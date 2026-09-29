@@ -30,4 +30,5 @@ the app at `/ui/docs`.
 | [Comparison](comparison.md) | How SwitchTender compares to AWX and Semaphore.|
 
 For deployment, the repository root holds a `docker-compose.yml` for a server, a database, and a
-worker, and [deploy/helm](../deploy/helm) holds a Helm chart.
+worker, and [deploy/helm](https://github.com/kordloom/switchtender/tree/main/deploy/helm) holds a
+Helm chart.

@@ -4,10 +4,10 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Quickstart · SwitchTender docs</title>
-	<meta name="description" content="Ansible on the PATH: ansible-playbook and ansible-inventory. Nothing else for the default SQLite setup. Go 1.26 to build from source, or use the container image.">
+	<meta name="description" content="Ansible on the PATH: ansible-playbook and ansible-inventory. Nothing else for the default SQLite setup.">
 	<link rel="canonical" href="https://switchtender.com/docs/quickstart">
 	<meta property="og:title" content="Quickstart · SwitchTender docs">
-	<meta property="og:description" content="Ansible on the PATH: ansible-playbook and ansible-inventory. Nothing else for the default SQLite setup. Go 1.26 to build from source, or use the container image.">
+	<meta property="og:description" content="Ansible on the PATH: ansible-playbook and ansible-inventory. Nothing else for the default SQLite setup.">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/quickstart">
 	<link rel="icon" href="/favicon.ico" sizes="any">
@@ -38,7 +38,8 @@
 			<h1 id="quickstart">Quickstart</h1>
 <h2 id="requirements">Requirements</h2>
 <p>Ansible on the PATH: <code>ansible-playbook</code> and <code>ansible-inventory</code>. Nothing else for the default
-SQLite setup. Go 1.26 to build from source, or use the container image.</p>
+SQLite setup. Go 1.26 to build from source, or Docker Compose, where <code>docker compose up --build</code>
+builds the image from this repository.</p>
 <h2 id="run-the-server">Run the server</h2>
 <pre><code>go build -o switchtender .
 SWITCHTENDER_ENCRYPTION_KEY=change-me SWITCHTENDER_ENCRYPTION_SALT=change-me-too \

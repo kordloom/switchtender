@@ -64,8 +64,10 @@ missing signature never launches a run.
 ## Credentials
 
 A credential is a secret sealed with AES-256-GCM, decrypted only at execution into a temporary file
-and wiped afterward. Kinds are SSH keys, vault passwords, environment bundles for cloud SDKs,
-become passwords, and container registry logins. Secrets never appear in API responses.
+and wiped afterward. Thirteen kinds cover SSH keys and SSH passwords, vault passwords, become
+passwords and full become settings, network device logins, environment bundles for cloud SDKs, API
+tokens, container registry logins, and typed AWS, Azure, GCP, and VMware cloud credentials. The
+[secrets guide](secrets.md) describes each. Secrets never appear in API responses.
 
 ## Teams and grants
 
@@ -97,9 +99,10 @@ against it lands there, no matter how it was launched.
 
 Every authenticated mutation is recorded in the audit trail, and each entry is linked into a SHA-256
 hash chain: it carries the previous entry's hash and its own hash over its content. Altering,
-reordering, or deleting an entry breaks the chain, which `GET /audit/verify` detects. A signed export
-from `GET /audit/export` seals the chain with an ed25519 signature, so `switchtender audit verify`
-proves the trail is intact and unaltered offline, without trusting the server that produced it.
+reordering, or deleting an entry breaks the chain, which `GET /v1/audit/verify` detects. A signed
+export from `GET /v1/audit/export` seals the chain with an ed25519 signature, so
+`switchtender audit verify` proves the trail is intact and unaltered offline, without trusting the
+server that produced it.
 
 ## Approvals
 

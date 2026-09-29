@@ -76,7 +76,7 @@ host, remembered across every run:
 ## Requirements
 
 - Ansible on the PATH: `ansible-playbook` and `ansible-inventory`.
-- Go 1.26 to build from source, or the container image and Helm chart to deploy.
+- Go 1.26 to build from source, or Docker Compose and the Helm chart to deploy.
 - Nothing else for the default SQLite setup. PostgreSQL is optional, for running more than one
   instance.
 
@@ -162,11 +162,11 @@ required.
 
 - A hosted option.
 - Signed desktop packages for macOS and Windows.
-- Broader notification channels beyond webhook, email, and Slack.
+- SSH key passphrase unlock and an OpenStack credential kind.
 
 ## Status
 
-Version 1.0. Source-available under the Business Source License 1.1. The execution engine, the
+Version 1.x. Source-available under the Business Source License 1.1. The execution engine, the
 control plane, and the one-command AWX and Semaphore migration are complete. The HTTP API is served
 under a stable `/v1` base path and follows semantic versioning, so no breaking change lands within
 the 1.x line.

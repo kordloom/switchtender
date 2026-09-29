@@ -189,7 +189,7 @@ type Run struct {
 	// Queue restricts execution to workers serving this queue. Empty runs on the default pool.
 	Queue string `json:"queue,omitempty"`
 	// Image names a container image the run executes inside, its execution environment. It outranks
-	// the project's image. Only Ansible runs in a container; other tools reject it at submit.
+	// the project's image. Every built-in tool runs in a container; the runner builds a per-tool plan.
 	Image string `json:"image,omitempty"`
 	// PullCredentialID names a registry credential for pulling a private Image. Empty for public.
 	PullCredentialID string `json:"pull_credential_id,omitempty"`
@@ -206,6 +206,9 @@ type Run struct {
 	// double-fire a run. Empty means no dedup. It is set from the Idempotency-Key request header and
 	// is a server-side control field, not part of the run's public representation.
 	IdempotencyKey string `json:"-"`
+	// Timeout bounds how many seconds the run may execute before it is canceled and finalized failed.
+	// It overrides the dispatcher's default cap. Zero uses the default, which may itself be off.
+	Timeout int `json:"timeout,omitempty"`
 }
 
 // Clone returns a deep copy so callers cannot mutate stored state through shared pointers.
@@ -354,6 +357,16 @@ func WithIntent(intent string) SubmitOption {
 func WithIdempotencyKey(key string) SubmitOption {
 	return func(r *Run) {
 		r.IdempotencyKey = key
+	}
+}
+
+// WithTimeout caps the run at seconds of execution, overriding the dispatcher default. Zero or less
+// leaves it on the default.
+func WithTimeout(seconds int) SubmitOption {
+	return func(r *Run) {
+		if seconds > 0 {
+			r.Timeout = seconds
+		}
 	}
 }
 

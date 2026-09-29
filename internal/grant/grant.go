@@ -44,7 +44,7 @@ type Grant struct {
 	Subject string `json:"subject"`
 	// Object is the target: a project, template, inventory, or credential id.
 	Object string `json:"object"`
-	// Access is the level conferred, use or manage.
+	// Access is the level conferred: read, use, or manage, each implying the ones below it.
 	Access Access `json:"access"`
 	// CreatedAt is when the grant was created.
 	CreatedAt time.Time `json:"created_at"`

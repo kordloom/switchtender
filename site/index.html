@@ -8,7 +8,7 @@
 	<meta property="og:title" content="SwitchTender · run everything, watch every host, prove every change">
 	<meta property="og:description" content="Run everything. Watch every host. Prove every change. Your whole automation stack in one Go binary, with a live host-by-task matrix and a provable audit trail.">
 	<meta property="og:type" content="website">
-	<meta property="og:url" content="https://switchtender.com">
+	<meta property="og:url" content="https://switchtender.com/">
 	<meta property="og:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=7">
 	<meta name="twitter:card" content="summary_large_image">
 	<link rel="canonical" href="https://switchtender.com/">
@@ -75,7 +75,7 @@
 					<a class="btn big" href="/get-started">Get started</a>
 					<a class="ghost big" href="https://github.com/kordloom/switchtender">★ Star on GitHub</a>
 				</div>
-				<p class="hero-note">Open source · BSL 1.1 · Go SDK with drop-in plugins · migrate from AWX or Semaphore in one command</p>
+				<p class="hero-note">Source-available · BSL 1.1 · Go SDK with drop-in plugins · migrate from AWX or Semaphore in one command</p>
 			</div>
 			<div class="hero-shot reveal">
 				<div class="glow" aria-hidden="true"></div>
@@ -91,10 +91,10 @@
 		</section>
 
 		<section class="strip wrap reveal">
-			<div><b>1</b><span>binary to deploy</span></div>
-			<div><b>0</b><span>Kubernetes required</span></div>
+			<div><b>1</b><span>binary, zero Kubernetes</span></div>
+			<div><b>~60ms</b><span>cold boot to serving</span></div>
+			<div><b>~35MB</b><span>memory at idle</span></div>
 			<div><b>7</b><span>tools, one engine</span></div>
-			<div><b>∞</b><span>tamper-evident audit</span></div>
 		</section>
 
 		<section class="section wrap" id="features">
@@ -151,7 +151,12 @@
 				<article class="card reveal">
 					<div class="ic ic-roles"></div>
 					<h3>Roles, teams, and orgs</h3>
-					<p>Global roles, per-object grants, teams, and organizations in the open source core. Grant a project or a credential to a whole org and every member inherits it. Semaphore paywalls its RBAC. SwitchTender does not.</p>
+					<p>Global roles, teams, organizations, and per-object read, use, and manage grants, all in the core. Delegate view of one credential without a global viewer, or a whole org inherits a project at once. Semaphore paywalls its RBAC. SwitchTender does not.</p>
+				</article>
+				<article class="card reveal">
+					<div class="ic ic-shards"></div>
+					<h3>Reach isolated networks</h3>
+					<p>A worker dials out to the control node with a token and opens no inbound port, so it runs jobs inside an air-gapped segment, a DMZ, or a customer network the control node can't reach. One binary, one outbound connection.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-ai"></div>
@@ -169,7 +174,7 @@
 		<section class="section demo wrap" id="demo">
 			<div class="section-head reveal">
 				<h2>See it in action</h2>
-				<p>A run painted live as a host-by-task matrix, not a wall of scrollback. The colors speak Ansible: <span class="lg-ok">green</span> means ok, <span class="lg-changed">amber</span> means the task changed the host, <span class="lg-failed">red</span> means failed, grey means skipped.</p>
+				<p>A run painted live as a host-by-task matrix, not a wall of scrollback. The colors speak Ansible: <span class="lg-ok">green</span> means ok, <span class="lg-changed">amber</span> means the task changed the host, <span class="lg-failed">red</span> means failed, gray means skipped.</p>
 			</div>
 			<figure class="window demo-frame reveal">
 				<div class="window-bar"><span></span><span></span><span></span><em>switchtender · run</em></div>
@@ -341,7 +346,7 @@ open http://localhost:8080/ui/</code></pre>
 				<a href="/ascender-alternative">vs Ascender</a>
 				<a href="https://github.com/kordloom/switchtender/blob/main/LICENSE">License</a>
 			</nav>
-			<span class="foot-note">Open source · BSL 1.1 · self-host free</span>
+			<span class="foot-note">Source-available · BSL 1.1 · self-host free</span>
 		</div>
 		<div style="text-align:center;margin:20px auto 0;font-size:11px;letter-spacing:1.6px;text-transform:uppercase;opacity:.5">A <a href="https://kordloom.com" style="color:inherit;text-decoration:none">KordLoom</a> product</div>
 	</footer>

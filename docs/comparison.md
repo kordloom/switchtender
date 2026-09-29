@@ -38,7 +38,7 @@ on them.
 |------------|-------|
 | Multiple runtimes | SwitchTender runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, each with a dry run. AWX is Ansible-only. Semaphore runs Ansible, Terraform, OpenTofu, and shell, but not Python, PowerShell, or Go. |
 | Container execution environments | SwitchTender pins an image on a template, a run, or a project, most specific wins, with private-registry pulls, opt-in behind a flag. AWX attaches execution environments to job templates. Semaphore favors native runtimes instead. |
-| Access control | SwitchTender has global roles plus per-object grants and teams. AWX has mature organization RBAC. Semaphore gates RBAC behind its Enterprise tier. |
+| Access control | SwitchTender has global roles plus organizations, teams, and per-object read, use, and manage grants, all in the source-available core. AWX has mature organization RBAC. Semaphore gates RBAC behind its Enterprise tier. |
 | Credentials | Sealed with AES-256-GCM under a key derived by Argon2id, decrypted only at execution into a private temporary file that is wiped after. Thirteen credential kinds and eleven sources, nine of them external secret managers: HashiCorp Vault static and dynamic, AWS Secrets Manager and STS, Azure Key Vault, GCP Secret Manager, CyberArk Conjur and CCP, and 1Password. Several credentials of different kinds attach to one run. AWX matches this through credential plugins. Semaphore stores an SSH key or a username and password, with no external secret managers. |
 | Scheduling | All three schedule runs. SwitchTender uses cron with highly available claiming so two servers do not double-fire. |
 | Surveys and prompts | All three collect typed values at launch. |

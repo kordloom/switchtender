@@ -115,7 +115,7 @@
 </tr>
 <tr>
 <td>Tamper-evident audit</td>
-<td>Every mutation is linked into a SHA-256 hash chain. <code>GET /audit/verify</code> flags the first altered or deleted entry, and a signed export verified with <code>switchtender audit verify</code> proves the whole chain offline.</td>
+<td>Every mutation is linked into a SHA-256 hash chain. <code>GET /v1/audit/verify</code> flags the first altered or deleted entry, and a signed export verified with <code>switchtender audit verify</code> proves the whole chain offline.</td>
 </tr>
 <tr>
 <td>Inventories</td>
@@ -131,7 +131,7 @@
 </tr>
 <tr>
 <td>Credentials</td>
-<td>SSH keys, vault passwords, env bundles for cloud SDKs, API tokens and JWTs, become passwords, and registry logins, all encrypted at rest.</td>
+<td>Thirteen kinds: SSH keys and SSH passwords, vault passwords, become passwords and full become settings, network device logins, env bundles for cloud SDKs, API tokens and JWTs, registry logins, and typed AWS, Azure, GCP, and VMware cloud credentials, all encrypted at rest.</td>
 </tr>
 <tr>
 <td>Secret masking</td>
@@ -159,11 +159,15 @@
 </tr>
 <tr>
 <td>Execution environments</td>
-<td>A template, run, or project pins a container image and its runs execute inside it, with their own ansible and system dependencies. The most specific wins: run, then template, then project. Private registries pull with a stored credential.</td>
+<td>A template, run, or project pins a container image and its runs execute inside it, with their own tool and system dependencies, for any of the seven tools. The most specific wins: run, then template, then project. Private registries pull with a stored credential.</td>
 </tr>
 <tr>
 <td>Teams and grants</td>
-<td>Group users into teams and grant use or manage on a specific project, template, inventory, or credential. A manage grant delegates editing and deleting that object without the global admin role. Grants layer on the global role and default open.</td>
+<td>Group users into teams and grant read, use, or manage on a specific project, template, inventory, or credential, each level implying the ones below it. A read grant delegates view of one object without a global viewer role; a manage grant delegates editing and deleting without global admin. Grants layer on the global role and default open, or lock down with strict grants.</td>
+</tr>
+<tr>
+<td>Reach isolated networks</td>
+<td>A worker dials out to the control node over the mesh relay with a token and needs no inbound port, so it runs jobs inside an air-gapped segment, a DMZ, or a customer network the control node cannot reach directly. Point <code>switchtender worker --server</code> at the control node and set the worker token.</td>
 </tr>
 <tr>
 <td>Retention</td>

@@ -123,10 +123,11 @@ binary against an existing database is safe to repeat.
 
 The audit trail is a SHA-256 hash chain. Every recorded mutation carries the previous entry's hash
 and its own hash over its content, so altering, reordering, or dropping an entry breaks the chain,
-which `GET /audit/verify` detects. The chain is tamper-evident with no key configured. When a signing
-key is set, `GET /audit/export` seals the chain head with an ed25519 signature, and `switchtender audit
-verify` confirms the trail offline, without trusting the server that produced it. The append is
-serialized by an in-process lock on SQLite and a transaction-level advisory lock on PostgreSQL, with
+which `GET /v1/audit/verify` detects. The chain is tamper-evident with no key configured. When a
+signing key is set, `GET /v1/audit/export` seals the chain head with an ed25519 signature, and
+`switchtender audit verify` confirms the trail offline, without trusting the server that produced
+it. The append is serialized by an in-process lock on SQLite and a transaction-level advisory
+lock on PostgreSQL, with
 a unique index on the sequence number as a cross-process backstop, so the chain stays linear even
 under concurrent writers.
 
@@ -143,7 +144,8 @@ exactly once and the loser gets a clear conflict. Treat a submit as create-once 
 Stored events are ordered and written once per batch. A batch replayed after a transient error
 appends rather than deduplicates, so a consumer keys on the event sequence number.
 
-Notifications by webhook, email, and Slack are best effort. Each is attempted at least once with one
+Notifications, on all eleven channels from webhook and Slack to PagerDuty, Twilio SMS, and email,
+are best effort. Each is attempted at least once with one
 retry, then logged and dropped, and the run's extra vars are stripped from the payload so survey and
 template values never leave the system. Notifications do not block a run from finishing, and shutdown
 waits for the deliveries already in flight. Treat a notification as a signal, and the store as the

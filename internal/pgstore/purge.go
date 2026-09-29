@@ -6,17 +6,18 @@ import (
 	"time"
 )
 
+// purgeBatch is how many rows one delete statement removes. Retention deletes loop in batches so
+// the first sweep on a mature database does not lock a table on one long running statement.
+const purgeBatch = 5000
+
 // PurgeEventsBefore drops the events and logs of terminal runs created before cutoff, keeping the
 // run records and their summaries. It returns how many runs were trimmed.
 func (s *store) PurgeEventsBefore(ctx context.Context, cutoff time.Time) (int, error) {
 	cut := formatTime(cutoff)
-	const sel = `run_id IN (
-		SELECT id FROM runs WHERE status NOT IN ('pending','running') AND created_at < $1
-	)`
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM run_events WHERE "+sel, cut); err != nil {
+	if err := s.deleteBatched(ctx, "run_events", cut); err != nil {
 		return 0, fmt.Errorf("purge events: %w", err)
 	}
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM run_logs WHERE "+sel, cut); err != nil {
+	if err := s.deleteBatched(ctx, "run_logs", cut); err != nil {
 		return 0, fmt.Errorf("purge logs: %w", err)
 	}
 	var trimmed int
@@ -33,23 +34,53 @@ SELECT COUNT(*) FROM runs WHERE status NOT IN ('pending','running') AND created_
 // keeping the per host and per task summaries. It returns how many runs were deleted.
 func (s *store) PurgeRunsBefore(ctx context.Context, cutoff time.Time) (int, error) {
 	cut := formatTime(cutoff)
-	const sel = `run_id IN (
-		SELECT id FROM runs WHERE status NOT IN ('pending','running') AND created_at < $1
-	)`
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM run_events WHERE "+sel, cut); err != nil {
+	if err := s.deleteBatched(ctx, "run_events", cut); err != nil {
 		return 0, fmt.Errorf("purge run events: %w", err)
 	}
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM run_logs WHERE "+sel, cut); err != nil {
+	if err := s.deleteBatched(ctx, "run_logs", cut); err != nil {
 		return 0, fmt.Errorf("purge run logs: %w", err)
 	}
-	res, err := s.db.ExecContext(ctx, `
-DELETE FROM runs WHERE status NOT IN ('pending','running') AND created_at < $1`, cut)
-	if err != nil {
-		return 0, fmt.Errorf("purge runs: %w", err)
+	deleted := 0
+	for {
+		res, err := s.db.ExecContext(ctx, `
+DELETE FROM runs WHERE id IN (
+	SELECT id FROM runs WHERE status NOT IN ('pending','running') AND created_at < $1 LIMIT $2
+)`, cut, purgeBatch)
+		if err != nil {
+			return deleted, fmt.Errorf("purge runs: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return deleted, fmt.Errorf("purge runs: %w", err)
+		}
+		deleted += int(n)
+		if int(n) < purgeBatch {
+			return deleted, nil
+		}
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("purge runs: %w", err)
+}
+
+// deleteBatched removes the child rows of terminal runs older than cut from table in bounded
+// batches, so no single statement holds a table lock for long. table is a fixed internal name,
+// not caller input.
+func (s *store) deleteBatched(ctx context.Context, table, cut string) error {
+	q := fmt.Sprintf(`
+DELETE FROM %s WHERE seq IN (
+	SELECT seq FROM %s WHERE run_id IN (
+		SELECT id FROM runs WHERE status NOT IN ('pending','running') AND created_at < $1
+	) LIMIT $2
+)`, table, table)
+	for {
+		res, err := s.db.ExecContext(ctx, q, cut, purgeBatch)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if int(n) < purgeBatch {
+			return nil
+		}
 	}
-	return int(n), nil
 }

@@ -71,14 +71,16 @@ CREATE TABLE IF NOT EXISTS runs (
 	intent        TEXT NOT NULL DEFAULT '',
 	image         TEXT NOT NULL DEFAULT '',
 	pull_credential_id TEXT NOT NULL DEFAULT '',
-	idempotency_key TEXT NOT NULL DEFAULT ''
+	idempotency_key TEXT NOT NULL DEFAULT '',
+	timeout       INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
--- CREATE TABLE IF NOT EXISTS is a no-op on a database created before this column, so the column is
--- also added on the fly and only then indexed, keeping the run submission dedup working after an
--- upgrade. Both statements are idempotent, so a fresh database and an existing one converge.
+-- CREATE TABLE IF NOT EXISTS is a no-op on a database created before these columns, so they are
+-- also added on the fly and only then indexed, keeping run submission dedup and timeouts working
+-- after an upgrade. Every statement is idempotent, so a fresh database and an existing one converge.
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS idempotency_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS timeout INTEGER NOT NULL DEFAULT 0;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_idempotency_key ON runs(idempotency_key) WHERE idempotency_key <> '';
 CREATE TABLE IF NOT EXISTS run_logs (
 	seq    BIGSERIAL PRIMARY KEY,
@@ -284,6 +286,10 @@ CREATE TABLE IF NOT EXISTS grants (
 	created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_grants_object ON grants(object);
+CREATE INDEX IF NOT EXISTS idx_runs_pending_claim ON runs(queue, created_at, id)
+	WHERE status='pending' AND claimed_by='' AND kind='';
+CREATE INDEX IF NOT EXISTS idx_runs_status_parent ON runs(status, parent_id);
+CREATE INDEX IF NOT EXISTS idx_runs_leased ON runs(claimed_at) WHERE claimed_by<>'';
 `
 
 // store is a run.Store backed by a PostgreSQL database.
@@ -344,6 +350,12 @@ func Open(dsn string) (*DB, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("ping postgres: %w", err)
 	}
+	// Cap the pool so a burst of API reads and SSE streams cannot exhaust the server's
+	// max_connections, and recycle connections so a load balancer or pooler can rebalance.
+	db.SetMaxOpenConns(24)
+	db.SetMaxIdleConns(8)
+	db.SetConnMaxLifetime(30 * time.Minute)
+	db.SetConnMaxIdleTime(5 * time.Minute)
 	// Several processes, a server and its workers, may open the same database at once, and
 	// concurrent ALTER TABLE statements deadlock. A session advisory lock serializes migration.
 	if _, err := db.Exec("SELECT pg_advisory_lock(7973821001)"); err != nil {
@@ -471,9 +483,10 @@ const runColumns = `id, playbook, inventory, status, exit_code, error, created_a
 	ended_at, parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index,
 	retry_of, attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested,
 	credential_ids, project_id, commit_sha, inventory_id, queue, tool, command, dry_run,
-	proposed_from, intent, image, pull_credential_id, idempotency_key`
+	proposed_from, intent, image, pull_credential_id, idempotency_key, timeout`
 
-// Save inserts or replaces the run identified by r.ID.
+// Save inserts or replaces the run identified by r.ID. The cancel flag merges with GREATEST so a
+// replace from a stale snapshot cannot erase a cancel another process just requested.
 func (s *store) Save(ctx context.Context, r *run.Run) error {
 	const q = `
 INSERT INTO runs
@@ -481,9 +494,9 @@ INSERT INTO runs
 	 parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index, retry_of,
 	 attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested, credential_ids,
 	 project_id, commit_sha, inventory_id, queue, tool, command, dry_run, proposed_from, intent,
-	 image, pull_credential_id, idempotency_key)
+	 image, pull_credential_id, idempotency_key, timeout)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-	$21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36)
+	$21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -493,12 +506,13 @@ ON CONFLICT(id) DO UPDATE SET
 	kind=excluded.kind, step_name=excluded.step_name, step_index=excluded.step_index,
 	retry_of=excluded.retry_of, attempt=excluded.attempt, extra_vars=excluded.extra_vars,
 	outputs=excluded.outputs, claimed_by=excluded.claimed_by, claimed_at=excluded.claimed_at,
-	cancel_requested=excluded.cancel_requested, credential_ids=excluded.credential_ids,
+	cancel_requested=GREATEST(runs.cancel_requested, excluded.cancel_requested),
+	credential_ids=excluded.credential_ids,
 	project_id=excluded.project_id, commit_sha=excluded.commit_sha,
 	inventory_id=excluded.inventory_id, queue=excluded.queue, tool=excluded.tool,
 	command=excluded.command, dry_run=excluded.dry_run, proposed_from=excluded.proposed_from,
 	intent=excluded.intent, image=excluded.image, pull_credential_id=excluded.pull_credential_id,
-	idempotency_key=excluded.idempotency_key`
+	idempotency_key=excluded.idempotency_key, timeout=excluded.timeout`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), nullInt(r.ExitCode), r.Error,
 		formatTime(r.CreatedAt), nullTime(r.StartedAt), nullTime(r.EndedAt),
@@ -507,7 +521,7 @@ ON CONFLICT(id) DO UPDATE SET
 		jsonMap(r.ExtraVars), jsonMap(r.Outputs), r.ClaimedBy, nullTime(r.ClaimedAt),
 		boolToInt(r.CancelRequested), joinIDs(r.CredentialIDs), r.ProjectID, r.CommitSHA,
 		r.InventoryID, r.Queue, r.Tool, r.Command, boolToInt(r.DryRun), r.ProposedFrom, r.Intent,
-		r.Image, r.PullCredentialID, r.IdempotencyKey,
+		r.Image, r.PullCredentialID, r.IdempotencyKey, r.Timeout,
 	)
 	if err != nil {
 		if r.IdempotencyKey != "" && isKeyConflict(err) {
@@ -920,18 +934,19 @@ ORDER BY task`
 	return out, nil
 }
 
-// Workers lists executors by the leases they hold, most recently seen first.
+// Workers lists executors by the leases they hold within run.WorkerWindow, most recently seen
+// first, so the listing stays bounded as history grows.
 func (s *store) Workers(ctx context.Context) ([]run.WorkerInfo, error) {
 	const q = `
 SELECT claimed_by,
 	SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS active,
 	MAX(claimed_at) AS last_seen
 FROM runs
-WHERE claimed_by != '' AND claimed_at IS NOT NULL
+WHERE claimed_by != '' AND claimed_at IS NOT NULL AND claimed_at >= $1
 GROUP BY claimed_by
 ORDER BY last_seen DESC, claimed_by`
 
-	rows, err := s.db.QueryContext(ctx, q)
+	rows, err := s.db.QueryContext(ctx, q, formatTime(time.Now().Add(-run.WorkerWindow)))
 	if err != nil {
 		return nil, fmt.Errorf("list workers: %w", err)
 	}
@@ -979,18 +994,22 @@ func (s *store) queryRuns(ctx context.Context, label, query string, args ...any)
 	return out, nil
 }
 
-// AppendLog appends raw output bytes to the run's log. Returns run.ErrNotFound if absent.
+// AppendLog appends raw output bytes to the run's log. Returns run.ErrNotFound if absent. The
+// insert-select folds the missing-run check into the write so the per-chunk output path costs one
+// statement instead of two.
 func (s *store) AppendLog(ctx context.Context, id string, p []byte) error {
-	ok, err := s.exists(ctx, id)
+	res, err := s.db.ExecContext(ctx,
+		"INSERT INTO run_logs (run_id, chunk) SELECT $1, $2 WHERE EXISTS (SELECT 1 FROM runs WHERE id=$1)",
+		id, p)
 	if err != nil {
-		return err
-	}
-	if !ok {
-		return run.ErrNotFound
-	}
-	if _, err := s.db.ExecContext(ctx,
-		"INSERT INTO run_logs (run_id, chunk) VALUES ($1, $2)", id, p); err != nil {
 		return fmt.Errorf("append log: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("append log: %w", err)
+	}
+	if n == 0 {
+		return run.ErrNotFound
 	}
 	return nil
 }
@@ -1025,14 +1044,69 @@ func (s *store) Log(ctx context.Context, id string) ([]byte, error) {
 	return buf, nil
 }
 
-// AppendEvents appends structured events to the run. Returns run.ErrNotFound if absent.
-func (s *store) AppendEvents(ctx context.Context, id string, events []event.Event) error {
+// LogAfter returns the run's log chunks past afterSeq in order, capped at limit chunks.
+func (s *store) LogAfter(ctx context.Context, id string, afterSeq int64, limit int) ([]run.LogChunk, error) {
 	ok, err := s.exists(ctx, id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !ok {
-		return run.ErrNotFound
+		return nil, run.ErrNotFound
+	}
+	query := "SELECT seq, chunk FROM run_logs WHERE run_id=$1 AND seq > $2 ORDER BY seq"
+	args := []any{id, afterSeq}
+	if limit > 0 {
+		query += " LIMIT $3"
+		args = append(args, limit)
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("read log: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []run.LogChunk
+	for rows.Next() {
+		var c run.LogChunk
+		if err := rows.Scan(&c.Seq, &c.Data); err != nil {
+			return nil, fmt.Errorf("read log: %w", err)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read log: %w", err)
+	}
+	return out, nil
+}
+
+// LastLogSeq returns the seq of the run's most recent log chunk, or zero when it has none.
+func (s *store) LastLogSeq(ctx context.Context, id string) (int64, error) {
+	ok, err := s.exists(ctx, id)
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		return 0, run.ErrNotFound
+	}
+	var seq int64
+	err = s.db.QueryRowContext(ctx,
+		"SELECT COALESCE(MAX(seq), 0) FROM run_logs WHERE run_id=$1", id).Scan(&seq)
+	if err != nil {
+		return 0, fmt.Errorf("read log: %w", err)
+	}
+	return seq, nil
+}
+
+// AppendEvents appends structured events to the run. Returns run.ErrNotFound if absent. Events
+// are marshaled before the transaction opens so the transaction stays short.
+func (s *store) AppendEvents(ctx context.Context, id string, events []event.Event) error {
+	rows := make([]string, len(events))
+	for i, e := range events {
+		data, err := json.Marshal(e)
+		if err != nil {
+			return fmt.Errorf("append events: %w", err)
+		}
+		rows[i] = string(data)
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -1041,18 +1115,23 @@ func (s *store) AppendEvents(ctx context.Context, id string, events []event.Even
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	var one int
+	err = tx.QueryRowContext(ctx, "SELECT 1 FROM runs WHERE id=$1", id).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return run.ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("append events: %w", err)
+	}
+
 	stmt, err := tx.PrepareContext(ctx, "INSERT INTO run_events (run_id, data) VALUES ($1, $2)")
 	if err != nil {
 		return fmt.Errorf("append events: %w", err)
 	}
 	defer func() { _ = stmt.Close() }()
 
-	for _, e := range events {
-		data, err := json.Marshal(e)
-		if err != nil {
-			return fmt.Errorf("append events: %w", err)
-		}
-		if _, err := stmt.ExecContext(ctx, id, string(data)); err != nil {
+	for _, data := range rows {
+		if _, err := stmt.ExecContext(ctx, id, data); err != nil {
 			return fmt.Errorf("append events: %w", err)
 		}
 	}
@@ -1195,7 +1274,7 @@ func scanRun(s scanner) (*run.Run, error) {
 		&r.Kind, &r.StepName, &stepIdx, &retryOf, &r.Attempt, &extra, &outputs,
 		&r.ClaimedBy, &claimed, &cancelI, &credIDs, &r.ProjectID, &r.CommitSHA,
 		&r.InventoryID, &r.Queue, &r.Tool, &r.Command, &dryRun, &r.ProposedFrom, &r.Intent,
-		&r.Image, &r.PullCredentialID, &r.IdempotencyKey); err != nil {
+		&r.Image, &r.PullCredentialID, &r.IdempotencyKey, &r.Timeout); err != nil {
 		return nil, err
 	}
 	r.CancelRequested = cancelI != 0
@@ -1341,14 +1420,16 @@ func parseNullTime(s sql.NullString) (*time.Time, error) {
 }
 
 // Claim leases the oldest unclaimed pending top-level plain run to owner and returns it. The row
-// is locked with SKIP LOCKED so concurrent workers never claim the same run.
+// is locked with SKIP LOCKED so concurrent workers never claim the same run. A run whose cancel
+// was requested while it waited is skipped; the cancel handler terminalizes it.
 func (s *store) Claim(ctx context.Context, owner string, queues []string) (*run.Run, error) {
 	placeholders, args := queuePlaceholders(queues, "$")
 	q := `
 UPDATE runs SET claimed_by=$1, claimed_at=$2
 WHERE id = (
 	SELECT id FROM runs
-	WHERE status='pending' AND claimed_by='' AND kind='' AND queue IN (` + placeholders + `)
+	WHERE status='pending' AND claimed_by='' AND kind='' AND cancel_requested=0
+		AND queue IN (` + placeholders + `)
 	ORDER BY created_at, id LIMIT 1
 	FOR UPDATE SKIP LOCKED
 )
@@ -1451,6 +1532,22 @@ func (s *store) RequestCancel(ctx context.Context, id string) error {
 		return run.ErrNotFound
 	}
 	return nil
+}
+
+// CancelPending atomically cancels a run still waiting unclaimed in pending or pending_approval.
+func (s *store) CancelPending(ctx context.Context, id string) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `
+UPDATE runs SET status='canceled', ended_at=$1
+WHERE id=$2 AND claimed_by='' AND status IN ('pending', 'pending_approval')`,
+		formatTime(time.Now()), id)
+	if err != nil {
+		return false, fmt.Errorf("cancel pending: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("cancel pending: %w", err)
+	}
+	return n > 0, nil
 }
 
 // TransitionStatus atomically moves the run from one status to another, reporting whether it changed.

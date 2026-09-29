@@ -28,19 +28,20 @@ What SwitchTender does today.
 | Auth         | User accounts with admin, operator, and viewer roles enforced per route. Bearer tokens hashed at rest. The API locks down the moment the first token exists.|
 | Approvals    | Mark a run to require sign-off, or require it automatically by policy on tool, command, or target. A held run never executes until an admin approves or rejects it, and the request and decision land in the tamper-evident audit trail.|
 | Observability| A Prometheus metrics endpoint, webhook notifications when runs finish, and an audit trail of every mutation.|
-| Tamper-evident audit | Every mutation is linked into a SHA-256 hash chain. `GET /audit/verify` flags the first altered or deleted entry, and a signed export verified with `switchtender audit verify` proves the whole chain offline.|
+| Tamper-evident audit | Every mutation is linked into a SHA-256 hash chain. `GET /v1/audit/verify` flags the first altered or deleted entry, and a signed export verified with `switchtender audit verify` proves the whole chain offline.|
 | Inventories  | Stored inventories referenced by id, materialized on whichever executor runs the play.|
 | Dynamic sources | Inventory plugins and scripts refreshed into stored inventories, with cloud auth from an env credential.|
 | Sourced inventories | An inventory's content can come from a command, Vault, or Google Secret Manager, resolved at launch, so the host list need not live in SwitchTender.|
-| Credentials  | SSH keys, vault passwords, env bundles for cloud SDKs, API tokens and JWTs, become passwords, and registry logins, all encrypted at rest.|
+| Credentials  | Thirteen kinds: SSH keys and SSH passwords, vault passwords, become passwords and full become settings, network device logins, env bundles for cloud SDKs, API tokens and JWTs, registry logins, and typed AWS, Azure, GCP, and VMware cloud credentials, all encrypted at rest.|
 | Secret masking | Credential values are redacted from run logs, live streams, and events, so a tool that echoes a secret shows `***` instead of the value.|
 | High availability | Two servers on one database share the schedule without double-firing. Tokens can carry a lifetime.|
 | Git triggers | A webhook URL launches a template on push. The project syncs fresh, so it deploys the commit just pushed.|
 | Surveys      | Templates declare typed launch prompts, validated and injected as extra vars.|
 | Worker queues | Target a run at a named queue. A worker serving that queue runs it and default workers leave it alone. Pin a queue on a run, a template, or an inventory, most specific wins, so queues work like AWX instance groups.|
 | Dependency sync | A project's requirements.yml roles and collections install on each sync, so playbooks that need them just run.|
-| Execution environments | A template, run, or project pins a container image and its runs execute inside it, with their own ansible and system dependencies. The most specific wins: run, then template, then project. Private registries pull with a stored credential.|
-| Teams and grants | Group users into teams and grant use or manage on a specific project, template, inventory, or credential. A manage grant delegates editing and deleting that object without the global admin role. Grants layer on the global role and default open.|
+| Execution environments | A template, run, or project pins a container image and its runs execute inside it, with their own tool and system dependencies, for any of the seven tools. The most specific wins: run, then template, then project. Private registries pull with a stored credential.|
+| Teams and grants | Group users into teams and grant read, use, or manage on a specific project, template, inventory, or credential, each level implying the ones below it. A read grant delegates view of one object without a global viewer role; a manage grant delegates editing and deleting without global admin. Grants layer on the global role and default open, or lock down with strict grants.|
+| Reach isolated networks | A worker dials out to the control node over the mesh relay with a token and needs no inbound port, so it runs jobs inside an air-gapped segment, a DMZ, or a customer network the control node cannot reach directly. Point `switchtender worker --server` at the control node and set the worker token.|
 | Retention | A sweeper drops old run events and deletes terminal runs past a configurable age, keeping the summaries the cross-run views need.|
 | Email | An SMTP notification on every finished run or on failures only, alongside the finish webhooks.|
 | Slack | A formatted message posts to a Slack incoming webhook when a run finishes, with the run label, status, and elapsed time.|

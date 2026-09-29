@@ -16,6 +16,8 @@ type Store interface {
 	// Save inserts or replaces the run identified by r.ID. When r carries a non-empty
 	// IdempotencyKey that a different run already holds, it makes no change and returns
 	// ErrDuplicateKey, the race backstop that lets one of two concurrent submissions win the key.
+	// A stored cancel request is sticky: replacing a run whose cancel flag is set keeps the flag
+	// set, so saving a stale snapshot cannot erase a cancel another process just requested.
 	Save(ctx context.Context, r *Run) error
 	// Get returns the run with the given id, or ErrNotFound.
 	Get(ctx context.Context, id string) (*Run, error)
@@ -51,11 +53,17 @@ type Store interface {
 	ReclaimStale(ctx context.Context, cutoff time.Time) (int, error)
 	// RequestCancel marks the run so whichever process holds it stops it, or ErrNotFound.
 	RequestCancel(ctx context.Context, id string) error
+	// CancelPending atomically cancels a run that is waiting unclaimed in pending or
+	// pending_approval and reports whether it changed the run. It reports false for a missing,
+	// claimed, executing, or terminal run; those are canceled cooperatively through RequestCancel
+	// by whichever process holds them.
+	CancelPending(ctx context.Context, id string) (bool, error)
 	// TransitionStatus atomically moves the run from the from status to the to status and reports
 	// whether it changed a row. It changes nothing and returns false when the run is missing or is
 	// not in the from status, so two callers racing to approve or reject the same run cannot both win.
 	TransitionStatus(ctx context.Context, id string, from, to Status) (bool, error)
-	// Workers lists executors by the leases they hold, most recently seen first.
+	// Workers lists executors by the leases they hold, most recently seen first. Only leases
+	// stamped within WorkerWindow count, so the listing stays bounded as run history grows.
 	Workers(ctx context.Context) ([]WorkerInfo, error)
 	// SaveHostSummary replaces the stored per host summaries for a run.
 	SaveHostSummary(ctx context.Context, runID string, summaries []HostSummary) error
@@ -77,6 +85,16 @@ type Store interface {
 	AppendLog(ctx context.Context, id string, p []byte) error
 	// Log returns a copy of the run's captured output, or ErrNotFound.
 	Log(ctx context.Context, id string) ([]byte, error)
+	// LogAfter returns the run's log chunks whose store sequence is greater than afterSeq, in
+	// order, capped at limit chunks. A limit of zero or less returns every matching chunk. Each
+	// chunk carries its Seq, so a caller streams new output by passing the last Seq it saw back
+	// as afterSeq. Seq values are opaque and monotonic within a run. Returns ErrNotFound if the
+	// run is absent.
+	LogAfter(ctx context.Context, id string, afterSeq int64, limit int) ([]LogChunk, error)
+	// LastLogSeq returns the store sequence of the run's most recent log chunk, or zero when the
+	// run has no log. A live stream starts from it to send only what lands next without reading
+	// the output already stored. Returns ErrNotFound if the run is absent.
+	LastLogSeq(ctx context.Context, id string) (int64, error)
 	// AppendEvents appends structured events to the run. Returns ErrNotFound if the run is absent.
 	AppendEvents(ctx context.Context, id string, events []event.Event) error
 	// Events returns a copy of the run's structured events, or ErrNotFound.
@@ -97,6 +115,20 @@ type Store interface {
 	// keeping the per host and per task summaries that power the cross-run views. It returns how
 	// many runs were deleted. Non-terminal runs are never purged.
 	PurgeRunsBefore(ctx context.Context, cutoff time.Time) (int, error)
+}
+
+// WorkerWindow bounds how far back Workers looks for leases. Terminal runs keep their last lease
+// stamp, so without a bound the listing would aggregate every run ever recorded and report
+// workers dead for months.
+const WorkerWindow = 48 * time.Hour
+
+// LogChunk is one stored piece of a run's log. Seq orders chunks within the run and serves as an
+// opaque cursor for LogAfter.
+type LogChunk struct {
+	// Seq is the chunk's store sequence, monotonic within the run.
+	Seq int64
+	// Data is the chunk's raw bytes.
+	Data []byte
 }
 
 // memStore is an in-memory Store backed by maps guarded by a read-write mutex.
@@ -131,7 +163,8 @@ func NewMemStore() Store {
 }
 
 // Save inserts or replaces the run identified by r.ID. A non-empty idempotency key already held by a
-// different run is rejected with ErrDuplicateKey so a concurrent retry cannot create a second run.
+// different run is rejected with ErrDuplicateKey so a concurrent retry cannot create a second run. A
+// stored cancel request survives the replace so a stale snapshot cannot erase a concurrent cancel.
 func (m *memStore) Save(_ context.Context, r *Run) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -140,7 +173,11 @@ func (m *memStore) Save(_ context.Context, r *Run) error {
 			return ErrDuplicateKey
 		}
 	}
-	m.runs[r.ID] = r.Clone()
+	cl := r.Clone()
+	if prev, ok := m.runs[r.ID]; ok && prev.CancelRequested {
+		cl.CancelRequested = true
+	}
+	m.runs[r.ID] = cl
 	if _, ok := m.logs[r.ID]; !ok {
 		m.logs[r.ID] = nil
 	}
@@ -324,7 +361,7 @@ func (m *memStore) Claim(_ context.Context, owner string, queues []string) (*Run
 	defer m.mu.Unlock()
 	var oldest *Run
 	for _, r := range m.runs {
-		if r.Status != StatusPending || r.ClaimedBy != "" || r.Kind != "" {
+		if r.Status != StatusPending || r.ClaimedBy != "" || r.Kind != "" || r.CancelRequested {
 			continue
 		}
 		if !serves[r.Queue] {
@@ -398,6 +435,23 @@ func (m *memStore) RequestCancel(_ context.Context, id string) error {
 	return nil
 }
 
+// CancelPending atomically cancels a run still waiting unclaimed in pending or pending_approval.
+func (m *memStore) CancelPending(_ context.Context, id string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.runs[id]
+	if !ok || r.ClaimedBy != "" {
+		return false, nil
+	}
+	if r.Status != StatusPending && r.Status != StatusPendingApproval {
+		return false, nil
+	}
+	now := time.Now()
+	r.Status = StatusCanceled
+	r.EndedAt = &now
+	return true, nil
+}
+
 // TransitionStatus atomically moves the run from one status to another, reporting whether it changed.
 func (m *memStore) TransitionStatus(_ context.Context, id string, from, to Status) (bool, error) {
 	m.mu.Lock()
@@ -410,13 +464,14 @@ func (m *memStore) TransitionStatus(_ context.Context, id string, from, to Statu
 	return true, nil
 }
 
-// Workers lists executors by the leases they hold, most recently seen first.
+// Workers lists executors by the leases they hold within WorkerWindow, most recently seen first.
 func (m *memStore) Workers(_ context.Context) ([]WorkerInfo, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	cutoff := time.Now().Add(-WorkerWindow)
 	byOwner := make(map[string]*WorkerInfo)
 	for _, r := range m.runs {
-		if r.ClaimedBy == "" || r.ClaimedAt == nil {
+		if r.ClaimedBy == "" || r.ClaimedAt == nil || r.ClaimedAt.Before(cutoff) {
 			continue
 		}
 		w, ok := byOwner[r.ClaimedBy]
@@ -677,6 +732,36 @@ func (m *memStore) Log(_ context.Context, id string) ([]byte, error) {
 	out := make([]byte, len(m.logs[id]))
 	copy(out, m.logs[id])
 	return out, nil
+}
+
+// LogAfter returns the log bytes past afterSeq as a single chunk. The memory store's log sequence
+// is the byte offset, so the returned chunk carries the total length as its Seq.
+func (m *memStore) LogAfter(_ context.Context, id string, afterSeq int64, _ int) ([]LogChunk, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if _, ok := m.runs[id]; !ok {
+		return nil, ErrNotFound
+	}
+	buf := m.logs[id]
+	if afterSeq < 0 {
+		afterSeq = 0
+	}
+	if afterSeq >= int64(len(buf)) {
+		return nil, nil
+	}
+	out := make([]byte, int64(len(buf))-afterSeq)
+	copy(out, buf[afterSeq:])
+	return []LogChunk{{Seq: int64(len(buf)), Data: out}}, nil
+}
+
+// LastLogSeq returns the byte length of the run's log, the memory store's log sequence.
+func (m *memStore) LastLogSeq(_ context.Context, id string) (int64, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if _, ok := m.runs[id]; !ok {
+		return 0, ErrNotFound
+	}
+	return int64(len(m.logs[id])), nil
 }
 
 // AppendEvents appends structured events to the run. Returns ErrNotFound if the run is absent.

@@ -128,9 +128,11 @@ does not lose the outcome.</p>
 binary against an existing database is safe to repeat.</p>
 <p>The audit trail is a SHA-256 hash chain. Every recorded mutation carries the previous entry's hash
 and its own hash over its content, so altering, reordering, or dropping an entry breaks the chain,
-which <code>GET /audit/verify</code> detects. The chain is tamper-evident with no key configured. When a signing
-key is set, <code>GET /audit/export</code> seals the chain head with an ed25519 signature, and <code>switchtender audit verify</code> confirms the trail offline, without trusting the server that produced it. The append is
-serialized by an in-process lock on SQLite and a transaction-level advisory lock on PostgreSQL, with
+which <code>GET /v1/audit/verify</code> detects. The chain is tamper-evident with no key configured. When a
+signing key is set, <code>GET /v1/audit/export</code> seals the chain head with an ed25519 signature, and
+<code>switchtender audit verify</code> confirms the trail offline, without trusting the server that produced
+it. The append is serialized by an in-process lock on SQLite and a transaction-level advisory
+lock on PostgreSQL, with
 a unique index on the sequence number as a cross-process backstop, so the chain stays linear even
 under concurrent writers.</p>
 <h2 id="idempotency-and-delivery">Idempotency and delivery</h2>
@@ -142,7 +144,8 @@ An approval is a compare-and-set state transition, so two concurrent approvals r
 exactly once and the loser gets a clear conflict. Treat a submit as create-once on the client side.</p>
 <p>Stored events are ordered and written once per batch. A batch replayed after a transient error
 appends rather than deduplicates, so a consumer keys on the event sequence number.</p>
-<p>Notifications by webhook, email, and Slack are best effort. Each is attempted at least once with one
+<p>Notifications, on all eleven channels from webhook and Slack to PagerDuty, Twilio SMS, and email,
+are best effort. Each is attempted at least once with one
 retry, then logged and dropped, and the run's extra vars are stripped from the payload so survey and
 template values never leave the system. Notifications do not block a run from finishing, and shutdown
 waits for the deliveries already in flight. Treat a notification as a signal, and the store as the

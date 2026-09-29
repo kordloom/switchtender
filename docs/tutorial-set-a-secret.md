@@ -20,11 +20,18 @@ live stream, and events, so the output shows `***` instead of the secret.
    | Kind | What it is |
    |------|------------|
    | `ssh_key` | an SSH private key, to reach hosts and clone private git projects. |
+   | `ssh_password` | a machine login, injected as `ansible_user` and `ansible_password` through a file, off the command line. |
    | `vault_password` | an Ansible Vault password. |
+   | `become_password` | a privilege escalation password, kept off the command line. |
+   | `become` | privilege escalation with an optional method and user, injected as the `ansible_become_*` variables through a file. |
+   | `network` | a network device login, injected as the `ansible_user`, `ansible_password`, `ansible_network_os`, and `ansible_connection` variables. |
    | `env` | `KEY=VALUE` lines injected into the run, how cloud SDK tokens reach a tool. |
    | `token` | a single API token or JWT, exposed to the run as the `SWITCHTENDER_TOKEN` environment variable. |
-   | `become_password` | a privilege escalation password, kept off the command line. |
    | `registry` | a container registry login, to pull a pinned execution image. |
+   | `aws` | an AWS access key, injected as the standard `AWS_*` environment variables. |
+   | `azure` | an Azure service principal, injected as the `ARM_*` variables Terraform reads and the `AZURE_*` variables the Ansible azure collection reads. |
+   | `gcp` | a Google Cloud service account JSON, written to a private file bound to `GOOGLE_APPLICATION_CREDENTIALS`. |
+   | `vmware` | a vCenter login, injected as the `VMWARE_*` environment variables the community.vmware modules read. |
 
 3. Paste the secret and save. Attach it to a project, a template, or a run.
 

@@ -8,8 +8,8 @@
 # HTTP API
 
 Every endpoint the server exposes. The API is served under the `/v1` base path. The web UI at
-`/ui/`, along with `/healthz`, `/metrics`, the OpenID Connect sign-in routes, and the webhook
-`/hooks` path, is unversioned. The root redirects to the UI.
+`/ui/`, along with `/healthz`, `/metrics`, the OpenID Connect and SAML sign-in routes, the webhook
+`/hooks` path, and the `/relay` worker path, is unversioned. The root redirects to the UI.
 
 | Method | Path                    | What                                                    |
 |--------|-------------------------|---------------------------------------------------------|
@@ -55,7 +55,7 @@ Every endpoint the server exposes. The API is served under the `/v1` base path. 
 | GET    | `/v1/triggers`             | List webhook triggers.                                  |
 | DELETE | `/v1/triggers/{id}`        | Delete a trigger, revoking its webhook.                 |
 | POST   | `/hooks/{token}`        | Fire a trigger from a git push. A required HMAC signature is checked first.|
-| POST   | `/v1/credentials`          | Store a credential (ssh_key, vault_password, env, token, become_password, registry), encrypted at rest.|
+| POST   | `/v1/credentials`          | Store a credential, encrypted at rest. Thirteen kinds: ssh_key, ssh_password, vault_password, become_password, become, network, env, token, registry, aws, azure, gcp, vmware.|
 | GET    | `/v1/credentials`          | List credentials, secrets never included.               |
 | PUT    | `/v1/credentials/{id}`     | Update a credential.                                    |
 | DELETE | `/v1/credentials/{id}`     | Delete a credential. 409 while an object still uses it. |
@@ -76,6 +76,12 @@ Every endpoint the server exposes. The API is served under the `/v1` base path. 
 | POST   | `/v1/teams/{id}/members`   | Add a user to a team.                                   |
 | GET    | `/v1/teams/{id}/members`   | List a team's members.                                  |
 | DELETE | `/v1/teams/{id}/members/{userID}` | Remove a user from a team.                       |
+| POST   | `/v1/orgs`                 | Create an organization.                                 |
+| GET    | `/v1/orgs`                 | List organizations.                                     |
+| DELETE | `/v1/orgs/{id}`            | Delete an organization and its memberships.             |
+| POST   | `/v1/orgs/{id}/members`    | Add a user to an organization with an organization role.|
+| GET    | `/v1/orgs/{id}/members`    | List an organization's members and their roles.         |
+| DELETE | `/v1/orgs/{id}/members/{userID}` | Remove a user from an organization.               |
 | POST   | `/v1/grants`               | Grant a user or team read, use, or manage on an object. |
 | GET    | `/v1/grants`               | List access grants.                                     |
 | DELETE | `/v1/grants/{id}`          | Delete an access grant.                                 |
@@ -99,3 +105,20 @@ Every endpoint the server exposes. The API is served under the `/v1` base path. 
 | GET    | `/v1/audit/export`         | Signed, self-verifying snapshot of the audit chain.     |
 | GET    | `/metrics`              | Prometheus series: run, fleet, queue-depth, and worker gauges, plus a run-duration histogram. |
 | GET    | `/healthz`              | Liveness.                                               |
+
+## Relay endpoints
+
+With `--worker-token` set, the server also serves the mesh relay under `/relay`: the execution
+path an outbound worker started with `--server` uses instead of a database connection. Every call
+presents the worker bearer token.
+
+| Method | Path                               | What                                          |
+|--------|------------------------------------|-----------------------------------------------|
+| POST   | `/relay/v1/claim`                  | Lease the oldest pending run for the caller.  |
+| POST   | `/relay/v1/heartbeat`              | Renew the lease on a run.                     |
+| GET    | `/relay/v1/runs/{id}`              | Fetch one run.                                |
+| POST   | `/relay/v1/runs/{id}/save`         | Save the run's state.                         |
+| POST   | `/relay/v1/runs/{id}/log`          | Append captured output.                       |
+| POST   | `/relay/v1/runs/{id}/events`       | Append structured events.                     |
+| POST   | `/relay/v1/runs/{id}/host-summary` | Save the run's per-host summaries.            |
+| POST   | `/relay/v1/runs/{id}/task-summary` | Save the run's per-task summaries.            |

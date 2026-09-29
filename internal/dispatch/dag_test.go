@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -474,5 +475,58 @@ func TestDispatcherPipelineDAGValidation(t *testing.T) {
 	})
 	if !errors.Is(err, ErrUnknownDependency) {
 		t.Errorf("SubmitPipeline() error = %v, want ErrUnknownDependency", err)
+	}
+}
+
+// TestStepOutputsDoesNotResurrectRun verifies recording a finished step's outputs never writes the
+// coordinator's stale pre-claim snapshot back to the store. Before the fresh-read fix, the stale
+// save reverted the step to pending and unclaimed, and a claim loop executed it a second time.
+func TestStepOutputsDoesNotResurrectRun(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	d := New(store, newOutputsRunner(nil), nil)
+	defer d.Close()
+	ctx := context.Background()
+
+	parentID := "run_parent"
+	idx := 0
+	stale := &run.Run{
+		ID: "run_step", Playbook: "a.yml", Status: run.StatusPending,
+		CreatedAt: time.Now(), ParentID: &parentID, StepIndex: &idx, StepName: "a",
+	}
+	if err := store.Save(ctx, stale); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	// An executor claimed the step, ran it, published outputs, and finalized it succeeded.
+	now := time.Now()
+	done := stale.Clone()
+	done.Status = run.StatusSucceeded
+	done.ClaimedBy = "worker-1"
+	done.ClaimedAt, done.StartedAt, done.EndedAt = &now, &now, &now
+	if err := store.Save(ctx, done); err != nil {
+		t.Fatalf("Save(done) error = %v", err)
+	}
+	if err := store.AppendEvents(ctx, "run_step", []event.Event{
+		{Type: event.TypeStats, Outputs: map[string]any{"version": "1.2.3"}},
+	}); err != nil {
+		t.Fatalf("AppendEvents() error = %v", err)
+	}
+
+	outputs := d.stepOutputs(stale)
+	if outputs["version"] != "1.2.3" {
+		t.Fatalf("outputs = %v, want the published version", outputs)
+	}
+
+	got, err := store.Get(ctx, "run_step")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Status != run.StatusSucceeded || got.ClaimedBy != "worker-1" {
+		t.Errorf("stored step = %q claimed by %q, want succeeded by worker-1, not resurrected",
+			got.Status, got.ClaimedBy)
+	}
+	if got.Outputs["version"] != "1.2.3" {
+		t.Errorf("stored outputs = %v, want recorded", got.Outputs)
 	}
 }

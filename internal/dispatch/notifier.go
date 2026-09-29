@@ -7,8 +7,8 @@ import (
 )
 
 // Notifier delivers a terminal top-level run to an external channel. Register one with
-// RegisterNotifier so a new channel plugs in beside the built-in webhook, Slack, and email
-// delivery without editing the dispatcher.
+// RegisterNotifier so a new channel plugs in beside the built-in channels without editing the
+// dispatcher.
 type Notifier interface {
 	// Notify delivers the run to the channel. The run is already redacted of extra vars, so a
 	// notifier never receives survey answers or template vars that can carry secrets.

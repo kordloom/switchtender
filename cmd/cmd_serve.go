@@ -55,8 +55,16 @@ const (
 	defaultScheduleInterval = 15 * time.Second
 	// shutdownTimeout bounds how long graceful HTTP shutdown waits for in-flight requests.
 	shutdownTimeout = 15 * time.Second
-	// readHeaderTimeout bounds how long the server waits to read request headers.
+	// readHeaderTimeout bounds how long the server waits to read request headers, closing a
+	// slowloris connection that dribbles them.
 	readHeaderTimeout = 10 * time.Second
+	// readTimeout bounds how long the server waits to read a full request, closing a client that
+	// dribbles a body to hold a connection open. It is generous enough for a large import upload.
+	readTimeout = 2 * time.Minute
+	// idleTimeout bounds how long a keep-alive connection may sit idle before it is closed, so
+	// abandoned connections do not accumulate. No WriteTimeout is set, since live SSE streams are
+	// long-lived by design and a write deadline would sever them.
+	idleTimeout = 2 * time.Minute
 )
 
 // serveAddr holds the value of the --addr flag.
@@ -131,6 +139,10 @@ var serveRequireImageDigest bool
 
 // serveWorkers holds the value of the serve --workers flag.
 var serveWorkers int
+
+// serveRunTimeout holds the value of the --run-timeout flag, the default cap on how long a run may
+// execute. Zero disables the cap.
+var serveRunTimeout time.Duration
 
 // serveStrictGrants holds the value of the --strict-grants flag.
 var serveStrictGrants bool
@@ -414,6 +426,9 @@ func init() {
 		"Largest host matrix, in cells, the UI draws before showing a notice. 0 means no limit.")
 	serveCmd.Flags().IntVar(&serveMaxShards, "max-shards", dispatch.DefaultMaxShards,
 		"Most groups a split fans out into. A split is always bounded by the host count.")
+	serveCmd.Flags().DurationVar(&serveRunTimeout, "run-timeout", 0,
+		"Default cap on how long a run may execute before it is canceled and failed, for example 1h. "+
+			"A run may set a shorter timeout. Zero leaves runs uncapped.")
 	serveCmd.Flags().StringVar(&servePluginsDir, "plugins-dir", "",
 		"Directory of extension plugin binaries to load at startup. Empty loads none. Also SWITCHTENDER_PLUGINS_DIR.")
 	serveCmd.Flags().StringVar(&serveOIDCIssuer, "oidc-issuer", "",
@@ -612,6 +627,30 @@ func projectCacheDir() string {
 }
 
 // runServe builds the server dependencies and serves until interrupted.
+// externalAuthConfigured reports whether any single sign-on or federated auth provider is set, in
+// which case the API is not wide open even before an API token exists.
+func externalAuthConfigured() bool {
+	return serveOIDCIssuer != "" || serveLDAPURL != "" ||
+		serveSAMLIDPMetadataURL != "" || serveJWTJWKSURL != ""
+}
+
+// isLoopbackAddr reports whether addr binds only the loopback interface. An empty or wildcard host
+// binds every interface and is not loopback, so exposing an unauthenticated API on it is refused.
+func isLoopbackAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	if host == "" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 func runServe(cmd *cobra.Command, _ []string) error {
 	log, err := logutil.New()
 	if err != nil {
@@ -627,6 +666,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	store, schedules := bundle.Runs(), bundle.Schedules()
 
 	if n, cerr := bundle.Tokens().Count(cmd.Context()); cerr == nil && n == 0 {
+		if !serveReadOnly && !externalAuthConfigured() && !isLoopbackAddr(serveAddr) {
+			return fmt.Errorf("refusing to serve an unauthenticated API on %s: no tokens and no "+
+				"SSO configured. Create a token with 'switchtender token new', configure SSO, "+
+				"bind a loopback address, or pass --read-only", serveAddr)
+		}
 		log.Warn("no API tokens exist. The API is UNAUTHENTICATED until you create one. Run: switchtender token new")
 	}
 
@@ -653,6 +697,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	disp := dispatch.New(store, runner, log, dispatch.WithPublisher(hub),
 		dispatch.WithWorkers(serveWorkers),
 		dispatch.WithMaxShards(serveMaxShards),
+		dispatch.WithRunTimeout(serveRunTimeout),
 		dispatch.WithCredentials(bundle.Credentials(), sealer),
 		dispatch.WithProjects(bundle.Projects(), syncer),
 		dispatch.WithDefaultImage(serveDefaultImage),
@@ -770,6 +815,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			server.WithAI(aiProvider),
 			server.WithDocs(docsFS)).Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		IdleTimeout:       idleTimeout,
 	}
 
 	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)

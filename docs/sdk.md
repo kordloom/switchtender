@@ -19,7 +19,8 @@ executes, and audits like a built-in. The SDK covers four kinds of extension:
   Advisory only: a provider produces text a human reads, never an action, so it stays out of the
   execution path.
 - **Notification channels.** `RegisterNotifier` delivers every terminal top-level run to your
-  channel, beside the built-in webhook, Slack, and email delivery. Extra vars are redacted before
+  channel, beside the eleven built-in channels: webhook, Slack, Mattermost, Rocket.Chat, Discord,
+  Teams, ntfy, PagerDuty, Grafana, Twilio SMS, and email. Extra vars are redacted before
   delivery, so survey answers and template vars that can carry secrets never leave the server.
 - **Secret engines.** `RegisterSecretSource` adds a static engine such as AWS Secrets Manager or
   1Password. `RegisterDynamicSecretSource` adds a dynamic engine that mints a short-lived
@@ -44,9 +45,9 @@ Two files make a SwitchTender with a custom `hello` tool.
 
     module example.com/switchtender-hello
 
-    go 1.26.4
+    go 1.26.5
 
-    require github.com/kordloom/switchtender v1.7.0
+    require github.com/kordloom/switchtender v1.19.0
 
 `main.go`:
 

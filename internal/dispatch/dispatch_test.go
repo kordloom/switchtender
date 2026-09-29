@@ -1178,3 +1178,58 @@ func TestDefaultImageFallback(t *testing.T) {
 		t.Errorf("spec.Image = %q, want ghcr.io/acme/pinned:2", spec.Image)
 	}
 }
+
+// TestDispatcherRunTimeout verifies a run that outlasts the dispatcher's timeout is canceled and
+// finalized failed with a timeout reason, so a hung tool cannot hold a worker slot forever.
+func TestDispatcherRunTimeout(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	started := make(chan struct{})
+	var once sync.Once
+	runner := roundhouse.RunnerFunc(
+		func(ctx context.Context, _ roundhouse.Spec, _ io.Writer) (roundhouse.Result, error) {
+			once.Do(func() { close(started) })
+			<-ctx.Done()
+			return roundhouse.Result{ExitCode: -1}, ctx.Err()
+		},
+	)
+	d := New(store, runner, nil, WithRunTimeout(150*time.Millisecond))
+	defer d.Close()
+
+	created, err := d.Submit(context.Background(), "play.yml", "inv")
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	<-started
+	got := waitTerminal(t, store, created.ID)
+	if got.Status != run.StatusFailed {
+		t.Errorf("status = %q, want failed", got.Status)
+	}
+	if !strings.Contains(got.Error, "timeout") {
+		t.Errorf("error = %q, want it to mention the timeout", got.Error)
+	}
+}
+
+// TestDispatcherPerRunTimeout verifies a per-run timeout is honored even when the dispatcher has no
+// default cap.
+func TestDispatcherPerRunTimeout(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	runner := roundhouse.RunnerFunc(
+		func(ctx context.Context, _ roundhouse.Spec, _ io.Writer) (roundhouse.Result, error) {
+			<-ctx.Done()
+			return roundhouse.Result{ExitCode: -1}, ctx.Err()
+		},
+	)
+	d := New(store, runner, nil)
+	defer d.Close()
+
+	created, err := d.Submit(context.Background(), "play.yml", "inv", run.WithTimeout(1))
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	got := waitTerminal(t, store, created.ID)
+	if got.Status != run.StatusFailed {
+		t.Errorf("status = %q, want failed from the per-run timeout", got.Status)
+	}
+}
