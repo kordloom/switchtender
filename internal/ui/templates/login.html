@@ -14,6 +14,11 @@
 
 	<main class="content narrow">
 		<h1>Sign in</h1>
+		{{if .ReadOnly}}
+		<p class="muted">This public demo is read-only and fully browsable without signing in, so there
+			is nothing an account would unlock here. <a href="/ui/">Back to the demo</a>, or self-host
+			to get accounts.</p>
+		{{end}}
 		<div id="signed-in-return" class="signed-in-return" hidden>
 			<span>This browser is already signed in <span id="signed-in-name"></span>.</span>
 			<a class="button" href="/ui/">Back to SwitchTender</a>

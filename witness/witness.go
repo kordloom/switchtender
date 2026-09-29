@@ -279,7 +279,8 @@ func Check(prev *Checkpoint, server string, beats []Beat, now time.Time) (*Check
 		// which is a configuration to fix rather than an attack, so the finding says so.
 		findings = append(findings, Finding{Kind: "empty_feed", Detail: "this server served no beats " +
 			"at all, so there is nothing to witness: start the span beat on it, with serve " +
-			"--beat-interval, or point the witness at a server that emits beats",
+			"--span-cadence, for example --span-cadence 60s, or point the witness at a server " +
+			"that emits beats",
 			Key: "empty_feed"})
 	}
 

@@ -207,29 +207,30 @@ func auditVerifyHandler(store audit.Store, installID string, log *zap.Logger) ht
 // asked to name a window instead, which the command has always offered.
 const maxBundleEntries = 250_000
 
-// bundleWindow narrows entries to the newest limit of them, and reports the message to answer with when
-// the request cannot be served as asked. An empty limit means the whole chain, up to the ceiling.
-func bundleWindow(entries []*audit.Entry, limit string) ([]*audit.Entry, string) {
+// bundleWindow decides how many of the chain's newest entries a bundle may assemble, from the chain's
+// size rather than a materialized slice, and reports the message to answer with when the request
+// cannot be served as asked. An empty limit means the whole chain, up to the ceiling.
+func bundleWindow(count int, limit string) (int, string) {
 	if limit == "" {
-		if len(entries) > maxBundleEntries {
-			return nil, fmt.Sprintf("this chain holds %d entries, more than the %d one bundle "+
+		if count > maxBundleEntries {
+			return 0, fmt.Sprintf("this chain holds %d entries, more than the %d one bundle "+
 				"assembles at once. Ask for a window with limit=<count>, which bundles that many of "+
-				"the newest entries", len(entries), maxBundleEntries)
+				"the newest entries", count, maxBundleEntries)
 		}
-		return entries, ""
+		return count, ""
 	}
 	n, err := strconv.Atoi(limit)
 	if err != nil || n < 1 {
-		return nil, "limit must be a count of the newest entries to bundle, such as limit=1000"
+		return 0, "limit must be a count of the newest entries to bundle, such as limit=1000"
 	}
 	if n > maxBundleEntries {
-		return nil, fmt.Sprintf("limit must be at most %d, the number of entries one bundle "+
+		return 0, fmt.Sprintf("limit must be at most %d, the number of entries one bundle "+
 			"assembles at once", maxBundleEntries)
 	}
-	if n >= len(entries) {
-		return entries, ""
+	if n >= count {
+		return count, ""
 	}
-	return entries[len(entries)-n:], ""
+	return n, ""
 }
 
 // auditBundleHandler assembles and serves the signed LoomSeal bundle the CLI produces, so the
@@ -246,46 +247,63 @@ func auditBundleHandler(store audit.Store, producer *audit.Identity, version str
 			respondError(w, log, http.StatusNotFound, "signed bundle export is not enabled")
 			return
 		}
-		entries, err := store.Chain(r.Context())
+		// The chain is streamed rather than materialized: the first pass counts it and holds it
+		// against every anchor in full, before any window is applied, the same way the command does
+		// it, and only the second pass assembles the window the response actually carries. Loading
+		// the whole history to then slice its tail was the cap defeating its own purpose.
+		recorded, aerr := anchorsFor(r.Context(), store)
+		if aerr != nil {
+			log.Error("server: read anchors: " + aerr.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read the anchors")
+			return
+		}
+		anchorScan := audit.NewAnchorScanner(recorded, producer.InstallID)
+		count := 0
+		var highest int64
+		err := store.ChainScan(r.Context(), 0, func(e *audit.Entry) error {
+			anchorScan.Feed(e)
+			count++
+			highest = e.Seq
+			return nil
+		})
 		if err != nil {
 			log.Error("server: chain audit entries: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not read the audit trail")
 			return
 		}
-		if len(entries) == 0 {
+		if count == 0 {
 			respondError(w, log, http.StatusConflict, "the audit chain is empty, there is nothing to bundle")
 			return
 		}
-		// The chain is held against the anchors in full below, before any window is applied, the same
-		// way the command does it: checking a window against the anchors reads a deliberate narrowing
-		// as lost history.
-		full := entries
-		windowed, msg := bundleWindow(entries, r.URL.Query().Get("limit"))
+		if len(recorded) > 0 {
+			if reachedAll, _ := anchorScan.Results(); !reachedAll {
+				respondError(w, log, http.StatusConflict, "the chain does not satisfy every anchor "+
+					"recorded over it, so it cannot be published as a bundle that does")
+				return
+			}
+		}
+		window, msg := bundleWindow(count, r.URL.Query().Get("limit"))
 		if msg != "" {
 			respondError(w, log, http.StatusBadRequest, msg)
 			return
 		}
-		entries = windowed
+		entries := make([]*audit.Entry, 0, window)
+		err = store.ChainScan(r.Context(), highest-int64(window), func(e *audit.Entry) error {
+			entries = append(entries, e)
+			return nil
+		})
+		if err != nil {
+			log.Error("server: chain audit entries: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read the audit trail")
+			return
+		}
 		doc, err := audit.BuildBundle(entries, *producer, version, time.Now())
 		if err != nil {
 			log.Error("server: build bundle: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not assemble the bundle")
 			return
 		}
-		if anchors, ok := store.(audit.AnchorStore); ok {
-			recorded, aerr := anchors.Anchors(r.Context(), 0)
-			if aerr != nil {
-				log.Error("server: read anchors: " + aerr.Error())
-				respondError(w, log, http.StatusInternalServerError, "could not read the anchors")
-				return
-			}
-			if reachedAll, _ := audit.CheckAnchors(full, recorded, producer.InstallID); !reachedAll {
-				respondError(w, log, http.StatusConflict, "the chain does not satisfy every anchor "+
-					"recorded over it, so it cannot be published as a bundle that does")
-				return
-			}
-			doc.AttachAnchors(recorded)
-		}
+		doc.AttachAnchors(recorded)
 		signed, err := audit.SignBundleDoc(doc, producer.Private())
 		if err != nil {
 			log.Error("server: sign bundle: " + err.Error())

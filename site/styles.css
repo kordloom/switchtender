@@ -78,7 +78,7 @@ code, pre { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, 
 
 /* Buttons */
 .btn {
-	display: inline-flex; align-items: center; justify-content: center;
+	display: inline-flex; align-items: center; justify-content: center; white-space: nowrap;
 	padding: 10px 20px; border-radius: 10px; font-weight: 600; font-size: 14.5px;
 	color: #05261a;
 	background: linear-gradient(135deg, var(--accent), #6ee7b7);
@@ -167,6 +167,13 @@ h1 {
 	background: linear-gradient(120deg, #fff, var(--accent)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
 }
 .strip span { font-size: 13.5px; color: var(--muted); }
+/* The path strip is the pipeline every change walks, so it reads as a numbered sequence on a
+   connecting line rather than five loose stats. */
+.strip.path { grid-template-columns: repeat(5, 1fr); gap: 16px; position: relative; }
+.strip.path::before { content: ""; position: absolute; top: 47px; left: 10%; right: 10%; height: 2px; background: var(--border-2); z-index: 1; }
+.strip.path div { position: relative; padding-top: 52px; }
+.strip.path i { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 34px; height: 34px; border-radius: 50%; border: 2px solid var(--accent); background: var(--bg); color: var(--accent); font-style: normal; font-weight: 700; font-size: 15px; font-family: "Space Grotesk", sans-serif; display: grid; place-items: center; z-index: 2; }
+.strip.path b { font-size: 19px; }
 
 /* Sections */
 .section { padding: 96px 24px; }
@@ -274,7 +281,9 @@ h1 {
 .start .code { max-width: 720px; margin: 0 auto; }
 .code pre {
 	background: #0c1017; border: 1px solid var(--border-2); border-radius: var(--radius);
-	padding: 24px 22px; overflow-x: auto; font-size: 14px; line-height: 1.9;
+	/* The right padding clears the absolutely positioned Copy button, which otherwise sat on top of
+	   the first line of exactly the commands a visitor is trying to read and copy. */
+	padding: 24px 84px 24px 22px; overflow-x: auto; font-size: 14px; line-height: 1.9;
 	box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
 }
 .code code { color: #dbe4ee; }
@@ -344,7 +353,13 @@ h1 {
 .reveal.in { opacity: 1; transform: none; }
 
 /* Responsive */
-@media (max-width: 900px) {
+/* The nav carries nine links plus two buttons, which is wider than a tablet: between 900px and
+   1100px the row overflowed off-screen with the CTA unreachable, so the hamburger takes over at the
+   width the full row genuinely needs, and the link gap tightens on narrow desktops first. */
+@media (max-width: 1280px) {
+	.nav-links { gap: 18px; }
+}
+@media (max-width: 1100px) {
 	.nav-links, .nav-cta { display: none; }
 	.nav-toggle { display: block; }
 	.nav.open .nav-links {
@@ -352,6 +367,8 @@ h1 {
 		background: rgba(8, 11, 16, 0.96); backdrop-filter: blur(14px); padding: 16px 24px; gap: 16px;
 		border-bottom: 1px solid var(--border);
 	}
+}
+@media (max-width: 900px) {
 	.hero { grid-template-columns: 1fr; padding-top: 56px; gap: 44px; }
 	.hero-shot { order: 2; }
 	.window { transform: none; }
@@ -363,6 +380,13 @@ h1 {
 	.strip { grid-template-columns: repeat(2, 1fr); gap: 26px; }
 	.cards .card { flex-basis: 100%; }
 	.section { padding: 68px 24px; }
+}
+/* Below tablet width the horizontal line does not fit, so the path stacks into a numbered vertical
+   sequence: each step keeps its node above its label, and the connecting line is dropped. */
+@media (max-width: 760px) {
+	.strip.path { grid-template-columns: 1fr; gap: 18px; padding: 28px 24px; }
+	.strip.path::before { display: none; }
+	.strip.path div { padding-top: 46px; }
 }
 @media (prefers-reduced-motion: reduce) {
 	* { animation: none !important; }

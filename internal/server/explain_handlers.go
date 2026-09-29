@@ -384,22 +384,30 @@ func driftedTaskSection(events []event.Event, host string) string {
 	return b.String()
 }
 
-// explainEvents returns the trailing window of a run's events. It is best effort and returns nil
-// on any error, since events are optional context for the prompt.
+// explainEvents returns the trailing window of a run's events. It pages the run with the cursor the
+// store hands back rather than subtracting the window from the last sequence: event sequences are
+// global, so on a busy install that subtraction skips the run's own earlier events, its failures
+// among them, because other runs' events sit between them. It is best effort and returns nil on any
+// error, since events are optional context for the prompt.
 func explainEvents(ctx context.Context, store run.Store, id string) []event.Event {
-	last, err := store.LastEventSeq(ctx, id)
-	if err != nil || last <= 0 {
-		return nil
+	const page = 1000
+	var window []event.Event
+	var after int64
+	for {
+		batch, err := store.EventsAfter(ctx, id, after, page)
+		if err != nil || len(batch) == 0 {
+			break
+		}
+		window = append(window, batch...)
+		if len(window) > explainEventWindow {
+			window = window[len(window)-explainEventWindow:]
+		}
+		after = batch[len(batch)-1].Seq
+		if len(batch) < page {
+			break
+		}
 	}
-	after := last - explainEventWindow
-	if after < 0 {
-		after = 0
-	}
-	events, err := store.EventsAfter(ctx, id, after, explainEventWindow)
-	if err != nil {
-		return nil
-	}
-	return events
+	return window
 }
 
 // failedTaskSection renders the most recent failing task events, one entry each, within a byte

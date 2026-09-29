@@ -21,6 +21,12 @@ import (
 	"github.com/kordloom/switchtender/internal/run"
 )
 
+// maxReceiptEntries is how many chain entries one receipt will assemble at once. It matches the
+// bundle export's ceiling: a receipt is one signed document over the claims it carries, so unlike a
+// streamed verification it has to hold them together, and the endpoint that serves it is reachable
+// below admin. It is a var only so a test can shrink it to force the refusal.
+var maxReceiptEntries = 250_000
+
 // Options are the shapes a receipt can take.
 type Options struct {
 	// Sparse discloses only this run's own entries, each proved to belong to the whole chain by an
@@ -72,18 +78,51 @@ func Build(ctx context.Context, runs run.Store, audits audit.Store, id audit.Ide
 		return nil, fmt.Errorf("run %s carries an unreadable creation receipt: %w", runID, err)
 	}
 
-	entries, err := audits.Chain(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("read audit chain: %w", err)
+	// The chain is streamed once rather than materialized: an audit chain grows for the life of an
+	// install and this endpoint is reachable below admin, so loading every entry ever written per
+	// request was an invitation to exhaust the server from a browser. The pass feeds the anchor
+	// scanner, finds the run's outcome, and collects only the entries this receipt's shape needs,
+	// refusing honestly past a ceiling instead of assembling without bound.
+	var recorded []*audit.Anchor
+	var anchorScan *audit.AnchorScanner
+	anchorStore, hasAnchors := audits.(audit.AnchorStore)
+	if hasAnchors {
+		var aerr error
+		if recorded, aerr = anchorStore.Anchors(ctx, 0); aerr != nil {
+			return nil, fmt.Errorf("read anchors: %w", aerr)
+		}
+		anchorScan = audit.NewAnchorScanner(recorded, id.InstallID)
+	}
+	collectFrom := creationSeq
+	if opts.Sparse {
+		// The tree shape proves membership against a root over the whole chain, so it needs every
+		// entry; the contiguous shape needs the segment from the run's creation on.
+		collectFrom = 1
 	}
 	outcomePrefix := "/runs/" + runID + "/outcome/"
+	var entries []*audit.Entry
 	var outcomeSeq int64
 	var outcomeEntry *audit.Entry
-	for _, e := range entries {
+	overflow := false
+	err = audits.ChainScan(ctx, 0, func(e *audit.Entry) error {
+		if anchorScan != nil {
+			anchorScan.Feed(e)
+		}
 		if e.Method == audit.MethodRun && strings.HasPrefix(e.Path, outcomePrefix) {
 			outcomeSeq = e.Seq
 			outcomeEntry = e
 		}
+		if e.Seq >= collectFrom {
+			if len(entries) >= maxReceiptEntries {
+				overflow = true
+				return nil
+			}
+			entries = append(entries, e)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read audit chain: %w", err)
 	}
 	if outcomeSeq == 0 {
 		return nil, fmt.Errorf("run %s has no committed outcome yet, so there is nothing to "+
@@ -92,6 +131,10 @@ func Build(ctx context.Context, runs run.Store, audits audit.Store, id audit.Ide
 	if outcomeSeq < creationSeq {
 		return nil, fmt.Errorf("run %s: its outcome is recorded before its creation, which is a "+
 			"broken chain", runID)
+	}
+	if overflow {
+		return nil, fmt.Errorf("this receipt would assemble more than %d chain entries at once; "+
+			"export a windowed bundle with the bundle command instead", maxReceiptEntries)
 	}
 
 	subject := audit.BundleSubject{Type: "run", ID: runID}
@@ -113,7 +156,19 @@ func Build(ctx context.Context, runs run.Store, audits audit.Store, id audit.Ide
 	// therefore proves its own entries belong to the log, and names the outcome entry and the digest it
 	// committed, without reproducing the body.
 	if !opts.Sparse {
-		if body, berr := outcome.Body(ctx, runs, r); berr == nil {
+		switch body, berr := outcome.Body(ctx, runs, r); {
+		case berr != nil:
+			res.Notes = append(res.Notes, "the outcome could not be rebuilt, so the receipt proves "+
+				"the chain but does not show what the run did: "+berr.Error())
+		case !audit.VerifyContentDigest(outcomeEntry.ContentDigest, outcomeEntry.Nonce, body):
+			// The rebuilt record no longer matches what the chain committed, which happens after
+			// routine retention deletes the run's logs or trims its summaries. Attaching it anyway
+			// would hand out a receipt whose own verifier rejects it as forged, so the disclosure is
+			// withheld and the receipt says why. The chain segment it proves is still intact.
+			res.Notes = append(res.Notes, "the outcome rebuilt today no longer matches the digest "+
+				"the chain committed, usually because retention has pruned this run's logs or "+
+				"summaries, so the receipt proves the chain but does not show what the run did")
+		default:
 			var bodyObj any
 			if json.Unmarshal(body, &bodyObj) == nil {
 				if claim := outcomeClaim(doc); claim != nil {
@@ -122,19 +177,12 @@ func Build(ctx context.Context, runs run.Store, audits audit.Store, id audit.Ide
 					discloseSpec(claim, r)
 				}
 			}
-		} else {
-			res.Notes = append(res.Notes, "the outcome could not be rebuilt, so the receipt proves "+
-				"the chain but does not show what the run did: "+berr.Error())
 		}
 		discloseDecisions(doc, entries, r)
 	}
 
-	if anchors, ok := audits.(audit.AnchorStore); ok {
-		recorded, aerr := anchors.Anchors(ctx, 0)
-		if aerr != nil {
-			return nil, fmt.Errorf("read anchors: %w", aerr)
-		}
-		if reachedAll, results := audit.CheckAnchors(entries, recorded, id.InstallID); !reachedAll {
+	if anchorScan != nil {
+		if reachedAll, results := anchorScan.Results(); !reachedAll {
 			var problems []string
 			for _, r := range results {
 				if !r.Reached {

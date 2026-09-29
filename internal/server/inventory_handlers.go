@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -142,7 +143,7 @@ func createInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 			respondError(w, log, http.StatusInternalServerError, "could not store inventory")
 			return
 		}
-		respondJSON(w, log, http.StatusCreated, i, wantsPretty(r))
+		respondJSON(w, log, http.StatusCreated, redactInventory(r.Context(), i), wantsPretty(r))
 	}
 }
 
@@ -197,8 +198,17 @@ func updateInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 				return
 			}
 		}
+		content := req.Content
+		if source == credential.SourceLocal {
+			restored, refuse := restoreRedactedInventoryContent(req.Content, existing.Content)
+			if refuse != "" {
+				respondError(w, log, http.StatusBadRequest, refuse)
+				return
+			}
+			content = restored
+		}
 		inv := &inventory.Inventory{
-			ID: id, Name: req.Name, Content: req.Content, CredentialIDs: req.CredentialIDs,
+			ID: id, Name: req.Name, Content: content, CredentialIDs: req.CredentialIDs,
 			Queue: req.Queue, OrgID: orgID,
 		}
 		if source != credential.SourceLocal {
@@ -220,7 +230,7 @@ func updateInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 			respondError(w, log, http.StatusInternalServerError, "could not read inventory")
 			return
 		}
-		respondJSON(w, log, http.StatusOK, updated, wantsPretty(r))
+		respondJSON(w, log, http.StatusOK, redactInventory(r.Context(), updated), wantsPretty(r))
 	}
 }
 
@@ -252,6 +262,15 @@ func listInventoriesHandler(store inventory.Store, authz *authorizer, log *zap.L
 	}
 }
 
+// redactInventory returns the inventory with its secret-looking variable values masked for a
+// non-admin caller, and unchanged for an admin. The create and update responses return the stored
+// record, so without this a manager who was served a redacted list, then saved and got the full
+// record back, would read the plaintext the list path deliberately hides. It reuses redactInventories
+// so one place decides what a non-admin may see.
+func redactInventory(ctx context.Context, inv *inventory.Inventory) *inventory.Inventory {
+	return redactInventories(ctx, []*inventory.Inventory{inv})[0]
+}
+
 // redactInventories removes secret-looking variable values from inventory content unless the caller
 // administers the install.
 //
@@ -277,6 +296,25 @@ func redactInventories(ctx context.Context, list []*inventory.Inventory) []*inve
 		out = append(out, &clone)
 	}
 	return out
+}
+
+// restoreRedactedInventoryContent guards a local-inventory update against a caller who echoes back the
+// redacted content they were shown. The list endpoint masks inline secrets to inventory.RedactedValue
+// for non-admins, so storing that submission verbatim would replace the real ansible_password and the
+// like with the mask, destroying the credential and failing every later run silently. When the
+// submission is exactly the redacted view of the stored content, the secrets were not touched, so the
+// stored content is kept. When it still carries a mask but differs from that view, which secret each
+// mask stands for cannot be told, so it is refused rather than guessed at or blanked. It mirrors
+// restoreMaskedNotifications for inventory text. refuse is a message and empty on success.
+func restoreRedactedInventoryContent(incoming, stored string) (content, refuse string) {
+	if !strings.Contains(incoming, inventory.RedactedValue) {
+		return incoming, ""
+	}
+	if inventory.Redact(stored) == incoming {
+		return stored, ""
+	}
+	return "", "the submitted inventory still contains redacted secrets (" + inventory.RedactedValue +
+		"); re-enter the secret value for each masked entry, or ask an admin to edit the raw content"
 }
 
 // deleteInventoryHandler removes an inventory.

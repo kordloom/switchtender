@@ -122,6 +122,41 @@ func TestTemplateTimeoutRoundTrip(t *testing.T) {
 	}
 }
 
+// TestTemplateLaunchStampsActorAccount proves a template-launched run carries the requester's
+// account id, so require_distinct_approver compares accounts, not credential names. Without the
+// account the check fell back to name comparison, letting a person approve their own template run
+// through a differently named credential.
+func TestTemplateLaunchStampsActorAccount(t *testing.T) {
+	t.Parallel()
+	store := template.NewMemStore()
+	sub := &fakeSubmitter{run: &run.Run{ID: "run_x"}}
+	handler := New(run.NewMemStore(), sub, zap.NewNop(), WithTemplates(store)).Handler()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/templates",
+		strings.NewReader(`{"name":"deploy","playbook":"site.yml"}`)))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d (body %s)", rec.Code, rec.Body.String())
+	}
+	var created template.Template
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created template: %v", err)
+	}
+
+	rec = httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/templates/"+created.ID+"/launch", nil)
+	req = req.WithContext(context.WithValue(req.Context(), actorKey{},
+		Actor{UserID: "usr_alice", Name: "alice-ci", Type: "token"}))
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("launch status = %d (body %s)", rec.Code, rec.Body.String())
+	}
+	if sub.gotRun.ActorUserID != "usr_alice" {
+		t.Errorf("launched run ActorUserID = %q, want %q; without it the distinct-approver check "+
+			"falls back to name comparison and can be self-approved", sub.gotRun.ActorUserID, "usr_alice")
+	}
+}
+
 // TestTemplateToolError checks template input validation per tool, including that any tool, not
 // just Ansible, may pin an execution image now that the container runner plans all seven.
 func TestTemplateToolError(t *testing.T) {

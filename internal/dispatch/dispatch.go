@@ -1197,6 +1197,26 @@ func idsOf(runs []*run.Run) []string {
 	return out
 }
 
+// startParentRow persists a coordinated parent's transition to running without erasing the lease the
+// start fence just stamped. These parents never pass through Claim, so their in-memory ClaimedAt is
+// nil, and the whole-row save writes every column: saving nil over the fence's stamp left a running,
+// claimed row with no lease time, which no sweep clause reaches, so a coordinator that died before
+// its first heartbeat stranded the parent as running and unkillable forever. The stamp is read back
+// so the store's clock stays the lease's clock; when that read fails the local clock stands in,
+// because a slightly skewed lease is sweepable and a missing one is not.
+func (d *Dispatcher) startParentRow(parent *run.Run) {
+	started := d.now()
+	parent.Status = run.StatusRunning
+	parent.StartedAt = &started
+	parent.ClaimedBy = d.owner
+	if current, err := d.store.Get(context.Background(), parent.ID); err == nil && current.ClaimedAt != nil {
+		parent.ClaimedAt = current.ClaimedAt
+	} else {
+		parent.ClaimedAt = &started
+	}
+	_ = d.save(parent)
+}
+
 // coordinate waits for the parent's shards, which execute wherever a claim loop picks them up,
 // and finalizes the parent from their stored results. The parent carries this process's lease so
 // a dead coordinator is swept, and canceling the parent propagates through the store to every
@@ -1212,13 +1232,7 @@ func (d *Dispatcher) coordinate(parent *run.Run, children []*run.Run) {
 	if !d.parentMayStart(parent, idsOf(children)) {
 		return
 	}
-
-	started := d.now()
-	parent.Status = run.StatusRunning
-	parent.StartedAt = &started
-	parent.ClaimedBy = d.owner
-	// The lease time is left to the store, for the reason streamSpec states.
-	_ = d.save(parent)
+	d.startParentRow(parent)
 
 	watchCtx, stopWatch := context.WithCancel(parentCtx)
 	defer stopWatch()
@@ -1476,13 +1490,7 @@ func (d *Dispatcher) runPipeline(parent *run.Run, steps []run.PipelineStep) {
 	if !d.parentMayStart(parent, nil) {
 		return
 	}
-
-	started := d.now()
-	parent.Status = run.StatusRunning
-	parent.StartedAt = &started
-	parent.ClaimedBy = d.owner
-	// The lease time is left to the store, for the reason streamSpec states.
-	_ = d.save(parent)
+	d.startParentRow(parent)
 
 	watchCtx, stopWatch := context.WithCancel(pipeCtx)
 	defer stopWatch()

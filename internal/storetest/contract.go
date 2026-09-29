@@ -44,6 +44,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("fleet health ranking", func(t *testing.T) { testFleetHealth(t, newStore()) })
 	t.Run("run summaries round trip", func(t *testing.T) { testRunSummaries(t, newStore()) })
 	t.Run("append summaries accumulate", func(t *testing.T) { testAppendSummaries(t, newStore()) })
+	t.Run("reclaim attribution is exact", func(t *testing.T) { testReclaimAttribution(t, newStore()) })
 	t.Run("drift status", func(t *testing.T) { testDriftStatus(t, newStore()) })
 	t.Run("drift and fleet health agree after a purge", func(t *testing.T) {
 		testDriftSurvivesPurge(t, newStore())
@@ -3189,5 +3190,67 @@ func testTrimSummaries(t *testing.T, store run.Store) {
 	}
 	if len(floored) != 1 || floored[0].RunID != runID(9) {
 		t.Errorf("busy history after zero keep = %+v, want only %s", floored, runID(9))
+	}
+}
+
+// settledReporter is the sweep-with-attribution capability the dispatcher's janitor uses. Declared
+// here so the contract can hold every backend to the same attribution rules.
+type settledReporter interface {
+	ReclaimStaleSettled(ctx context.Context, ttl time.Duration) (int, []string, error)
+}
+
+// testReclaimAttribution holds ReclaimStaleSettled to its one hard rule: it names exactly the
+// top-level runs the sweep itself drove terminal. A run whose real finisher already recorded its end
+// must not be attributed to the sweep, or the janitor commits a second, contradictory outcome entry
+// for it and the run's receipt permanently fails verification. A child is never attributed, since its
+// outcome rolls up into its parent.
+func testReclaimAttribution(t *testing.T, store run.Store) {
+	reporter, ok := store.(settledReporter)
+	if !ok {
+		t.Fatalf("%T does not implement ReclaimStaleSettled", store)
+	}
+	ctx := context.Background()
+	stale := time.Now().Add(-2 * time.Hour)
+
+	// A genuinely stale top-level run: its worker died mid-change, so the sweep settles it.
+	dead := &run.Run{ID: "r_dead", Playbook: "p", Status: run.StatusRunning, CreatedAt: stale,
+		ClaimedBy: "dead-worker", ClaimedAt: &stale, StartedAt: &stale}
+	// A run whose executor finished it properly before the sweep ran: terminal, not the sweep's.
+	code := 0
+	endedAt := time.Now()
+	finished := &run.Run{ID: "r_finished", Playbook: "p", Status: run.StatusSucceeded, CreatedAt: stale,
+		ClaimedBy: "live-worker", ClaimedAt: &stale, StartedAt: &stale, ExitCode: &code, EndedAt: &endedAt}
+	// A terminal split parent whose stale child the sweep settles: the child is never attributed.
+	parent := &run.Run{ID: "r_parent", Playbook: "p", Status: run.StatusSucceeded, Kind: run.KindSplit,
+		CreatedAt: stale, EndedAt: &endedAt}
+	child := &run.Run{ID: "r_child", Playbook: "p", Status: run.StatusRunning, CreatedAt: stale,
+		ClaimedBy: "dead-worker", ClaimedAt: &stale, StartedAt: &stale, ParentID: &parent.ID}
+	for _, r := range []*run.Run{dead, finished, parent, child} {
+		if err := store.Save(ctx, r); err != nil {
+			t.Fatalf("save %s: %v", r.ID, err)
+		}
+	}
+
+	n, settled, err := reporter.ReclaimStaleSettled(ctx, time.Minute)
+	if err != nil {
+		t.Fatalf("ReclaimStaleSettled: %v", err)
+	}
+	if n == 0 {
+		t.Fatal("the sweep changed nothing, want the stale runs settled")
+	}
+	if diff := cmp.Diff([]string{"r_dead"}, settled); diff != "" {
+		t.Errorf("settled attribution mismatch (-want +got):\n%s", diff)
+	}
+
+	// The already-finished run is untouched, and both stale runs were interrupted.
+	got, err := store.Get(ctx, "r_finished")
+	if err != nil || got.Status != run.StatusSucceeded {
+		t.Errorf("finished run = %v/%v, want untouched succeeded", got.Status, err)
+	}
+	for _, id := range []string{"r_dead", "r_child"} {
+		got, err := store.Get(ctx, id)
+		if err != nil || got.Status != run.StatusInterrupted {
+			t.Errorf("%s = %v/%v, want interrupted by the sweep", id, got.Status, err)
+		}
 	}
 }
