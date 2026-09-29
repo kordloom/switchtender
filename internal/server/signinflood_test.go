@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -30,7 +31,13 @@ func TestSignInFloodIsBoundedPerAddress(t *testing.T) {
 	if err := users.Save(ctx, u); err != nil {
 		t.Fatalf("Save user: %v", err)
 	}
-	handler := loginHandler(users, auth.NewMemStore(), nil, zap.NewNop())
+	// A frozen clock, owned by this handler. This test was the single largest source of CI failures:
+	// it makes 200 requests and asserts most are refused, which only holds if all 200 land inside one
+	// window. On a slow runner the window rolled over, the budget reset, and the test failed for how
+	// fast the machine was rather than for anything about the limiter.
+	frozen := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+	handler := loginHandlerWithClock(users, auth.NewMemStore(), nil, zap.NewNop(),
+		func() time.Time { return frozen })
 
 	attempt := func(username string) int {
 		body := `{"username":"` + username + `","password":"wrong"}`

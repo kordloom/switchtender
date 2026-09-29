@@ -96,6 +96,14 @@ var (
 	serveTLSKey  string
 )
 
+// serveTrustedProxy names networks in CIDR form whose forwarding headers the server believes, and
+// serveClientIPHeader names the header they set. Without these, every client behind one reverse
+// proxy shares a rate-limit key, so one stranger's failed sign-ins refuse everybody.
+var (
+	serveTrustedProxy   []string
+	serveClientIPHeader string
+)
+
 // scheduleInterval holds the value of the --schedule-interval flag.
 var scheduleInterval time.Duration
 
@@ -480,6 +488,12 @@ func init() {
 		"Reject a container run whose image is not pinned to an @sha256: digest.")
 	registerContainerFlags(serveCmd)
 	registerGalaxyFlag(serveCmd)
+	serveCmd.Flags().StringSliceVar(&serveTrustedProxy, "trusted-proxy", nil,
+		"CIDR of a reverse proxy whose client IP header to believe, repeatable. Required behind a "+
+			"proxy: without it every client shares one rate-limit key.")
+	serveCmd.Flags().StringVar(&serveClientIPHeader, "client-ip-header", "",
+		"Header carrying the real client address from a trusted proxy. Defaults to the leftmost "+
+			"X-Forwarded-For entry.")
 	serveCmd.Flags().BoolVar(&serveStrictGrants, "strict-grants", false,
 		"Deny non-admins access to an object that has no grants, instead of deferring to the role.")
 	serveCmd.Flags().BoolVar(&serveReadOnly, "read-only", false,
@@ -904,6 +918,30 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("init logger: %w", err)
 	}
 	defer func() { _ = log.Sync() }()
+
+	// Starting on a database that is not there is a legitimate first run, and the quickstart, the
+	// container image, and the switching guide all do exactly that. It is also what a mistyped --db
+	// looks like, and then the server comes up healthy on an empty chain with no admin account and
+	// authentication off while the operator's real install sits unserved. So it is said out loud
+	// rather than refused, because refusing breaks every documented first run.
+	if !strings.HasPrefix(serveDB, "postgres://") && !strings.HasPrefix(serveDB, "postgresql://") {
+		if _, serr := os.Stat(serveDB); errors.Is(serr, os.ErrNotExist) {
+			fmt.Fprintf(os.Stderr,
+				"creating a new database at %s. If you meant to serve an existing install, stop now "+
+					"and check --db: this one starts empty, with no admin account and no tokens.\n",
+				serveDB)
+		}
+	}
+	var proxies []*net.IPNet
+	for _, c := range serveTrustedProxy {
+		_, n, perr := net.ParseCIDR(strings.TrimSpace(c))
+		if perr != nil {
+			return fmt.Errorf("--trusted-proxy %q is not a CIDR: %w", c, perr)
+		}
+		proxies = append(proxies, n)
+	}
+	server.SetTrustedProxies(proxies)
+	server.SetClientIPHeader(serveClientIPHeader)
 
 	bundle, err := openBundle(serveDB)
 	if err != nil {

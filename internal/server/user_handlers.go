@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -109,6 +110,18 @@ type loginLimiter struct {
 	// max is how many attempts a window allows. Zero means loginWindowMax, so a sign-in limiter
 	// needs no configuration and a caller with a different shape of traffic can state its own.
 	max int
+	// now reads the clock. Nil means time.Now. A test sets it so a window cannot roll over midway
+	// through a burst, which is the difference between asserting on the limiter and asserting on how
+	// fast the machine happened to be.
+	now func() time.Time
+}
+
+// clock returns the limiter's time source, defaulting to the real one.
+func (l *loginLimiter) clock() time.Time {
+	if l.now != nil {
+		return l.now()
+	}
+	return time.Now()
 }
 
 // loginWindow is one key's open window.
@@ -124,7 +137,7 @@ type loginWindow struct {
 func (l *loginLimiter) allow(key string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	now := time.Now()
+	now := l.clock()
 	if len(l.windows) > 4096 {
 		for k, w := range l.windows {
 			if now.Sub(w.start) > loginWindowLength {
@@ -151,7 +164,7 @@ func (l *loginLimiter) spent(key string, max int) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	w, ok := l.windows[key]
-	if !ok || time.Since(w.start) > loginWindowLength {
+	if !ok || l.clock().Sub(w.start) > loginWindowLength {
 		return false
 	}
 	return w.count >= max
@@ -161,7 +174,7 @@ func (l *loginLimiter) spent(key string, max int) bool {
 func (l *loginLimiter) record(key string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	now := time.Now()
+	now := l.clock()
 	if len(l.windows) > 4096 {
 		for k, w := range l.windows {
 			if now.Sub(w.start) > loginWindowLength {
@@ -177,24 +190,95 @@ func (l *loginLimiter) record(key string) {
 	w.count++
 }
 
-// clientAddr returns the request's client host without the port, the stable half of the limiter
-// key. The remote address is used as seen; forwarding headers are spoofable and are not trusted.
+// trustedProxies holds the networks whose forwarding headers this server believes, set by the
+// operator with --trusted-proxy. Empty means believe nobody, which is the default.
+var trustedProxies []*net.IPNet
+
+// SetTrustedProxies configures which peers may set a client IP header. It is called once at startup.
+func SetTrustedProxies(nets []*net.IPNet) { trustedProxies = nets }
+
+// clientIPHeader names the header carrying the real client address, set by the operator with
+// --client-ip-header. Empty means use the leftmost X-Forwarded-For entry.
+var clientIPHeader string
+
+// SetClientIPHeader configures which header carries the client address behind a trusted proxy.
+func SetClientIPHeader(name string) { clientIPHeader = name }
+
+// clientAddr returns the request's client host without the port, the stable half of the limiter key.
+//
+// The remote address is used as seen unless the immediate peer is a proxy the operator explicitly
+// trusted, because a forwarding header from anyone else is a value a stranger chooses and would let
+// them spend or evade any budget keyed on it. Trusting a named proxy is not a loosening: without it
+// every client behind that proxy shares one key, so one stranger's failed guesses spend the budget
+// for everybody, and the sign-in endpoint stops answering for the whole install.
 func clientAddr(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+	if len(trustedProxies) == 0 {
+		return host
+	}
+	peer := net.ParseIP(host)
+	if peer == nil || !fromTrustedProxy(peer) {
+		return host
+	}
+	if fwd := forwardedClient(r); fwd != "" {
+		return fwd
 	}
 	return host
+}
+
+// fromTrustedProxy reports whether the immediate peer sits in a network the operator trusts.
+func fromTrustedProxy(peer net.IP) bool {
+	for _, n := range trustedProxies {
+		if n.Contains(peer) {
+			return true
+		}
+	}
+	return false
+}
+
+// forwardedClient reads the client address a trusted proxy forwarded, preferring the operator's
+// named header and falling back to the leftmost X-Forwarded-For entry, which is the original client.
+func forwardedClient(r *http.Request) string {
+	if clientIPHeader != "" {
+		if v := strings.TrimSpace(r.Header.Get(clientIPHeader)); v != "" {
+			if ip := net.ParseIP(v); ip != nil {
+				return ip.String()
+			}
+		}
+		return ""
+	}
+	xff := r.Header.Get("X-Forwarded-For")
+	if xff == "" {
+		return ""
+	}
+	first, _, _ := strings.Cut(xff, ",")
+	if ip := net.ParseIP(strings.TrimSpace(first)); ip != nil {
+		return ip.String()
+	}
+	return ""
 }
 
 // loginHandler authenticates a username and password and mints a session token owned by the user.
 // Attempts are rate limited per client and username so stolen password lists cannot be replayed
 // at full speed.
 func loginHandler(users user.Store, tokens auth.Store, ldap *LDAPAuth, log *zap.Logger) http.HandlerFunc {
-	limiter := &loginLimiter{windows: make(map[string]*loginWindow)}
+	return loginHandlerWithClock(users, tokens, ldap, log, nil)
+}
+
+// loginHandlerWithClock is loginHandler with the limiters' time source stated. Production passes
+// nil, meaning the real clock. A test passes a frozen one so a burst cannot straddle a window
+// boundary and fail for how fast the machine was rather than for anything about the limiter. The
+// clock is per handler rather than a package variable, because a variable a test writes while a
+// parallel handler reads it is a data race, and the race detector finds it.
+func loginHandlerWithClock(users user.Store, tokens auth.Store, ldap *LDAPAuth, log *zap.Logger,
+	now func() time.Time) http.HandlerFunc {
+	limiter := &loginLimiter{windows: make(map[string]*loginWindow), now: now}
 	// The address budget is kept in its own limiter so its keys cannot collide with the per-username
 	// ones and its larger cap applies to nothing else.
-	addresses := &loginLimiter{windows: make(map[string]*loginWindow)}
+	addresses := &loginLimiter{windows: make(map[string]*loginWindow), now: now}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if users == nil || tokens == nil {
 			respondError(w, log, http.StatusNotFound, "accounts not enabled")
@@ -209,6 +293,11 @@ func loginHandler(users user.Store, tokens auth.Store, ldap *LDAPAuth, log *zap.
 		// wrong at all, and how many times anyone may guess at this account. The address budget is
 		// checked before any hashing happens, which is what makes it a brake on the work rather than
 		// only on the outcome.
+		//
+		// This only refuses the right people because clientAddr resolves the real client behind a
+		// trusted proxy. Keyed on the raw peer address instead, every client behind one proxy shares
+		// a budget, and a stranger's failed guesses lock the whole install out of the approval queue.
+		// An operator running behind a proxy must set --trusted-proxy or that is what they get.
 		if addresses.spent(addr, loginAddressMax) {
 			log.Warn("server: sign-in flood from one address", zap.String("address", addr))
 			respondError(w, log, http.StatusTooManyRequests,
