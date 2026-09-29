@@ -4,7 +4,7 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Pricing | SwitchTender</title>
-	<meta name="description" content="SwitchTender is free to self-host forever: the complete platform, not a trial. SSO, RBAC, approvals, Postgres and HA, agent policy gates, and the provable audit chain, with no seat caps, no license keys, and no phone-home. KordLoom sells services around it: founder-led migration off AWX, approval coordination, and long-term evidence custody.">
+	<meta name="description" content="SwitchTender is free to self-host forever: the complete platform, not a trial. SSO, RBAC, approvals, Postgres and HA, agent policy gates, and the provable audit chain, with no seat caps, no license keys, and no phone-home. KordLoom sells services around it: a $25,000 founder-led migration off AWX, plus approval coordination and long-term evidence custody for design partners.">
 	<link rel="canonical" href="https://switchtender.com/pricing">
 	<meta property="og:title" content="Pricing | SwitchTender">
 	<meta property="og:description" content="The complete controller is free forever. Paid tiers add SCIM, external approvers, control-mapped evidence packs, and direct support from the engineers who built it. Flat per-org pricing.">
@@ -25,7 +25,7 @@
 			"priceCurrency": "USD",
 			"lowPrice": "0",
 			"highPrice": "25000",
-			"offerCount": "4"
+			"offerCount": "2"
 		}
 	}
 	</script>
@@ -80,10 +80,23 @@
 		.pricing-note { max-width: 760px; margin: 44px auto 0; text-align: center; color: var(--muted); font-size: 15px; }
 		.pricing-note strong { color: var(--text); }
 		.sprint {
-			display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap;
-			max-width: 860px; margin: 32px auto 0; padding: 22px 26px; border-radius: var(--radius);
+			max-width: 860px; margin: 32px auto 0; padding: 26px 28px; border-radius: var(--radius);
 			background: var(--surface); border: 1px solid rgba(34, 211, 238, 0.32);
 		}
+		.sprint .sprint-head {
+			display: flex; align-items: baseline; justify-content: space-between; gap: 18px; flex-wrap: wrap;
+		}
+		.sprint .sprint-price { font-family: "Space Grotesk", sans-serif; font-size: 30px; font-weight: 700; }
+		.sprint .sprint-price span { font-size: 14px; font-weight: 500; color: var(--muted); margin-left: 8px; }
+		.sprint h4 {
+			font-size: 12px; letter-spacing: 0.8px; text-transform: uppercase; color: var(--muted);
+			margin: 22px 0 8px;
+		}
+		.sprint ol, .sprint ul { margin: 0; padding-left: 20px; }
+		.sprint li { color: var(--muted); font-size: 14.5px; margin: 7px 0; }
+		.sprint li b { color: var(--text); }
+		.sprint .fineprint { font-size: 13.5px; color: var(--muted); margin-top: 18px; }
+		.sprint .sprint-cta { margin-top: 22px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
 		.sprint > div { flex: 1 1 480px; min-width: 0; }
 		.sprint h3 { font-family: "Space Grotesk", sans-serif; font-size: 17px; margin-bottom: 6px; }
 		.sprint p { color: var(--muted); font-size: 14.5px; }
@@ -176,8 +189,8 @@
 				<article class="card tier">
 					<div class="tier-name">Governance</div>
 					<p class="tier-for">Control who is allowed to authorize a change.</p>
-					<div class="tier-price"><span class="from">From</span><b>$4,000</b><span class="cadence">/ year</span></div>
-					<p class="tier-sub">One flat org price, set once from your fleet size. Never per seat, per node, or per run.</p>
+					<div class="tier-price"><b>Design partners</b></div>
+					<p class="tier-sub">Priced from your scope, in conversation. Flat per organization when it lands. Never per seat, per node, or per run.</p>
 					<div class="tier-payoff">Your binary already enforces the rules. We run the parts that reach <b>outside</b> it: the people who must sign off but should never have access to the automation platform, the images your fleet executes, and a private line to the person who wrote the software.</div>
 					<a class="ghost" href="mailto:hello@kordloom.com?subject=SwitchTender%20Governance">Talk to us</a>
 					<span class="tier-badge">Design partners</span>
@@ -186,15 +199,15 @@
 						<li><b>External approver coordination</b>: an approver signs a specific change from a link, with no seat and no access to your install. Our service sees only the digest and the summary, never your diff, your inventory, or your secrets</li>
 						<li>The same approval, <b>as a signed file</b>, for air-gapped sites. Nothing leaves your network and the signature still binds the exact change</li>
 						<li><b>Managed execution environments</b>: pinned, scanned run images with SBOMs, maintained and rolled forward by us, so what executes is reproducible</li>
-						<li>Private support channel to the engineer who wrote it, with a response time in writing, business hours</li>
+						<li>Private support channel to the engineer who wrote it, with a response time in writing, business hours, and a stated limit on what a year includes rather than an open-ended claim on one person</li>
 					</ul>
 				</article>
 
 				<article class="card tier">
 					<div class="tier-name">Assurance</div>
 					<p class="tier-for">Stay able to prove your controls operated, years later.</p>
-					<div class="tier-price"><span class="from">From</span><b>$12,000</b><span class="cadence">/ year</span></div>
-					<p class="tier-sub">One flat org price, set once from your fleet size. Migration priced separately.</p>
+					<div class="tier-price"><b>Design partners</b></div>
+					<p class="tier-sub">Priced from your scope, in conversation. Migration priced separately.</p>
 					<div class="tier-payoff">Your install already writes the evidence and anyone can verify it offline, free. What you are buying here is <b>a company on the hook</b> for keeping it current, keeping it retrievable, and keeping it verifiable long after the timestamp authority that signed it has gone away.</div>
 					<a class="ghost" href="mailto:hello@kordloom.com?subject=SwitchTender%20Assurance">Talk to us</a>
 					<span class="tier-badge">Design partners</span>
@@ -214,30 +227,86 @@
 				<strong>Free ships today, complete.</strong> Governance and Assurance are services we are
 				building with our first design partners, which is why they say talk to us instead of
 				checkout, and why you are not billed until the thing you signed up for is actually
-				running. The prices start where they say because you should not have to email anyone to
-				learn roughly what something costs. The only thing that moves a price above the starting
-				figure is the size of the fleet we are covering, never seats, runs, or CPU, and the number
-				we agree is fixed for your term. Want the migration done now, on the free tier, without
+				running. Neither carries a
+				number yet, and that is deliberate: nobody has bought one, so any figure printed here would
+				be invented, and an invented figure is worse than an honest blank. We would rather agree a
+				price against your actual scope than anchor you to a guess and then revise it. What we can
+				commit to now is the shape. Flat per organization, never per seat, per node, or per run.
+				The lever is the size of the fleet we cover, and separately operated business units bring
+				their own approvers and their own evidence calendar, so those get scoped rather than ridden
+				free. Whatever we agree is fixed for your term. Want the migration done now, on the free tier, without
 				waiting for either service? That is the
 				<a href="#sprint" style="color: var(--accent);">Migration Program</a> below, and you can
 				start it today.
 			</p>
 
 			<div class="sprint reveal" id="sprint">
-				<div>
-					<h3>SwitchTender Migration Program &mdash; $25,000, four weeks</h3>
-					<p>The one thing you can buy outright today. We move you off AWX, Semaphore, or
-					Rundeck: inventories, projects, job templates, schedules and credentials migrated and
-					verified against the originals, SwitchTender deployed in your environment on your
-					infrastructure, approval policy built from the change process you already run, agent
-					policy for anything proposing changes automatically, evidence mapped to the controls
-					your auditors ask about, runbooks, and a handoff session, because your team owns this
-					when we leave. Fixed scope, fixed price, one invoice. Milestone-based with scheduled
-					working windows, not on-call. A portion credits toward your first year of Assurance if
-					you want us to keep the evidence running afterward. Founder-led, so we take a limited
-					number at a time.</p>
+				<div class="sprint-head">
+					<h3>SwitchTender Migration Program</h3>
+					<div class="sprint-price">$25,000<span>fixed price, four milestones</span></div>
 				</div>
-				<a class="btn" href="mailto:hello@kordloom.com?subject=SwitchTender%20Migration%20Program">Start a migration</a>
+				<p>A founder-led program that moves you off AWX, Semaphore, or Rundeck and into production
+				on SwitchTender, with the change controls you already run and your evidence workflows
+				carried forward. Milestones are scheduled around your access, approvals, credential owners,
+				and production change windows, and a delay in any of those moves the affected milestone.
+				The four milestones are normally completed over about six weeks once the readiness items
+				below are in place.</p>
+
+				<h4>Before milestone one begins</h4>
+				<ul>
+					<li>Access provisioned to the environment, the repositories, and the target hosts.</li>
+					<li>One named technical counterpart who can <b>coordinate access</b> and answer
+					migration questions within a business day.</li>
+					<li>The people who hold your credential values, since exports never contain secrets.</li>
+					<li>A representative set of production workflows <b>chosen and recorded</b> for
+					validation, so we agree up front what "working" means.</li>
+					<li>Someone who can <b>decide</b> approval policy, and someone who can authorize the
+					production cutover. Often two different people.</li>
+				</ul>
+
+				<h4>The four milestones</h4>
+				<ol>
+					<li><b>Discovery and import.</b> We inventory what you have, run the import, and show
+					you item by item what was in the old controller and what landed.</li>
+					<li><b>Environment.</b> SwitchTender deployed on your infrastructure, sized to your
+					fleet, wired to your identity provider, with credentials entered by their owners and
+					exercised against the recorded validation set.</li>
+					<li><b>Governance.</b> Approval policy built from the change process you already run,
+					agent policy for anything proposing changes automatically, and evidence configured
+					against the controls you identify with us during discovery.</li>
+					<li><b>Cutover and handoff.</b> The validation set recorded in milestone one runs
+					green, meaning every workflow in it completes with a zero exit status, which is what
+					finishes this milestone rather than an open-ended parallel period. You authorize the
+					cutover through your own change process, and you get runbooks and a working session,
+					because your team owns this when we leave.</li>
+				</ol>
+
+				<p>At handoff you have the migrated configuration running in your environment, documented
+				identity and governance configuration, the recorded validation set passing, evidence
+				configured against your controls, production runbooks, and a team that has been walked
+				through all of it.</p>
+
+				<p class="fineprint">Flat $25,000 for a standard migration: one source controller, one
+				production environment, standard integrations. Playbook and host counts do not set the
+				price by themselves, because the importer handles bulk. We scope together first when the
+				work changes in nature rather than size, such as multiple independently operated
+				environments, custom execution dependencies or plugins, nonstandard network paths,
+				air-gapped targets, or complex identity and secret-store integration. We will tell you
+				which of those you have during the first conversation, not after you have paid.</p>
+
+				<p class="fineprint">Migration reproduces the agreed behavior of your source controller
+				for the recorded validation set. Anything that also fails in the source environment is
+				outside migration scope, as is new automation, architectural redesign, and rewriting
+				existing content. We flag whatever we find early and quote it separately if you want it
+				fixed. Work runs under a mutual NDA and a fixed-price statement of work with the
+				milestones above. Founder-led and limited to one active migration at a time. A portion
+				credits toward your first year of Assurance if you want us to keep the evidence running
+				afterward.</p>
+
+				<div class="sprint-cta">
+					<a class="btn" href="mailto:hello@kordloom.com?subject=SwitchTender%20Migration%20Program">Start a migration</a>
+				</div>
+			</div>
 			</div>
 		</section>
 
@@ -250,15 +319,15 @@
 			<div class="assurance reveal">
 				<div>
 					<h3>The binary is complete, and free for self-hosted use</h3>
-					<p>Every feature SwitchTender ships is in the binary you download. There is no separate
-					paid build and nothing is unlocked with a license key. What we sell is work we do, never
-					permission to run the software.</p>
+					<p>Every feature SwitchTender ships is in the binary you download, and nothing in it is
+					unlocked with a license key. You never pay us for permission to run the software you
+					already have.</p>
 				</div>
 				<div>
 					<h3>Nothing that is free ever becomes paid</h3>
-					<p>Paid offerings are services we operate or hours we work, never capabilities carved
-					back out of the binary you already run. If we shipped it free, it is yours, including
-					every future release.</p>
+					<p>Whatever we sell later, it is never carved back out of the binary you already run. If
+					we shipped it free, it is yours, in that release and every release after it. We can only
+					ever add, and you can always keep running exactly what you have.</p>
 				</div>
 				<div>
 					<h3>It never needs us to keep running</h3>
@@ -277,7 +346,7 @@
 			<div class="faq reveal">
 				<details>
 					<summary>Is it really free, or free-until-you-need-it?</summary>
-					<p>Really free, and complete. No seat cap, no host cap, no execution cap, no expiry, and that includes SSO, SCIM, RBAC, the whole policy engine, Postgres with HA, and the audit chain. Nothing is unlocked with a license key, because there are no license keys. What we charge for is work we do around the software: migrating you onto it, coordinating approvers outside it, and staying accountable for your evidence. Nothing that is free today ever becomes paid.</p>
+					<p>Really free, and complete. No seat cap, no host cap, no execution cap, no expiry, and that includes SSO, SCIM, RBAC, the whole policy engine, Postgres with HA, and the audit chain. Nothing is unlocked with a license key, because there are no license keys. What we charge for today is work we do around the software: migrating you onto it, coordinating approvers outside it, and staying accountable for your evidence. Whatever we add later, nothing that is free today ever becomes paid.</p>
 				</details>
 				<details>
 					<summary>What is actually built today?</summary>
@@ -343,6 +412,7 @@
 				<a href="/awx-alternative">vs AWX</a>
 				<a href="/aap-alternative">vs AAP</a>
 				<a href="/semaphore-alternative">vs Semaphore</a>
+				<a href="/jenkins-alternative">vs Jenkins</a>
 				<a href="/rundeck-alternative">vs Rundeck</a>
 				<a href="/privacy">Privacy</a>
 				<a href="https://github.com/kordloom/switchtender/blob/main/LICENSE">License</a>

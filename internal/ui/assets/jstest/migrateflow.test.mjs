@@ -97,3 +97,67 @@ test("the read-only demo keeps the client-side sample loader usable while blocki
 		"clicking Load a sample export in the demo did not fill the box",
 	);
 });
+
+test("choosing Jenkins asks which hosts the jobs run against", () => {
+	const { app, document } = loadPage("migrate", { parts: ALL_PARTS, routes: {} });
+	app.wireMigrate();
+
+	const format = document.getElementById("migrate-format");
+	const field = document.getElementById("migrate-inventory-field");
+
+	// AWX exports name their own inventories, so the question does not apply.
+	format.value = "awx";
+	fire(format, "change");
+	assert.equal(field.hidden, true, "AWX was asked for an inventory it already carries");
+
+	// Jenkins picks an agent by label rather than naming hosts, so without an answer every imported
+	// template launches with no target at all.
+	format.value = "jenkins";
+	fire(format, "change");
+	assert.equal(field.hidden, false, "Jenkins was not asked which hosts its jobs run against");
+	assert.match(
+		document.getElementById("migrate-inventory-help").textContent,
+		/agent by label/,
+		"the hint still explains Rundeck's reason rather than Jenkins'",
+	);
+});
+
+test("the Jenkins inventory rides along on the import request", async () => {
+	let seen = "";
+	const routes = {
+		"/v1/import/jenkins": (req) => { seen = req.url; return reply({ templates: ["nightly"] }); },
+	};
+	const { app, document, clock } = loadPage("migrate", { parts: ALL_PARTS, routes });
+	app.wireMigrate();
+
+	document.getElementById("migrate-format").value = "jenkins";
+	document.getElementById("migrate-inventory").value = "prod hosts";
+	document.getElementById("migrate-export").value = "<project/>";
+	fire(document.getElementById("migrate-preview"), "click");
+	await clock.flush();
+
+	// Without this the import silently produces templates that launch against nothing.
+	assert.match(seen, /inventory=prod(%20|\+)hosts/, `the inventory did not reach the server: ${seen}`);
+});
+
+test("typing over a loaded archive sends what was typed", async () => {
+	const bodies = [];
+	const routes = {
+		"/v1/import/jenkins": (req) => { bodies.push(req.body); return reply({ templates: [] }); },
+	};
+	const { app, document, clock } = loadPage("migrate", { parts: ALL_PARTS, routes });
+	app.wireMigrate();
+
+	document.getElementById("migrate-format").value = "jenkins";
+	const box = document.getElementById("migrate-export");
+
+	// An archive is held aside as bytes because it cannot round trip through a textarea. If the
+	// operator then pastes a job in, the paste is what they meant, not the file they forgot about.
+	box.value = "<project/>";
+	fire(box, "input");
+	fire(document.getElementById("migrate-preview"), "click");
+	await clock.flush();
+
+	assert.equal(bodies.length, 1);
+	assert.equal(bodies[0], "<project/>", "the pasted export was not what got sent");
+});

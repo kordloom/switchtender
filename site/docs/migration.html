@@ -3,17 +3,17 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Migrate off AWX, Semaphore, or Rundeck | SwitchTender docs</title>
-	<meta name="description" content="SwitchTender imports an AWX, Semaphore, or Rundeck export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.">
+	<title>Migrate off AWX, Semaphore, Rundeck, or Jenkins | SwitchTender docs</title>
+	<meta name="description" content="SwitchTender imports an AWX, Semaphore, Rundeck, or Jenkins export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.">
 	<link rel="canonical" href="https://switchtender.com/docs/migration">
-	<meta property="og:title" content="Migrate off AWX, Semaphore, or Rundeck | SwitchTender docs">
-	<meta property="og:description" content="SwitchTender imports an AWX, Semaphore, or Rundeck export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.">
+	<meta property="og:title" content="Migrate off AWX, Semaphore, Rundeck, or Jenkins | SwitchTender docs">
+	<meta property="og:description" content="SwitchTender imports an AWX, Semaphore, Rundeck, or Jenkins export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/migration">
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
 	<meta name="twitter:card" content="summary_large_image">
-	<meta name="twitter:title" content="Migrate off AWX, Semaphore, or Rundeck | SwitchTender docs">
-	<meta name="twitter:description" content="SwitchTender imports an AWX, Semaphore, or Rundeck export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.">
+	<meta name="twitter:title" content="Migrate off AWX, Semaphore, Rundeck, or Jenkins | SwitchTender docs">
+	<meta name="twitter:description" content="SwitchTender imports an AWX, Semaphore, Rundeck, or Jenkins export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.">
 	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
 	<link rel="icon" href="/favicon.ico" sizes="any">
 	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
@@ -36,13 +36,13 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration" class="active">Migrate off AWX, Semaphore, or Rundeck</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/continuity">Continuity</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration" class="active">Migrate off AWX, Semaphore, Rundeck, or Jenkins</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/continuity">Continuity</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
-			<h1 id="migrate-off-awx-semaphore-or-rundeck">Migrate off AWX, Semaphore, or Rundeck</h1>
-<p>SwitchTender imports an AWX, Semaphore, or Rundeck export, or a plain crontab, and creates the
-equivalent objects, so moving over is one command rather than a rebuild.</p>
+			<h1 id="migrate-off-awx-semaphore-rundeck-or-jenkins">Migrate off AWX, Semaphore, Rundeck, or Jenkins</h1>
+<p>SwitchTender imports an AWX, Semaphore, Rundeck, or Jenkins export, or a plain crontab, and creates
+the equivalent objects, so moving over is one command rather than a rebuild.</p>
 <h2 id="get-an-export">Get an export</h2>
 <ul>
 <li>AWX: <code>awx export</code> produces a JSON document of organizations, projects, inventories, job
@@ -82,6 +82,42 @@ copied; a Quartz-only form such as the third Friday of the month has no cron equ
 reported instead of converted to a day it would fire wrongly on. And a secure option is never
 imported as a survey field, because a survey answer is stored in plain text on the run; the report
 names each one so you can store it as a credential instead.</p>
+<h2 id="import-jenkins-jobs">Import Jenkins jobs</h2>
+<p>Jenkins keeps each job's definition in a <code>config.xml</code> under <code>JENKINS_HOME/jobs</code>, so there is no
+single export file to fetch. Point the importer at the directory and it reads the tree.</p>
+<pre><code>switchtender import jenkins /var/jenkins_home --inventory prod --db switchtender.db
+</code></pre>
+<p>A <code>JENKINS_HOME</code>, its <code>jobs</code> directory, one job's <code>config.xml</code>, or a zip of any of those all work.
+Folders are followed and each job keeps its full name, so a job in the <code>platform</code> folder imports as
+<code>platform/db-vacuum</code>. To import from the web page instead, zip the <code>jobs</code> directory and upload it;
+zip that directory rather than the whole <code>JENKINS_HOME</code>, which also holds every build log and
+workspace.</p>
+<p>Each job's shell steps become one Bash template, in order, opening with <code>set -e</code> so it stops at the
+first failure the way the build did. Parameters become a survey. Every line of the build trigger
+becomes a schedule.</p>
+<p><strong>Only freestyle jobs are imported.</strong> A Pipeline job is a Groovy program, and there is no honest
+mechanical translation from one into a template, so Pipeline, multibranch, matrix, and Maven jobs are
+each named in the report and skipped rather than half-imported into something that would not do what
+the job did. Rebuild those as pipelines here, or leave them in Jenkins.</p>
+<p>Four things behave differently enough to know about before you run it.</p>
+<p><strong>Jenkins <code>H</code> notation is resolved to real times.</strong> Jenkins writes <code>H</code> where a number would go and
+hashes the job name to spread load, so <code>H 2 * * *</code> means &quot;some minute past two, the same one every
+time.&quot; A cron parser rejects the letter outright, so these are not approximated, they are resolved:
+the job keeps its cadence and its window, and the report names the expression it became. The minute
+inside that window may differ from the one Jenkins chose, because the hash is not Jenkins' own.</p>
+<p><strong>A poll trigger is not imported as a schedule.</strong> <code>Poll SCM</code> asks the repository whether anything
+changed and builds only if it did, so a job polling every five minutes usually does nothing.
+Imported as a plain schedule it would instead run for real every five minutes. It is reported and
+skipped; trigger those from a webhook instead.</p>
+<p><strong>Jenkins build variables are not set here.</strong> A step reading <code>$WORKSPACE</code>, <code>$BUILD_NUMBER</code>, or
+<code>$JOB_NAME</code> gets an empty string, so the report names every one it found. Supply them as survey
+fields or extra vars, or rewrite the step.</p>
+<p><strong>Secrets are never imported.</strong> A password parameter is stored encrypted by Jenkins, and a survey
+answer is stored in plain text on the run, so importing one would quietly downgrade it. The same
+goes for a job's remote trigger token. Both are named in the report and left out.</p>
+<p>Two smaller ones: a Windows batch step is skipped, since the rest of the job imports as Bash, and a
+job whose source control checkout mattered has its repository named rather than attached, because
+attaching a project changes the directory every relative path in the script resolves against.</p>
 <h2 id="import-a-crontab">Import a crontab</h2>
 <p>Fleets that still schedule work from a crontab can bring it under governance in one step. Point the
 importer at a crontab file and it turns each cron line into a governed schedule, so every firing is
@@ -176,6 +212,38 @@ the schedules first, then re-run with <code>--apply</code> to create them.</p>
 <tr>
 <td>Rundeck dispatch thread count</td>
 <td>Recorded on the template, and reported. It paces Ansible runs; a Bash template, which is what a Rundeck job imports as, does not read it.</td>
+</tr>
+<tr>
+<td>Jenkins freestyle job</td>
+<td>Template running the job's shell steps as one Bash script, in order.</td>
+</tr>
+<tr>
+<td>Jenkins folder</td>
+<td>Nothing of its own. Its jobs keep the folder in their names, so <code>platform/db-vacuum</code> stays that.</td>
+</tr>
+<tr>
+<td>Jenkins Pipeline job</td>
+<td>Refused and named. Groovy has no mechanical translation into a template.</td>
+</tr>
+<tr>
+<td>Jenkins parameter</td>
+<td>Survey field. A choice becomes a choice and a boolean a toggle; a password parameter is refused, not downgraded.</td>
+</tr>
+<tr>
+<td>Jenkins build trigger</td>
+<td>One schedule per line, with <code>H</code> resolved to concrete times, the <code>@daily</code> family expanded, and Sunday renumbered from 7 to 0.</td>
+</tr>
+<tr>
+<td>Jenkins poll trigger</td>
+<td>Refused and named. It builds only on a change, so importing it as a schedule would run the job unconditionally.</td>
+</tr>
+<tr>
+<td>Jenkins build timeout</td>
+<td>Template timeout, converted from minutes to seconds.</td>
+</tr>
+<tr>
+<td>Jenkins agent label</td>
+<td>Reported, not imported. SwitchTender targets an inventory, so check the one you attached covers the same machines.</td>
 </tr>
 </tbody>
 </table>

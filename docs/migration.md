@@ -5,10 +5,10 @@
   </picture>
 </p>
 
-# Migrate off AWX, Semaphore, or Rundeck
+# Migrate off AWX, Semaphore, Rundeck, or Jenkins
 
-SwitchTender imports an AWX, Semaphore, or Rundeck export, or a plain crontab, and creates the
-equivalent objects, so moving over is one command rather than a rebuild.
+SwitchTender imports an AWX, Semaphore, Rundeck, or Jenkins export, or a plain crontab, and creates
+the equivalent objects, so moving over is one command rather than a rebuild.
 
 ## Get an export
 
@@ -58,6 +58,53 @@ reported instead of converted to a day it would fire wrongly on. And a secure op
 imported as a survey field, because a survey answer is stored in plain text on the run; the report
 names each one so you can store it as a credential instead.
 
+## Import Jenkins jobs
+
+Jenkins keeps each job's definition in a `config.xml` under `JENKINS_HOME/jobs`, so there is no
+single export file to fetch. Point the importer at the directory and it reads the tree.
+
+    switchtender import jenkins /var/jenkins_home --inventory prod --db switchtender.db
+
+A `JENKINS_HOME`, its `jobs` directory, one job's `config.xml`, or a zip of any of those all work.
+Folders are followed and each job keeps its full name, so a job in the `platform` folder imports as
+`platform/db-vacuum`. To import from the web page instead, zip the `jobs` directory and upload it;
+zip that directory rather than the whole `JENKINS_HOME`, which also holds every build log and
+workspace.
+
+Each job's shell steps become one Bash template, in order, opening with `set -e` so it stops at the
+first failure the way the build did. Parameters become a survey. Every line of the build trigger
+becomes a schedule.
+
+**Only freestyle jobs are imported.** A Pipeline job is a Groovy program, and there is no honest
+mechanical translation from one into a template, so Pipeline, multibranch, matrix, and Maven jobs are
+each named in the report and skipped rather than half-imported into something that would not do what
+the job did. Rebuild those as pipelines here, or leave them in Jenkins.
+
+Four things behave differently enough to know about before you run it.
+
+**Jenkins `H` notation is resolved to real times.** Jenkins writes `H` where a number would go and
+hashes the job name to spread load, so `H 2 * * *` means "some minute past two, the same one every
+time." A cron parser rejects the letter outright, so these are not approximated, they are resolved:
+the job keeps its cadence and its window, and the report names the expression it became. The minute
+inside that window may differ from the one Jenkins chose, because the hash is not Jenkins' own.
+
+**A poll trigger is not imported as a schedule.** `Poll SCM` asks the repository whether anything
+changed and builds only if it did, so a job polling every five minutes usually does nothing.
+Imported as a plain schedule it would instead run for real every five minutes. It is reported and
+skipped; trigger those from a webhook instead.
+
+**Jenkins build variables are not set here.** A step reading `$WORKSPACE`, `$BUILD_NUMBER`, or
+`$JOB_NAME` gets an empty string, so the report names every one it found. Supply them as survey
+fields or extra vars, or rewrite the step.
+
+**Secrets are never imported.** A password parameter is stored encrypted by Jenkins, and a survey
+answer is stored in plain text on the run, so importing one would quietly downgrade it. The same
+goes for a job's remote trigger token. Both are named in the report and left out.
+
+Two smaller ones: a Windows batch step is skipped, since the rest of the job imports as Bash, and a
+job whose source control checkout mattered has its repository named rather than attached, because
+attaching a project changes the directory every relative path in the script resolves against.
+
 ## Import a crontab
 
 Fleets that still schedule work from a crontab can bring it under governance in one step. Point the
@@ -97,6 +144,14 @@ the schedules first, then re-run with `--apply` to create them.
 | Rundeck option | Survey field. An enforced value list becomes a choice; a secure option is refused, not downgraded.|
 | Rundeck schedule | Schedule, with the Quartz expression converted and its weekday renumbered.|
 | Rundeck dispatch thread count | Recorded on the template, and reported. It paces Ansible runs; a Bash template, which is what a Rundeck job imports as, does not read it.|
+| Jenkins freestyle job | Template running the job's shell steps as one Bash script, in order.|
+| Jenkins folder | Nothing of its own. Its jobs keep the folder in their names, so `platform/db-vacuum` stays that.|
+| Jenkins Pipeline job | Refused and named. Groovy has no mechanical translation into a template.|
+| Jenkins parameter | Survey field. A choice becomes a choice and a boolean a toggle; a password parameter is refused, not downgraded.|
+| Jenkins build trigger | One schedule per line, with `H` resolved to concrete times, the `@daily` family expanded, and Sunday renumbered from 7 to 0.|
+| Jenkins poll trigger | Refused and named. It builds only on a change, so importing it as a schedule would run the job unconditionally.|
+| Jenkins build timeout | Template timeout, converted from minutes to seconds.|
+| Jenkins agent label | Reported, not imported. SwitchTender targets an inventory, so check the one you attached covers the same machines.|
 
 ## Re-enter secrets
 

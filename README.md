@@ -64,7 +64,7 @@ instead of scrollback.
 | Big&nbsp;jobs                        | Sharded across hosts, balanced by their measured duration, only failed shards retried. | Sliced round-robin, with no balancing.     | No splitting at all.     |
 | Memory&nbsp;across&nbsp;runs         | Flaky hosts flagged, durations trended, every host's history kept.               | Forgotten the moment a run ends.                | Forgotten the moment a run ends. |
 | Pipelines                            | A dependency graph with a drag-and-drop editor, passing typed outputs from one step to the next. | A visual workflow builder.       | Basic chaining.          |
-| Leaving&nbsp;your&nbsp;old&nbsp;tool | One command imports your AWX or Semaphore projects, inventories, templates, surveys, and schedules. | Not applicable.                     | Not applicable.          |
+| Leaving&nbsp;your&nbsp;old&nbsp;tool | One command imports your AWX, Semaphore, Rundeck, or Jenkins projects, inventories, templates, surveys, and schedules. | Not applicable.                     | Not applicable.          |
 
 The full head-to-head, including where SwitchTender is behind, is in the
 [comparison](docs/comparison.md).
@@ -223,20 +223,24 @@ Open http://localhost:8080 and submit a run:
 
 Add `"shards": 4` to split it across four slices of the inventory.
 
-Migrating from AWX or Semaphore is one command. Point it at an export to see what it would create,
-then apply:
+Migrating is one command. Point it at an export to see what it would create, then apply:
 
-    ./switchtender import awx awx-export.json           # dry-run report
-    ./switchtender import awx awx-export.json --apply    # create the objects
+    ./switchtender import awx awx-export.json            # dry-run report
+    ./switchtender import awx awx-export.json --apply     # create the objects
+
+The same for `import semaphore`, `import rundeck`, `import cron`, and `import jenkins`, which reads a
+Jenkins jobs directory or a zip of one and turns freestyle jobs into templates.
 
 Credentials come across as shells. Re-enter their secrets, since exports omit them by design. The
-[switching-from-AWX guide](docs/switching-from-awx.md) walks the whole move.
+[switching-from-AWX guide](docs/switching-from-awx.md) walks the whole move, and the
+[migration guide](docs/migration.md) covers every source.
 
 Coming from [AWX](https://switchtender.com/awx-alternative),
 [Ansible Automation Platform](https://switchtender.com/aap-alternative),
-[Semaphore](https://switchtender.com/semaphore-alternative), or
-[Ascender](https://switchtender.com/ascender-alternative). Rundeck has no importer yet, so that move
-is by hand today.
+[Semaphore](https://switchtender.com/semaphore-alternative),
+[Ascender](https://switchtender.com/ascender-alternative),
+[Rundeck](https://switchtender.com/rundeck-alternative), or
+[Jenkins](https://switchtender.com/jenkins-alternative).
 
 To see it without any setup, run the seeded read-only demo. It fills a fresh database with sample
 projects, templates, and real runs, then serves it with every change blocked:
@@ -258,7 +262,7 @@ The docs live in [docs/](docs/) and also render inside the app at `/ui/docs`.
 | [AI agents](docs/agents.md) | Put an AI agent behind the approval gate and prove what it did |
 | [Extend in Go](docs/sdk.md) | The SDK: add tools, AI providers, secret engines, and notifiers |
 | [HTTP API](docs/api.md) | Every endpoint the server exposes |
-| [Migration](docs/migration.md) | Moving off AWX or Semaphore in detail |
+| [Migration](docs/migration.md) | Moving off AWX, Semaphore, Rundeck, or Jenkins in detail |
 | [Comparison](docs/comparison.md) | How SwitchTender compares to AWX and Semaphore |
 
 Deploy with the `docker-compose.yml` at the root, which brings up a server, a database, and a

@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Move operational jobs off Jenkins | SwitchTender</title>
+	<meta name="description" content="Keep Jenkins for builds. Move the scheduled shell jobs off it. SwitchTender imports Jenkins freestyle jobs in one command, resolves H notation into real schedules, and puts every run behind an approval policy and a tamper-evident audit trail.">
+	<link rel="canonical" href="https://switchtender.com/jenkins-alternative">
+	<meta property="og:title" content="Move operational jobs off Jenkins | SwitchTender">
+	<meta property="og:description" content="A backup script on a timer is not a build. One command imports Jenkins freestyle jobs into governed, audited schedules, and Jenkins keeps the CI.">
+	<meta property="og:type" content="website">
+	<meta property="og:url" content="https://switchtender.com/jenkins-alternative">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta name="twitter:card" content="summary_large_image">
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/styles.css?v=34">
+</head>
+<body>
+	<div class="bg-mesh" aria-hidden="true"></div>
+	<div class="bg-grid" aria-hidden="true"></div>
+
+	<header class="nav" id="nav">
+		<div class="wrap nav-inner">
+			<a class="brand" href="/" aria-label="SwitchTender"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+			<nav class="nav-links">
+				<a href="/#features">Features</a>
+				<a href="/#compare">Compare</a>
+				<a href="/pricing">Pricing</a>
+				<a href="/agents">Agents</a>
+				<a href="/docs/">Docs</a>
+			</nav>
+			<div class="nav-cta">
+				<a class="ghost" href="https://github.com/kordloom/switchtender">GitHub</a>
+				<a class="btn" href="/get-started">Get started</a>
+			</div>
+			<button class="nav-toggle" id="nav-toggle" aria-label="Menu">
+				<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="7" x2="21" y2="7"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="17" x2="21" y2="17"/></svg>
+			</button>
+		</div>
+	</header>
+
+	<main>
+		<section class="wrap gs-hero reveal">
+			<span class="eyebrow">Jenkins, for the jobs that are not builds</span>
+			<h1>Keep Jenkins for builds.<br><span class="grad">Move the 3 a.m. jobs.</span></h1>
+			<p class="lede">This is not a pitch to rip out Jenkins. Jenkins is a build system and it is good at that. But most long-lived Jenkins installs have grown a second population of jobs that were never builds: a freestyle job holding a shell script on a timer. Database backups. Certificate rotation. Log pruning. The monthly report. They ended up in Jenkins because Jenkins was already there and already had cron. SwitchTender takes that half, with one command, and gives it the approvals, host history, and provable audit trail an operational change needs. Your pipelines stay where they are.</p>
+			<div class="hero-cta">
+				<a class="btn big" href="/get-started">Get started</a>
+				<a class="ghost big" href="/docs/migration">How the import works</a>
+			</div>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>Why a backup script on a timer is a bad fit for a CI server</h2>
+				<p>Not because Jenkins is bad. Because a build and a production change are different things, and only one of them is safe to re-run.</p>
+			</div>
+			<div class="cards cards-3">
+				<article class="card reveal">
+					<h3>Nobody approved it and nothing recorded it</h3>
+					<p>A build is meant to run on every commit without asking. A script that touches production is not. In Jenkins, a freestyle job runs when its timer fires, and what you keep afterward is console output on a retention policy. SwitchTender holds a run for approval where a policy covers it, records who launched it and what they changed, and writes the result into a hash-chained audit trail you can hand to an auditor and they can verify without trusting you or the server.</p>
+				</article>
+				<article class="card reveal">
+					<h3>A shell script inherits the whole plugin tree</h3>
+					<p>The job that runs <code>backup.sh</code> lives inside a JVM with a plugin set that has to be kept current for the builds around it. Every upgrade is a change to the thing your backup runs on. SwitchTender is one static Go binary and one SQLite file, so the schedule that matters at 3 a.m. is not downstream of a plugin bump made for a pipeline.</p>
+				</article>
+				<article class="card reveal">
+					<h3>No memory of the machines</h3>
+					<p>Jenkins remembers builds. Operational work needs the other axis: which host has failed the last four times, what changed on it, when it last came clean. SwitchTender keeps per-host history across every run, spots flaky hosts, and detects drift from a dry run, because the question is not "did the job pass" but "is that machine right."</p>
+				</article>
+			</div>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>One command reads your jobs directory</h2>
+				<p>Jenkins has no single export file. Point the importer at the tree, or upload a zip of it, and it reads every job in place. Nothing is created until you ask.</p>
+			</div>
+			<div class="code reveal"><button class="copy" aria-label="Copy">Copy</button><pre><code>switchtender import jenkins /var/jenkins_home --inventory prod</code></pre></div>
+			<p class="gs-note reveal">Folders are followed and each job keeps its full name. Shell steps become one Bash template in order. Parameters become a survey. Build triggers become schedules. Leave off <code>--apply</code> and it only reports what it would create.</p>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>The four things the importer refuses to guess</h2>
+				<p>An importer that half-translates a job is worse than one that says it cannot. Each of these is named in the report and left out.</p>
+			</div>
+			<div class="cards cards-2">
+				<article class="card reveal">
+					<h3>Pipeline jobs</h3>
+					<p>A Jenkinsfile is a Groovy program. There is no honest mechanical translation from one into a template, so Pipeline, multibranch, matrix, and Maven jobs are skipped by name rather than imported as a shell that would not do what the job did. Those are usually your actual builds, and they should stay in Jenkins.</p>
+				</article>
+				<article class="card reveal">
+					<h3>Poll SCM triggers</h3>
+					<p>A poll trigger looks like a schedule and is not one: it asks the repository whether anything changed and builds only if it did, so a job polling every five minutes usually does nothing. Imported as a plain schedule it would run for real every five minutes. For a deploy job that is an incident, not a migration artifact.</p>
+				</article>
+				<article class="card reveal">
+					<h3>Password parameters and trigger tokens</h3>
+					<p>Jenkins stores a password parameter encrypted. A survey answer here is stored in plain text on the run, so importing one would quietly downgrade a secret. It is refused and named, and so is a job's remote build token, which is a shared secret that would hand a launch to anybody holding it.</p>
+				</article>
+				<article class="card reveal">
+					<h3>Jenkins build variables</h3>
+					<p>A step reading <code>$WORKSPACE</code> or <code>$BUILD_NUMBER</code> gets an empty string here, and <code>rm -rf $WORKSPACE/</code> with <code>WORKSPACE</code> unset is the worst version of that. Every occurrence is found and reported so you supply it or rewrite the step, rather than discovering it at 3 a.m.</p>
+				</article>
+			</div>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>Your H schedules survive the trip</h2>
+				<p>Jenkins writes <code>H</code> where a number would go and hashes the job name to spread load, so <code>H 2 * * *</code> means "some minute past two, the same one every time." No cron parser accepts the letter, so a naive import drops every one of those jobs as invalid, and the job silently never runs again. Here they are resolved rather than approximated: the cadence and the window are kept, <code>@daily</code> and its family are expanded the way Jenkins expands them, a spec holding several lines becomes several schedules, and Sunday written as 7 is renumbered to 0 instead of being rejected. The report names the expression each one became.</p>
+			</div>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>Where each tool wins</h2>
+				<p>Rows where Jenkins is the right answer are in this table too. It is a build server, and this is not one.</p>
+			</div>
+			<div class="table-wrap reveal">
+				<table class="compare">
+					<thead>
+						<tr><th>Capability</th><th class="us">SwitchTender</th><th>Jenkins</th></tr>
+					</thead>
+					<tbody>
+						<tr><td>Build on commit, per-branch pipelines</td><td class="us"><span class="muted">Not its job</span></td><td><i class="y"></i></td></tr>
+						<tr><td>Test reports and build artifacts</td><td class="us"><span class="muted">Not its job</span></td><td><i class="y"></i></td></tr>
+						<tr><td>Plugin ecosystem</td><td class="us"><span class="muted">Deliberately small</span></td><td>Very large</td></tr>
+						<tr><td>Runs without a JVM</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>One binary, no plugins to run a job</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Approval gates enforced by policy</td><td class="us"><i class="y"></i></td><td><span class="muted">Plugin</span></td></tr>
+						<tr><td>Tamper-evident, signed audit trail</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Verifiable offline by a third party</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Per-host fleet memory and flaky-host detection</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Ansible, Terraform, and OpenTofu as first-class tools</td><td class="us"><i class="y"></i></td><td><span class="muted">Via plugins</span></td></tr>
+						<tr><td>Drift detection from a dry run</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Imports the other tool's jobs</td><td class="us">AWX, Semaphore, Rundeck, Jenkins, crontab</td><td><i class="n"></i></td></tr>
+					</tbody>
+				</table>
+			</div>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>Honesty first</h2>
+				<p>Jenkins has two decades of production history, an ecosystem no new tool will match, and an enormous amount of institutional knowledge inside your company. If your freestyle jobs are working and nobody is asking who approved them, there is no reason to move them. This is worth your time when somebody starts asking that question: an audit, a compliance program, a change-control review, or a 3 a.m. job that did something nobody can now reconstruct. Move that subset, keep the pipelines, and run both. Nothing here asks you to choose.</p>
+			</div>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>See what it would import, in five minutes</h2>
+				<p>The dry run creates nothing. It reads your jobs and prints exactly what it would make and what it refused.</p>
+			</div>
+			<div class="gs-steps">
+				<ol>
+					<li class="gs-step reveal">
+						<div class="gs-num">1</div>
+						<div class="gs-body">
+							<h3>Install it</h3>
+							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>brew install kordloom/tap/switchtender</code></pre></div>
+						</div>
+					</li>
+					<li class="gs-step reveal">
+						<div class="gs-num">2</div>
+						<div class="gs-body">
+							<h3>See what it would import</h3>
+							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>switchtender import jenkins /var/jenkins_home --inventory prod</code></pre></div>
+						</div>
+					</li>
+					<li class="gs-step reveal">
+						<div class="gs-num">3</div>
+						<div class="gs-body">
+							<h3>Create the objects</h3>
+							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>switchtender import jenkins /var/jenkins_home --inventory prod --apply</code></pre></div>
+						</div>
+					</li>
+				</ol>
+			</div>
+			<p class="gs-note reveal">The <a href="/docs/migration">migration guide</a> covers every mapping and every refusal, and the <a href="/get-started">get started guide</a> has prebuilt binaries for Linux, macOS, and Windows with published checksums.</p>
+		</section>
+
+		<section class="cta wrap reveal">
+			<h2>Let Jenkins build. Let this one answer for production.</h2>
+			<div class="hero-cta">
+				<a class="btn big" href="/get-started">Get started</a>
+				<a class="ghost big" href="https://github.com/kordloom/switchtender">View on GitHub</a>
+			</div>
+		</section>
+	</main>
+
+	<footer class="footer">
+		<div class="wrap footer-inner">
+			<img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="foot-logo">
+			<nav>
+				<a href="https://github.com/kordloom/switchtender">GitHub</a>
+				<a href="/docs/">Docs</a>
+				<a href="/pricing">Pricing</a>
+				<a href="/agents">Agents</a>
+				<a href="/docs/comparison">Compare</a>
+				<a href="/awx-alternative">vs AWX</a>
+				<a href="/ascender-alternative">vs Ascender</a>
+				<a href="/aap-alternative">vs AAP</a>
+				<a href="/semaphore-alternative">vs Semaphore</a>
+				<a href="/jenkins-alternative">vs Jenkins</a>
+				<a href="/rundeck-alternative">vs Rundeck</a>
+				<a href="/privacy">Privacy</a>
+				<a href="https://github.com/kordloom/switchtender/blob/main/LICENSE">License</a>
+			</nav>
+			<span class="foot-note">Source-available. BSL 1.1. Self-host free.</span>
+		</div>
+			<div class="foot-legal">SwitchTender&trade; is a trademark of KordLoom LLC. Copyright 2026 KordLoom LLC.</div>
+	</footer>
+	<script src="/app.js?v=7"></script>
+</body>
+</html>
