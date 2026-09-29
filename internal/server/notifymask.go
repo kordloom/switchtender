@@ -34,6 +34,12 @@ func maskedNotifications(targets []run.NotifyTarget) []run.NotifyTarget {
 	out := make([]run.NotifyTarget, len(targets))
 	for i, t := range targets {
 		t.URL = maskNotifyURL(t.URL)
+		// The per-service key is a bearer secret too: a PagerDuty routing key pages the service and
+		// a Grafana token writes annotations. It is redacted on read the same as a URL. The
+		// recipient a twilio or email target names is not a secret and is left readable.
+		if t.Key != "" {
+			t.Key = maskMarker
+		}
 		out[i] = t
 	}
 	return out
@@ -70,20 +76,32 @@ func restoreMaskedNotifications(incoming, stored []run.NotifyTarget) []run.Notif
 	out := make([]run.NotifyTarget, len(incoming))
 	copy(out, incoming)
 	for i := range out {
-		if !strings.Contains(out[i].URL, maskMarker) {
-			continue
-		}
+		// A field arriving as the mask marker is a redacted value coming back unchanged from an
+		// editor, so it is restored from the stored target beside it rather than saved as the
+		// ellipsis. This applies to the URL and to the per-service key, the two masked fields.
 		if i < len(stored) && stored[i].Kind == out[i].Kind {
-			out[i].URL = stored[i].URL
+			if strings.Contains(out[i].URL, maskMarker) {
+				out[i].URL = stored[i].URL
+			}
+			if strings.Contains(out[i].Key, maskMarker) {
+				out[i].Key = stored[i].Key
+			}
 			continue
 		}
-		// A masked URL with no stored counterpart is meaningless, so drop the row rather than
-		// storing an unusable address.
-		out[i].URL = ""
+		// A masked value with no stored counterpart is meaningless: clear it so the row is judged
+		// on what it actually carries.
+		if strings.Contains(out[i].URL, maskMarker) {
+			out[i].URL = ""
+		}
+		if strings.Contains(out[i].Key, maskMarker) {
+			out[i].Key = ""
+		}
 	}
+	// A row that is not deliverable is dropped rather than stored as one that will silently reach no
+	// one. This is what previously dropped a row with an emptied URL, generalized to every kind.
 	kept := out[:0]
 	for _, t := range out {
-		if t.URL != "" {
+		if run.ValidateNotifyTarget(t) == nil {
 			kept = append(kept, t)
 		}
 	}

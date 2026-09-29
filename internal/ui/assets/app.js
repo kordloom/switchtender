@@ -4508,7 +4508,22 @@ function syncTemplateTool() {
 // openTemplateEdit fills the template dialog with an existing record and switches it to edit mode.
 // The dialog does not expose inventory_id, so it is carried through the form dataset to avoid
 // dropping a stored inventory reference on save.
-// notifyRow appends one notification target row to the template dialog.
+// NOTIFY_KINDS lists every selectable per-template channel. The first seven take a URL; the rest
+// carry a routing key, a Grafana url and token, or a recipient, and the row shows the right field.
+const NOTIFY_KINDS = [
+	"webhook", "slack", "mattermost", "rocketchat", "discord", "teams", "ntfy",
+	"pagerduty", "grafana", "twilio", "email",
+];
+
+// notifyNeedsURL reports whether a channel kind is addressed by a URL.
+function notifyNeedsURL(kind) {
+	return ["webhook", "slack", "mattermost", "rocketchat", "discord", "teams", "ntfy", "grafana"]
+		.includes(kind);
+}
+
+// notifyRow appends one notification target row to the template dialog. The fields it shows follow
+// the channel kind, mirroring the server's own validation: a URL channel shows a URL, pagerduty a
+// routing key, grafana a URL and a token, and twilio or email a recipient.
 function notifyRow(target) {
 	const rows = document.getElementById("tpl-notify-rows");
 	if (!rows) return;
@@ -4516,17 +4531,45 @@ function notifyRow(target) {
 	row.className = "notify-row";
 	const kind = document.createElement("select");
 	kind.className = "input";
-	for (const k of ["webhook", "slack", "mattermost", "rocketchat", "discord", "teams", "ntfy"]) {
+	for (const k of NOTIFY_KINDS) {
 		const opt = document.createElement("option");
 		opt.value = k;
 		opt.textContent = k;
 		kind.appendChild(opt);
 	}
 	kind.value = (target && target.kind) || "slack";
+
+	const fields = document.createElement("div");
+	fields.className = "notify-fields";
 	const url = document.createElement("input");
-	url.className = "input mono";
-	url.placeholder = "https://hooks.example/...";
+	url.className = "input mono notify-url";
 	url.value = (target && target.url) || "";
+	const key = document.createElement("input");
+	key.className = "input mono notify-key";
+	key.value = (target && target.key) || "";
+	const to = document.createElement("input");
+	to.className = "input mono notify-to";
+	to.value = (target && target.to) || "";
+	fields.appendChild(url);
+	fields.appendChild(key);
+	fields.appendChild(to);
+
+	// applyKind shows only the inputs the selected channel needs and labels them, so a row cannot be
+	// built that the API will reject for a missing field.
+	const applyKind = () => {
+		const k = kind.value;
+		const needsKey = k === "pagerduty" || k === "grafana";
+		const needsTo = k === "twilio" || k === "email";
+		url.style.display = notifyNeedsURL(k) ? "" : "none";
+		key.style.display = needsKey ? "" : "none";
+		to.style.display = needsTo ? "" : "none";
+		url.placeholder = k === "grafana" ? "https://grafana.example/" : "https://hooks.example/...";
+		key.placeholder = k === "pagerduty" ? "routing key" : "api token";
+		to.placeholder = k === "twilio" ? "+15550100" : "ops@example.com";
+	};
+	kind.addEventListener("change", applyKind);
+	applyKind();
+
 	const fail = document.createElement("label");
 	fail.className = "check-label notify-fail";
 	const cb = document.createElement("input");
@@ -4541,19 +4584,36 @@ function notifyRow(target) {
 	del.textContent = "\u00d7";
 	del.addEventListener("click", () => row.remove());
 	row.appendChild(kind);
-	row.appendChild(url);
+	row.appendChild(fields);
 	row.appendChild(fail);
 	row.appendChild(del);
 	rows.appendChild(row);
 }
 
-// collectNotifyTargets reads the dialog's notification rows, skipping rows without a URL.
+// collectNotifyTargets reads the dialog's notification rows into API targets, keeping only the field
+// each channel uses and skipping a row the operator left blank.
 function collectNotifyTargets() {
 	const out = [];
 	for (const row of document.querySelectorAll("#tpl-notify-rows .notify-row")) {
-		const url = row.querySelector("input.mono").value.trim();
-		if (!url) continue;
-		const target = { kind: row.querySelector("select").value, url };
+		const kind = row.querySelector("select").value;
+		const url = row.querySelector(".notify-url").value.trim();
+		const key = row.querySelector(".notify-key").value.trim();
+		const to = row.querySelector(".notify-to").value.trim();
+		const target = { kind };
+		if (kind === "pagerduty") {
+			if (!key) continue;
+			target.key = key;
+		} else if (kind === "grafana") {
+			if (!url || !key) continue;
+			target.url = url;
+			target.key = key;
+		} else if (kind === "twilio" || kind === "email") {
+			if (!to) continue;
+			target.to = to;
+		} else {
+			if (!url) continue;
+			target.url = url;
+		}
 		if (row.querySelector("input[type=checkbox]").checked) target.on_failure = true;
 		out.push(target);
 	}

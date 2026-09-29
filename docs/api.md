@@ -163,6 +163,43 @@ Zero, or the field omitted, leaves launches on the server default set by `--run-
 template saved before this field existed is unchanged. A run that exceeds its timeout is canceled
 and finalized as failed. A launch cannot raise the cap; the template's value is what applies.
 
+## Per-template notifications
+
+A template or a run submission may carry `notifications`, a list of targets that receive its
+terminal state in addition to the server-wide channels. Each target names a `kind` and the field
+that kind is addressed by, plus an optional `on_failure` that limits the target to failed runs.
+
+| Kind | Required fields | What is sent |
+|------|-----------------|--------------|
+| `webhook` | `url` | The finished run as JSON, extra vars redacted. |
+| `slack`, `mattermost`, `rocketchat` | `url` | A message to the incoming webhook. |
+| `discord`, `teams` | `url` | A message or Adaptive Card to the webhook. |
+| `ntfy` | `url` | A notification to the topic, raised priority on failure. |
+| `pagerduty` | `key` | An incident trigger on the routing key, failed and interrupted runs only. |
+| `grafana` | `url`, `key` | An annotation to that instance's annotations API with that token. |
+| `twilio` | `to` | An SMS to that recipient through the server-held Twilio account. |
+| `email` | `to` | Mail to that comma-separated recipient list through the server SMTP transport. |
+
+```bash
+curl -X POST https://switchtender.example.com/v1/templates \
+  -H "Authorization: Bearer $SWITCHTENDER_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "prod deploy",
+    "playbook": "plays/deploy.yml",
+    "notifications": [
+      {"kind": "slack", "url": "https://hooks.slack.com/services/T0/B1/x"},
+      {"kind": "pagerduty", "key": "R0UTINGKEY", "on_failure": true},
+      {"kind": "email", "to": "oncall@example.com, lead@example.com"}
+    ]
+  }'
+```
+
+A malformed target is refused at create or update with the field it lacks, not dropped at
+delivery. A Twilio or email target names only a recipient: the account credentials stay in server
+flags, so a template never carries them. On read, webhook URLs, PagerDuty routing keys, and
+Grafana tokens come back masked; an edit that echoes the mask back keeps the stored value.
+
 ## Relay endpoints
 
 With `--worker-token` set, the server also serves the mesh relay under `/relay`: the execution

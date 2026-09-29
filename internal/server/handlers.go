@@ -563,10 +563,8 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 			opts = append(opts, run.WithTimeout(req.Timeout))
 		}
 		for _, t := range req.Notifications {
-			if !run.ValidNotifyKind(t.Kind) || t.URL == "" {
-				respondError(w, log, http.StatusBadRequest,
-					"each notification needs a url and a kind of webhook, slack, mattermost, "+
-						"rocketchat, discord, teams, or ntfy")
+			if err := run.ValidateNotifyTarget(t); err != nil {
+				respondError(w, log, http.StatusBadRequest, err.Error())
 				return
 			}
 		}

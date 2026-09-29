@@ -17,15 +17,26 @@ func (d *Dispatcher) notifyRunTargets(r *run.Run) {
 		return
 	}
 	byKind := map[string][]string{}
+	var richer []run.NotifyTarget
 	for _, t := range r.Notifications {
-		if t.URL == "" || !run.ValidNotifyKind(t.Kind) {
+		if !run.ValidNotifyKind(t.Kind) {
 			continue
 		}
 		if t.OnFailure && r.Status == run.StatusSucceeded {
 			continue
 		}
-		byKind[t.Kind] = append(byKind[t.Kind], t.URL)
+		// A URL-configured channel groups by URL; a richer channel carries its own key or recipient
+		// and is delivered one target at a time below.
+		switch t.Kind {
+		case run.NotifyPagerDuty, run.NotifyGrafana, run.NotifyTwilio, run.NotifyEmail:
+			richer = append(richer, t)
+		default:
+			if t.URL != "" {
+				byKind[t.Kind] = append(byKind[t.Kind], t.URL)
+			}
+		}
 	}
+	d.notifyRicherTargets(r, richer)
 
 	postJSON := func(urls []string, body []byte) {
 		for _, u := range urls {

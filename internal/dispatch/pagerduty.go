@@ -8,9 +8,9 @@ import (
 	"github.com/kordloom/switchtender/internal/run"
 )
 
-// pagerDutyEndpoint is the PagerDuty Events API v2 enqueue URL. It is a package variable so a test can
-// point it at a mock server.
-var pagerDutyEndpoint = "https://events.pagerduty.com/v2/enqueue"
+// defaultPagerDutyEndpoint is the PagerDuty Events API v2 enqueue URL. A dispatcher copies it into a
+// field at construction so a test can point one instance at a mock server without a shared global.
+const defaultPagerDutyEndpoint = "https://events.pagerduty.com/v2/enqueue"
 
 // WithPagerDuty triggers a PagerDuty incident through the Events API for each routing key when a
 // top-level run fails, so an on-call responder is paged.
@@ -65,7 +65,7 @@ func (d *Dispatcher) notifyPagerDuty(r *run.Run) {
 		d.notifyWG.Add(1)
 		go func(b []byte) {
 			defer d.notifyWG.Done()
-			d.deliver(pagerDutyEndpoint, r.ID, b)
+			d.deliver(d.pagerDutyEndpoint, r.ID, b)
 		}(body)
 	}
 }

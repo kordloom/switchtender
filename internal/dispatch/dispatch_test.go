@@ -1041,16 +1041,37 @@ func TestDispatcherNotifiesWebhook(t *testing.T) {
 	}
 }
 
-// captureEmailer records the subjects it is asked to send.
+// captureEmailer records the subjects it is asked to send, and the recipients of the last SendTo.
 type captureEmailer struct {
-	// sent receives one subject per Send call.
+	// sent receives one subject per Send or SendTo call.
 	sent chan string
+	// mu guards lastTo.
+	mu sync.Mutex
+	// lastTo holds the recipients of the most recent SendTo call.
+	lastTo []string
 }
 
 // Send records the subject and reports success.
 func (c *captureEmailer) Send(_ context.Context, subject, _ string) error {
 	c.sent <- subject
 	return nil
+}
+
+// SendTo records the recipient override and the subject, so a test can prove a per-template
+// target reaches the recipient the template named rather than the server default.
+func (c *captureEmailer) SendTo(_ context.Context, to []string, subject, _ string) error {
+	c.mu.Lock()
+	c.lastTo = append([]string(nil), to...)
+	c.mu.Unlock()
+	c.sent <- subject
+	return nil
+}
+
+// recipients returns the recipients of the most recent SendTo call.
+func (c *captureEmailer) recipients() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.lastTo...)
 }
 
 func TestDispatcherEmailsOnFailure(t *testing.T) {
