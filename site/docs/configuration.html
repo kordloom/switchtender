@@ -60,7 +60,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration" class="active">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration" class="active">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -141,6 +141,11 @@ believes it has a control it does not have.</p>
 <td>Per-deployment salt for argon2id key derivation. Must be set alongside the key and stay stable across restarts, or stored credentials cannot be decrypted. Credentials are disabled when unset.</td>
 </tr>
 <tr>
+<td><code>SWITCHTENDER_DB</code></td>
+<td>serve, worker</td>
+<td>The database when <code>--db</code> is not given: a SQLite file path or a <code>postgres://</code> DSN. A DSN carries its password, and on the command line it shows in the process list and, on Kubernetes, in the pod spec, so a shared deployment names it here instead.</td>
+</tr>
+<tr>
 <td><code>SWITCHTENDER_AUDIT_KEY</code></td>
 <td>serve</td>
 <td>Hex-encoded ed25519 seed for the install's signing identity, which signs the LoomSeal bundles it emits and binds every audit entry to this install. Unset beside a local database, the install mints and stores its own key there. Unset against a shared database it mints nothing, since every process must sign as the same install, and the chain is recorded unattributed and unbound until a seed is supplied to all of them. A malformed value stops startup.</td>
@@ -205,11 +210,59 @@ believes it has a control it does not have.</p>
 <td>desktop</td>
 <td>Set to any value to skip opening the browser, for a headless or remote run.</td>
 </tr>
+<tr>
+<td><code>SWITCHTENDER_NOTIFY_NTFY_TOKEN</code></td>
+<td>serve</td>
+<td>Bearer token for a protected ntfy topic, read when <code>--notify-ntfy-token</code> is unset. A run cannot read it, and a flag shows in the process list.</td>
+</tr>
+<tr>
+<td><code>SWITCHTENDER_NOTIFY_GRAFANA_TOKEN</code></td>
+<td>serve</td>
+<td>Bearer token for the Grafana annotations API, read when <code>--notify-grafana-token</code> is unset.</td>
+</tr>
+<tr>
+<td><code>SWITCHTENDER_NOTIFY_TWILIO_TOKEN</code></td>
+<td>serve</td>
+<td>Twilio Auth Token, read when <code>--notify-twilio-token</code> is unset.</td>
+</tr>
+<tr>
+<td><code>SWITCHTENDER_WITNESS_TOKEN</code></td>
+<td>witness serve</td>
+<td>Bearer token the witness API requires, read when <code>--api-token</code> is unset.</td>
+</tr>
+<tr>
+<td><code>SWITCHTENDER_MCP_TOKEN</code></td>
+<td>mcp</td>
+<td>API token the agent presents, read when <code>--token</code> is unset.</td>
+</tr>
+<tr>
+<td><code>SWITCHTENDER_TOKEN</code></td>
+<td>mcp</td>
+<td>Fallback for <code>SWITCHTENDER_MCP_TOKEN</code>.</td>
+</tr>
+<tr>
+<td><code>SWITCHTENDER_LICENSE</code></td>
+<td>serve, worker, license, audit</td>
+<td>Path to the license file, overriding <code>switchtender-license.json</code> beside the database.</td>
+</tr>
+<tr>
+<td><code>SWITCHTENDER_DEMO_PORT</code></td>
+<td>docker compose</td>
+<td>Host port the compose <code>demo</code> profile publishes, <code>8081</code> by default so the demo and the stack can run side by side.</td>
+</tr>
 </tbody>
 </table>
+<p>Every command that takes <code>--db</code> defaults to <code>switchtender.db</code> in the current directory. Only <code>serve</code>,
+<code>init</code>, <code>demo</code>, <code>restore</code>, and an import create a database there. The commands that work on an
+existing install, such as <code>token</code>, <code>user</code>, <code>examples</code>, <code>backup</code>, and the <code>audit</code> commands, refuse a
+SQLite path that does not exist and name the path they looked at. Opening it would create an empty
+database the server never reads, and the command would report success. An import that starts a new
+database says so, with the <code>--db</code> a server needs to read it.</p>
 <h2 id="init">init</h2>
 <p>Bootstraps a new deployment. It creates the database and the first admin account, writes an
-environment file, and optionally a systemd unit. Run it once, then start <code>serve</code>.</p>
+environment file, and optionally a systemd unit. Run it once, then start <code>serve</code>. Running it again,
+with <code>--force</code> to rewrite the environment file or after deleting it, leaves an admin account that
+already exists as it is, password included.</p>
 <table>
 <thead>
 <tr>
@@ -247,7 +300,7 @@ environment file, and optionally a systemd unit. Run it once, then start <code>s
 <tr>
 <td><code>--force</code></td>
 <td><code>false</code></td>
-<td>Overwrite an existing config file.</td>
+<td>Rewrite an existing config file, keeping the encryption key and salt it already holds so the credentials sealed under them still open. Delete the file instead to start over with new keys.</td>
 </tr>
 </tbody>
 </table>
@@ -888,8 +941,8 @@ each tier covers is listed at <a href="https://switchtender.com/pricing">https:/
 <li><code>license status</code> shows the tier this install runs and when a license lapses.</li>
 <li><code>license install &lt;file&gt;</code> verifies a license file and installs it beside the database.</li>
 </ul>
-<p>A license is read from <code>SWITCHTENDER_LICENSE</code>, or from <code>switchtender-license.json</code> in the same
-directory as the database. A license this install cannot parse or that has lapsed reads as
+<p>A license is read from the file <code>SWITCHTENDER_LICENSE</code> names, or from <code>switchtender-license.json</code> in
+the same directory as the database. A license this install cannot parse or that has lapsed reads as
 Community rather than failing the server, so an expiry never takes an install down.</p>
 <h2 id="assess">assess</h2>
 <p>Reports what an automation export holds and what governing it would change, without writing
@@ -903,8 +956,9 @@ switchtender assess chef chef-nodes.json
 Automation Platform, Tower, and Ascender.</p>
 <p>An export saved as UTF-8 with a byte order mark, or as UTF-16 the way Windows PowerShell writes a
 file by default, is read the same as plain UTF-8, here, by <code>import</code>, and by the assessment page.</p>
-<p>The output has three parts: what is in the export, what survives the move, and what changes about
-how it is governed. The third part names the templates that cannot be undone, the ones carrying a
+<p>The output has three parts: what the import would create, what does not survive the move as it was,
+and what changes about how it is governed. Everything that does not come across is listed, one line
+each. The third part names the templates that cannot be undone, the ones carrying a
 destructive signal, the credentials more than one template shares, and the templates targeting no
 stored inventory.</p>
 <p>Grades are a floor rather than a measurement. An Ansible template keeps its work in a playbook, and
@@ -1012,13 +1066,18 @@ never seen this install.</p>
 </code></pre>
 <p>Pass <code>--pubkey</code> with the fingerprint the producer published to tie the result to a key obtained out
 of band. Without it the receipt is checked against the key it names, which proves it was not altered
-but not who signed it.</p>
+but not who signed it, and the verdict says so: <code>INTACT, BUT UNIDENTIFIED</code> rather than <code>VERIFIED</code>.
+A <code>--pubkey</code> given an empty value, which is what a failed key fetch leaves behind, is refused rather
+than treated as no pin.</p>
 <h2 id="witness">witness</h2>
 <p>Watches a server's span beat feed from outside it. A chain proves what it holds was not altered, but
 not that nothing was removed from the end, because the process running the chain also decides what
 gets written down. A witness on another machine remembers what the feed served, keeps that memory in
 a signed checkpoint, and raises a finding when a beat goes missing, an already-witnessed beat comes
 back rewritten, or the head regresses. Run it where the server's operator has no hand.</p>
+<p>The server has to be writing beats for there to be anything to watch, and beats are off by default.
+Start the server with <code>--span-cadence</code>, for example <code>--span-cadence 60s</code>. Against a server with
+beats off, the witness reports <code>empty_feed</code>, and a <code>--once</code> run exits nonzero.</p>
 <table>
 <thead>
 <tr>
@@ -1089,12 +1148,27 @@ attestations.</li>
 <tr>
 <td><code>--api-token</code></td>
 <td>none</td>
-<td>Bearer token the witness API requires.</td>
+<td>Bearer token the witness API requires. Prefer <code>SWITCHTENDER_WITNESS_TOKEN</code>. Required when <code>--listen</code> is not loopback.</td>
 </tr>
 <tr>
 <td><code>--watch</code></td>
 <td>none</td>
-<td>Span beat feed to watch, repeatable.</td>
+<td>Base URL of a server to watch, repeatable, at least one.</td>
+</tr>
+<tr>
+<td><code>--interval</code></td>
+<td><code>1m0s</code></td>
+<td>How often every watched server is checked. At least 10s.</td>
+</tr>
+<tr>
+<td><code>--key-dir</code></td>
+<td>the state directory</td>
+<td>Directory holding the witness signing key.</td>
+</tr>
+<tr>
+<td><code>--webhook</code></td>
+<td>none</td>
+<td>URL that receives every finding as a JSON POST.</td>
 </tr>
 </tbody>
 </table>
@@ -1105,6 +1179,9 @@ public key the attestation carries, and <code>signed_by_key_id</code> is the sha
 startup and serves from its API.</p>
 <pre><code>switchtender witness verify-attestation attestation.json --pubkey sha256:...
 </code></pre>
+<p>The verdict carries <code>pinned</code>. Without a pin, <code>ok</code> means only that the document is internally
+consistent, which an attestation a forger signed with their own key also is, so an unpinned verdict
+carries a note saying so. An empty <code>--pubkey</code> is refused.</p>
 <table>
 <thead>
 <tr>
@@ -1148,6 +1225,11 @@ reach.</p>
 </thead>
 <tbody>
 <tr>
+<td><code>--server</code></td>
+<td>required</td>
+<td>SwitchTender API base URL.</td>
+</tr>
+<tr>
 <td><code>--allow-adhoc</code></td>
 <td>off</td>
 <td>Also expose the ad-hoc run tool, letting the agent compose a run rather than launch a template an operator defined. Approval policy still applies.</td>
@@ -1155,7 +1237,7 @@ reach.</p>
 <tr>
 <td><code>--token</code></td>
 <td>none</td>
-<td>API token the agent presents.</td>
+<td>API token the agent presents. Prefer <code>SWITCHTENDER_MCP_TOKEN</code>.</td>
 </tr>
 <tr>
 <td><code>--timeout</code></td>
@@ -1189,7 +1271,7 @@ instance is safe to expose. It needs ansible on the PATH to run the sample playb
 <tr>
 <td><code>--db</code></td>
 <td>temporary file</td>
-<td>Database to seed and serve. Empty uses a fresh temporary SQLite file.</td>
+<td>Database to seed and serve. Empty uses a fresh temporary SQLite file, removed when the demo stops.</td>
 </tr>
 <tr>
 <td><code>--seed-only</code></td>

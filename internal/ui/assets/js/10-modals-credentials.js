@@ -88,11 +88,14 @@ function wireLaunchForm() {
 		const go = form.querySelector('button[type="submit"]');
 		if (go) {
 			go.disabled = true;
-			go.title = "Disabled in this read-only demo. Self-host to launch runs.";
+			go.title = isDemo() ? "Disabled in this read-only demo. Self-host to launch runs." :
+				readOnlyReason() + ".";
 		}
 		if (status) {
-			status.textContent = "This demo is read-only. The form is here to show what a launch " +
-				"asks for. Self-host to run one.";
+			status.textContent = isDemo()
+				? "This demo is read-only. The form is here to show what a launch asks for. Self-host " +
+					"to run one."
+				: "This server is read-only, so it launches nothing.";
 		}
 		form.addEventListener("submit", (e) => e.preventDefault());
 		return;
@@ -150,7 +153,7 @@ function renderSealingNotice() {
 	if (!anchor.parentNode || anchor.parentNode.querySelector(".seal-notice")) return;
 	const note = document.createElement("div");
 	note.className = "ro-banner seal-notice";
-	note.textContent = isReadOnly()
+	note.textContent = isDemo()
 		? "This demo holds no encryption key, so no new credential can be stored here. The ones below are seeded, and templates reference them the way a real install would."
 		: "This server has no encryption key, so a new credential cannot be sealed and saved. Set SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT and restart, keeping the salt stable, since it is what every stored secret is sealed against.";
 	anchor.parentNode.insertBefore(note, anchor);
@@ -273,7 +276,8 @@ const CRED_SOURCES = {
 	local: { hint: "The value below is the secret, sealed and stored here." },
 	command: {
 		placeholder: "vault kv get -field=password secret/prod-fleet",
-		hint: "The command runs on the executor at launch and its standard output is the secret.",
+		hint: "The command runs on the executor at launch and its standard output is the secret. " +
+			"For an env credential it prints KEY=VALUE lines; a single value belongs on a token.",
 	},
 	vault: {
 		placeholder: '{"addr":"https://vault:8200","path":"secret/data/ci","field":"token"}',
@@ -525,7 +529,7 @@ async function loadCredentials() {
 			const add = document.querySelector(".page-head .button.primary");
 			if (add) {
 				add.disabled = true;
-				add.dataset.tip = isReadOnly()
+				add.dataset.tip = isDemo()
 					? "This demo is read-only, and it stores no encryption key, so nothing can be saved here."
 					: "Set SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT on the server to store credentials.";
 			}
@@ -709,7 +713,7 @@ function renderNeedsSecret(creds) {
 		save.disabled = readOnly;
 		const status = document.createElement("span");
 		status.className = "cred-needs-status muted";
-		if (readOnly) status.textContent = "Disabled in the demo";
+		if (readOnly) status.textContent = readOnlyReason();
 
 		save.addEventListener("click", async () => {
 			const secret = input.value;

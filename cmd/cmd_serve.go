@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/smtp"
@@ -12,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -19,6 +21,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
+	"golang.org/x/term"
 
 	"github.com/kordloom/switchtender/identity"
 	"github.com/kordloom/switchtender/internal/ai"
@@ -50,6 +53,7 @@ import (
 	"github.com/kordloom/switchtender/internal/template"
 	"github.com/kordloom/switchtender/internal/trigger"
 	"github.com/kordloom/switchtender/internal/user"
+	"github.com/kordloom/switchtender/internal/util"
 	"github.com/kordloom/switchtender/spanbeat"
 )
 
@@ -346,6 +350,33 @@ func containerLimitsFromFlags() roundhouse.ContainerLimits {
 	}
 }
 
+// checkChoice refuses a flag value outside the set the flag accepts. The choice flags coerced any value
+// they did not recognize to their default, so a typo in --container-runtime ran docker and one in
+// --notify-on emailed on failures only, with nothing saying the value had been ignored.
+func checkChoice(flag, value string, allowed ...string) error {
+	if slices.Contains(allowed, value) {
+		return nil
+	}
+	return fmt.Errorf("%w: --%s %q is not one of %s", ErrUsage, flag, value, strings.Join(allowed, ", "))
+}
+
+// checkContainerChoices refuses a container runtime or pull policy the runner does not know, for
+// serve and worker alike.
+func checkContainerChoices() error {
+	if err := checkChoice("container-runtime", containerRuntime, "docker", "podman"); err != nil {
+		return err
+	}
+	return checkChoice("container-pull-policy", containerPullPolicy, "always", "missing", "never")
+}
+
+// checkServeChoices refuses any serve choice flag holding a value it does not know.
+func checkServeChoices() error {
+	if err := checkContainerChoices(); err != nil {
+		return err
+	}
+	return checkChoice("notify-on", notifyOn, "failure", "finish")
+}
+
 // containerRuntimeFromFlags returns the container CLI selected by the flag, coercing any value other
 // than podman to docker so the runner never gets an unexpected binary.
 func containerRuntimeFromFlags() string {
@@ -449,7 +480,8 @@ func init() {
 			"API refuses policy changes, so a change to what needs approval is a reviewed diff. A "+
 			"malformed file stops the server rather than silently gating nothing.")
 	serveCmd.Flags().StringVar(&serveDB, "db", defaultDBPath,
-		"SQLite file path, or a postgres:// DSN for the PostgreSQL backend.")
+		"SQLite file path, or a postgres:// DSN for the PostgreSQL backend. "+dbEnvVar+" sets it when "+
+			"this flag is absent, which keeps a DSN's password off the command line.")
 	serveCmd.Flags().StringVar(&serveTLSCert, "tls-cert", "",
 		"TLS certificate file, to serve HTTPS directly. Requires --tls-key.")
 	serveCmd.Flags().StringVar(&serveTLSKey, "tls-key", "",
@@ -723,10 +755,78 @@ func openBundle(db string) (storeBundle, error) {
 	} else if lic != nil {
 		license.Set(lic)
 	}
-	if strings.HasPrefix(db, "postgres://") || strings.HasPrefix(db, "postgresql://") {
+	if isPostgresDSN(db) {
 		return pgstore.Open(db)
 	}
 	return sqlitestore.Open(db)
+}
+
+// openExisting opens the store a command works on, refusing a SQLite file that does not exist.
+// Opening creates a missing file, so a command run from another directory, or with --db left off,
+// minted its token or user into a new empty database the server never reads and reported success.
+// Only serve, init, demo, restore, and an import create a database. A PostgreSQL DSN names a database
+// that must already exist, so it goes straight through.
+func openExisting(db string) (storeBundle, error) {
+	if !isPostgresDSN(db) && !fileExists(db) {
+		where := db
+		if abs, err := filepath.Abs(db); err == nil {
+			where = abs
+		}
+		return nil, fmt.Errorf("%w at %s, and this command does not create one. Pass --db with the "+
+			"path your server uses, the one in its serve command or service file, or create an install "+
+			"with switchtender init", errNoDatabase, where)
+	}
+	return openBundle(db)
+}
+
+// isPostgresDSN reports whether a --db value names a PostgreSQL database rather than a SQLite file.
+func isPostgresDSN(db string) bool {
+	return strings.HasPrefix(db, "postgres://") || strings.HasPrefix(db, "postgresql://")
+}
+
+// fileExists reports whether path names something on disk. Only a missing path answers false, so a
+// file that cannot be read is left for the open to report.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return !errors.Is(err, fs.ErrNotExist)
+}
+
+// publishedKeyValues are the encryption values the documentation printed in its examples. They are
+// public, so credentials sealed under them are sealed under a key anyone can read.
+var publishedKeyValues = map[string]bool{"change-me": true, "change-me-too": true}
+
+// refusePublishedKey refuses to start when the encryption key or salt is a value the documentation
+// printed. The quickstart used them for months, so they are in shell histories and deploy scripts,
+// and a server started with them sealed every credential it was given under a pair anyone can look
+// up: a copy of the database was all it took to open them. Refusing here says so before anything is
+// sealed, rather than after.
+func refusePublishedKey() error {
+	for _, name := range []string{"SWITCHTENDER_ENCRYPTION_KEY", "SWITCHTENDER_ENCRYPTION_SALT"} {
+		if publishedKeyValues[strings.TrimSpace(os.Getenv(name))] {
+			return fmt.Errorf("%w: %s is set to an example from the documentation, which anyone can "+
+				"use to open the credentials this server seals. Generate your own with "+
+				"`openssl rand -hex 32`, keep it with your other secrets, and set it before starting",
+				errPublishedKey, name)
+		}
+	}
+	return nil
+}
+
+// refuseBadAuditKey refuses to start when SWITCHTENDER_AUDIT_KEY is set to something that cannot
+// sign. The configuration reference says a malformed value stops startup, and it did not: the server
+// logged a warning and ran with no producer identity, so its chain bound no entry to this install and
+// every receipt it issued could be lifted onto another. An operator who set the variable meant it,
+// so a value that cannot be used is a mistake to stop on rather than a default to fall back from.
+func refuseBadAuditKey() error {
+	seed := os.Getenv(identity.KeyEnv)
+	if seed == "" {
+		return nil
+	}
+	if err := identity.CheckSeed(seed); err != nil {
+		return fmt.Errorf("%w: %w. Set it to 32 bytes of hex, such as the output of "+
+			"`openssl rand -hex 32`, or unset it and the server keeps its own key", errBadAuditKey, err)
+	}
+	return nil
 }
 
 // newSealerFromEnv builds a credential Sealer from the encryption environment. Credentials need
@@ -921,15 +1021,24 @@ func tokenCountGuard(count int, countErr error, accounts int, readOnly, external
 	return postureBootstrap, nil
 }
 
-// bootstrapAdminToken mints the initial admin token for an install that has none and prints it once.
+// initialTokenFile is the file the first admin token is handed over in when nobody is at a terminal
+// to read it, beside the database it opens.
+const initialTokenFile = "initial-admin-token"
+
+// bootstrapAdminToken mints the initial admin token for an install that has none and hands it over
+// once.
 //
-// The value goes to stderr with fmt rather than through the logger. A token is exactly what the
-// logging rules say never to log, and the run log is the wrong place for a credential; this is a
-// one-time handover to the person at the terminal, the same disclosure 'token new' makes.
+// At a terminal it is printed to stderr with fmt rather than through the logger. A token is exactly
+// what the logging rules say never to log, and this is a one-time handover to the person at the
+// terminal, the same disclosure 'token new' makes. Nobody is at a terminal when the server runs in a
+// container, a pod, or under a service manager, and there stderr is the log, which keeps the token
+// for as long as the log is kept and ships it wherever the logs go: a never-expiring admin token sat
+// in docker logs and kubectl logs, and survived restarts there. So it goes to a file beside the
+// database, readable by this account alone, and the log says where.
 //
 // The mint is recorded in the audit chain like any other token creation, so an install cannot come
 // into existence with an admin credential the trail does not mention.
-func bootstrapAdminToken(ctx context.Context, bundle storeBundle, addr string) error {
+func bootstrapAdminToken(ctx context.Context, bundle storeBundle, addr, db string) error {
 	plain, tok, err := auth.New("initial")
 	if err != nil {
 		return fmt.Errorf("mint the initial admin token: %w", err)
@@ -937,8 +1046,29 @@ func bootstrapAdminToken(ctx context.Context, bundle storeBundle, addr string) e
 	if err := bundle.Tokens().Save(ctx, tok); err != nil {
 		return fmt.Errorf("save the initial admin token: %w", err)
 	}
-	if err := recordCLI(ctx, bundle.Audits(), "/cli/serve/bootstrap-token"); err != nil {
+	if err := recordCLI(ctx, bundle.Audits(), db, "/cli/serve/bootstrap-token"); err != nil {
 		return err
+	}
+	next := fmt.Sprintf(`  Name more:     switchtender token new --user <account> --name ci %s
+  Revoke this:   switchtender token revoke %s %s
+`, dbFlag(db), tok.ID, dbFlag(db))
+	if initialTokenToFile(term.IsTerminal(int(os.Stderr.Fd()))) {
+		path, werr := writeInitialToken(db, plain)
+		if werr == nil {
+			fmt.Fprintf(os.Stderr, `
+  No API tokens exist, so %s would have served an unauthenticated API.
+  Created an initial admin token and wrote it to a file readable by this account alone,
+  rather than to this log, which keeps whatever it is given:
+
+      %s
+
+  Read it, delete the file, and use it as: Authorization: Bearer <token>
+%s
+`, addr, path, next)
+			return nil
+		}
+		fmt.Fprintf(os.Stderr, "\n  Could not write the initial admin token to a file (%v), so it is printed "+
+			"below, and this log keeps it. Revoke it once you have named another.\n", werr)
 	}
 	fmt.Fprintf(os.Stderr, `
   No API tokens exist, so %s would have served an unauthenticated API.
@@ -947,32 +1077,99 @@ func bootstrapAdminToken(ctx context.Context, bundle storeBundle, addr string) e
       %s
 
   Use it as:     Authorization: Bearer %s
-  Name more:     switchtender token new --name ci
-  Revoke this:   switchtender token revoke %s
-
-`, addr, plain, plain, tok.ID)
+%s
+`, addr, plain, plain, next)
 	return nil
 }
 
+// initialTokenToFile reports whether the initial admin token is written to a file rather than
+// printed. A terminal shows it once and keeps nothing, so it is printed there. Anything else keeps
+// it: a service log, and a container's log even when a terminal is attached, since docker logs
+// records the terminal's output. The banner said the token was shown only once while the container
+// log kept it for as long as the container existed.
+func initialTokenToFile(isTerminal bool) bool {
+	return !isTerminal || BuildChannel == buildChannelContainer
+}
+
+// writeInitialToken writes the initial admin token beside the database, readable by this account
+// alone, and returns the file's path. A PostgreSQL install keeps it in its identity directory, since
+// a DSN has no directory of its own.
+func writeInitialToken(db, plain string) (string, error) {
+	dir, err := identityDir(db)
+	if err != nil {
+		return "", err
+	}
+	path, err := filepath.Abs(filepath.Join(dir, initialTokenFile))
+	if err != nil {
+		return "", err
+	}
+	// A file left from an earlier database is replaced rather than appended to or trusted, and it is
+	// created fresh so the permissions are this function's, not whatever the old file had.
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return "", err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return "", err
+	}
+	if _, err := f.WriteString(plain + "\n"); err != nil {
+		_ = f.Close()
+		return "", err
+	}
+	return path, f.Close()
+}
+
+// dbFlag returns the --db argument a command printed for the operator needs to reach this server's
+// database. A command without it opens switchtender.db in whatever directory it is run from, and
+// quietly creates one when there is none, so a token minted by following a hint worked nowhere. A
+// PostgreSQL DSN carries its password, so it is named by a placeholder rather than printed.
+func dbFlag(db string) string {
+	if isPostgresDSN(db) {
+		return "--db <this server's database DSN>"
+	}
+	if abs, err := filepath.Abs(db); err == nil {
+		db = abs
+	}
+	return "--db " + util.ShellArg(db)
+}
+
+// newDatabaseNote is what serve says when its database does not exist yet, empty when it does or when
+// there is nothing to say.
+//
+// Starting on a database that is not there is a legitimate first run, and the quickstart, the
+// container image, and the switching guide all do exactly that. It is also what a mistyped --db
+// looks like, and then the server comes up healthy on an empty chain with no admin account and
+// authentication off while the operator's real install sits unserved. So it is said out loud rather
+// than refused, because refusing breaks every documented first run. Desktop makes its database in a
+// per-user directory on its first launch by design and takes no --db, so telling its user to check
+// --db named a flag they cannot pass.
+func newDatabaseNote(db string, desktop bool) string {
+	if desktop || isPostgresDSN(db) || fileExists(db) {
+		return ""
+	}
+	return fmt.Sprintf("creating a new database at %s. If you meant to serve an existing install, "+
+		"stop now and check --db: this one starts empty, with no admin account and no tokens.", db)
+}
+
 func runServe(cmd *cobra.Command, _ []string) error {
+	serveDB = dbFromEnv(cmd, serveDB)
 	log, err := logutil.New()
 	if err != nil {
 		return fmt.Errorf("init logger: %w", err)
 	}
 	defer func() { _ = log.Sync() }()
+	if err := refusePublishedKey(); err != nil {
+		return err
+	}
+	if err := refuseBadAuditKey(); err != nil {
+		return err
+	}
+	if err := checkServeChoices(); err != nil {
+		return err
+	}
 
-	// Starting on a database that is not there is a legitimate first run, and the quickstart, the
-	// container image, and the switching guide all do exactly that. It is also what a mistyped --db
-	// looks like, and then the server comes up healthy on an empty chain with no admin account and
-	// authentication off while the operator's real install sits unserved. So it is said out loud
-	// rather than refused, because refusing breaks every documented first run.
-	if !strings.HasPrefix(serveDB, "postgres://") && !strings.HasPrefix(serveDB, "postgresql://") {
-		if _, serr := os.Stat(serveDB); errors.Is(serr, os.ErrNotExist) {
-			fmt.Fprintf(os.Stderr,
-				"creating a new database at %s. If you meant to serve an existing install, stop now "+
-					"and check --db: this one starts empty, with no admin account and no tokens.\n",
-				serveDB)
-		}
+	if note := newDatabaseNote(serveDB, serveDesktop); note != "" {
+		fmt.Fprintln(os.Stderr, note)
 	}
 	if err := checkWorkers(serveWorkers, serveWorkersHint); err != nil {
 		return err
@@ -1024,32 +1221,6 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 	store, schedules := bundle.Runs(), bundle.Schedules()
 
-	n, cerr := bundle.Tokens().Count(cmd.Context())
-	// A failure to list accounts is not fatal here: the token count already decided the dangerous
-	// direction, and an unreadable user store leaves this exactly where it was before accounts were
-	// consulted rather than refusing to start.
-	accounts := 0
-	if users, uerr := bundle.Users().List(cmd.Context()); uerr == nil {
-		accounts = len(users)
-	} else {
-		log.Warn("cannot count accounts, so the startup authentication notice may be wrong: " + uerr.Error())
-	}
-	posture, gerr := tokenCountGuard(n, cerr, accounts, serveReadOnly, externalAuthConfigured(),
-		isLoopbackAddr(serveAddr), serveAddr)
-	if gerr != nil {
-		return gerr
-	}
-	switch posture {
-	case postureWarn:
-		log.Warn("no API tokens exist. The API is UNAUTHENTICATED until you create one. Run: switchtender token new")
-	case postureBootstrap:
-		if err := bootstrapAdminToken(cmd.Context(), bundle, serveAddr); err != nil {
-			return err
-		}
-	case postureReady:
-	}
-
-	sealer := newSealerFromEnv(log)
 	// The producer identity signs LoomSeal bundles and is published so a relying party can pin its
 	// fingerprint. It is created on first start in the install's identity directory, the same one the
 	// bundle command reads, so a bundle is signed with the key serve publishes. A failure to create
@@ -1061,8 +1232,13 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	// warning says so rather than naming only the export, because a shared database reaches this path
 	// by design and an operator reading about bundles would not know the binding went with it. The
 	// error it carries already ends with the remedy and the path to put the key in.
+	//
+	// It is bound before the initial admin token is minted, so that entry, the first change to who can
+	// act that an install records, commits to the install like every entry after it.
 	var producer *audit.Identity
-	if id, err := loadProducerIdentity(serveDB); err != nil {
+	producerProblem := ""
+	if id, err := loadProducerIdentity(cmd.Context(), bundle.Audits(), serveDB); err != nil {
+		producerProblem = err.Error()
 		log.Warn("producer identity unavailable, so bundles cannot be attributed and entries are not " +
 			"bound to this install, which lets a receipt be lifted onto another one: " + err.Error())
 	} else {
@@ -1081,6 +1257,33 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
+	n, cerr := bundle.Tokens().Count(cmd.Context())
+	// A failure to list accounts is not fatal here: the token count already decided the dangerous
+	// direction, and an unreadable user store leaves this exactly where it was before accounts were
+	// consulted rather than refusing to start.
+	accounts := 0
+	if users, uerr := bundle.Users().List(cmd.Context()); uerr == nil {
+		accounts = len(users)
+	} else {
+		log.Warn("cannot count accounts, so the startup authentication notice may be wrong: " + uerr.Error())
+	}
+	posture, gerr := tokenCountGuard(n, cerr, accounts, serveReadOnly, externalAuthConfigured(),
+		isLoopbackAddr(serveAddr), serveAddr)
+	if gerr != nil {
+		return gerr
+	}
+	switch posture {
+	case postureWarn:
+		log.Warn("no API tokens exist. The API is UNAUTHENTICATED until you create one. Run: " +
+			"switchtender token new --user <account> --name <name> " + dbFlag(serveDB))
+	case postureBootstrap:
+		if err := bootstrapAdminToken(cmd.Context(), bundle, serveAddr, serveDB); err != nil {
+			return err
+		}
+	case postureReady:
+	}
+
+	sealer := newSealerFromEnv(log)
 	closePlugins, err := extplugin.Load(pluginsDir(servePluginsDir), log)
 	if err != nil {
 		return fmt.Errorf("load plugins: %w", err)
@@ -1450,6 +1653,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		server.WithPolicies(policies),
 		server.WithAudit(bundle.Audits()),
 		server.WithProducerIdentity(producer, resolveVersion()),
+		server.WithProducerUnavailable(producerProblem),
 		server.WithInventorySources(bundle.InventorySources(), disp),
 		server.WithTriggers(bundle.Triggers(), sealer),
 		server.WithTeams(bundle.Teams()),
@@ -1540,10 +1744,62 @@ func notifySecret(flagValue, env string) string {
 // loadProducerIdentity reads the install's producer signing identity, resolving where it lives
 // first so a server with nowhere durable to keep it says so rather than signing with a key the next
 // restart throws away.
-func loadProducerIdentity(db string) (audit.Identity, error) {
+func loadProducerIdentity(ctx context.Context, audits audit.Store, db string) (audit.Identity, error) {
 	dir, err := identityDir(db)
 	if err != nil {
 		return audit.Identity{}, err
 	}
-	return audit.LoadIdentityForStore(db, dir)
+	return identityForChain(ctx, audits, db, dir)
+}
+
+// identityForChain loads the producer identity in dir for the chain audits holds. It creates one only
+// for a chain that no install has claimed yet. A chain already bound to an install whose key is not
+// in dir means the key was lost or the directory is the wrong one, and minting a new key there
+// started a second install: every bundle signed afterward named an install the earlier entries do
+// not, so none of them could verify, while the command printed a fingerprint to publish. A key that
+// names a different install than the chain is refused for the same reason.
+func identityForChain(ctx context.Context, audits audit.Store, db, dir string) (audit.Identity, error) {
+	bound := ""
+	if reader, ok := audits.(audit.InstallReader); ok {
+		var err error
+		if bound, err = reader.BoundInstall(ctx); err != nil {
+			return audit.Identity{}, err
+		}
+	}
+	if bound != "" && !audit.IdentityPresent(dir) {
+		where := dir
+		if abs, err := filepath.Abs(dir); err == nil {
+			where = abs
+		}
+		return audit.Identity{}, fmt.Errorf("%w: the audit chain belongs to install %s, and its key "+
+			"is not in %s. Restore %s there from a backup, or set %s to the seed this install signs "+
+			"with. A new key would sign as a different install, and no earlier entry would verify "+
+			"under it", errLostIdentity, bound, where, audit.IdentityFile, identity.KeyEnv)
+	}
+	id, err := audit.LoadIdentityForStore(db, dir)
+	if err != nil {
+		return audit.Identity{}, err
+	}
+	if bound != "" && id.InstallID != bound {
+		return audit.Identity{}, fmt.Errorf("%w: the key in use names install %s, and the audit chain "+
+			"belongs to install %s. Restore that install's %s, or set %s to its seed",
+			errForeignIdentity, id.InstallID, bound, audit.IdentityFile, identity.KeyEnv)
+	}
+	return id, nil
+}
+
+// dbEnvVar names the database when --db is not given.
+const dbEnvVar = "SWITCHTENDER_DB"
+
+// dbFromEnv returns the database SWITCHTENDER_DB names when --db was not given, and the flag's value
+// otherwise. A PostgreSQL DSN carries its password, and on the command line it showed in the process
+// list and in the pod spec of every chart install, readable by anyone allowed to list pods.
+func dbFromEnv(cmd *cobra.Command, flagValue string) string {
+	if cmd.Flags().Changed("db") {
+		return flagValue
+	}
+	if v := strings.TrimSpace(os.Getenv(dbEnvVar)); v != "" {
+		return v
+	}
+	return flagValue
 }

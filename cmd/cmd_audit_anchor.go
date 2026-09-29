@@ -72,7 +72,7 @@ func init() {
 
 // runAuditAnchor records an anchor over the current chain head.
 func runAuditAnchor(cmd *cobra.Command, _ []string) error {
-	store, err := openBundle(anchorDB)
+	store, err := openExisting(anchorDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
@@ -106,7 +106,7 @@ func runAuditAnchor(cmd *cobra.Command, _ []string) error {
 	// value it fixes. For a tree anchor that is what makes the root recomputable at all; for a linear
 	// one it says which install's chain the link belongs to, which is the same question asked of a
 	// restored copy.
-	id, ierr := loadProducerIdentity(anchorDB)
+	id, ierr := loadProducerIdentity(cmd.Context(), store.Audits(), anchorDB)
 	if ierr != nil {
 		return ierr
 	}
@@ -163,7 +163,7 @@ func init() {
 
 // runAuditAnchorDelete removes one anchor from the store.
 func runAuditAnchorDelete(cmd *cobra.Command, args []string) error {
-	store, err := openBundle(anchorDB)
+	store, err := openExisting(anchorDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}

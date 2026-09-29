@@ -84,6 +84,13 @@ chmod +x "$tmp/$BIN"
 
 # Install into PREFIX, falling back to ~/.local/bin when PREFIX is not writable without root.
 dest="$PREFIX"
+# A PREFIX that does not exist yet is not a permission problem. PREFIX=$HOME/bin is the common
+# spelling of it, and treating a missing directory as unwritable ignored the setting while printing
+# "No write access to $HOME/bin", which was not true: the parent was writable and the directory
+# only needed creating.
+if [ ! -d "$dest" ] && mkdir -p "$dest" 2>/dev/null; then
+	:
+fi
 if [ ! -d "$dest" ] || [ ! -w "$dest" ]; then
 	if [ "$(id -u)" = 0 ]; then
 		mkdir -p "$dest"
@@ -93,15 +100,47 @@ if [ ! -d "$dest" ] || [ ! -w "$dest" ]; then
 		say "No write access to $PREFIX; installing to $dest instead."
 	fi
 fi
-mv "$tmp/$BIN" "$dest/$BIN"
+# Copied rather than moved, so the installed file belongs to the account running this script. A moved
+# file keeps the owner the archive recorded, and tar run as root restores that owner. The copy lands
+# beside the target and is renamed over it, so a running binary is replaced in one step.
+cp "$tmp/$BIN" "$dest/.$BIN.new"
+chmod 0755 "$dest/.$BIN.new"
+mv -f "$dest/.$BIN.new" "$dest/$BIN"
 
 say ""
 say "Installed $dest/$BIN"
+# The closing commands are printed the way they will actually work from this shell. Printing the
+# bare name after saying the directory is not on PATH sent readers straight into command not found
+# on a stock Mac and on every non-root Linux install, where the fallback directory is the normal
+# outcome rather than the exception.
+run="$BIN"
 case ":$PATH:" in
 	*":$dest:"*) : ;;
-	*) say "Add $dest to your PATH to run it by name: export PATH=\"$dest:\$PATH\"" ;;
+	*)
+		run="$dest/$BIN"
+		say "$dest is not on your PATH. Add it to run it by name:"
+		say "  export PATH=\"$dest:\$PATH\""
+		say "Until you do, use the full path:"
+		;;
 esac
+# An earlier install from go install, Homebrew, or a package manager can sit earlier on PATH, and
+# then every command below runs the old binary while this script reports success. Saying which one
+# will actually run costs one lookup.
+shadow="$(command -v "$BIN" 2>/dev/null || true)"
+if [ -n "$shadow" ] && [ "$shadow" != "$dest/$BIN" ]; then
+	say ""
+	say "Note: $shadow comes first on your PATH, so \"$BIN\" still runs that one."
+	say "Use $dest/$BIN, or remove the older install."
+	run="$dest/$BIN"
+fi
 say "Verify what you got:"
-say "  $BIN version --verify"
+say "  $run version --verify"
 say "Start a local server:"
-say "  $BIN serve"
+say "  $run serve"
+# The Bash tool, and every starter template, runs bash by name. Most systems ship it, and Alpine and
+# some minimal images do not, where the first run fails with "bash: executable file not found".
+if ! have bash; then
+	say ""
+	say "Note: bash is not installed here, and the Bash tool and the starter templates need it."
+	say "Install it with your package manager first, for example: apk add bash"
+fi

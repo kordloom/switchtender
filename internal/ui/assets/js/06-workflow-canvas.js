@@ -182,6 +182,14 @@ async function saveWorkflowTemplate() {
 		wfSetStatus("Add at least one step before saving.", "err");
 		return;
 	}
+	// The same guard Run workflow has. Saving the untouched example made a template of terraform
+	// against infra/network, two playbooks nobody wrote, and a curl at a host that does not exist,
+	// and the page then said a schedule or a webhook could fire it.
+	if (wfIsUntouchedSample()) {
+		wfSetStatus("This is the sample pipeline, not yours. Point a step at a real playbook or " +
+			"command first, or clear the canvas and build your own.", "err");
+		return;
+	}
 	const doc = workflowDocument();
 	const body = { name: doc.name, steps: doc.steps };
 	if (doc.inventory) body.inventory = doc.inventory;
@@ -189,9 +197,12 @@ async function saveWorkflowTemplate() {
 	wfState.submitting = true;
 	if (btn) btn.disabled = true;
 	wfSetStatus("Saving workflow template.", "");
+	// A second save updates the template the first one made. Each press used to create another
+	// template of the same name, so saving twice left two to tell apart and keep in step.
+	const saved = wfState.savedTemplateId;
 	try {
-		const res = await fetch(API + "/templates", {
-			method: "POST",
+		const res = await fetch(API + "/templates" + (saved ? "/" + encodeURIComponent(saved) : ""), {
+			method: saved ? "PUT" : "POST",
 			headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
 			body: JSON.stringify(body),
 		});
@@ -205,7 +216,8 @@ async function saveWorkflowTemplate() {
 			wfSetStatus(data.error || ("Could not save the template: HTTP " + res.status), "err");
 			return;
 		}
-		wfSetStatus("Saved as the workflow template " + (data.name || doc.name) +
+		if (data.id) wfState.savedTemplateId = data.id;
+		wfSetStatus((saved ? "Updated" : "Saved as") + " the workflow template " + (data.name || doc.name) +
 			". A schedule or a webhook can fire it now.", "ok");
 	} catch (err) {
 		wfSetStatus("Could not save the template: " + err.message, "err");
@@ -396,8 +408,12 @@ document.addEventListener("DOMContentLoaded", () => {
 		wireCredentialForm();
 		loadCredentials();
 	} else if (page === "audit") {
-		wireAudit();
-		loadAudit();
+		if (roleAtLeast("admin")) {
+			wireAudit();
+			loadAudit();
+		} else {
+			renderAuditForAdminsOnly();
+		}
 	} else if (page === "policies") {
 		wireModal("policy");
 		wirePolicyForm();
@@ -507,13 +523,31 @@ function sealDialogSubmits() {
 	}
 }
 
-// readOnlyBanner builds the notice a read-only demo leads every page with. It says the demo resets
-// every night on purpose, so a visitor who finds yesterday's runs gone reads the design rather than
-// data loss; it starts them at the run a rule is holding, which is the product; and it names the
-// way to watch the evidence catch that nightly rewrite.
+// PUBLIC_DEMO_HOST is the hosted demo, the one instance reseeded every night.
+const PUBLIC_DEMO_HOST = "demo.switchtender.com";
+
+// readOnlyBanner builds the notice a read-only demo leads every page with.
+//
+// The hosted demo resets every night on purpose, so its banner says so, and a visitor who finds
+// yesterday's runs gone reads the design rather than data loss. It starts them at the run a rule is
+// holding, which is the product, and names the way to watch the evidence catch that nightly rewrite.
+// Only the hosted demo is reset. A demo someone runs themselves is not, and without terraform on the
+// machine it seeds no held run, so its banner claimed a nightly reset that never happens and pointed
+// at a filter that showed no runs. It points at the runs page instead.
 function readOnlyBanner() {
 	const banner = document.createElement("div");
 	banner.className = "ro-banner";
+	if (!isDemo()) {
+		banner.append("This server is read-only, so nothing here can be changed.");
+		return banner;
+	}
+	if (location.hostname !== PUBLIC_DEMO_HOST) {
+		const runs = document.createElement("a");
+		runs.href = "/ui/runs";
+		runs.textContent = "the runs it seeded";
+		banner.append("Read-only demo, so nothing here can be changed. Start with ", runs, ".");
+		return banner;
+	}
 	const held = document.createElement("a");
 	held.href = "/ui/runs?status=pending_approval";
 	held.textContent = "the run a rule is holding";
@@ -575,7 +609,7 @@ function applyReadOnly() {
 		if (!actions.querySelector(".ro-note")) {
 			const note = document.createElement("span");
 			note.className = "ro-note";
-			note.textContent = "Disabled in the demo";
+			note.textContent = readOnlyReason();
 			actions.appendChild(note);
 		}
 	}

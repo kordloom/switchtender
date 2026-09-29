@@ -14,10 +14,14 @@ import (
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/template"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // DefaultInterval is how often the scheduler checks for due schedules when none is configured.
 const DefaultInterval = 15 * time.Second
+
+// maxFailure bounds the bytes of a failed fire's reason a schedule keeps.
+const maxFailure = 1000
 
 // Submitter fires a schedule's target. The dispatcher satisfies it.
 type Submitter interface {
@@ -248,15 +252,17 @@ func (s *Scheduler) tick(now time.Time) {
 		}
 
 		runID, err := s.fire(s.ctx, sc)
+		failure := ""
 		if err != nil {
 			s.log.Error("schedule: fire: "+err.Error(), zap.String("schedule_id", sc.ID))
+			failure = util.Clip(err.Error(), maxFailure)
 		}
 		// Only what the fire owns is written back. sc came from the List above, so it is a snapshot
 		// taken before the run and writing it whole reverted anything an operator changed meanwhile:
 		// a disable came back enabled, an edit was rolled back, and a delete was re-inserted as a
 		// live schedule that kept firing. NextRunAt is deliberately not written either, because
 		// ClaimDue already advanced it and rewriting it here is what reverted an edited cron.
-		if err := s.store.RecordFire(s.ctx, sc.ID, now, runID); err != nil {
+		if err := s.store.RecordFire(s.ctx, sc.ID, now, runID, failure); err != nil {
 			s.log.Error("schedule: record fire: "+err.Error(), zap.String("schedule_id", sc.ID))
 		}
 	}

@@ -586,3 +586,42 @@ func TestDossierSurfacesTheCommittedOutcome(t *testing.T) {
 		t.Errorf("dossier does not surface the committed outcome as a decision:\n%s", string(doc))
 	}
 }
+
+// TestDossierSaysWhenNoActorWasRecorded pins the dossier's actor cells for an install with no tokens,
+// which records its decisions with no actor. The cells rendered empty, so the decision table read
+// "Approved | |" in the one document an auditor samples.
+func TestDossierSaysWhenNoActorWasRecorded(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	runs := run.NewMemStore()
+	audits := audit.NewMemStore()
+	id := "run_open1"
+	started := time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC)
+	if err := runs.Save(ctx, &run.Run{
+		ID: id, Playbook: "site.yml", Inventory: "hosts.ini", Status: run.StatusRejected,
+		CreatedAt: started,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := audits.Append(ctx, &audit.Entry{
+		ID: audit.NewID(), At: started, Method: audit.MethodDecision, Path: "/runs/" + id + "/decision/rejected",
+	}); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+	in, err := Collect(ctx, runs, audits, audit.Identity{}, id, started.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	doc, err := Render(in)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	html := string(doc)
+	if got := strings.Count(html, "<td>none recorded</td>"); got != 2 {
+		t.Errorf("dossier says none recorded %d time(s), want 2, once in the decisions and once in "+
+			"the entries", got)
+	}
+	if strings.Contains(html, "<td></td>") {
+		t.Error("dossier still renders an empty cell")
+	}
+}

@@ -83,10 +83,12 @@ async function loadOverview() {
 	try {
 		// Each half fails alone: one refused endpoint used to blank the whole dashboard, runs,
 		// fleet, and all, when the other half had answered fine.
+		// The chain verdict is read by admins only, so a session below admin does not ask. It used to
+		// ask anyway and draw nothing, leaving a 403 in the console of every operator's overview.
 		const [runsRes, fleetRes, chainRes] = await Promise.allSettled([
 			getJSON("/runs"),
 			getJSON("/fleet"),
-			getJSON("/audit/verify"),
+			roleAtLeast("admin") ? getJSON("/audit/verify") : Promise.resolve(null),
 		]);
 		if (runsRes.status === "rejected" && fleetRes.status === "rejected") {
 			throw runsRes.reason;

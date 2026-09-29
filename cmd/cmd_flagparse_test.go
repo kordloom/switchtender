@@ -571,9 +571,15 @@ func TestRandomHexIsTheRightLengthAndNotRepeated(t *testing.T) {
 // privilege escalation available to it.
 func TestSystemdUnitStartsTheServerItWasAskedFor(t *testing.T) {
 	t.Parallel()
-	unit := systemdUnit("/var/lib/switchtender/st.db", "127.0.0.1:8080", "/etc/switchtender.env",
-		"/opt/switchtender/bin/switchtender", "/var/lib/switchtender")
+	unit := systemdUnit(unitSpec{DB: "/var/lib/switchtender/st.db", Addr: "127.0.0.1:8080",
+		Config: "/etc/switchtender.env", Exe: "/opt/switchtender/bin/switchtender",
+		WorkDir: "/var/lib/switchtender", User: "switchtender", Group: "switchtender"})
 	wants := []string{
+		// Without these systemd runs the service as root, and every run without an execution image
+		// runs as the server's own account, so the whole fleet's local automation ran as root.
+		"User=switchtender",
+		"Group=switchtender",
+		"PrivateTmp=true",
 		"EnvironmentFile=/etc/switchtender.env",
 		// The binary is the one that generated the unit, not a guess at where it was installed.
 		// The hardcoded /usr/local/bin here failed 203/EXEC for every install the published script

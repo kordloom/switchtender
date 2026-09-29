@@ -32,7 +32,7 @@ Every authenticated change is one entry in a SHA-256 hash chain. Each entry comm
 | Method and path | The operation performed. |
 | Content digest | A hash of the change payload with secret fields redacted, so the record proves what a change contained, not only that a call was made, without exposing the secret. |
 | Time, sequence, link | When it happened and its tamper-evident position in the chain. |
-| Install | Which install wrote the entry, so a signed record cannot be presented as another install's history. Entries written before this existed carry no install and are unaffected. |
+| Install | Which install wrote the entry, so a signed record cannot be presented as another install's history. Entries written before this existed carry no install and are unaffected. So does an entry written by a process that could not load this install's key, which says so when it writes it. |
 
 The change register (`switchtender audit report --from --to`) renders these per change with the
 run's actor, the approval decision recorded over it, the risk grade, and the outcome. The run dossier
@@ -75,7 +75,7 @@ protected health information.
 | The record cannot be silently altered | The SHA-256 chain and its offline verification; a change that cannot be recorded is refused. |
 | The record can be examined | The change register and per-change dossier render as self-contained HTML a reviewer reads without tooling. |
 | The record is retained and its integrity demonstrable over a period | Scheduled evidence packs write a register per period to an archive, and an anchor fixes the chain in time so a lost tail is detectable. |
-| Access to the audit trail is itself controlled | Reading the trail is an admin-role operation. A run's evidence and its signed receipt need the operator role, and the actor who launched a run may read that run's own evidence. |
+| Access to the audit trail is itself controlled | Reading the trail is an admin-role operation. A run's evidence and its signed receipt are readable by an admin and by the actor who launched that run, and by no one else. |
 
 ## The boundary, stated plainly
 

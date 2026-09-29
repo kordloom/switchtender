@@ -51,7 +51,7 @@ func runAuditReceipt(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	store, err := openBundle(receiptDB)
+	store, err := openExisting(receiptDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
@@ -79,7 +79,7 @@ func runAuditReceipt(cmd *cobra.Command, args []string) error {
 		}
 		// The install identity binds the tree profile's leaves, so a tree anchor cannot be checked
 		// without it.
-		id, ierr := loadProducerIdentity(receiptDB)
+		id, ierr := loadProducerIdentity(cmd.Context(), store.Audits(), receiptDB)
 		if ierr != nil {
 			return ierr
 		}

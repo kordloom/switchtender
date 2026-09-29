@@ -268,6 +268,13 @@ func refreshSourceHandler(refresher SourceRefresher, sources invsource.Store, au
 			respondError(w, log, http.StatusNotFound, "source not found")
 			return
 		}
+		// A source this server refused to run is our own sentence about the stored path, with nothing
+		// from the plugin in it, so the person who pressed Refresh reads why. It used to be the same
+		// generic failure as a plugin's, and the reason appeared only after a reload.
+		if errors.Is(err, invsource.ErrInvalidSource) {
+			respondError(w, log, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
 		if err != nil {
 			// The refresh failure detail is recorded on the source as its LastError, which an admin
 			// reads back from the source, so the response stays generic and leaks no plugin internals.

@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/user"
 )
 
@@ -85,16 +88,13 @@ func readPassword() (string, error) {
 
 // runUserNew creates and stores an account.
 func runUserNew(cmd *cobra.Command, args []string) error {
-	bundle, err := openBundle(userDB)
+	bundle, err := openExisting(userDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer func() { _ = bundle.Close() }()
 	users := bundle.Users()
 
-	if err := recordCLI(cmd.Context(), bundle.Audits(), "/cli/user/create"); err != nil {
-		return err
-	}
 	if _, err := users.FindByUsername(cmd.Context(), args[0]); err == nil {
 		return fmt.Errorf("username %q already exists", args[0])
 	}
@@ -108,15 +108,42 @@ func runUserNew(cmd *cobra.Command, args []string) error {
 	}
 	// Made here rather than by a directory, so a directory identity of the same name cannot later be handed this account.
 	u.Source = "local"
+	// Recorded once the account exists in memory and before it is saved, so the entry commits to
+	// which account was made and with what role. It used to be recorded before any of that was
+	// known, and the chain showed that an account was created without saying which.
+	if err := recordUserChange(cmd.Context(), bundle.Audits(), "/cli/user/create",
+		userChange{ID: u.ID, Username: u.Username, Role: string(u.Role)}); err != nil {
+		return err
+	}
 	if err := users.Save(cmd.Context(), u); err != nil {
 		return fmt.Errorf("save user: %w", err)
 	}
 	return printJSON(map[string]string{"id": u.ID, "username": u.Username, "role": string(u.Role)})
 }
 
+// userChange is what an account entry's content digest commits to: which account was created or
+// deleted and its role, never its password.
+type userChange struct {
+	// ID is the account's id.
+	ID string `json:"id"`
+	// Username is the account's name, set when one is created.
+	Username string `json:"username,omitempty"`
+	// Role is the account's role, set when one is created.
+	Role string `json:"role,omitempty"`
+}
+
+// recordUserChange records an account change from the command line with its summary committed.
+func recordUserChange(ctx context.Context, audits audit.Store, path string, change userChange) error {
+	body, err := json.Marshal(change)
+	if err != nil {
+		return fmt.Errorf("encode the account change: %w", err)
+	}
+	return recordCLIChange(ctx, audits, userDB, path, body)
+}
+
 // runUserList prints all accounts without password material.
 func runUserList(cmd *cobra.Command, _ []string) error {
-	bundle, err := openBundle(userDB)
+	bundle, err := openExisting(userDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
@@ -131,13 +158,14 @@ func runUserList(cmd *cobra.Command, _ []string) error {
 
 // runUserDelete removes the account with the given id.
 func runUserDelete(cmd *cobra.Command, args []string) error {
-	bundle, err := openBundle(userDB)
+	bundle, err := openExisting(userDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer func() { _ = bundle.Close() }()
 
-	if err := recordCLI(cmd.Context(), bundle.Audits(), "/cli/user/delete"); err != nil {
+	if err := recordUserChange(cmd.Context(), bundle.Audits(), "/cli/user/delete",
+		userChange{ID: args[0]}); err != nil {
 		return err
 	}
 	if err := bundle.Users().Delete(cmd.Context(), args[0]); err != nil {

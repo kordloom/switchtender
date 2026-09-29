@@ -5,10 +5,10 @@
   </picture>
 </p>
 
-# Migrate off AWX, Semaphore, Rundeck, Jenkins, or cron
+# Migrate off AWX, Semaphore, Rundeck, Jenkins, Chef, Puppet, or cron
 
-SwitchTender imports an AWX, Semaphore, Rundeck, or Jenkins export, or a plain crontab, and creates
-the equivalent objects, so moving over is one command rather than a rebuild.
+SwitchTender imports an AWX, Semaphore, Rundeck, Jenkins, Chef, or Puppet export, or a plain crontab,
+and creates the equivalent objects, so moving over is one command rather than a rebuild.
 
 ## The migration summary
 
@@ -31,7 +31,10 @@ Two numbers are worth understanding before relying on them.
 
 **Needs a secret is not a limitation of the importer.** An export never carries secret values, from
 any of these systems, so a credential arrives as a named shell whoever wrote the tool. The count is
-how many secrets a person re-enters once.
+how many credentials need a secret set once before anything uses them. The plan says which of them
+held a secret in the source and which held none, such as an AWX machine credential that only names a
+user. A run refuses a credential with no secret and says which one, so the choice for the second kind
+is to set a secret or to detach the credential from the templates that use it.
 
 **Does not come across is itemized, never summarized.** Each entry names the object and the reason,
 because a count with no names cannot be acted on. Nothing is dropped without an entry: a test reads
@@ -103,6 +106,12 @@ only its name, and calls out anything that could not be mapped cleanly. Apply it
 looks right:
 
     switchtender import awx awx-export.json --db switchtender.db --apply
+
+Apply an export once. A second apply is refused before it writes anything when the install already
+holds a project, inventory, credential, inventory source, template, or schedule of the same name, and
+the refusal names each one. Importing again would create a second copy of each object, and a second
+copy of a schedule fires as well. To import a revised export, delete what the first one created, or
+import into a fresh database.
 
 Semaphore works the same way with `import semaphore`. The importer is proven against a real
 backup taken from a live current Semaphore release, unknown newer fields included, not only
@@ -244,7 +253,7 @@ has no supported road ahead, and the fleet needs to be somewhere else before tha
 Chef reads what the server stores about its nodes. Any of the three shapes the tooling emits works:
 an array of node documents, a single node, or an object keyed by node name.
 
-    knife node list | xargs -I{} knife node show {} -F json > chef-nodes.json
+    knife node list | xargs -I{} knife node show {} -l -F json > chef-nodes.json
     switchtender import chef chef-nodes.json --db switchtender.db
 
 Each node becomes a host. Its `chef_environment` becomes a group, and every `role[...]` in its run
@@ -254,20 +263,21 @@ attributes that identify a machine come across as host variables, and `ipaddress
 DNS in step. The rest of a node's automatic attributes are left out on purpose: they run to hundreds
 of keys per host, and copying them produces an inventory nobody can read.
 
-Puppet reads a PuppetDB query, or the plain certname list when PuppetDB is not reachable.
+Puppet reads PuppetDB queries, or the plain certname list when PuppetDB is not reachable. Export the
+nodes and their facts, put both in one document, and import it once:
 
     curl -s "$PUPPETDB/pdb/query/v4/nodes" > puppet-nodes.json
-    switchtender import puppet puppet-nodes.json --db switchtender.db
+    curl -s "$PUPPETDB/pdb/query/v4/facts" > puppet-facts.json
+    jq -s add puppet-nodes.json puppet-facts.json > puppet.json
+    switchtender import puppet puppet.json --db switchtender.db
 
 Nodes group by environment. Deactivated and expired nodes are left out and counted, because Puppet
 itself stopped managing them and a play targeting everything would otherwise reach for machines
-nothing owns. Export a facts query as well to carry addresses:
-
-    curl -s "$PUPPETDB/pdb/query/v4/facts" > puppet-facts.json
-    switchtender import puppet puppet-facts.json --db switchtender.db
-
-Without facts the hosts import as names with no address, and the preview says so rather than letting
-an inventory that reaches nothing look complete.
+nothing owns. The facts carry each host's address. The two go in one document because only the nodes
+query says which nodes are deactivated: facts imported alone bring those back, which the report says,
+and a second import of the same fleet is refused as a copy of the first. Without facts the hosts
+import as names with no address, and the preview says so rather than letting an inventory that
+reaches nothing look complete.
 
 ## Import a crontab
 
@@ -280,8 +290,10 @@ approved, recorded, and provable like any other run instead of running unseen on
 A crontab names no target host, so `--inventory` records which inventory the jobs belong to. It does
 not move where they run: each line imports as a shell step, and a shell step runs on the SwitchTender
 host, not on the machine the crontab came from. The report says so on every cron import. Change a step
-to Ansible when you want it to run against the inventory. When the name matches a stored inventory, the
-import wires the object by id; anything else is used as a path on the server and the report says which. Add `--system` to read
+to Ansible when you want it to run against the inventory. The name is kept on each schedule as a path on the
+server, since a schedule's own steps cannot name a stored inventory, and the report says so. To run a
+line against a stored inventory, make it a template that targets that inventory and schedule the
+template. Add `--system` to read
 `/etc/crontab` and the system tabs, which carry a user column the report calls out. Comments and
 environment lines are noted and skipped. As with the other imports, leave off `--apply` to preview
 the schedules first, then re-run with `--apply` to create them.
@@ -296,27 +308,28 @@ archive over that size imports from the CLI alone.
 
 | Source | Becomes |
 |--------|---------|
-| AWX git project | Project.|
+| AWX git project | Project, with its source control credential attached when that credential is an SSH key. A username and password credential is reported, since a project here syncs a private repository over SSH with a key.|
 | AWX inventory | Stored inventory, rendered as INI from its hosts and groups.|
 | AWX inventory source | Dynamic inventory source, plus the stored inventory it maintains, named `<source> (dynamic)`. A file source keeps its path; a cloud plugin source imports carrying the plugin name and is reported, since it needs a config file before it can refresh.|
-| AWX job template | Template, with job slicing becoming shard count.|
-| AWX survey | Template survey, field for field, with the field types translated. A password prompt is refused, not downgraded to plain text.|
+| AWX job template | Template, with job slicing becoming shard count. Privilege escalation arrives as `ansible_become: true` in its extra vars, which the report notes, since an extra var also outranks a play that sets `become: false`.|
+| AWX survey | Template survey, field for field, with the field types translated. A password prompt is refused, not downgraded to plain text. A survey switched off in AWX is not imported, since AWX never asks it.|
 | Semaphore survey | Template survey, field for field. A secret variable is refused, not downgraded to plain text: store its value as a credential.|
 | AWX schedule that stops | Refused and named. A rule with `COUNT` or `UNTIL` bounds itself, a cron entry never stops, and importing one would leave a job firing forever.|
 | AWX workflow job template | Workflow template carrying the graph, with each node's job template inlined as a step and the success and always edges becoming dependencies. Imported whole or reported and skipped, never partially.|
 | AWX job template schedule | Schedule, with the recurrence rule converted to cron and its timezone kept.|
 | AWX workflow schedule | Schedule on the imported workflow template, read from whichever place the export carried it. A workflow that was refused has no template to fire, so its schedules are named in the report as not imported rather than dropped silently.|
-| AWX credential | Credential shell with its kind mapped from its type and its configured inputs, secret omitted.|
+| AWX credential | Credential shell with its kind mapped from its type and its configured inputs, secret omitted. A become password beside the connection secret arrives as a second shell, attached wherever the first one is.|
 | AWX organization, team, or notification template | Counted in the report, not imported. The report names what to create by hand in their place.|
-| Semaphore repository | Project.|
-| Semaphore static inventory | Stored inventory.|
+| Semaphore repository | Project, cloned with its access key when that key is an SSH key. A login and password key is reported, since a project here clones a private repository over SSH with a key.|
+| Semaphore static inventory | Stored inventory, carrying its SSH key and become key, so every run against it has them.|
 | Semaphore inventory of any other type | Stored inventory holding whatever the export's inventory field carried, which for a file inventory is a path rather than hosts, and reported. Only static content travels in the export.|
-| Semaphore template | Template, with survey variables mapped.|
-| Semaphore key | Credential shell.|
+| Semaphore template | Template, with survey variables mapped and run by the tool Semaphore ran it with. A Bash, Python, or PowerShell template runs its script from the project checkout with its arguments. A Terraform or OpenTofu template imports as a plan, since a run here applies without asking, and the workspace its inventory picked is reported. A template for a tool with no equivalent here, such as Pulumi, is refused and named. Its vault keys arrive as vault passwords it unlocks.|
+| Semaphore key | Credential shell of the kind its use makes it: an SSH key, the login an inventory reaches its hosts with, a become password, or a vault password. A key of type none holds nothing and is not imported.|
 | Semaphore schedule | Schedule.|
 | Rundeck job | Template running the job's step sequence as one Bash script. The same job from a job export and from a project archive produces the same template.|
-| Rundeck option | Survey field. An enforced value list becomes a choice; a secure option is refused, not downgraded.|
-| Rundeck script step naming an interpreter | Kept when the interpreter is a shell. Anything else, a Python interpreter or a command such as `sudo -u deploy /bin/bash`, is refused and named: a template runs one Bash script, so the step body would not be run by what the job ran it with.|
+| Rundeck option | Survey field. An enforced value list becomes a choice; a secure option is refused, not downgraded. The script sets `RD_OPTION_<NAME>` from the answer, or the option's default, and `@option.name@` and `${option.name}` in a step read the same value. A name with a dash or a dot becomes a survey variable with an underscore in its place. An option's `regex` becomes the field's pattern, checked against the whole answer as Rundeck checks it.|
+| Rundeck script step naming an interpreter | Kept when the interpreter is a shell. Anything else, a Python interpreter or a command such as `sudo -u deploy /bin/bash`, is refused and named: a template runs one Bash script, so the step body would not be run by what the job ran it with. A script that names no interpreter is judged by its `#!` line the same way.|
+| Rundeck step arguments, error handler, retries, and notifications | Reported as left out. A script runs with no arguments, a failed step ends the job or is passed over when the job keeps going, a failed run is not retried, and the template's notifications are set by hand.|
 | Rundeck project archive `resources.source.N` | Reported, never imported. The archive carries the node source's configuration and no node definitions, so the report names the file path or the endpoint and you attach an inventory of your own.|
 | Rundeck project archive SCM configuration | Project, when it names a repository this can reach, carrying the repository and its branch. A `file:///` URL is refused and named, since it is a path on the Rundeck server. The export's path template, format, and committer identity have no equivalent and do not carry.|
 | Rundeck project archive ACL policy, webhook, execution, or report | Not imported. Access here comes from policies and grants, a webhook is a trigger created against this server, and the execution history is not a source of hosts.|
@@ -326,12 +339,12 @@ archive over that size imports from the CLI alone.
 | Jenkins freestyle job | Template running the job's shell steps as one Bash script, in order.|
 | Jenkins folder | Nothing of its own. Its jobs keep the folder in their names, so `platform/db-vacuum` stays that.|
 | Jenkins Pipeline job | Refused and named. Groovy has no mechanical translation into a template.|
-| Jenkins parameter | Survey field. A choice becomes a choice and a boolean a toggle; a password parameter is refused, not downgraded.|
-| Jenkins build trigger | One schedule per line, with `H` resolved to concrete times, the `@daily` family expanded, and Sunday renumbered from 7 to 0.|
+| Jenkins parameter | Survey field. A choice becomes a choice and a boolean a toggle; a password parameter is refused, not downgraded. The script sets the parameter under its own name from the answer, or its default, as Jenkins did.|
+| Jenkins build trigger | One schedule per line, with `H` resolved to concrete times, the `@daily` family expanded, and Sunday renumbered from 7 to 0. A `TZ=` line sets the timezone of every line after it, as in Jenkins.|
 | Jenkins poll trigger | Refused and named. It builds only on a change, so importing it as a schedule would run the job unconditionally.|
 | Jenkins build timeout | Template timeout, converted from minutes to seconds.|
 | Jenkins agent label | Reported, not imported. SwitchTender targets an inventory, so check the one you attached covers the same machines.|
-| Crontab job line | Schedule carrying its own one-step bash pipeline. No template is created.|
+| Crontab job line | Schedule carrying its own one-step bash pipeline. No template is created. The command runs as cron would run it: `\%` is a literal percent sign, and what follows the first unescaped `%` is fed to the command as its input.|
 | Crontab `@reboot` line | Refused and named. It has no time-based cadence to convert.|
 | Crontab comment or environment assignment | Skipped. A comment goes quietly; an environment line is named, since an imported schedule does not carry it.|
 | `/etc/crontab` user column | Reported, not imported. The schedule runs under the server's execution account, so confirm that is equivalent.|
@@ -352,8 +365,11 @@ import has none to re-enter and none to attach.
   failure edge, which runs work precisely because something failed, has no pipeline equivalent, and a
   node pointing at a job template the export does not carry has no work to do. A node that runs a
   nested workflow, a project or inventory sync, or a system job is refused the same way, since a step
-  runs a playbook, even when that object shares its name with a job template in the export. A partial
-  graph would keep the workflow's name and run a subset of it, which is worse than not importing it.
+  runs a playbook, even when that object shares its name with a job template in the export. So is a
+  workflow whose job templates come from more than one project, since a workflow template sources
+  every step from one, and a node that runs one node always and another only on success, since a
+  step here lets everything after it continue or nothing. A partial graph would keep the workflow's
+  name and run a subset of it, which is worse than not importing it.
 - A workflow with an approval node is reported and skipped, and the assessment names it in its
   governance section. Approval here is a policy that holds a whole run before it starts, not a step
   partway through, and an import writes no policies, so bringing the other nodes across would run

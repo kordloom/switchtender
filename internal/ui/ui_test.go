@@ -196,7 +196,7 @@ func TestLoginBrandedSSO(t *testing.T) {
 // disabled button, so a visitor sees the capability exists, and never a live sign-in link.
 func TestLoginDemoShowcase(t *testing.T) {
 	t.Parallel()
-	handler := ui.New(zap.NewNop(), nil, true, 0, false, false, false, "").Handler()
+	handler := ui.New(zap.NewNop(), nil, true, 0, false, false, false, "", ui.WithDemo(true)).Handler()
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ui/login", nil))
 	body := rec.Body.String()
@@ -208,5 +208,26 @@ func TestLoginDemoShowcase(t *testing.T) {
 	}
 	if strings.Contains(body, "/auth/oidc/login") || strings.Contains(body, "/auth/saml/login") {
 		t.Error("the demo login exposes a live SSO link with no provider configured")
+	}
+}
+
+// TestAReadOnlyInstallIsNotCalledTheDemo pins the pages of a server started with --read-only. It is
+// read-only and it is somebody's real install, and its pages told its users they were browsing the
+// public demo, with nothing an account would unlock and a reset every night.
+func TestAReadOnlyInstallIsNotCalledTheDemo(t *testing.T) {
+	t.Parallel()
+	handler := ui.New(zap.NewNop(), nil, true, 0, false, false, false, "").Handler()
+	for _, path := range []string{"/ui/login", "/ui/runs"} {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		body := rec.Body.String()
+		for _, demo := range []string{"This public demo", "sso-demo-note", `data-demo="true"`} {
+			if strings.Contains(body, demo) {
+				t.Errorf("%s on a read-only install carries the demo's %q", path, demo)
+			}
+		}
+		if path == "/ui/runs" && !strings.Contains(body, `data-readonly="true"`) {
+			t.Errorf("%s lost its read-only flag", path)
+		}
 	}
 }

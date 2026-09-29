@@ -54,9 +54,11 @@ run; static inventories import fully.
 
 ## What else can I migrate from?
 
-Five sources in all. AWX is the one above; the other four are:
+Seven sources in all. AWX is the one above; the other six are:
 
     switchtender import semaphore export.json
+    switchtender import chef chef-nodes.json
+    switchtender import puppet puppet.json
     switchtender import rundeck jobs.yaml --inventory prod
     switchtender import rundeck project-archive.zip --inventory prod
     switchtender import jenkins /var/jenkins_home --inventory prod
@@ -71,7 +73,9 @@ repository this can reach. Neither Rundeck artifact carries a node definition, s
 from either and `--inventory` answers for both. A crontab brings schedules alone, one per job line,
 and no template for them to fire, so each carries its own one-step bash pipeline. That step runs on
 the SwitchTender host, not on the machine the crontab came from, and the report says so on every
-cron import. Rundeck, Jenkins, and cron create no credentials at all. The table is in
+cron import. Chef and Puppet bring the fleet as a stored inventory, grouped by environment and, for
+Chef, by role, and nothing else. Rundeck, Jenkins, cron, Chef, and Puppet create no credentials at
+all. The table is in
 [what each source brings over](migration.md#what-each-source-brings-over).
 
 Jenkins has no single export file: point the importer at a `JENKINS_HOME`, at its `jobs` directory,
@@ -79,8 +83,8 @@ at one job's `config.xml`, or at a zip of a `JENKINS_HOME` or a `jobs` directory
 the directory holding its `config.xml`, so a zip whose only entry is a bare `config.xml` is refused
 with the reason rather than imported under a name it does not have. Only freestyle jobs import,
 since a Pipeline job is a Groovy program with no honest mechanical translation. The
-`/v1/import/{format}` endpoint and the Migrate page in the UI take awx, semaphore, rundeck, and
-jenkins; a crontab imports from the command line only. Both cap an upload at 25 MiB, so a Rundeck
+`/v1/import/{format}` endpoint and the Migrate page in the UI take awx, semaphore, chef, puppet,
+rundeck, and jenkins, and a crontab imports from the command line only. Both cap an upload at 25 MiB, so a Rundeck
 project archive from a busy project, which carries every execution log beside the definitions the
 importer reads, may need the command line.
 
@@ -249,16 +253,17 @@ want an ungranted object to be invisible instead.
 
 ## How mature is SwitchTender?
 
-Young, and worth saying plainly. AWX has years of production use, a large community, and a
-commercial edition behind it. Semaphore UI has an established user base. SwitchTender has neither,
-and if what you need most is a tool thousands of people have already hit the edges of, that is a
-real reason to choose one of them.
+New, and built so you can check its maturity instead of taking it on reputation. Before any
+release ships, it is deployed to a fresh Kubernetes cluster and proven against three real machines:
+a destructive change is held until a person approves it, the receipt is verified offline by a
+binary that never spoke to the cluster, the previous release upgrades in place and rolls back, and
+a worker is killed mid-run. [The supertest](supertest.md) lists every check.
 
-What offsets it is verifiability rather than reputation. The audit trail is hash-chained and
-signed, and a third party can verify a run offline with a separate open-source verifier, so the
-claims do not rest on trusting the vendor. The license converts to Apache 2.0 on a fixed schedule
-and the source is available now, so the project outliving the company is a documented path rather
-than a hope. The continuity and vendor risk pages set out what happens if this goes away.
+The audit trail is hash-chained and signed, and a third party can verify a run offline with a
+separate open-source verifier, so the claims do not rest on trusting the vendor. The license
+converts to Apache 2.0 on a fixed schedule and the source is available now, so the project
+outliving the company is a documented path rather than a hope. The [continuity](continuity.md) and
+[vendor risk](vendor-risk.md) pages cover the rest.
 
 ## What is the license?
 

@@ -398,6 +398,16 @@ function wireInventoryForm() {
 // shape needs a real parser and a wrong count is worse than an honest dash.
 function parseInventory(content) {
 	const text = String(content || "");
+	// A source stores what ansible-inventory --list prints, a JSON document. Read line by line as
+	// INI it became hosts named "{" and "\"db\":", a count of ten, and no groups, and an empty
+	// document counted one host.
+	if (text.trim().startsWith("{")) {
+		try {
+			return parseInventoryJSON(JSON.parse(text));
+		} catch {
+			return { format: "json", hosts: [], groups: [] };
+		}
+	}
 	if (/^\s*(---|all\s*:)/m.test(text)) return { format: "yaml", hosts: [], groups: [] };
 	const hosts = [];
 	const groups = [];
@@ -417,5 +427,24 @@ function parseInventory(content) {
 		if (host && !hosts.includes(host)) hosts.push(host);
 	}
 	return { format: "ini", hosts, groups };
+}
+
+// parseInventoryJSON reads the ansible-inventory --list shape: every host under _meta.hostvars,
+// each group under its own name with its hosts, and all and ungrouped as the implicit groups.
+function parseInventoryJSON(doc) {
+	const hosts = new Set();
+	const groups = [];
+	if (!doc || typeof doc !== "object" || Array.isArray(doc)) return { format: "json", hosts: [], groups };
+	const hostvars = doc._meta && doc._meta.hostvars;
+	if (hostvars && typeof hostvars === "object") {
+		for (const name of Object.keys(hostvars)) hosts.add(name);
+	}
+	for (const [name, group] of Object.entries(doc)) {
+		if (name === "_meta") continue;
+		if (name !== "all" && name !== "ungrouped") groups.push(name);
+		const members = Array.isArray(group) ? group : (group && Array.isArray(group.hosts) ? group.hosts : []);
+		for (const h of members) hosts.add(String(h));
+	}
+	return { format: "json", hosts: [...hosts], groups };
 }
 

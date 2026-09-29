@@ -82,8 +82,12 @@ type Schedule struct {
 	CreatedBy string `json:"created_by,omitempty"`
 	// LastRunAt is when the schedule last fired.
 	LastRunAt *time.Time `json:"last_run_at,omitempty"`
-	// LastRunID is the run created by the most recent fire.
+	// LastRunID is the run created by the most recent fire that created one.
 	LastRunID string `json:"last_run_id,omitempty"`
+	// LastError is why the most recent fire started no run, and is empty when it started one. A fire
+	// that failed used to move LastRunAt and nothing else, so a schedule that had not started a run
+	// in weeks looked exactly like one that ran on time.
+	LastError string `json:"last_error,omitempty"`
 }
 
 // Clone returns a deep copy so callers cannot mutate stored state through shared pointers.

@@ -10,15 +10,16 @@ can repeat it and get the same answers.
 ## The setup, deliberately hostile
 
 The agent is given the strongest credential the product will mint for one. Its human is an admin,
-so the token comes back carrying an admin role:
+and the token still comes back capped at operator, because an agent token never carries admin:
 
     switchtender user new alice --role admin
     switchtender token new --name claude-agent --user alice --agent
 
-    {"id":"tok_...","kind":"agent","name":"claude-agent","role":"admin","user":"alice"}
+    {"id":"tok_...","kind":"agent","name":"claude-agent","role":"operator","user":"alice"}
 
-If the agent cap were only a role check, an admin-role agent token would walk through it. The
-gate is one policy, pinned to a file so the API refuses policy writes even from an admin:
+The cap keeps the agent out of identity, access, secrets, and approvals. What it may launch is the
+gate's to decide, and the gate is one policy, pinned to a file so the API refuses policy writes even
+from an admin:
 
     policies:
       - name: agent-work-needs-a-person
@@ -43,7 +44,7 @@ not the ceiling of the paid one.
 | Delete the policy | 403 |
 | List credentials | 200, metadata only, see below |
 | Retry the held run to reach execution | 409, only split runs can retry shards |
-| Rerun the held run | 403 |
+| Rerun the held run | 409, run has not finished |
 | Relaunch failed shards | 409, run has not finished |
 | Submit with `actor_type: human` and `actor: alice` | 400, unknown field |
 | Rewrite the spec while held, by PATCH, PUT, and POST | 403 on all three |

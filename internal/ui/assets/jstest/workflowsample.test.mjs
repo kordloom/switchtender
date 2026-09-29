@@ -71,3 +71,35 @@ test("naming the graph does not by itself clear the sample guard", async () => {
 		"a renamed but otherwise untouched sample was allowed to run");
 	net.assertClean();
 });
+
+// TestSavingTheSampleIsRefused pins Save as template to the guard Run already has. The untouched
+// example saved as a launchable template, and the page said a schedule could fire it.
+test("saving the untouched sample as a template is refused, and posts nothing", async () => {
+	const { app, document, net } = mountWorkflows();
+	app.mountWorkflow();
+	await app.saveWorkflowTemplate();
+	assert.match(document.getElementById("status").textContent, /sample pipeline, not yours/i,
+		"saving the sample was not refused");
+	assert.equal(net.calls.filter((c) => c.url.includes("/templates")).length, 0,
+		"the sample was sent to the server as a template");
+});
+
+// TestSavingTwiceUpdatesTheSameTemplate pins that a second press does not make a duplicate. Each
+// save created another template of the same name.
+test("saving twice updates the template the first save made", async () => {
+	const page = loadPage("workflows", {
+		parts: ALL_PARTS,
+		routes: [
+			[/^\/v1\/templates\/tpl_1$/, reply({ id: "tpl_1", name: "release" })],
+			[/^\/v1\/templates$/, reply({ id: "tpl_1", name: "release" }, { status: 201 })],
+		],
+	});
+	page.app.mountWorkflow();
+	page.app.wfState.nodes[0].command = "infra/my-own-network";
+	await page.app.saveWorkflowTemplate();
+	await page.app.saveWorkflowTemplate();
+	const writes = page.net.calls.filter((c) => c.url.includes("/templates")).map((c) => c.method + " " + c.url);
+	assert.deepEqual(writes, ["POST /v1/templates", "PUT /v1/templates/tpl_1"],
+		"a second save created another template rather than updating the first");
+	assert.match(page.document.getElementById("status").textContent, /^Updated/);
+});

@@ -61,6 +61,8 @@ type Governance struct {
 type CredentialUse struct {
 	// ID is the credential's id in the plan.
 	ID string `json:"id"`
+	// Name is the credential's name, which is what a reader recognizes it by.
+	Name string `json:"name"`
 	// Templates is how many templates use it.
 	Templates int `json:"templates"`
 }
@@ -100,7 +102,9 @@ func (p *Plan) Assess() Assessment {
 
 	for id, n := range credUse {
 		if n > 1 {
-			g.SharedCredentials = append(g.SharedCredentials, CredentialUse{ID: id, Templates: n})
+			g.SharedCredentials = append(g.SharedCredentials, CredentialUse{
+				ID: id, Name: p.credentialName(id), Templates: n,
+			})
 		}
 	}
 	sort.Slice(g.SharedCredentials, func(i, j int) bool {

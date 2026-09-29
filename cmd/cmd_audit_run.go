@@ -46,7 +46,7 @@ func init() {
 
 // runAuditRunDossier collects one run's evidence and writes the rendered dossier.
 func runAuditRunDossier(cmd *cobra.Command, args []string) error {
-	store, err := openBundle(dossierDB)
+	store, err := openExisting(dossierDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
@@ -54,7 +54,7 @@ func runAuditRunDossier(cmd *cobra.Command, args []string) error {
 
 	// The install identity binds the tree profile's leaves, so a tree anchor cannot be checked
 	// without it.
-	id, err := loadProducerIdentity(dossierDB)
+	id, err := loadProducerIdentity(cmd.Context(), store.Audits(), dossierDB)
 	if err != nil {
 		return err
 	}

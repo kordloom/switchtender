@@ -14,7 +14,9 @@
 	var ready = false;
 
 	// pad right-justifies a label column so the verdict lines read like the command line's.
-	function pad(s) { return (s + "           ").slice(0, 11); }
+	// pad widens a row label to width, so every value starts in one column. The width comes from the
+	// longest label on the page, since a fixed one ran "timestamped" into its value.
+	function pad(s, width) { while (s.length < width) s += " "; return s; }
 
 	// esc escapes text for safe insertion, since a bundle is untrusted input.
 	function esc(s) {
@@ -42,7 +44,10 @@
 		var cls = ok ? (soft ? "part" : "ok") : "no";
 		var word = ok ? (riders ? "INTACT, WITH AN UNVERIFIABLE RIDER"
 			: (unpinned ? "INTACT, BUT UNIDENTIFIED" : "VERIFIED")) : "NOT VERIFIED";
-		var html = '<div class="verdict ' + cls + '">' + word + "   " + esc(report.level || "") + "</div>";
+		// The level names what a passing bundle achieved. On a failure it is "not verified", which
+		// only repeated the verdict beside it, so it is shown for a pass alone.
+		var level = ok && report.level ? "   " + esc(report.level) : "";
+		var html = '<div class="verdict ' + cls + '">' + word + level + "</div>";
 		if (riders) {
 			html += '<p class="unpinned">This receipt carries ' + (report.head_attestors || []).length +
 				' counter-signature(s). SwitchTender never adds them, so somebody attached these after ' +
@@ -65,8 +70,15 @@
 			rows.push(["pin", "matches the fingerprint you pinned, so this is that install's key"]);
 		} else if (report.fingerprint_match === false) {
 			rows.push(["pin", "DOES NOT match the fingerprint you pinned"]);
-		} else {
+		} else if (pinned) {
+			// The verifier compares the pin only once the signature holds, so a bundle that failed
+			// before that carries no comparison. Reading that as NONE told a visitor who had pinned a
+			// fingerprint that they had not.
+			rows.push(["pin", "not compared, because verification stopped before it reached the key"]);
+		} else if (ok) {
 			rows.push(["pin", "NONE, so this says the bundle was signed, not who signed it"]);
+		} else {
+			rows.push(["pin", "NONE"]);
 		}
 		if (report.chain_present) {
 			rows.push(["chain", (report.chain_profile || "") + ", " + (report.chain_mode || "") +
@@ -94,7 +106,8 @@
 		}
 		(report.problems || []).forEach(function (p) { rows.push(["problem", p]); });
 
-		var body = rows.map(function (r) { return esc(pad(r[0])) + esc(String(r[1])); }).join("\n");
+		var width = rows.reduce(function (w, r) { return Math.max(w, r[0].length); }, 0) + 2;
+		var body = rows.map(function (r) { return esc(pad(r[0], width)) + esc(String(r[1])); }).join("\n");
 		html += "<pre><code>" + body + "</code></pre>";
 		html += '<details><summary>Full report</summary><pre><code>' +
 			esc(JSON.stringify(report, null, 2)) + "</code></pre></details>";

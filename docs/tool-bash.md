@@ -20,9 +20,17 @@ parses the script and reports syntax errors without executing it.
 ## How values reach the script
 
 - Extra vars, including survey answers and template vars, arrive as `SWITCHTENDER_VARS`, a JSON object.
-  Read a value with `jq`:
+- Each var whose name a shell variable can hold and whose value is a string, a number, or a boolean
+  also arrives on its own as `SWITCHTENDER_VAR_<name>`, so one answer needs no JSON parser:
 
-        region=$(printf '%s' "$SWITCHTENDER_VARS" | jq -r .region)
+        region=${SWITCHTENDER_VAR_region:-us-east-1}
+
+  Read a list or an object from the JSON with `jq`, which the container image carries and a host
+  needs installed:
+
+        zones=$(printf '%s' "$SWITCHTENDER_VARS" | jq -r '.zones | join(",")')
+
+  The prefix keeps an answer from ever setting `PATH` or any other variable the shell runs by.
 
 - An `env` credential's `KEY=VALUE` lines are set in the environment directly.
 - A `token` credential is set as `SWITCHTENDER_TOKEN`.
@@ -32,7 +40,7 @@ parses the script and reports syntax errors without executing it.
 ## Example
 
     set -euo pipefail
-    region=$(printf '%s' "$SWITCHTENDER_VARS" | jq -r '.region // "us-east-1"')
+    region=${SWITCHTENDER_VAR_region:-us-east-1}
     echo "Draining $region"
     kubectl --context "$region" drain node-1 --ignore-daemonsets
 

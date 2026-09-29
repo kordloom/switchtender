@@ -1,16 +1,20 @@
 package cmd
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
+	osuser "os/user"
 	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/kordloom/switchtender/internal/user"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // init flag values.
@@ -83,31 +87,40 @@ func runInit(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("generate salt: %w", err)
 		}
 	}
-	var err error
-	password := os.Getenv("SWITCHTENDER_ADMIN_PASSWORD")
-	generated := password == ""
-	if generated {
-		if password, err = randomHex(12); err != nil {
-			return fmt.Errorf("generate password: %w", err)
-		}
-	}
-
 	bundle, err := openBundle(initDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer func() { _ = bundle.Close() }()
-	admin, err := user.New(initAdmin, password, user.RoleAdmin)
+
+	// A rerun finds the admin account the first run made. Creating it again failed on the unique
+	// username, so init could not be rerun at all: not with --force to regenerate a systemd unit,
+	// which is what the flag is for, and not after deleting the config to start over with new keys,
+	// which is what its help says to do. The account is left as it is, password included.
+	adminExists, err := accountExists(cmd.Context(), bundle.Users(), initAdmin)
 	if err != nil {
-		return fmt.Errorf("build admin: %w", err)
-	}
-	// The first administrator is local, and is exactly the account a misconfigured username claim would otherwise be handed.
-	admin.Source = "local"
-	if err := recordCLI(cmd.Context(), bundle.Audits(), "/cli/init/admin"); err != nil {
 		return err
 	}
-	if err := bundle.Users().Save(cmd.Context(), admin); err != nil {
-		return fmt.Errorf("save admin: %w", err)
+	password := os.Getenv("SWITCHTENDER_ADMIN_PASSWORD")
+	generated := password == "" && !adminExists
+	if generated {
+		if password, err = randomHex(12); err != nil {
+			return fmt.Errorf("generate password: %w", err)
+		}
+	}
+	if !adminExists {
+		admin, err := user.New(initAdmin, password, user.RoleAdmin)
+		if err != nil {
+			return fmt.Errorf("build admin: %w", err)
+		}
+		// The first administrator is local, and is exactly the account a misconfigured username claim would otherwise be handed.
+		admin.Source = "local"
+		if err := recordCLI(cmd.Context(), bundle.Audits(), initDB, "/cli/init/admin"); err != nil {
+			return err
+		}
+		if err := bundle.Users().Save(cmd.Context(), admin); err != nil {
+			return fmt.Errorf("save admin: %w", err)
+		}
 	}
 
 	env := "SWITCHTENDER_ENCRYPTION_KEY=" + key + "\nSWITCHTENDER_ENCRYPTION_SALT=" + salt + "\n"
@@ -128,9 +141,17 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			return fmt.Errorf("resolve this binary's path for the unit: %w", err)
 		}
-		unit := systemdUnit(dbPath, initAddr, cfgPath, exe, filepath.Dir(dbPath))
+		account, group, err := unitAccount()
+		if err != nil {
+			return err
+		}
+		unit := systemdUnit(unitSpec{DB: dbPath, Addr: initAddr, Config: cfgPath, Exe: exe,
+			WorkDir: filepath.Dir(dbPath), User: account, Group: group})
 		if err := os.WriteFile(initSystemd, []byte(unit), 0o644); err != nil {
 			return fmt.Errorf("write systemd unit: %w", err)
+		}
+		if account == "root" {
+			fmt.Fprintln(os.Stderr, rootUnitNote)
 		}
 	}
 
@@ -139,8 +160,25 @@ func runInit(cmd *cobra.Command, _ []string) error {
 			"sealed under them still open. Delete that file first if you meant to start over.\n",
 			initConfig)
 	}
+	if adminExists {
+		fmt.Fprintf(os.Stderr, "The admin account %q already exists, so it was left as it is, password "+
+			"included.\n", initAdmin)
+	}
 	printInitSummary(generated, password)
 	return nil
+}
+
+// accountExists reports whether the store already holds an account with the given username.
+func accountExists(ctx context.Context, users user.Store, username string) (bool, error) {
+	_, err := users.FindByUsername(ctx, username)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, user.ErrNotFound):
+		return false, nil
+	default:
+		return false, fmt.Errorf("look up the admin account: %w", err)
+	}
 }
 
 // initConfigValues are the secrets an existing config file already holds.
@@ -184,8 +222,36 @@ func randomHex(n int) (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// rootUnitNote is what init says when it writes a unit as root, since that unit then runs the
+// server, and every run it executes, as root.
+const rootUnitNote = `Note: init ran as root, so the unit runs the server as root, and every run it
+executes runs as root too. To keep runs off root, create an account for it and run init as that
+account instead:
+  sudo useradd --system --create-home --home-dir /var/lib/switchtender switchtender
+  sudo -u switchtender -H switchtender init --db /var/lib/switchtender/switchtender.db \
+    --config /var/lib/switchtender/switchtender.env \
+    --systemd /var/lib/switchtender/switchtender.service`
+
+// unitSpec is what a generated systemd unit starts, and as which account.
+type unitSpec struct {
+	// DB is the database the server opens, as an absolute path.
+	DB string
+	// Addr is the address the server listens on.
+	Addr string
+	// Config is the environment file holding the encryption key and salt, as an absolute path.
+	Config string
+	// Exe is the binary the unit runs, as an absolute path.
+	Exe string
+	// WorkDir is the directory the service runs in.
+	WorkDir string
+	// User is the account the service runs as.
+	User string
+	// Group is the group the service runs as.
+	Group string
+}
+
 // systemdUnit renders a systemd service that starts the server with the config file's secrets and
-// the given database and address.
+// the given database and address, as the account that owns them.
 //
 // Every path here is absolute and every one of them was a defect. ExecStart hardcoded
 // /usr/local/bin/switchtender, which the published install script does not use when that directory
@@ -194,7 +260,12 @@ func randomHex(n int) (string, error) {
 // resolved somewhere the operator never chose. Both together produced the worst version: a service
 // that started against a database that did not exist, created it, and stood up a new empty chain
 // with no admin account and authentication off, in place of the one the operator had just set up.
-func systemdUnit(db, addr, configPath, exePath, workDir string) string {
+//
+// The account is named for the same reason. A system unit without User= runs as root, and a run with
+// no execution image runs as the server's own account, so every Bash, Python, and local Ansible run
+// the server executed ran as root, and the server wrote root-owned files into the directory init had
+// just set up as somebody else.
+func systemdUnit(u unitSpec) string {
 	return fmt.Sprintf(`[Unit]
 Description=SwitchTender
 After=network-online.target
@@ -202,15 +273,32 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+User=%s
+Group=%s
 EnvironmentFile=%s
 WorkingDirectory=%s
 ExecStart=%s serve --db %s --addr %s
 Restart=on-failure
 NoNewPrivileges=true
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target
-`, configPath, workDir, exePath, db, addr)
+`, u.User, u.Group, u.Config, u.WorkDir, u.Exe, u.DB, u.Addr)
+}
+
+// unitAccount returns the account and group running init, which own every file init writes and so
+// are the ones the generated unit runs as.
+func unitAccount() (name, group string, err error) {
+	u, err := osuser.Current()
+	if err != nil {
+		return "", "", fmt.Errorf("resolve the account running init: %w", err)
+	}
+	g, err := osuser.LookupGroupId(u.Gid)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve the group of %s: %w", u.Username, err)
+	}
+	return u.Username, g.Name, nil
 }
 
 // printInitSummary writes the setup result and the next steps to stderr, keeping stdout clean. The
@@ -231,6 +319,17 @@ func printInitSummary(generated bool, password string) {
 		return
 	}
 	fmt.Fprintln(os.Stderr, "\nStart the server:")
-	fmt.Fprintln(os.Stderr, "  set -a; . ./"+initConfig+"; set +a")
-	fmt.Fprintln(os.Stderr, "  switchtender serve --db "+initDB+" --addr "+initAddr)
+	fmt.Fprintln(os.Stderr, "  set -a; . "+util.ShellQuote(sourceablePath(initConfig))+"; set +a")
+	fmt.Fprintln(os.Stderr, "  switchtender serve --db "+util.ShellQuote(initDB)+" --addr "+initAddr)
+}
+
+// sourceablePath returns a path the shell's dot command reads as a file rather than searching PATH
+// for. A bare name needs ./ in front of it. A path that already holds a slash does not, and an
+// absolute one given ./ became .//etc/switchtender.env, which exists nowhere, so the printed start
+// command failed and the server it started had no encryption key.
+func sourceablePath(p string) string {
+	if strings.Contains(p, "/") {
+		return p
+	}
+	return "./" + p
 }

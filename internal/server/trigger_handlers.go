@@ -458,6 +458,13 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 			respondError(w, log, http.StatusForbidden, err.Error())
 			return
 		}
+		// The sender cannot fix a credential, but whoever reads its delivery log can, and "could not
+		// launch the template" sent them to the server log to find out which one and why.
+		if errors.Is(err, credential.ErrNoSecret) || errors.Is(err, credential.ErrUnreadable) {
+			log.Warn("server: fire trigger: " + err.Error())
+			respondError(w, log, http.StatusConflict, err.Error())
+			return
+		}
 		if err != nil {
 			log.Error("server: fire trigger: " + err.Error())
 			respondError(w, log, http.StatusBadGateway, "could not launch the template")

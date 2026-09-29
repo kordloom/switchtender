@@ -53,11 +53,11 @@ func (e *errStore) ClaimDue(ctx context.Context, id string, oldNext, newNext tim
 }
 
 // RecordFire returns the configured error, or records through the wrapped store.
-func (e *errStore) RecordFire(ctx context.Context, id string, at time.Time, runID string) error {
+func (e *errStore) RecordFire(ctx context.Context, id string, at time.Time, runID, failure string) error {
 	if e.recordErr != nil {
 		return e.recordErr
 	}
-	return e.Store.RecordFire(ctx, id, at, runID)
+	return e.Store.RecordFire(ctx, id, at, runID, failure)
 }
 
 // failingSubmitter refuses every submission, standing in for a dispatcher that cannot accept work.
@@ -458,6 +458,40 @@ func TestAFailedFireDoesNotRewriteTheLastRunRecord(t *testing.T) {
 	}
 	if got.NextRunAt == nil || !got.NextRunAt.After(time.Now()) {
 		t.Errorf("NextRunAt = %v, want the schedule advanced past the slot that failed", got.NextRunAt)
+	}
+}
+
+// TestAFailedFireSaysWhyOnTheSchedule pins where a fire's failure goes. It went to the server log and
+// nowhere else, so a schedule that had not started a run in weeks showed a fresh last-fire time and
+// looked healthy. The reason is kept on the schedule, and the next fire that starts a run clears it.
+func TestAFailedFireSaysWhyOnTheSchedule(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := NewMemStore()
+	if err := store.Save(ctx, dueSchedule("s1", "* * * * *")); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	NewScheduler(store, &failingSubmitter{}, zap.NewNop()).tick(time.Now())
+	got, err := store.Get(ctx, "s1")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.LastError != "dispatcher unavailable" {
+		t.Errorf("LastError = %q, want the reason the fire started no run", got.LastError)
+	}
+
+	due := time.Now().Add(-time.Minute)
+	got.NextRunAt = &due
+	if err := store.Update(ctx, got); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	NewScheduler(store, &countingKindSubmitter{}, zap.NewNop()).tick(time.Now())
+	if got, err = store.Get(ctx, "s1"); err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.LastError != "" || got.LastRunID != "run_counted" {
+		t.Errorf("after a fire that started a run: last_error=%q last_run_id=%q, want no error and "+
+			"run_counted", got.LastError, got.LastRunID)
 	}
 }
 

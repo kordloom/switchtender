@@ -7,7 +7,7 @@
 	<meta name="description" content="Give an AI agent one operator-bound token, hold every run at a human approval gate, and record each change in a fail-closed hash chain before it executes. Signed bundles verify offline, so what your agents did is evidence, not testimony.">
 	<link rel="canonical" href="https://switchtender.com/agents">
 	<meta property="og:title" content="AI agent change governance | SwitchTender">
-	<meta property="og:description" content="Your agents are changing production. Prove exactly what they did: one scoped token per agent, a human approval gate on every run, and a sealed audit chain an auditor verifies offline.">
+	<meta property="og:description" content="Your agents can propose anything. They can't approve anything: one capped token per agent, a human approval gate on every run, and a sealed audit chain an auditor verifies offline.">
 	<meta property="og:type" content="website">
 	<meta property="og:url" content="https://switchtender.com/agents">
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
@@ -18,7 +18,7 @@
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-	<link rel="stylesheet" href="/styles.css?v=35">
+	<link rel="stylesheet" href="/styles.css?v=37">
 	<noscript><style>.reveal{opacity:1 !important;transform:none !important}</style></noscript>
 </head>
 <body>
@@ -48,8 +48,8 @@
 	<main>
 		<section class="wrap gs-hero reveal">
 			<span class="eyebrow">AI agent change governance</span>
-			<h1>Your agents are changing production.<br><span class="grad">Prove exactly what they did.</span></h1>
-			<p class="lede">Auditors discount logs that can't prove their own integrity, and they're right to. A normal log is testimony: the operator's word for what happened. A sealed hash chain is evidence: anyone can recompute it, and a single altered byte breaks it. SwitchTender records what an agent changes before the change executes, holds it at a human gate, and signs the trail so a third party can check it without trusting your server.</p>
+			<h1>Your agents can propose anything.<br><span class="grad">They can't approve anything.</span></h1>
+			<p class="lede">An agent gets one credential, its SwitchTender token. It never sees an SSH key, a cloud login, or a vault password, and it can never approve a change, widen its own access, or manage identity or secrets. Everything it asks for goes through the same gate a person's request does. What it did is recorded before it happens, in a chain a third party can check without trusting your server.</p>
 			<div class="hero-cta">
 				<a class="btn big" href="/get-started">Get started</a>
 				<a class="ghost big" href="/docs/concepts#provable-audit">How the proof works</a>
@@ -59,17 +59,9 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>What governed agent changes look like</h2>
-				<p>Seven properties, each one testable against a running server. Together they turn agent activity into a record an auditor can rely on.</p>
+				<p>Seven properties, each one testable against a running server. The first three keep an agent inside the gate. The rest make what it did evidence an auditor can rely on.</p>
 			</div>
 			<div class="cards cards-3">
-				<article class="card reveal">
-					<h3>Fail-closed recording</h3>
-					<p>Every mutation is written into the audit chain before its handler runs. If the record cannot be written, the change is refused with a 503 instead of performed silently. There is no path where an agent changes something and nothing is written down.</p>
-				</article>
-				<article class="card reveal">
-					<h3>A receipt for every change</h3>
-					<p>Every mutation returns an <code>Audit-Receipt</code> header naming its sequence and hash. Keep them. A receipt later proves the chain still holds that exact entry at that exact position, so an omission is detectable by the party it happened to.</p>
-				</article>
 				<article class="card reveal">
 					<h3>One credential per agent</h3>
 					<p>Secrets are sealed on the server and decrypt only at execution, so an agent holds exactly one credential: its SwitchTender token. It never sees an SSH key, a cloud login, or a vault password. Revoking that one token shuts the door.</p>
@@ -79,16 +71,24 @@
 					<p>Policies can hold an agent's runs for a person, refuse them outright, or key on the operation's assessed risk, or on whether an agent or a person asked, and the approval itself is a chain entry committing a digest of the exact change released. The executor refuses a change that drifted after the decision, so what a person approved is provably what ran. Community holds one require-approval policy, and it can be narrowed, to a single tool for instance, rather than having to hold everything. The full engine is Team: scoping a rule to agents or to a named actor, refusing a run outright, keying on risk, and requiring that the approver not be the requester.</p>
 				</article>
 				<article class="card reveal">
-					<h3>Speaks MCP</h3>
+					<h3>MCP with no approve tool</h3>
 					<p>An agent runtime that speaks the Model Context Protocol connects straight to <code>switchtender mcp</code> with its agent token. It serves six MCP tools: list templates, propose a run, list recent runs, and read a run, its log, and its evidence. There is no approve tool and no way to widen its own reach. <code>--allow-adhoc</code> adds a seventh that lets the agent compose a run of its own rather than launch a template an operator wrote, and even that one goes through the same approval policy. Hand it an admin token, which an agent could use to release its own runs, and the command exits instead of starting. Serving on one anyway means typing <code>--allow-admin-token</code>, which exists for a local trial and prints a warning naming the risk at every start. The safe setting is the one you get without asking for it, so the same gated, chained, fail-closed request a person makes is the only thing an agent can make.</p>
-				</article>
-				<article class="card reveal">
-					<h3>Sealed offline verification</h3>
-					<p><code>switchtender audit bundle</code> emits the chain as a signed LoomSeal bundle. It verifies on a machine with no network and no SwitchTender install, against the key the server publishes at <code>/.well-known/loomseal.json</code>.</p>
 				</article>
 				<article class="card reveal">
 					<h3>Actor-level provenance</h3>
 					<p>Every entry names the actor behind it, whether it was a person or an agent (<code>actor_type</code>), and whose authority it used (<code>on_behalf_of</code>), all committed by the entry hash. The kind is declared when the token is minted, with <code>--agent</code>, rather than guessed from how a request looks, so an agent's changes stay attributable instead of blurring into a shared account. The <a href="https://demo.switchtender.com">live demo</a> seeds a deploy-bot service account whose API and scheduled runs, and the audit entries behind them, are on screen right now. It is a plain operator account rather than an <code>--agent</code> token, so what the demo shows is the actor named on every run and entry. The agent kind is what you add when you mint the token yourself.</p>
+				</article>
+				<article class="card reveal">
+					<h3>Fail-closed recording</h3>
+					<p>Every mutation is written into the audit chain before its handler runs. If the record cannot be written, the change is refused with a 503 instead of performed silently. There is no path where an agent changes something and nothing is written down.</p>
+				</article>
+				<article class="card reveal">
+					<h3>A receipt for every change</h3>
+					<p>Every mutation other than signing in or out returns an <code>Audit-Receipt</code> header naming its sequence and hash. Keep them. A receipt later proves the chain still holds that exact entry at that exact position, so an omission is detectable by the party it happened to.</p>
+				</article>
+				<article class="card reveal">
+					<h3>Sealed offline verification</h3>
+					<p><code>switchtender audit bundle</code> emits the chain as a signed LoomSeal bundle. It verifies on a machine with no network and no SwitchTender install, against the key the server publishes at <code>/.well-known/loomseal.json</code>.</p>
 				</article>
 			</div>
 		</section>
@@ -103,8 +103,9 @@
 					<li class="gs-step reveal">
 						<div class="gs-num">1</div>
 						<div class="gs-body">
-							<h3>Create the agent's operator account</h3>
-							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>switchtender user new deploy-agent --role operator --db switchtender.db</code></pre></div>
+							<h3>Pick the person the agent answers to</h3>
+							<p>The agent's token is bound to that person's account, so every entry it writes names who it acted for. Create the account if they have none. It asks for their password, or reads <code>SWITCHTENDER_PASSWORD</code> when there is no terminal. The agent never signs in: the token in the next step is its only credential.</p>
+							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>switchtender user new dev-lead --role operator --db switchtender.db</code></pre></div>
 						</div>
 					</li>
 					<li class="gs-step reveal">
@@ -112,7 +113,7 @@
 						<div class="gs-body">
 							<h3>Mint the agent token, the only credential the agent gets</h3>
 							<p><code>--agent</code> is not decoration. It caps the token at operator no matter what account it is bound to, and it marks every chain entry the token writes as <code>actor_type: agent</code>. Leave it off and you get an ordinary API token: the same entries record <code>actor_type: token</code>, indistinguishable from a person's script, and a rule scoped to agent runs never matches it. <code>--agent</code> requires <code>--user</code>, so the human the agent acts for is on the record. The TTL forces rotation, here monthly.</p>
-							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>switchtender token new --name deploy-agent --user deploy-agent --agent --ttl 720h --db switchtender.db</code></pre></div>
+							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>switchtender token new --name deploy-agent --user dev-lead --agent --ttl 720h --db switchtender.db</code></pre></div>
 						</div>
 					</li>
 					<li class="gs-step reveal">
@@ -141,7 +142,7 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>What the chain does not prove</h2>
-				<p>The chain proves the record was not altered. It does not prove that every change in your infrastructure went through SwitchTender. A person or a process holding its own SSH key can still change a host behind the controller's back, and no audit system can write down what it never saw. For agents, credential scoping is what closes that gap. An agent that holds only a SwitchTender token has no way around the controller, so for that actor, the recorded history and the actual history are the same thing.</p>
+				<p>The chain proves the record was not altered. It does not prove that every change in your infrastructure went through SwitchTender. A person or a process holding its own SSH key can still change a host behind the controller's back, and no audit system can write down what it never saw. For agents, credential scoping is what closes that gap. An agent that holds only a SwitchTender token has no way around the controller, so for that actor, the recorded history and the actual history are the same thing. For people, <a href="/docs/side-door">the side door</a> covers how standing keys go away and how a change made around the gate still turns up.</p>
 			</div>
 		</section>
 

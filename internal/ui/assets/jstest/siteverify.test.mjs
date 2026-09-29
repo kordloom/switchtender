@@ -26,7 +26,7 @@ const SCRIPT = new URL("../../../../site/verify/verify.js", import.meta.url).pat
 // mount parses the real verify page into a document, stubs the WebAssembly verifier with a canned
 // report, and runs the page's own script against it. Returns a function that drops a file and gives
 // back the rendered output element.
-async function mount(report) {
+async function mount(report, opts = {}) {
 	const document = createDocument();
 	const nodes = parseHTML(readFileSync(PAGE, "utf8"), document);
 	const html = nodes.find((n) => n.nodeType === 1 && n.tagName === "HTML");
@@ -42,7 +42,10 @@ async function mount(report) {
 		Go: function () { this.importObject = {}; this.run = () => {}; },
 		loomsealVerify: (bytes, pin) => {
 			calls.push(pin);
-			return JSON.stringify(pin === undefined ? report : { ...report, fingerprint_match: pin === "sha256:good" });
+			// The real verifier compares a pin only once the signature holds, so a report for a bundle
+			// that failed earlier carries no comparison even when a pin was given.
+			if (pin === undefined || opts.stopsBeforeKey) return JSON.stringify(report);
+			return JSON.stringify({ ...report, fingerprint_match: pin === "sha256:good" });
 		},
 		FileReader: class {
 			readAsArrayBuffer() { this.result = new Uint8Array([1, 2, 3]); this.onload(); }
@@ -185,4 +188,56 @@ test("a receipt with no riders says nothing about them", async () => {
 	assert.doesNotMatch(text, /RIDER|rider|attestors/,
 		"a receipt carrying no counter-signatures still mentioned them: " + text.slice(0, 200));
 	assert.match(text, /VERIFIED/, "a clean pinned receipt no longer reads as verified");
+});
+
+test("a pin that was given but never reached is not reported as no pin", async () => {
+	// The verifier stops at a failed signature before it compares the pin. The page rendered that
+	// as "pin NONE", which told a visitor who had pinned a fingerprint that they had not, and left
+	// them wondering whether the box had been read at all.
+	const failed = { ...SOUND, ok: false, signature_ok: false, level: "not verified",
+		problems: ["signature does not verify over the canonical bundle"] };
+	const page = await mount(failed, { stopsBeforeKey: true });
+	const text = page.drop("sha256:good").textContent;
+
+	assert.doesNotMatch(text, /pin\s+NONE/,
+		"a pinned run that stopped at the signature read as unpinned: " + text.slice(0, 240));
+	assert.match(text, /not compared/,
+		"the pin row does not say the pin was never compared: " + text.slice(0, 240));
+	assert.deepEqual(page.calls, ["sha256:good"],
+		"the fingerprint the visitor typed was not passed to the verifier");
+});
+
+test("a failed verdict does not repeat itself", async () => {
+	// A failure's level is "not verified", and printing it beside the verdict read "NOT VERIFIED
+	// not verified", which looks like a page that does not know what it is saying.
+	const page = await mount({ ok: false, level: "not verified", problems: ["parse: unexpected EOF"] });
+	const out = page.drop();
+	const verdict = out.querySelector(".verdict").textContent;
+
+	assert.doesNotMatch(verdict, /not verified/,
+		"the failed verdict repeats itself: " + verdict);
+	assert.doesNotMatch(out.textContent, /so this says the bundle was signed/,
+		"a file that did not verify was described as signed: " + out.textContent.slice(0, 240));
+});
+
+test("a passing verdict still names the level it reached", async () => {
+	const page = await mount(SOUND);
+	const verdict = page.drop("sha256:good").querySelector(".verdict").textContent;
+
+	assert.match(verdict, /VERIFIED\s+full/, "the level a sound bundle reached is gone: " + verdict);
+});
+
+test("every row label is set apart from its value", async () => {
+	// Labels were padded to a fixed eleven characters, so "timestamped", which is eleven long, ran
+	// straight into its value: "timestamped2026-09-29T02:53:28Z".
+	const page = await mount({
+		...SOUND,
+		anchor_attestations: ["2026-09-29T02:53:28Z by freetsa.org"],
+		head_attestors: ["sha256:aaaa"],
+	});
+	const text = page.drop("sha256:good").textContent;
+	for (const label of ["bundle", "signature", "pin", "chain", "timestamped", "rider", "attestors"]) {
+		assert.match(text, new RegExp("\\b" + label + " {2,}\\S"),
+			label + " is not followed by a gap before its value: " + text.slice(0, 400));
+	}
 });

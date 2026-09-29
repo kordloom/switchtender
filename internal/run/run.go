@@ -925,3 +925,7 @@ func NewClaimSecret() string {
 // to what a run receipt commits to. Labels already travel with the run, already filter, and already
 // appear in the evidence.
 const ChangeLabel = "change"
+
+// VarEnvPrefix prefixes the environment entry each scalar extra var arrives in for a script, beside
+// the JSON of them all in SWITCHTENDER_VARS.
+const VarEnvPrefix = "SWITCHTENDER_VAR_"

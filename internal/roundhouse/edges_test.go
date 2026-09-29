@@ -395,7 +395,7 @@ func TestVarsExtraAndVarsEnvBoundaries(t *testing.T) {
 	if got := varsExtra(Spec{ExtraVars: map[string]any{}}); got != nil {
 		t.Errorf("varsExtra with an empty map = %v, want nil", got)
 	}
-	want := []string{`SWITCHTENDER_VARS={"a":1,"b":"two"}`}
+	want := []string{`SWITCHTENDER_VARS={"a":1,"b":"two"}`, "SWITCHTENDER_VAR_a=1", "SWITCHTENDER_VAR_b=two"}
 	got := varsExtra(Spec{ExtraVars: map[string]any{"a": 1, "b": "two"}})
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("varsExtra mismatch (-want +got):\n%s", diff)
@@ -406,7 +406,7 @@ func TestVarsExtraAndVarsEnvBoundaries(t *testing.T) {
 	env := varsEnv([]string{"BASE=1", "SWITCHTENDER_VARS=stale"},
 		Spec{Env: []string{"TOKEN=x"}, ExtraVars: map[string]any{"k": "v"}})
 	wantEnv := []string{"BASE=1", "SWITCHTENDER_VARS=stale", "TOKEN=x",
-		`SWITCHTENDER_VARS={"k":"v"}`}
+		`SWITCHTENDER_VARS={"k":"v"}`, "SWITCHTENDER_VAR_k=v"}
 	if diff := cmp.Diff(wantEnv, env); diff != "" {
 		t.Errorf("varsEnv mismatch (-want +got):\n%s", diff)
 	}

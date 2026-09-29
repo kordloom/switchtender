@@ -128,6 +128,13 @@ func WithProducerIdentity(id *audit.Identity, version string) Option {
 	}
 }
 
+// WithProducerUnavailable records why this server has no signing identity, so a request for a
+// signed bundle is told the reason instead of that the export is not enabled. Empty means there is
+// nothing to explain.
+func WithProducerUnavailable(reason string) Option {
+	return func(srv *Server) { srv.producerProblem = reason }
+}
+
 // WithInventories enables the inventory endpoints backed by the given store.
 func WithInventories(store inventory.Store) Option {
 	return func(srv *Server) { srv.inventories = store }
@@ -176,6 +183,12 @@ func WithDocs(docs fs.FS) Option {
 // its visitors.
 func WithReadOnly(readOnly bool) Option {
 	return func(srv *Server) { srv.readOnly = readOnly }
+}
+
+// WithDemo marks the server as the public demo, whose pages speak as a showcase. It implies nothing
+// about what is allowed: WithReadOnly decides that.
+func WithDemo(demo bool) Option {
+	return func(srv *Server) { srv.demo = demo }
 }
 
 // WithShutdown gives the server the context that is canceled when the process begins draining. A
@@ -346,6 +359,8 @@ type Server struct {
 	// producer is the install's signing identity, published so a verifier can pin it. Nil when the
 	// install has none.
 	producer *audit.Identity
+	// producerProblem is why producer is nil, empty when there is nothing to explain.
+	producerProblem string
 	// productVersion stamps the trust document.
 	productVersion string
 	// invSources backs the dynamic inventory source endpoints when configured.
@@ -364,8 +379,10 @@ type Server struct {
 	strictGrants bool
 	// docs is the documentation tree rendered inside the UI, nil when not wired.
 	docs fs.FS
-	// readOnly rejects mutating requests when set, for a public demo.
+	// readOnly rejects mutating requests when set, for a public demo or any exposed install.
 	readOnly bool
+	// demo marks the public demo.
+	demo bool
 	// enforceAuth declares the install authenticates regardless of what the token and account
 	// tables hold, so the gate never serves open mode. Set for an install whose way in is SSO.
 	enforceAuth bool
@@ -422,7 +439,8 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 		oidcBrand = srv.oidc.Brand()
 	}
 	srv.web = ui.New(srv.log, srv.docs, srv.readOnly, srv.matrixCap, srv.oidc != nil, srv.saml != nil,
-		srv.ai != nil, oidcBrand, ui.WithAccountCheck(srv.anyAccount), ui.WithTokenCheck(srv.anyToken))
+		srv.ai != nil, oidcBrand, ui.WithAccountCheck(srv.anyAccount), ui.WithTokenCheck(srv.anyToken),
+		ui.WithDemo(srv.demo))
 	return srv
 }
 
@@ -457,6 +475,20 @@ func (s *Server) anyToken() bool {
 		return true
 	}
 	return n > 0
+}
+
+// demoLanding is where the read-only demo's bare address lands: the runs a rule is holding. The
+// gate is the product, so a visitor who types the address, or follows a link naming only the host,
+// starts at a change the gate stopped rather than at a dashboard any automation tool could show.
+const demoLanding = "/ui/runs?status=pending_approval"
+
+// landing returns where the bare address sends a visitor: the held runs on the read-only demo, and
+// the overview everywhere else.
+func (s *Server) landing() string {
+	if s.readOnly {
+		return demoLanding
+	}
+	return "/ui/"
 }
 
 // checkouts returns the reader for project checkouts, nil when this server has none. The syncer is
@@ -507,7 +539,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/workers", workersHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/audit", auditHandler(s.audits, s.log))
 	mux.Handle("GET /v1/audit/verify", auditVerifyHandler(s.audits, producer, s.log))
-	mux.Handle("GET /v1/audit/bundle", auditBundleHandler(s.audits, s.producer, s.productVersion, s.log))
+	mux.Handle("GET /v1/audit/bundle", auditBundleHandler(s.audits, s.producer, s.producerProblem,
+		s.productVersion, s.log))
 	mux.Handle("GET /v1/audit/register", auditRegisterHandler(s.store, s.audits, producer, s.log))
 	// Served unauthenticated: the beat feed exists so an outside watcher can see the chain is
 	// alive and whole, and that watcher has no account here.
@@ -554,7 +587,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /v1/schedules/{id}", deleteScheduleHandler(s.schedules, authz, s.log))
 	mux.Handle("/ui/", s.web.Handler())
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/ui/", http.StatusFound)
+		http.Redirect(w, r, s.landing(), http.StatusFound)
 	})
 	mux.Handle("POST /v1/auth/check", authCheckHandler())
 	mux.Handle("GET /v1/auth/me", authMeHandler(s.log))
@@ -660,7 +693,7 @@ func (s *Server) Handler() http.Handler {
 	handler = compress(handler)
 	if s.tokens != nil {
 		gate := &authGate{tokens: s.tokens, users: s.users, jwt: s.jwt, audits: s.audits, log: s.log,
-			authz: authz, alwaysEnforce: s.enforceAuth, tickets: tickets}
+			authz: authz, alwaysEnforce: s.enforceAuth, tickets: tickets, publicReads: s.readOnly}
 		handler = gate.wrap(handler)
 	}
 	if s.readOnly {
@@ -769,14 +802,21 @@ func relayGate(relayHandler, next http.Handler) http.Handler {
 	})
 }
 
-// readOnlyGate rejects every request that would change state, so a demo cannot be mutated. Reads
-// and the UI pass through.
+// readOnlyGate rejects every request that would change state, so a read-only server cannot be
+// mutated. Reads, the UI, and signing in and out pass through.
 func readOnlyGate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet, http.MethodHead, http.MethodOptions:
 			next.ServeHTTP(w, r)
 		default:
+			// Signing in changes nothing the install governs. Refusing it locked every account out of
+			// a read-only install, so the people it was exposed for could not read what their role
+			// allows, and the refusal told them the install was a demo.
+			if isSignIn(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			// An import preview is a read written as a POST, because an export is a body rather than
 			// a query. Refusing it on the method alone turned the migration page into a wall in the
 			// demo, which is where the most expensive question a visitor brings gets answered: does
@@ -789,7 +829,7 @@ func readOnlyGate(next http.Handler) http.Handler {
 			}
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusForbidden)
-			_, _ = w.Write([]byte(`{"error":"this is a read-only demo"}`))
+			_, _ = w.Write([]byte(`{"error":"this server is read-only"}`))
 		}
 	})
 }

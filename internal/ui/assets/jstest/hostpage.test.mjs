@@ -59,3 +59,43 @@ test("the host summary counts failures from the field the API actually returns",
 	assert.ok(text.includes("50%"),
 		"success rate should be 50%, not 100%; the card said: " + text);
 });
+
+// A fire that started no run used to leave the Last run cell reading "never", or linking an older run
+// as though it were the latest, while the reason sat in the server log.
+test("the last run cell says a fire did not run, why, and links the last run that did", () => {
+	const tests = [
+		// Test 0: A failed fire after an earlier run shows the reason and keeps the link.
+		{
+			In: { last_run_at: "2026-09-29T04:21:00Z", last_run_id: "run_prev",
+				last_error: "credential has no secret yet: \"Demo Credential\"" },
+			WantText: ["did not run", "credential has no secret yet", "Last run that started"],
+			WantHref: "/ui/runs/run_prev",
+		},
+		// Test 1: A failed first fire has no earlier run to link.
+		{
+			In: { last_run_at: "2026-09-29T04:21:00Z", last_error: "dispatcher unavailable" },
+			WantText: ["did not run", "dispatcher unavailable"],
+			WantHref: null,
+		},
+		// Test 2: A fire that started a run links it, and says nothing failed.
+		{
+			In: { last_run_at: "2026-09-29T04:21:00Z", last_run_id: "run_ok" },
+			WantText: [],
+			WantHref: "/ui/runs/run_ok",
+			WantNot: "did not run",
+		},
+		// Test 3: A schedule that never fired says so.
+		{ In: {}, WantText: ["never"], WantHref: null, WantNot: "did not run" },
+	];
+	for (const [i, tc] of tests.entries()) {
+		const cell = app.scheduleLastCell(tc.In);
+		for (const want of tc.WantText) {
+			assert.ok(cell.textContent.includes(want), "test " + i + ": " + cell.textContent);
+		}
+		if (tc.WantNot) {
+			assert.ok(!cell.textContent.includes(tc.WantNot), "test " + i + ": " + cell.textContent);
+		}
+		const link = cell.querySelector("a");
+		assert.equal(link ? link.getAttribute("href") : null, tc.WantHref, "test " + i);
+	}
+});

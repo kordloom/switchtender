@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -29,6 +30,9 @@ type puppetNode struct {
 	Deactivated string `json:"deactivated"`
 	// Expired is set when PuppetDB aged the node out.
 	Expired string `json:"expired"`
+	// fromNodesQuery is set for a node read from a nodes query, which is the only source that says
+	// whether a node is deactivated or expired.
+	fromNodesQuery bool
 }
 
 // puppetFact is one fact row from /pdb/query/v4/facts, which is how PuppetDB returns facts: one row
@@ -48,6 +52,17 @@ type puppetFact struct {
 // output of any custom fact somebody wrote. These identify a machine and let a play reach it.
 var puppetFacts = []string{"fqdn", "ipaddress", "osfamily", "operatingsystem",
 	"operatingsystemrelease", "kernel"}
+
+// puppetStructured maps the structured facts Puppet 8 reports to the flat names above, fact by fact.
+// Puppet 8 and OpenVox stop reporting the legacy flat facts by default, so a fleet exported from one
+// carried no fqdn and no ipaddress, and every host imported with no address while the report said
+// both had been carried. Reading the few fields needed out of the structured fact closes that, and
+// keeps the variables a play sees the same whichever version reported them.
+var puppetStructured = map[string]map[string][]string{
+	"networking": {"fqdn": {"fqdn"}, "ipaddress": {"ip"}},
+	"os": {"osfamily": {"family"}, "operatingsystem": {"name"},
+		"operatingsystemrelease": {"release", "full"}},
+}
 
 // FromPuppet maps a Puppet fleet into an inventory of the machines it manages.
 //
@@ -76,6 +91,14 @@ func FromPuppet(data []byte, now time.Time) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A facts query names every node it has facts for, and only a nodes query says which of them
+	// Puppet deactivated. Imported alone, the facts brought deactivated nodes back into the fleet
+	// with nothing said.
+	if len(facts) > 0 && !slices.ContainsFunc(nodes, func(n puppetNode) bool { return n.fromNodesQuery }) {
+		plan.warn("this document carries PuppetDB facts and no nodes query, so it cannot tell which " +
+			"nodes Puppet deactivated, and every node with facts was imported. Combine both queries " +
+			"into one document to leave those out: jq -s add puppet-nodes.json puppet-facts.json")
+	}
 	if len(nodes) == 0 {
 		return nil, fmt.Errorf("%w: no puppet nodes in this document", ErrNothingRecognized)
 	}
@@ -87,7 +110,7 @@ func FromPuppet(data []byte, now time.Time) (*Plan, error) {
 
 	var hosts []importHost
 	byGroup := map[string][]importHost{}
-	skipped := 0
+	skipped, noAddress := 0, 0
 	for _, n := range nodes {
 		if n.Deactivated != "" || n.Expired != "" {
 			// A deactivated node is not part of the fleet. Importing it would put a machine in the
@@ -109,6 +132,8 @@ func FromPuppet(data []byte, now time.Time) (*Plan, error) {
 		}
 		if ip, ok := vars["ipaddress"].(string); ok && ip != "" {
 			vars["ansible_host"] = ip
+		} else if len(facts) > 0 {
+			noAddress++
 		}
 		host := importHost{Name: name, Variables: vars}
 		hosts = append(hosts, host)
@@ -120,6 +145,11 @@ func FromPuppet(data []byte, now time.Time) (*Plan, error) {
 		if env = strings.TrimSpace(env); env != "" {
 			byGroup[env] = append(byGroup[env], host)
 		}
+	}
+	if noAddress > 0 {
+		plan.warn("%d host%s carried no ipaddress fact, legacy or structured, so Ansible reaches %s "+
+			"by certname. Add an address fact to the export, or set ansible_host on %s",
+			noAddress, plural(noAddress), itOrThem(noAddress), itOrThem(noAddress))
 	}
 	if skipped > 0 {
 		plan.warn("%d node%s deactivated or expired in PuppetDB %s not imported, since Puppet "+
@@ -188,10 +218,24 @@ func decodePuppet(data []byte) ([]puppetNode, map[string]map[string]any, error) 
 				}
 				facts[fact.Certname][fact.Name] = fact.Value
 			}
+			// A legacy fact wins where a node reports both, so this fills only what is missing.
+			for flat, path := range puppetStructured[fact.Name] {
+				value := digFact(fact.Value, path...)
+				if value == nil {
+					continue
+				}
+				if facts[fact.Certname] == nil {
+					facts[fact.Certname] = map[string]any{}
+				}
+				if _, have := facts[fact.Certname][flat]; !have {
+					facts[fact.Certname][flat] = value
+				}
+			}
 			continue
 		}
 		var node puppetNode
 		if json.Unmarshal(row, &node) == nil && node.Certname != "" {
+			node.fromNodesQuery = true
 			nodes = append(nodes, node)
 		}
 	}
@@ -207,6 +251,20 @@ func decodePuppet(data []byte) ([]puppetNode, map[string]map[string]any, error) 
 		}
 	}
 	return nodes, facts, nil
+}
+
+// digFact returns the value at path inside a structured fact, or nil when any step is missing.
+func digFact(value any, path ...string) any {
+	for _, key := range path {
+		m, ok := value.(map[string]any)
+		if !ok {
+			return nil
+		}
+		if value, ok = m[key]; !ok {
+			return nil
+		}
+	}
+	return value
 }
 
 // decodePuppetNodeList reads the certname per line that `puppet node list` prints, ignoring the

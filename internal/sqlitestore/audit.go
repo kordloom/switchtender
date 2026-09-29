@@ -380,3 +380,18 @@ func (s *auditStore) Anchors(ctx context.Context, seq int64) ([]*audit.Anchor, e
 
 // BindInstall sets the install every later append is stamped with.
 func (s *auditStore) BindInstall(installID string) { s.installID = installID }
+
+// BoundInstall returns the install id of the newest entry that carries one. It walks the sequence
+// index backward and stops at the first bound entry, which on a running install is the newest one.
+func (s *auditStore) BoundInstall(ctx context.Context) (string, error) {
+	const q = `SELECT install_id FROM audit_entries WHERE install_id <> '' ORDER BY seq DESC LIMIT 1`
+	var id string
+	err := s.db.QueryRowContext(ctx, q).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read the install the chain is bound to: %w", err)
+	}
+	return id, nil
+}

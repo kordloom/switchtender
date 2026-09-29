@@ -58,7 +58,7 @@ func (d *Dispatcher) validateCredentials(ctx context.Context, tool string, ids [
 			return fmt.Errorf("%w: %s", err, id)
 		}
 		if _, err := d.sealer.Open(c.Secret); err != nil {
-			return fmt.Errorf("decrypt credential %s: %w", id, err)
+			return unopenable(c, err)
 		}
 		if enforceTool && !ansible && credential.AnsibleOnly(c.Kind) {
 			return fmt.Errorf("%w: credential %s of kind %s applies only to the ansible tool, not %s",
@@ -66,6 +66,21 @@ func (d *Dispatcher) validateCredentials(ctx context.Context, tool string, ids [
 		}
 	}
 	return nil
+}
+
+// unopenable explains why a stored credential's secret did not open. A credential with no secret is
+// one nobody has set yet, which every imported credential is until someone does, and one that does
+// not open was sealed under a different key or salt, or was damaged. Both reached whoever launched as
+// a bare 500 with "sealed value too short" in the server log, so each error names the credential and
+// the fix.
+func unopenable(c *credential.Credential, err error) error {
+	if c.Secret == "" {
+		return fmt.Errorf("%w: %q. Set its secret on the Credentials page or with "+
+			"PUT /v1/credentials/%s, then launch again", credential.ErrNoSecret, c.Name, c.ID)
+	}
+	return fmt.Errorf("%w: %q (%v). It was sealed under a different SWITCHTENDER_ENCRYPTION_KEY or "+
+		"SWITCHTENDER_ENCRYPTION_SALT, or its stored value is damaged. Restore the key and salt it was "+
+		"sealed with, or set its secret again", credential.ErrUnreadable, c.Name, err)
 }
 
 // inventoryCredentialIDs returns the credentials the run's target inventory attaches, minus the
@@ -230,7 +245,11 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 			// inputs into every run's environment.
 			paths = paths[:len(paths)-1]
 			_ = os.Remove(f.Name())
-			spec.Env = append(spec.Env, credential.EnvLines(plain)...)
+			pairs, err := credential.EnvPairs(plain)
+			if err != nil {
+				return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
+			}
+			spec.Env = append(spec.Env, pairs...)
 		case credential.KindToken:
 			// A token is exposed as one environment variable; the temp file is not needed.
 			paths = paths[:len(paths)-1]
@@ -520,7 +539,7 @@ func (d *Dispatcher) openCredential(ctx context.Context, id string) (*credential
 	}
 	plain, err := d.sealer.Open(c.Secret)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("decrypt credential %s: %w", id, err)
+		return nil, "", nil, unopenable(c, err)
 	}
 	value, lease, err := secretsource.ResolveLeased(ctx, c.Source, plain)
 	if err != nil {

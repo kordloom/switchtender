@@ -398,6 +398,44 @@ function fmtSeconds(s) {
 	return fmtMs((s || 0) * 1000);
 }
 
+// scheduleLastCell renders what a schedule's most recent fire did. A fire that started no run left
+// this cell reading "never", or pointing at an older run, while the reason sat in the server log, so a
+// schedule that had not run in weeks looked the same as one that ran on time. The reason is shown in
+// the cell rather than only in a tip, because it is the thing to act on.
+function scheduleLastCell(s) {
+	const last = document.createElement("td");
+	if (s.last_error) {
+		const chip = document.createElement("span");
+		chip.className = "chip failed";
+		chip.textContent = "did not run";
+		const when = fmtTime(s.last_run_at);
+		chip.dataset.tip = when ? "The fire at " + when + " started no run" : "The last fire started no run";
+		last.appendChild(chip);
+		const why = document.createElement("div");
+		why.className = "schedule-why";
+		why.textContent = s.last_error;
+		last.appendChild(why);
+		if (s.last_run_id) {
+			const prev = document.createElement("a");
+			prev.className = "schedule-why";
+			prev.href = "/ui/runs/" + s.last_run_id;
+			prev.textContent = "Last run that started";
+			last.appendChild(prev);
+		}
+		return last;
+	}
+	if (s.last_run_id) {
+		const link = document.createElement("a");
+		link.href = "/ui/runs/" + s.last_run_id;
+		link.textContent = fmtTime(s.last_run_at) || "view run";
+		last.appendChild(link);
+		return last;
+	}
+	last.className = "muted";
+	last.textContent = "never";
+	return last;
+}
+
 // loadSchedules populates the schedules table.
 async function loadSchedules() {
 	try {
@@ -454,17 +492,7 @@ async function loadSchedules() {
 			if (!fmtTime(s.next_run_at)) next.className = "muted";
 			tr.appendChild(next);
 
-			const last = document.createElement("td");
-			if (s.last_run_id) {
-				const link = document.createElement("a");
-				link.href = "/ui/runs/" + s.last_run_id;
-				link.textContent = fmtTime(s.last_run_at) || "view run";
-				last.appendChild(link);
-			} else {
-				last.className = "muted";
-				last.textContent = "never";
-			}
-			tr.appendChild(last);
+			tr.appendChild(scheduleLastCell(s));
 
 			const actions = document.createElement("td");
 			const del = document.createElement("button");

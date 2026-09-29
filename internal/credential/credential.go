@@ -78,12 +78,20 @@ var (
 	ErrNotFound = errors.New("credential not found")
 	// ErrBadKind is returned when a credential kind is not recognized.
 	ErrBadKind = errors.New("unknown credential kind")
+	// ErrEnvLine is returned when an env credential holds a line that is not KEY=VALUE.
+	ErrEnvLine = errors.New("an env credential holds a line that would reach the run as nothing")
 	// ErrBadField is returned when a typed credential is missing a required field.
 	ErrBadField = errors.New("credential missing required field")
 	// ErrBadSetting is returned when a credential setting has an invalid key or value.
 	ErrBadSetting = errors.New("invalid credential setting")
 	// ErrNoKey is returned when encryption is attempted without an encryption key configured.
 	ErrNoKey = errors.New("no encryption key: set SWITCHTENDER_ENCRYPTION_KEY")
+	// ErrNoSecret is returned when a run needs a credential whose secret was never set, which every
+	// imported credential is until someone sets it.
+	ErrNoSecret = errors.New("credential has no secret yet")
+	// ErrUnreadable is returned when a credential's sealed secret does not open under the configured
+	// encryption key and salt, which is what changing either after it was sealed does.
+	ErrUnreadable = errors.New("credential does not open with this server's encryption key")
 )
 
 // builtinKinds are the credential kinds SwitchTender ships with, in a stable display order. ValidKind
@@ -247,6 +255,28 @@ func RegistryLogin(secret string) (username, password string) {
 		return strings.TrimSpace(secret), ""
 	}
 	return strings.TrimSpace(username), password
+}
+
+// EnvPairs returns an env credential's KEY=VALUE lines, refusing one that holds a line of anything
+// else. EnvLines skips such a line, so a command source printing one bare value, which is what a
+// secret store's CLI prints by default, injected nothing, and the run went ahead without the secret
+// and without a word. The error names the line, never what is on it, since that is secret.
+func EnvPairs(secret string) ([]string, error) {
+	var out []string
+	n := 0
+	for line := range strings.SplitSeq(secret, "\n") {
+		n++
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if key, _, ok := strings.Cut(line, "="); !ok || strings.TrimSpace(key) == "" {
+			return nil, fmt.Errorf("%w: line %d is not KEY=VALUE. A single value belongs on a token "+
+				"credential, which reaches the run as %s", ErrEnvLine, n, TokenEnvVar)
+		}
+		out = append(out, line)
+	}
+	return out, nil
 }
 
 // EnvLines splits env credential material into KEY=VALUE entries, dropping blanks and comments.

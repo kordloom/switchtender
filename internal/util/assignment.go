@@ -9,8 +9,12 @@ import (
 // classifier decides whether it is secret, and the value is either a quoted run (spaces allowed, up to
 // the closing quote) or an unquoted run up to the next whitespace, which is exactly what the INI form
 // permits: several host variables share one line, so an unquoted value cannot contain a space.
+//
+// A backslash escapes the next character inside a quoted run, so a quote escaped inside a value does
+// not end it. Ending there left the rest of a password holding a quote out of the masker's list, and
+// the password printed in the run log.
 var iniAssignment = regexp.MustCompile(
-	`(?i)([a-z0-9_][a-z0-9_.\-]*)\s*=\s*("[^"\n]*"|'[^'\n]*'|[^\s]+)`)
+	`(?i)([a-z0-9_][a-z0-9_.\-]*)\s*=\s*("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|[^\s]+)`)
 
 // yamlAssignment matches one name: value line in text that did not parse as a document. The value runs
 // to the end of the line rather than to the next space, because a YAML scalar needs no quotes to
@@ -44,6 +48,9 @@ type Assignment struct {
 	Name string
 	// Value is what it was assigned, without surrounding quotes.
 	Value string
+	// Raw is the value as written, quotes and escapes included, for a reader that decodes it the way
+	// the consuming program does.
+	Raw string
 }
 
 // RedactAssignments replaces the value of every secret-looking assignment in text with mask, and
@@ -75,7 +82,8 @@ func RedactAssignments(text, mask string) (string, []Assignment) {
 		scheme := m[:strings.Index(m, "://")+3]
 		userinfo := m[len(scheme) : len(m)-1]
 		if i := strings.IndexByte(userinfo, ':'); i >= 0 && userinfo[i+1:] != "" {
-			found = append(found, Assignment{Name: "url_userinfo", Value: userinfo[i+1:]})
+			found = append(found, Assignment{Name: "url_userinfo", Value: userinfo[i+1:],
+				Raw: userinfo[i+1:]})
 		}
 		return scheme + mask + "@"
 	})
@@ -120,7 +128,7 @@ func redactPatternDepth(pattern *regexp.Regexp, text, mask string, found *[]Assi
 			// neither anything to mask nor anything to report.
 		case SecretKey(name):
 			out.WriteString(mask)
-			*found = append(*found, Assignment{Name: name, Value: Unquote(value)})
+			*found = append(*found, Assignment{Name: name, Value: Unquote(value), Raw: value})
 		case depth > 0 && (strings.IndexByte(value, '=') >= 0 || strings.IndexByte(value, ':') >= 0):
 			// The value may be a secret joined onto this one, like a=psql;password=x or a yaml line
 			// note: ... ansible_ssh_pass: x, so it can hold either separator. Scan it once, spending a

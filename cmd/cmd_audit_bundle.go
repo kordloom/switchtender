@@ -58,7 +58,7 @@ func init() {
 
 // runAuditBundle reads the chain, assembles it into a bundle, signs it, and writes it out.
 func runAuditBundle(cmd *cobra.Command, _ []string) error {
-	store, err := openBundle(bundleDB)
+	store, err := openExisting(bundleDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
@@ -81,7 +81,7 @@ func runAuditBundle(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	id, err := audit.LoadIdentityForStore(bundleDB, dir)
+	id, err := identityForChain(cmd.Context(), store.Audits(), bundleDB, dir)
 	if err != nil {
 		return err
 	}

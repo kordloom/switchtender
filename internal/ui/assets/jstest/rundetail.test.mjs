@@ -83,13 +83,14 @@ test("a split parent reconciles its matrix from a fresh shard read when the stre
 
 // mountForLog loads the detail parts against the real detail template and drives the real entry
 // point, loadSingle, so the test exercises the wiring rather than the helper it calls.
-function mountForLog(logBody, ok = true) {
+function mountForLog(logBody, ok = true, logSeq) {
 	const app = loadParts(["01-boot.js", "20-held-copy-stream.js", "22-run-detail.js"]);
 	const document = mountPage(app, "detail", { vars: { RunID: "run_1", MatrixCap: 20000 } });
 	app.loadAllEvents = () => Promise.resolve([]);
 	app.renderDetail = () => {};
 	app.setStatus = () => {};
-	app.fetchAuthed = () => Promise.resolve({ ok, text: () => Promise.resolve(logBody) });
+	const headers = { get: (name) => (name === "Switchtender-Log-Seq" && logSeq != null ? String(logSeq) : null) };
+	app.fetchAuthed = () => Promise.resolve({ ok, headers, text: () => Promise.resolve(logBody) });
 	return { app, document };
 }
 
@@ -130,14 +131,25 @@ test("only the tail of a long log is loaded, so the pane cannot be flooded", asy
 	assert.match(shown, /LAST LINE/, "the tail is the part worth keeping");
 });
 
-test("a run still going is left to the live stream rather than loaded from storage", async () => {
-	const { app, document } = mountForLog("stored output that should not appear\n");
-	let opened = false;
-	app.openStream = () => { opened = true; return Promise.resolve(); };
+// TestLiveRunShowsWhatItAlreadyPrinted pins the join between the stored log and the live stream.
+//
+// The stream opened with no log cursor starts at the log's current end, so a run's first lines were
+// lost to anyone who opened its page after they were written, and a short run that finished before
+// the stream connected showed no output at all. The page reads what is stored, then streams from
+// the exact point that read ended, so every line appears once.
+test("a live run shows what it already printed and streams from where that ends", async () => {
+	const { app, document } = mountForLog("TASK [Gather facts]\n", true, 42);
+	let opened = null;
+	app.openStream = (id, after, logAfter) => { opened = { id, after, logAfter }; return Promise.resolve(); };
 	await app.loadSingle({ id: "run_1", status: "running" });
 	assert.ok(opened, "a live run should open its stream");
-	assert.equal(document.getElementById("log-panel").hidden, true,
-		"a live run's pane is filled by the stream, not by a stored copy");
+	assert.equal(opened.logAfter, 42,
+		"the stream did not resume from where the stored read ended, so lines are lost or repeated");
+	assert.equal(document.getElementById("log-panel").hidden, false,
+		"what the run printed before the page arrived is not shown");
+	assert.match(document.getElementById("log").textContent, /Gather facts/);
+	assert.match(document.querySelector("#log-panel h2").textContent, /^Live output/,
+		"a live run's pane is not labeled live");
 });
 
 // TestFailureReasonIsShown pins that a run which never started says why on the page.

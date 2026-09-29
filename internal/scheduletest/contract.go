@@ -248,7 +248,7 @@ func testRecordFire(t *testing.T, store schedule.Store) {
 
 	// A fire touches only the firing schedule. Without this, a cross-row write such as a stray
 	// "OR 1=1" or a loop over every schedule compiles and passes every other assertion here.
-	if err := store.RecordFire(ctx, "sch_a", fired, "run_second"); err != nil {
+	if err := store.RecordFire(ctx, "sch_a", fired, "run_second", ""); err != nil {
 		t.Fatalf("RecordFire() error = %v", err)
 	}
 	other, err := store.Get(ctx, "sch_b")
@@ -276,8 +276,9 @@ func testRecordFire(t *testing.T, store schedule.Store) {
 			got.Enabled, got.NextRunAt, got.Playbook)
 	}
 
-	// A fire that created no run keeps the run id already stored.
-	if err := store.RecordFire(ctx, "sch_a", fired.Add(time.Hour), ""); err != nil {
+	// A fire that created no run keeps the run id already stored and says why it created none.
+	const why = "credential has no secret yet: \"deploy-key\""
+	if err := store.RecordFire(ctx, "sch_a", fired.Add(time.Hour), "", why); err != nil {
 		t.Fatalf("RecordFire(no run) error = %v", err)
 	}
 	if got, err = store.Get(ctx, "sch_a"); err != nil {
@@ -286,12 +287,31 @@ func testRecordFire(t *testing.T, store schedule.Store) {
 	if got.LastRunID != "run_second" {
 		t.Errorf("LastRunID = %q, want the previous run id kept when a fire created none", got.LastRunID)
 	}
+	if got.LastError != why {
+		t.Errorf("LastError = %q, want the reason the fire started no run", got.LastError)
+	}
+	if other, err = store.Get(ctx, "sch_b"); err != nil || other.LastError != "" {
+		t.Errorf("a failed fire on one schedule wrote its reason to another: %q (err %v)",
+			other.LastError, err)
+	}
+
+	// A fire that starts a run clears the reason the one before it failed.
+	if err := store.RecordFire(ctx, "sch_a", fired.Add(2*time.Hour), "run_third", ""); err != nil {
+		t.Fatalf("RecordFire(after a failure) error = %v", err)
+	}
+	if got, err = store.Get(ctx, "sch_a"); err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.LastRunID != "run_third" || got.LastError != "" {
+		t.Errorf("after a fire that started a run: last_run_id=%q last_error=%q, want run_third and "+
+			"no error", got.LastRunID, got.LastError)
+	}
 
 	// The case this method exists for.
 	if err := store.Delete(ctx, "sch_a"); err != nil {
 		t.Fatalf("Delete() error = %v", err)
 	}
-	if err := store.RecordFire(ctx, "sch_a", fired, "run_third"); err != nil {
+	if err := store.RecordFire(ctx, "sch_a", fired, "run_fourth", ""); err != nil {
 		t.Errorf("RecordFire() on a deleted schedule error = %v, want nil; the record is a note "+
 			"about a run that already happened", err)
 	}
@@ -345,11 +365,11 @@ func testMissingAndZero(t *testing.T, store schedule.Store) {
 		Want: schedule.ErrNotFound,
 	}, { // Test 6: RecordFire names a row that is not there.
 		Name: "record fire missing",
-		Call: func(s schedule.Store) error { return s.RecordFire(ctx, "nope", time.Now(), "run_1") },
+		Call: func(s schedule.Store) error { return s.RecordFire(ctx, "nope", time.Now(), "run_1", "") },
 		Want: nil,
 	}, { // Test 7: RecordFire with a zero-value id, time, and run id.
 		Name: "record fire zero values",
-		Call: func(s schedule.Store) error { return s.RecordFire(ctx, "", time.Time{}, "") },
+		Call: func(s schedule.Store) error { return s.RecordFire(ctx, "", time.Time{}, "", "") },
 		Want: nil,
 	}}
 

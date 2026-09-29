@@ -60,12 +60,12 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart" class="active">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart" class="active">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
 			<h1 id="quickstart">Quickstart</h1>
-<p>No install needed to look around. The <a href="https://demo.switchtender.com">live demo</a> is a seeded, read-only instance of exactly what you get.</p>
+<p>No install needed to look around. The <a href="https://demo.switchtender.com/ui/runs?status=pending_approval">live demo</a> is a seeded, read-only instance of exactly what you get.</p>
 <h2 id="requirements">Requirements</h2>
 <p>The tools your runs use, on the PATH: <code>ansible-playbook</code> and <code>ansible-inventory</code> for Ansible, and
 <code>terraform</code>, <code>tofu</code>, <code>python3</code>, <code>pwsh</code> (PowerShell 7), or <code>go</code> for the rest. Bash runs use the
@@ -76,7 +76,8 @@ already carries Ansible, Python, Terraform, and OpenTofu.</p>
 <h2 id="install">Install</h2>
 <pre><code>curl -fsSL https://switchtender.com/install.sh | sh
 </code></pre>
-<p>The script downloads the release binary for your platform, checks it against the published
+<p>On a host with <code>wget</code> and no <code>curl</code>, <code>wget -qO- https://switchtender.com/install.sh | sh</code> does the
+same. The script downloads the release binary for your platform, checks it against the published
 checksums, and installs it. It writes to <code>/usr/local/bin</code> when it can and to <code>~/.local/bin</code>
 otherwise, which is what happens on a stock Mac and on any Linux install without root. That second
 directory is often not on PATH, so the script says so and prints its closing commands with the full
@@ -84,12 +85,13 @@ path; add the line it gives you to run <code>switchtender</code> by name. Runnin
 yourself, or want to hack on it? <code>go build -o switchtender .</code> from a clone produces the same
 binary; the commands below assume it is on your PATH, so prefix a locally built binary with <code>./</code>.</p>
 <h2 id="run-the-server">Run the server</h2>
-<pre><code>SWITCHTENDER_ENCRYPTION_KEY=change-me SWITCHTENDER_ENCRYPTION_SALT=change-me-too \
-  switchtender serve --addr :8080 --db switchtender.db
+<pre><code>export SWITCHTENDER_ENCRYPTION_KEY=$(openssl rand -hex 32)
+export SWITCHTENDER_ENCRYPTION_SALT=$(openssl rand -hex 16)
+switchtender serve --addr :8080 --db switchtender.db
 </code></pre>
-<p>The key and salt together seal stored credentials at rest with argon2id and AES-256-GCM. Without
-both the server still runs, but credential features stay off. Keep the salt stable across restarts
-or existing credentials cannot be decrypted.</p>
+<p>The key and salt together seal stored credentials at rest with argon2id and AES-256-GCM. Keep both
+with your other secrets: a server started with a different pair cannot open the credentials sealed
+under this one. Without them the server still runs, but credential features stay off.</p>
 <p>The first start on an empty database mints an initial admin token and prints it once, so the API
 is authenticated from the first request. Export it for the commands below:</p>
 <pre><code>export ST_TOKEN=&lt;the token serve printed&gt;
@@ -126,75 +128,126 @@ each host's measured duration in recent runs.</p>
 <p>Distributed execution is a Team feature, so every <code>switchtender worker</code> needs a license and refuses
 to start without one. Community runs everything on the server itself, which is the default and needs
 no extra process: this section is for when one machine is no longer enough.</p>
-<p>Point a worker at the same database and it competes for queued runs:</p>
-<pre><code>SWITCHTENDER_ENCRYPTION_KEY=change-me SWITCHTENDER_ENCRYPTION_SALT=change-me-too \
-  switchtender worker --db switchtender.db --name laptop
+<p>Point a worker at the same database, with the same key and salt set as the server's, and it
+competes for queued runs:</p>
+<pre><code>switchtender worker --db switchtender.db --name laptop
 </code></pre>
 <p>For more than one machine, use a PostgreSQL DSN as the <code>--db</code> value on every process.</p>
 <p>Queues are part of the same feature: naming one on a run, a template, or an inventory source routes
 it to a worker serving that name, so it is refused on Community rather than accepted and left with
 nothing able to claim it.</p>
 <h2 id="lock-down-the-api">Lock down the API</h2>
-<p>The initial admin token from the first start is yours to keep, but a shared install deserves named
-tokens so the audit trail says who did what. Mint one per person and per CI job:</p>
-<pre><code>switchtender token new --db switchtender.db --name ci
-</code></pre>
-<p>A loopback bind, or <code>--read-only</code>, serves without authentication instead, since neither exposes an
-unauthenticated API to the network.</p>
-<p>Create user accounts with roles for sign-in:</p>
+<p>The initial admin token from the first start is yours to keep, but a shared install deserves an
+account for each person and each CI job, with tokens bound to them, so the audit trail says who did
+what and each token carries only its account's role. Create the accounts:</p>
 <pre><code>SWITCHTENDER_PASSWORD=secret switchtender user new operator-jane --role operator --db switchtender.db
+SWITCHTENDER_PASSWORD=secret switchtender user new ci-deploy --role operator --db switchtender.db
 </code></pre>
+<p>Then mint a token for each, bound with <code>--user</code>:</p>
+<pre><code>switchtender token new --db switchtender.db --user ci-deploy --name ci
+</code></pre>
+<p>A token minted without <code>--user</code> is an admin token that names no account, like the initial one, so
+keep those few.</p>
+<p>A loopback bind, or <code>--read-only</code>, starts without minting an initial token: a loopback API is
+reachable only from this machine, and a read-only one changes nothing. On a loopback bind the API
+asks for a token from the moment the install holds any token or account.</p>
 <h2 id="run-with-docker">Run with Docker</h2>
 <p>The compose file lives in the repository, so this one needs a checkout rather than the installed
 binary:</p>
 <pre><code>git clone https://github.com/kordloom/switchtender
 cd switchtender
-export SWITCHTENDER_ENCRYPTION_KEY=change-me
-export SWITCHTENDER_ENCRYPTION_SALT=change-me-too
+export SWITCHTENDER_ENCRYPTION_KEY=$(openssl rand -hex 32)
+export SWITCHTENDER_ENCRYPTION_SALT=$(openssl rand -hex 16)
 docker compose --profile stack up --build
 </code></pre>
-<p>This starts a server and a PostgreSQL database. The server listens on port 8080. Set
-<code>SWITCHTENDER_PORT</code> to change the host port.</p>
-<p>Workers are a separate profile because they are Team: <code>docker compose --profile stack --profile workers up --build</code> adds one, and it needs a license to start.</p>
+<p>This starts one server on SQLite, with its database and its signing key in a volume, so both
+survive a restart and an upgrade. The server listens on port 8080. Set <code>SWITCHTENDER_PORT</code> to change
+the host port. With no terminal to show it on, the initial admin token is written to
+<code>/data/initial-admin-token</code> in the container, readable by the service user alone:</p>
+<pre><code>docker compose --profile stack exec server cat /data/initial-admin-token
+</code></pre>
+<p>On a Team license, the <code>team</code> profile runs PostgreSQL, a server, and a worker instead. Put the license
+at <code>./switchtender-license.json</code>, or name it with <code>SWITCHTENDER_LICENSE_FILE</code>, and give every process
+the same signing key, since processes that share one database sign as one install:</p>
+<pre><code>export SWITCHTENDER_AUDIT_KEY=$(openssl rand -hex 32)
+docker compose --profile team up --build
+</code></pre>
+<p>Keep that key where you can restore it, beside the encryption key and salt.</p>
 <h2 id="set-up-a-production-server">Set up a production server</h2>
 <p>For a real install, <code>init</code> generates the encryption key and salt, creates the first admin account, and
 writes a config file in one step. It can also write a systemd unit:</p>
-<pre><code>switchtender init --db switchtender.db --config switchtender.env --systemd switchtender.service
+<pre><code>sudo useradd --system --create-home --home-dir /var/lib/switchtender switchtender
+sudo -u switchtender -H switchtender init --db /var/lib/switchtender/switchtender.db \
+  --config /var/lib/switchtender/switchtender.env \
+  --systemd /var/lib/switchtender/switchtender.service
 </code></pre>
-<p>It prints the admin password once, so save it. Move the unit into place and start it:</p>
-<pre><code>sudo cp switchtender.service /etc/systemd/system/switchtender.service
+<p>The unit runs the server as the account that ran <code>init</code>, and every run the server executes without
+an execution image runs as that account too, which is why <code>init</code> runs here as an account made for
+the job rather than as you or as root. It prints the admin password once, so save it. Move the unit
+into place and start it:</p>
+<pre><code>sudo cp /var/lib/switchtender/switchtender.service /etc/systemd/system/switchtender.service
 sudo systemctl enable --now switchtender
 </code></pre>
-<p>Serve HTTPS directly, with no reverse proxy in front, by pointing the server at a certificate and key:</p>
-<pre><code>switchtender serve --db switchtender.db --tls-cert tls.crt --tls-key tls.key
+<p>The unit listens on loopback, which suits a reverse proxy on the same machine. To serve HTTPS
+directly with nothing in front, give it a certificate and key and listen on the network: add
+<code>--addr :8443 --tls-cert /path/to/tls.crt --tls-key /path/to/tls.key</code> to the unit's <code>ExecStart</code>
+line, then <code>sudo systemctl daemon-reload &amp;&amp; sudo systemctl restart switchtender</code>. Run by hand, the
+server reads the same key and salt from the file <code>init</code> wrote:</p>
+<pre><code>set -a; . /var/lib/switchtender/switchtender.env; set +a
+switchtender serve --db /var/lib/switchtender/switchtender.db --addr :8443 \
+  --tls-cert /path/to/tls.crt --tls-key /path/to/tls.key
 </code></pre>
 <h2 id="run-on-kubernetes">Run on Kubernetes</h2>
-<p>SwitchTender needs no operator. A Helm chart installs the server and a worker as ordinary pods sharing a
-database:</p>
-<p>The chart is in the repository too, so clone it first if you installed the binary alone:</p>
+<p>The Helm chart runs the server as an ordinary Deployment, with no operator. By default it is the
+Community shape: one server on SQLite, with the whole install on a persistent volume.</p>
+<p>The chart is in the repository, so clone it first if you installed the binary alone. Write the keys
+to a file before you install, so you keep them. The salt has to stay the same for the life of the
+install, because every stored credential is sealed against it, and a key or a salt generated afresh
+on an upgrade makes every stored secret unreadable:</p>
 <pre><code>git clone https://github.com/kordloom/switchtender
 cd switchtender
-helm install switchtender ./deploy/helm/switchtender \
-  --set encryptionKey=$(openssl rand -hex 32) \
-  --set encryptionSalt=$(openssl rand -hex 16)
+printf 'encryptionKey: &quot;%s&quot;\nencryptionSalt: &quot;%s&quot;\nauditKey: &quot;%s&quot;\n' \
+  &quot;$(openssl rand -hex 32)&quot; &quot;$(openssl rand -hex 16)&quot; &quot;$(openssl rand -hex 32)&quot; \
+  &gt; switchtender-secrets.yaml
+chmod 600 switchtender-secrets.yaml
+helm install switchtender ./deploy/helm/switchtender -f switchtender-secrets.yaml \
+  --set fullnameOverride=switchtender
 </code></pre>
-<p>Add <code>--set auditKey=$(openssl rand -hex 32)</code> too, a 32 byte ed25519 seed as hex, or that install
-cannot sign a receipt. A deployment that shares one database will not create a signing key by itself, because
-every server and worker has to sign as the same install, and a key minted inside one pod would be
-that pod's alone. Without it the chain still records and still verifies, but no receipt, signed
-bundle or trust document can be produced, which is most of why anyone runs this. Keep the seed where
-you can restore it.</p>
-<p>Both values are required, and the salt has to stay the same across upgrades: it is what every
-stored secret was sealed against, so a new salt makes the old ones unreadable. Keep them in a
-secret manager and pass <code>--set existingSecret=&lt;name&gt;</code> instead once you have one. The chart pulls
-<code>ghcr.io/kordloom/switchtender</code>.</p>
+<p>Keep that file in a secret manager, and pass the same <code>-f switchtender-secrets.yaml</code> to every
+<code>helm upgrade</code>. Or put the three values in a Secret of your own under <code>SWITCHTENDER_ENCRYPTION_KEY</code>,
+<code>SWITCHTENDER_ENCRYPTION_SALT</code>, and <code>SWITCHTENDER_AUDIT_KEY</code> and pass <code>--set existingSecret=&lt;name&gt;</code>.
+Copy the values across before you switch an install over: the chart keeps its own Secret rather than
+deleting it, but the pods read only the one you name.</p>
+<p><code>auditKey</code> is the install's signing seed. On SQLite the server mints one itself when it is empty,
+and setting it means you hold the copy to restore. On PostgreSQL it is required, since every server
+and worker has to sign as the same install and none of them mints the key.</p>
+<p><code>fullnameOverride</code> names the resources <code>switchtender</code> and <code>switchtender-server</code> rather than repeating
+the name. Set it on a new install only: renaming an existing install's resources orphans its data
+volume and its keys.</p>
+<p>The install prints how to reach the interface. With the default ClusterIP service:</p>
+<pre><code>kubectl port-forward svc/switchtender 8080:8080
+</code></pre>
+<p>The first server to start writes an initial admin token to <code>/data</code> in its pod, readable by the
+service user alone:</p>
+<pre><code>kubectl exec deploy/switchtender-server -- cat /data/initial-admin-token
+</code></pre>
+<p>Sign in with it, create named accounts and tokens, and delete it.</p>
+<p>On a Team license, point <code>database.dsn</code> at PostgreSQL to run more than one server, and set
+<code>worker.enabled=true</code> for dedicated workers. Pass the license with
+<code>--set-file license=switchtender-license.json</code>: <code>--set</code> parses commas and braces and changes it. The
+DSN reaches the pods from a Secret rather than as an argument, so the password is not in the pod
+spec.</p>
+<p><code>helm uninstall</code> leaves the data volume and the Secret holding the keys in place. Delete them
+yourself once you are sure. <code>extraEnv</code>, <code>extraEnvFrom</code>, <code>extraVolumes</code>, and <code>extraVolumeMounts</code>
+carry anything the chart has no key for, such as a secret source's token or a CA bundle.</p>
 <h2 id="try-the-demo">Try the demo</h2>
 <p>To look around without setting anything up, run the seeded demo. It fills a fresh database with
 sample projects, templates, inventories, and real runs, including a flaky host, a split, and a
 pipeline, then serves it read-only so it is safe to expose:</p>
 <pre><code>switchtender demo --addr :8080
 </code></pre>
-<p>Or with Docker, from a checkout: <code>docker compose --profile demo up --build</code>.</p>
+<p>Or with Docker, from a checkout: <code>docker compose --profile demo up --build</code>, which serves on port
+8081 so it can run beside the stack. <code>SWITCHTENDER_DEMO_PORT</code> moves it.</p>
 
 		</main>
 	</div>

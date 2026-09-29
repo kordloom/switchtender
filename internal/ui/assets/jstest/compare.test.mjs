@@ -4,6 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import { reply } from "./net.mjs";
 import { loadPage } from "./pages.mjs";
 
 // PARTS covers the compare page and the helpers it calls into.
@@ -75,4 +76,23 @@ test("runs from different sources carry the apples-to-apples warning", () => {
 	c.same_source = false;
 	app.renderCompare(c);
 	assert.ok(document.getElementById("compare-header").textContent.includes("different sources"));
+});
+
+// TestScriptRunsCompareWithoutAnError pins the comparison of two runs that have no hosts. A script
+// run records neither hosts nor tasks, the server sends both lists as null, and iterating null put
+// "c.hosts is not iterable" in front of the reader where a plain sentence belonged.
+test("two script runs compare without an error and say there is nothing per-host", async () => {
+	const doc = { ...comparison(), hosts: null, tasks: null };
+	const { app, document } = loadPage("compare", {
+		parts: PARTS, vars: { RunID: "run_new" },
+		routes: [[/^\/v1\/runs\/run_new\/compare/, reply(doc)]],
+	});
+	await app.loadCompare();
+
+	const status = document.getElementById("status");
+	assert.equal(status.hidden, false, "nothing told the reader why the page is empty");
+	assert.doesNotMatch(status.textContent, /not iterable|unavailable/,
+		"a script run's comparison failed: " + status.textContent);
+	assert.match(status.textContent, /no per-host or per-task results/);
+	assert.equal(document.getElementById("compare-hosts-section").hidden, true);
 });

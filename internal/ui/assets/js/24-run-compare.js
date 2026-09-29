@@ -83,14 +83,20 @@ function renderCompareHeader(c) {
 	}
 }
 
-// renderCompare fills the whole page from one comparison document.
+// renderCompare fills the whole page from one comparison document, and returns a sentence for the
+// status line when there is nothing per-host or per-task to show, or the empty string.
 function renderCompare(c) {
 	renderCompareHeader(c);
 	renderCompareSummary(c);
 
+	// A script run has no hosts and no tasks, and the server sends each list as null rather than
+	// empty. Iterating null threw, and the page showed "c.hosts is not iterable" where it should have
+	// said there was nothing per-host to compare.
+	const hostList = c.hosts || [];
+	const taskList = c.tasks || [];
 	const hosts = document.getElementById("compare-hosts");
 	hosts.innerHTML = "";
-	for (const h of c.hosts) {
+	for (const h of hostList) {
 		const row = document.createElement("tr");
 		const hostCell = document.createElement("td");
 		const hostLink = document.createElement("a");
@@ -112,11 +118,11 @@ function renderCompare(c) {
 		row.appendChild(td(String((h.a ? h.a.changed : 0)) + " / " + String(h.b ? h.b.changed : 0)));
 		hosts.appendChild(row);
 	}
-	document.getElementById("compare-hosts-section").hidden = c.hosts.length === 0;
+	document.getElementById("compare-hosts-section").hidden = hostList.length === 0;
 
 	const tasks = document.getElementById("compare-tasks");
 	tasks.innerHTML = "";
-	for (const tk of c.tasks) {
+	for (const tk of taskList) {
 		const row = document.createElement("tr");
 		row.appendChild(td(tk.task));
 		row.appendChild(td(compareSeconds(tk.a_seconds)));
@@ -133,7 +139,12 @@ function renderCompare(c) {
 		row.appendChild(delta);
 		tasks.appendChild(row);
 	}
-	document.getElementById("compare-tasks-section").hidden = c.tasks.length === 0;
+	document.getElementById("compare-tasks-section").hidden = taskList.length === 0;
+	if (hostList.length === 0 && taskList.length === 0) {
+		return "These runs record no per-host or per-task results to compare. A script run has " +
+			"neither, so compare the output of each run instead.";
+	}
+	return "";
 }
 
 // loadCompare fetches the comparison named by the page URL and renders it.
@@ -147,8 +158,9 @@ async function loadCompare() {
 		// The status line is hidden only once the render has finished. Hiding it first meant a
 		// comparison document the render choked on, a truncated body or one a proxy emptied, wrote
 		// the explanation into a line already hidden: the page went blank and said nothing at all.
-		renderCompare(c);
-		status.hidden = true;
+		const note = renderCompare(c);
+		status.textContent = note;
+		status.hidden = !note;
 	} catch (e) {
 		status.hidden = false;
 		// Only the server saying there is no baseline earns the picker. A truncated body, an HTML

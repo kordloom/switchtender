@@ -35,6 +35,11 @@ The macOS app inside the `.dmg` is signed with a Developer ID certificate issued
 `codesign -dv` names the same authority. The `.dmg` wrapper itself carries no signature, which is
 not what Gatekeeper judges: it assesses the app it contains.
 
+The macOS binary in the `tar.gz`, which the Homebrew cask installs, is not signed or notarized yet.
+The install script and a `curl` download run it as is. A copy downloaded through a browser, or
+installed by the cask, carries macOS's quarantine flag, and Gatekeeper can refuse to run it until the
+flag is cleared with `xattr -d com.apple.quarantine` on the binary.
+
 The Linux and Windows binaries in the tarballs and packages carry no code-signing certificate, so
 Windows shows the unidentified-developer prompt on first launch: choose More info, then Run anyway.
 Every archive is covered by the published `SHA256SUMS`, which CI signs with cosign, and

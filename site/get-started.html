@@ -18,7 +18,7 @@
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-	<link rel="stylesheet" href="/styles.css?v=35">
+	<link rel="stylesheet" href="/styles.css?v=37">
 	<!-- st:entity -->
 	<script type="application/ld+json">
 {
@@ -96,7 +96,7 @@
 		<section class="wrap gs-hero reveal">
 			<span class="eyebrow">Get started</span>
 			<h1>Running in <span class="grad">about a minute.</span></h1>
-			<p class="lede">One binary, one SQLite file. No Kubernetes, no Postgres, no Redis to stand up first. The same binary grows with the team: on a Team license it runs active-active on PostgreSQL from the Helm chart, with workers inside networks the control node cannot reach. Here's every step, from download to a live run. Or skip the install and poke at the <a href="https://demo.switchtender.com">live demo</a> first.</p>
+			<p class="lede">One binary, one SQLite file. No Kubernetes, no Postgres, no Redis to stand up first. The same binary grows with the team: on a Team license it runs active-active on PostgreSQL, and relay workers run inside networks the control node cannot reach. Here's every step, from download to a live run. Or skip the install and poke at the <a href="https://demo.switchtender.com/ui/runs?status=pending_approval">live demo</a> first.</p>
 		</section>
 
 		<section class="gs-steps wrap" id="steps">
@@ -107,13 +107,14 @@
 						<h3>Install</h3>
 						<p>One line downloads the right binary for your machine, verifies it against the published checksums, and installs it:</p>
 						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>curl -fsSL https://switchtender.com/install.sh | sh</code></pre></div>
-						<p class="gs-note">Prefer not to pipe to a shell? Every release ships cosign-signed checksums and SBOMs: verify them with <a href="https://github.com/kordloom/switchtender/blob/main/SECURITY.md#verifying-a-release"><code>cosign</code></a>, then run the binary you checked. The <a href="/verify">in-browser verifier</a> checks a LoomSeal evidence bundle, which is a different artifact.</p>
+						<p>On a host with <code>wget</code> and no <code>curl</code>, <code>wget -qO- https://switchtender.com/install.sh | sh</code> does the same.</p>
+						<p class="gs-note">Prefer not to pipe to a shell? Every release from v1.69.0 on ships cosign-signed checksums and SBOMs: verify them with <a href="https://github.com/kordloom/switchtender/blob/main/SECURITY.md#verifying-a-release"><code>cosign</code></a>, then run the binary you checked. The <a href="/verify">in-browser verifier</a> checks a LoomSeal evidence bundle, which is a different artifact.</p>
 						<p>Or grab a prebuilt binary yourself. No toolchain required. Every release ships macOS, Linux, and Windows builds you can download and run.</p>
 						<div class="hero-cta">
 							<a class="btn" href="https://github.com/kordloom/switchtender/releases/latest">Download the latest release</a>
 							<a class="ghost" href="https://github.com/kordloom/switchtender/releases">All releases</a>
 						</div>
-						<p>Pick the build for your platform: the <code>.dmg</code> or a <code>darwin</code> tarball on macOS, a <code>linux</code> tarball on Linux, or the <code>windows</code> zip. Verify it against the <code>SHA256SUMS</code> file on the same release.</p>
+						<p>Pick the build for your platform: the <code>.dmg</code> or a <code>darwin</code> tarball on macOS, a <code>linux</code> tarball on Linux, or the <code>windows</code> zip. Verify it against the <code>SHA256SUMS</code> file on the same release. On macOS the app in the <code>.dmg</code> is signed and notarized. The binary in the tarball is not yet, so if you downloaded it through a browser, clear the quarantine flag before running it: <code>xattr -d com.apple.quarantine ./switchtender</code>.</p>
 						<p>Prefer to build from source? With the Go toolchain installed:</p>
 						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>go install github.com/kordloom/switchtender@latest</code></pre></div>
 						<p>Each tool a run uses has to be on the box too: <code>ansible-playbook</code> for Ansible, and <code>terraform</code>, <code>tofu</code>, <code>python3</code>, <code>pwsh</code> (PowerShell 7), or <code>go</code> for the rest. Bash runs use the shell macOS and Linux already have. The container image carries Ansible, Python, Terraform, and OpenTofu. PowerShell and Go bring their own, on the host or in a pinned container image.</p>
@@ -124,9 +125,9 @@
 					<div class="gs-body">
 						<h3>Serve</h3>
 						<p>Start the server. SQLite is the default. Point <code>--db</code> at a Postgres DSN when you want more than one instance. Creating a new PostgreSQL schema needs a Team license; opening one that already exists is never gated, in any license state. Set the encryption pair if you plan to store credentials. On a public address with no tokens yet, serve mints your initial admin token and prints it once, so the API requires auth from its very first request; only loopback and <code>--read-only</code> may run open, and it says so.</p>
-						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code><span class="c"># optional, only needed for stored secrets</span>
-export SWITCHTENDER_ENCRYPTION_KEY=change-me
-export SWITCHTENDER_ENCRYPTION_SALT=change-me-too
+						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code><span class="c"># optional, only needed for stored secrets; keep both values</span>
+export SWITCHTENDER_ENCRYPTION_KEY=$(openssl rand -hex 32)
+export SWITCHTENDER_ENCRYPTION_SALT=$(openssl rand -hex 16)
 
 switchtender serve --addr :8080 --db switchtender.db</code></pre></div>
 					</div>
@@ -157,7 +158,7 @@ curl -s -X POST localhost:8080/v1/runs \
 					<div class="gs-num">5</div>
 					<div class="gs-body">
 						<h3>Name your tokens</h3>
-						<p>The server never listens openly on a network interface: step 2 already minted your initial admin token. Now mint named tokens for each person and each CI job, send them as bearer tokens, and retire the initial one so every credential in the audit trail names its owner.</p>
+						<p>Unless you start it with <code>--read-only</code> for a public demo, the server never runs open on a network interface: step 2 already minted your initial admin token. Now mint named tokens for each person and each CI job, send them as bearer tokens, and retire the initial one so every credential in the audit trail names its owner.</p>
 						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>switchtender token new --name admin --db switchtender.db
 switchtender token revoke &lt;initial-token-id&gt; --db switchtender.db</code></pre></div>
 					</div>

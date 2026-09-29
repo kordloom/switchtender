@@ -604,7 +604,7 @@ func TestRecordFireWritesOnlyWhatAFireOwns(t *testing.T) {
 	}
 
 	firedAt := baseTime.Add(30 * time.Minute)
-	if err := store.RecordFire(ctx, "sc_1", firedAt, "run_1"); err != nil {
+	if err := store.RecordFire(ctx, "sc_1", firedAt, "run_1", ""); err != nil {
 		t.Fatalf("RecordFire() error = %v", err)
 	}
 	got, err := store.Get(ctx, "sc_1")
@@ -625,7 +625,7 @@ func TestRecordFireWritesOnlyWhatAFireOwns(t *testing.T) {
 	// A fire with no run id keeps the last one, because the fire happened even if the launch
 	// produced no run to point at.
 	later := firedAt.Add(time.Hour)
-	if err := store.RecordFire(ctx, "sc_1", later, ""); err != nil {
+	if err := store.RecordFire(ctx, "sc_1", later, "", ""); err != nil {
 		t.Fatalf("RecordFire(no run id) error = %v", err)
 	}
 	got, err = store.Get(ctx, "sc_1")
@@ -643,7 +643,7 @@ func TestRecordFireWritesOnlyWhatAFireOwns(t *testing.T) {
 	if err := store.Delete(ctx, "sc_1"); err != nil {
 		t.Fatalf("Delete() error = %v", err)
 	}
-	if err := store.RecordFire(ctx, "sc_1", later, "run_2"); err != nil {
+	if err := store.RecordFire(ctx, "sc_1", later, "run_2", ""); err != nil {
 		t.Errorf("RecordFire(deleted schedule) = %v, want a quiet no-op", err)
 	}
 	if _, err := store.Get(ctx, "sc_1"); !errors.Is(err, schedule.ErrNotFound) {

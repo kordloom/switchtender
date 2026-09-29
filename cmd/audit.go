@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	osuser "os/user"
 
 	"github.com/kordloom/switchtender/internal/audit"
@@ -34,8 +35,8 @@ func cliActor() string {
 // It is called before the change, matching the server, so a mutation that cannot be recorded does
 // not happen. Every command-line mutation routes through here rather than appending its own entry,
 // so a command added later either uses it or is visibly missing from this file.
-func recordCLI(ctx context.Context, audits audit.Store, command string) error {
-	return recordCLIChange(ctx, audits, command, nil)
+func recordCLI(ctx context.Context, audits audit.Store, db, command string) error {
+	return recordCLIChange(ctx, audits, db, command, nil)
 }
 
 // recordCLIChange records a command-line mutation and, when body is non-empty, commits a content
@@ -43,9 +44,23 @@ func recordCLI(ctx context.Context, audits audit.Store, command string) error {
 // carry no secret: the digest is recomputable by any holder of the exported chain, so it is meant for
 // a summary such as counts and timestamps, not a payload. A nil body records the call alone, which is
 // what recordCLI does for a mutation whose content is not summarized.
-func recordCLIChange(ctx context.Context, audits audit.Store, command string, body []byte) error {
+//
+// The entry is bound to the install that db belongs to, the way serve binds its own. Command-line
+// entries were written unbound, so the account and token changes made from a shell, the ones most
+// worth auditing, did not commit to the install that made them and could be lifted onto another. When
+// no identity can be had, the change is still recorded, and the command says why its entry is
+// unbound: refusing would block the change without making anything more verifiable.
+func recordCLIChange(ctx context.Context, audits audit.Store, db, command string, body []byte) error {
 	if audits == nil {
 		return nil
+	}
+	if binder, ok := audits.(audit.InstallBinder); ok {
+		if id, err := loadProducerIdentity(ctx, audits, db); err == nil {
+			binder.BindInstall(id.InstallID)
+		} else {
+			fmt.Fprintln(os.Stderr, "note: this change is recorded, but its audit entry is not bound "+
+				"to the install: "+err.Error())
+		}
 	}
 	entry := &audit.Entry{
 		ID: audit.NewID(), Actor: cliActor(),

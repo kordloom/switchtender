@@ -417,8 +417,15 @@ func exportRefusal(err error) string {
 // The signed bytes are written exactly as SignBundleDoc produced them and never re-marshaled. A
 // re-encode would change the bytes the signature covers, so an offline verifier would then reject a
 // bundle this install actually signed.
-func auditBundleHandler(store audit.Store, producer *audit.Identity, version string, log *zap.Logger) http.HandlerFunc {
+func auditBundleHandler(store audit.Store, producer *audit.Identity, problem, version string, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// A server that has a chain and no key to sign it with, because the key was lost or belongs
+		// to another install, cannot produce a bundle anyone could verify. Saying the export is not
+		// enabled sent the operator looking for a setting, when what is missing is the key.
+		if store != nil && producer == nil && problem != "" {
+			respondError(w, log, http.StatusConflict, "this server cannot sign a bundle: "+problem)
+			return
+		}
 		if store == nil || producer == nil {
 			respondError(w, log, http.StatusNotFound, "signed bundle export is not enabled")
 			return

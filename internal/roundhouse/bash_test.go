@@ -117,6 +117,30 @@ func TestRegisterRunner(t *testing.T) {
 	}
 }
 
+// TestBashReadsEachAnswerOnItsOwn pins the single entries beside SWITCHTENDER_VARS. A script reads one
+// answer with plain shell, a scalar that is not a string arrives as its text, and an answer can never
+// reach a variable the process runs by: one named PATH lands under the prefix and PATH is untouched.
+// A name a shell cannot hold, and a value that is not a scalar, stay in the JSON alone.
+func TestBashReadsEachAnswerOnItsOwn(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	res, err := newBashRunner(nil).Run(context.Background(), Spec{
+		Command: `printf '%s|%s|%s|%s|%s\n' "$SWITCHTENDER_VAR_region" "$SWITCHTENDER_VAR_flag" ` +
+			`"$SWITCHTENDER_VAR_PATH" "${SWITCHTENDER_VAR_obj-none}" "$(env | grep -c '^SWITCHTENDER_VAR_bad')"; ` +
+			`[ "$PATH" != /evil ] && echo path-intact`,
+		ExtraVars: map[string]any{
+			"region": "us east 1", "flag": true, "PATH": "/evil", "obj": map[string]any{"a": 1},
+			"bad-name": "x",
+		},
+	}, &buf)
+	if err != nil || res.ExitCode != 0 {
+		t.Fatalf("bash run: exit=%d err=%v output=%q", res.ExitCode, err, buf.String())
+	}
+	if got, want := buf.String(), "us east 1|true|/evil|none|0\npath-intact\n"; !strings.Contains(got, want) {
+		t.Errorf("output %q, want %q", got, want)
+	}
+}
+
 func TestBashReceivesExtraVars(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer

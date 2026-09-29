@@ -124,7 +124,7 @@ func warnUnpinned(s backup.Stores) {
 // no output path is given the backup goes to stdout and the counts go to stderr, so a piped backup
 // stays clean.
 func runBackup(cmd *cobra.Command, _ []string) error {
-	bundle, err := openBundle(backupDB)
+	bundle, err := openExisting(backupDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
@@ -201,7 +201,7 @@ func runRestore(cmd *cobra.Command, _ []string) error {
 	// them, which is the property that stops a receipt being lifted onto another install. An
 	// identity that cannot be loaded is a warning, not a refusal: an install that never minted one
 	// still deserves its restore recorded.
-	if id, ierr := loadProducerIdentity(restoreDB); ierr == nil {
+	if id, ierr := loadProducerIdentity(cmd.Context(), bundle.Audits(), restoreDB); ierr == nil {
 		if binder, ok := bundle.Audits().(audit.InstallBinder); ok {
 			binder.BindInstall(id.InstallID)
 		}
@@ -209,7 +209,7 @@ func runRestore(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintln(os.Stderr, "note: producer identity unavailable, so this restore's audit "+
 			"entries are not bound to the install: "+ierr.Error())
 	}
-	if err := recordCLI(cmd.Context(), bundle.Audits(), "/cli/restore"); err != nil {
+	if err := recordCLI(cmd.Context(), bundle.Audits(), restoreDB, "/cli/restore"); err != nil {
 		return err
 	}
 	sum, err := backup.Read(cmd.Context(), backupStores(bundle), newSealerFromEnv(zap.NewNop()), in)
@@ -219,7 +219,7 @@ func runRestore(cmd *cobra.Command, _ []string) error {
 	// proved the trail is writable, so a failure to record this provenance is a real fault and is
 	// returned even when the restore itself succeeded.
 	if !sum.CreatedAt.IsZero() {
-		if perr := recordRestoreProvenance(cmd.Context(), bundle.Audits(), sum); perr != nil {
+		if perr := recordRestoreProvenance(cmd.Context(), bundle.Audits(), restoreDB, sum); perr != nil {
 			// A provenance fault must not swallow a restore fault, and neither may swallow the
 			// partial counts: an operator holding a half-restored install and a single provenance
 			// error was told nothing about either of the two things that actually went wrong.
@@ -232,6 +232,12 @@ func runRestore(cmd *cobra.Command, _ []string) error {
 		}
 	}
 	if err != nil {
+		// A file that would not decrypt or validate wrote nothing, and saying it failed partway
+		// beside a column of zeros sent an operator looking for damage that was never done.
+		if sum.CreatedAt.IsZero() {
+			fmt.Fprintln(os.Stderr, "Restore failed before writing anything.")
+			return err
+		}
 		// A restore is not atomic across stores, so a failure can still have written some of the
 		// file. The counts say how far it got, which is the difference between an operator who
 		// knows to look and one who was told nothing happened.
@@ -249,13 +255,13 @@ func runRestore(cmd *cobra.Command, _ []string) error {
 // carry these because they are known only once the file is read. The Summary is a struct of times and
 // counts with no restored object in it, so the content digest it commits exposes nothing sensitive.
 // The source instant also rides in the path so a reader sees it without opening the digest.
-func recordRestoreProvenance(ctx context.Context, audits audit.Store, sum backup.Summary) error {
+func recordRestoreProvenance(ctx context.Context, audits audit.Store, db string, sum backup.Summary) error {
 	body, err := json.Marshal(sum)
 	if err != nil {
 		return fmt.Errorf("encode restore provenance: %w", err)
 	}
 	path := fmt.Sprintf("/cli/restore?taken_at=%s", sum.CreatedAt.UTC().Format(time.RFC3339))
-	return recordCLIChange(ctx, audits, path, body)
+	return recordCLIChange(ctx, audits, db, path, body)
 }
 
 // reportBackup writes the object counts to stderr so they never mix with a backup written to stdout.

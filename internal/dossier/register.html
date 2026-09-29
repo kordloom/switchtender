@@ -202,7 +202,7 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13.5px; }
 						<td>{{.When}}</td>
 						<td class="mono">{{.Run}}</td>
 						<td class="mono">{{.Change}}{{if .DryRun}} <span class="pill warn">dry run</span>{{end}}</td>
-						<td>{{.Actor}}</td>
+						<td>{{if .Actor}}{{.Actor}}{{else}}none recorded{{end}}</td>
 						<td>{{.Source}}</td>
 						<td>{{.Risk}}</td>
 						<td>{{if .Held}}{{.Held}}{{else}}&mdash;{{end}}</td>

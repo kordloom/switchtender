@@ -2,7 +2,9 @@ package dispatch
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,7 +95,11 @@ func (d *Dispatcher) dumpSource(ctx context.Context, src *invsource.Source) ([]b
 			return nil, fmt.Errorf("%w: inventory source %s carries a %s credential, and a source "+
 				"dump can only apply an env credential", credential.ErrBadKind, src.ID, c.Kind)
 		}
-		env = credential.EnvLines(plain)
+		pairs, err := credential.EnvPairs(plain)
+		if err != nil {
+			return nil, fmt.Errorf("inventory source %s credential: %w", src.ID, err)
+		}
+		env = pairs
 	}
 
 	sourcePath := src.Source
@@ -114,6 +120,10 @@ func (d *Dispatcher) dumpSource(ctx context.Context, src *invsource.Source) ([]b
 		defer wt.Cleanup()
 		if sourcePath, err = project.WithinRepo(wt.Dir, src.Source); err != nil {
 			return nil, fmt.Errorf("source path %q: %w", src.Source, err)
+		}
+		if _, err := os.Stat(sourcePath); errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("%w: %q is not in the project's checkout", invsource.ErrInvalidSource,
+				src.Source)
 		}
 	} else if err := validateBareSource(src.Source); err != nil {
 		return nil, err
@@ -139,10 +149,20 @@ func validateBareSource(source string) error {
 			return fmt.Errorf("%w: %q traverses directories", invsource.ErrInvalidSource, source)
 		}
 	}
+	// A comma makes it a host list, which ansible-inventory reads without looking for a file.
+	if strings.Contains(source, ",") {
+		return nil
+	}
 	info, err := os.Stat(source)
+	if errors.Is(err, fs.ErrNotExist) {
+		// ansible-inventory does not report it. It warns that it could not parse the path and prints
+		// an empty inventory with a clean exit, so a typo in the path refreshed as a success and the
+		// stored inventory quietly emptied under every template that targets it.
+		return fmt.Errorf("%w: %q does not exist on this server", invsource.ErrInvalidSource, source)
+	}
 	if err != nil {
-		// A missing or unreadable path is not an execution surface; let ansible-inventory report it.
-		return nil //nolint:nilerr // Absence is handled downstream, not a validation failure.
+		// An unreadable path is not an execution surface; let ansible-inventory report it.
+		return nil //nolint:nilerr // Handled downstream, not a validation failure.
 	}
 	// The rule is stated positively: accept a non-executable regular file, refuse everything else.
 	//

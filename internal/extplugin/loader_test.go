@@ -415,8 +415,9 @@ func TestPluginEnvBoundaries(t *testing.T) {
 		WantPass bool
 	}{{ // Test 0: A variable every process needs passes.
 		Name: "path passes", Key: "PATH", Value: "/usr/bin", WantPass: true,
-	}, { // Test 1: The allowlist is matched case-insensitively, for platforms whose variables vary.
-		Name: "lowercase allowlist entry passes", Key: "Path", Value: "/usr/local/bin", WantPass: true,
+	}, { // Test 1: A differently cased name is the same variable only on Windows, so it passes there
+		// and is withheld everywhere else.
+		Name: "differently cased name", Key: "Path", Value: "/usr/local/bin", WantPass: runtime.GOOS == "windows",
 	}, { // Test 2: The operator's namespaced configuration passes.
 		Name: "namespaced variable passes", Key: "SWITCHTENDER_PLUGIN_X", Value: "1", WantPass: true,
 	}, { // Test 3: The bare prefix with nothing after it still counts as namespaced.
@@ -464,7 +465,8 @@ func TestPluginEnvIsAnAllowlist(t *testing.T) {
 			t.Errorf("plugin environment entry %q has no value separator", kv)
 			continue
 		}
-		if pluginPassThrough[strings.ToUpper(name)] || strings.HasPrefix(name, pluginEnvPrefix) {
+		upper := strings.ToUpper(name)
+		if pluginPassThrough[upper] || windowsPassThrough[upper] || strings.HasPrefix(upper, pluginEnvPrefix) {
 			continue
 		}
 		t.Errorf("%q reached the plugin environment without being allowed", name)

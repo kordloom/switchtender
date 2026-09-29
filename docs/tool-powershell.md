@@ -26,6 +26,8 @@ so syntax is checked and nothing executes.
         $vars = $env:SWITCHTENDER_VARS | ConvertFrom-Json
         $region = if ($vars.region) { $vars.region } else { "us-east-1" }
 
+- Each var whose name a shell variable can hold and whose value is a string, a number, or a boolean
+  also arrives on its own as `SWITCHTENDER_VAR_<name>`, which reads without parsing the JSON.
 - Credentials arrive in the environment. An `env` credential lands its `KEY=VALUE` lines directly,
   and a `token` credential arrives as `SWITCHTENDER_TOKEN`.
 - Anything the script prints that matches a materialized secret is masked to `***` in the stored and

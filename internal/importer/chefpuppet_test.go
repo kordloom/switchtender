@@ -242,3 +242,105 @@ func TestEveryChefFormReportsWhatItDoesNotRead(t *testing.T) {
 		})
 	}
 }
+
+// TestAPuppet8FleetKeepsItsAddresses pins the structured facts Puppet 8 and OpenVox report instead
+// of the flat legacy ones, which they stop reporting by default. A fleet exported from one imported
+// every host with no address while the report said fqdn and ipaddress had been carried. A host that
+// carries no address at all is now named in the report rather than left to be found at run time.
+func TestAPuppet8FleetKeepsItsAddresses(t *testing.T) {
+	t.Parallel()
+	export := `[
+ {"certname":"web01","name":"networking","value":{"fqdn":"web01.acme","ip":"10.1.0.11",
+   "interfaces":{"eth0":{"ip":"10.1.0.11"}}}},
+ {"certname":"web01","name":"os","value":{"family":"Debian","name":"Ubuntu",
+   "release":{"full":"22.04","major":"22"}}},
+ {"certname":"db01","name":"os","value":{"family":"RedHat","name":"Rocky"}}
+]`
+	plan, err := FromPuppet([]byte(export), time.Now())
+	if err != nil {
+		t.Fatalf("FromPuppet() error = %v", err)
+	}
+	content := plan.Inventories[0].Content
+	for _, want := range []string{"web01 ansible_host=10.1.0.11", "fqdn=web01.acme", "osfamily=Debian",
+		"operatingsystem=Ubuntu"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("the inventory does not carry %q:\n%s", want, content)
+		}
+	}
+	if strings.Contains(content, "interfaces") {
+		t.Errorf("the whole networking fact was carried, not the fields a play needs:\n%s", content)
+	}
+	found := false
+	for _, w := range plan.Warnings {
+		if strings.Contains(w, "1 host carried no ipaddress fact") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the host with no address fact was not reported: %v", plan.Warnings)
+	}
+}
+
+// TestAChefExportWithoutAttributesSaysSo pins the node export knife writes without --long, which
+// leaves out every automatic attribute. Each host imported with no address while the report said the
+// identifying facts had been carried. The hosts with no address are counted and the flag that fixes
+// the export is named.
+func TestAChefExportWithoutAttributesSaysSo(t *testing.T) {
+	t.Parallel()
+	export := `[{"name":"web01","chef_environment":"production","run_list":["role[web]"]},
+ {"name":"db01","chef_environment":"production","automatic":{"ipaddress":"10.0.0.2"}}]`
+	plan, err := FromChef([]byte(export), time.Now())
+	if err != nil {
+		t.Fatalf("FromChef() error = %v", err)
+	}
+	found := false
+	for _, w := range plan.Warnings {
+		if strings.Contains(w, "1 host carried no ipaddress attribute") && strings.Contains(w, "-l") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the host with no address was not reported with the fix: %v", plan.Warnings)
+	}
+}
+
+// TestPuppetFactsAloneSayTheyCannotTellDeactivatedNodes pins the facts query imported on its own,
+// which the guide used to tell people to do as a second step. Only a nodes query says which nodes
+// Puppet deactivated, so facts alone brought them back into the fleet without a word. The report now
+// says so and names the one-document form, and the combined document leaves them out.
+func TestPuppetFactsAloneSayTheyCannotTellDeactivatedNodes(t *testing.T) {
+	t.Parallel()
+	facts := `[{"certname":"old01","name":"ipaddress","value":"10.0.0.9"},
+ {"certname":"web01","name":"ipaddress","value":"10.0.0.1"}]`
+	plan, err := FromPuppet([]byte(facts), time.Now())
+	if err != nil {
+		t.Fatalf("FromPuppet(facts) error = %v", err)
+	}
+	warned := false
+	for _, w := range plan.Warnings {
+		if strings.Contains(w, "cannot tell which nodes Puppet deactivated") && strings.Contains(w, "jq -s add") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Errorf("facts imported alone did not say deactivated nodes may be back: %v", plan.Warnings)
+	}
+
+	combined := `[{"certname":"web01","catalog_environment":"production"},
+ {"certname":"old01","deactivated":"2026-09-01T00:00:00Z"},
+ {"certname":"old01","name":"ipaddress","value":"10.0.0.9"},
+ {"certname":"web01","name":"ipaddress","value":"10.0.0.1"}]`
+	plan, err = FromPuppet([]byte(combined), time.Now())
+	if err != nil {
+		t.Fatalf("FromPuppet(combined) error = %v", err)
+	}
+	content := plan.Inventories[0].Content
+	if strings.Contains(content, "old01") || !strings.Contains(content, "web01 ansible_host=10.0.0.1") {
+		t.Errorf("the combined document did not leave the deactivated node out:\n%s", content)
+	}
+	for _, w := range plan.Warnings {
+		if strings.Contains(w, "cannot tell which nodes") {
+			t.Errorf("the combined document was warned as facts alone: %s", w)
+		}
+	}
+}

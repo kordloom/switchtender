@@ -294,12 +294,12 @@ function wireRunDownloads(runId) {
 		});
 	}
 	const exportEvidence = document.getElementById("export-evidence");
-	// The dossier quotes the audit trail, approver identities included, so the control only shows
-	// where the trail itself would: an admin session, or an open instance with no accounts.
-	const evidenceRole = localStorage.getItem("st_role");
-	if (exportEvidence && evidenceRole && evidenceRole !== "admin") {
-		exportEvidence.hidden = true;
-	} else if (exportEvidence) {
+	// The dossier quotes the audit trail, approver identities included, so the server serves it to an
+	// admin and to the actor who launched the run. The control starts where the trail itself would
+	// show, an admin session or an open instance with no accounts, and offerOwnEvidence adds the
+	// launcher once the run is read.
+	if (exportEvidence) {
+		exportEvidence.hidden = !roleAtLeast("admin");
 		exportEvidence.dataset.tip =
 			"Click to download this run's evidence dossier, one self-contained document for an auditor";
 		exportEvidence.addEventListener("click", async (e) => {
@@ -317,7 +317,7 @@ function wireRunDownloads(runId) {
 				// way on every click, which is exactly what it was written to replace.
 				if (err.status === 403) {
 					exportEvidence.hidden = true;
-					setStatus("Evidence quotes the audit trail, so it is admin only on this server.");
+					setStatus("A run's evidence is readable by an admin or by whoever launched it.");
 					return;
 				}
 				setStatus("Could not export the evidence: " + err.message);
@@ -329,8 +329,8 @@ function wireRunDownloads(runId) {
 	// into the one file a third party checks without trusting this install. It reads the same trail
 	// the dossier does, so it shows where the dossier does.
 	const receiptBtn = document.getElementById("download-receipt");
-	if (receiptBtn && roleAtLeast("admin")) {
-		receiptBtn.hidden = false;
+	if (receiptBtn) {
+		receiptBtn.hidden = !roleAtLeast("admin");
 		receiptBtn.dataset.tip =
 			"Click to download this run's signed receipt, verifiable offline with switchtender verify";
 		receiptBtn.addEventListener("click", async () => {
@@ -354,6 +354,11 @@ function wireRunDownloads(runId) {
 				// the receipt", which describes a transient failure and sends the reader to retry.
 				// It is a configuration gap with a name and a fix, so it says both, and the control
 				// stops offering what this install cannot do.
+				if (err.status === 403) {
+					receiptBtn.hidden = true;
+					setStatus("A run's receipt is readable by an admin or by whoever launched it.");
+					return;
+				}
 				if (String(err.message).includes("no signing identity")) {
 					receiptBtn.disabled = true;
 					receiptBtn.dataset.tip = "This install has no signing identity, so it cannot " +
@@ -385,6 +390,17 @@ function wireRunDownloads(runId) {
 				setStatus("Could not export the events: " + err.message);
 			}
 		});
+	}
+}
+
+// offerOwnEvidence shows a run's Evidence and receipt controls to the actor who launched it. The
+// server serves both to an admin or to that actor, and the page used to draw them for admins only, so
+// an operator could not reach the evidence for their own change from the page that shows it.
+function offerOwnEvidence(run) {
+	if (!run || roleAtLeast("admin") || !signedInAs(run.actor)) return;
+	for (const id of ["export-evidence", "download-receipt"]) {
+		const el = document.getElementById(id);
+		if (el) el.hidden = false;
 	}
 }
 
@@ -440,8 +456,9 @@ async function loadDetail(runId) {
 			el.textContent = fmtDuration(el.dataset.started, new Date().toISOString());
 		}
 	}, 1000);
+	let run = null;
 	try {
-		const run = await getJSON("/runs/" + runId);
+		run = await getJSON("/runs/" + runId);
 		// Filtering the trail by the run id matched only entries written after the run existed, so
 		// a run still held for approval matched none of them and its Audit trail button opened an
 		// empty table while the header beside it named the very chain entry that created it. The
@@ -450,33 +467,8 @@ async function loadDetail(runId) {
 			auditLink.href = "/ui/audit?q=" + encodeURIComponent(runId) +
 				"&seq=" + encodeURIComponent(String(run.audit_receipt).split(":")[0]);
 		}
-		const rerun = document.getElementById("rerun-run");
-		// A rejected run, and one canceled before it ever started, are decisions not to run it. The
-		// API refuses to replay either, so the button is not offered for them.
-		const decided = run.status === "rejected" ||
-			(run.status === "canceled" && !run.started_at);
-		// The server refuses to replay a run that has not finished, so the button waits for the
-		// terminal state instead of offering a click whose only future is a refusal.
-		if (rerun && !run.parent_id && run.kind !== "pipeline" && !decided &&
-			isTerminal(run.status) && roleAtLeast("operator")) {
-			rerun.hidden = false;
-			rerun.dataset.tip = "Click to start a fresh run with this exact spec";
-			if (isReadOnly()) {
-				rerun.disabled = true;
-				rerun.dataset.tip = "Disabled in the demo";
-			} else {
-				rerun.addEventListener("click", async () => {
-					rerun.disabled = true;
-					try {
-						const created = await postAction("/runs/" + runId + "/rerun");
-						location.href = "/ui/runs/" + created.id;
-					} catch (err) {
-						setStatus("Rerun failed: " + err.message);
-						rerun.disabled = false;
-					}
-				});
-			}
-		}
+		offerRerun(run);
+		offerOwnEvidence(run);
 		// A split or pipeline parent has no output of its own; each shard or step carries its log
 		// and events. Hiding the links beats serving blanks.
 		const isParent = !run.parent_id && (run.kind === "pipeline" || run.kind === "split" || run.shard_count);
@@ -495,6 +487,10 @@ async function loadDetail(runId) {
 			await loadSingle(run);
 		}
 	} catch (e) {
+		if (run) {
+			showDrawFault(run, e);
+			return;
+		}
 		setStatus("Failed to load run: " + e.message);
 		// Nothing loaded, so every action on this page acts on nothing. They used to stay enabled:
 		// eight live buttons under one grey line, one of which produced no download, no message,
@@ -505,13 +501,66 @@ async function loadDetail(runId) {
 		if (actions) actions.hidden = true;
 		const header = document.getElementById("run-header");
 		if (header) header.hidden = true;
-		showRunDeadEnd(runId);
+		showRunDeadEnd(runId, e.status === 404);
 	}
 }
 
+// offerRerun shows the Run again button once a run can be replayed. It is called when the page loads
+// and again when a run it is watching ends: decided once at load, the button never appeared for a
+// run that finished while its page was open, so the one run somebody had just watched was the one
+// they could not run again without a reload. The click is wired once however often it is called.
+function offerRerun(run) {
+	const rerun = document.getElementById("rerun-run");
+	// A rejected run, and one canceled before it ever started, are decisions not to run it. The
+	// API refuses to replay either, so the button is not offered for them.
+	const decided = run.status === "rejected" ||
+		(run.status === "canceled" && !run.started_at);
+	// The server refuses to replay a run that has not finished, so the button waits for the
+	// terminal state instead of offering a click whose only future is a refusal.
+	if (!rerun || run.parent_id || run.kind === "pipeline" || decided ||
+		!isTerminal(run.status) || !roleAtLeast("operator")) {
+		return;
+	}
+	rerun.hidden = false;
+	rerun.dataset.tip = "Click to start a fresh run with this exact spec";
+	if (isReadOnly()) {
+		rerun.disabled = true;
+		rerun.dataset.tip = readOnlyReason();
+		return;
+	}
+	if (rerun.dataset.wired) return;
+	rerun.dataset.wired = "1";
+	rerun.addEventListener("click", async () => {
+		rerun.disabled = true;
+		try {
+			const created = await postAction("/runs/" + run.id + "/rerun");
+			location.href = "/ui/runs/" + created.id;
+		} catch (err) {
+			setStatus("Rerun failed: " + err.message);
+			rerun.disabled = false;
+		}
+	});
+}
+
+// showDrawFault reports a run that was read but could not be fully drawn. The run exists, so it
+// must not be called missing, and its actions are what an approver came for: a fault drawing one
+// header field used to hide Approve and Reject and tell the approver there was no such run.
+function showDrawFault(run, e) {
+	const header = document.getElementById("run-header");
+	if (header && header.childElementCount) header.hidden = false;
+	let message = "Part of this page could not be drawn: " + e.message + ". The run itself is intact.";
+	try {
+		updateActions(run);
+	} catch (err) {
+		message += " Its actions could not be drawn either: " + err.message + ".";
+	}
+	setStatus(message);
+}
+
 // showRunDeadEnd explains an unreadable run and offers somewhere to go, since the page it replaces
-// has no other exit.
-function showRunDeadEnd(runId) {
+// has no other exit. Only a run the server says does not exist is called missing. Any other failure
+// to read it, a server error or a lost connection, says so instead.
+function showRunDeadEnd(runId, missing) {
 	if (document.getElementById("run-deadend")) return;
 	const host = document.querySelector("main.content");
 	if (!host) return;
@@ -519,8 +568,10 @@ function showRunDeadEnd(runId) {
 	box.id = "run-deadend";
 	box.className = "empty";
 	const p = document.createElement("p");
-	p.textContent = "There is no run " + runId + " on this install. A link to it may be stale, or " +
-		"the run may have been removed with the history it belonged to.";
+	p.textContent = missing
+		? "There is no run " + runId + " on this install. A link to it may be stale, or the run " +
+			"may have been removed with the history it belonged to."
+		: "Run " + runId + " could not be read just now. Reload to try again.";
 	box.appendChild(p);
 	const ways = document.createElement("p");
 	const runs = document.createElement("a");

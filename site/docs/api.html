@@ -60,7 +60,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api" class="active">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api" class="active">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -718,6 +718,11 @@ either licensed or absent.</li>
 status code. The run event NDJSON download and the run log download therefore end with a
 <code>{&quot;export_incomplete&quot;:true,&quot;reason&quot;:&quot;...&quot;}</code> line when they stop early, so a short file is never
 mistaken for a whole one.</p>
+<h3 id="when-a-run-needs-a-credential-that-is-not-ready">When a run needs a credential that is not ready</h3>
+<p>A launch, a rerun, a retry, a relaunch, and a webhook answer <code>409</code> when the run needs a credential
+that has no secret yet, which every imported credential is until someone sets one, or a credential
+whose sealed secret does not open under this server's encryption key and salt. The error names the
+credential and the fix: set its secret, or restore the key and salt it was sealed with.</p>
 <h3 id="when-the-chain-itself-refuses-a-bundle">When the chain itself refuses a bundle</h3>
 <p><code>GET /v1/audit/bundle</code> recomputes the whole chain and holds it against every anchor recorded over it
 before any window is applied. A chain this server checked and rejected is a finding, not a fault, so
@@ -949,10 +954,15 @@ an extra var. A field also takes an optional <code>help</code> string shown bene
   ]
 }
 </code></pre>
-<p><code>type</code> is one of <code>text</code>, <code>multiline</code>, <code>int</code>, <code>choice</code>, or <code>bool</code>. <code>var</code> names the extra var the
+<p><code>type</code> is one of <code>text</code>, <code>multiline</code>, <code>int</code>, <code>choice</code>, or <code>bool</code>, and <code>integer</code>, <code>boolean</code>, <code>string</code>,
+and <code>textarea</code> are read as <code>int</code>, <code>bool</code>, <code>text</code>, and <code>multiline</code>. <code>var</code> names the extra var the
 answer becomes, and it is the only field besides <code>type</code> that every entry must carry. An unknown key
 is refused rather than ignored, so a survey that almost parses is reported instead of silently
 losing a field.</p>
+<p>A launch answers the survey under <code>answers</code>, keyed by each field's <code>var</code>, with an <code>int</code> answered as a
+number and a <code>bool</code> as <code>true</code> or <code>false</code>:</p>
+<pre><code class="language-json">{&quot;answers&quot;: {&quot;release&quot;: &quot;v2.1.0&quot;, &quot;batch&quot;: 10, &quot;environment&quot;: &quot;staging&quot;}}
+</code></pre>
 <h2 id="per-template-notifications">Per-template notifications</h2>
 <p>A template or a run submission may carry <code>notifications</code>, a list of targets that receive its
 terminal state in addition to the server-wide channels, and hear when a rule holds it for approval.

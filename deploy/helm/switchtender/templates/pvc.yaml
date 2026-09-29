@@ -6,6 +6,12 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: {{ include "switchtender.fullname" . }}-data
+  {{- if .Values.persistence.keepOnUninstall }}
+  # The volume is the install: runs, evidence, and the audit chain. helm uninstall deleted it with
+  # nothing said, so it is kept, and removing it is a deliberate kubectl delete pvc.
+  annotations:
+    helm.sh/resource-policy: keep
+  {{- end }}
   labels:
     {{- include "switchtender.labels" . | nindent 4 }}
 spec:

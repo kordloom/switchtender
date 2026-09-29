@@ -169,3 +169,28 @@ func TestTheUnreadSetComesFromTheStructRatherThanAList(t *testing.T) {
 		t.Error("a field absent from the struct was not reported as unread")
 	}
 }
+
+// TestEveryUnreadFieldIsNamed pins the whole list. The report named twelve fields and summarized the
+// rest as "and N more", and a Semaphore template's arguments, the field that decided which hosts a
+// deploy reached, was among the ones a reader never saw.
+func TestEveryUnreadFieldIsNamed(t *testing.T) {
+	t.Parallel()
+	var fields []string
+	for i := range 20 {
+		fields = append(fields, fmt.Sprintf(`"unread_%02d": true`, i))
+	}
+	export := `{"templates": [{"name": "t", "playbook": "site.yml", ` + strings.Join(fields, ", ") + `}]}`
+	plan, err := FromSemaphore([]byte(export), time.Now())
+	if err != nil {
+		t.Fatalf("FromSemaphore: %v", err)
+	}
+	joined := strings.Join(plan.Warnings, "\n")
+	for i := range 20 {
+		if want := fmt.Sprintf("templates[].unread_%02d", i); !strings.Contains(joined, want) {
+			t.Errorf("no warning names %q, so it was dropped out of sight:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, " more") {
+		t.Errorf("the list was cut short with a count instead of the names:\n%s", joined)
+	}
+}

@@ -20,8 +20,9 @@ the pitch, and the migration path.
 | [Set a secret](tutorial-set-a-secret.md) | Seal a secret, or resolve it from Vault at run time.|
 | [Migrate your setup](tutorial-migrate.md) | Import a whole export at once.|
 
-Going beyond Ansible? The per-tool guides cover what each engine does and how values reach it:
-[Bash](tool-bash.md), [Terraform](tool-terraform.md), [Python](tool-python.md), and [Go](tool-go.md).
+The per-tool guides cover what each engine does and how values reach it: [Ansible](tool-ansible.md),
+[Bash](tool-bash.md), [PowerShell](tool-powershell.md), [Terraform](tool-terraform.md),
+[OpenTofu](tool-opentofu.md), [Python](tool-python.md), and [Go](tool-go.md).
 
 For the bigger picture, read [switching from AWX](switching-from-awx.md) and the
 [concepts](concepts.md) page.

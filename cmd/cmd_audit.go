@@ -97,14 +97,14 @@ func runChangeRegister(cmd *cobra.Command) error {
 	if !from.Before(to) {
 		return fmt.Errorf("--from %s does not precede --to %s", from.Format(time.RFC3339), to.Format(time.RFC3339))
 	}
-	store, err := openBundle(auditReportDB)
+	store, err := openExisting(auditReportDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer func() { _ = store.Close() }()
 	// The install identity binds the tree profile's leaves, so a tree anchor cannot be checked
 	// without it.
-	id, err := loadProducerIdentity(auditReportDB)
+	id, err := loadProducerIdentity(cmd.Context(), store.Audits(), auditReportDB)
 	if err != nil {
 		return err
 	}

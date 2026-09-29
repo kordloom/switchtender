@@ -47,6 +47,8 @@ The body carries the survey answers under `answers`, one key per field, and an o
 `credential_ids` list choosing from the template's selectable credentials. Both are optional, so an
 empty body launches a template that has no required survey fields and no selectable credentials. A
 chosen credential must be in the template's selectable set, and it applies on top of the credentials
-the template always uses.
+the template always uses. The selectable set is the template's `selectable_credential_ids`, set with
+`POST /v1/templates` or `PUT /v1/templates/{id}`. The template form does not edit it, and saving a
+template from the form keeps the set it already has.
 
 Next: run it on a cadence with [schedule a job](tutorial-schedule-a-job.md).

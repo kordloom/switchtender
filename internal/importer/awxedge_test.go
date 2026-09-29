@@ -335,6 +335,7 @@ func TestAWXRefIsReadInEveryShapeAWXWrites(t *testing.T) {
 		Name     string
 		JSON     string
 		WantName string
+		WantOrg  string
 	}{
 		{Name: "string", JSON: `"infra"`, WantName: "infra"},                         // Test 0.
 		{Name: "natural key array", JSON: `["Default", "infra"]`, WantName: "infra"}, // Test 1.
@@ -344,6 +345,13 @@ func TestAWXRefIsReadInEveryShapeAWXWrites(t *testing.T) {
 		{Name: "object without name", JSON: `{"id": 5}`, WantName: ""},               // Test 5.
 		{Name: "null", JSON: `null`, WantName: ""},                                   // Test 6.
 		{Name: "unicode", JSON: `"生产"`, WantName: "生产"},                              // Test 7.
+		{Name: "natural key with its organization", // Test 8.
+			JSON:     `{"organization": {"name": "Team A", "type": "organization"}, "name": "site"}`,
+			WantName: "site", WantOrg: "Team A"},
+		{Name: "organization named by a string", // Test 9.
+			JSON: `{"name": "site", "organization": "Team B"}`, WantName: "site", WantOrg: "Team B"},
+		{Name: "organization null", // Test 10.
+			JSON: `{"name": "site", "organization": null}`, WantName: "site"},
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -353,8 +361,9 @@ func TestAWXRefIsReadInEveryShapeAWXWrites(t *testing.T) {
 				t.Fatalf("UnmarshalJSON(%s) error = %v, want none: a reference never fails the "+
 					"document", test.JSON, err)
 			}
-			if string(ref) != test.WantName {
-				t.Errorf("UnmarshalJSON(%s) = %q, want %q", test.JSON, string(ref), test.WantName)
+			if ref.Name != test.WantName || ref.Org != test.WantOrg {
+				t.Errorf("UnmarshalJSON(%s) = %+v, want name %q in organization %q", test.JSON, ref,
+					test.WantName, test.WantOrg)
 			}
 		})
 	}
@@ -488,9 +497,12 @@ func TestAWXVaultLabelIsCarriedOnlyWhenItIsUsable(t *testing.T) {
 	}
 }
 
-// TestAWXEveryCredentialIsReportedAsNeedingItsSecret pins that no credential imports quietly. An
-// export omits secrets by design, so a credential that arrives without a line in the report is one
-// an operator will discover at the first failed run.
+// TestAWXEveryCredentialIsReportedAsNeedingItsSecret pins that no credential imports quietly, and
+// that the line says the true thing. An export omits secrets by design, so a credential that arrives
+// without a line in the report is one an operator will discover at the first failed run. AWX writes a
+// secret it holds as "$encrypted$", so a credential with that marker needs its secret re-entered, and
+// one without it had none to re-enter. Telling the second kind to re-enter a secret sent the operator
+// looking for one that never existed.
 func TestAWXEveryCredentialIsReportedAsNeedingItsSecret(t *testing.T) {
 	t.Parallel()
 	doc := `{"credentials": [
@@ -500,18 +512,29 @@ func TestAWXEveryCredentialIsReportedAsNeedingItsSecret(t *testing.T) {
       {"name": "refused only", "credential_type": {"name": "Machine"},
         "inputs": {"username": "` + strings.Repeat("u", 600) + `"}},
       {"name": "both", "credential_type": {"name": "Machine"},
-        "inputs": {"username": "deploy", "region": "` + strings.Repeat("r", 600) + `"}}
+        "inputs": {"username": "deploy", "region": "` + strings.Repeat("r", 600) + `"}},
+      {"name": "keyed", "credential_type": {"name": "Machine"},
+        "inputs": {"username": "deploy", "ssh_key_data": "$encrypted$"}}
     ]}`
 	plan, err := FromAWX([]byte(doc), importNow)
 	if err != nil {
 		t.Fatalf("FromAWX() error = %v", err)
 	}
 	for _, name := range []string{"bare", "settings only", "refused only", "both"} {
-		if _, ok := warningContaining(t, plan.Warnings, fmt.Sprintf("credential %q", name),
-			"needs its secret re-entered"); !ok {
-			t.Errorf("credential %q was not reported as needing its secret.\nwarnings: %v",
-				name, plan.Warnings)
+		line, ok := warningContaining(t, plan.Warnings, fmt.Sprintf("credential %q", name),
+			"had no secret in AWX", "detach it")
+		if !ok {
+			t.Errorf("credential %q, which held no secret, was not reported as having none.\n"+
+				"warnings: %v", name, plan.Warnings)
 		}
+		if strings.Contains(line, "re-entered") {
+			t.Errorf("credential %q held no secret but was told to re-enter one: %s", name, line)
+		}
+	}
+	if _, ok := warningContaining(t, plan.Warnings, `credential "keyed"`,
+		"needs its secret re-entered"); !ok {
+		t.Errorf("a credential that held a secret was not reported as needing it.\nwarnings: %v",
+			plan.Warnings)
 	}
 	if _, ok := warningContaining(t, plan.Warnings, `credential "refused only"`,
 		"could not be stored and must be set by hand"); !ok {
@@ -641,7 +664,7 @@ func TestAWXInventoryRendersEveryPartOfWhatItMeans(t *testing.T) {
 		"\n" +
 		"[web:vars]\n" +
 		"http_port=80\n" +
-		"note=\"with space\"\n" +
+		"note='with space'\n" +
 		"\n" +
 		"[web:children]\n" +
 		"web-canary\n" +

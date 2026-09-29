@@ -60,7 +60,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts" class="active">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts" class="active">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -90,8 +90,10 @@ credentials, and extra vars. One click in the UI or one POST launches it. A temp
 declare a survey.</p>
 <h2 id="inventories-and-sources">Inventories and sources</h2>
 <p>A stored inventory is inventory content referenced by id and materialized on whichever executor
-runs the play. A dynamic inventory source runs an inventory plugin or script and refreshes the
-result into a stored inventory, with cloud authentication supplied by a credential.</p>
+runs the play. A dynamic inventory source reads an inventory plugin config or an inventory file, or
+runs a script from a project checkout, and refreshes the result into a stored inventory, with cloud
+authentication supplied by a credential. A script at a bare path on the server is refused, since
+nothing but the stored path would decide what code runs as the executor.</p>
 <p>A stored inventory can also draw its content from an external store, a command, Vault, or Google
 Secret Manager, resolved at launch, so the host list lives outside SwitchTender and is fetched fresh
 for each run.</p>
@@ -136,7 +138,8 @@ the organization's own settings, is the install's global admin role, not this on
 organization admin can rewrite that organization's credentials but cannot list its members.</p>
 <h2 id="queues-and-workers">Queues and workers</h2>
 <p>A worker is any process running the executor against the shared store. Every process, the server
-included, competes for pending runs through the store. A run can target a named queue, and only
+included, competes for pending runs through the store. Workers beyond the server and named queues
+are Team features. A run can target a named queue, and only
 workers serving that queue run it, which places work across a mixed fleet. A lease keeps a run
 attributable, and a janitor requeues work whose holder went away. The <a href="/docs/reliability">reliability</a>
 page details how work is claimed, bounded, recovered, and kept consistent across workers.</p>
@@ -246,10 +249,14 @@ pinned key with no call to the witness at all, so the token gates delivery, not 
 event from the SIEM, months later, redeems its receipt against the live chain and gets proof the
 entry still stands at that exact position. The cursor is durable and advances only when every
 sink accepted, so delivery is at least once and an outage delays events rather than dropping
-them. Deduplicate on the receipt.</p>
+them. Deduplicate on the receipt. The cursor also remembers the link of what it last sent, so a
+database restored from an older copy, or one whose tail was cut, is noticed when the server starts:
+the forwarder logs it and resumes after the newest delivered entry the chain still holds, and the
+entries the chain has since appended reach the SIEM rather than being skipped.</p>
 <p><strong>Receipts make an omission detectable by the party it happened to.</strong> Every mutation returns an
-<code>Audit-Receipt: seq:link</code> header naming where it was recorded, with sign-in and webhook delivery
-excluded because neither carries an authenticated actor to record it against. Keep them. <code>switchtender audit receipt 41:9f2c...</code> confirms the chain still holds that exact link at that exact position, and a
+<code>Audit-Receipt: seq:link</code> header naming where it was recorded, a webhook fire included. Signing in
+and out is the exception: a sign-in carries no authenticated actor to record it against, and
+recording one would let a stranger append to the chain without bound. Keep the receipts. <code>switchtender audit receipt 41:9f2c...</code> confirms the chain still holds that exact link at that exact position, and a
 server that omitted the entry cannot produce a chain containing the receipt.</p>
 <p>What none of this defends against is an operator running modified code on the machine itself. That
 is the boundary of every audit system, it costs an attacker the whole controller to reach, and it

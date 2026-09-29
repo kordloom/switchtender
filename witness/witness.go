@@ -75,8 +75,9 @@ const StaleAfter = 24 * time.Hour
 
 // Finding is one problem the witness can attest to.
 type Finding struct {
-	// Kind names the condition: missing_beat, rewritten_beat, or head_regression for what the
-	// record shows, and witness_blind or witness_seeing for whether this witness can see at all.
+	// Kind names the condition. missing_beat, duplicate_beat, rewritten_beat, rewritten_history,
+	// head_regression, seq_regression, stalled_feed, empty_feed, and malformed_feed describe what
+	// the feed shows, and witness_blind and witness_seeing say whether this witness can see at all.
 	// A reader routing on it should treat unknown kinds as findings rather than drop them.
 	Kind string `json:"kind"`
 	// Detail says what was expected and what was seen, in words an operator can act on.

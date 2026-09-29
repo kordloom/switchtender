@@ -60,7 +60,8 @@ var demoCmd = &cobra.Command{
 func init() {
 	demoCmd.Flags().StringVar(&demoAddr, "addr", defaultServeAddr, "Address the demo listens on.")
 	demoCmd.Flags().StringVar(&demoDB, "db", "",
-		"Database to seed and serve. Empty uses a fresh temporary SQLite file.")
+		"Database to seed and serve. Empty uses a fresh temporary SQLite file, removed when the demo "+
+			"stops.")
 	demoCmd.Flags().BoolVar(&demoNoSeed, "no-seed", false,
 		"Serve the database as it already stands instead of seeding it. Use with a database a "+
 			"previous --seed-only run prepared, so a public demo can swap in fresh data without "+
@@ -109,6 +110,22 @@ func demoPaths() (db, keyDir string, err error) {
 	return db, filepath.Dir(db), nil
 }
 
+// ownsDemoFiles reports whether a demo run made its database and assets only for itself, so they are
+// its to remove when it stops. A --db run keeps what it was pointed at, and a --seed-only run keeps
+// the database it seeded, which is what it is for.
+func ownsDemoFiles(dbFlag string, seedOnly bool) bool {
+	return dbFlag == "" && !seedOnly
+}
+
+// removeDemoFiles removes a temporary demo database, the files SQLite keeps beside it, and the demo's
+// assets directory. Anything else beside the database stays, including the producer identity.
+func removeDemoFiles(db, assets string) {
+	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		_ = os.Remove(db + suffix)
+	}
+	_ = os.RemoveAll(assets)
+}
+
 // runDemo seeds a database and serves it read-only until interrupted.
 func runDemo(cmd *cobra.Command, _ []string) error {
 	log, err := logutil.New()
@@ -121,6 +138,17 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	// A temporary database this run made, and the assets it wrote, are this run's to remove once it
+	// stops serving. Both stayed in the temp directory after every run, and a machine that ran the
+	// demo often held hundreds of them.
+	if ownsDemoFiles(demoDB, demoSeedOnly) {
+		defer removeDemoFiles(db, demo.AssetsDir())
+	}
+	// Interrupts are caught from here on rather than once serving starts, so a stop during seeding,
+	// which runs playbooks and takes a while, still returns through the cleanup above. Caught only at
+	// serving, a stop during seeding killed the process where it stood.
+	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	// Behind a reverse proxy, every per-client budget has to key on the client rather than on the
 	// proxy. Without this the demo's own 32-stream-per-caller cap applied to all visitors together,
@@ -197,7 +225,7 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 	//
 	// The anchor binds to the same identity, so a fetched bundle names the install the anchor does.
 	// No identity is not fatal: the seed continues unbound and unanchored.
-	if id, ierr := loadProducerIdentity(db); ierr == nil {
+	if id, ierr := loadProducerIdentity(ctx, bundle.Audits(), db); ierr == nil {
 		if binder, ok := bundle.Audits().(audit.InstallBinder); ok {
 			binder.BindInstall(id.InstallID)
 		} else {
@@ -212,7 +240,14 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 			"anchoring is skipped: " + ierr.Error())
 	}
 	if !demoNoSeed {
-		if err := demo.Seed(cmd.Context(), seedDeps, log); err != nil {
+		err := demo.Seed(ctx, seedDeps, log)
+		if ctx.Err() != nil {
+			// A stop asked for during seeding is not a seeding failure, whatever the step it cut
+			// short reported.
+			log.Info("demo: interrupted while seeding")
+			return nil
+		}
+		if err != nil {
 			return fmt.Errorf("seed demo: %w", err)
 		}
 	}
@@ -263,7 +298,7 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 			server.WithUsers(bundle.Users()),
 			server.WithApprover(disp),
 			server.WithDocs(docsFS),
-			server.WithReadOnly(true)).Handler(),
+			server.WithReadOnly(true), server.WithDemo(true)).Handler(),
 		// The same timeouts serve sets. The demo is the one process actually exposed to the public
 		// internet, and it was the one without them: Go falls an unset IdleTimeout back to
 		// ReadTimeout, and an unset ReadTimeout means no timeout, so abandoned keep-alive
@@ -272,9 +307,6 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 		ReadTimeout:       readTimeout,
 		IdleTimeout:       idleTimeout,
 	}
-
-	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 
 	errCh := make(chan error, 1)
 	go func() {

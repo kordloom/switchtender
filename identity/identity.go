@@ -261,6 +261,12 @@ func createNamed(dir, name string) (Identity, error) {
 	return id, nil
 }
 
+// CheckSeed reports why a hex seed cannot sign, or nil when it can.
+func CheckSeed(hexSeed string) error {
+	_, err := identityFromSeed(hexSeed, "")
+	return err
+}
+
 // identityFromSeed parses a hex seed into a usable identity.
 func identityFromSeed(hexSeed, installID string) (Identity, error) {
 	seed, err := hex.DecodeString(hexSeed)

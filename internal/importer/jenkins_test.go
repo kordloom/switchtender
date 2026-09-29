@@ -1275,3 +1275,54 @@ func TestSundayDetectionReadsWholeNumbers(t *testing.T) {
 		})
 	}
 }
+
+// TestAJenkinsTimerKeepsTheZoneItWasWrittenIn pins the TZ= line of a Jenkins timer. It sets the zone
+// every rule after it is read in, and it was reported as not a cron expression and dropped, so a job
+// written to fire at 06:30 in Berlin fired at 06:30 wherever the server was. The rule before it keeps
+// the server's zone, as it does in Jenkins.
+func TestAJenkinsTimerKeepsTheZoneItWasWrittenIn(t *testing.T) {
+	t.Parallel()
+	doc := freestyle(shellStep("./nightly.sh") + timer("H 2 * * 1-5\nTZ=Europe/Berlin\n30 6 * * 7"))
+	plan, err := importer.FromJenkins("hosts.ini")(jenkinsBundle([2]string{"nightly", doc}), fixedTime)
+	if err != nil {
+		t.Fatalf("FromJenkins() error = %v", err)
+	}
+	if len(plan.Schedules) != 2 {
+		t.Fatalf("schedules = %d, want 2: %v", len(plan.Schedules), plan.Warnings)
+	}
+	if got := plan.Schedules[0].Timezone; got != "" {
+		t.Errorf("the rule before TZ= imported in %q, want the server's own zone", got)
+	}
+	if got := plan.Schedules[1]; got.Timezone != "Europe/Berlin" || got.Cron != "30 6 * * 0" {
+		t.Errorf("the rule after TZ= imported as %q in %q, want 30 6 * * 0 in Europe/Berlin",
+			got.Cron, got.Timezone)
+	}
+	for _, w := range plan.Warnings {
+		if strings.Contains(w, "TZ=") {
+			t.Errorf("the TZ= line was reported as a timer it could not read: %s", w)
+		}
+	}
+}
+
+// TestJenkinsZipSaysWhyALoneConfigIsRefused pins the refusal for an archive whose only config.xml
+// sits at its top, where no directory names the job. It said no config.xml was found, when one was.
+func TestJenkinsZipSaysWhyALoneConfigIsRefused(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Files    map[string]string
+		WantText string
+	}{{ // Test 0: A bare config.xml is found, and refused for having no job name.
+		Files: map[string]string{"config.xml": "<project/>"}, WantText: "naming its job",
+	}, { // Test 1: An archive with no config.xml at all still says so.
+		Files: map[string]string{"README.md": "hello"}, WantText: "no config.xml found",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			_, err := importer.JenkinsBundleFromZip(zipOf(t, test.Files))
+			if err == nil || !strings.Contains(err.Error(), test.WantText) {
+				t.Errorf("JenkinsBundleFromZip() error = %v, want it to say %q", err, test.WantText)
+			}
+		})
+	}
+}

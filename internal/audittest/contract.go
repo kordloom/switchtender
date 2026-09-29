@@ -37,6 +37,9 @@ func Contract(t *testing.T, rawStore func() audit.Store) {
 		testAnchorDelete(t, newStore())
 	})
 	t.Run("concurrent appends do not fork", func(t *testing.T) { testConcurrentAppend(t, newStore()) })
+	t.Run("the chain says which install it belongs to", func(t *testing.T) {
+		testBoundInstall(t, newStore())
+	})
 	t.Run("a chosen time behind the head is pinned forward", func(t *testing.T) {
 		testAppendPinsBehindClock(t, newStore())
 	})
@@ -914,6 +917,53 @@ func testInstallBinding(t *testing.T, store audit.Store) {
 			"is hashed into every link, so a read path that cannot return it breaks the chain.",
 			brokeAt)
 	}
+}
+
+// testBoundInstall pins what a store says about the install its chain belongs to. A process that
+// finds its signing key missing has to tell a first start, where minting one is right, from a chain
+// another key already claimed, where minting one silently starts a second install whose bundles can
+// never verify. An unbound entry written after the binding, such as one from a process with no key,
+// must not hide the install the chain was bound to.
+func testBoundInstall(t *testing.T, store audit.Store) {
+	t.Helper()
+	reader, ok := store.(audit.InstallReader)
+	if !ok {
+		t.Fatalf("%T cannot say which install its chain belongs to", store)
+	}
+	binder, ok := store.(audit.InstallBinder)
+	if !ok {
+		t.Fatalf("%T does not bind an install", store)
+	}
+	ctx := context.Background()
+	appendOne := func(id string) {
+		t.Helper()
+		e := &audit.Entry{ID: id, Actor: "ops", ActorType: "token", Method: "POST", Path: "/v1/runs"}
+		if err := store.Append(ctx, e); err != nil {
+			t.Fatalf("Append(%s) error = %v", id, err)
+		}
+	}
+	want := func(label, wantID string) {
+		t.Helper()
+		got, err := reader.BoundInstall(ctx)
+		if err != nil {
+			t.Fatalf("%s: BoundInstall() error = %v", label, err)
+		}
+		if got != wantID {
+			t.Errorf("%s: BoundInstall() = %q, want %q", label, got, wantID)
+		}
+	}
+	want("an empty chain", "")
+	appendOne("aud_unbound")
+	want("a chain with only unbound entries", "")
+	binder.BindInstall("in_first")
+	appendOne("aud_first")
+	want("after a bound entry", "in_first")
+	binder.BindInstall("")
+	appendOne("aud_after")
+	want("after an unbound entry follows a bound one", "in_first")
+	binder.BindInstall("in_second")
+	appendOne("aud_second")
+	want("after a newer bound entry", "in_second")
 }
 
 // testAppendPinsBehindClock proves the store never records a chain whose times invert, even when

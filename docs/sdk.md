@@ -39,15 +39,12 @@ binary that loads extensions at startup. Same seams, same registration, same beh
 
 ## A complete extension
 
-Two files make a SwitchTender with a custom `hello` tool.
+One file makes a SwitchTender with a custom `hello` tool. Start a module and take the current
+release, since everything the server enforces at the door comes with the version you build against:
 
-`go.mod`:
-
-    module example.com/switchtender-hello
-
-    go 1.26.5
-
-    require github.com/kordloom/switchtender v1.19.0
+    mkdir switchtender-hello && cd switchtender-hello
+    go mod init example.com/switchtender-hello
+    go get github.com/kordloom/switchtender@latest
 
 `main.go`:
 
@@ -142,10 +139,14 @@ takes the same flag, so a plugged-in tool runs wherever runs execute.
 
 A plugin starts with a deliberately small environment: `PATH`, `HOME`, the temporary directory and
 locale variables, `SYSTEMROOT` and `USERPROFILE` on Windows, and every variable named with the
-`SWITCHTENDER_PLUGIN_` prefix. Everything else the server holds is withheld, its encryption key and
-every secret it reads from its own environment included. Configure a plugin through
-`SWITCHTENDER_PLUGIN_` variables. A plugin that reads any other name finds it empty, and one that
-exits for want of configuration is skipped like any plugin that fails to launch.
+`SWITCHTENDER_PLUGIN_` prefix. Names match exactly, except on Windows, where case does not tell two
+variables apart. The plugin library adds its own handshake: `SWITCHTENDER_EXTENSION`, plus
+`PLUGIN_MIN_PORT`, `PLUGIN_MAX_PORT`, `PLUGIN_PROTOCOL_VERSIONS`, and `PLUGIN_CLIENT_CERT`, which
+carry the port range, the protocol versions, and SwitchTender's certificate for mutual TLS.
+`plugin.Serve` reads those, so a plugin never has to. Everything else the server holds is withheld,
+its encryption key and every secret it reads from its own environment included. Configure a plugin
+through `SWITCHTENDER_PLUGIN_` variables. A plugin that reads any other name finds it empty, and
+one that exits for want of configuration is skipped like any plugin that fails to launch.
 
 A plugin that fails to launch or describe itself is logged and skipped, so one broken binary does
 not take the server down. A name that collides with a built-in or with a plugin already loaded is

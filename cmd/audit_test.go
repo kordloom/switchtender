@@ -42,6 +42,34 @@ func TestEveryCLIMutationIsAudited(t *testing.T) {
 			"scanning nothing")
 	}
 	fset := token.NewFileSet()
+	// A recorder is recordCLI, recordCLIChange, or a record* helper that itself calls one of them to
+	// commit a change summary, such as the token and account helpers. Collected from the source rather
+	// than listed, so a helper that stops recording stops counting.
+	recorders := map[string]bool{"recordCLI": true, "recordCLIChange": true}
+	for _, path := range append(files, "audit.go") {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			t.Fatalf("ParseFile(%s) error = %v", path, err)
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil || !strings.HasPrefix(fn.Name.Name, "record") {
+				continue
+			}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				if call, ok := n.(*ast.CallExpr); ok {
+					if id, ok := call.Fun.(*ast.Ident); ok &&
+						(id.Name == "recordCLI" || id.Name == "recordCLIChange") {
+						recorders[fn.Name.Name] = true
+					}
+				}
+				return true
+			})
+		}
+	}
 	audited := 0
 	for _, path := range files {
 		if strings.HasSuffix(path, "_test.go") {
@@ -72,7 +100,7 @@ func TestEveryCLIMutationIsAudited(t *testing.T) {
 						mutates = true
 					}
 				case *ast.Ident:
-					if f.Name == "recordCLI" {
+					if recorders[f.Name] {
 						records = true
 					}
 				}

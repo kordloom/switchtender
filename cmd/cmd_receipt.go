@@ -59,13 +59,13 @@ func init() {
 // the command and the HTTP endpoint produce the same bytes.
 func runReceipt(cmd *cobra.Command, args []string) error {
 	runID := args[0]
-	store, err := openBundle(receiptRunDB)
+	store, err := openExisting(receiptRunDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer func() { _ = store.Close() }()
 
-	id, err := loadProducerIdentity(receiptRunDB)
+	id, err := loadProducerIdentity(cmd.Context(), store.Audits(), receiptRunDB)
 	if err != nil {
 		return err
 	}

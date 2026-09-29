@@ -38,7 +38,9 @@ test("launching a bash run creates it and opens its detail", async ({ page }) =>
   await page.locator("#launch-tool").selectOption("bash");
   await expect(page.locator("#launch-command")).toBeVisible();
   const marker = unique("echo-e2e");
-  await page.locator("#launch-command").fill(`echo ${marker}`);
+  // The run outlives the page load, so the page watches it live: the first line is printed before
+  // the page can connect, and the run ends while the page is open.
+  await page.locator("#launch-command").fill(`echo ${marker}-start; sleep 3; echo ${marker}-end`);
 
   // Submitting posts the run and navigates to the new run's detail, which is how the operator lands on
   // what they just started. That navigation is the server's own id coming back, so reaching it proves
@@ -47,6 +49,12 @@ test("launching a bash run creates it and opens its detail", async ({ page }) =>
   await expect(page).toHaveURL(/\/ui\/runs\/run_[0-9a-f]+$/, { timeout: 30_000 });
   await expect(page.locator('[data-page="detail"]')).toBeVisible();
   await expect(page.locator("#run-header")).toBeVisible();
+  // Every line the run printed is on the page it lands on, the one printed before the page connected
+  // included, and Run again appears when the run ends. The stream used to start at the log's end,
+  // dropping the first lines, and Run again was decided once, at load, while the run was going.
+  await expect(page.locator("#log")).toContainText(`${marker}-end`, { timeout: 30_000 });
+  await expect(page.locator("#log")).toContainText(`${marker}-start`);
+  await expect(page.locator("#rerun-run")).toBeVisible({ timeout: 30_000 });
   const runURL = page.url();
 
   // And the run is really in the list, not only reachable by its own url: reloading the runs page shows
@@ -97,5 +105,39 @@ test("creating an inventory stores it and shows it in the list", async ({ page }
   await expect(page.getByText(name, { exact: false }).first()).toBeVisible({ timeout: 15_000 });
   await page.reload();
   await expect(page.getByText(name, { exact: false }).first()).toBeVisible();
+  assertNoErrors();
+});
+
+// A run against a stored inventory is what every template imported from AWX launches, and the demo's
+// runs all use a path, so nothing else in these suites reaches this page. Its header threw on the
+// stored inventory field, the page then said the run did not exist, and a held run drew no Approve,
+// so an approver could not act on it from the interface at all.
+test("a held run against a stored inventory opens with its header and its decision", async ({ page }) => {
+  const assertNoErrors = attachErrorGuards(page);
+  const name = unique("stored");
+  await page.goto("/ui/inventories");
+  await page.locator("#inventory-open").click();
+  await expect(page.locator("#inventory-modal")).toBeVisible();
+  await page.locator("#inv-name").fill(name);
+  await page.locator("#inv-content").fill("[all]\nweb-e2e-1\n");
+  await page.locator('#inventory-form button[type="submit"]').click();
+  await expect(page.getByText(name, { exact: false }).first()).toBeVisible({ timeout: 15_000 });
+
+  await page.goto("/ui/runs");
+  await page.locator("#launch-open").click();
+  await expect(page.locator("#launch-modal")).toBeVisible();
+  await page.locator("#launch-tool").selectOption("ansible");
+  await page.locator("#launch-playbook").fill("site.yml");
+  await expect(page.locator("#launch-inventory-id option", { hasText: name })).toHaveCount(1);
+  await page.locator("#launch-inventory-id").selectOption({ label: name });
+  await page.locator("#launch-require-approval").check();
+  await page.locator('#launch-form button[type="submit"]').click();
+  await expect(page).toHaveURL(/\/ui\/runs\/run_[0-9a-f]+$/, { timeout: 30_000 });
+
+  await expect(page.locator("#run-header")).toBeVisible();
+  await expect(page.locator("#run-header")).toContainText(name);
+  await expect(page.locator("#approve-run")).toBeVisible();
+  await expect(page.locator("#reject-run")).toBeVisible();
+  await expect(page.locator("#run-deadend")).toHaveCount(0);
   assertNoErrors();
 });

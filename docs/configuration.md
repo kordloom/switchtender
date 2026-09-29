@@ -36,6 +36,7 @@ believes it has a control it does not have.
 |----------|---------|---------|
 | `SWITCHTENDER_ENCRYPTION_KEY` | serve, worker | Passphrase that seals stored credentials with AES-256-GCM. Credentials are disabled when unset. |
 | `SWITCHTENDER_ENCRYPTION_SALT` | serve, worker | Per-deployment salt for argon2id key derivation. Must be set alongside the key and stay stable across restarts, or stored credentials cannot be decrypted. Credentials are disabled when unset. |
+| `SWITCHTENDER_DB` | serve, worker | The database when `--db` is not given: a SQLite file path or a `postgres://` DSN. A DSN carries its password, and on the command line it shows in the process list and, on Kubernetes, in the pod spec, so a shared deployment names it here instead. |
 | `SWITCHTENDER_AUDIT_KEY` | serve | Hex-encoded ed25519 seed for the install's signing identity, which signs the LoomSeal bundles it emits and binds every audit entry to this install. Unset beside a local database, the install mints and stores its own key there. Unset against a shared database it mints nothing, since every process must sign as the same install, and the chain is recorded unattributed and unbound until a seed is supplied to all of them. A malformed value stops startup. |
 | `SWITCHTENDER_IDENTITY_DIR` | serve, audit, receipt | Directory holding the install's producer signing identity. A SQLite install keeps it beside the database and needs no setting. A postgres install has no filesystem home, so it uses a per-user configuration directory; when the account has no home, as in a container, there is nowhere durable to put a key and startup refuses rather than choosing a path a restart would empty. Point this at a durable path the server owns. |
 | `SWITCHTENDER_PASSWORD` | user new | Initial account password, read instead of prompting so it never lands on the command line. |
@@ -49,11 +50,28 @@ believes it has a control it does not have.
 | `SWITCHTENDER_PLUGINS_DIR` | serve, worker | Directory of extension plugin binaries, read when `--plugins-dir` is unset. |
 | `SWITCHTENDER_ADMIN_PASSWORD` | init | Password for the first admin account. When unset, init generates one and prints it once. |
 | `SWITCHTENDER_DESKTOP_NO_BROWSER` | desktop | Set to any value to skip opening the browser, for a headless or remote run. |
+| `SWITCHTENDER_NOTIFY_NTFY_TOKEN` | serve | Bearer token for a protected ntfy topic, read when `--notify-ntfy-token` is unset. A run cannot read it, and a flag shows in the process list. |
+| `SWITCHTENDER_NOTIFY_GRAFANA_TOKEN` | serve | Bearer token for the Grafana annotations API, read when `--notify-grafana-token` is unset. |
+| `SWITCHTENDER_NOTIFY_TWILIO_TOKEN` | serve | Twilio Auth Token, read when `--notify-twilio-token` is unset. |
+| `SWITCHTENDER_WITNESS_TOKEN` | witness serve | Bearer token the witness API requires, read when `--api-token` is unset. |
+| `SWITCHTENDER_MCP_TOKEN` | mcp | API token the agent presents, read when `--token` is unset. |
+| `SWITCHTENDER_TOKEN` | mcp | Fallback for `SWITCHTENDER_MCP_TOKEN`. |
+| `SWITCHTENDER_LICENSE` | serve, worker, license, audit | Path to the license file, overriding `switchtender-license.json` beside the database. |
+| `SWITCHTENDER_DEMO_PORT` | docker compose | Host port the compose `demo` profile publishes, `8081` by default so the demo and the stack can run side by side. |
+
+Every command that takes `--db` defaults to `switchtender.db` in the current directory. Only `serve`,
+`init`, `demo`, `restore`, and an import create a database there. The commands that work on an
+existing install, such as `token`, `user`, `examples`, `backup`, and the `audit` commands, refuse a
+SQLite path that does not exist and name the path they looked at. Opening it would create an empty
+database the server never reads, and the command would report success. An import that starts a new
+database says so, with the `--db` a server needs to read it.
 
 ## init
 
 Bootstraps a new deployment. It creates the database and the first admin account, writes an
-environment file, and optionally a systemd unit. Run it once, then start `serve`.
+environment file, and optionally a systemd unit. Run it once, then start `serve`. Running it again,
+with `--force` to rewrite the environment file or after deleting it, leaves an admin account that
+already exists as it is, password included.
 
 | Flag | Default | Purpose |
 |------|---------|---------|
@@ -62,7 +80,7 @@ environment file, and optionally a systemd unit. Run it once, then start `serve`
 | `--addr` | `127.0.0.1:8080` | Address the server listens on. Loopback by default. |
 | `--admin` | `admin` | Username for the first admin account. |
 | `--systemd` | none | Path to write a systemd unit to, empty to skip. |
-| `--force` | `false` | Overwrite an existing config file. |
+| `--force` | `false` | Rewrite an existing config file, keeping the encryption key and salt it already holds so the credentials sealed under them still open. Delete the file instead to start over with new keys. |
 
 The admin password comes from `SWITCHTENDER_ADMIN_PASSWORD`, or is generated and printed once when
 that variable is unset.
@@ -257,8 +275,8 @@ each tier covers is listed at <https://switchtender.com/pricing>.
 - `license status` shows the tier this install runs and when a license lapses.
 - `license install <file>` verifies a license file and installs it beside the database.
 
-A license is read from `SWITCHTENDER_LICENSE`, or from `switchtender-license.json` in the same
-directory as the database. A license this install cannot parse or that has lapsed reads as
+A license is read from the file `SWITCHTENDER_LICENSE` names, or from `switchtender-license.json` in
+the same directory as the database. A license this install cannot parse or that has lapsed reads as
 Community rather than failing the server, so an expiry never takes an install down.
 
 ## assess
@@ -277,8 +295,9 @@ Automation Platform, Tower, and Ascender.
 An export saved as UTF-8 with a byte order mark, or as UTF-16 the way Windows PowerShell writes a
 file by default, is read the same as plain UTF-8, here, by `import`, and by the assessment page.
 
-The output has three parts: what is in the export, what survives the move, and what changes about
-how it is governed. The third part names the templates that cannot be undone, the ones carrying a
+The output has three parts: what the import would create, what does not survive the move as it was,
+and what changes about how it is governed. Everything that does not come across is listed, one line
+each. The third part names the templates that cannot be undone, the ones carrying a
 destructive signal, the credentials more than one template shares, and the templates targeting no
 stored inventory.
 
@@ -372,7 +391,9 @@ never seen this install.
 
 Pass `--pubkey` with the fingerprint the producer published to tie the result to a key obtained out
 of band. Without it the receipt is checked against the key it names, which proves it was not altered
-but not who signed it.
+but not who signed it, and the verdict says so: `INTACT, BUT UNIDENTIFIED` rather than `VERIFIED`.
+A `--pubkey` given an empty value, which is what a failed key fetch leaves behind, is refused rather
+than treated as no pin.
 
 ## witness
 
@@ -381,6 +402,10 @@ not that nothing was removed from the end, because the process running the chain
 gets written down. A witness on another machine remembers what the feed served, keeps that memory in
 a signed checkpoint, and raises a finding when a beat goes missing, an already-witnessed beat comes
 back rewritten, or the head regresses. Run it where the server's operator has no hand.
+
+The server has to be writing beats for there to be anything to watch, and beats are off by default.
+Start the server with `--span-cadence`, for example `--span-cadence 60s`. Against a server with
+beats off, the witness reports `empty_feed`, and a `--once` run exits nonzero.
 
 | Flag | Default | Purpose |
 |------|---------|---------|
@@ -403,8 +428,11 @@ Runs the witness. Its flags are checked against that subcommand rather than `wit
 |------|---------|---------|
 | `--listen` | `127.0.0.1:9440` | Address the witness API serves on. |
 | `--state-dir` | `switchtender-witness` | Directory holding the signed checkpoints and the findings record. |
-| `--api-token` | none | Bearer token the witness API requires. |
-| `--watch` | none | Span beat feed to watch, repeatable. |
+| `--api-token` | none | Bearer token the witness API requires. Prefer `SWITCHTENDER_WITNESS_TOKEN`. Required when `--listen` is not loopback. |
+| `--watch` | none | Base URL of a server to watch, repeatable, at least one. |
+| `--interval` | `1m0s` | How often every watched server is checked. At least 10s. |
+| `--key-dir` | the state directory | Directory holding the witness signing key. |
+| `--webhook` | none | URL that receives every finding as a JSON POST. |
 
 ## witness verify-attestation
 
@@ -414,6 +442,10 @@ public key the attestation carries, and `signed_by_key_id` is the sha256 key id 
 startup and serves from its API.
 
     switchtender witness verify-attestation attestation.json --pubkey sha256:...
+
+The verdict carries `pinned`. Without a pin, `ok` means only that the document is internally
+consistent, which an attestation a forger signed with their own key also is, so an unpinned verdict
+carries a note saying so. An empty `--pubkey` is refused.
 
 | Flag | Default | Purpose |
 |------|---------|---------|
@@ -442,8 +474,9 @@ reach.
 
 | Flag | Default | Purpose |
 |------|---------|---------|
+| `--server` | required | SwitchTender API base URL. |
 | `--allow-adhoc` | off | Also expose the ad-hoc run tool, letting the agent compose a run rather than launch a template an operator defined. Approval policy still applies. |
-| `--token` | none | API token the agent presents. |
+| `--token` | none | API token the agent presents. Prefer `SWITCHTENDER_MCP_TOKEN`. |
 | `--timeout` | `1m0s` | Bounds one API call. |
 | `--allow-admin-token` | `false` | Start even when the token has admin rights. An agent should hold an operator-bound token, so this is a deliberate override. |
 
@@ -455,7 +488,7 @@ instance is safe to expose. It needs ansible on the PATH to run the sample playb
 | Flag | Default | Purpose |
 |------|---------|---------|
 | `--addr` | `127.0.0.1:8080` | Address the demo listens on. Loopback by default. |
-| `--db` | temporary file | Database to seed and serve. Empty uses a fresh temporary SQLite file. |
+| `--db` | temporary file | Database to seed and serve. Empty uses a fresh temporary SQLite file, removed when the demo stops. |
 | `--seed-only` | off | Seed the database and exit without serving. |
 | `--no-seed` | off | Serve the database as it already stands instead of seeding it. |
 | `--anchor-tsa` | a public authority | RFC 3161 authority that anchors the seeded chain, so the demo shows a real anchor. Empty anchors nothing. |

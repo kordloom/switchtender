@@ -32,6 +32,16 @@ run that finds changes is recorded as drift keyed on its working directory rathe
 plan's changed-resource count. Bash, Python, PowerShell, and Go have no desired-state check, so they do
 not report drift.
 
+## Changes made around the gate
+
+A change made outside SwitchTender, in an SSH session or a cloud console, never reaches the audit
+chain, because it never passed through the gate. It still shows up here. If it touched anything your
+automation asserts, the next scheduled check shows that host or Terraform directory as drifted, and
+the reconcile that puts it back is held for approval like any other change. Drift names what
+diverged, not who changed it, so pair it with the hosts' own logs when the question is who.
+[The side door](side-door.md) covers the rest: how agents never get one, and how people stop
+needing one.
+
 ## From the API
 
     curl -s -H "Authorization: Bearer $ST_TOKEN" localhost:8080/v1/drift

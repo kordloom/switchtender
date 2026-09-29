@@ -1,8 +1,10 @@
 package template_test
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/kordloom/switchtender/internal/run"
@@ -254,9 +256,46 @@ func TestValidateSurvey(t *testing.T) {
 			if (err != nil) != test.Want {
 				t.Errorf("template.ValidateSurvey() error = %v, wantErr %v", err, test.Want)
 			}
-			if err != nil && !errors.Is(err, template.ErrSurvey) {
-				t.Errorf("error %v does not wrap ErrSurvey", err)
+			// A malformed definition is the template's problem, not an answer's, and says so.
+			if err != nil && !errors.Is(err, template.ErrSurveyField) {
+				t.Errorf("error %v does not wrap ErrSurveyField", err)
 			}
 		})
+	}
+}
+
+// TestASurveyFieldTypeReadsTheWordsPeopleWrite pins the spellings a survey field's type arrives in.
+// A template posted with "integer" or "boolean" was refused as an unknown type, and the refusal said
+// the survey answer was invalid when no answer had been given. The common spellings are read as the
+// type they name, and a type that is still unknown is refused with the ones that exist.
+func TestASurveyFieldTypeReadsTheWordsPeopleWrite(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		In   string
+		Want template.FieldType
+	}{
+		{In: `"integer"`, Want: template.FieldInt},        // Test 0.
+		{In: `"boolean"`, Want: template.FieldBool},       // Test 1.
+		{In: `"string"`, Want: template.FieldText},        // Test 2.
+		{In: `"textarea"`, Want: template.FieldMultiline}, // Test 3.
+		{In: `"Integer"`, Want: template.FieldInt},        // Test 4: Case does not matter here.
+		{In: `"int"`, Want: template.FieldInt},            // Test 5: The stored name is unchanged.
+		{In: `"choice"`, Want: template.FieldChoice},      // Test 6.
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			var field template.SurveyField
+			if err := json.Unmarshal([]byte(`{"var":"a","type":`+test.In+`}`), &field); err != nil {
+				t.Fatalf("Unmarshal() error = %v", err)
+			}
+			if field.Type != test.Want {
+				t.Errorf("type %s read as %q, want %q", test.In, field.Type, test.Want)
+			}
+		})
+	}
+	err := template.ValidateSurvey([]template.SurveyField{{Var: "rate", Type: "float"}})
+	if !errors.Is(err, template.ErrSurveyField) || !strings.Contains(err.Error(), "text, multiline, int, bool, or choice") {
+		t.Errorf("an unknown type was refused with %v, want the types that exist named", err)
 	}
 }

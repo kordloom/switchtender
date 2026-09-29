@@ -319,7 +319,7 @@ func TestRunReceiptHandlerAgreesWithTheSiblingEndpoints(t *testing.T) {
 	}
 
 	bundle := httptest.NewRecorder()
-	auditBundleHandler(tampered, &id, "v-test", zap.NewNop()).
+	auditBundleHandler(tampered, &id, "", "v-test", zap.NewNop()).
 		ServeHTTP(bundle, httptest.NewRequest(http.MethodGet, "/v1/audit/bundle", nil))
 	var bundleSays bundleRefusal
 	if err := json.Unmarshal(bundle.Body.Bytes(), &bundleSays); err != nil {

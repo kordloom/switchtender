@@ -455,6 +455,40 @@ func mergeCredentialIDs(base, extra []string) []string {
 	return out
 }
 
+// agentLaunchRefusal returns why an agent may not launch t as req asks, or the empty string when it
+// may. A person who launches a template may reshape it within their grants. An agent works from a
+// menu of templates an operator wrote, so it launches each one as written, and survey answers, a
+// narrower limit, a dry run, and labels are all it may add.
+//
+// The MCP server refused everything else from the start, and the plain API accepted all of it from
+// the same agent token, so the narrowing held only for an agent that happened to connect over MCP.
+// An agent that sent extra vars straight to the API could rewrite what a vetted template does while
+// the audit trail recorded the template's name, and one that sent a limit of every host could widen
+// a template pinned to a canary.
+func agentLaunchRefusal(r *http.Request, t *template.Template, req launchTemplateRequest) string {
+	a, ok := actorFrom(r.Context())
+	if !ok || !a.Agent {
+		return ""
+	}
+	switch {
+	case len(req.ExtraVars) > 0:
+		return "an agent launches a template as an operator wrote it, so extra_vars is refused. " +
+			"Answer the template's survey under answers instead."
+	case req.InventoryID != nil && *req.InventoryID != "" && *req.InventoryID != t.InventoryID:
+		return "an agent cannot aim a template at another inventory. Launch it against its own, or " +
+			"ask an operator for a template that targets the inventory you need."
+	case len(req.CredentialIDs) > 0:
+		return "an agent cannot choose a template's credentials, so credential_ids is refused. The " +
+			"template's own credentials apply."
+	}
+	if req.Limit != nil {
+		if err := run.CheckLimitNarrows(t.Limit, *req.Limit); err != nil {
+			return err.Error()
+		}
+	}
+	return ""
+}
+
 // launchTemplateHandler submits a run from a saved template in one action.
 func launchTemplateHandler(store template.Store, submitter Submitter, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if submitter == nil {
@@ -494,6 +528,10 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 		// override reads the same way, so an unknown field is refused here too.
 		var launchReq launchTemplateRequest
 		if !decodeStrictOptional(w, log, r.Body, &launchReq) {
+			return
+		}
+		if msg := agentLaunchRefusal(r, t, launchReq); msg != "" {
+			respondError(w, log, http.StatusForbidden, msg)
 			return
 		}
 
@@ -613,6 +651,9 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 			errors.Is(err, dispatch.ErrUnnamedStep), errors.Is(err, dispatch.ErrDuplicateStep),
 			errors.Is(err, dispatch.ErrUnknownDependency), errors.Is(err, dispatch.ErrDependencyCycle):
 			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		case errors.Is(err, credential.ErrNoSecret), errors.Is(err, credential.ErrUnreadable):
+			respondError(w, log, http.StatusConflict, err.Error())
 			return
 		case errors.Is(err, dispatch.ErrPolicyDenied) ||
 			errors.Is(err, dispatch.ErrQueueUnlicensed):

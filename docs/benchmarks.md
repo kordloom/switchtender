@@ -144,7 +144,7 @@ measures 110.5 MiB, a ratio of about 8.5 to 1, and it holds a higher resident se
 against our 35.1 MiB. Size and memory are what this page can speak to, and they are not a feature
 comparison: Semaphore's own image describes it as covering Terraform, OpenTofu, Terragrunt and
 PowerShell alongside Ansible. What each product does and does not carry is the [comparison
-page](comparison.md), including where SwitchTender is still young. We publish no boot comparison
+page](comparison.md), including the rows where SwitchTender is behind. We publish no boot comparison
 against it, for the reason above.
 
 **AWX is not shaped for a boot-time row, and pretending otherwise would be the dishonest thing.** It

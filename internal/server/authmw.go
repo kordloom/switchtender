@@ -45,6 +45,9 @@ type authGate struct {
 	// authz enforces object grants so a manage grant can delegate editing a specific object beyond
 	// the global role. Nil leaves only the global role gate in force.
 	authz *authorizer
+	// publicReads declares a read-only public server, whose reads are meant for any host name, so
+	// the rebinding check leaves them alone.
+	publicReads bool
 	// alwaysEnforce declares this install authenticates whatever the tables hold, so open mode is
 	// never entered. It is set for an install configured with single sign-on, whose tables are
 	// legitimately empty until the first person signs in.
@@ -60,15 +63,11 @@ type authGate struct {
 	checkedAt time.Time
 }
 
-// reboundWrite reports whether a browser sent this state-changing request for a host name that no
-// loopback install answers to, with no declared proxy in front. Only requests carrying the
-// browser's own fetch metadata count: curl, the CLI, and server-to-server senders name no
-// Sec-Fetch-Site and are unaffected.
-func reboundWrite(r *http.Request) bool {
-	switch r.Method {
-	case http.MethodGet, http.MethodHead, http.MethodOptions:
-		return false
-	}
+// reboundRequest reports whether a browser sent this request for a host name that no loopback
+// install answers to, with no declared proxy in front. Only requests carrying the browser's own
+// fetch metadata count: curl, the CLI, and server-to-server senders name no Sec-Fetch-Site and are
+// unaffected.
+func reboundRequest(r *http.Request) bool {
 	if r.Header.Get("Sec-Fetch-Site") == "" {
 		return false
 	}
@@ -84,6 +83,15 @@ func reboundWrite(r *http.Request) bool {
 		return false
 	}
 	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return false
+	}
+	return true
+}
+
+// isWrite reports whether a request changes state.
+func isWrite(r *http.Request) bool {
+	switch r.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
 		return false
 	}
 	return true
@@ -120,8 +128,15 @@ func crossSiteWrite(r *http.Request) bool {
 	}
 	// No Sec-Fetch-Site: a non-browser client, unless it named an origin.
 	origin := r.Header.Get("Origin")
-	if origin == "" || origin == "null" {
+	if origin == "" {
 		return false
+	}
+	// A browser sends "null" for an opaque document: a sandboxed frame, or a data: or file: page.
+	// That is the easiest place for a hostile page to post from without saying where it is, and no
+	// page this server serves sends it, so it counts as another site. It was let through as though
+	// no browser had sent it.
+	if origin == "null" {
+		return true
 	}
 	return !sameOriginAs(origin, r)
 }
@@ -143,16 +158,21 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 				"a state-changing request from another site is refused")
 			return
 		}
-		if reboundWrite(r) && !g.enforcing(r.Context()) {
+		if reboundRequest(r) && (isWrite(r) || !g.publicReads) && !g.enforcing(r.Context()) {
 			// DNS rebinding walks around the cross-site check: the attacker's page flips its own
 			// hostname's A record to 127.0.0.1, so the browser sends Sec-Fetch-Site: same-origin
 			// and a matching Origin, and every header lies in unison. What cannot lie is the Host
-			// itself, which necessarily names the attacker's domain. A writable install that runs
-			// open is loopback-bound by construction, so a browser write whose Host is not a
-			// loopback name did not come from the operator's own machine, unless a declared
-			// reverse proxy fronts the install, which is what --trusted-proxy states.
+			// itself, which necessarily names the attacker's domain. An install that runs open is
+			// loopback-bound by construction, so a browser request whose Host is not a loopback
+			// name did not come from the operator's own machine, unless a declared reverse proxy
+			// fronts the install, which is what --trusted-proxy states.
+			//
+			// Reads are refused too. Only writes were, and an open install answers every read,
+			// so the rebound page could not change anything but could read every run, its script
+			// and log, the inventories, and the audit list, and send them wherever it liked. A
+			// read-only public server is the exception: reading it from any host is its purpose.
 			respondError(w, g.log, http.StatusForbidden,
-				"refused a browser write for host "+r.Host+" on an open install: a loopback "+
+				"refused a browser request for host "+r.Host+" on an open install: a loopback "+
 					"server answers loopback names. Fronting it with a proxy? Declare it with "+
 					"--trusted-proxy.")
 			return
@@ -196,7 +216,7 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			// default, so a thirty-day session credential ended up in access logs and everything
 			// downstream of them. A ticket opens one run, once, for thirty seconds.
 			if actor, ok := g.tickets.redeem(r.URL.Query().Get("ticket"), streamRunID(r)); ok {
-				if !g.decide(w, r, actor) {
+				if !g.decide(w, r, actor, recordedActor{Name: actor.Name, Type: actor.Type}) {
 					return
 				}
 				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), actorKey{}, actor)))
@@ -216,12 +236,11 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 				return
 			}
 			actor := Actor{UserID: u.ID, Role: u.Role, Name: u.Username, Type: actorTypeSession}
-			if !g.decide(w, r, actor) {
+			who := recordedActor{Name: u.Username, Type: actorTypeSession}
+			if !g.decide(w, r, actor, who) {
 				return
 			}
-			receipt, ok := g.record(w, recordedActor{
-				Name: u.Username, Type: actorTypeSession,
-			}, r)
+			receipt, ok := g.record(w, who, r)
 			if !ok {
 				return
 			}
@@ -255,7 +274,7 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 		switch {
 		case tok.IsAgent():
 			actorType = actorTypeAgent
-			role = capAgentRole(role)
+			role = user.AgentRole(role)
 		case tok.IsSession():
 			// A person at a browser is a session, not a script. The chain recorded every interactive
 			// change as actor_type "token", which is exactly the distinction the identity stage of the
@@ -265,18 +284,17 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 		}
 		actor := Actor{UserID: tok.UserID, Role: role, Name: tok.Name, Agent: tok.IsAgent(),
 			Type: actorType, TokenID: tok.ID}
-		if !g.decide(w, r, actor) {
-			return
-		}
-		g.touch(tok)
 		// A token's label is chosen by whoever minted it and is not unique, so the label alone cannot
 		// attribute a change: two tokens named "agent" on different accounts read identically. The
 		// bound account is recorded beside it, which is also the delegation an agent operates under.
 		// The type says whether a person or an agent held the token, which is set when the token is
 		// minted rather than inferred from the request.
-		receipt, ok := g.record(w, recordedActor{
-			Name: tok.Name, Type: actorType, OnBehalfOf: boundUser,
-		}, r)
+		who := recordedActor{Name: tok.Name, Type: actorType, OnBehalfOf: boundUser}
+		if !g.decide(w, r, actor, who) {
+			return
+		}
+		g.touch(tok)
+		receipt, ok := g.record(w, who, r)
 		if !ok {
 			return
 		}
@@ -402,16 +420,6 @@ type Actor struct {
 	// exactly it. Empty for a sign-in that carries no stored token, such as a bearer JWT verified
 	// against an issuer.
 	TokenID string
-}
-
-// capAgentRole lowers an admin role to operator for an agent, and leaves any lower role unchanged.
-// An agent may launch and propose work but must not manage identity, access, or secrets, or approve
-// its own held run, all of which are admin.
-func capAgentRole(role user.Role) user.Role {
-	if role == user.RoleAdmin {
-		return user.RoleOperator
-	}
-	return role
 }
 
 // actorFrom returns the authenticated actor from the context, and whether one was present. It is
@@ -758,7 +766,13 @@ func roleAllows(have, need user.Role) bool {
 
 // decide applies the authorization decision for actor on r, writing the denial or error response and
 // reporting whether the caller should proceed.
-func (g *authGate) decide(w http.ResponseWriter, r *http.Request, actor Actor) bool {
+//
+// A refused mutation is recorded as who before the 403 is written, the way a mutation refused later by
+// its handler already was. The audit page says a refused request is on the record too, and one refused
+// for its caller's role was the exception: an operator trying to approve a run or write a policy, and
+// an agent trying to approve its own held run, left no entry and no receipt. The caller authenticated,
+// so the entry names a known token or session, and a probe by a stranger never reaches here.
+func (g *authGate) decide(w http.ResponseWriter, r *http.Request, actor Actor, who recordedActor) bool {
 	allow, err := g.allowed(r.Context(), actor, r)
 	if err != nil {
 		g.log.Error("server: authorize: " + err.Error())
@@ -766,6 +780,9 @@ func (g *authGate) decide(w http.ResponseWriter, r *http.Request, actor Actor) b
 		return false
 	}
 	if !allow {
+		if _, ok := g.record(w, who, r); !ok {
+			return false
+		}
 		forbidden(w)
 		return false
 	}

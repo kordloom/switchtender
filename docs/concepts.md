@@ -43,8 +43,10 @@ declare a survey.
 ## Inventories and sources
 
 A stored inventory is inventory content referenced by id and materialized on whichever executor
-runs the play. A dynamic inventory source runs an inventory plugin or script and refreshes the
-result into a stored inventory, with cloud authentication supplied by a credential.
+runs the play. A dynamic inventory source reads an inventory plugin config or an inventory file, or
+runs a script from a project checkout, and refreshes the result into a stored inventory, with cloud
+authentication supplied by a credential. A script at a bare path on the server is refused, since
+nothing but the stored path would decide what code runs as the executor.
 
 A stored inventory can also draw its content from an external store, a command, Vault, or Google
 Secret Manager, resolved at launch, so the host list lives outside SwitchTender and is fetched fresh
@@ -104,7 +106,8 @@ organization admin can rewrite that organization's credentials but cannot list i
 ## Queues and workers
 
 A worker is any process running the executor against the shared store. Every process, the server
-included, competes for pending runs through the store. A run can target a named queue, and only
+included, competes for pending runs through the store. Workers beyond the server and named queues
+are Team features. A run can target a named queue, and only
 workers serving that queue run it, which places work across a mixed fleet. A lease keeps a run
 attributable, and a janitor requeues work whose holder went away. The [reliability](reliability.md)
 page details how work is claimed, bounded, recovered, and kept consistent across workers.
@@ -230,11 +233,15 @@ pinned key with no call to the witness at all, so the token gates delivery, not 
 event from the SIEM, months later, redeems its receipt against the live chain and gets proof the
 entry still stands at that exact position. The cursor is durable and advances only when every
 sink accepted, so delivery is at least once and an outage delays events rather than dropping
-them. Deduplicate on the receipt.
+them. Deduplicate on the receipt. The cursor also remembers the link of what it last sent, so a
+database restored from an older copy, or one whose tail was cut, is noticed when the server starts:
+the forwarder logs it and resumes after the newest delivered entry the chain still holds, and the
+entries the chain has since appended reach the SIEM rather than being skipped.
 
 **Receipts make an omission detectable by the party it happened to.** Every mutation returns an
-`Audit-Receipt: seq:link` header naming where it was recorded, with sign-in and webhook delivery
-excluded because neither carries an authenticated actor to record it against. Keep them. `switchtender audit
+`Audit-Receipt: seq:link` header naming where it was recorded, a webhook fire included. Signing in
+and out is the exception: a sign-in carries no authenticated actor to record it against, and
+recording one would let a stranger append to the chain without bound. Keep the receipts. `switchtender audit
 receipt 41:9f2c...` confirms the chain still holds that exact link at that exact position, and a
 server that omitted the entry cannot produce a chain containing the receipt.
 

@@ -29,6 +29,11 @@ spec:
       app.kubernetes.io/component: server
   template:
     metadata:
+      annotations:
+        # A change to a Secret the chart writes rolls the pods. They kept the old values until
+        # something else restarted them, so a renewed license or a rotated key did nothing.
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        checksum/db: {{ include (print $.Template.BasePath "/db-secret.yaml") . | sha256sum }}
       labels:
         {{- include "switchtender.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: server
@@ -47,8 +52,10 @@ spec:
             - serve
             - --addr
             - {{ .Values.server.addr | quote }}
+            {{- if not .Values.database.dsn }}
             - --db
-            - {{ .Values.database.dsn | default "/data/switchtender.db" | quote }}
+            - /data/switchtender.db
+            {{- end }}
             {{- range .Values.server.extraArgs }}
             - {{ . | quote }}
             {{- end }}
@@ -80,6 +87,22 @@ spec:
             - name: SWITCHTENDER_LICENSE
               value: /etc/switchtender/license/license.jwt
             {{- end }}
+            {{- if .Values.database.dsn }}
+            # The DSN carries its password, so it is read from a Secret rather than passed as an
+            # argument, where the pod spec showed it to anyone allowed to list pods.
+            - name: SWITCHTENDER_DB
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "switchtender.fullname" . }}-db
+                  key: SWITCHTENDER_DB
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: http
               containerPort: 8080
@@ -101,7 +124,7 @@ spec:
             periodSeconds: 5
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          {{- if or .Values.license .Values.existingSecret (not .Values.database.dsn) }}
+          {{- if or .Values.license .Values.existingSecret (not .Values.database.dsn) .Values.extraVolumeMounts }}
           volumeMounts:
             {{- if not .Values.database.dsn }}
             - name: data
@@ -112,8 +135,11 @@ spec:
               mountPath: /etc/switchtender/license
               readOnly: true
             {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
-      {{- if or .Values.license .Values.existingSecret (not .Values.database.dsn) }}
+      {{- if or .Values.license .Values.existingSecret (not .Values.database.dsn) .Values.extraVolumes }}
       volumes:
         {{- if not .Values.database.dsn }}
         - name: data
@@ -132,6 +158,9 @@ spec:
               - key: license.jwt
                 path: license.jwt
             optional: true
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
         {{- end }}
       {{- end }}
 ---

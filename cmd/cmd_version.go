@@ -72,6 +72,18 @@ func runVersionVerify(cmd *cobra.Command) error {
 	if version == "0.0.0-dev" || strings.Contains(version, "devel") {
 		return fmt.Errorf("this is a development build; there is no release to verify against")
 	}
+	// The container image compiles its own binary from the tagged source, so its bytes are not the
+	// release archive's and never match the published hashes. Holding it against them reported the
+	// official image as "not the released binary", which reads as tampering. The image is signed on
+	// its own, and that signature is the check that applies to it.
+	if BuildChannel == buildChannelContainer {
+		return fmt.Errorf("%w from the tagged source, so it is not the release archive's file and "+
+			"cannot match its hashes. Verify the image instead, from outside it: cosign verify "+
+			"ghcr.io/kordloom/switchtender:%s --certificate-identity-regexp "+
+			"'^https://github.com/kordloom/switchtender/.github/workflows/release.yml@.*' "+
+			"--certificate-oidc-issuer https://token.actions.githubusercontent.com",
+			errContainerBuild, version)
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("locate executable: %w", err)

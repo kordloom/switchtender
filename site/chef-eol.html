@@ -18,7 +18,7 @@
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-	<link rel="stylesheet" href="/styles.css?v=35">
+	<link rel="stylesheet" href="/styles.css?v=37">
 	<!-- st:entity -->
 	<script type="application/ld+json">
 {
@@ -126,10 +126,10 @@
 		<section class="section wrap">
 			<div class="reveal">
 				<h2>What comes across, in one command</h2>
-				<pre class="code"><code>knife node list | xargs -I{} knife node show {} -F json &gt; chef-nodes.json
-switchtender import chef chef-nodes.json</code></pre>
+				<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>knife node list | xargs -I{} knife node show {} -l -F json &gt; chef-nodes.json
+switchtender import chef chef-nodes.json</code></pre></div>
 				<p>Every node becomes a host. Its <code>chef_environment</code> becomes a group, and every <code>role[...]</code> in its run list becomes a group as well, so a play can target <code>[webserver]</code> on the day of the import rather than after somebody rebuilds the grouping by hand. The ohai facts that identify a machine come across as host variables, and <code>ipaddress</code> is also set as <code>ansible_host</code>, because a Chef estate addresses machines by node name and has no reason to have kept DNS in step.</p>
-				<p>The preview runs before anything is created, and it names what it left behind: how many recipes it saw and how many fields in the export this importer does not read, with the first several of each listed by name. A clean report means clean, which is the only way a report is worth reading.</p>
+				<p>The preview runs before anything is created, and it names what it left behind: how many recipes it saw, with the first eight by name, and every field in the export this importer does not read. A clean report means clean, which is the only way a report is worth reading.</p>
 			</div>
 		</section>
 

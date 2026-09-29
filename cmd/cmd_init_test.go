@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/kordloom/switchtender/internal/user"
 )
 
 // TestInitForceKeepsTheKeyTheInstallIsUsing pins that rerunning init over a live install does not
@@ -57,6 +59,62 @@ func TestInitForceKeepsTheKeyTheInstallIsUsing(t *testing.T) {
 	// A directory with no config is the fresh install, where minting is correct.
 	if _, present := readInitConfig(filepath.Join(dir, "absent.env")); present {
 		t.Error("a missing config was reported present, which would refuse a fresh install")
+	}
+}
+
+// TestInitRerunsOverAnInstallItAlreadyMade pins that init can run again over its own install. It
+// created the admin account every time, and the second attempt failed on the unique username, so the
+// two reruns its own help describes were impossible: --force to regenerate a systemd unit, and
+// deleting the config to start over with new keys. A rerun leaves the account as it is, password
+// included, since changing it would lock out whoever holds the first one.
+func TestInitRerunsOverAnInstallItAlreadyMade(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "switchtender.env")
+	db := filepath.Join(dir, "st.db")
+	setString(t, &initConfig, cfg)
+	setString(t, &initDB, db)
+	setString(t, &initAdmin, "admin")
+	setString(t, &initSystemd, "")
+	setBool(t, &initForce, false)
+	cmd := initCmd
+	cmd.SetContext(context.Background())
+
+	t.Setenv("SWITCHTENDER_ADMIN_PASSWORD", "the-first-password")
+	if err := runInit(cmd, nil); err != nil {
+		t.Fatalf("first runInit() error = %v", err)
+	}
+
+	// Rerun to regenerate what the config holds, which is what --force is for.
+	t.Setenv("SWITCHTENDER_ADMIN_PASSWORD", "a-second-password")
+	setBool(t, &initForce, true)
+	if err := runInit(cmd, nil); err != nil {
+		t.Fatalf("runInit(--force) over its own install error = %v", err)
+	}
+
+	// Rerun after deleting the config, which the --force help says is how to start over.
+	if err := os.Remove(cfg); err != nil {
+		t.Fatalf("remove config: %v", err)
+	}
+	setBool(t, &initForce, false)
+	if err := runInit(cmd, nil); err != nil {
+		t.Fatalf("runInit() after deleting the config error = %v", err)
+	}
+
+	bundle, err := openBundle(db)
+	if err != nil {
+		t.Fatalf("openBundle() error = %v", err)
+	}
+	defer func() { _ = bundle.Close() }()
+	accounts, err := bundle.Users().List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(accounts) != 1 {
+		t.Errorf("accounts after three runs = %d, want the one the first run made", len(accounts))
+	}
+	if _, err := user.Authenticate(context.Background(), bundle.Users(), "admin",
+		"the-first-password"); err != nil {
+		t.Errorf("the admin's first password no longer works after a rerun: %v", err)
 	}
 }
 

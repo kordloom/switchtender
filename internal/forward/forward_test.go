@@ -127,8 +127,8 @@ func TestForwarderHoldsTheCursorUntilEverySinkAccepts(t *testing.T) {
 	if _, err := f.forwardOnce(context.Background()); err == nil {
 		t.Fatal("forwardOnce() with a refusing sink = nil error, want the failure surfaced")
 	}
-	if seq, err := readCursor(cursor); err != nil || seq != 0 {
-		t.Fatalf("cursor after refusal = %d, %v, want unmoved at 0", seq, err)
+	if doc, err := readCursor(cursor); err != nil || doc.Seq != 0 {
+		t.Fatalf("cursor after refusal = %d, %v, want unmoved at 0", doc.Seq, err)
 	}
 
 	// The collector recovers: the batch is redelivered whole. The sink that already accepted
@@ -143,8 +143,8 @@ func TestForwarderHoldsTheCursorUntilEverySinkAccepts(t *testing.T) {
 		t.Errorf("deliveries = %d good, %d bad; want the accepted sink redelivered and the "+
 			"recovered one caught up", len(good.all()), len(bad.all()))
 	}
-	if seq, _ := readCursor(cursor); seq != 2 {
-		t.Errorf("cursor = %d, want advanced past the delivered batch", seq)
+	if doc, _ := readCursor(cursor); doc.Seq != 2 {
+		t.Errorf("cursor = %d, want advanced past the delivered batch", doc.Seq)
 	}
 }
 

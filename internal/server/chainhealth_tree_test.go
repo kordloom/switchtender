@@ -78,7 +78,7 @@ func TestAuditBundleHandlerExportsOverATreeAnchor(t *testing.T) {
 	}
 	audits := seedTreeAnchoredChain(t, id.InstallID, 3)
 
-	h := auditBundleHandler(audits, &id, "v-test", zap.NewNop())
+	h := auditBundleHandler(audits, &id, "", "v-test", zap.NewNop())
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/audit/bundle", nil))
 	if rec.Code != http.StatusOK {

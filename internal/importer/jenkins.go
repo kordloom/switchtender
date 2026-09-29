@@ -305,9 +305,13 @@ func (p *Plan) addJenkinsFreestyle(name string, proj jenkinsProject, inventoryNa
 			"inventory, so check that the inventory you attached covers the same machines.",
 			name, oneLine(node))
 	}
+	// Jenkins sets each parameter as an environment variable of the same name.
+	survey := p.jenkinsSurvey(name, proj)
+	command = withPreamble(command, p.paramPreamble(name, "Jenkins",
+		surveyParams(survey, func(v string) string { return v })))
 	tmpl := &template.Template{
 		ID: template.NewID(), Name: name, Tool: "bash", Command: command,
-		Inventory: inventoryName, Survey: p.jenkinsSurvey(name, proj),
+		Inventory: inventoryName, Survey: survey,
 		Timeout: p.jenkinsTimeout(name, proj), CreatedAt: now,
 	}
 	p.jenkinsSCMWarning(name, proj)
@@ -315,7 +319,7 @@ func (p *Plan) addJenkinsFreestyle(name string, proj jenkinsProject, inventoryNa
 
 	for _, spec := range p.jenkinsSchedules(name, proj) {
 		p.addSchedule(&schedule.Schedule{
-			ID: schedule.NewID(), Name: name, Cron: spec, TemplateID: tmpl.ID,
+			ID: schedule.NewID(), Name: name, Cron: spec.cron, Timezone: spec.zone, TemplateID: tmpl.ID,
 			Enabled: !proj.Disabled, CreatedAt: now,
 		}, "jenkins", now)
 	}
@@ -627,8 +631,8 @@ var jenkinsFieldBounds = [5][2]int{{0, 59}, {0, 23}, {1, 28}, {1, 12}, {0, 6}}
 // asks the repository whether anything changed and builds only if something did. Importing it as a
 // plain schedule would turn a job that usually does nothing into one that runs every few minutes
 // unconditionally, so it is refused and reported.
-func (p *Plan) jenkinsSchedules(name string, proj jenkinsProject) []string {
-	var specs []string
+func (p *Plan) jenkinsSchedules(name string, proj jenkinsProject) []jenkinsSpec {
+	var specs []jenkinsSpec
 	for _, item := range proj.Triggers.Items {
 		switch item.XMLName.Local {
 		case "hudson.triggers.TimerTrigger":
@@ -649,12 +653,24 @@ func (p *Plan) jenkinsSchedules(name string, proj jenkinsProject) []string {
 	return specs
 }
 
-// jenkinsTimer converts one timer trigger's specification into cron expressions.
+// jenkinsSpec is one converted timer line and the zone it is read in, empty for the server's own.
+type jenkinsSpec struct {
+	// cron is the standard five field expression.
+	cron string
+	// zone is the IANA zone a TZ= line before it named.
+	zone string
+}
+
+// jenkinsTimer converts one timer trigger's specification into schedules.
 //
 // A Jenkins timer spec holds one rule per line and allows blank lines and # comments, so a single
-// trigger can describe several firing times and each becomes its own schedule.
-func (p *Plan) jenkinsTimer(name, spec string) []string {
-	var specs []string
+// trigger can describe several firing times and each becomes its own schedule. A TZ= line sets the
+// zone every line after it is read in, until the next one, which is how Jenkins reads it. It was
+// reported as not a cron expression and dropped, so the lines after it fired in the server's zone
+// instead of the one the job was written for.
+func (p *Plan) jenkinsTimer(name, spec string) []jenkinsSpec {
+	var specs []jenkinsSpec
+	zone := ""
 	for _, line := range strings.Split(strings.ReplaceAll(spec, "\r\n", "\n"), "\n") {
 		if idx := strings.Index(line, "#"); idx >= 0 {
 			line = line[:idx]
@@ -663,8 +679,19 @@ func (p *Plan) jenkinsTimer(name, spec string) []string {
 		if line == "" {
 			continue
 		}
+		if tz, ok := strings.CutPrefix(line, "TZ="); ok {
+			tz = strings.TrimSpace(tz)
+			if _, err := time.LoadLocation(tz); err != nil || tz == "" {
+				p.warn("job %q names the timezone %q, which this system cannot resolve, so the "+
+					"timer lines after it import in the server's local time", name, oneLine(tz))
+				zone = ""
+				continue
+			}
+			zone = tz
+			continue
+		}
 		if converted, ok := p.jenkinsCron(name, line); ok {
-			specs = append(specs, converted)
+			specs = append(specs, jenkinsSpec{cron: converted, zone: zone})
 		}
 	}
 	return specs

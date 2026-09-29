@@ -154,7 +154,7 @@ func createTokenHandler(tokens auth.Store, users user.Store, log *zap.Logger) ht
 		}
 		role := u.Role
 		if tok.IsAgent() {
-			role = capAgentRole(role)
+			role = user.AgentRole(role)
 		}
 		// The label, the account, and the kind are logged; the plaintext never is.
 		log.Info("server: token minted", zap.String("name", tok.Name),

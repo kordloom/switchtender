@@ -46,14 +46,27 @@ archives:
     format_overrides:
       - goos: windows
         formats: [zip]
+    # Every entry is recorded as owned by root. Left alone, an archive records the build account's
+    # uid, and tar run as root restores it, so a binary unpacked into a root-owned directory stayed
+    # writable by whichever local account happened to share that uid.
+    builds_info:
+      owner: root
+      group: root
+      mode: 0755
     files:
-      - LICENSE
+      - src: LICENSE
+        info: &rootfile
+          owner: root
+          group: root
+          mode: 0644
       # Beside LICENSE, because it changes one of its parameters for the versions released before
       # LICENSE carried the two-year wording. Somebody auditing an archive offline reads what is in
       # their hand, so the grant travels with the artifact rather than living only in a repository
       # they would have to know to go and find.
-      - LICENSE-GRANT.md
-      - README.md
+      - src: LICENSE-GRANT.md
+        info: *rootfile
+      - src: README.md
+        info: *rootfile
 
 checksum:
   name_template: SHA256SUMS
@@ -99,6 +112,12 @@ nfpms:
       - deb
       - rpm
       - apk
+    # Bash runs every script template and the starter templates, and an Alpine host has none until
+    # it is installed. The CA bundle is what version --verify and every HTTPS call check against,
+    # and a minimal image ships without it.
+    dependencies:
+      - bash
+      - ca-certificates
     bindir: /usr/bin
 
 changelog:

@@ -44,13 +44,20 @@ existing store, fetched fresh each run:
 
     vault kv get -field=token secret/ci
 
+That prints one bare value, which is what a `token` credential holds, and it reaches the run as
+`SWITCHTENDER_TOKEN`. An `env` credential holds `KEY=VALUE` lines, so its command has to print them,
+for example `printf 'CI_TOKEN=%s\n' "$(vault kv get -field=token secret/ci)"`. An `env` credential
+whose command prints anything else stops the run before it starts and says which line.
+
 Any CLI works the same way, so a credential can pull from Vault, AWS Secrets Manager, GCP Secret
 Manager, or 1Password with no extra integration.
 
 For Vault there is also a native source that needs no `vault` CLI on the runner: set the source to
 Vault and give it the address, path, and field as JSON. SwitchTender reads the secret over Vault's HTTP
-API at launch, handling both KV v2 and KV v1. The token comes from the config or the `VAULT_TOKEN`
-environment:
+API at launch, handling both KV v2 and KV v1. The token comes from the config, or from the server's
+`VAULT_TOKEN` environment when the server also has `VAULT_ADDR` set to the same Vault as `addr`. The
+server hands its own token only to the Vault it was pointed at, so a credential cannot name another
+address and collect it. With neither, the run stops and says a token is missing:
 
     {"addr":"https://vault:8200","path":"secret/data/ci","field":"token"}
 
@@ -121,7 +128,7 @@ on a lease.
     curl -s -X POST localhost:8080/v1/credentials \
       -H "Authorization: Bearer $ST_TOKEN" \
       -H 'content-type: application/json' \
-      -d '{"name":"ci-token","kind":"env","source":"command","secret":"vault kv get -field=token secret/ci"}'
+      -d '{"name":"ci-token","kind":"token","source":"command","secret":"vault kv get -field=token secret/ci"}'
 
 For a pasted value, omit `source` and put the value in `secret`. Imported credentials arrive without
 secrets, since exports never contain them. This is the one-time step to fill them in.
@@ -129,9 +136,11 @@ secrets, since exports never contain them. This is the one-time step to fill the
 ## Scope a secret to an inventory
 
 Attach a credential to a stored inventory and every run that targets that inventory receives it, so
-a fleet can carry its own secret variables in one place. Open Inventories, edit the inventory, and
-pick the credentials under Credentials. An `env` credential becomes that inventory's secret
-variables. A `token` credential its bearer token. You need use access on a credential to attach it.
+a fleet can carry its own secrets in one place. Open Inventories, edit the inventory, and pick the
+credentials under Credentials. An `env` credential's `KEY=VALUE` lines become environment variables
+in each of those runs, so a playbook reads one with `lookup('env', 'KEY')` and a script reads
+`$KEY`. They are not Ansible variables, so `{{ KEY }}` is undefined. A `token` credential arrives as
+`SWITCHTENDER_TOKEN`. You need use access on a credential to attach it.
 
 ## Source an inventory's hosts
 

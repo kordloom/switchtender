@@ -60,7 +60,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model" class="active">Threat model</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model" class="active">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -101,8 +101,8 @@ on the same conformance vectors, accepting and rejecting the same bundles.</p>
 <p>They cannot submit around it: every entry path shares the one submit call. They cannot approve
 their own held run where a rule requires a second person. They cannot edit the spec after approval,
 because the executor refuses a digest that no longer matches. And they cannot do any of it quietly,
-because the submission, the hold, the decision, and the outcome are all separate chain entries,
-each naming its actor.</p>
+because the submission, the decision, and the outcome are all separate chain entries, each naming
+its actor, and the run itself records which rule held it.</p>
 <h3 id="an-operator-who-wants-to-rewrite-history">An operator who wants to rewrite history</h3>
 <p>Editing an entry breaks its content digest. Replacing an entry breaks the hash link of everything
 after it. Truncating the chain moves the head backward, which is exactly what a witness on another
@@ -143,8 +143,14 @@ morning. That alarm is the product working, and anyone can run the exercise toda
 <p><strong>A change made outside SwitchTender.</strong> A person or process holding its own SSH key can change a
 host behind the controller's back, and no audit system records what it never saw. The chain proves
 the record it holds; it does not prove the record is exhaustive. For human operators this boundary
-is organizational, taking the side keys away. For agents it closes structurally, because an agent
-that was only ever given a SwitchTender token has no path around the gate.</p>
+is organizational, taking the side keys away, and SwitchTender makes that workable by holding the
+credentials runs use, or minting them per run and revoking them after, so nobody needs a standing
+key to production. For agents it closes structurally, because an agent that was only ever given a
+SwitchTender token has no path around the gate. What SwitchTender does see is the effect. A scheduled dry run flags any host or Terraform directory that no longer matches
+what your automation asserts, so a change made around the gate to anything your automation manages
+surfaces on the next check, and the fix goes back through the gate. Drift says what diverged, not
+who changed it, and state your automation never asserts is invisible to it. <a href="/docs/side-door">The side
+door</a> puts all three parts of this in one place.</p>
 <p><strong>A controller compromised before the write.</strong> Stated above and worth repeating as a limit:
 tamper-evidence begins when the entry is written. Records forged at the source are internally
 consistent. Witnessing bounds when such a window could have begun; it does not prevent one.</p>
@@ -182,9 +188,11 @@ loudly, and it is the right trade for a system whose product is the record.</p>
 commit that was. The execution that follows syncs the same remote and fails on the same fault.</li>
 <li><strong>Database restored from an older backup.</strong> The head moves backward. A witness raises a finding,
 and bundles exported after the restore point no longer extend the ones exported before it.</li>
-<li><strong>Witness offline.</strong> The gap shows up as an unattested window in verification output, reported
-with its duration rather than hidden. Attestation coverage is a claim the verifier checks, not
-an assumption.</li>
+<li><strong>Witness offline.</strong> The witness sees nothing while it is down, and nothing records its downtime.
+When it comes back it checks the feed against its signed checkpoint, so a beat it had already
+witnessed that has since vanished or changed is still a finding. History written and removed
+entirely while it was away is outside what it saw. Anchors bound that loss independently of any
+witness. <code>witness serve</code> reports a server it cannot reach rather than going quiet.</li>
 <li><strong>Signing key lost.</strong> Old bundles still verify against the pinned key. New exports need a new
 key, and the change of key is itself visible to anyone pinning the old fingerprint.</li>
 </ul>

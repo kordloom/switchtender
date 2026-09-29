@@ -16,6 +16,9 @@ var (
 	// append in batches, and a retry that started over from the first batch duplicated every batch that
 	// had already landed, so the run's event record showed the same tasks executing twice.
 	ErrPartlyDelivered = errors.New("write landed in part, so repeating it would duplicate")
+	// ErrLimitWidens is returned when a launch limit would widen a template's target rather than
+	// narrow it.
+	ErrLimitWidens = errors.New("limit would widen the template's target")
 	// errScanLimit reports that reading one more file would pass what one playbook grade reads.
 	errScanLimit = errors.New("scan limit reached")
 	// errScanTooLarge reports a file larger than a playbook grade reads.

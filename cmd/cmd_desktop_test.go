@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -122,5 +123,43 @@ func TestDesktopAlive(t *testing.T) {
 	_ = l.Close()
 	if desktopAlive(port) {
 		t.Errorf("desktopAlive(%d) = true with nothing listening", port)
+	}
+}
+
+// TestNewDatabaseNoteSparesDesktop pins when serve warns about a database it is about to create.
+// Desktop makes its database on first launch by design and takes no --db, so its user was told to
+// check a flag they cannot pass.
+func TestNewDatabaseNoteSparesDesktop(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	existing := filepath.Join(dir, "there.db")
+	if err := os.WriteFile(existing, nil, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	missing := filepath.Join(dir, "missing.db")
+	tests := []struct {
+		DB       string
+		Desktop  bool
+		WantNote bool
+	}{{ // Test 0: serve about to create a database says so, in case --db was mistyped.
+		DB: missing, WantNote: true,
+	}, { // Test 1: desktop creating its own database says nothing.
+		DB: missing, Desktop: true,
+	}, { // Test 2: an existing database needs no note.
+		DB: existing,
+	}, { // Test 3: a PostgreSQL DSN is never a file to check.
+		DB: "postgres://u:p@db/st",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			note := newDatabaseNote(test.DB, test.Desktop)
+			if (note != "") != test.WantNote {
+				t.Errorf("newDatabaseNote(%q, %v) = %q, want a note = %v", test.DB, test.Desktop, note, test.WantNote)
+			}
+			if test.WantNote && !strings.Contains(note, "check --db") {
+				t.Errorf("the note %q does not point at --db", note)
+			}
+		})
 	}
 }

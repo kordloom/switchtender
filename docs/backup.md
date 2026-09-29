@@ -31,12 +31,14 @@ database itself if that history has to travel.
 
 The signing identity is not included either, and it is the one thing to copy by hand. `producer-key.json`
 sits in the state directory beside the database and is what makes a bundle attributable to this install:
-a tree anchor's Merkle leaves are bound to the install id derived from that key, so a deployment restored
-without it signs as a different install and its own anchors can no longer be recomputed. Copy the file
-with the same care as the encryption key, and keep it out of the same place if you keep the backup
-somewhere a reader could reach both. An anchor records which install took it, so a mismatch is reported
-as an identity that does not match rather than as a chain that was rewritten, but the remedy is still to
-restore the key.
+every entry and a tree anchor's Merkle leaves are bound to the install id derived from that key. A
+deployment restored without it will not mint a replacement: once a chain names an install, the server and
+every command refuse to sign or bind as another one, because a new key would sign as a different install
+and no earlier entry would verify under it. The server still starts and records the chain, unbound, and a
+request for a signed bundle answers `409` naming the key it needs. Commands that record a change still
+record it, unbound, and say why. Copy the file with the same care as the encryption key, and keep it out
+of the same place if you keep the backup somewhere a reader could reach both. The remedy for a missing
+key is to restore it.
 
 Against PostgreSQL there is no directory beside the database, so the key has to be supplied rather than
 found: set `SWITCHTENDER_AUDIT_KEY` to one seed on every process, or place the same `producer-key.json` in

@@ -35,7 +35,7 @@ func TestAuditBundleHandlerDownloadsAVerifiableBundle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadIdentity() error = %v", err)
 	}
-	h := auditBundleHandler(audits, &id, "v-test", zap.NewNop())
+	h := auditBundleHandler(audits, &id, "", "v-test", zap.NewNop())
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/audit/bundle", nil))
@@ -86,15 +86,23 @@ func TestAuditBundleHandlerRefusals(t *testing.T) {
 
 	// No producer identity: bundle signing is off.
 	rec := httptest.NewRecorder()
-	auditBundleHandler(audit.NewMemStore(), nil, "v", zap.NewNop()).
+	auditBundleHandler(audit.NewMemStore(), nil, "", "v", zap.NewNop()).
 		ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/audit/bundle", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("no-producer status = %d, want 404", rec.Code)
 	}
 
+	// No producer identity because the key was lost: the refusal says so, as a conflict.
+	rec = httptest.NewRecorder()
+	auditBundleHandler(audit.NewMemStore(), nil, "this install's signing key is missing", "v",
+		zap.NewNop()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/audit/bundle", nil))
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "signing key is missing") {
+		t.Errorf("lost-key status = %d %s, want 409 carrying the reason", rec.Code, rec.Body.String())
+	}
+
 	// Empty chain: nothing to bundle.
 	rec = httptest.NewRecorder()
-	auditBundleHandler(audit.NewMemStore(), &id, "v", zap.NewNop()).
+	auditBundleHandler(audit.NewMemStore(), &id, "", "v", zap.NewNop()).
 		ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/audit/bundle", nil))
 	if rec.Code != http.StatusConflict {
 		t.Errorf("empty-chain status = %d, want 409", rec.Code)

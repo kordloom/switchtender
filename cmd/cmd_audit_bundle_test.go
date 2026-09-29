@@ -357,7 +357,7 @@ func TestAuditBundleHoldsTheWholeChainBeforeWindowing(t *testing.T) {
 			if rerr != nil {
 				t.Fatalf("ReadFile() error = %v", rerr)
 			}
-			id, ierr := loadProducerIdentity(seed.DB)
+			id, ierr := installIdentity(seed.DB)
 			if ierr != nil {
 				t.Fatalf("loadProducerIdentity() error = %v", ierr)
 			}

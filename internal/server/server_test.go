@@ -609,6 +609,43 @@ func TestHealth(t *testing.T) {
 	}
 }
 
+// TestTheDemoLandsOnTheGate pins where the read-only demo's bare address goes. Every link to the
+// demo that names only the host, a README badge or an address typed from a comment, opened on the
+// overview dashboard, which is the one page every automation tool has, while the product is the
+// change a rule is holding. An install that is not the demo keeps its overview.
+func TestTheDemoLandsOnTheGate(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		ReadOnly     bool
+		WantLocation string
+	}{{ // Test 0: The read-only demo starts at the held runs.
+		ReadOnly: true, WantLocation: "/ui/runs?status=pending_approval",
+	}, { // Test 1: Any other install starts at its overview.
+		ReadOnly: false, WantLocation: "/ui/",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
+				WithReadOnly(test.ReadOnly)).Handler()
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+			if rec.Code != http.StatusFound {
+				t.Fatalf("GET / status = %d, want 302", rec.Code)
+			}
+			if loc := rec.Header().Get("Location"); loc != test.WantLocation {
+				t.Errorf("GET / Location = %q, want %q", loc, test.WantLocation)
+			}
+			// The held runs must be a page the demo serves, or the landing is a dead end.
+			rec = httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, test.WantLocation, nil))
+			if rec.Code != http.StatusOK {
+				t.Errorf("GET %s status = %d, want 200", test.WantLocation, rec.Code)
+			}
+		})
+	}
+}
+
 func TestUIMountAndRedirect(t *testing.T) {
 	t.Parallel()
 	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop()).Handler()
@@ -2611,5 +2648,82 @@ func TestTheDemoAnswersWhetherAnExportComesAcrossWithoutAcceptingOne(t *testing.
 		if rec := post(target); rec.Code != http.StatusForbidden {
 			t.Errorf("POST %s status = %d, want 403", target, rec.Code)
 		}
+	}
+}
+
+// TestRunLogsTailSaysWhereItEnds pins the header a live run page resumes its stream from. The tail
+// holds every log chunk up to the sequence it names and none past it, so a stream opened after that
+// sequence carries exactly the lines written since: none lost between the read and the connection,
+// none shown twice.
+func TestRunLogsTailSaysWhereItEnds(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	if err := store.Save(ctx, &run.Run{ID: "run_1", Status: run.StatusRunning, CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	for _, line := range []string{"line one\n", "line two\n"} {
+		if err := store.AppendLog(ctx, "run_1", []byte(line)); err != nil {
+			t.Fatalf("AppendLog() error = %v", err)
+		}
+	}
+	handler := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/runs/run_1/logs?tail=4096", nil))
+	if rec.Code != http.StatusOK || rec.Body.String() != "line one\nline two\n" {
+		t.Fatalf("tail = %d %q, want the whole short log", rec.Code, rec.Body.String())
+	}
+	seq, err := strconv.ParseInt(rec.Header().Get("Switchtender-Log-Seq"), 10, 64)
+	if err != nil {
+		t.Fatalf("the tail named no sequence to resume from: %q", rec.Header().Get("Switchtender-Log-Seq"))
+	}
+	if err := store.AppendLog(ctx, "run_1", []byte("line three\n")); err != nil {
+		t.Fatalf("AppendLog() error = %v", err)
+	}
+	chunks, err := store.LogAfter(ctx, "run_1", seq, 100)
+	if err != nil {
+		t.Fatalf("LogAfter() error = %v", err)
+	}
+	var rest strings.Builder
+	for _, c := range chunks {
+		rest.Write(c.Data)
+	}
+	if rest.String() != "line three\n" {
+		t.Errorf("resuming from the tail's sequence gave %q, want exactly the line written after it",
+			rest.String())
+	}
+}
+
+// TestAReadOnlyInstallLetsPeopleSignIn pins the difference between a read-only server and a demo. A
+// real install started with --read-only still has accounts, and the gate refused the sign-in itself,
+// so nobody could read what their role allowed. The refusal also called the install a demo.
+func TestAReadOnlyInstallLetsPeopleSignIn(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	users := user.NewMemStore()
+	reader, err := user.New("reader", "correct horse", user.RoleViewer)
+	if err != nil {
+		t.Fatalf("user.New: %v", err)
+	}
+	if err := users.Save(ctx, reader); err != nil {
+		t.Fatalf("Save user: %v", err)
+	}
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), WithReadOnly(true),
+		WithTokens(auth.NewMemStore()), WithUsers(users)).Handler()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/auth/login",
+		strings.NewReader(`{"username":"reader","password":"correct horse"}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("sign-in on a read-only install = %d %s, want 200", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/runs", strings.NewReader(`{}`)))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("a change on a read-only install = %d, want 403", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "demo") {
+		t.Errorf("a read-only install's refusal calls it a demo: %s", rec.Body.String())
 	}
 }

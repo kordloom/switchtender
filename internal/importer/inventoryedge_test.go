@@ -56,10 +56,10 @@ func TestGroupVarsRefuseAKeyAnInventoryParserWouldReadAsSomethingElse(t *testing
 			WantKept: []string{"good=v"}, WantDropped: []string{"a#b"}}, // Test 4.
 		{Name: "key with a newline", Vars: `{"a\nb": "v", "good": "v"}`,
 			WantKept: []string{"good=v"}, WantDropped: []string{`a\\nb`}}, // Test 5.
-		{Name: "value with a newline", Vars: `{"bad": "one\ntwo", "good": "v"}`,
-			WantKept: []string{"good=v"}, WantDropped: []string{"control character"}}, // Test 6.
+		{Name: "value with a newline is escaped", Vars: `{"cert": "one\ntwo", "good": "v"}`,
+			WantKept: []string{"good=v", `cert='one\ntwo'`}}, // Test 6.
 		{Name: "value with a space is quoted", Vars: `{"note": "with space"}`,
-			WantKept: []string{`note="with space"`}}, // Test 7.
+			WantKept: []string{`note='with space'`}}, // Test 7.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -98,14 +98,12 @@ func TestInventoryWideVarsApplyTheSameRule(t *testing.T) {
 	if strings.Contains(content, "bad key") {
 		t.Errorf("a variable key holding a space was written:\n%s", content)
 	}
-	if strings.Contains(content, "carriage") {
-		t.Errorf("a variable value holding a control character was written:\n%s", content)
+	// A control character is kept as an escape inside its literal, on the one line it belongs to.
+	if !strings.Contains(content, `carriage='a\rb'`) || strings.Contains(content, "\r") {
+		t.Errorf("a value holding a control character was not kept escaped on one line:\n%q", content)
 	}
 	if _, ok := warningContaining(t, plan.Warnings, "all:vars", "bad key"); !ok {
 		t.Errorf("the dropped key was not reported.\nwarnings: %v", plan.Warnings)
-	}
-	if _, ok := warningContaining(t, plan.Warnings, "all:vars", "control character"); !ok {
-		t.Errorf("the dropped value was not reported.\nwarnings: %v", plan.Warnings)
 	}
 }
 
@@ -209,15 +207,16 @@ func TestHostVariableValuesAreRenderedFaithfully(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FromAWX() error = %v", err)
 	}
-	line := strings.SplitN(plan.Inventories[0].Content, "\n", 2)[0]
-	for _, want := range []string{
-		"port=2222", "big=90071992547409931", "ratio=0.5", "flag=true", "nothing=",
-		`list="[1,\"two\"]"`, `object="{\"a\":\"b\"}"`, `spaced="with space"`,
-		`quoted="say \"hi\""`,
-	} {
-		if !strings.Contains(line, want) {
-			t.Errorf("host line is missing %q:\n%s", want, line)
-		}
+	// What Ansible's parser receives for each: the literal whose type is the value's own type, and a
+	// string as the string it was. A true written as true arrived as the string "true", and a null
+	// as an empty string.
+	want := map[string]string{
+		"port": "2222", "big": "90071992547409931", "ratio": "0.5", "flag": "True", "nothing": "None",
+		"list": "[1, 'two']", "object": "{'a': 'b'}", "spaced": "with space", "quoted": `say "hi"`,
+	}
+	if diff := cmp.Diff(want, parseINIHostVars(t, plan.Inventories[0].Content)); diff != "" {
+		t.Errorf("host variables mismatch (-want +got):\n%s\ninventory:\n%s", diff,
+			plan.Inventories[0].Content)
 	}
 }
 
@@ -393,32 +392,4 @@ func TestJenkinsBundleAcceptsALoneConfigFileAndAZipOnDisk(t *testing.T) {
 			t.Errorf("job names mismatch (-want +got):\n%s", diff)
 		}
 	})
-}
-
-// TestRootIsSequenceTellsTheTwoRundeckShapesApart pins the check that decides which parse error an
-// operator is shown. Falling through to the wrapped attempt reported that the top level was the
-// wrong shape when the file was fine and one scalar inside it was quoted.
-func TestRootIsSequenceTellsTheTwoRundeckShapesApart(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		Name   string
-		Doc    string
-		WantIs bool
-	}{
-		{Name: "bare list", Doc: "- name: a\n", WantIs: true},         // Test 0.
-		{Name: "json list", Doc: `[{"name": "a"}]`, WantIs: true},     // Test 1.
-		{Name: "mapping", Doc: "jobs:\n  - name: a\n", WantIs: false}, // Test 2.
-		{Name: "scalar", Doc: "just a string", WantIs: false},         // Test 3.
-		{Name: "empty", Doc: "", WantIs: false},                       // Test 4.
-		{Name: "unparseable", Doc: "a: [1, 2", WantIs: false},         // Test 5.
-		{Name: "flow list", Doc: "[a, b]", WantIs: true},              // Test 6.
-	}
-	for testNum, test := range tests {
-		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
-			t.Parallel()
-			if got := rootIsSequence([]byte(test.Doc)); got != test.WantIs {
-				t.Errorf("rootIsSequence(%q) = %v, want %v", test.Doc, got, test.WantIs)
-			}
-		})
-	}
 }

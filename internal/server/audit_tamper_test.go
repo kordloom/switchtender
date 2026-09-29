@@ -170,7 +170,7 @@ func TestAuditBundleHandlerReportsATamperedChain(t *testing.T) {
 			}
 			store := newEditedChain(t, seedAuditChain(t, 5), test.Edit)
 			rec := httptest.NewRecorder()
-			auditBundleHandler(store, &id, "v-test", zap.NewNop()).
+			auditBundleHandler(store, &id, "", "v-test", zap.NewNop()).
 				ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/audit/bundle"+test.Query, nil))
 
 			if rec.Code != http.StatusConflict {
@@ -210,7 +210,7 @@ func TestAuditBundleHandlerStillExportsAnIntactChain(t *testing.T) {
 		t.Fatalf("LoadIdentity() error = %v", err)
 	}
 	audits := seedAuditChain(t, 5)
-	h := auditBundleHandler(audits, &id, "v-test", zap.NewNop())
+	h := auditBundleHandler(audits, &id, "", "v-test", zap.NewNop())
 
 	for _, query := range []string{"", "?limit=2"} {
 		rec := httptest.NewRecorder()
@@ -265,7 +265,7 @@ func TestAuditBundleHandlerNamesTheAnchorItCannotSatisfy(t *testing.T) {
 	})
 
 	rec := httptest.NewRecorder()
-	auditBundleHandler(cut, &id, "v-test", zap.NewNop()).
+	auditBundleHandler(cut, &id, "", "v-test", zap.NewNop()).
 		ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/audit/bundle", nil))
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want 409 (body %s)", rec.Code, rec.Body.String())
@@ -324,7 +324,7 @@ func TestAuditBundleHandlerReportsAChainItCannotBundle(t *testing.T) {
 	})
 
 	rec := httptest.NewRecorder()
-	auditBundleHandler(store, &id, "v-test", zap.NewNop()).
+	auditBundleHandler(store, &id, "", "v-test", zap.NewNop()).
 		ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/audit/bundle", nil))
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want 409 (body %s)", rec.Code, rec.Body.String())

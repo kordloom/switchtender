@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -203,5 +204,21 @@ func TestVersionVerify(t *testing.T) {
 	if err := versionCmd.RunE(testCommand(), nil); err == nil ||
 		!strings.Contains(err.Error(), "development") {
 		t.Errorf("verify on a dev build error = %v, want the dev refusal", err)
+	}
+}
+
+// TestAContainerBuildIsSentToTheImageSignature pins what version --verify says inside the container
+// image. The image compiles its own binary from the tagged source, so it never matches the release
+// archive's hashes, and the check reported the official image as "not the released binary". It now
+// says why and names the cosign command that verifies the image, without fetching anything.
+func TestAContainerBuildIsSentToTheImageSignature(t *testing.T) {
+	setString(t, &Version, "1.100.0")
+	setString(t, &BuildChannel, buildChannelContainer)
+	err := runVersionVerify(testCommand())
+	if !errors.Is(err, errContainerBuild) {
+		t.Fatalf("runVersionVerify() in the image = %v, want errContainerBuild", err)
+	}
+	if !strings.Contains(err.Error(), "cosign verify ghcr.io/kordloom/switchtender:1.100.0") {
+		t.Errorf("the refusal does not name the image check: %v", err)
 	}
 }

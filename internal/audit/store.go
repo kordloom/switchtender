@@ -217,3 +217,15 @@ func (m *memStore) BindInstall(installID string) {
 	defer m.mu.Unlock()
 	m.installID = installID
 }
+
+// BoundInstall returns the install id of the newest entry that carries one.
+func (m *memStore) BoundInstall(_ context.Context) (string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for i := len(m.entries) - 1; i >= 0; i-- {
+		if m.entries[i].InstallID != "" {
+			return m.entries[i].InstallID, nil
+		}
+	}
+	return "", nil
+}

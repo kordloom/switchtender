@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"strings"
 	"time"
 
@@ -213,7 +215,8 @@ CREATE TABLE IF NOT EXISTS schedules (
 	template_id TEXT NOT NULL DEFAULT '',
 	timezone    TEXT NOT NULL DEFAULT '',
 	org_id      TEXT NOT NULL DEFAULT '',
-	created_by  TEXT NOT NULL DEFAULT ''
+	created_by  TEXT NOT NULL DEFAULT '',
+	last_error  TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_schedules_created ON schedules(created_at, id);
 CREATE TABLE IF NOT EXISTS users (
@@ -423,6 +426,27 @@ CREATE TABLE IF NOT EXISTS grants (
 CREATE INDEX IF NOT EXISTS idx_grants_object ON grants(object);
 `
 
+// createPrivate creates the database file readable by its owner alone when it does not exist yet.
+//
+// SQLite created it with the process umask, which on a stock system is world-readable, while the
+// file holds hashed tokens, sealed credentials, stored inventory content, and the audit chain. SQLite
+// gives the WAL and shared-memory files the database file's permissions, so creating the file first
+// is enough to cover all three. An existing file is left as its owner set it, and an in-memory
+// database has no file to create.
+func createPrivate(path string) error {
+	if path == "" || strings.HasPrefix(path, ":memory:") || strings.Contains(path, "mode=memory") {
+		return nil
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if errors.Is(err, fs.ErrExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("create database file: %w", err)
+	}
+	return f.Close()
+}
+
 // Open opens the SQLite database at path, applies the schema, and returns the bundled stores.
 func Open(path string) (*DB, error) {
 	// Every transaction takes the write lock when it begins rather than upgrading into it.
@@ -438,6 +462,9 @@ func Open(path string) (*DB, error) {
 	//
 	// An immediate transaction takes the lock up front, so there is no upgrade to lose, and
 	// busy_timeout does apply to acquiring it: the second writer waits its turn instead of failing.
+	if err := createPrivate(path); err != nil {
+		return nil, err
+	}
 	db, err := sql.Open("sqlite", "file:"+path+"?_txlock=immediate")
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
@@ -1063,13 +1090,18 @@ func migrateTemplates(db *sql.DB) error {
 	return nil
 }
 
-// migrateSchedules adds the timezone column a schedules table created before per-schedule timezones
-// lacks. Empty is the server-local default, so a schedule made before it fires exactly as it did.
+// migrateSchedules adds the columns a schedules table created before them lacks: the timezone, whose
+// empty default is server-local so an older schedule fires exactly as it did, and the reason the last
+// fire started no run, whose empty default says nothing failed.
 func migrateSchedules(db *sql.DB) error {
-	if _, err := db.Exec(
-		"ALTER TABLE schedules ADD COLUMN timezone TEXT NOT NULL DEFAULT ''"); err != nil &&
-		!strings.Contains(err.Error(), "duplicate column name") {
-		return fmt.Errorf("migrate schedules: %w", err)
+	for _, column := range []string{
+		"timezone TEXT NOT NULL DEFAULT ''",
+		"last_error TEXT NOT NULL DEFAULT ''",
+	} {
+		if _, err := db.Exec("ALTER TABLE schedules ADD COLUMN " + column); err != nil &&
+			!strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("migrate schedules: %w", err)
+		}
 	}
 	return nil
 }

@@ -280,3 +280,43 @@ func TestTheClosingParagraphCountsItsTemplates(t *testing.T) {
 		})
 	}
 }
+
+// TestTheAssessmentListsEverythingThatDoesNotComeAcross pins the parts of the assessment a reader
+// acts on. It capped what did not come across at six lines and "and N more", while the guide says that
+// list is itemized and never summarized. It headed the counts of what the import would create "what is
+// in there" and repeated their total as "comes across". It counted shared credentials and templates
+// with no inventory without naming either.
+func TestTheAssessmentListsEverythingThatDoesNotComeAcross(t *testing.T) {
+	t.Parallel()
+	var leftOut []string
+	for i := 0; i < 9; i++ {
+		leftOut = append(leftOut, fmt.Sprintf("dropped item %d was not imported", i))
+	}
+	a := Assessment{
+		Report: Report{CreatedTotal: 3, Created: []Count{{Kind: "templates", N: 3}}, LeftOut: leftOut},
+		Governance: Governance{
+			Templates:         3,
+			SharedCredentials: []CredentialUse{{ID: "cred_1", Name: "deploy-key", Templates: 2}},
+			NoInventory:       []string{"Ad hoc cleanup"},
+		},
+	}
+	var doc strings.Builder
+	Render(&doc, "awx", "export.json", a)
+	out := doc.String()
+	for _, w := range leftOut {
+		if !strings.Contains(out, w) {
+			t.Errorf("the left out item %q is not listed:\n%s", w, out)
+		}
+	}
+	for _, want := range []string{"What the import would create", "deploy-key, used by 2 templates",
+		"- Ad hoc cleanup"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the assessment does not say %q:\n%s", want, out)
+		}
+	}
+	for _, gone := range []string{"What is in there", "comes across   "} {
+		if strings.Contains(out, gone) {
+			t.Errorf("the assessment still says %q:\n%s", gone, out)
+		}
+	}
+}

@@ -11,7 +11,7 @@
   <a href="https://switchtender.com"><img
     src="https://img.shields.io/badge/website-switchtender.com-0969da"
     alt="Website"></a>
-  <a href="https://demo.switchtender.com"><img
+  <a href="https://demo.switchtender.com/ui/runs?status=pending_approval"><img
     src="https://img.shields.io/badge/live%20demo-demo.switchtender.com-1f883d"
     alt="Live demo"></a>
   <a href="https://github.com/kordloom/switchtender/actions/workflows/ci.yml"><img
@@ -30,11 +30,10 @@
     alt="License"></a>
 </p>
 
-**One control point for every way your infrastructure can change.** Terraform runs Terraform, AWX
-runs Ansible, a pipeline runs deploys, and somebody has an SSH session open right now. Each decides
-for itself who may run what, and afterward no two of them tell the same story about what happened.
-SwitchTender is one gate in front of all of them, with the same identity, policy, approval, and
-evidence whether a person or an AI agent asked. It runs Ansible, Terraform, OpenTofu, Bash,
+**One gate for every change to production, including the ones AI agents make.** People, pipelines,
+schedules, and AI agents answer to the same policies, and an agent can never approve its own run.
+SwitchTender puts each of them through the same identity checks, policy, approval, and evidence,
+and takes over from AWX with a one-command import. It runs Ansible, Terraform, OpenTofu, Bash,
 PowerShell, Python, and Go, paints every run live as a host-by-task matrix instead of a text scroll,
 and hands back a signed receipt anyone can verify offline.
 No Kubernetes operator, no Postgres, no Redis, no message bus. One process, one SQLite file.
@@ -61,8 +60,8 @@ Postgres, Redis, and a mesh to reach your hosts, all standing before the first t
 finishes and hands you a text log to scroll, and when it ends the tool forgets everything it saw.
 
 SwitchTender runs those same playbooks from one binary and treats every run as structured data you
-can read, split, and remember. One process, one file to back up, and a live host-by-task matrix
-instead of scrollback.
+can read, split, and remember. One process, one database, and a live host-by-task matrix instead
+of scrollback.
 
 |                                      | SwitchTender                                                                        | AWX                                             | Semaphore                |
 |--------------------------------------|-----------------------------------------------------------------------------------|-------------------------------------------------|--------------------------|
@@ -77,7 +76,7 @@ The full head-to-head, including where SwitchTender is behind, is in the
 [comparison](docs/comparison.md).
 
 Checked against vendor documentation on 2026-08-10, for AWX 24.6.1 and Semaphore 2.19.7; release
-state re-verified 2026-09-06 (AWX still 24.6.1, Semaphore at 2.19.12). These
+state re-verified 2026-09-07 (AWX still 24.6.1, Semaphore at 2.19.12). These
 products ship, and a table like this decays. If a row is out of date, open an issue and it gets
 corrected.
 
@@ -140,7 +139,7 @@ An AI agent that changes infrastructure is a principal here, not an API key. Its
 an agent's, naming the human it acts for, and that classification is enforced and recorded, never
 guessed from traffic:
 
-    switchtender token new --agent --user owner --name prod-remediator
+    switchtender token new --agent --user admin --name prod-remediator
 
 - **Bounded authority.** An agent token is capped below admin no matter what account it is bound
   to. It can launch and propose work; it can never manage identity, access, or secrets, and it can
@@ -190,9 +189,10 @@ in the run's summary, with screenshots of the deployed UI in the artifacts.
     go run ./test/supertest -skip-team
 
 Two smaller proofs travel with the repository. `scripts/prove.sh` walks the whole claim in about a
-minute against a server it starts itself: an agent proposes a destructive change, policy holds it,
-the agent is refused its own approval, a person approves the exact content, the deletion really
-happens, and the receipt verifies offline until one recorded byte is altered. And before you
+minute against a server it starts itself, with a real token for the agent and another for the
+person: the agent proposes a destructive change, policy holds it, the agent is refused when it tries
+to approve itself, a person approves the exact content, the deletion really happens, and the signed
+record verifies against the server's published key until one recorded byte is altered. And before you
 migrate anything:
 
     switchtender assess awx export.json
@@ -202,7 +202,7 @@ templates nobody currently has to approve, without writing a thing.
 
 ## See it
 
-Poke at the [live demo](https://demo.switchtender.com), read-only and seeded with real runs, nothing to install.
+Poke at the [live demo](https://demo.switchtender.com/ui/runs?status=pending_approval), read-only and seeded with real runs, nothing to install.
 
 A two-shard split executing live: the merged host matrix fills in as hosts report, one shard
 fails on the broken database host while the other lands clean, and the timeline draws itself:
@@ -226,7 +226,7 @@ host, remembered across every run:
 
 ## Quick start
 
-Try the [live demo](https://demo.switchtender.com) without installing anything, or run it yourself.
+Try the [live demo](https://demo.switchtender.com/ui/runs?status=pending_approval) without installing anything, or run it yourself.
 
 One line with a Go toolchain installed:
 
@@ -238,10 +238,11 @@ to build without. The default `GOTOOLCHAIN=auto` fetches it for you; a toolchain
 
 Or grab a build for your platform from the [releases page](https://github.com/kordloom/switchtender/releases):
 a `windows_amd64.zip` for Windows, a `tar.gz` of the binary for macOS and Linux, or a `deb`, `rpm`,
-or `apk` package. On macOS the binary is the desktop app: run `switchtender desktop` and it opens
-the UI in its own window. Verify any download with `switchtender version --verify`, which checks the running
-binary against the release's published hashes; see [verifying a release](SECURITY.md#verifying-a-release)
-for that and for the cosign signature CI-built releases carry. Or build from source:
+or `apk` package. Any of them runs as a desktop app: `switchtender desktop` starts a local server and
+opens the UI in your default browser. Verify any download with `switchtender version --verify`, which checks the running
+binary against the release's published hashes. [Verifying a release](SECURITY.md#verifying-a-release)
+covers that, the cosign signature CI-built releases carry, installing the Linux packages, and the
+container image, which is verified with cosign instead. Or build from source:
 
     go build -o switchtender .
 
@@ -301,7 +302,7 @@ Coming from [AWX](https://switchtender.com/awx-alternative),
 To see it without any setup, run the seeded read-only demo. It fills a fresh database with sample
 projects, templates, and real runs, then serves it with every change blocked:
 
-    ./switchtender demo --addr :8080         # or: docker compose --profile demo up --build
+    ./switchtender demo --addr :8080         # or: docker compose --profile demo up --build, on :8081
 
 ## Documentation
 
@@ -321,16 +322,16 @@ The docs live in [docs/](docs/) and also render inside the app at `/ui/docs`.
 | [Migration](docs/migration.md) | Moving off AWX, Semaphore, Rundeck, Jenkins, or cron in detail |
 | [Comparison](docs/comparison.md) | How SwitchTender compares to AWX, AAP, Semaphore, Ascender, and Rundeck |
 
-Deploy with the `docker-compose.yml` at the root, which brings up a server, a database, and a
-worker, or the Helm chart under [deploy/helm](deploy/helm).
+Deploy with the `docker-compose.yml` at the root, which brings up a server on SQLite, or on a Team
+license PostgreSQL, a server, and a worker, or with the Helm chart under [deploy/helm](deploy/helm).
 
 ## Design
 
 A single-binary monolith on purpose. The serve command hosts the HTTP API, an in-process executor
 with a bounded worker pool, the cron scheduler, and the embedded UI.
 
-- Storage is SQLite through a pure Go driver in WAL mode. No cgo, one file to back up, and the
-  store sits behind an interface a Postgres backend can satisfy for multi-instance deployments.
+- Storage is SQLite through a pure Go driver in WAL mode. No cgo, one database file, and the store
+  sits behind an interface a Postgres backend can satisfy for multi-instance deployments.
 - Structured events come from an embedded Ansible callback plugin that writes one JSON object per
   event to a sidecar file. The dispatcher tails the sidecar as the run executes, storing and
   publishing events without touching the human-readable log.
@@ -373,7 +374,7 @@ reserved right is offering SwitchTender to others as a hosted or managed service
 the maintainer. Each version converts to Apache-2.0 two years after its release.
 
 See `LICENSE` for the exact terms and [`LICENSING.md`](LICENSING.md) for what self-hosting grants,
-how a commercial license works, and how to ask about support or a hosted plan.
+how a commercial license works, and how to ask about support.
 
 <p align="center">
   <img src="assets/switchtender-figure-banner.png" alt="A switchtender throwing the switch. See you down the line." width="100%">

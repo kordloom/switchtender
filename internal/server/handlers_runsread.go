@@ -456,6 +456,10 @@ func runLogsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Ha
 			}
 			if len(chunks) < streamBatch {
 				if ring != nil {
+					// The store sequence the tail ends at, so a live view resumes its stream there:
+					// the text holds every chunk up to it and none past it, so nothing is repeated
+					// and nothing written in between is skipped.
+					w.Header().Set("Switchtender-Log-Seq", strconv.FormatInt(after, 10))
 					// The reader is told what they are looking at rather than left to assume the
 					// log begins where the pane does.
 					if omitted := ring.omitted(); omitted > 0 {

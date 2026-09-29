@@ -132,8 +132,18 @@ async function loadUsers() {
 		const data = await getJSON("/users");
 		const users = data.users || [];
 		if (users.length === 0) {
-			showEmpty("No accounts yet. This install runs open until you add one. Add a user to require "
-			+ "sign-in: viewers read, operators run work, admins manage everything.");
+			// An install with a token and no accounts is not open: it authenticates every request by
+			// token. Telling that install it ran open sent an operator to add an account to fix a
+			// hole that was not there, and read as a security warning about their own install.
+			const main = document.querySelector("main.content");
+			if (main && main.dataset.tokens === "yes") {
+				showEmpty("No accounts yet. This install signs every request in with an API token until "
+				+ "you add one. Add a user to let people sign in by name: viewers read, operators run "
+				+ "work, admins manage everything.");
+			} else {
+				showEmpty("No accounts yet. This install runs open until you add one. Add a user to "
+				+ "require sign-in: viewers read, operators run work, admins manage everything.");
+			}
 			return;
 		}
 		const tbody = document.getElementById("users");
@@ -336,7 +346,16 @@ async function userNamesByID() {
 function wireTokenForm() {
 	const form = document.getElementById("token-form");
 	if (!form) return;
-	fillUserSelect(document.getElementById("token-user"));
+	// A token acts as an account, so with no account there is nothing to issue one for. The dialog
+	// used to open with an empty required picker and answer a submit with the browser's own "Please
+	// select an item in the list", which says nothing about what to do next.
+	fillUserSelect(document.getElementById("token-user")).then((count) => {
+		if (count !== 0) return;
+		const submit = form.querySelector('button[type="submit"]');
+		if (submit) submit.disabled = true;
+		document.getElementById("token-status").textContent = "A token acts as an account, and this " +
+			"install has none yet. Add a user first, then issue it a token.";
+	});
 	const reveal = document.getElementById("token-secret");
 	const value = document.getElementById("token-value");
 	const resetDialog = () => {
@@ -423,15 +442,22 @@ function parseHours(text) {
 }
 
 // fillUserSelect loads accounts into a picker by username, which is what the token endpoint binds by.
+//
+// It resolves to how many accounts it listed, or null when the list could not be read.
 async function fillUserSelect(select) {
-	if (!select) return;
+	if (!select) return null;
 	try {
 		const data = await getJSON("/users");
-		for (const u of data.users || []) {
+		const users = data.users || [];
+		for (const u of users) {
 			const opt = document.createElement("option");
 			opt.value = u.username;
 			opt.textContent = u.username + " (" + (u.role || "viewer") + ")";
 			select.appendChild(opt);
 		}
-	} catch (_) { /* the picker stays empty and the save explains itself */ }
+		return users.length;
+	} catch (_) {
+		// The picker stays empty and the save explains itself.
+		return null;
+	}
 }

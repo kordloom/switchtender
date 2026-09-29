@@ -101,7 +101,7 @@ func TestFromRundeckArchive(t *testing.T) {
 			"a file on the Rundeck server at %PROJECT_BASEDIR%/etc/resources.xml",
 			"No inventory was imported from it",
 			"file:///home/rundeck/gitrepos/payments-batch-jobs.git",
-			"so no project was created",
+			"so it was not imported as a project",
 		},
 	}, { // Test 1: A project whose nodes came from a remote endpoint, with no SCM configured.
 		Archive: urlSourceArchive, Inventory: "cmdb-hosts",
@@ -872,5 +872,21 @@ func TestParseManifest(t *testing.T) {
 	}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("manifest mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// TestARundeckArchiveCountsWhatItLeavesOut pins the summary for a project archive. It said nothing was
+// left out of an archive whose access policy was skipped without a word and whose source control
+// repository, a path on the Rundeck server, was filed as merely worth reviewing. Both are named as
+// left out, so the count an operator reads first matches what did not come across.
+func TestARundeckArchiveCountsWhatItLeavesOut(t *testing.T) {
+	t.Parallel()
+	plan := planFromArchive(t, fileSourceArchive, "prod-hosts")
+	leftOut := strings.Join(plan.Report().LeftOut, "\n")
+	for _, want := range []string{"batch-operators.aclpolicy was not imported",
+		"file:///home/rundeck/gitrepos/payments-batch-jobs.git"} {
+		if !strings.Contains(leftOut, want) {
+			t.Errorf("the summary's left out list does not name %q:\n%s", want, leftOut)
+		}
 	}
 }

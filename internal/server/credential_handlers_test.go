@@ -526,3 +526,60 @@ func TestCreateAndUpdateAgreeOnVaultID(t *testing.T) {
 		t.Errorf("blank label on create = %d, want 201", c)
 	}
 }
+
+// TestAnEnvSecretIsCheckedWhenItIsSaved pins the save-time half of the env refusal. A pasted env
+// secret whose line holds no KEY= reached a run as nothing, so it is refused when it is saved, with a
+// sentence that names the line and not the secret. A command source is left to launch, the first
+// moment its output exists.
+func TestAnEnvSecretIsCheckedWhenItIsSaved(t *testing.T) {
+	t.Parallel()
+	sealer := credential.NewSealer("pass", "salt")
+	tests := []struct {
+		Name     string
+		Method   string
+		Body     string
+		WantCode int
+	}{{ // Test 0: KEY=VALUE lines are stored.
+		Name: "pairs", Method: http.MethodPost,
+		Body: `{"name":"k","kind":"env","secret":"A=b\nC=d"}`, WantCode: http.StatusCreated,
+	}, { // Test 1: A bare value is refused.
+		Name: "bare", Method: http.MethodPost,
+		Body: `{"name":"k","kind":"env","secret":"s3cr3t-value"}`, WantCode: http.StatusBadRequest,
+	}, { // Test 2: A command is not its own output, so it is stored and checked at launch.
+		Name: "command", Method: http.MethodPost,
+		Body:     `{"name":"k","kind":"env","source":"command","secret":"vault kv get -field=token secret/ci"}`,
+		WantCode: http.StatusCreated,
+	}, { // Test 3: The same refusal holds on an update that replaces the secret.
+		Name: "update bare", Method: http.MethodPut,
+		Body: `{"name":"k","kind":"env","secret":"s3cr3t-value"}`, WantCode: http.StatusBadRequest,
+	}}
+	for i, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", i, test.Name), func(t *testing.T) {
+			t.Parallel()
+			store := credential.NewMemStore()
+			sealed, err := sealer.Seal("A=b")
+			if err != nil {
+				t.Fatalf("Seal() error = %v", err)
+			}
+			if err := store.Save(context.Background(), &credential.Credential{
+				ID: "cred_1", Name: "k", Kind: credential.KindEnv, Secret: sealed, CreatedAt: time.Now(),
+			}); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+			handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
+				WithCredentials(store, sealer)).Handler()
+			path := "/v1/credentials"
+			if test.Method == http.MethodPut {
+				path += "/cred_1"
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(test.Method, path, strings.NewReader(test.Body)))
+			if rec.Code != test.WantCode {
+				t.Fatalf("status = %d, want %d (body %s)", rec.Code, test.WantCode, rec.Body.String())
+			}
+			if strings.Contains(rec.Body.String(), "s3cr3t") {
+				t.Errorf("the response carries the secret: %s", rec.Body.String())
+			}
+		})
+	}
+}

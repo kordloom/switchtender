@@ -119,7 +119,7 @@ func runWitness(cmd *cobra.Command, _ []string) error {
 				return err
 			}
 			if len(findings) > 0 {
-				return fmt.Errorf("%d finding(s); the record disagrees with this witness's memory", len(findings))
+				return fmt.Errorf("the witness raised %d finding(s), each printed above", len(findings))
 			}
 			fmt.Fprintln(os.Stderr, witnessSummary(cp))
 			return nil

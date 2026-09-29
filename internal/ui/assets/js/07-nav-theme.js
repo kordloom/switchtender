@@ -715,7 +715,7 @@ function wireHinttips() {
 		if (blocked) {
 			clearTimeout(linkTimer);
 			const what = blocked.dataset.tip || "This changes data";
-			place(blocked, what + ". Disabled in this read-only demo");
+			place(blocked, what + ". " + readOnlyReason());
 			return;
 		}
 		const target = e.target.closest("[data-tip]");

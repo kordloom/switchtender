@@ -7,6 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadPage } from "./pages.mjs";
 import { sandboxOf } from "./loader.mjs";
+import { fire } from "./dom.mjs";
 
 // heldRun is a run waiting for a decision, the state with the most role-gated controls.
 const heldRun = { id: "run_h", playbook: "site.yml", status: "pending_approval" };
@@ -62,4 +63,55 @@ test("roleAtLeast ranks the three roles and lets unknown through", () => {
 	store.setItem("st_role", "operator");
 	assert.equal(page.app.roleAtLeast("operator"), true);
 	assert.equal(page.app.roleAtLeast("admin"), false);
+});
+
+// mountDownloadsAs mounts the detail page as the given role and user, wires its download controls,
+// and offers the run's own evidence the way the page does once the run is read.
+function mountDownloadsAs(role, user, run) {
+	const page = loadPage("detail");
+	const store = sandboxOf(page.app).localStorage;
+	if (role) store.setItem("st_role", role);
+	if (user) store.setItem("st_user", user);
+	page.app.wireRunDownloads(run.id);
+	page.app.offerOwnEvidence(run);
+	return page.document;
+}
+
+test("the operator who launched a run can reach its evidence and receipt", () => {
+	// The server serves both to an admin or to the actor who launched the run. The page drew them
+	// for admins only, so an operator could not reach the evidence for their own change.
+	const doc = mountDownloadsAs("operator", "drew", { id: "run_1", actor: "drew" });
+	assert.equal(hidden(doc, "export-evidence"), false, "the launcher cannot see Evidence");
+	assert.equal(hidden(doc, "download-receipt"), false, "the launcher cannot see Download receipt");
+});
+
+test("another operator does not get controls the server would refuse", () => {
+	const doc = mountDownloadsAs("operator", "sam", { id: "run_1", actor: "drew" });
+	assert.equal(hidden(doc, "export-evidence"), true);
+	assert.equal(hidden(doc, "download-receipt"), true);
+});
+
+test("an admin gets the evidence controls for any run", () => {
+	const doc = mountDownloadsAs("admin", "root", { id: "run_1", actor: "drew" });
+	assert.equal(hidden(doc, "export-evidence"), false);
+	assert.equal(hidden(doc, "download-receipt"), false);
+});
+
+test("an operator on the audit page is told the trail is for admins, not that verification failed", async () => {
+	// The page verified on open for every session, and the server refuses a non-admin, so an
+	// operator arriving here saw a red "Verify failed: forbidden" badge, which reads as a broken
+	// chain.
+	const page = loadPage("audit");
+	sandboxOf(page.app).localStorage.setItem("st_role", "operator");
+	fire(page.document, "DOMContentLoaded");
+	await page.clock.flush();
+	const badge = page.document.getElementById("audit-badge");
+	assert.equal(badge.hidden, true, "the verify badge is shown: " + badge.textContent);
+	assert.doesNotMatch(badge.textContent, /failed/i);
+	assert.match(page.document.getElementById("status").textContent, /readable by admins/);
+	for (const id of ["audit-verify", "audit-bundle", "audit-register"]) {
+		assert.equal(hidden(page.document, id), true, id + " is offered to a session the server refuses");
+	}
+	assert.equal(page.net.calls.filter((c) => c.url.includes("/audit")).length, 0,
+		"the page still asked the server for the audit trail");
 });

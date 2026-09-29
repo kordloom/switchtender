@@ -1,8 +1,11 @@
 package importer
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"time"
@@ -54,17 +57,14 @@ var chefFacts = []string{"fqdn", "ipaddress", "platform", "platform_version", "o
 // does. The honest boundary is the fleet, which is exactly what somebody needs on day one to start
 // governing the machines while the recipes are dealt with separately.
 //
-// Accepts what the Chef tools actually emit: an array of node documents, a single node document, or
-// an object keyed by node name.
+// Accepts what the Chef tools actually emit: an array of node documents, node documents one after
+// another, a knife search result, a single node document, or an object keyed by node name.
 func FromChef(data []byte, now time.Time) (*Plan, error) {
 	data, err := textOf(data)
 	if err != nil {
 		return nil, err
 	}
-	if err := refuseJSONTail(data); err != nil {
-		return nil, err
-	}
-	nodes, shape, err := decodeChefNodes(data)
+	nodes, shape, err := decodeChefStream(data)
 	if err != nil {
 		return nil, err
 	}
@@ -83,6 +83,7 @@ func FromChef(data []byte, now time.Time) (*Plan, error) {
 	var hosts []importHost
 	byGroup := map[string][]importHost{}
 	recipes := map[string]bool{}
+	noAddress := 0
 	for _, n := range nodes {
 		name := n.Name
 		if name == "" {
@@ -95,6 +96,9 @@ func FromChef(data []byte, now time.Time) (*Plan, error) {
 		}
 		host := importHost{Name: name, Variables: chefHostVars(n)}
 		hosts = append(hosts, host)
+		if _, ok := host.Variables["ansible_host"]; !ok {
+			noAddress++
+		}
 
 		if env := strings.TrimSpace(n.ChefEnvironment); env != "" && env != "_default" {
 			byGroup[env] = append(byGroup[env], host)
@@ -132,6 +136,13 @@ func FromChef(data []byte, now time.Time) (*Plan, error) {
 	plan.warn("%d host%s imported carrying only the facts that identify a machine (%s). A node's "+
 		"other automatic attributes were not copied, since they run to hundreds of keys per host.",
 		len(hosts), plural(len(hosts)), strings.Join(chefFacts, ", "))
+	// knife prints a node's automatic attributes only with --long, and without them no host has an
+	// address. The line above still said the identifying facts had been carried.
+	if noAddress > 0 {
+		plan.warn("%d host%s carried no ipaddress attribute, so Ansible reaches %s by node name. "+
+			"Export with knife node show -l to include the automatic attributes, or set "+
+			"ansible_host on %s", noAddress, plural(noAddress), itOrThem(noAddress), itOrThem(noAddress))
+	}
 
 	reportUnread(plan, data, shape)
 	return plan, nil
@@ -168,9 +179,48 @@ func splitRunListEntry(entry string) (kind, value string) {
 	return entry[:open], entry[open+1 : len(entry)-1]
 }
 
-// decodeChefNodes reads the three shapes the Chef tooling emits: an array of nodes, one node, or an
-// object keyed by node name. Accepting all three matters because which one somebody has depends on
-// how they dumped it, and refusing two of them reads as the importer not supporting Chef.
+// decodeChefStream reads a Chef export that may be several node documents one after another, which
+// is what the documented export, knife node show run once per node, writes. A file holding anything
+// but nodes after its first document is still refused, since importing its first part alone would
+// report a partial estate as the whole one.
+func decodeChefStream(data []byte) ([]chefNode, any, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	var docs []json.RawMessage
+	for {
+		var doc json.RawMessage
+		if err := dec.Decode(&doc); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if len(docs) == 0 {
+				return decodeChefNodes(data)
+			}
+			return nil, nil, fmt.Errorf("parse chef export: document %d: %w", len(docs)+1, err)
+		}
+		docs = append(docs, doc)
+	}
+	if len(docs) <= 1 {
+		return decodeChefNodes(data)
+	}
+	nodes := make([]chefNode, 0, len(docs))
+	for i, doc := range docs {
+		var node chefNode
+		if err := json.Unmarshal(doc, &node); err != nil ||
+			(node.Name == "" && node.ChefEnvironment == "" && len(node.RunList) == 0) {
+			return nil, nil, fmt.Errorf("%w: this file holds more than one document, and document %d "+
+				"of %d is not a chef node, so importing the rest would report part of the estate as "+
+				"all of it. Export the nodes alone, then import again",
+				ErrNothingRecognized, i+1, len(docs))
+		}
+		nodes = append(nodes, node)
+	}
+	return nodes, chefNode{}, nil
+}
+
+// decodeChefNodes reads the four shapes the Chef tooling emits: an array of nodes, a knife search
+// result, one node, or an object keyed by node name. Accepting all of them matters because which one
+// somebody has depends on how they dumped it, and refusing one reads as the importer not supporting
+// Chef.
 //
 // The second return is the shape that decoded, for the unread scan. Comparing every form against
 // the array shape meant a keyed or single-node dump was never scanned at all, so a field this
@@ -179,6 +229,19 @@ func decodeChefNodes(data []byte) ([]chefNode, any, error) {
 	var list []chefNode
 	if err := json.Unmarshal(data, &list); err == nil {
 		return list, []chefNode{}, nil
+	}
+	// knife search node writes the matches under rows, beside a count.
+	var search struct {
+		// Results is how many nodes matched.
+		Results *int `json:"results"`
+		// Rows holds the matching nodes.
+		Rows []chefNode `json:"rows"`
+	}
+	if err := json.Unmarshal(data, &search); err == nil && search.Results != nil && search.Rows != nil {
+		return search.Rows, struct {
+			Results int        `json:"results"`
+			Rows    []chefNode `json:"rows"`
+		}{}, nil
 	}
 	var keyed map[string]chefNode
 	if err := json.Unmarshal(data, &keyed); err == nil {

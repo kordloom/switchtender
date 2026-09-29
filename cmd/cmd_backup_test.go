@@ -150,7 +150,9 @@ func TestBackupRestoreRoundTrip(t *testing.T) {
 	}
 }
 
-// TestRestoreRejectsGarbage verifies a corrupt archive fails loudly instead of half-importing.
+// TestRestoreRejectsGarbage verifies a corrupt archive fails loudly instead of half-importing, and
+// says it wrote nothing. It used to print "Restore failed partway" over a column of zeros, which
+// sends an operator looking for damage that was never done.
 func TestRestoreRejectsGarbage(t *testing.T) {
 	t.Setenv("SWITCHTENDER_ENCRYPTION_KEY", "test-key-material")
 	t.Setenv("SWITCHTENDER_ENCRYPTION_SALT", "test-salt-material")
@@ -163,8 +165,12 @@ func TestRestoreRejectsGarbage(t *testing.T) {
 
 	restoreDB, restoreIn = target, archive
 	t.Cleanup(func() { restoreDB, restoreIn = "", "" })
-	if err := runRestore(testCommand(), nil); err == nil {
+	said, err := stderrOf(t, func() error { return runRestore(testCommand(), nil) })
+	if err == nil {
 		t.Error("runRestore() on a corrupt archive = nil error, want a failure")
+	}
+	if strings.Contains(said, "partway") || !strings.Contains(said, "before writing anything") {
+		t.Errorf("a restore that wrote nothing said %q, want it to say it failed before writing", said)
 	}
 }
 

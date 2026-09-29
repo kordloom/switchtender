@@ -162,6 +162,13 @@ status code. The run event NDJSON download and the run log download therefore en
 `{"export_incomplete":true,"reason":"..."}` line when they stop early, so a short file is never
 mistaken for a whole one.
 
+### When a run needs a credential that is not ready
+
+A launch, a rerun, a retry, a relaunch, and a webhook answer `409` when the run needs a credential
+that has no secret yet, which every imported credential is until someone sets one, or a credential
+whose sealed secret does not open under this server's encryption key and salt. The error names the
+credential and the fix: set its secret, or restore the key and salt it was sealed with.
+
 ### When the chain itself refuses a bundle
 
 `GET /v1/audit/bundle` recomputes the whole chain and holds it against every anchor recorded over it
@@ -371,10 +378,18 @@ The shape itself, which strict decoding refuses to guess at:
 }
 ```
 
-`type` is one of `text`, `multiline`, `int`, `choice`, or `bool`. `var` names the extra var the
+`type` is one of `text`, `multiline`, `int`, `choice`, or `bool`, and `integer`, `boolean`, `string`,
+and `textarea` are read as `int`, `bool`, `text`, and `multiline`. `var` names the extra var the
 answer becomes, and it is the only field besides `type` that every entry must carry. An unknown key
 is refused rather than ignored, so a survey that almost parses is reported instead of silently
 losing a field.
+
+A launch answers the survey under `answers`, keyed by each field's `var`, with an `int` answered as a
+number and a `bool` as `true` or `false`:
+
+```json
+{"answers": {"release": "v2.1.0", "batch": 10, "environment": "staging"}}
+```
 
 ## Per-template notifications
 

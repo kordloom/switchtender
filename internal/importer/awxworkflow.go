@@ -19,6 +19,8 @@ import (
 type awxWorkflow struct {
 	// Name is the workflow name.
 	Name string `json:"name"`
+	// Organization is the organization the workflow belongs to, which scopes its name.
+	Organization awxRef `json:"organization"`
 	// ExtraVars are the workflow's own extra vars as a YAML or JSON string.
 	ExtraVars string `json:"extra_vars"`
 	// Inventory references the inventory the workflow runs against, by natural key.
@@ -187,7 +189,7 @@ func (n awxWorkflowNode) approvalGate() *awxApprovalTemplate {
 		return n.Related.CreateApprovalTemplate
 	}
 	if n.templateType == "workflow_approval_template" {
-		return &awxApprovalTemplate{Name: string(n.UnifiedJobTemplate)}
+		return &awxApprovalTemplate{Name: n.UnifiedJobTemplate.Name}
 	}
 	if s := n.SummaryFields; s != nil && s.UnifiedJobTemplate.UnifiedJobType == "workflow_approval" {
 		return &awxApprovalTemplate{Name: s.UnifiedJobTemplate.Name}
@@ -223,7 +225,7 @@ func (n awxWorkflowNode) templateName() string {
 	if n.SummaryFields != nil && n.SummaryFields.UnifiedJobTemplate.Name != "" {
 		return n.SummaryFields.UnifiedJobTemplate.Name
 	}
-	return string(n.UnifiedJobTemplate)
+	return n.UnifiedJobTemplate.Name
 }
 
 // nodeKeyForID spells a numeric node id as a graph key, kept in one place so the key a node
@@ -319,20 +321,21 @@ func (w awxWorkflow) survey() *awxSurvey {
 // export's job templates by name so a node's referenced playbook and project can be inlined onto its
 // step, since a pipeline step carries its own work rather than pointing at another template.
 func (p *Plan) addWorkflows(export awxExport, now time.Time,
-	projectIDs, inventoryIDs, credentialIDs map[string]string) {
+	projectIDs, inventoryIDs, credentialIDs awxIDs) {
 	if len(export.Workflows) == 0 {
 		return
 	}
-	jobs := make(map[string]awxJobTemplate, len(export.JobTemplates))
-	for _, jt := range export.JobTemplates {
-		jobs[jt.Name] = jt
-	}
+	jobs := newAWXJobs(export.JobTemplates)
+	workflowName := orgQualifier(awxOrgNames(export.Workflows, func(wf awxWorkflow) (string, string) {
+		return wf.Organization.Name, wf.Name
+	})...)
 	for _, wf := range export.Workflows {
-		id := p.addWorkflow(wf, jobs, now, projectIDs, inventoryIDs, credentialIDs)
+		id := p.addWorkflow(wf, workflowName(wf.Organization.Name, wf.Name), jobs, now, projectIDs,
+			inventoryIDs, credentialIDs)
 		if id == "" {
 			p.refused++
 		}
-		p.addWorkflowSchedules(wf, id, now)
+		p.addWorkflowSchedules(wf, id, inventoryIDs, now)
 	}
 }
 
@@ -342,7 +345,8 @@ func (p *Plan) addWorkflows(export awxExport, now time.Time,
 // whole rather than being reported as unmappable. The schedules are read here rather than inside
 // addWorkflow because a refused workflow has no template for them to fire, and that outcome has to
 // be reported rather than left as a second silent loss on top of the first.
-func (p *Plan) addWorkflowSchedules(wf awxWorkflow, templateID string, now time.Time) {
+func (p *Plan) addWorkflowSchedules(wf awxWorkflow, templateID string, inventoryIDs awxIDs,
+	now time.Time) {
 	scheds := wf.schedules()
 	if len(scheds) == 0 {
 		return
@@ -359,14 +363,13 @@ func (p *Plan) addWorkflowSchedules(wf awxWorkflow, templateID string, now time.
 			owner, len(scheds), plural(len(scheds)))
 		return
 	}
-	p.addSchedules(owner, scheds, templateID, now)
+	p.addSchedules(owner, scheds, templateID, inventoryIDs, now)
 }
 
 // addWorkflow maps one workflow and returns the id of the template it created, or reports why it
 // could not be mapped and returns the empty string.
-func (p *Plan) addWorkflow(wf awxWorkflow, jobs map[string]awxJobTemplate, now time.Time,
-	projectIDs, inventoryIDs, credentialIDs map[string]string) string {
-	name := wf.Name
+func (p *Plan) addWorkflow(wf awxWorkflow, name string, jobs awxJobs, now time.Time,
+	projectIDs, inventoryIDs, credentialIDs awxIDs) string {
 	if name == "" {
 		p.warn("a workflow job template without a name was skipped")
 		return ""
@@ -423,11 +426,11 @@ func (p *Plan) addWorkflow(wf awxWorkflow, jobs map[string]awxJobTemplate, now t
 	stepName := make(map[string]string, len(nodes))
 	projectID := ""
 	for _, n := range nodes {
-		jt, ok := jobs[string(n.UnifiedJobTemplate)]
+		jt, ok := jobs.get(n.UnifiedJobTemplate)
 		if !ok {
-			p.warn("workflow %q was not imported: node %s runs %q, which is not a job template in "+
+			p.warn("workflow %q was not imported: node %s runs %s, which is not a job template in "+
 				"this export, so the step would have no work to do.",
-				name, nodeLabel(n), oneLine(string(n.UnifiedJobTemplate)))
+				name, nodeLabel(n), jobs.keys.unresolved(n.UnifiedJobTemplate))
 			return ""
 		}
 		if jt.Playbook == "" {
@@ -437,7 +440,7 @@ func (p *Plan) addWorkflow(wf awxWorkflow, jobs map[string]awxJobTemplate, now t
 		}
 		// A pipeline sources every step from one project, so a workflow spanning two of them cannot
 		// be expressed as one template.
-		if id := projectIDs[string(jt.Project)]; id != "" {
+		if id, _ := projectIDs.get(jt.Project); id != "" {
 			if projectID != "" && projectID != id {
 				p.warn("workflow %q was not imported: its nodes span more than one project, and a "+
 					"workflow template sources every step from one.", name)
@@ -547,22 +550,23 @@ func (p *Plan) addWorkflow(wf awxWorkflow, jobs map[string]awxJobTemplate, now t
 		ID: template.NewID(), Name: name, Steps: steps, ProjectID: projectID, CreatedAt: now,
 		Tags: splitAWXTags(tags), SkipTags: splitAWXTags(skipTags), Timeout: timeout,
 	}
-	inv := string(wf.Inventory)
-	if inv == "" {
+	inv := wf.Inventory
+	if inv.Name == "" {
 		// The workflow names none, so its steps ran against whatever their own job templates named.
 		// That was read nowhere and the workflow imported with no inventory at all, which is a run
 		// against no hosts rather than the run AWX performed.
 		inv = nodeInventory
-	} else if nodeInventory != "" && nodeInventory != inv {
+	} else if nodeInventory.Name != "" && nodeInventory != inv {
 		p.warn("workflow %q runs against inventory %q and its nodes' job templates name %q. The "+
 			"workflow's own inventory wins here, as it does in AWX when the workflow sets one, so "+
-			"every step now targets %q.", name, inv, nodeInventory, inv)
+			"every step now targets %q.", name, inv.Name, nodeInventory.Name, inv.Name)
 	}
-	if inv != "" {
-		if id, ok := inventoryIDs[inv]; ok {
+	if inv.Name != "" {
+		if id, ok := inventoryIDs.get(inv); ok {
 			tpl.InventoryID = id
 		} else {
-			p.warn("workflow %q references unknown inventory %q, so it imports with none", name, inv)
+			p.warn("workflow %q references unknown inventory %s, so it imports with none", name,
+				inventoryIDs.unresolved(inv))
 		}
 	}
 	tpl.Limit = limit
@@ -607,11 +611,11 @@ func sameTagSet(a, b string) bool {
 	return slices.Equal(sorted, other)
 }
 
-func workflowTags(nodes []awxWorkflowNode, jobs map[string]awxJobTemplate) (tags, skip string, err error) {
-	first := jobs[string(nodes[0].UnifiedJobTemplate)]
+func workflowTags(nodes []awxWorkflowNode, jobs awxJobs) (tags, skip string, err error) {
+	first := jobs.of(nodes[0].UnifiedJobTemplate)
 	tags, skip = first.JobTags, first.SkipTags
 	for _, n := range nodes[1:] {
-		jt := jobs[string(n.UnifiedJobTemplate)]
+		jt := jobs.of(n.UnifiedJobTemplate)
 		if !sameTagSet(jt.JobTags, tags) {
 			return "", "", fmt.Errorf("node %s runs the tags %q while another runs %q, and a "+
 				"workflow template applies one set of tags to every step",
@@ -632,10 +636,10 @@ func workflowTags(nodes []awxWorkflowNode, jobs map[string]awxJobTemplate) (tags
 // So nodes limited differently, or a limit on some nodes and not others, cannot be expressed. Both
 // are refused rather than resolved, because every way of resolving them runs some node against hosts
 // its operator had excluded.
-func workflowLimit(nodes []awxWorkflowNode, jobs map[string]awxJobTemplate) (string, error) {
-	limit := jobs[string(nodes[0].UnifiedJobTemplate)].Limit
+func workflowLimit(nodes []awxWorkflowNode, jobs awxJobs) (string, error) {
+	limit := jobs.of(nodes[0].UnifiedJobTemplate).Limit
 	for _, n := range nodes[1:] {
-		if l := jobs[string(n.UnifiedJobTemplate)].Limit; l != limit {
+		if l := jobs.of(n.UnifiedJobTemplate).Limit; l != limit {
 			return "", fmt.Errorf("node %s is limited to %q while another is limited to %q, and a "+
 				"workflow template applies one limit to every step",
 				nodeLabel(n), oneLine(l), oneLine(limit))
@@ -653,7 +657,7 @@ func workflowLimit(nodes []awxWorkflowNode, jobs map[string]awxJobTemplate) (str
 // import nor the run would say so, and a variable is exactly the kind of thing that decides which
 // environment a playbook touches.
 func (p *Plan) workflowVars(wf awxWorkflow, nodes []awxWorkflowNode,
-	jobs map[string]awxJobTemplate) (map[string]any, error) {
+	jobs awxJobs) (map[string]any, error) {
 	merged := map[string]any{}
 	add := func(src string, in map[string]any) error {
 		for _, k := range slices.Sorted(maps.Keys(in)) {
@@ -674,7 +678,7 @@ func (p *Plan) workflowVars(wf awxWorkflow, nodes []awxWorkflowNode,
 		return nil, err
 	}
 	for _, n := range nodes {
-		jt := jobs[string(n.UnifiedJobTemplate)]
+		jt := jobs.of(n.UnifiedJobTemplate)
 		tv, err := parseExtraVars(jt.ExtraVars)
 		if err != nil {
 			return nil, fmt.Errorf("the extra_vars of job template %q could not be parsed: %w",
@@ -719,21 +723,21 @@ func parseNodeData(raw json.RawMessage) (map[string]any, error) {
 // widening is a real change in what a step may touch, so the caller says so rather than leaving the
 // operator to discover it.
 func (p *Plan) workflowCredentials(name string, nodes []awxWorkflowNode,
-	jobs map[string]awxJobTemplate, credentialIDs map[string]string) (ids []string, widened bool) {
+	jobs awxJobs, credentialIDs awxIDs) (ids []string, widened bool) {
 	seen := map[string]bool{}
 	perNode := 0
 	for _, n := range nodes {
-		refs := append(append([]awxRef(nil), jobs[string(n.UnifiedJobTemplate)].Credentials...),
+		refs := append(append([]awxRef(nil), jobs.of(n.UnifiedJobTemplate).Credentials...),
 			n.Credentials...)
 		count := 0
 		for _, ref := range refs {
-			if ref == "" {
+			if ref.Name == "" {
 				continue
 			}
-			id, ok := credentialIDs[string(ref)]
+			id, ok := credentialIDs.get(ref)
 			if !ok {
-				p.warn("workflow %q node %s references unknown credential %q, so its steps import "+
-					"without it", name, nodeLabel(n), oneLine(string(ref)))
+				p.warn("workflow %q node %s references unknown credential %s, so its steps import "+
+					"without it", name, nodeLabel(n), oneLine(credentialIDs.unresolved(ref)))
 				continue
 			}
 			count++
@@ -833,11 +837,11 @@ func (n awxWorkflowNode) edgeConflict(byKey map[string]int,
 // what runs. The report names what changed for which node, since a step whose cap grew is a step whose
 // hang now lasts longer than its operator set.
 func (p *Plan) workflowTimeout(name string, nodes []awxWorkflowNode,
-	jobs map[string]awxJobTemplate) int {
+	jobs awxJobs) int {
 	longest, at := 0, ""
 	shortened := false
 	for _, n := range nodes {
-		seconds := jobs[string(n.UnifiedJobTemplate)].Timeout
+		seconds := int(jobs.of(n.UnifiedJobTemplate).Timeout)
 		if seconds <= 0 {
 			continue
 		}
@@ -872,21 +876,23 @@ func (p *Plan) workflowTimeout(name string, nodes []awxWorkflowNode,
 // Nodes that disagree refuse the workflow, for the reason the limit does: every way of resolving them
 // runs some step against hosts its operator had not chosen. A node whose job template names no
 // inventory does not force a refusal, because AWX would have taken the workflow's own in that case.
-func workflowInventory(nodes []awxWorkflowNode, jobs map[string]awxJobTemplate) (string, error) {
-	found := ""
+func workflowInventory(nodes []awxWorkflowNode, jobs awxJobs) (awxRef, error) {
+	var found awxRef
 	for _, n := range nodes {
-		inv := string(jobs[string(n.UnifiedJobTemplate)].Inventory)
-		if inv == "" {
+		inv := jobs.of(n.UnifiedJobTemplate).Inventory
+		if inv.Name == "" {
 			continue
 		}
-		if found == "" {
+		if found.Name == "" {
 			found = inv
 			continue
 		}
+		// Compared with its organization, so two teams' inventories that share a name are two
+		// inventories, which is what they are.
 		if inv != found {
-			return "", fmt.Errorf("node %s runs against inventory %q while another runs against %q, "+
-				"and a workflow template applies one inventory to every step",
-				nodeLabel(n), oneLine(inv), oneLine(found))
+			return awxRef{}, fmt.Errorf("node %s runs against inventory %q while another runs "+
+				"against %q, and a workflow template applies one inventory to every step",
+				nodeLabel(n), oneLine(inv.Name), oneLine(found.Name))
 		}
 	}
 	return found, nil

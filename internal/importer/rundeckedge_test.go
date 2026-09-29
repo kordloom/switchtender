@@ -31,8 +31,6 @@ func TestRundeckRefusesADocumentItCannotRead(t *testing.T) {
 		{Name: "mapping without jobs", Doc: "meta:\n  version: 1\n"}, // Test 2.
 		{Name: "empty", Doc: ""},                                     // Test 3.
 		{Name: "null document", Doc: "null\n"},                       // Test 4.
-		{Name: "bad threadcount in a bare list",
-			Doc: "- name: j\n  nodefilters:\n    dispatch:\n      threadcount: many\n"}, // Test 5.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -161,34 +159,6 @@ func TestRundeckScriptFileStepIsQuotedAndReported(t *testing.T) {
 	if _, ok := warningContaining(t, plan.Warnings, "runs the script file",
 		"must already exist on the target"); !ok {
 		t.Errorf("the script file step was not reported.\nwarnings: %v", plan.Warnings)
-	}
-}
-
-// TestShellQuoteSurvivesItsOwnQuote pins the quoting rule directly, including the single quote a
-// naive wrapper would let out. A path that closes its own quoting turns the rest of the line into
-// commands the export chose.
-func TestShellQuoteSurvivesItsOwnQuote(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		In         string
-		WantResult string
-	}{
-		{In: "/opt/run.sh", WantResult: `'/opt/run.sh'`},             // Test 0.
-		{In: "", WantResult: `''`},                                   // Test 1.
-		{In: "with space", WantResult: `'with space'`},               // Test 2.
-		{In: `it's`, WantResult: `'it'\''s'`},                        // Test 3.
-		{In: `'; rm -rf /; '`, WantResult: `''\''; rm -rf /; '\'''`}, // Test 4.
-		{In: `$(id)`, WantResult: `'$(id)'`},                         // Test 5.
-		{In: "back`tick`", WantResult: "'back`tick`'"},               // Test 6.
-		{In: "生产/run.sh", WantResult: `'生产/run.sh'`},                 // Test 7.
-	}
-	for testNum, test := range tests {
-		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
-			t.Parallel()
-			if got := shellQuote(test.In); got != test.WantResult {
-				t.Errorf("shellQuote(%q) = %q, want %q", test.In, got, test.WantResult)
-			}
-		})
 	}
 }
 
@@ -344,21 +314,34 @@ func TestRundeckDisabledJobAndScheduleBothComeAcrossSwitchedOff(t *testing.T) {
   sequence:
     commands:
       - exec: /bin/y
+- name: disabled-job-on-a-schedule
+  executionEnabled: false
+  schedule:
+    crontab: "0 0 3 * * ?"
+  sequence:
+    commands:
+      - exec: /bin/z
 `
 	plan := rundeckPlan(t, "prod", doc)
-	if len(plan.Templates) != 2 {
-		t.Fatalf("templates = %d, want 2: both jobs still import", len(plan.Templates))
+	if len(plan.Templates) != 3 {
+		t.Fatalf("templates = %d, want 3: every job still imports", len(plan.Templates))
 	}
-	if len(plan.Schedules) != 1 {
-		t.Fatalf("schedules = %d, want the disabled one carried rather than dropped: %v",
+	if len(plan.Schedules) != 2 {
+		t.Fatalf("schedules = %d, want both carried rather than dropped: %v",
 			len(plan.Schedules), plan.Warnings)
 	}
-	if plan.Schedules[0].Enabled {
-		t.Error("a schedule disabled in Rundeck imported armed, which starts a job the estate had " +
-			"switched off")
-	}
-	if plan.Schedules[0].Cron == "" {
-		t.Error("the schedule came across with no expression, so carrying it gained nothing")
+	// The third job is the one that went wrong. Its schedule was enabled in Rundeck and the job
+	// itself was not, so Rundeck never ran it, and it imported armed: a parked purge job fired on
+	// its old cadence the night after somebody migrated.
+	for _, sc := range plan.Schedules {
+		if sc.Enabled {
+			t.Errorf("schedule %q imported armed, which starts a job the estate had switched off",
+				sc.Name)
+		}
+		if sc.Cron == "" {
+			t.Errorf("schedule %q came across with no expression, so carrying it gained nothing",
+				sc.Name)
+		}
 	}
 	if _, ok := warningContaining(t, plan.Warnings, `job "disabled-job" is disabled`); !ok {
 		t.Errorf("the disabled job was not noted.\nwarnings: %v", plan.Warnings)
@@ -702,5 +685,84 @@ func TestRundeckStepDescriptionCannotWriteItsOwnScriptLines(t *testing.T) {
 	}
 	if !strings.Contains(command, `# first\nrm -rf /`) {
 		t.Errorf("the description was not folded onto one comment line:\n%s", command)
+	}
+}
+
+// TestARundeckJobSaysWhatItsStepsLose pins the Rundeck settings a template has no place for. A script
+// whose first line runs it with Python was inlined into Bash and failed on its first import line, and
+// a step's script arguments, its error handler, the job's retries, its notifications, and an option's
+// regex were all dropped without a word. The script is left out and named, the regex becomes the
+// survey pattern it is, and every other loss is reported as left out.
+func TestARundeckJobSaysWhatItsStepsLose(t *testing.T) {
+	t.Parallel()
+	const export = `
+- name: Nightly report
+  retry: '3'
+  notification:
+    onfailure:
+      email: {recipients: ops@example.test}
+  options:
+    - name: ticket
+      regex: 'CHG[0-9]{7}'
+  sequence:
+    commands:
+      - exec: echo start
+      - script: |
+          #!/usr/bin/env python3
+          import sys
+          print(sys.argv)
+      - script: |
+          #!/bin/bash -e
+          echo "$1"
+        args: 'weekly'
+        errorhandler:
+          exec: echo cleanup
+`
+	plan, err := FromRundeck("hosts")([]byte(export), testNow)
+	if err != nil {
+		t.Fatalf("FromRundeck() error = %v", err)
+	}
+	if len(plan.Templates) != 1 {
+		t.Fatalf("templates = %d, want 1", len(plan.Templates))
+	}
+	tpl := plan.Templates[0]
+	if strings.Contains(tpl.Command, "import sys") {
+		t.Errorf("the Python script was inlined into the Bash template:\n%s", tpl.Command)
+	}
+	if !strings.Contains(tpl.Command, `echo "$1"`) {
+		t.Errorf("the Bash script with a flag on its shebang was left out:\n%s", tpl.Command)
+	}
+	if len(tpl.Survey) != 1 || tpl.Survey[0].Pattern != "CHG[0-9]{7}" {
+		t.Errorf("survey = %+v, want the option's regex as the field's pattern", tpl.Survey)
+	}
+	leftOut := strings.Join(plan.Report().LeftOut, "\n")
+	for _, want := range []string{`first line runs it with "python3"`, `passes "weekly" to its script`,
+		"has an error handler", "retries up to 3 times", "sends notifications"} {
+		if !strings.Contains(leftOut, want) {
+			t.Errorf("the summary does not count %q as left out:\n%s", want, leftOut)
+		}
+	}
+}
+
+// TestARundeckArchiveJobCarriesTheSameLosses pins that a job read from a project archive's XML
+// reports the same losses as one from a job export, since both feed one mapping.
+func TestARundeckArchiveJobCarriesTheSameLosses(t *testing.T) {
+	t.Parallel()
+	const doc = `<joblist><job><name>Nightly</name><retry delay="10s">2</retry>
+  <notification><onfailure><email recipients="ops@example.test"/></onfailure></notification>
+  <context><options><option name="ticket" regex="CHG[0-9]{7}"/></options></context>
+  <sequence><command><script>echo "$1"</script><scriptargs>weekly</scriptargs>
+    <errorhandler><exec>echo cleanup</exec></errorhandler></command></sequence></job></joblist>`
+	jobs, err := decodeRundeckXML([]byte(doc))
+	if err != nil || len(jobs) != 1 {
+		t.Fatalf("decodeRundeckXML() = %d jobs, %v", len(jobs), err)
+	}
+	job := jobs[0]
+	if rundeckRetries(job.Retry) != "2" || job.Notification == nil || job.Options[0].Regex != "CHG[0-9]{7}" {
+		t.Errorf("job = retry %v notification %v regex %q, want each read", job.Retry, job.Notification,
+			job.Options[0].Regex)
+	}
+	if cmd := job.Sequence.Commands[0]; cmd.Args != "weekly" || cmd.ErrorHandler == nil {
+		t.Errorf("step = args %q error handler %v, want both read", cmd.Args, cmd.ErrorHandler)
 	}
 }

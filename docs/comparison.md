@@ -38,7 +38,7 @@ set rather than by not finding it.
 | RBAC in the free tier | Full, plus per-object grants | Yes, no paid tier exists [26] | Yes, subscription required for the product [27] | Four fixed project roles; custom roles are Enterprise [28] | Yes [29] | Yes, and finely grained; GUI editor is commercial [30] |
 | Drift detection | Yes, from a dry run | Not documented | Not documented | Not documented | Not documented | Not documented |
 | Workflows | DAG with a drag-and-drop editor | Visual editor [31] | Visual editor [32] | Basic build and deploy chaining [33] | Visual editor [34] | Engine yes; visualization is commercial [35] |
-| Minimum published footprint | One binary, one file | Not published as a single figure | 16 GB RAM, 4 CPU, 60 GB [2] | Not published [36] | 8 GB RAM, 2 CPU, 20 GB [37] | 8 GB RAM, 2 CPU [5] |
+| Minimum published footprint | One binary, one database | Not published as a single figure | 16 GB RAM, 4 CPU, 60 GB [2] | Not published [36] | 8 GB RAM, 2 CPU, 20 GB [37] | 8 GB RAM, 2 CPU [5] |
 | License | BSL 1.1, converts to Apache 2.0 | Apache 2.0 [38] | Paid subscription [39] | MIT [40] | Apache 2.0 [41] | Apache 2.0, commercial tier separate [42] |
 
 ### Where the field is even or ahead
@@ -76,7 +76,7 @@ than "structured versus scrollback".
 | Visual workflow editor | A drag-and-drop canvas at Workflows builds the dependency graph in the browser: draft persistence, undo, keyboard editing, cycle refusal, and a pan, zoom, and fit-to-view viewport, on the same DAG engine the API uses. | A drag-and-drop editor. | On the roadmap. |
 | Fleet memory | Flaky-host detection, outcome sparklines, per-host history, and task duration trends across runs. | Not available. | Not available. |
 | Distributed workers | Store leasing, where the same single binary adds capacity, held together by leases and a janitor that requeues a crashed worker's runs. | A Receptor mesh. | Global runners are free; project-isolated runners and tag routing are Pro. |
-| Instance groups | A queue pins work at the run, template, or inventory level, most specific wins, so jobs land on the right worker group. | Instance groups. | Not available. |
+| Instance groups | A queue pins work at the run, template, or inventory level, most specific wins, so jobs land on the right worker group (Team). | Instance groups. | Not available. |
 | High availability | Active-active replicas on PostgreSQL behind any load balancer: store-claimed work, compare-and-set schedules and approvals, automatic failover through stale-lease reclaim, proven by a two-replica integration suite. | Via Kubernetes replicas. | Not documented. |
 | Per-run provenance | Every run records the exact commit it executed. | Partial. | Partial. |
 | Provable audit | A tamper-evident SHA-256 hash chain, exported as a signed LoomSeal bundle and verified offline by an open verifier. | An activity stream. | An activity log. |
@@ -104,7 +104,7 @@ than "structured versus scrollback".
 
 | Capability | Status |
 |------------|--------|
-| Maturity | AWX and Semaphore have years of production use and large communities. SwitchTender is young. AWX's years now cut both ways: its last release was July 2024, and [mid-refactor development builds have moved external authentication out of core](https://forum.ansible.com/t/awx-modernization-moving-forward/45134) into a shared library. |
+| Maturity | AWX and Semaphore have years of production use and large communities. Every SwitchTender release is proven end to end on real machines before it ships, as [the supertest](supertest.md) sets out. AWX's years now cut both ways: its last release was July 2024, and [mid-refactor development builds have moved external authentication out of core](https://forum.ansible.com/t/awx-modernization-moving-forward/45134) into a shared library. |
 | Approval steps inside a workflow | A whole run is held for approval. AWX places an approval node at a point in the graph, so the first half runs, waits, and continues. |
 | Recurrence beyond cron | AWX schedules take an RRULE, so "the last Friday of the quarter" is expressible. SwitchTender takes a cron expression with a timezone, and a cadence cron cannot say is reported and skipped on import rather than converted wrongly. |
 | Secret survey answers | AWX offers a password survey field whose answer is stored encrypted. A survey answer here is stored in plain text on the run, so a secret belongs in a credential instead, and every importer that carries surveys refuses to downgrade one rather than accept it quietly: an AWX password field, a Semaphore secret variable, a Rundeck secure option, and a Jenkins password parameter are each named in the report and left out. |

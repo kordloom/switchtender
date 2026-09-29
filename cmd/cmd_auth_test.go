@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +13,7 @@ import (
 // TestTokenLifecycle verifies minting, listing, and revoking an API token through the commands,
 // and that the plaintext token is shown once and never stored.
 func TestTokenLifecycle(t *testing.T) {
-	db := filepath.Join(t.TempDir(), "tokens.db")
+	db := tempDB(t)
 	tokenDB, tokenName = db, "ci-runner"
 	t.Cleanup(func() { tokenDB, tokenName = "", "" })
 
@@ -63,7 +62,7 @@ func TestTokenLifecycle(t *testing.T) {
 // TestUserLifecycle verifies account creation, listing, and deletion through the commands, and
 // that the stored password is hashed rather than kept in the clear.
 func TestUserLifecycle(t *testing.T) {
-	db := filepath.Join(t.TempDir(), "users.db")
+	db := tempDB(t)
 	userDB, userRole = db, string(user.RoleAdmin)
 	t.Setenv("SWITCHTENDER_PASSWORD", "correct-horse")
 	t.Cleanup(func() { userDB, userRole = "", "" })
@@ -124,7 +123,7 @@ func TestUserLifecycle(t *testing.T) {
 // TestUserNewRequiresPassword verifies account creation fails without a password rather than
 // creating an account nobody can sign in to, or worse, one with an empty password.
 func TestUserNewRequiresPassword(t *testing.T) {
-	db := filepath.Join(t.TempDir(), "users.db")
+	db := tempDB(t)
 	userDB, userRole = db, string(user.RoleViewer)
 	t.Setenv("SWITCHTENDER_PASSWORD", "")
 	t.Cleanup(func() { userDB, userRole = "", "" })
@@ -139,7 +138,7 @@ func TestUserNewRequiresPassword(t *testing.T) {
 // path for an automation or an AI agent: an operator-bound token can submit runs but cannot
 // approve its own held work.
 func TestTokenNewUserBinding(t *testing.T) {
-	db := filepath.Join(t.TempDir(), "tokens.db")
+	db := tempDB(t)
 	tokenDB, tokenName, tokenUser = db, "agent-bot", "agent-bot"
 	t.Cleanup(func() { tokenDB, tokenName, tokenUser = "", "", "" })
 
@@ -179,7 +178,7 @@ func TestTokenNewUserBinding(t *testing.T) {
 // nothing. Failing open here would mint an unscoped admin token under a name the operator
 // believed was confined.
 func TestTokenNewUserUnknownRefused(t *testing.T) {
-	db := filepath.Join(t.TempDir(), "tokens.db")
+	db := tempDB(t)
 	tokenDB, tokenName, tokenUser = db, "agent-bot", "no-such-account"
 	t.Cleanup(func() { tokenDB, tokenName, tokenUser = "", "", "" })
 
@@ -207,7 +206,7 @@ func TestTokenNewUserUnknownRefused(t *testing.T) {
 // was asked for: an operator handing out what they believed was a short-lived credential handed out
 // one that never expires.
 func TestTokenNewRefusesNegativeTTL(t *testing.T) {
-	db := filepath.Join(t.TempDir(), "tokens.db")
+	db := tempDB(t)
 	tokenDB, tokenName, tokenTTL = db, "oops", -time.Hour
 	t.Cleanup(func() { tokenDB, tokenName, tokenTTL = "", "", 0 })
 

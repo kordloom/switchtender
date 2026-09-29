@@ -44,6 +44,13 @@ func FromCron(inventory string, system bool) func([]byte, time.Time) (*Plan, err
 		if strings.TrimSpace(inventory) == "" {
 			p.warn("no --inventory was given, so imported schedules name no target host and run " +
 				"against nothing until one is set on each")
+		} else {
+			// The guide said a name matching a stored inventory was wired by id. A schedule's own
+			// steps carry an inventory as a path and nothing else, so it never was, and nothing said.
+			p.warn("--inventory %q is kept on each schedule as a path on the server, which a bash "+
+				"step does not read. A schedule's own steps cannot name a stored inventory, so to run "+
+				"a line against one, make it a template that targets that inventory and schedule the "+
+				"template", oneLine(inventory))
 		}
 		s := bufio.NewScanner(bytes.NewReader(data))
 		s.Buffer(make([]byte, 0, 64*1024), 1<<20)
@@ -104,7 +111,7 @@ func FromCron(inventory string, system bool) func([]byte, time.Time) (*Plan, err
 				ID: schedule.NewID(), Name: fmt.Sprintf("cron line %d", lineNo),
 				Cron: StandardizeCron(expr), Timezone: zone,
 				Inventory: inventory, Enabled: true, CreatedAt: now,
-				Steps: []run.PipelineStep{{Name: "cron", Tool: run.ToolBash, Command: command}},
+				Steps: []run.PipelineStep{{Name: "cron", Tool: run.ToolBash, Command: cronCommand(command)}},
 			}, "the crontab", now)
 		}
 		if err := s.Err(); err != nil {
@@ -146,6 +153,37 @@ func splitCronLine(raw string, system bool) (expr, user, command string, ok bool
 		return "", "", "", false
 	}
 	return expr, user, command, true
+}
+
+// cronStdinEnd closes the here-document that carries a crontab line's standard input.
+const cronStdinEnd = "SWITCHTENDER_CRON_STDIN"
+
+// cronCommand translates a crontab command into the script cron would run. In a crontab "\%" is a
+// literal percent sign, and the first unescaped "%" ends the command: what follows is the command's
+// standard input, with every further unescaped "%" a newline. The command was imported verbatim, so a
+// line dated with $(date +"\%Y\%m\%d") ran with the backslashes in the file name, and a line that
+// fed its command input ran with that input as arguments. The input is fed to the whole command, as
+// cron feeds it to the shell, through a quoted here-document so nothing in it is expanded.
+func cronCommand(raw string) string {
+	var cmd, in strings.Builder
+	target, hasInput := &cmd, false
+	for i := 0; i < len(raw); i++ {
+		switch {
+		case raw[i] == '\\' && i+1 < len(raw) && raw[i+1] == '%':
+			target.WriteByte('%')
+			i++
+		case raw[i] == '%' && !hasInput:
+			target, hasInput = &in, true
+		case raw[i] == '%':
+			in.WriteByte('\n')
+		default:
+			target.WriteByte(raw[i])
+		}
+	}
+	if !hasInput {
+		return cmd.String()
+	}
+	return "{\n" + cmd.String() + "\n} <<'" + cronStdinEnd + "'\n" + in.String() + "\n" + cronStdinEnd
 }
 
 // cutField returns the first whitespace-delimited field of s and the remainder with leading

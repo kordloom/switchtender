@@ -1,8 +1,10 @@
 package importer
 
 import (
+	"errors"
 	"fmt"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/template"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // rundeckJob is one job definition from a Rundeck job export. Rundeck writes YAML or JSON, and JSON
@@ -38,6 +41,10 @@ type rundeckJob struct {
 	Schedule *rundeckSchedule `yaml:"schedule" json:"schedule"`
 	// NodeFilters selects which nodes the job dispatches to.
 	NodeFilters rundeckNodeFilters `yaml:"nodefilters" json:"nodefilters"`
+	// Retry is how many times Rundeck retries the job after a failure, a count or a count with a delay.
+	Retry any `yaml:"retry" json:"retry"`
+	// Notification is where Rundeck reports the job's outcome. Only its presence is read.
+	Notification any `yaml:"notification" json:"notification"`
 }
 
 // rundeckOption is one prompted job input.
@@ -58,6 +65,8 @@ type rundeckOption struct {
 	Secure bool `yaml:"secure" json:"secure"`
 	// Multivalued lets the option carry several values at once.
 	Multivalued bool `yaml:"multivalued" json:"multivalued"`
+	// Regex is a regular expression the whole value must match.
+	Regex string `yaml:"regex" json:"regex"`
 }
 
 // rundeckSequence is a job's ordered step list.
@@ -87,6 +96,10 @@ type rundeckCommand struct {
 	JobRef *rundeckJobRef `yaml:"jobref" json:"jobref"`
 	// Type names a plugin step, which does not map.
 	Type string `yaml:"type" json:"type"`
+	// Args are the arguments a script step passes to its script.
+	Args string `yaml:"args" json:"args"`
+	// ErrorHandler is the step Rundeck runs when this one fails. Only its presence is read.
+	ErrorHandler any `yaml:"errorhandler" json:"errorhandler"`
 }
 
 // rundeckJobRef is a reference from one job to another.
@@ -198,11 +211,15 @@ func FromRundeck(inventory string) func([]byte, time.Time) (*Plan, error) {
 		if err := refuseYAMLTail(data); err != nil {
 			return nil, err
 		}
-		jobs, err := decodeRundeck(data)
+		jobs, skipped, err := decodeRundeck(data)
 		if err != nil {
 			return nil, err
 		}
 		plan := &Plan{}
+		for _, s := range skipped {
+			plan.warn("%s", s)
+			plan.refused++
+		}
 		plan.warnRundeckInventory(inventory)
 		for _, job := range jobs {
 			plan.addRundeckJob(job, inventory, now)
@@ -214,44 +231,67 @@ func FromRundeck(inventory string) func([]byte, time.Time) (*Plan, error) {
 	}
 }
 
-// decodeRundeck reads a Rundeck export, which is a list of jobs. Some exports wrap the list in a
-// mapping, so a bare list and a wrapped one are both accepted.
-func decodeRundeck(data []byte) ([]rundeckJob, error) {
-	var jobs []rundeckJob
-	listErr := yaml.Unmarshal(data, &jobs)
-	if listErr == nil {
-		return jobs, nil
-	}
-	// A document whose root is a list is the bare form, so its own error is the one worth showing.
-	// Falling through to the wrapped attempt reported "cannot unmarshal !!seq into struct", which
-	// blamed the top-level shape for what was really one field inside a job.
-	if rootIsSequence(data) {
-		return nil, fmt.Errorf("parse rundeck export: %w", listErr)
-	}
-	var wrapped struct {
-		// Jobs is the job list when the export wraps it.
-		Jobs []rundeckJob `yaml:"jobs" json:"jobs"`
-	}
-	if err := yaml.Unmarshal(data, &wrapped); err != nil {
-		return nil, fmt.Errorf("parse rundeck export: %w", err)
-	}
-	if wrapped.Jobs == nil {
-		return nil, fmt.Errorf("parse rundeck export: no job list found")
-	}
-	return wrapped.Jobs, nil
-}
-
-// rootIsSequence reports whether a document's top level is a list, which tells the two export shapes
-// apart without decoding either into its target type.
-func rootIsSequence(data []byte) bool {
+// decodeRundeck reads the job list from either export shape, a bare list or one wrapped under jobs.
+// Each job is decoded on its own, so a job with a field that will not read is left out with a
+// sentence saying which and why, and the other jobs import. One bad threadcount used to refuse the
+// whole export.
+func decodeRundeck(data []byte) ([]rundeckJob, []string, error) {
 	var root yaml.Node
 	if err := yaml.Unmarshal(data, &root); err != nil {
-		return false
+		return nil, nil, fmt.Errorf("parse rundeck export: %w", err)
 	}
-	if root.Kind == yaml.DocumentNode && len(root.Content) > 0 {
-		return root.Content[0].Kind == yaml.SequenceNode
+	list := &root
+	if list.Kind == yaml.DocumentNode && len(list.Content) > 0 {
+		list = list.Content[0]
 	}
-	return root.Kind == yaml.SequenceNode
+	if list.Kind == yaml.MappingNode {
+		var jobs *yaml.Node
+		for i := 0; i+1 < len(list.Content); i += 2 {
+			if list.Content[i].Value == "jobs" {
+				jobs = list.Content[i+1]
+			}
+		}
+		if jobs == nil {
+			return nil, nil, fmt.Errorf("parse rundeck export: no job list found")
+		}
+		list = jobs
+	}
+	if list.Kind != yaml.SequenceNode {
+		return nil, nil, fmt.Errorf("parse rundeck export: the job list is not a list")
+	}
+	var jobs []rundeckJob
+	var skipped []string
+	for i, item := range list.Content {
+		var job rundeckJob
+		if err := item.Decode(&job); err != nil {
+			skipped = append(skipped, fmt.Sprintf("job %s was skipped because %s, and the rest of "+
+				"the export imports without it", yamlJobLabel(item, i), yamlProblem(err)))
+			continue
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, skipped, nil
+}
+
+// yamlJobLabel names a job entry for a warning: its name when it has one, its position otherwise.
+func yamlJobLabel(item *yaml.Node, idx int) string {
+	if item.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(item.Content); i += 2 {
+			if item.Content[i].Value == "name" && strings.TrimSpace(item.Content[i+1].Value) != "" {
+				return strconv.Quote(item.Content[i+1].Value)
+			}
+		}
+	}
+	return "#" + strconv.Itoa(idx+1)
+}
+
+// yamlProblem says why a job did not decode, without the decoder's own framing.
+func yamlProblem(err error) string {
+	var typeErr *yaml.TypeError
+	if errors.As(err, &typeErr) && len(typeErr.Errors) > 0 {
+		return oneLine(strings.Join(typeErr.Errors, "; "))
+	}
+	return oneLine(strings.TrimPrefix(err.Error(), "yaml: "))
 }
 
 // addRundeckJob maps one job into the plan as a template, plus a schedule when the job has one.
@@ -261,17 +301,33 @@ func (p *Plan) addRundeckJob(job rundeckJob, inventoryName string, now time.Time
 		p.warn("a job without a name was skipped")
 		return
 	}
-	if job.ExecutionEnabled != nil && !*job.ExecutionEnabled {
-		p.warn("job %q is disabled in Rundeck; it is imported but you may want to leave it unused", name)
+	// A job disabled for execution never runs in Rundeck, whatever its schedule says, so its schedule
+	// arrives switched off too. It used to arrive armed, which turned a job the estate had parked
+	// into one that fires on its old cadence the night after the import.
+	if retries := rundeckRetries(job.Retry); retries != "" {
+		p.warn("job %q retries up to %s times after a failure in Rundeck, which was left out, so a "+
+			"failed run here is not retried", name, oneLine(retries))
+	}
+	if job.Notification != nil {
+		p.warn("job %q sends notifications in Rundeck, which were left out. Set the template's "+
+			"notifications to match", name)
+	}
+	disabled := job.ExecutionEnabled != nil && !*job.ExecutionEnabled
+	if disabled {
+		p.warn("job %q is disabled in Rundeck; it is imported with any schedule it has switched "+
+			"off, and you may want to leave it unused", name)
 	}
 
 	command, ok := p.rundeckCommand(job, name)
 	if !ok {
 		return
 	}
+	// Rundeck sets each option as RD_OPTION_ and its name in capitals.
+	survey := p.rundeckSurvey(job, name)
+	command = withPreamble(command, p.paramPreamble(name, "Rundeck", surveyParams(survey, rundeckOptionEnv)))
 	tmpl := &template.Template{
 		ID: template.NewID(), Name: name, Tool: "bash", Command: command,
-		Inventory: inventoryName, Survey: p.rundeckSurvey(job, name),
+		Inventory: inventoryName, Survey: survey,
 		Forks: int(job.NodeFilters.Dispatch.ThreadCount), Timeout: p.rundeckTimeout(job, name),
 		CreatedAt: now,
 	}
@@ -295,7 +351,7 @@ func (p *Plan) addRundeckJob(job rundeckJob, inventoryName string, now time.Time
 	// AWX, Jenkins and Semaphore all carry theirs switched off. addSchedule says which ones arrive off.
 	p.addSchedule(&schedule.Schedule{
 		ID: schedule.NewID(), Name: name, Cron: spec, TemplateID: tmpl.ID,
-		Enabled: job.ScheduleEnabled == nil || *job.ScheduleEnabled, CreatedAt: now,
+		Enabled: !disabled && (job.ScheduleEnabled == nil || *job.ScheduleEnabled), CreatedAt: now,
 	}, "rundeck", now)
 }
 
@@ -327,9 +383,17 @@ func (p *Plan) rundeckCommand(job rundeckJob, name string) (string, bool) {
 	}
 	steps := 0
 	for i, cmd := range job.Sequence.Commands {
+		if args := strings.TrimSpace(cmd.Args); args != "" {
+			p.warn("job %q step %d passes %q to its script, which was left out, so the script runs "+
+				"with no arguments", name, i+1, oneLine(args))
+		}
+		if cmd.ErrorHandler != nil {
+			p.warn("job %q step %d has an error handler, which was left out. A failure in that step "+
+				"now ends the job, or is passed over when the job keeps going", name, i+1)
+		}
 		switch {
 		case cmd.Exec != "":
-			p.writeRundeckStep(&b, cmd.Description, cmd.Exec)
+			p.writeRundeckStep(&b, cmd.Description, p.rundeckTokens(name, i+1, cmd.Exec))
 			steps++
 		case cmd.Script != "":
 			if !rundeckShellScript(cmd.ScriptInterpreter) {
@@ -339,10 +403,20 @@ func (p *Plan) rundeckCommand(job rundeckJob, name string) (string, bool) {
 					name, i+1, oneLine(cmd.ScriptInterpreter))
 				continue
 			}
-			p.writeRundeckStep(&b, cmd.Description, cmd.Script)
+			// With no interpreter named, Rundeck runs the script as a file, so its first line decides
+			// what reads it. A Python script inlined into Bash failed on its first import line.
+			if cmd.ScriptInterpreter == "" {
+				if shebang := rundeckShebang(cmd.Script); shebang != "" && !rundeckShellScript(shebang) {
+					p.warn("job %q step %d is a script whose first line runs it with %q rather than a "+
+						"shell, and a template runs one Bash script, so the step was left out. Rewrite "+
+						"it as a step that calls that interpreter itself.", name, i+1, oneLine(shebang))
+					continue
+				}
+			}
+			p.writeRundeckStep(&b, cmd.Description, p.rundeckTokens(name, i+1, cmd.Script))
 			steps++
 		case cmd.ScriptFile != "":
-			p.writeRundeckStep(&b, cmd.Description, shellQuote(cmd.ScriptFile))
+			p.writeRundeckStep(&b, cmd.Description, util.ShellQuote(cmd.ScriptFile))
 			p.warn("job %q step %d runs the script file %q, which must already exist on the target",
 				name, i+1, oneLine(cmd.ScriptFile))
 			steps++
@@ -387,6 +461,46 @@ func rundeckShellScript(interpreter string) bool {
 	return false
 }
 
+// rundeckShebang returns the program an inline script's first line names, or the empty string when it
+// has no #! line. The program env stands in for, as in "#!/usr/bin/env python3", is what is returned.
+func rundeckShebang(script string) string {
+	line, _, _ := strings.Cut(strings.TrimLeft(script, " \t\r\n"), "\n")
+	rest, ok := strings.CutPrefix(strings.TrimSpace(line), "#!")
+	if !ok {
+		return ""
+	}
+	fields := strings.Fields(rest)
+	if len(fields) == 0 {
+		return ""
+	}
+	if path.Base(fields[0]) != "env" {
+		return fields[0]
+	}
+	for _, f := range fields[1:] {
+		if !strings.HasPrefix(f, "-") {
+			return f
+		}
+	}
+	return ""
+}
+
+// rundeckRetries returns how many times a job retries after a failure, or the empty string when it
+// does not. Rundeck writes a count, or a count with a delay.
+func rundeckRetries(v any) string {
+	switch r := v.(type) {
+	case nil:
+		return ""
+	case map[string]any:
+		return rundeckRetries(r["retry"])
+	default:
+		s := strings.TrimSpace(fmt.Sprint(r))
+		if s == "" || s == "0" {
+			return ""
+		}
+		return s
+	}
+}
+
 // writeRundeckStep appends one step's body to the script, preceded by its description as a comment.
 func (p *Plan) writeRundeckStep(b *strings.Builder, description, body string) {
 	if d := strings.TrimSpace(description); d != "" {
@@ -406,12 +520,6 @@ func rundeckStepType(t string) string {
 	return " of type " + strconv.Quote(oneLine(t))
 }
 
-// shellQuote wraps a path in single quotes so a script file name carrying a space or a shell
-// metacharacter runs as one argument rather than being split or interpreted.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
-
 // rundeckSurvey maps a job's options to survey fields.
 //
 // A secure option is refused rather than imported. Rundeck stores such a value obscured, and a
@@ -420,11 +528,23 @@ func shellQuote(s string) string {
 // secret without saying so is worse than not importing it, so the option is dropped and named.
 func (p *Plan) rundeckSurvey(job rundeckJob, name string) []template.SurveyField {
 	var fields []template.SurveyField
+	taken := map[string]string{}
 	for _, opt := range job.Options {
 		if opt.Name == "" {
 			p.warn("job %q has an option with no name, which was skipped", name)
 			continue
 		}
+		// The answer reaches the script under a variable name, so the survey variable is the
+		// option's name with the characters a variable cannot hold made underscores, the same
+		// folding Rundeck applies to RD_OPTION_. A dash in a name used to keep the answer from
+		// reaching the script at all.
+		variable := nonEnvChar.ReplaceAllString(opt.Name, "_")
+		if first, dup := taken[variable]; dup {
+			p.warn("job %q options %q and %q fold to the same variable, %s, so the second was "+
+				"skipped", name, first, opt.Name, variable)
+			continue
+		}
+		taken[variable] = opt.Name
 		if opt.Secure {
 			p.warn("job %q option %q is a secure option and was NOT imported. Store its value as a "+
 				"credential instead: importing it as a survey field would keep the answer in plain "+
@@ -432,7 +552,7 @@ func (p *Plan) rundeckSurvey(job rundeckJob, name string) []template.SurveyField
 			continue
 		}
 		field := template.SurveyField{
-			Var: opt.Name, Label: opt.Name, Type: template.FieldText,
+			Var: variable, Label: opt.Name, Type: template.FieldText,
 			Required: opt.Required, Help: opt.Description,
 		}
 		if len(opt.Values) > 0 && opt.Enforced {
@@ -448,6 +568,18 @@ func (p *Plan) rundeckSurvey(job rundeckJob, name string) []template.SurveyField
 		if opt.Multivalued {
 			p.warn("job %q option %q accepted several values at once, which imports as a single "+
 				"text answer", name, opt.Name)
+		}
+		// Rundeck checks the whole value against the option's regex, which is what a survey pattern
+		// does here. The check was dropped, so a value Rundeck refused was accepted. A pattern this
+		// engine cannot compile is reported rather than carried broken.
+		if re := strings.TrimSpace(opt.Regex); re != "" && field.Type == template.FieldText {
+			if _, err := regexp.Compile(re); err != nil {
+				p.warn("job %q option %q must match %q in Rundeck, which was left out because it "+
+					"does not compile here: %v. Set a pattern on the survey field by hand",
+					name, opt.Name, oneLine(re), err)
+			} else {
+				field.Pattern = re
+			}
 		}
 		fields = append(fields, field)
 	}
@@ -626,3 +758,39 @@ func (p *Plan) convertQuartzDOW(field, name string) (string, bool) {
 	}
 	return out.String(), true
 }
+
+// rundeckOptionToken matches a reference to an option's value that Rundeck substitutes into a step's
+// text before it runs, in either of the two spellings it accepts.
+var rundeckOptionToken = regexp.MustCompile(`@option\.([A-Za-z0-9_.\-]+)@|\$\{option\.([A-Za-z0-9_.\-]+)\}`)
+
+// rundeckContextToken matches a reference to the rest of Rundeck's data context, which has no
+// equivalent here.
+var rundeckContextToken = regexp.MustCompile(`@(node|job|globals|execution)\.[A-Za-z0-9_.\-]+@|\$\{(node|job|globals|execution)\.[A-Za-z0-9_.\-]+\}`)
+
+// rundeckTokens rewrites a step's references to option values as the variables the preamble sets.
+// Rundeck replaces @option.name@ and ${option.name} in the text itself, so left alone the first ran as
+// a literal word and the second stopped Bash with a bad substitution. A reference to the rest of the
+// data context, a node's name or the job's, is reported, since nothing here fills it.
+func (p *Plan) rundeckTokens(job string, step int, text string) string {
+	text = rundeckOptionToken.ReplaceAllStringFunc(text, func(m string) string {
+		parts := rundeckOptionToken.FindStringSubmatch(m)
+		name := parts[1]
+		if name == "" {
+			name = parts[2]
+		}
+		return "${" + rundeckOptionEnv(name) + "}"
+	})
+	if ref := rundeckContextToken.FindString(text); ref != "" {
+		p.warn("job %q step %d refers to Rundeck's own context, %s, which nothing here fills, so "+
+			"it expands to nothing or stops the script", job, step, oneLine(ref))
+	}
+	return text
+}
+
+// rundeckOptionEnv is the environment variable Rundeck sets for an option.
+func rundeckOptionEnv(name string) string {
+	return "RD_OPTION_" + strings.ToUpper(nonEnvChar.ReplaceAllString(name, "_"))
+}
+
+// nonEnvChar matches a character an environment variable name cannot hold.
+var nonEnvChar = regexp.MustCompile(`[^A-Za-z0-9_]`)

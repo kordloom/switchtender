@@ -4,16 +4,16 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Migration | SwitchTender docs</title>
-	<meta name="description" content="SwitchTender imports an AWX, Semaphore, Rundeck, or Jenkins export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.">
+	<meta name="description" content="SwitchTender imports an AWX, Semaphore, Rundeck, Jenkins, Chef, or Puppet export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.">
 	<link rel="canonical" href="https://switchtender.com/docs/migration">
 	<meta property="og:title" content="Migration | SwitchTender docs">
-	<meta property="og:description" content="SwitchTender imports an AWX, Semaphore, Rundeck, or Jenkins export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.">
+	<meta property="og:description" content="SwitchTender imports an AWX, Semaphore, Rundeck, Jenkins, Chef, or Puppet export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/migration">
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
 	<meta name="twitter:card" content="summary_large_image">
 	<meta name="twitter:title" content="Migration | SwitchTender docs">
-	<meta name="twitter:description" content="SwitchTender imports an AWX, Semaphore, Rundeck, or Jenkins export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.">
+	<meta name="twitter:description" content="SwitchTender imports an AWX, Semaphore, Rundeck, Jenkins, Chef, or Puppet export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.">
 	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
 	<script type="application/ld+json">
 {
@@ -24,7 +24,7 @@
   "name": "SwitchTender",
   "url": "https://switchtender.com/"
  },
- "description": "SwitchTender imports an AWX, Semaphore, Rundeck, or Jenkins export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.",
+ "description": "SwitchTender imports an AWX, Semaphore, Rundeck, Jenkins, Chef, or Puppet export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.",
  "headline": "Migration",
  "isPartOf": {
   "@type": "WebSite",
@@ -60,13 +60,13 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration" class="active">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration" class="active">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
-			<h1 id="migrate-off-awx-semaphore-rundeck-jenkins-or-cron">Migrate off AWX, Semaphore, Rundeck, Jenkins, or cron</h1>
-<p>SwitchTender imports an AWX, Semaphore, Rundeck, or Jenkins export, or a plain crontab, and creates
-the equivalent objects, so moving over is one command rather than a rebuild.</p>
+			<h1 id="migrate-off-awx-semaphore-rundeck-jenkins-chef-puppet-or-cron">Migrate off AWX, Semaphore, Rundeck, Jenkins, Chef, Puppet, or cron</h1>
+<p>SwitchTender imports an AWX, Semaphore, Rundeck, Jenkins, Chef, or Puppet export, or a plain crontab,
+and creates the equivalent objects, so moving over is one command rather than a rebuild.</p>
 <h2 id="the-migration-summary">The migration summary</h2>
 <p>Every preview opens with a summary before the itemized plan, and the API returns the same thing as
 <code>report</code> on an import response. The plan answers what an import did. The summary answers whether to
@@ -85,7 +85,10 @@ attempt one.</p>
 <p>Two numbers are worth understanding before relying on them.</p>
 <p><strong>Needs a secret is not a limitation of the importer.</strong> An export never carries secret values, from
 any of these systems, so a credential arrives as a named shell whoever wrote the tool. The count is
-how many secrets a person re-enters once.</p>
+how many credentials need a secret set once before anything uses them. The plan says which of them
+held a secret in the source and which held none, such as an AWX machine credential that only names a
+user. A run refuses a credential with no secret and says which one, so the choice for the second kind
+is to set a secret or to detach the credential from the templates that use it.</p>
 <p><strong>Does not come across is itemized, never summarized.</strong> Each entry names the object and the reason,
 because a count with no names cannot be acted on. Nothing is dropped without an entry: a test reads
 every warning the importers can raise and fails when one describes a dropped object in wording the
@@ -216,6 +219,11 @@ only its name, and calls out anything that could not be mapped cleanly. Apply it
 looks right:</p>
 <pre><code>switchtender import awx awx-export.json --db switchtender.db --apply
 </code></pre>
+<p>Apply an export once. A second apply is refused before it writes anything when the install already
+holds a project, inventory, credential, inventory source, template, or schedule of the same name, and
+the refusal names each one. Importing again would create a second copy of each object, and a second
+copy of a schedule fires as well. To import a revised export, delete what the first one created, or
+import into a fresh database.</p>
 <p>Semaphore works the same way with <code>import semaphore</code>. The importer is proven against a real
 backup taken from a live current Semaphore release, unknown newer fields included, not only
 against hand-built samples.</p>
@@ -327,7 +335,7 @@ attaching a project changes the directory every relative path in the script reso
 has no supported road ahead, and the fleet needs to be somewhere else before that matters.</p>
 <p>Chef reads what the server stores about its nodes. Any of the three shapes the tooling emits works:
 an array of node documents, a single node, or an object keyed by node name.</p>
-<pre><code>knife node list | xargs -I{} knife node show {} -F json &gt; chef-nodes.json
+<pre><code>knife node list | xargs -I{} knife node show {} -l -F json &gt; chef-nodes.json
 switchtender import chef chef-nodes.json --db switchtender.db
 </code></pre>
 <p>Each node becomes a host. Its <code>chef_environment</code> becomes a group, and every <code>role[...]</code> in its run
@@ -336,18 +344,20 @@ attributes that identify a machine come across as host variables, and <code>ipad
 <code>ansible_host</code>, because a Chef estate addresses machines by certname and has no reason to have kept
 DNS in step. The rest of a node's automatic attributes are left out on purpose: they run to hundreds
 of keys per host, and copying them produces an inventory nobody can read.</p>
-<p>Puppet reads a PuppetDB query, or the plain certname list when PuppetDB is not reachable.</p>
+<p>Puppet reads PuppetDB queries, or the plain certname list when PuppetDB is not reachable. Export the
+nodes and their facts, put both in one document, and import it once:</p>
 <pre><code>curl -s &quot;$PUPPETDB/pdb/query/v4/nodes&quot; &gt; puppet-nodes.json
-switchtender import puppet puppet-nodes.json --db switchtender.db
+curl -s &quot;$PUPPETDB/pdb/query/v4/facts&quot; &gt; puppet-facts.json
+jq -s add puppet-nodes.json puppet-facts.json &gt; puppet.json
+switchtender import puppet puppet.json --db switchtender.db
 </code></pre>
 <p>Nodes group by environment. Deactivated and expired nodes are left out and counted, because Puppet
 itself stopped managing them and a play targeting everything would otherwise reach for machines
-nothing owns. Export a facts query as well to carry addresses:</p>
-<pre><code>curl -s &quot;$PUPPETDB/pdb/query/v4/facts&quot; &gt; puppet-facts.json
-switchtender import puppet puppet-facts.json --db switchtender.db
-</code></pre>
-<p>Without facts the hosts import as names with no address, and the preview says so rather than letting
-an inventory that reaches nothing look complete.</p>
+nothing owns. The facts carry each host's address. The two go in one document because only the nodes
+query says which nodes are deactivated: facts imported alone bring those back, which the report says,
+and a second import of the same fleet is refused as a copy of the first. Without facts the hosts
+import as names with no address, and the preview says so rather than letting an inventory that
+reaches nothing look complete.</p>
 <h2 id="import-a-crontab">Import a crontab</h2>
 <p>Fleets that still schedule work from a crontab can bring it under governance in one step. Point the
 importer at a crontab file and it turns each cron line into a governed schedule, so every firing is
@@ -357,8 +367,10 @@ approved, recorded, and provable like any other run instead of running unseen on
 <p>A crontab names no target host, so <code>--inventory</code> records which inventory the jobs belong to. It does
 not move where they run: each line imports as a shell step, and a shell step runs on the SwitchTender
 host, not on the machine the crontab came from. The report says so on every cron import. Change a step
-to Ansible when you want it to run against the inventory. When the name matches a stored inventory, the
-import wires the object by id; anything else is used as a path on the server and the report says which. Add <code>--system</code> to read
+to Ansible when you want it to run against the inventory. The name is kept on each schedule as a path on the
+server, since a schedule's own steps cannot name a stored inventory, and the report says so. To run a
+line against a stored inventory, make it a template that targets that inventory and schedule the
+template. Add <code>--system</code> to read
 <code>/etc/crontab</code> and the system tabs, which carry a user column the report calls out. Comments and
 environment lines are noted and skipped. As with the other imports, leave off <code>--apply</code> to preview
 the schedules first, then re-run with <code>--apply</code> to create them.</p>
@@ -378,7 +390,7 @@ archive over that size imports from the CLI alone.</p>
 <tbody>
 <tr>
 <td>AWX git project</td>
-<td>Project.</td>
+<td>Project, with its source control credential attached when that credential is an SSH key. A username and password credential is reported, since a project here syncs a private repository over SSH with a key.</td>
 </tr>
 <tr>
 <td>AWX inventory</td>
@@ -390,11 +402,11 @@ archive over that size imports from the CLI alone.</p>
 </tr>
 <tr>
 <td>AWX job template</td>
-<td>Template, with job slicing becoming shard count.</td>
+<td>Template, with job slicing becoming shard count. Privilege escalation arrives as <code>ansible_become: true</code> in its extra vars, which the report notes, since an extra var also outranks a play that sets <code>become: false</code>.</td>
 </tr>
 <tr>
 <td>AWX survey</td>
-<td>Template survey, field for field, with the field types translated. A password prompt is refused, not downgraded to plain text.</td>
+<td>Template survey, field for field, with the field types translated. A password prompt is refused, not downgraded to plain text. A survey switched off in AWX is not imported, since AWX never asks it.</td>
 </tr>
 <tr>
 <td>Semaphore survey</td>
@@ -418,7 +430,7 @@ archive over that size imports from the CLI alone.</p>
 </tr>
 <tr>
 <td>AWX credential</td>
-<td>Credential shell with its kind mapped from its type and its configured inputs, secret omitted.</td>
+<td>Credential shell with its kind mapped from its type and its configured inputs, secret omitted. A become password beside the connection secret arrives as a second shell, attached wherever the first one is.</td>
 </tr>
 <tr>
 <td>AWX organization, team, or notification template</td>
@@ -426,11 +438,11 @@ archive over that size imports from the CLI alone.</p>
 </tr>
 <tr>
 <td>Semaphore repository</td>
-<td>Project.</td>
+<td>Project, cloned with its access key when that key is an SSH key. A login and password key is reported, since a project here clones a private repository over SSH with a key.</td>
 </tr>
 <tr>
 <td>Semaphore static inventory</td>
-<td>Stored inventory.</td>
+<td>Stored inventory, carrying its SSH key and become key, so every run against it has them.</td>
 </tr>
 <tr>
 <td>Semaphore inventory of any other type</td>
@@ -438,11 +450,11 @@ archive over that size imports from the CLI alone.</p>
 </tr>
 <tr>
 <td>Semaphore template</td>
-<td>Template, with survey variables mapped.</td>
+<td>Template, with survey variables mapped and run by the tool Semaphore ran it with. A Bash, Python, or PowerShell template runs its script from the project checkout with its arguments. A Terraform or OpenTofu template imports as a plan, since a run here applies without asking, and the workspace its inventory picked is reported. A template for a tool with no equivalent here, such as Pulumi, is refused and named. Its vault keys arrive as vault passwords it unlocks.</td>
 </tr>
 <tr>
 <td>Semaphore key</td>
-<td>Credential shell.</td>
+<td>Credential shell of the kind its use makes it: an SSH key, the login an inventory reaches its hosts with, a become password, or a vault password. A key of type none holds nothing and is not imported.</td>
 </tr>
 <tr>
 <td>Semaphore schedule</td>
@@ -454,11 +466,15 @@ archive over that size imports from the CLI alone.</p>
 </tr>
 <tr>
 <td>Rundeck option</td>
-<td>Survey field. An enforced value list becomes a choice; a secure option is refused, not downgraded.</td>
+<td>Survey field. An enforced value list becomes a choice; a secure option is refused, not downgraded. The script sets <code>RD_OPTION_&lt;NAME&gt;</code> from the answer, or the option's default, and <code>@option.name@</code> and <code>${option.name}</code> in a step read the same value. A name with a dash or a dot becomes a survey variable with an underscore in its place. An option's <code>regex</code> becomes the field's pattern, checked against the whole answer as Rundeck checks it.</td>
 </tr>
 <tr>
 <td>Rundeck script step naming an interpreter</td>
-<td>Kept when the interpreter is a shell. Anything else, a Python interpreter or a command such as <code>sudo -u deploy /bin/bash</code>, is refused and named: a template runs one Bash script, so the step body would not be run by what the job ran it with.</td>
+<td>Kept when the interpreter is a shell. Anything else, a Python interpreter or a command such as <code>sudo -u deploy /bin/bash</code>, is refused and named: a template runs one Bash script, so the step body would not be run by what the job ran it with. A script that names no interpreter is judged by its <code>#!</code> line the same way.</td>
+</tr>
+<tr>
+<td>Rundeck step arguments, error handler, retries, and notifications</td>
+<td>Reported as left out. A script runs with no arguments, a failed step ends the job or is passed over when the job keeps going, a failed run is not retried, and the template's notifications are set by hand.</td>
 </tr>
 <tr>
 <td>Rundeck project archive <code>resources.source.N</code></td>
@@ -498,11 +514,11 @@ archive over that size imports from the CLI alone.</p>
 </tr>
 <tr>
 <td>Jenkins parameter</td>
-<td>Survey field. A choice becomes a choice and a boolean a toggle; a password parameter is refused, not downgraded.</td>
+<td>Survey field. A choice becomes a choice and a boolean a toggle; a password parameter is refused, not downgraded. The script sets the parameter under its own name from the answer, or its default, as Jenkins did.</td>
 </tr>
 <tr>
 <td>Jenkins build trigger</td>
-<td>One schedule per line, with <code>H</code> resolved to concrete times, the <code>@daily</code> family expanded, and Sunday renumbered from 7 to 0.</td>
+<td>One schedule per line, with <code>H</code> resolved to concrete times, the <code>@daily</code> family expanded, and Sunday renumbered from 7 to 0. A <code>TZ=</code> line sets the timezone of every line after it, as in Jenkins.</td>
 </tr>
 <tr>
 <td>Jenkins poll trigger</td>
@@ -518,7 +534,7 @@ archive over that size imports from the CLI alone.</p>
 </tr>
 <tr>
 <td>Crontab job line</td>
-<td>Schedule carrying its own one-step bash pipeline. No template is created.</td>
+<td>Schedule carrying its own one-step bash pipeline. No template is created. The command runs as cron would run it: <code>\%</code> is a literal percent sign, and what follows the first unescaped <code>%</code> is fed to the command as its input.</td>
 </tr>
 <tr>
 <td>Crontab <code>@reboot</code> line</td>
@@ -548,8 +564,11 @@ and skipped rather than converted to a wrong cadence.</li>
 failure edge, which runs work precisely because something failed, has no pipeline equivalent, and a
 node pointing at a job template the export does not carry has no work to do. A node that runs a
 nested workflow, a project or inventory sync, or a system job is refused the same way, since a step
-runs a playbook, even when that object shares its name with a job template in the export. A partial
-graph would keep the workflow's name and run a subset of it, which is worse than not importing it.</li>
+runs a playbook, even when that object shares its name with a job template in the export. So is a
+workflow whose job templates come from more than one project, since a workflow template sources
+every step from one, and a node that runs one node always and another only on success, since a
+step here lets everything after it continue or nothing. A partial graph would keep the workflow's
+name and run a subset of it, which is worse than not importing it.</li>
 <li>A workflow with an approval node is reported and skipped, and the assessment names it in its
 governance section. Approval here is a policy that holds a whole run before it starts, not a step
 partway through, and an import writes no policies, so bringing the other nodes across would run

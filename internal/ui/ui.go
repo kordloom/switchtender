@@ -44,8 +44,10 @@ type UI struct {
 	docCache sync.Map
 	// md renders documentation markdown to HTML.
 	md goldmark.Markdown
-	// readOnly hides mutating controls in the pages for a read-only demo.
+	// readOnly hides mutating controls in the pages for a read-only server.
 	readOnly bool
+	// demo marks the public demo, the one read-only server whose pages speak as a showcase.
+	demo bool
 	// matrixCap is the largest host matrix, in cells, the detail page draws before showing a
 	// notice instead. Zero or less means no limit.
 	matrixCap int
@@ -121,6 +123,14 @@ func (u *UI) accountsExist() bool {
 		return true
 	}
 	return u.hasAccounts()
+}
+
+// WithDemo marks the UI as the public demo. A server started with --read-only is read-only too, and
+// it is somebody's real install: it resets nothing overnight and has nothing to show off, so it was
+// wrong to tell its users they were browsing a demo, and wrong to tell them there was nothing to sign
+// in for.
+func WithDemo(demo bool) Option {
+	return func(u *UI) { u.demo = demo }
 }
 
 // WithTokenCheck tells the sign-in page whether this install holds any API token.
@@ -295,7 +305,7 @@ func (u *UI) jobTemplates(w http.ResponseWriter, _ *http.Request) {
 
 // users renders the account management page.
 func (u *UI) users(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "users.html", map[string]any{"ReadOnly": u.readOnly})
+	u.render(w, "users.html", map[string]any{"ReadOnly": u.readOnly, "TokensExist": u.tokensExist()})
 }
 
 // workers renders the executor fleet page.
@@ -345,6 +355,10 @@ func (u *UI) workflows(w http.ResponseWriter, _ *http.Request) {
 // counting statuses ever saw a failure. Every page here is a single template with no partial-write
 // protection in front of it, so any fault past the first action landed that way.
 func (u *UI) render(w http.ResponseWriter, name string, data any) {
+	// Every page is told whether it is the demo, so no handler can forget to say.
+	if m, ok := data.(map[string]any); ok {
+		m["Demo"] = u.demo
+	}
 	var buf bytes.Buffer
 	if err := u.tmpl.ExecuteTemplate(&buf, name, data); err != nil {
 		u.log.Error("ui: render " + name + ": " + err.Error())

@@ -44,6 +44,14 @@ func denyNonAdminCommandSource(w http.ResponseWriter, r *http.Request, log *zap.
 // secret. It rejects a passphrase on anything but a locally stored ssh_key, where the passphrase
 // would otherwise be silently ignored at run time.
 func sealableSecret(kind credential.Kind, source, secret, passphrase string) (string, error) {
+	// A pasted env secret is checked when it is saved, so a line that would reach the run as nothing
+	// is refused here rather than discovered when a run goes ahead without it. A command's output is
+	// checked when it runs, the first moment there is any.
+	if kind == credential.KindEnv && credential.NormalizeSource(source) == credential.SourceLocal {
+		if _, err := credential.EnvPairs(secret); err != nil {
+			return "", err
+		}
+	}
 	if passphrase == "" {
 		return secret, nil
 	}

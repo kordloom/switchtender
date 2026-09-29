@@ -18,11 +18,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"golang.org/x/text/unicode/norm"
 	"gopkg.in/yaml.v3"
 
 	"github.com/kordloom/switchtender/internal/credential"
@@ -60,6 +63,9 @@ type Plan struct {
 	// refused counts the objects the export held that were recognized and then refused, each with a
 	// warning saying why, so a document of nothing else reads as an export rather than as nothing.
 	refused int
+	// becomeFor maps an imported credential to the become password shell split out of it, so a
+	// template that attaches the one attaches both.
+	becomeFor map[string]string
 }
 
 // objects counts everything the plan would create, which is what makes an import a success or a
@@ -76,6 +82,10 @@ func (p *Plan) objects() int {
 // version, or the wrong project was told their migration had succeeded and had nothing to show for it.
 // The one thing an import must never do is look complete when it read nothing.
 var ErrNothingRecognized = errors.New("nothing in this document was recognized")
+
+// ErrAlreadyImported is returned when an apply would create objects of the same kind and name as
+// ones the install already holds, which is what importing the same export twice does.
+var ErrAlreadyImported = errors.New("this install already holds what the import would create")
 
 // ErrNotText is returned for an export whose byte order mark promises an encoding its bytes do not
 // hold, which is a file cut short or one that is not text.
@@ -163,14 +173,46 @@ func parseExtraVars(raw string) (map[string]any, error) {
 	if raw == "" || raw == "---" {
 		return nil, nil
 	}
+	var node yaml.Node
+	if err := yaml.Unmarshal([]byte(raw), &node); err != nil {
+		return nil, err
+	}
+	resolveYAML11Bools(&node)
 	var out map[string]any
-	if err := yaml.Unmarshal([]byte(raw), &out); err != nil {
+	if err := node.Decode(&out); err != nil {
 		return nil, err
 	}
 	if len(out) == 0 {
 		return nil, nil
 	}
 	return out, nil
+}
+
+// yaml11Bools are the plain scalars PyYAML reads as booleans and YAML 1.2 reads as strings.
+var yaml11Bools = map[string]bool{
+	"yes": true, "Yes": true, "YES": true, "on": true, "On": true, "ON": true,
+	"no": false, "No": false, "NO": false, "off": false, "Off": false, "OFF": false,
+}
+
+// resolveYAML11Bools reads yes, no, on, and off as the booleans AWX and Ansible read them as. Both
+// parse variables with PyYAML, where feature: no is false. Decoded here as the string "no", it was
+// true to every conditional that tested it. Only values are resolved, never keys, and a quoted
+// scalar stays the string its author quoted it to be.
+func resolveYAML11Bools(n *yaml.Node) {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		if b, ok := yaml11Bools[n.Value]; ok && n.Style == 0 && n.Tag == "!!str" {
+			n.Tag, n.Value = "!!bool", strconv.FormatBool(b)
+		}
+	case yaml.MappingNode:
+		for i := 1; i < len(n.Content); i += 2 {
+			resolveYAML11Bools(n.Content[i])
+		}
+	default:
+		for _, c := range n.Content {
+			resolveYAML11Bools(c)
+		}
+	}
 }
 
 // safeININame reports whether s can be written as a host name, group name, or variable key in an INI
@@ -219,31 +261,113 @@ func safeININame(s string) bool {
 	return true
 }
 
-// hasControl reports whether s holds a control character, including any line break. Such a value
-// cannot be written on a single INI line: Ansible reads the inventory line by line, so a break would
-// start a fresh directive, and even quoting cannot fold it back onto one line.
-func hasControl(s string) bool {
-	for _, r := range s {
-		if r < 0x20 || r == 0x7f {
-			return true
-		}
+// Python's literal parser rejects each of these shapes, and Ansible keeps a rejected INI value as the
+// string it was, so a string of one of them is written unquoted, as a person would write it.
+var (
+	// bareINIWord is a word that starts with a letter: a name, a hostname, or a path segment.
+	bareINIWord = regexp.MustCompile(`^[\p{L}_][\p{L}\p{Nd}_.\-/:@]*$`)
+	// bareINIDotted is an address or a version, which has too many dots to be a number.
+	bareINIDotted = regexp.MustCompile(`^[0-9]+(\.[0-9]+){2,}(/[0-9]+)?$`)
+	// bareINIColon holds a colon outside any bracket, which no literal can: a time or an IPv6 address.
+	bareINIColon = regexp.MustCompile(`^[0-9A-Za-z_.\-/@]*:[0-9A-Za-z_.:\-/@]*$`)
+)
+
+// bareINIString reports whether s reads back as itself when written unquoted. Python folds a
+// full-width identifier to its plain form, so one that folds to True, False, or None is quoted too.
+func bareINIString(s string) bool {
+	if !bareINIWord.MatchString(s) && !bareINIDotted.MatchString(s) && !bareINIColon.MatchString(s) {
+		return false
 	}
-	return false
+	switch norm.NFKC.String(s) {
+	case "True", "False", "None":
+		return false
+	}
+	return true
 }
 
-// renderINIValue encodes v for the value side of an INI host variable and reports whether it can be
-// written at all. A value carrying a control character is refused, because it cannot live on one
-// line. Any other value is quoted when it holds whitespace, a comment mark, or a character shlex
-// would act on, so Ansible reads it as a single value rather than as further host variables; a plain
-// value is written as itself so the ordinary inventory stays readable.
-func renderINIValue(v string) (string, bool) {
-	if hasControl(v) {
-		return "", false
+// iniLiteral renders a variable's value as the Python literal that Ansible's INI inventory reads back
+// as the same value and type, reporting false for one that has none.
+//
+// Ansible passes every INI value through Python's literal parser. Written as plain text, a false
+// became the string "false", which every conditional reads as true, the string "1.10" became a float,
+// "True" became a boolean, and a null became an empty string. Nested inside a list or a dict a string
+// is always quoted, since a bare word there fails the whole value.
+func iniLiteral(v any, nested bool) (string, bool) {
+	switch t := v.(type) {
+	case nil:
+		return "None", true
+	case bool:
+		if t {
+			return "True", true
+		}
+		return "False", true
+	case string:
+		if !nested && bareINIString(t) {
+			return t, true
+		}
+		return util.PyQuote(t), true
+	case json.Number:
+		return t.String(), true
+	case int:
+		return strconv.Itoa(t), true
+	case int64:
+		return strconv.FormatInt(t, 10), true
+	case uint64:
+		return strconv.FormatUint(t, 10), true
+	case float64:
+		if math.IsInf(t, 0) || math.IsNaN(t) {
+			return "", false
+		}
+		f := strconv.FormatFloat(t, 'g', -1, 64)
+		// A float that prints as a whole number would read back as an integer.
+		if !strings.ContainsAny(f, ".eE") {
+			f += ".0"
+		}
+		return f, true
+	case time.Time:
+		// A date has no literal form, and PyYAML's date prints as its ISO text, which is the value a
+		// template rendering it had.
+		if t.Equal(t.Truncate(24*time.Hour)) && t.Location() == time.UTC {
+			return util.PyQuote(t.Format(time.DateOnly)), true
+		}
+		return util.PyQuote(t.Format(time.RFC3339Nano)), true
+	case []any:
+		parts := make([]string, 0, len(t))
+		for _, item := range t {
+			lit, ok := iniLiteral(item, true)
+			if !ok {
+				return "", false
+			}
+			parts = append(parts, lit)
+		}
+		return "[" + strings.Join(parts, ", ") + "]", true
+	case map[string]any:
+		keys := make([]string, 0, len(t))
+		for k := range t {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, k := range keys {
+			lit, ok := iniLiteral(t[k], true)
+			if !ok {
+				return "", false
+			}
+			parts = append(parts, util.PyQuote(k)+": "+lit)
+		}
+		return "{" + strings.Join(parts, ", ") + "}", true
+	case map[any]any:
+		converted := make(map[string]any, len(t))
+		for k, val := range t {
+			key, ok := k.(string)
+			if !ok {
+				return "", false
+			}
+			converted[key] = val
+		}
+		return iniLiteral(converted, nested)
 	}
-	if !strings.ContainsAny(v, " \t#\"'\\") {
-		return v, true
-	}
-	return quoteINIValue(v), true
+	return "", false
 }
 
 // quoteINIValue wraps v in double quotes so Ansible's ini inventory plugin reads it as one value.
@@ -324,11 +448,16 @@ func hostLine(plan *Plan, inv string, h importHost) string {
 				"variables", inv, oneLine(k), h.Name)
 			continue
 		}
-		value, ok := renderINIValue(jsonScalarString(h.Variables[k]))
+		value, ok := iniLiteral(h.Variables[k], false)
 		if !ok {
-			plan.warn("inventory %q: variable %q on host %q was dropped because its value carries a "+
-				"control character, which cannot be written on a single inventory line", inv, k, h.Name)
+			plan.warn("inventory %q: variable %q on host %q was dropped because its value has no "+
+				"form an INI inventory reads back as the same value", inv, k, h.Name)
 			continue
+		}
+		// A host line is split as a shell would split it before the value is read, so a literal
+		// holding a space, a quote, or a backslash is wrapped to arrive as one word.
+		if strings.ContainsAny(value, " \t#\"'\\") {
+			value = quoteINIValue(value)
 		}
 		fmt.Fprintf(&line, " %s=%s", k, value)
 	}
@@ -574,6 +703,18 @@ func mapCredentialKind(awxType string, inputs map[string]any) (credential.Kind, 
 	return credential.KindEnv, false
 }
 
+// awxHeldSecret reports whether an AWX credential held a secret, which its export marks by writing
+// the value as the literal "$encrypted$". That marker is AWX's own reading of which fields are secret,
+// so a credential without one held nothing that needs entering again.
+func awxHeldSecret(inputs map[string]any) bool {
+	for _, v := range inputs {
+		if strings.TrimSpace(jsonScalarString(v)) == "$encrypted$" {
+			return true
+		}
+	}
+	return false
+}
+
 // hasInput reports whether an AWX credential configured the named input. AWX exports a secret as the
 // literal "$encrypted$", so a set secret is present but unreadable, which is all this needs to know.
 //
@@ -631,10 +772,11 @@ func varsSection(plan *Plan, inv, section string, vars map[string]any) string {
 				"whitespace, a quote, or an inventory metacharacter", inv, oneLine(k), section)
 			continue
 		}
-		value, ok := renderINIValue(jsonScalarString(vars[k]))
+		// A vars section line is read whole, with no shell splitting, so the literal is written as is.
+		value, ok := iniLiteral(vars[k], false)
 		if !ok {
-			plan.warn("inventory %q: variable %q in [%s] was dropped because its value carries a "+
-				"control character, which cannot be written on a single inventory line", inv, k, section)
+			plan.warn("inventory %q: variable %q in [%s] was dropped because its value has no form "+
+				"an INI inventory reads back as the same value", inv, k, section)
 			continue
 		}
 		fmt.Fprintf(&b, "%s=%s\n", k, value)

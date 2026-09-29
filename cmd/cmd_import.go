@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/kordloom/switchtender/internal/importer"
+	"github.com/kordloom/switchtender/internal/template"
 )
 
 // importDB holds the value of the import --db flag.
@@ -24,7 +25,7 @@ type mapFunc func(data []byte, now time.Time) (*importer.Plan, error)
 // importCmd groups the migration importers.
 var importCmd = &cobra.Command{
 	Use:   "import",
-	Short: "Import AWX, Semaphore, Rundeck, Jenkins, or crontab definitions into SwitchTender.",
+	Short: "Import AWX, Semaphore, Rundeck, Jenkins, Chef, Puppet, or crontab definitions into SwitchTender.",
 	Args:  cobra.NoArgs,
 	RunE:  runGroupHelp,
 }
@@ -231,6 +232,10 @@ func runImportData(cmd *cobra.Command, data []byte, mapper mapFunc) error {
 		return nil
 	}
 	before := len(plan.Warnings)
+	// Importing is how the AWX guide creates an install, so an import may start a new database. It
+	// says so, because one run from the wrong directory lands every object in a file the server never
+	// reads while reporting a clean import.
+	fresh := !isPostgresDSN(importDB) && !fileExists(importDB)
 	created, err := applyPlan(cmd.Context(), plan)
 	if err != nil {
 		return err
@@ -244,9 +249,11 @@ func runImportData(cmd *cobra.Command, data []byte, mapper mapFunc) error {
 			fmt.Fprintf(os.Stderr, "    - %s\n", w)
 		}
 	}
-	fmt.Fprintf(os.Stderr,
-		"\nCreated %d objects. Re-enter credential secrets before running templates that need them.\n",
-		created)
+	fmt.Fprintln(os.Stderr, "\n"+createdLine(created, plan.Report().NeedsSecret))
+	if fresh {
+		fmt.Fprintf(os.Stderr, "This started a new database. A server reads it only when started with "+
+			"%s.\n", dbFlag(importDB))
+	}
 	return nil
 }
 
@@ -278,11 +285,15 @@ func reportPlan(plan *importer.Plan) {
 	}
 	fmt.Fprintf(os.Stderr, "  Templates:   %d\n", len(plan.Templates))
 	for _, t := range plan.Templates {
-		fmt.Fprintf(os.Stderr, "    - %s\n", t.Name)
+		fmt.Fprintf(os.Stderr, "    - %s%s\n", t.Name, templateScope(t))
 	}
 	fmt.Fprintf(os.Stderr, "  Schedules:   %d\n", len(plan.Schedules))
 	for _, s := range plan.Schedules {
-		fmt.Fprintf(os.Stderr, "    - %s (%s)\n", s.Name, s.Cron)
+		state := ""
+		if !s.Enabled {
+			state = ", arrives switched off"
+		}
+		fmt.Fprintf(os.Stderr, "    - %s (%s%s)\n", s.Name, s.Cron, state)
 	}
 	if len(plan.Warnings) > 0 {
 		fmt.Fprintf(os.Stderr, "  Warnings (%d):\n", len(plan.Warnings))
@@ -293,6 +304,65 @@ func reportPlan(plan *importer.Plan) {
 			fmt.Fprintf(os.Stderr, "    (%d more not listed)\n", n)
 		}
 	}
+}
+
+// templateScope renders what narrows or changes an imported template's runs, so a reader of the plan
+// can see that a limit, tags, or check mode came across rather than trust that it did.
+func templateScope(t *template.Template) string {
+	var parts []string
+	if t.Limit != "" {
+		parts = append(parts, "limit "+t.Limit)
+	}
+	if len(t.Tags) > 0 {
+		parts = append(parts, "tags "+strings.Join(t.Tags, ","))
+	}
+	if len(t.SkipTags) > 0 {
+		parts = append(parts, "skip tags "+strings.Join(t.SkipTags, ","))
+	}
+	if t.DryRun {
+		parts = append(parts, "check mode")
+	}
+	if t.DiffMode {
+		parts = append(parts, "diff")
+	}
+	if t.Forks > 0 {
+		parts = append(parts, fmt.Sprintf("forks %d", t.Forks))
+	}
+	if t.Verbosity > 0 {
+		parts = append(parts, fmt.Sprintf("verbosity %d", t.Verbosity))
+	}
+	if n := len(t.ExtraVars); n > 0 {
+		noun := "extra vars"
+		if n == 1 {
+			noun = "extra var"
+		}
+		parts = append(parts, fmt.Sprintf("%d %s", n, noun))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(parts, ", ") + ")"
+}
+
+// createdLine is the import's closing line: how many objects it created and, only when some credential
+// arrived without its secret, how many need one entered. It used to tell every import to re-enter
+// credential secrets, including a crontab or a Chef fleet that creates no credentials, and to say
+// "1 objects".
+func createdLine(created, needSecret int) string {
+	line := fmt.Sprintf("Created %d %s.", created, plural(created, "object", "objects"))
+	if needSecret > 0 {
+		line += fmt.Sprintf(" %d %s no secret yet: enter it before running a template that needs it.",
+			needSecret, plural(needSecret, "credential has", "credentials have"))
+	}
+	return line
+}
+
+// plural returns one when n is 1 and many otherwise.
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 // applyPlan persists a plan through the stores in dependency order and returns how many objects were
@@ -306,7 +376,7 @@ func applyPlan(ctx context.Context, plan *importer.Plan) (int, error) {
 
 	// One entry for the import as a whole. It creates many objects, and a chain that recorded each
 	// separately would bury the fact that they arrived together from one export.
-	if err := recordCLI(ctx, bundle.Audits(), "/cli/import/apply"); err != nil {
+	if err := recordCLI(ctx, bundle.Audits(), importDB, "/cli/import/apply"); err != nil {
 		return 0, err
 	}
 	return plan.Apply(ctx, importer.ApplyStores{

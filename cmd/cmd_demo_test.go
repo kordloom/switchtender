@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -87,5 +90,68 @@ func TestDemoTakesTheProxyFlagsServeTakes(t *testing.T) {
 		if serveCmd.Flags().Lookup(name) == nil {
 			t.Errorf("serve has no --%s, which this test assumed as the reference", name)
 		}
+	}
+}
+
+// TestATemporaryDemoLeavesNothingBehind covers what a demo run without --db leaves in the temp
+// directory when it stops.
+//
+// Every run left its database, the write-ahead log and shared-memory files beside it, and a tree of
+// playbooks and Terraform, so a machine that ran the demo often held hundreds of them. The producer
+// identity lives in the same directory and has to survive, since it is what the next run signs with.
+func TestATemporaryDemoLeavesNothingBehind(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	db := filepath.Join(dir, "switchtender-demo-1.db")
+	assets := filepath.Join(dir, "switchtender-demo-assets-1")
+	identity := filepath.Join(dir, "switchtender-audit.key")
+	for _, name := range []string{db, db + "-wal", db + "-shm", db + "-journal", identity} {
+		if err := os.WriteFile(name, []byte("x"), 0o600); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", name, err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(assets, "ansible"), 0o750); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(assets, "ansible", "site.yml"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	removeDemoFiles(db, assets)
+
+	for _, name := range []string{db, db + "-wal", db + "-shm", db + "-journal", assets} {
+		if _, err := os.Stat(name); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("%s is still there after the demo stopped (Stat error = %v)", filepath.Base(name), err)
+		}
+	}
+	if _, err := os.Stat(identity); err != nil {
+		t.Errorf("the producer identity beside the database was removed with it: %v", err)
+	}
+}
+
+// TestOnlyATemporaryDemoRemovesItsFiles covers which demo runs clean up after themselves. A --db run
+// was pointed at a database someone wants, and a --seed-only run exists to leave one behind.
+func TestOnlyATemporaryDemoRemovesItsFiles(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		DB       string
+		SeedOnly bool
+		WantOwns bool
+	}{{ // Test 0: No --db is a temporary database the run made for itself.
+		DB: "", SeedOnly: false, WantOwns: true,
+	}, { // Test 1: --seed-only keeps the database it seeded.
+		DB: "", SeedOnly: true, WantOwns: false,
+	}, { // Test 2: --db keeps what it was pointed at.
+		DB: "demo.db", SeedOnly: false, WantOwns: false,
+	}, { // Test 3: --db with --seed-only keeps it too.
+		DB: "demo.db", SeedOnly: true, WantOwns: false,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			if got := ownsDemoFiles(test.DB, test.SeedOnly); got != test.WantOwns {
+				t.Errorf("ownsDemoFiles(%q, %v) = %v, want %v", test.DB, test.SeedOnly, got, test.WantOwns)
+			}
+		})
 	}
 }

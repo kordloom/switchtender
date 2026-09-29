@@ -7,14 +7,14 @@
 	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
 	<link rel="stylesheet" href="/ui/assets/app.css">
 </head>
-<body data-page="login"{{if .ReadOnly}} data-readonly="true"{{end}}>
+<body data-page="login"{{if .ReadOnly}} data-readonly="true"{{end}}{{if .Demo}} data-demo="true"{{end}}>
 	<header class="topbar">
 		<div class="brand"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="SwitchTender"></picture>SwitchTender</div>
 	</header>
 
 	<main class="content narrow">
 		<h1>Sign in</h1>
-		{{if .ReadOnly}}
+		{{if .Demo}}
 		<p class="muted">This public demo is read-only and fully browsable without signing in, so there
 			is nothing an account would unlock here. <a href="/ui/">Back to the demo</a>, or self-host
 			to get accounts.</p>
@@ -51,11 +51,11 @@
 		{{if .SAMLEnabled}}
 		<a class="button primary sso" data-sso href="/auth/saml/login"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>Sign in with SAML</a>
 		{{end}}
-		{{if and .ReadOnly (not .OIDCEnabled) (not .SAMLEnabled)}}
+		{{if and .Demo (not .OIDCEnabled) (not .SAMLEnabled)}}
 		<button class="button sso brand" type="button" disabled aria-disabled="true" title="Single sign-on is configured per install. This public demo has no identity provider wired, so the button is inactive here."><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>Sign in with SSO</button>
 		<p class="muted sso-demo-note">SSO (OIDC and SAML) and LDAP directory sign-in are built in. This public demo has no identity provider configured, so it is inactive here. <a href="/ui/docs/configuration">How to enable it</a>.</p>
 		{{end}}
-		{{if or .OIDCEnabled .SAMLEnabled (and .ReadOnly (not .OIDCEnabled) (not .SAMLEnabled))}}
+		{{if or .OIDCEnabled .SAMLEnabled (and .Demo (not .OIDCEnabled) (not .SAMLEnabled))}}
 		<div class="sso-divider muted">or</div>
 		{{end}}
 		<form id="account-form" class="stack">

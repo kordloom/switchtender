@@ -27,6 +27,17 @@ const (
 	RoleViewer Role = "viewer"
 )
 
+// AgentRole returns the role an agent token carries when it is bound to an account holding role:
+// admin is lowered to operator, and every lower role is unchanged. An agent may launch and propose
+// work but must not manage identity, access, or secrets, or approve its own held run, all of which
+// are admin.
+func AgentRole(role Role) Role {
+	if role == RoleAdmin {
+		return RoleOperator
+	}
+	return role
+}
+
 var (
 	// ErrNotFound is returned when a user does not exist in the store.
 	ErrNotFound = errors.New("user not found")

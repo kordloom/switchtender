@@ -78,13 +78,13 @@ func runExamples(cmd *cobra.Command, _ []string) error {
 	// for the same reason.
 	fresh := newDatabase(examplesDB)
 
-	bundle, err := openBundle(examplesDB)
+	bundle, err := openExisting(examplesDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer func() { _ = bundle.Close() }()
 
-	added, err := seedExamples(cmd.Context(), bundle.Audits(), bundle.Templates(), time.Now())
+	added, err := seedExamples(cmd.Context(), bundle.Audits(), examplesDB, bundle.Templates(), time.Now())
 	if err != nil {
 		return err
 	}
@@ -119,7 +119,7 @@ func newDatabase(db string) bool {
 // Seeding writes into the same store the server serves, so it is an operator action like any other
 // and is recorded in the audit chain before the first write. A change that leaves no entry is a
 // silence an auditor cannot tell apart from tampering. A run that adds nothing records nothing.
-func seedExamples(ctx context.Context, audits audit.Store, store template.Store,
+func seedExamples(ctx context.Context, audits audit.Store, db string, store template.Store,
 	now time.Time) (int, error) {
 	existing, err := store.List(ctx)
 	if err != nil {
@@ -139,7 +139,7 @@ func seedExamples(ctx context.Context, audits audit.Store, store template.Store,
 	if len(missing) == 0 {
 		return 0, nil
 	}
-	if err := recordCLI(ctx, audits, "/cli/examples"); err != nil {
+	if err := recordCLI(ctx, audits, db, "/cli/examples"); err != nil {
 		return 0, err
 	}
 

@@ -3,6 +3,7 @@ package importer
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/inventory"
@@ -46,6 +47,9 @@ func (p *Plan) Apply(ctx context.Context, s ApplyStores) (int, error) {
 	// holds a filesystem path, so the imported templates pointed at a file that does not exist and the
 	// operator found out when one launched.
 	if err := p.resolveInventoryNames(ctx, s.Inventories); err != nil {
+		return 0, err
+	}
+	if err := p.refuseExisting(ctx, s); err != nil {
 		return 0, err
 	}
 	created := 0
@@ -134,4 +138,104 @@ func (p *Plan) resolveInventoryNames(ctx context.Context, store inventory.Store)
 		}
 	}
 	return nil
+}
+
+// refuseExisting refuses an apply that would create an object of the same kind and name as a
+// different object the install already holds, before anything is written. An object holding the
+// same id is this plan's own, written by an earlier call that failed part way, and saving it again
+// replaces it.
+//
+// Applying the same export twice created a second copy of every object, and a second copy of a
+// schedule fires as well: every imported cadence ran twice on the next tick. Nothing here can tell a
+// second copy of the same thing from a different thing that shares its name, so neither is guessed
+// at. The apply names what is already there and stops.
+func (p *Plan) refuseExisting(ctx context.Context, s ApplyStores) error {
+	// The kinds that act on their own come first, so a long list names them before it is cut.
+	checks := []func() ([]string, error){
+		func() ([]string, error) {
+			return clashes(ctx, "schedule", p.Schedules, s.Schedules,
+				func(v *schedule.Schedule) namedObject { return namedObject{v.Name, v.ID} })
+		},
+		func() ([]string, error) {
+			return clashes(ctx, "template", p.Templates, s.Templates,
+				func(v *template.Template) namedObject { return namedObject{v.Name, v.ID} })
+		},
+		func() ([]string, error) {
+			return clashes(ctx, "inventory source", p.Sources, s.Sources,
+				func(v *invsource.Source) namedObject { return namedObject{v.Name, v.ID} })
+		},
+		func() ([]string, error) {
+			return clashes(ctx, "credential", p.Credentials, s.Credentials,
+				func(v *credential.Credential) namedObject { return namedObject{v.Name, v.ID} })
+		},
+		func() ([]string, error) {
+			return clashes(ctx, "inventory", p.Inventories, s.Inventories,
+				func(v *inventory.Inventory) namedObject { return namedObject{v.Name, v.ID} })
+		},
+		func() ([]string, error) {
+			return clashes(ctx, "project", p.Projects, s.Projects,
+				func(v *project.Project) namedObject { return namedObject{v.Name, v.ID} })
+		},
+	}
+	var found []string
+	for _, check := range checks {
+		names, err := check()
+		if err != nil {
+			return err
+		}
+		found = append(found, names...)
+	}
+	if len(found) == 0 {
+		return nil
+	}
+	suffix := ""
+	if len(found) > 10 {
+		found, suffix = found[:10], fmt.Sprintf(", and %d more", len(found)-10)
+	}
+	return fmt.Errorf("%w: %s%s. Importing again would create a second copy of each, and a second "+
+		"copy of a schedule fires as well. Delete those objects first, or import into a fresh database",
+		ErrAlreadyImported, strings.Join(found, ", "), suffix)
+}
+
+// namedObject is an object reduced to what an import clash is judged on.
+type namedObject struct {
+	// name is what an operator tells objects apart by.
+	name string
+	// id is what saving an object again replaces it by.
+	id string
+}
+
+// lister is a store that can list everything it holds.
+type lister[T any] interface {
+	// List returns every object the store holds.
+	List(ctx context.Context) ([]T, error)
+}
+
+// clashes names the planned objects of one kind that share a name with a different object the store
+// already holds. A store left unset holds nothing.
+func clashes[T any](ctx context.Context, kind string, planned []T, store lister[T],
+	describe func(T) namedObject) ([]string, error) {
+	if len(planned) == 0 || store == nil {
+		return nil, nil
+	}
+	held, err := store.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("look for an existing %s of the same name: %w", kind, err)
+	}
+	ids := make(map[string][]string, len(held))
+	for _, h := range held {
+		o := describe(h)
+		ids[o.name] = append(ids[o.name], o.id)
+	}
+	var out []string
+	for _, pl := range planned {
+		want := describe(pl)
+		for _, id := range ids[want.name] {
+			if id != want.id {
+				out = append(out, kind+" "+quoteName(want.name))
+				break
+			}
+		}
+	}
+	return out, nil
 }

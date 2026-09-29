@@ -28,8 +28,8 @@ that is honestly a server: real sshd, real python, a real non-root account.
 
 **Community installs the way the chart installs it and does real work.** No license, no external
 database: SQLite on a PersistentVolumeClaim, updating by Recreate because SQLite holds one writer.
-The harness adopts the initial admin token the server prints on first boot, exactly as an operator
-would, creates accounts, stores an SSH credential and an inventory, and runs a real Ansible
+The harness adopts the initial admin token the server mints on first boot, reading it from the file
+the server names in its log, from inside the pod, exactly as an operator would. It creates accounts, stores an SSH credential and an inventory, and runs a real Ansible
 playbook across all three machines. Then it reads the files that playbook wrote back through
 `kubectl exec`, because proof that comes from the product's own reporting is not proof.
 

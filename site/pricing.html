@@ -35,7 +35,7 @@
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-	<link rel="stylesheet" href="/styles.css?v=35">
+	<link rel="stylesheet" href="/styles.css?v=37">
 	<style>
 		/* Tier pricing layout. Reuses the card system, adding a price header, a feature checklist,
 		   and a featured-tier ring so the middle tier reads as the recommended one. */
@@ -244,7 +244,7 @@
 					<a class="btn" href="/get-started">Get started</a>
 					<ul class="tier-list">
 						<li>All seven tools: Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</li>
-						<li>One-command importers: AWX, AAP, Tower, Ascender, Semaphore, Rundeck, Jenkins, and crontabs</li>
+						<li>One-command importers: AWX, AAP, Tower, Ascender, Semaphore, Chef, Puppet, Rundeck, Jenkins, and crontabs</li>
 						<li>Live host-by-task matrix, balanced splits, fleet memory, and drift detection</li>
 						<li>Drag-and-drop workflow editor, pipelines, schedules, webhooks, notifications</li>
 						<li>Local users with roles, organizations, and teams</li>
@@ -331,7 +331,7 @@
 			<p class="pricing-note">
 				<strong>For your procurement or security review:</strong> the
 				<a href="/procurement" style="color: var(--accent);">procurement page</a> answers
-				vendor-risk questions in writing: continuity if we disappear, support clocks, security
+				vendor-risk questions in writing: business continuity, support clocks, security
 				response, release verification, and what data ever reaches us.</p>
 			<p class="pricing-note">
 				<strong>Before you buy:</strong> a purchase is governed by the
@@ -347,12 +347,11 @@
 					<h3>SwitchTender Migration Program</h3>
 					<div class="sprint-price">$25,000<span>fixed price, four milestones, first year of Team at the 250 band included, larger bands pay the difference</span></div>
 				</div>
-				<p>A founder-led program that moves you off AWX, Semaphore, or Rundeck and into
+				<p>We move you off AWX, Semaphore, or Rundeck and into
 				production on SwitchTender, with the change controls you already run and your evidence
 				workflows carried forward. Four milestones, normally about six weeks: discovery and
 				import, environment, governance, cutover and handoff. Your first year of Team at your
-				band is included, so everything wired during the program keeps working after it.
-				Founder-led.</p>
+				band is included, so everything wired during the program keeps working after it.</p>
 				<div class="sprint-cta">
 					<a class="btn" href="mailto:hello@switchtender.com?subject=SwitchTender%20Migration%20Program">Start a migration</a>
 					<a class="ghost" href="/migration">Full program details</a>
@@ -362,9 +361,8 @@
 
 		<section class="section wrap" style="padding-top: 0;">
 			<div class="section-head reveal">
-				<h2>What we promise</h2>
-				<p>Seven commitments, published before we have a single customer, every one enforceable
-				by us alone.</p>
+				<h2>In writing, before you sign</h2>
+				<p>Seven commitments, every one enforceable.</p>
 			</div>
 			<div class="assurance reveal">
 				<div>
@@ -412,8 +410,9 @@
 			<div class="faq reveal">
 				<details>
 					<summary>Which tier do I need?</summary>
-					<p>Community, until somebody else has to sign in. The week you need directory
-					sign-in, more than one approval policy, PostgreSQL behind more than one controller,
+					<p>Community, until one policy stops being enough. When production needs a rule of its
+					own, or people should sign in from the directory you already run, that is Pro. The week
+					you need deny rules or agent-scoped policy, PostgreSQL behind more than one controller,
 					workers reaching fleets a single machine cannot, or a change register an auditor will
 					actually read, that is Team. Enterprise is for when the proof has to come from outside
 					your own install: an independent witness countersigning your history, custody that
@@ -433,7 +432,7 @@
 					<summary>I started on SQLite. How do I get to Postgres and HA?</summary>
 					<p>Team includes Postgres. Today the supported move is <code>switchtender backup</code>
 					and <code>restore</code>, which carries your configuration: projects, templates,
-					inventories, credential shells, schedules, and tokens. Run history and the audit
+					inventories, credentials with their sealed secrets, schedules, and tokens. Run history and the audit
 					chain stay with the SQLite file, and that is not a loss: the old database remains
 					readable and its evidence verifiable forever, because receipts never depend on
 					where the data lives now. If you want the history physically merged, tell us and
@@ -509,7 +508,7 @@
 				</details>
 				<details>
 					<summary>Did this page ever say something different?</summary>
-					<p>Yes, for one day. Until September 1, 2026, before we had a single customer, an
+					<p>Yes. Until September 1, 2026, an
 					earlier version sold services around a fully free controller. The model changed to
 					the tiers above on September 1, and caches of the old page may still exist. If you
 					evaluated SwitchTender under that page, write to
@@ -526,7 +525,7 @@
 			<p>One binary either way, and the proofs are free forever. Team is an email and a signed file away; Enterprise is a conversation. If you need off AWX in a hurry, the Migration Program starts this week.</p>
 			<div class="hero-cta center">
 				<a class="btn big" href="/get-started">Get started</a>
-				<a class="ghost big" href="https://demo.switchtender.com">Live demo</a>
+				<a class="ghost big" href="https://demo.switchtender.com/ui/runs?status=pending_approval">Live demo</a>
 				<a class="ghost big" href="mailto:hello@switchtender.com?subject=SwitchTender%20pricing">Talk to us</a>
 			</div>
 		</section>

@@ -759,6 +759,11 @@ func waitOutcomeCommitted(ctx context.Context, audits audit.Store, id string) {
 	}
 }
 
+// AssetsDir returns the directory this process writes the demo's assets to.
+func AssetsDir() string {
+	return filepath.Join(os.TempDir(), "switchtender-demo-assets-"+strconv.Itoa(os.Getpid()))
+}
+
 // materialize writes the embedded assets to a temp directory, recreating their tree, and returns its
 // path. The tree carries the Ansible playbook and inventory plus the Terraform working directory.
 // The path is the same on every call within a process and different in any other process.
@@ -772,11 +777,12 @@ func materialize() (string, error) {
 	// from mid-walk. It surfaced as a missing file, a half-written git object, or a directory that
 	// would not unlink, never as anything naming the real cause.
 	//
-	// The cost is one small tree per process rather than one per machine, left where the operating
-	// system cleans its temp directory. Pruning the others is not worth the risk: the process that
-	// owns a tree keeps using it for as long as it serves the demo, so anything old enough to look
-	// abandoned may still be in use.
-	dir := filepath.Join(os.TempDir(), "switchtender-demo-assets-"+strconv.Itoa(os.Getpid()))
+	// The cost is one small tree per process rather than one per machine. The demo command removes
+	// its own tree when it stops, and a tree whose process was killed outright stays where the
+	// operating system cleans its temp directory. Pruning the others is not worth the risk: the
+	// process that owns a tree keeps using it for as long as it serves the demo, so anything old
+	// enough to look abandoned may still be in use.
+	dir := AssetsDir()
 	if err := os.RemoveAll(dir); err != nil {
 		return "", err
 	}

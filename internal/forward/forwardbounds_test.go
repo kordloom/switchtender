@@ -152,15 +152,15 @@ func TestReadCursorShapes(t *testing.T) {
 					t.Fatalf("WriteFile() error = %v", err)
 				}
 			}
-			seq, err := readCursor(path)
+			doc, err := readCursor(path)
 			if gotErr := err != nil; gotErr != test.WantErr {
 				t.Fatalf("readCursor() error = %v, want an error: %v", err, test.WantErr)
 			}
 			if test.WantErr {
 				return
 			}
-			if seq != test.WantSeq {
-				t.Errorf("readCursor() = %d, want %d", seq, test.WantSeq)
+			if doc.Seq != test.WantSeq {
+				t.Errorf("readCursor() = %d, want %d", doc.Seq, test.WantSeq)
 			}
 		})
 	}
@@ -199,15 +199,15 @@ func TestCursorRoundTrip(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			path := filepath.Join(t.TempDir(), "cursor.json")
-			if err := writeCursor(path, test.Seq); err != nil {
+			if err := writeCursor(path, cursorDoc{Seq: test.Seq}); err != nil {
 				t.Fatalf("writeCursor() error = %v", err)
 			}
 			got, err := readCursor(path)
 			if err != nil {
 				t.Fatalf("readCursor() error = %v", err)
 			}
-			if got != test.Seq {
-				t.Errorf("readCursor() = %d, want the %d that was written", got, test.Seq)
+			if got.Seq != test.Seq {
+				t.Errorf("readCursor() = %d, want the %d that was written", got.Seq, test.Seq)
 			}
 			if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
 				t.Errorf("the temporary file survived the write, stat error = %v", err)
@@ -223,16 +223,16 @@ func TestWriteCursorLeavesThePreviousValueOnFailure(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cursor.json")
-	if err := writeCursor(path, 11); err != nil {
+	if err := writeCursor(path, cursorDoc{Seq: 11}); err != nil {
 		t.Fatalf("writeCursor() error = %v", err)
 	}
 	// A path that cannot be written to at all, so the temporary write fails before the rename.
 	missing := filepath.Join(dir, "no-such-directory", "cursor.json")
-	if err := writeCursor(missing, 12); err == nil {
+	if err := writeCursor(missing, cursorDoc{Seq: 12}); err == nil {
 		t.Error("writeCursor() into a missing directory = nil error")
 	}
-	if seq, err := readCursor(path); err != nil || seq != 11 {
-		t.Errorf("the existing cursor reads %d, %v, want the previous value 11 intact", seq, err)
+	if doc, err := readCursor(path); err != nil || doc.Seq != 11 {
+		t.Errorf("the existing cursor reads %d, %v, want the previous value 11 intact", doc.Seq, err)
 	}
 }
 
@@ -256,8 +256,8 @@ func TestForwardOnceHoldsTheCursorWhenTheWriteFails(t *testing.T) {
 	if n != 0 {
 		t.Errorf("forwardOnce() reported %d delivered, want zero on a failed advance", n)
 	}
-	if f.cursor != 0 {
-		t.Errorf("in-memory cursor = %d, want it held so the batch is redelivered", f.cursor)
+	if f.cursor.Seq != 0 {
+		t.Errorf("in-memory cursor = %d, want it held so the batch is redelivered", f.cursor.Seq)
 	}
 	if _, err := f.forwardOnce(context.Background()); err == nil {
 		t.Error("the second attempt succeeded, so the cursor moved without being recorded")
@@ -456,8 +456,8 @@ func TestForwarderTailDeliversAndStopsPromptly(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Close() did not return, so the tail ignores the stop signal while sleeping")
 	}
-	if seq, err := readCursor(cursor); err != nil || seq == 0 {
-		t.Errorf("cursor = %d, %v, want it advanced past the delivered batch", seq, err)
+	if doc, err := readCursor(cursor); err != nil || doc.Seq == 0 {
+		t.Errorf("cursor = %d, %v, want it advanced past the delivered batch", doc.Seq, err)
 	}
 }
 
@@ -512,7 +512,7 @@ func TestReadBatchStopsAtTheBatchSize(t *testing.T) {
 			f := NewForwarder(seedAudits(t, test.Entries), []Sink{&captureSink{}},
 				filepath.Join(t.TempDir(), "cursor.json"), time.Second, nil)
 			f.batch = test.Batch
-			events, err := f.readBatch(context.Background(), 0)
+			events, _, err := f.readBatch(context.Background(), 0)
 			if err != nil {
 				t.Fatalf("readBatch() error = %v, want the batch-full sentinel absorbed", err)
 			}
@@ -542,7 +542,7 @@ func TestReadBatchCarriesTheRedeemableReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Chain() error = %v", err)
 	}
-	events, err := f.readBatch(context.Background(), 0)
+	events, _, err := f.readBatch(context.Background(), 0)
 	if err != nil {
 		t.Fatalf("readBatch() error = %v", err)
 	}
@@ -559,7 +559,7 @@ func TestReadBatchCarriesTheRedeemableReceipt(t *testing.T) {
 	}
 
 	// Reading from a cursor past the end is the caught-up case and must be empty, not a replay.
-	after, err := f.readBatch(context.Background(), chain[len(chain)-1].Seq)
+	after, _, err := f.readBatch(context.Background(), chain[len(chain)-1].Seq)
 	if err != nil || len(after) != 0 {
 		t.Errorf("readBatch() past the head = %d events, %v, want nothing", len(after), err)
 	}
@@ -649,7 +649,7 @@ func TestWriteCursorCleansUpWhenTheRenameFails(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(path, "occupant"), []byte("x"), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	if err := writeCursor(path, 5); err == nil {
+	if err := writeCursor(path, cursorDoc{Seq: 5}); err == nil {
 		t.Fatal("writeCursor() over a non-empty directory = nil error")
 	}
 	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {

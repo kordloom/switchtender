@@ -400,3 +400,23 @@ func TestRefreshFailureNeverEchoesThePluginError(t *testing.T) {
 		t.Errorf("body = %q, want the generic refusal", body)
 	}
 }
+
+// TestARefusedSourceSaysWhy pins the one refresh failure the caller is told the reason for. A path
+// this server refused to hand to ansible-inventory, one that is missing or executable, is our own
+// sentence with nothing of the plugin's in it, and the caller used to get the same generic 502 as a
+// plugin failure, with the reason only after a reload.
+func TestARefusedSourceSaysWhy(t *testing.T) {
+	t.Parallel()
+	refused := fmt.Errorf("%w: %q does not exist on this server", invsource.ErrInvalidSource,
+		"/etc/switchtender/aws_ec2.yml")
+	stored := &invsource.Source{ID: "src_1", Name: "aws", Source: "/etc/switchtender/aws_ec2.yml"}
+	rec := serveWith(t, http.MethodPost, "/v1/inventory-sources/src_1/refresh", "",
+		WithInventorySources(&stubSources{present: stored}, &stubRefresher{err: refused}),
+		WithInventories(inventory.NewMemStore()))
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422 (%q)", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "does not exist on this server") {
+		t.Errorf("body = %q, want the reason the source was refused", rec.Body.String())
+	}
+}

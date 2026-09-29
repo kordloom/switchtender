@@ -163,6 +163,43 @@ func TestImportApplyReportsWarningsRaisedDuringApply(t *testing.T) {
 	}
 }
 
+// TestImportApplyTwiceSaysWhatIsAlreadyThere pins the answer to applying one export a second time. It
+// is refused before anything is written, and the refusal is the caller's to read, so it arrives as a
+// conflict naming the objects rather than as "could not apply import" and a server error.
+func TestImportApplyTwiceSaysWhatIsAlreadyThere(t *testing.T) {
+	t.Parallel()
+	export := `
+- name: Nightly
+  sequence:
+    commands:
+      - exec: nightly.sh
+`
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
+		WithProjects(project.NewMemStore()),
+		WithInventories(inventory.NewMemStore()),
+		WithCredentials(credential.NewMemStore(), nil),
+		WithTemplates(template.NewMemStore()),
+		WithSchedules(schedule.NewMemStore()),
+	).Handler()
+	apply := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost,
+			"/v1/import/rundeck?apply=true&inventory=hosts.ini", strings.NewReader(export))
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := apply(); rec.Code != http.StatusOK {
+		t.Fatalf("first apply status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+	rec := apply()
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("second apply status = %d, want 409 (body %s)", rec.Code, rec.Body.String())
+	}
+	if body := rec.Body.String(); !strings.Contains(body, `template \"Nightly\"`) {
+		t.Errorf("the refusal does not name the template already there: %s", body)
+	}
+}
+
 // TestImportCronSaysWhereCronImportsFrom covers the one documented asymmetry in the import surface.
 //
 // The command line imports five sources and this endpoint takes four. Cron used to fall to the

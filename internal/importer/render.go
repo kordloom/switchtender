@@ -18,25 +18,32 @@ func Render(out io.Writer, format, source string, a Assessment) {
 	fmt.Fprintf(out, "SwitchTender migration assessment\n")
 	fmt.Fprintf(out, "  Source: %s export, %s\n\n", format, source)
 
-	fmt.Fprintf(out, "What is in there\n")
+	// These are the objects the import would create, not what the export held: the export can hold
+	// more, and the difference is itemized below. The heading used to say "what is in there" over
+	// counts that left out every refused object, and the total repeated as "comes across".
+	fmt.Fprintf(out, "What the import would create\n")
 	for _, c := range a.Report.Created {
 		fmt.Fprintf(out, "  %-22s %6d\n", c.Kind, c.N)
 	}
 	fmt.Fprintf(out, "  %-22s %6d\n\n", "total", a.Report.CreatedTotal)
 
-	fmt.Fprintf(out, "What survives the move\n")
-	fmt.Fprintf(out, "  %-22s %6d\n", "comes across", a.Report.CreatedTotal)
+	fmt.Fprintf(out, "What does not survive the move as it was\n")
 	if a.Report.NeedsSecret > 0 {
-		fmt.Fprintf(out, "  %-22s %6d   re-entered once; an export never carries secret values\n",
+		fmt.Fprintf(out, "  %-22s %6d   set once before first use; an export never carries secret values\n",
 			"needs a secret", a.Report.NeedsSecret)
 	}
+	// What does not come across is itemized in full, as the guide promises. A capped list here
+	// read as complete to anybody who did not count it against the number beside it.
 	fmt.Fprintf(out, "  %-22s %6d\n", "does not come across", len(a.Report.LeftOut))
-	for _, w := range capList(a.Report.LeftOut, 6) {
+	for _, w := range a.Report.LeftOut {
 		fmt.Fprintf(out, "      - %s\n", w)
 	}
 	fmt.Fprintf(out, "  %-22s %6d\n", "worth reviewing", len(a.Report.NeedsReview))
 	for _, w := range capList(a.Report.NeedsReview, 4) {
 		fmt.Fprintf(out, "      - %s\n", w)
+	}
+	if len(a.Report.NeedsReview) > 4 {
+		fmt.Fprintf(out, "      The import preview lists every one.\n")
 	}
 	if a.Report.Suppressed > 0 {
 		fmt.Fprintf(out, "  %d further warning(s) were not listed, because this export passed the "+
@@ -70,7 +77,17 @@ func Render(out io.Writer, format, source string, a Assessment) {
 	}
 	fmt.Fprintf(out, "  %-22s %6d   templates use a credential another template also uses\n",
 		"shared credentials", len(g.SharedCredentials))
+	shared := make([]string, 0, len(g.SharedCredentials))
+	for _, c := range g.SharedCredentials {
+		shared = append(shared, fmt.Sprintf("%s, used by %d templates", c.Name, c.Templates))
+	}
+	for _, n := range capList(shared, 6) {
+		fmt.Fprintf(out, "      - %s\n", n)
+	}
 	fmt.Fprintf(out, "  %-22s %6d   target no stored inventory\n", "no inventory", len(g.NoInventory))
+	for _, n := range capList(g.NoInventory, 6) {
+		fmt.Fprintf(out, "      - %s\n", n)
+	}
 	fmt.Fprintln(out)
 
 	if g.Unread > 0 {

@@ -302,6 +302,8 @@ th.col-num, td.col-num { width: 1%; color: var(--muted); font-variant-numeric: t
 .migrate-figure-label { font-size: 13px; color: var(--muted); margin-top: 3px; }
 .migrate-kinds { margin-top: 12px; font-size: 13px; color: var(--muted); }
 .migrate-note { margin-top: 10px; font-size: 13px; color: var(--muted); }
+.schedule-why { display: block; margin-top: 4px; max-width: 36ch; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+a.schedule-why { color: var(--accent); }
 
 /* Menu toggle sits at the far left of the top bar and opens the navigation drawer. */
 .nav-toggle { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0; margin-right: 2px; background: none; border: 1px solid transparent; border-radius: var(--radius); color: var(--text); cursor: pointer; }

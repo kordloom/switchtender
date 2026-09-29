@@ -1,8 +1,8 @@
 # Continuity
 
 What happens to your install, your evidence, and your access to the source if KordLoom
-disappears tomorrow. Vendor risk reviews ask this about every one-person company, so here is the
-whole answer in one place.
+disappears tomorrow. Vendor risk reviews ask this of every vendor, so here is the whole answer in
+one place.
 
 ## Your install keeps running
 

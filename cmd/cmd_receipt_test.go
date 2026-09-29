@@ -89,8 +89,17 @@ func TestReceiptProduceAndVerifyOffline(t *testing.T) {
 		t.Fatalf("runReceipt() error = %v", err)
 	}
 
-	// Verify it offline. runVerify returns nil only when every check passes.
-	verifyPubkey = ""
+	// Verify it offline, pinned to the key that signed it the way a relying party does. runVerify
+	// returns nil only when every check passes, and only a pinned pass reads as VERIFIED.
+	produced, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("ReadFile(receipt) error = %v", err)
+	}
+	signer, err := audit.VerifyBundle(produced, "")
+	if err != nil {
+		t.Fatalf("VerifyBundle(receipt) error = %v", err)
+	}
+	verifyPubkey = signer.KeyID
 	var buf bytes.Buffer
 	c := testCommand()
 	c.SetOut(&buf)
@@ -318,7 +327,7 @@ func TestReceiptRefusesAChainThatDoesNotVerify(t *testing.T) {
 				if rerr != nil {
 					t.Fatalf("ReadFile() error = %v", rerr)
 				}
-				id, ierr := loadProducerIdentity(seed.DB)
+				id, ierr := installIdentity(seed.DB)
 				if ierr != nil {
 					t.Fatalf("loadProducerIdentity() error = %v", ierr)
 				}

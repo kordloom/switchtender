@@ -1,19 +1,36 @@
-# Two deployments in one file, each behind its own profile so neither drags the other in.
+# Three deployments in one file, each behind its own profile so none drags another in.
 #
-#   The full stack:  docker compose --profile stack up --build
+#   The stack:       docker compose --profile stack up --build
 #   The seeded demo: docker compose --profile demo up --build
+#   Team:            docker compose --profile team up --build
 #
-# The stack needs SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT set. The demo needs
-# neither: it holds no credentials. They used to share the default profile, so the documented demo
-# command started the server too and both bound the same host port, and the demo also inherited the
-# stack's secret requirements.
+# The stack is one server on SQLite, with its database and its signing key kept in a volume, which is
+# everything Community runs. It used to be PostgreSQL, and creating a PostgreSQL schema is Team, so
+# the documented command failed on every install without a license.
 #
-# The two secrets are read without a hard guard. Compose interpolates every service in the file no
-# matter which profile is selected, so a required-variable guard on the stack refused to start the
-# demo, which uses neither. Unset, the server says so on boot and runs with credentials disabled.
+# The team profile is PostgreSQL, a server, and a worker. It needs a Team license, read from
+# ./switchtender-license.json or the file SWITCHTENDER_LICENSE_FILE names, and SWITCHTENDER_AUDIT_KEY,
+# because processes that share one database sign as one install and none of them mints the key.
+#
+# The encryption key and salt are read without a hard guard. Compose interpolates every service in the
+# file no matter which profile is selected, so a required-variable guard on one profile refused to
+# start the demo, which uses neither. Unset, the server says so on boot and runs with credentials
+# disabled.
 services:
-  postgres:
+  server:
     profiles: ["stack"]
+    build: .
+    command: ["serve", "--addr", ":8080", "--db", "/data/switchtender.db"]
+    environment:
+      SWITCHTENDER_ENCRYPTION_KEY: ${SWITCHTENDER_ENCRYPTION_KEY:-}
+      SWITCHTENDER_ENCRYPTION_SALT: ${SWITCHTENDER_ENCRYPTION_SALT:-}
+    volumes:
+      - data:/data
+    ports:
+      - "${SWITCHTENDER_PORT:-8080}:8080"
+
+  postgres:
+    profiles: ["team"]
     image: postgres:16
     environment:
       POSTGRES_USER: switchtender
@@ -27,13 +44,23 @@ services:
       timeout: 5s
       retries: 10
 
-  server:
-    profiles: ["stack"]
+  team-server:
+    profiles: ["team"]
     build: .
     command: ["serve", "--addr", ":8080", "--db", "postgres://switchtender:switchtender@postgres:5432/switchtender?sslmode=disable"]
-    environment:
+    environment: &team-env
       SWITCHTENDER_ENCRYPTION_KEY: ${SWITCHTENDER_ENCRYPTION_KEY:-}
       SWITCHTENDER_ENCRYPTION_SALT: ${SWITCHTENDER_ENCRYPTION_SALT:-}
+      SWITCHTENDER_AUDIT_KEY: ${SWITCHTENDER_AUDIT_KEY:-}
+    volumes: &team-license
+      # A missing license file is refused rather than created. Left to its default, Compose makes an
+      # empty directory where the file should be, and the server reads that as Community.
+      - type: bind
+        source: ${SWITCHTENDER_LICENSE_FILE:-./switchtender-license.json}
+        target: /data/switchtender-license.json
+        read_only: true
+        bind:
+          create_host_path: false
     ports:
       - "${SWITCHTENDER_PORT:-8080}:8080"
     depends_on:
@@ -41,21 +68,20 @@ services:
         condition: service_healthy
 
   worker:
-    # Its own profile, not "stack". A worker is distributed execution, which is Team, so it refuses
-    # to start without a license: including it in the default stack meant the documented command
-    # brought up a container that exited immediately on every Community install.
-    profiles: ["workers"]
+    profiles: ["team"]
     build: .
+    # The server creates the schema when it starts, so a worker that comes up first waits for it by
+    # restarting rather than exiting for good.
+    restart: on-failure
     command: ["worker", "--db", "postgres://switchtender:switchtender@postgres:5432/switchtender?sslmode=disable", "--name", "worker-1"]
-    environment:
-      SWITCHTENDER_ENCRYPTION_KEY: ${SWITCHTENDER_ENCRYPTION_KEY:-}
-      SWITCHTENDER_ENCRYPTION_SALT: ${SWITCHTENDER_ENCRYPTION_SALT:-}
+    environment: *team-env
+    volumes: *team-license
     depends_on:
-      postgres:
-        condition: service_healthy
+      team-server:
+        condition: service_started
 
-  # A seeded, read-only demo on its own. Start it with: docker compose --profile demo up --build.
-  # Its own port variable, so the demo and the stack can run side by side.
+  # A seeded, read-only demo on its own. Its own port variable, so the demo and the stack can run side
+  # by side.
   demo:
     build: .
     profiles: ["demo"]
@@ -64,4 +90,5 @@ services:
       - "${SWITCHTENDER_DEMO_PORT:-8081}:8080"
 
 volumes:
+  data:
   pgdata:

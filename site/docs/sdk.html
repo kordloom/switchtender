@@ -60,7 +60,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk" class="active">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk" class="active">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -93,13 +93,11 @@ on first use.</p>
 version skew. Or ship it as a plugin binary in the server's <code>--plugins-dir</code> for a stock release
 binary that loads extensions at startup. Same seams, same registration, same behavior at run time.</p>
 <h2 id="a-complete-extension">A complete extension</h2>
-<p>Two files make a SwitchTender with a custom <code>hello</code> tool.</p>
-<p><code>go.mod</code>:</p>
-<pre><code>module example.com/switchtender-hello
-
-go 1.26.5
-
-require github.com/kordloom/switchtender v1.19.0
+<p>One file makes a SwitchTender with a custom <code>hello</code> tool. Start a module and take the current
+release, since everything the server enforces at the door comes with the version you build against:</p>
+<pre><code>mkdir switchtender-hello &amp;&amp; cd switchtender-hello
+go mod init example.com/switchtender-hello
+go get github.com/kordloom/switchtender@latest
 </code></pre>
 <p><code>main.go</code>:</p>
 <pre><code>// Package main builds a SwitchTender server with a custom tool compiled in through the SDK.
@@ -185,10 +183,14 @@ TLS, supervised by the server. It starts with the server and exits with it. The 
 takes the same flag, so a plugged-in tool runs wherever runs execute.</p>
 <p>A plugin starts with a deliberately small environment: <code>PATH</code>, <code>HOME</code>, the temporary directory and
 locale variables, <code>SYSTEMROOT</code> and <code>USERPROFILE</code> on Windows, and every variable named with the
-<code>SWITCHTENDER_PLUGIN_</code> prefix. Everything else the server holds is withheld, its encryption key and
-every secret it reads from its own environment included. Configure a plugin through
-<code>SWITCHTENDER_PLUGIN_</code> variables. A plugin that reads any other name finds it empty, and one that
-exits for want of configuration is skipped like any plugin that fails to launch.</p>
+<code>SWITCHTENDER_PLUGIN_</code> prefix. Names match exactly, except on Windows, where case does not tell two
+variables apart. The plugin library adds its own handshake: <code>SWITCHTENDER_EXTENSION</code>, plus
+<code>PLUGIN_MIN_PORT</code>, <code>PLUGIN_MAX_PORT</code>, <code>PLUGIN_PROTOCOL_VERSIONS</code>, and <code>PLUGIN_CLIENT_CERT</code>, which
+carry the port range, the protocol versions, and SwitchTender's certificate for mutual TLS.
+<code>plugin.Serve</code> reads those, so a plugin never has to. Everything else the server holds is withheld,
+its encryption key and every secret it reads from its own environment included. Configure a plugin
+through <code>SWITCHTENDER_PLUGIN_</code> variables. A plugin that reads any other name finds it empty, and
+one that exits for want of configuration is skipped like any plugin that fails to launch.</p>
 <p>A plugin that fails to launch or describe itself is logged and skipped, so one broken binary does
 not take the server down. A name that collides with a built-in or with a plugin already loaded is
 refused the same way: the plugin is skipped whole, nothing it declared is registered, its process is

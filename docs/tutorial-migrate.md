@@ -11,12 +11,13 @@ You do not rebuild your automation by hand. SwitchTender reads an AWX, Semaphore
 Jenkins export, a Rundeck project archive, or a plain crontab, and creates the equivalent objects in
 one pass.
 
-The five sources do not carry the same things. AWX and Semaphore export a whole control plane, so
+The seven sources do not carry the same things. AWX and Semaphore export a whole control plane, so
 they bring projects, inventories, credential shells, templates, surveys, and schedules. Jenkins
 exports jobs and nothing else, so it brings templates, surveys, and schedules against an inventory
 you name. Rundeck brings those same three, plus one project when you hand it a project archive whose
 source control configuration names a repository this can reach. Neither Rundeck artifact brings an
-inventory. A crontab brings schedules alone. The table is in
+inventory. A crontab brings schedules alone, and Chef and Puppet bring the fleet as a stored inventory
+and nothing else. The table is in
 [what each source brings over](migration.md#what-each-source-brings-over).
 
 ## From the UI
@@ -26,7 +27,7 @@ inventory. A crontab brings schedules alone. The table is in
    from its API into one JSON document. Rundeck exports a project's jobs as YAML or JSON, or a whole
    project as an archive from Project Settings; either one uploads and the importer tells them apart
    by content. Jenkins has no export file at all, so zip its `jobs` directory and upload that.
-2. Open Migrate from the top of the overview, or go to `/ui/migrate`.
+2. Open Migrate from the sidebar, or go to `/ui/migrate`.
 3. Choose the format: AWX, Semaphore, Chef, Puppet, Rundeck, or Jenkins. Rundeck and Jenkins ask for the inventory
    their templates should target, since neither names hosts of its own.
 4. Paste the export, or choose the file, and select Preview. Nothing is written yet. You get a
@@ -34,7 +35,7 @@ inventory. A crontab brings schedules alone. The table is in
 5. Select Import to apply it.
 
 A crontab imports from the command line only. The Migrate page and the `/v1/import/{format}`
-endpoint take the other four.
+endpoint take the other six.
 
 Both cap an upload at 25 MiB and answer a larger one with 413. The command line applies no such cap,
 so a Rundeck project archive from a busy project, which carries every execution log alongside the

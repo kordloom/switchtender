@@ -96,26 +96,17 @@ func argHint(msg string) string {
 // risk grade uses, so a pattern that widens the run is refused here and graded wide there rather than
 // the two disagreeing about what "all" means.
 
-// checkLimit refuses a host pattern that widens what a template may touch rather than narrowing it.
-//
-// The launch endpoint takes a caller's limit as a replacement for the template's, which is right for a
-// person who chose the template and is wrong for an agent working from a menu: a template pinned to one
-// canary host could be aimed at an entire inventory by passing a limit, under the same template name
-// the audit trail records. Passing "all" was worse than widening, because the risk grade the approval
-// policies key on is computed partly from how wide a run reaches, so the widest possible run also
-// graded itself down and could fall under the threshold that would otherwise have held it.
-//
-// Narrowing is left alone. An agent asking to touch one host out of many is the useful case, and it is
-// the direction that cannot cause harm the template did not already permit.
+// checkLimit refuses a host pattern that widens what a template may touch rather than narrowing it,
+// by the rule run.CheckLimitNarrows states. The server applies the same rule to every agent launch,
+// so this is the early, friendlier refusal: it answers before a request is sent, and it says when the
+// template's own target could not be read.
 func checkLimit(ctx context.Context, c *Client, templateID, limit string) error {
 	limit = strings.TrimSpace(limit)
 	if limit == "" {
 		return nil
 	}
-	if run.WholeInventoryLimit(limit) {
-		return fmt.Errorf("limit %q means every host, which widens the run rather than narrowing it: "+
-			"name the hosts this run should touch, or leave limit out to use the template's own target",
-			limit)
+	if err := run.CheckLimitNarrows("", limit); err != nil {
+		return err
 	}
 	// Read from the listing rather than a per-id GET. There is no GET on a single template: the
 	// path has PUT and DELETE registered, so the mux answers 405 and every attempt to narrow a
@@ -154,11 +145,7 @@ func checkLimit(ctx context.Context, c *Client, templateID, limit string) error 
 			"target cannot be confirmed and narrowing it to %q is refused: launch it as defined",
 			limit)
 	}
-	if pinned := strings.TrimSpace(pinnedLimit); pinned != "" && pinned != limit {
-		return fmt.Errorf("this template pins its target to %q, so limit cannot be changed: launch it "+
-			"as defined, or ask an operator for a template that targets %q", pinned, limit)
-	}
-	return nil
+	return run.CheckLimitNarrows(pinnedLimit, limit)
 }
 
 // idArg reads one required string argument by name.

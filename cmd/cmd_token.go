@@ -1,7 +1,10 @@
 package cmd
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -9,6 +12,7 @@ import (
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/jsonutil"
+	"github.com/kordloom/switchtender/internal/user"
 )
 
 // tokenDB holds the value of the token --db flag.
@@ -93,15 +97,46 @@ func init() {
 
 // openTokens opens the token store for the --db value.
 func openTokens(db string) (auth.Store, audit.Store, func() error, error) {
-	bundle, err := openBundle(db)
+	bundle, err := openExisting(db)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	return bundle.Tokens(), bundle.Audits(), bundle.Close, nil
 }
 
-// printJSON writes v as JSON to stdout, indented when --pretty is set.
+// tokenChange is what a token entry's content digest commits to: which token was minted or revoked,
+// for whom, and what it can do, never its secret.
+type tokenChange struct {
+	// ID is the token's id.
+	ID string `json:"id"`
+	// Name is the token's label, set when one is minted.
+	Name string `json:"name,omitempty"`
+	// Kind is agent for an agent token, empty for a person's.
+	Kind string `json:"kind,omitempty"`
+	// UserID is the account the token is bound to, empty for an unbound admin token.
+	UserID string `json:"user_id,omitempty"`
+	// Role is the bound account's role at the time the token was minted.
+	Role string `json:"role,omitempty"`
+	// ExpiresAt is when the token stops working, nil for one that never expires.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+}
+
+// recordTokenChange records a token change from the command line with its summary committed.
+func recordTokenChange(ctx context.Context, audits audit.Store, path string, change tokenChange) error {
+	body, err := json.Marshal(change)
+	if err != nil {
+		return fmt.Errorf("encode the token change: %w", err)
+	}
+	return recordCLIChange(ctx, audits, tokenDB, path, body)
+}
+
+// printJSON writes v as JSON to stdout, indented when --pretty is set. An empty list prints as [],
+// not null: a store with no rows returns a nil slice, and a script reading the output with jq or a
+// JSON parser met null where it expected an array.
 func printJSON(v any) error {
+	if rv := reflect.ValueOf(v); rv.Kind() == reflect.Slice && rv.IsNil() {
+		v = []any{}
+	}
 	data, err := jsonutil.Marshal(v, tokenPretty)
 	if err != nil {
 		return err
@@ -121,15 +156,12 @@ func runTokenNew(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("%w: --ttl %s is negative: pass a positive lifetime, "+
 			"or zero for a token that never expires", ErrUsage, tokenTTL)
 	}
-	bundle, err := openBundle(tokenDB)
+	bundle, err := openExisting(tokenDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer func() { _ = bundle.Close() }()
 
-	if err := recordCLI(cmd.Context(), bundle.Audits(), "/cli/token/new"); err != nil {
-		return err
-	}
 	// An agent token must name the human it acts for, or the chain records an action by an agent on
 	// behalf of nobody, which is exactly the accountability the agent identity exists to provide. An
 	// unbound token is also an admin token, and an admin agent is a contradiction.
@@ -155,11 +187,27 @@ func runTokenNew(cmd *cobra.Command, _ []string) error {
 		}
 		tok.UserID = u.ID
 		out["user"] = u.Username
-		out["role"] = string(u.Role)
+		// The role printed and recorded is the one the token acts with. An agent token runs capped
+		// below admin whatever its account holds, and printing the account's admin role told the
+		// operator the agent could approve, mint tokens, and manage users, all of which it cannot.
+		role := u.Role
+		if tokenAgent {
+			role = user.AgentRole(role)
+		}
+		out["role"] = string(role)
 	}
 	if tokenTTL > 0 {
 		expires := time.Now().Add(tokenTTL)
 		tok.ExpiresAt = &expires
+	}
+	// Recorded once the token exists in memory and before it is saved, so the entry commits to which
+	// token was minted, for whom, with what role and lifetime. It used to be recorded before any of
+	// that was known, and the chain showed that a token was minted without saying which.
+	if err := recordTokenChange(cmd.Context(), bundle.Audits(), "/cli/token/new", tokenChange{
+		ID: tok.ID, Name: tok.Name, Kind: tok.Kind, UserID: tok.UserID, Role: out["role"],
+		ExpiresAt: tok.ExpiresAt,
+	}); err != nil {
+		return err
 	}
 	if err := bundle.Tokens().Save(cmd.Context(), tok); err != nil {
 		return fmt.Errorf("save token: %w", err)
@@ -191,7 +239,8 @@ func runTokenRevoke(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = closeStores() }()
 
-	if err := recordCLI(cmd.Context(), audits, "/cli/token/revoke"); err != nil {
+	if err := recordTokenChange(cmd.Context(), audits, "/cli/token/revoke",
+		tokenChange{ID: args[0]}); err != nil {
 		return err
 	}
 	if err := tokens.Delete(cmd.Context(), args[0]); err != nil {

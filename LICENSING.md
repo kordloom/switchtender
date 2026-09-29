@@ -58,9 +58,8 @@ Community feature keep working, and only paid features stop. No phone-home, no s
 audits, ever. Every receipt verifies without us, forever, with the open verifier. Each release converts
 to Apache 2.0 two years after it ships, and the terms accelerate that to immediate if
 KordLoom ceases business or ships nothing for 120 consecutive days during a paid term. Your price is
-fixed for the term, with 60 days notice before any renewal change. Every release converts to
-Apache 2.0 two years after it ships. And pricing is flat per organization within a band, never per
-seat and never per run.
+fixed for the term, with 60 days notice before any renewal change. And pricing is flat per
+organization within a band, never per seat and never per run.
 
 ## The one reserved right
 
@@ -80,23 +79,15 @@ Reach out for a commercial license if you want to:
 - Embed SwitchTender in a product you distribute or sell.
 - Lift the hosted-service restriction for any other reason.
 
-## What KordLoom sells
+## Services
 
-KordLoom charges for services around SwitchTender, never for permission to automate. None of these
-is required to use the software, and the binary is complete without every one of them:
+Beside the tiers, KordLoom runs the Migration Program, a fixed-scope engagement under its own
+written agreement that moves an estate off AWX, Semaphore, or Rundeck and into production on
+SwitchTender. Enterprise adds the services that by definition come from outside your install, such
+as the hosted witness and evidence custody. None of these is required to use the software.
 
-- **Migration.** A fixed-scope, founder-led engagement that moves you off AWX, Semaphore, or
-  Rundeck and into production on SwitchTender.
-- **Governance.** Coordination for approvers who sit outside your install, and pinned, scanned
-  execution images maintained for your fleet, plus a private support channel with a written
-  response time.
-- **Assurance.** Evidence operations on your audit calendar, control mappings kept current as
-  guidance shifts, long-term custody with re-anchoring so old receipts still verify, and priority
-  support with an SLA.
-- **Hosted SwitchTender**, for teams that would rather not self-host, under the reserved right
-  described above.
-
-See [switchtender.com/pricing](https://switchtender.com/pricing) for what each includes.
+See [switchtender.com/pricing](https://switchtender.com/pricing) for what each tier and service
+includes.
 
 ## Conversion to open source
 
@@ -111,6 +102,6 @@ versions it covers is closed.
 
 ## Getting in touch
 
-Email licensing@switchtender.com to start a conversation about a commercial license, support, or
-hosting. You can also open an issue at https://github.com/kordloom/switchtender, though email keeps
+Email licensing@switchtender.com to start a conversation about a commercial license or support. You
+can also open an issue at https://github.com/kordloom/switchtender, though email keeps
 your inquiry private.

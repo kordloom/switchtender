@@ -100,6 +100,11 @@ func TestEveryImportVerbCreatesObjects(t *testing.T) {
 			if !strings.Contains(strings.ToLower(applied), "creat") {
 				t.Errorf("%s: apply did not report what it created:\n%s", test.Name, applied)
 			}
+			// This import started the database, which one run from the wrong directory does too, so
+			// it has to say where the objects went.
+			if !strings.Contains(applied, "started a new database") || !strings.Contains(applied, db) {
+				t.Errorf("%s: an import that created the database did not say so:\n%s", test.Name, applied)
+			}
 		})
 	}
 }

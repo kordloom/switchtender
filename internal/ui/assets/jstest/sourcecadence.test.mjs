@@ -82,3 +82,32 @@ test("an unreadable interval is refused rather than silently turning refresh off
 	assert.match(page.document.getElementById("src-status").textContent, /15m|interval|cadence/i,
 		"the refusal does not say what the field accepts");
 });
+
+// TestRefreshColumnSaysWhatTheDispatcherDoes pins the Refresh column to the dispatcher's rules. A
+// source with neither an interval nor update on launch read "on every launch", and it never
+// refreshes by itself at all, so the table promised fresh hosts to a source nothing would ever pull.
+test("the Refresh column says when each source actually refreshes", async () => {
+	const sources = [
+		{ id: "s1", name: "manual", source: "a.yml" },
+		{ id: "s2", name: "launch", source: "b.yml", update_on_launch: true },
+		{ id: "s3", name: "timer", source: "c.yml", sync_interval_seconds: 900 },
+		{ id: "s4", name: "both", source: "d.yml", sync_interval_seconds: 3600, update_on_launch: true },
+	];
+	const page = loadPage("sources", {
+		routes: {
+			"/v1/inventory-sources": reply({ sources }),
+			"/v1/inventories": reply({ inventories: [] }),
+		},
+	});
+	await page.app.loadSources();
+	await page.clock.flush();
+
+	const cadence = {};
+	for (const row of page.document.querySelectorAll("tbody tr")) {
+		cadence[row.children[0].textContent] = row.children[3].textContent;
+	}
+	assert.deepEqual(cadence, {
+		manual: "Only by hand", launch: "Before every launch", timer: "Every 15 minutes",
+		both: "Before launch, every hour",
+	});
+});

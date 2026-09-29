@@ -129,6 +129,9 @@ func TestCrossSiteWritesAreRefused(t *testing.T) {
 		Name: "saml acs", Method: http.MethodPost, Path: "/auth/saml/acs", FetchSite: "cross-site",
 	}, { // Test 7: A forge delivering a webhook is server-side and sends neither header.
 		Name: "webhook delivery", Method: http.MethodPost, Path: "/hooks/tok",
+	}, { // Test 8: An older browser posting from a sandboxed frame names the null origin.
+		Name: "null origin", Method: http.MethodPost, Path: "/v1/runs",
+		Origin: "null", WantBlock: true,
 	}}
 
 	for testNum, test := range tests {
@@ -204,5 +207,47 @@ func TestARebindingWriteIsRefusedOnAnOpenInstall(t *testing.T) {
 	// curl through an SSH tunnel legitimately names anything.
 	if got := send("evil.example:8080", ""); got != http.StatusNotFound {
 		t.Errorf("non-browser write = %d, want it through the gate on Host alone", got)
+	}
+}
+
+// TestARebindingReadIsRefusedOnAnOpenInstall extends the rebinding check to reads.
+//
+// Only writes were checked, and an open install answers every read, so a rebound page could not
+// change a thing but could read every run, its script and its log, the inventories, and the audit
+// list, and post them anywhere it liked. A read-only public server is the exception, since reading
+// it from any host name is what it is for.
+func TestARebindingReadIsRefusedOnAnOpenInstall(t *testing.T) {
+	get := func(handler http.Handler, host, fetchSite string) int {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/v1/runs", nil)
+		req.Host = host
+		if fetchSite != "" {
+			req.Header.Set("Sec-Fetch-Site", fetchSite)
+		}
+		handler.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	open := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
+		WithTokens(auth.NewMemStore())).Handler()
+
+	// Test 0: The rebound browser read: same-origin by every header, foreign by Host.
+	if got := get(open, "evil.example:8080", "same-origin"); got != http.StatusForbidden {
+		t.Errorf("rebound browser read = %d, want 403", got)
+	}
+	// Test 1: The operator's own browser on loopback names keeps reading.
+	for _, host := range []string{"127.0.0.1:8080", "localhost:8080", "[::1]:8080"} {
+		if got := get(open, host, "same-origin"); got != http.StatusOK {
+			t.Errorf("loopback browser read on %q = %d, want 200", host, got)
+		}
+	}
+	// Test 2: A non-browser client is untouched, whatever its Host.
+	if got := get(open, "evil.example:8080", ""); got != http.StatusOK {
+		t.Errorf("non-browser read = %d, want 200", got)
+	}
+	// Test 3: A read-only public server is read from its own public name.
+	public := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
+		WithTokens(auth.NewMemStore()), WithReadOnly(true)).Handler()
+	if got := get(public, "demo.example.com", "same-origin"); got != http.StatusOK {
+		t.Errorf("read-only public read = %d, want 200", got)
 	}
 }

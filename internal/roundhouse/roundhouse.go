@@ -8,9 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -504,8 +507,14 @@ func varsEnv(baseEnv []string, spec Spec) []string {
 	return append(env, varsExtra(spec)...)
 }
 
-// varsExtra returns the SWITCHTENDER_VARS entry carrying a Spec's extra vars as JSON, or nil when there
-// are none, shared by the host script runners and the container plan.
+// varsExtra returns the SWITCHTENDER_VARS entry carrying a Spec's extra vars as JSON, and one
+// SWITCHTENDER_VAR_<name> entry per scalar var, or nil when there are none. It is shared by the host
+// script runners and the container plan.
+//
+// The single entries exist so a script can read one answer with plain shell. With only the JSON, a
+// script needed a parser to reach a survey answer, and a job imported from Jenkins or Rundeck, which
+// read each parameter as a variable of its own, ran with every one of them empty. The prefix keeps
+// an answer from ever landing on PATH, LD_PRELOAD, or any other variable the process runs by.
 func varsExtra(spec Spec) []string {
 	if len(spec.ExtraVars) == 0 {
 		return nil
@@ -514,7 +523,45 @@ func varsExtra(spec Spec) []string {
 	if err != nil {
 		return nil
 	}
-	return []string{"SWITCHTENDER_VARS=" + string(b)}
+	out := []string{"SWITCHTENDER_VARS=" + string(b)}
+	for _, name := range slices.Sorted(maps.Keys(spec.ExtraVars)) {
+		if !envVarName.MatchString(name) {
+			continue
+		}
+		if value, ok := envScalar(spec.ExtraVars[name]); ok {
+			out = append(out, run.VarEnvPrefix+name+"="+value)
+		}
+	}
+	return out
+}
+
+// envVarName matches a name a shell variable can hold.
+var envVarName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// envScalar renders a scalar extra var as the text its environment entry carries, reporting false
+// for a value that is not a scalar or that an environment entry cannot hold.
+func envScalar(v any) (string, bool) {
+	var s string
+	switch t := v.(type) {
+	case string:
+		s = t
+	case bool:
+		s = strconv.FormatBool(t)
+	case json.Number:
+		s = t.String()
+	case float64:
+		s = strconv.FormatFloat(t, 'f', -1, 64)
+	case int:
+		s = strconv.Itoa(t)
+	case int64:
+		s = strconv.FormatInt(t, 10)
+	default:
+		return "", false
+	}
+	if strings.IndexByte(s, 0) >= 0 {
+		return "", false
+	}
+	return s, true
 }
 
 // callbackEnv returns the environment entries that enable the structured event callback and point

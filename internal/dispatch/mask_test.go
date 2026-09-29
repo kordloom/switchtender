@@ -559,10 +559,11 @@ func TestStreamMaskerReleasesASelfOverlappingSecretAsItGoes(t *testing.T) {
 	got.Write(sm.flush())
 
 	// What is withheld is bounded by the secret, not by the stream. next holds back one byte short of
-	// the longest secret, and the release point can move back by up to that again to clear a match it
-	// landed inside, so twice the secret bounds it however long the run gets. Accumulating past that
-	// is the release point going unfound.
-	if want := 2 * len(secret); held > want {
+	// the longest value it masks, and the release point can move back by up to that again to clear a
+	// match it landed inside, so twice that bounds it however long the run gets. The longest value is
+	// one of the secret's encoded forms, a byte dump or a wrapped encoding, and those are fixed by the
+	// secret alone. Accumulating past that is the release point going unfound.
+	if want := 2 * m.longest(); held > want {
 		t.Errorf("withheld %d bytes at its peak, want no more than %d: what is held grows with the "+
 			"stream rather than staying bounded by the secret", held, want)
 	}

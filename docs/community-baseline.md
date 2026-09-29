@@ -1,6 +1,6 @@
 # The Community Baseline
 
-Dated 2026-09-21, before launch and before the first customer. The pricing page promises
+Dated 2026-09-21, before launch. The pricing page promises
 that the Community tier as published at launch never shrinks. The contractual list is the Community feature list in LICENSING.md as it stood at the tag
 community-baseline-2026-09-09. This file restates it,
 pinned in the repository so the promise has a fixed object to point at. Anything on this

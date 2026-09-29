@@ -43,6 +43,7 @@ transparency log.
 **A release built any other way is not signed, and its assets carry no `SHA256SUMS.sig` or
 `SHA256SUMS.pem`.** Check for those two files before relying on the command below: their absence
 means the release was assembled by hand and the signature chain described here does not apply to it.
+Releases v1.58.0 through v1.68.8 were built that way. Every release from v1.69.0 on is signed.
 Verify such a release against the checksums alone, and treat the checksums as unattested. This
 product's claim is that you can check what it tells you, so the honest form of that claim includes
 saying when a check is not available.
@@ -65,6 +66,36 @@ incompletely published. When it holds, the checks above establish the manifest t
 because `--verify` fetches it over HTTPS and compares the running executable against it: on its own
 that trusts whoever can write the release assets. Checking the signature once, out of band, is what
 turns it into a check on the build rather than a check on GitHub.
+
+With cosign v3, the `verify-blob` command above still verifies and also prints two notices that
+`--signature` and `--certificate` are deprecated in favor of a bundle. A release does not publish a
+bundle yet, so those two flags are the ones that apply to it.
+
+### The Linux packages
+
+The `deb`, `rpm`, and `apk` packages are not signed with a package manager key. Their integrity comes
+from the signed `SHA256SUMS` above, so verify the checksums first, then install:
+
+    sudo dpkg -i switchtender_1.100.0_linux_amd64.deb
+    sudo rpm -i switchtender_1.100.0_linux_amd64.rpm
+    apk add --allow-untrusted switchtender_1.100.0_linux_amd64.apk
+
+apk refuses a package with no trusted signature, and `--allow-untrusted` tells it to go ahead, which
+is why the checksum comes first.
+
+### The container image
+
+The images on ghcr.io are signed by the same workflow, keylessly, and carry build provenance. Verify
+one from outside it:
+
+    cosign verify ghcr.io/kordloom/switchtender:1.100.0 \
+      --certificate-identity-regexp '^https://github.com/kordloom/switchtender/.github/workflows/release.yml@.*' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+`switchtender version --verify` does not apply inside the image. The image compiles its binary from
+the tagged source rather than copying the release archive's file, so its bytes differ from the
+published hashes. The command says so inside an image and names the check above. An older image
+reports it as a hash that does not match instead.
 
 ## Security posture
 

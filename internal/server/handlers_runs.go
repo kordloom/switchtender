@@ -213,6 +213,9 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 			errors.Is(err, dispatch.ErrUnknownTool), errors.Is(err, dispatch.ErrToolCredential):
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
+		case errors.Is(err, credential.ErrNoSecret), errors.Is(err, credential.ErrUnreadable):
+			respondError(w, log, http.StatusConflict, err.Error())
+			return
 		case errors.Is(err, dispatch.ErrPolicyDenied) ||
 			errors.Is(err, dispatch.ErrQueueUnlicensed):
 			respondError(w, log, http.StatusForbidden, err.Error())
@@ -316,6 +319,9 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 			errors.Is(err, dispatch.ErrNoPlaybook), errors.Is(err, dispatch.ErrNoCommand),
 			errors.Is(err, dispatch.ErrUnknownTool), errors.Is(err, dispatch.ErrToolCredential):
 			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		case errors.Is(err, credential.ErrNoSecret), errors.Is(err, credential.ErrUnreadable):
+			respondError(w, log, http.StatusConflict, err.Error())
 			return
 		case errors.Is(err, dispatch.ErrPolicyDenied) ||
 			errors.Is(err, dispatch.ErrQueueUnlicensed):
@@ -442,6 +448,9 @@ func retryRunHandler(store run.Store, retrier Retrier, authz *authorizer, log *z
 			// The error names how many shards exist and what to do instead, which is the answer.
 			respondError(w, log, http.StatusConflict, err.Error())
 			return
+		case errors.Is(err, credential.ErrNoSecret), errors.Is(err, credential.ErrUnreadable):
+			respondError(w, log, http.StatusConflict, err.Error())
+			return
 		case errors.Is(err, dispatch.ErrPolicyDenied) ||
 			errors.Is(err, dispatch.ErrQueueUnlicensed):
 			respondError(w, log, http.StatusForbidden, err.Error())
@@ -500,6 +509,9 @@ func relaunchFailedHandler(store run.Store, retrier Retrier, authz *authorizer, 
 			return
 		case errors.Is(err, dispatch.ErrNoFailedHosts):
 			respondError(w, log, http.StatusConflict, "no hosts failed, so there is nothing to relaunch")
+			return
+		case errors.Is(err, credential.ErrNoSecret), errors.Is(err, credential.ErrUnreadable):
+			respondError(w, log, http.StatusConflict, err.Error())
 			return
 		case errors.Is(err, dispatch.ErrPolicyDenied) ||
 			errors.Is(err, dispatch.ErrQueueUnlicensed):
@@ -666,6 +678,10 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 		if errors.Is(err, dispatch.ErrPolicyDenied) ||
 			errors.Is(err, dispatch.ErrQueueUnlicensed) {
 			respondError(w, log, http.StatusForbidden, err.Error())
+			return
+		}
+		if errors.Is(err, credential.ErrNoSecret) || errors.Is(err, credential.ErrUnreadable) {
+			respondError(w, log, http.StatusConflict, err.Error())
 			return
 		}
 		if err != nil {

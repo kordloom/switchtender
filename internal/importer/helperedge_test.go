@@ -49,42 +49,46 @@ func TestSafeININameRefusesEveryTokenizingCharacter(t *testing.T) {
 	}
 }
 
-// TestRenderINIValueQuotesWhatShlexWouldActOn pins that a value is written as itself only when no
-// character in it would be tokenized, and refused outright when it cannot live on one line. A value
-// that escapes its own quoting becomes further host variables, which is the injection this guards.
-func TestRenderINIValueQuotesWhatShlexWouldActOn(t *testing.T) {
+// TestIniLiteralKeepsEveryValueItsType pins the literal each value is written as. Ansible reads an INI
+// value through Python's literal parser, so the literal decides the type a play sees: these strings
+// were each checked against ansible-inventory, and the host line built from them splits into exactly
+// one variable apiece, however hard a value tries to close its own quoting.
+func TestIniLiteralKeepsEveryValueItsType(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		Name       string
-		In         string
+		In         any
 		WantResult string
 		WantOK     bool
 	}{
-		{Name: "plain", In: "local", WantResult: "local", WantOK: true},                  // Test 0.
-		{Name: "empty", In: "", WantResult: "", WantOK: true},                            // Test 1.
-		{Name: "space", In: "a b", WantResult: `"a b"`, WantOK: true},                    // Test 2.
-		{Name: "tab refused", In: "a\tb", WantResult: "", WantOK: false},                 // Test 3.
-		{Name: "hash", In: "a#b", WantResult: `"a#b"`, WantOK: true},                     // Test 4.
-		{Name: "double quote", In: `a"b`, WantResult: `"a\"b"`, WantOK: true},            // Test 5.
-		{Name: "single quote", In: "a'b", WantResult: `"a'b"`, WantOK: true},             // Test 6.
-		{Name: "backslash", In: `a\b`, WantResult: `"a\\b"`, WantOK: true},               // Test 7.
-		{Name: "closing run", In: `x" y=z`, WantResult: `"x\" y=z"`, WantOK: true},       // Test 8.
-		{Name: "newline refused", In: "a\nb", WantResult: "", WantOK: false},             // Test 9.
-		{Name: "carriage refused", In: "a\rb", WantResult: "", WantOK: false},            // Test 10.
-		{Name: "equals is fine", In: "k=v", WantResult: "k=v", WantOK: true},             // Test 11.
-		{Name: "bracket is fine", In: "[all]", WantResult: "[all]", WantOK: true},        // Test 12.
-		{Name: "unicode", In: "ünïcode", WantResult: "ünïcode", WantOK: true},            // Test 13.
-		{Name: "trailing slash", In: `c:\tmp\`, WantResult: `"c:\\tmp\\"`, WantOK: true}, // Test 14.
+		{Name: "plain word", In: "local", WantResult: "local", WantOK: true},      // Test 0.
+		{Name: "empty", In: "", WantResult: "''", WantOK: true},                   // Test 1.
+		{Name: "string float", In: "1.10", WantResult: "'1.10'", WantOK: true},    // Test 2.
+		{Name: "string True", In: "True", WantResult: "'True'", WantOK: true},     // Test 3.
+		{Name: "space", In: "a b", WantResult: "'a b'", WantOK: true},             // Test 4.
+		{Name: "closing run", In: `x" y=z`, WantResult: `'x" y=z'`, WantOK: true}, // Test 5.
+		{Name: "single quote", In: "a'b", WantResult: `'a\'b'`, WantOK: true},     // Test 6.
+		{Name: "newline", In: "a\nb", WantResult: `'a\nb'`, WantOK: true},         // Test 7.
+		{Name: "false", In: false, WantResult: "False", WantOK: true},             // Test 8.
+		{Name: "null", In: nil, WantResult: "None", WantOK: true},                 // Test 9.
+		{Name: "float", In: 3.0, WantResult: "3.0", WantOK: true},                 // Test 10.
+		{Name: "list", In: []any{json.Number("1"), "two", true}, WantResult: "[1, 'two', True]", // Test 11.
+			WantOK: true},
+		{Name: "dict", In: map[string]any{"a": "b", "n": nil}, WantResult: "{'a': 'b', 'n': None}", // Test 12.
+			WantOK: true},
+		{Name: "unicode", In: "ünïcode", WantResult: "ünïcode", WantOK: true},                      // Test 13.
+		{Name: "hostname", In: "web01.example.com", WantResult: "web01.example.com", WantOK: true}, // Test 14.
+		{Name: "no form", In: struct{}{}, WantOK: false},                                           // Test 15.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
 			t.Parallel()
-			got, ok := renderINIValue(test.In)
+			got, ok := iniLiteral(test.In, false)
 			if ok != test.WantOK {
-				t.Fatalf("renderINIValue(%q) ok = %v, want %v", test.In, ok, test.WantOK)
+				t.Fatalf("iniLiteral(%#v) ok = %v, want %v", test.In, ok, test.WantOK)
 			}
 			if got != test.WantResult {
-				t.Errorf("renderINIValue(%q) = %q, want %q", test.In, got, test.WantResult)
+				t.Errorf("iniLiteral(%#v) = %s, want %s", test.In, got, test.WantResult)
 			}
 		})
 	}
@@ -590,23 +594,33 @@ func TestProjectNameQualifiesOnlyWhenItHasTo(t *testing.T) {
 func TestMapSemaphoreKeyAndVarType(t *testing.T) {
 	t.Parallel()
 	keyTests := []struct {
-		KeyType   string
-		WantKind  credential.Kind
-		WantExact bool
+		Use      semaphoreKeyUse
+		KeyType  string
+		WantKind credential.Kind
+		WantNote bool
 	}{
-		{KeyType: "ssh", WantKind: credential.KindSSHKey, WantExact: true},         // Test 0.
-		{KeyType: "login_password", WantKind: credential.KindEnv, WantExact: true}, // Test 1.
-		{KeyType: "none", WantKind: credential.KindEnv, WantExact: false},          // Test 2.
-		{KeyType: "", WantKind: credential.KindEnv, WantExact: false},              // Test 3.
-		{KeyType: "SSH", WantKind: credential.KindEnv, WantExact: false},           // Test 4: case matters.
+		{KeyType: "ssh", WantKind: credential.KindSSHKey}, // Test 0: An SSH key.
+		{KeyType: "login_password", Use: semaphoreKeyUse{login: true},
+			WantKind: credential.KindSSHPassword}, // Test 1: The login an inventory's hosts use.
+		{KeyType: "login_password", Use: semaphoreKeyUse{become: true},
+			WantKind: credential.KindBecomePassword}, // Test 2: An inventory's become password.
+		{KeyType: "login_password", Use: semaphoreKeyUse{vault: true},
+			WantKind: credential.KindVaultPassword}, // Test 3: A template's vault password.
+		{KeyType: "login_password", Use: semaphoreKeyUse{repo: true},
+			WantKind: credential.KindEnv, WantNote: true}, // Test 4: HTTPS git, which has no home here.
+		{KeyType: "login_password", WantKind: credential.KindEnv, WantNote: true}, // Test 5: Unused.
+		{KeyType: "login_password", Use: semaphoreKeyUse{login: true, become: true},
+			WantKind: credential.KindSSHPassword, WantNote: true}, // Test 6: Two uses, one credential.
+		{KeyType: "", WantKind: credential.KindEnv, WantNote: true},    // Test 7: No type.
+		{KeyType: "SSH", WantKind: credential.KindEnv, WantNote: true}, // Test 8: Case matters.
 	}
 	for testNum, test := range keyTests {
 		t.Run(fmt.Sprintf("test %d key %s", testNum, test.KeyType), func(t *testing.T) {
 			t.Parallel()
-			gotKind, gotExact := mapSemaphoreKey(test.KeyType)
-			if gotKind != test.WantKind || gotExact != test.WantExact {
-				t.Errorf("mapSemaphoreKey(%q) = %q, %v, want %q, %v",
-					test.KeyType, gotKind, gotExact, test.WantKind, test.WantExact)
+			gotKind, note := semaphoreKeyKind(test.KeyType, test.Use)
+			if gotKind != test.WantKind || (note != "") != test.WantNote {
+				t.Errorf("semaphoreKeyKind(%q, %+v) = %q, note %q, want %q, a note %v",
+					test.KeyType, test.Use, gotKind, note, test.WantKind, test.WantNote)
 			}
 		})
 	}
@@ -681,5 +695,22 @@ func TestNodeKeyForIDIsTheOneSpelling(t *testing.T) {
 				t.Errorf("nodeKeyForID(%d) = %q, want %q", test.In, got, test.WantResult)
 			}
 		})
+	}
+}
+
+// TestExtraVarsReadYesAndNoAsAWXDoes pins the YAML 1.1 booleans. AWX and Ansible read variables with
+// PyYAML, where an unquoted no is false. Read here as YAML 1.2, it was the string "no", which every
+// conditional that tested it read as true, so a feature somebody had switched off came back on.
+func TestExtraVarsReadYesAndNoAsAWXDoes(t *testing.T) {
+	t.Parallel()
+	got, err := parseExtraVars("a: yes\nb: 'no'\nc: Off\nd: [on, NO]\nyes: kept\ne: \"yes\"\n")
+	if err != nil {
+		t.Fatalf("parseExtraVars() error = %v", err)
+	}
+	want := map[string]any{
+		"a": true, "b": "no", "c": false, "d": []any{true, false}, "yes": "kept", "e": "yes",
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("mismatch (-want +got):\n%s", diff)
 	}
 }

@@ -93,6 +93,16 @@ jobs:
           if grep -q 'PersistentVolumeClaim' /tmp/team.yaml; then
             echo '::error::Team render carries the SQLite claim'; exit 1
           fi
+          # The DSN's password lives in its own Secret and nowhere else: as an argument it showed in
+          # the pod spec to anyone allowed to list pods.
+          test "$(grep -c 'postgres://u:p@postgres/db' /tmp/team.yaml)" = "1"
+          if grep -q -- '- --db' /tmp/team.yaml; then
+            echo '::error::Team render passes the database as an argument'; exit 1
+          fi
+          # The volume and the Secret holding the keys survive an uninstall, and a Secret change
+          # rolls the pods that read it.
+          test "$(grep -c 'helm.sh/resource-policy: keep' /tmp/community.yaml)" = "2"
+          grep -q 'checksum/secret:' /tmp/community.yaml
           # The shapes that cannot work refuse at render time, each with its sentence: two SQLite
           # writers, a worker with no shared database, and a PostgreSQL install with no signing
           # identity.

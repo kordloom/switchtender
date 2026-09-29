@@ -100,7 +100,12 @@ if [ ! -d "$dest" ] || [ ! -w "$dest" ]; then
 		say "No write access to $PREFIX; installing to $dest instead."
 	fi
 fi
-mv "$tmp/$BIN" "$dest/$BIN"
+# Copied rather than moved, so the installed file belongs to the account running this script. A moved
+# file keeps the owner the archive recorded, and tar run as root restores that owner. The copy lands
+# beside the target and is renamed over it, so a running binary is replaced in one step.
+cp "$tmp/$BIN" "$dest/.$BIN.new"
+chmod 0755 "$dest/.$BIN.new"
+mv -f "$dest/.$BIN.new" "$dest/$BIN"
 
 say ""
 say "Installed $dest/$BIN"
@@ -132,3 +137,10 @@ say "Verify what you got:"
 say "  $run version --verify"
 say "Start a local server:"
 say "  $run serve"
+# The Bash tool, and every starter template, runs bash by name. Most systems ship it, and Alpine and
+# some minimal images do not, where the first run fails with "bash: executable file not found".
+if ! have bash; then
+	say ""
+	say "Note: bash is not installed here, and the Bash tool and the starter templates need it."
+	say "Install it with your package manager first, for example: apk add bash"
+fi

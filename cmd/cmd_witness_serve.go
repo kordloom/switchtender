@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -236,7 +237,10 @@ func runWitnessServe(cmd *cobra.Command, _ []string) error {
 }
 
 // runWitnessVerify checks one attestation and prints the verdict.
-func runWitnessVerify(_ *cobra.Command, args []string) error {
+func runWitnessVerify(cmd *cobra.Command, args []string) error {
+	if err := refuseEmptyPin(cmd, "pubkey", witnessVerifyPubkey); err != nil {
+		return err
+	}
 	data, err := os.ReadFile(args[0])
 	if err != nil {
 		return fmt.Errorf("read attestation: %w", err)
@@ -272,17 +276,25 @@ func runWitnessVerify(_ *cobra.Command, args []string) error {
 	// It accepts either form. The pin was compared against the raw hex key alone, so a relying
 	// party who pinned exactly what they were told to publish got a refusal on a sound attestation,
 	// which is the one path the whole witness exists to make work.
-	if err == nil && witnessVerifyPubkey != "" &&
-		signer != witnessVerifyPubkey && keyID != witnessVerifyPubkey {
+	pinned := strings.TrimSpace(witnessVerifyPubkey) != ""
+	if err == nil && pinned && signer != witnessVerifyPubkey && keyID != witnessVerifyPubkey {
 		verdict["ok"] = false
 		verdict["problem"] = "signed by " + signer + " (key id " + keyID +
 			"), not by the pinned witness key"
+	}
+	// Without a pin, "ok" means only that the document is internally consistent, and an
+	// attestation a forger signed with their own key is that too. The verdict says which check it
+	// made, so a reader of the output does not have to know what was typed to produce it.
+	verdict["pinned"] = pinned
+	if err == nil && !pinned {
+		verdict["note"] = "no witness key was pinned, so this says the attestation was signed, " +
+			"not who signed it. Pass --pubkey with the key id the witness publishes."
 	}
 	out, jerr := jsonutil.Marshal(verdict, true)
 	if jerr != nil {
 		return jerr
 	}
-	fmt.Println(string(out))
+	fmt.Fprintln(cmd.OutOrStdout(), string(out))
 	if verdict["ok"] != true {
 		return fmt.Errorf("attestation did not verify")
 	}

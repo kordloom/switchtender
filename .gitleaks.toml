@@ -22,6 +22,7 @@ paths = [
   '''internal/audit/redact_freetext_test\.go''',
   '''internal/credential/credential_test\.go''',
   '''internal/credential/sshkey_test\.go''',
+  '''cmd/startkeys_test\.go''',
   '''internal/dispatch/credentials_test\.go''',
   '''internal/dispatch/gcpmask_test\.go''',
   '''internal/dispatch/mask_test\.go''',

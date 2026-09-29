@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/outcome"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // verifyPubkey is the key fingerprint a relying party pins, so a receipt signed by any other key is
@@ -29,7 +31,8 @@ server, so a relying party can check a receipt on a machine that has never seen 
 
 Pass --pubkey with the fingerprint the producer published to tie the result to a key you obtained out
 of band. Without it the receipt is checked against the key it names, which proves it was not altered
-but not who signed it.`,
+but not who signed it, and the verdict reads INTACT, BUT UNIDENTIFIED instead of VERIFIED. An empty
+--pubkey is refused, since that is what a failed key fetch leaves behind.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runVerify,
 }
@@ -43,6 +46,9 @@ func init() {
 
 // runVerify checks one receipt file and reports the verdict.
 func runVerify(cmd *cobra.Command, args []string) error {
+	if err := refuseEmptyPin(cmd, "pubkey", verifyPubkey); err != nil {
+		return err
+	}
 	signed, err := os.ReadFile(args[0])
 	if err != nil {
 		return fmt.Errorf("read receipt: %w", err)
@@ -62,6 +68,15 @@ func runVerify(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(out, "subject      %s %s\n", rep.Subject.Type, rep.Subject.ID)
 	fmt.Fprintf(out, "signed by    %s\n", rep.KeyID)
 	fmt.Fprintf(out, "signature    %s\n", mark(rep.SignatureOK))
+	// Whether a key was pinned decides what the verdict can claim, so it gets its own line rather
+	// than being left for a reader to infer from a flag they may not have typed. The wording is the
+	// browser verifier's, so the two never drift in a reader's memory.
+	pinned := strings.TrimSpace(verifyPubkey) != ""
+	if pinned {
+		fmt.Fprintln(out, "pin          OK (matches the fingerprint you pinned, so this is that install's key)")
+	} else {
+		fmt.Fprintln(out, "pin          NONE (this says the receipt was signed, not who signed it)")
+	}
 	if rep.ChainOK {
 		fmt.Fprintf(out, "chain        OK (%d entries recompute, head seq %d)\n", rep.ClaimCount, rep.Head.Seq)
 	} else {
@@ -108,24 +123,39 @@ func runVerify(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(out, "decisions    %s (%d, each %s what the chain committed)\n",
 			mark(rep.DecisionsOK), rep.DecisionsPresent, matchWord(rep.DecisionsOK))
 		for _, d := range rep.Decisions {
-			fmt.Fprintf(out, "  %s by %s (%s), binding spec %s\n",
-				d.Verdict, d.Actor, d.ActorType, d.SpecDigest)
+			fmt.Fprintf(out, "  %s %s, binding spec %s\n", d.Verdict, decidedBy(d), d.SpecDigest)
 		}
 	}
 	if rep.SpecPresent || rep.DecisionsPresent > 0 {
-		agree := "agree"
-		if !rep.SpecConsistent {
-			agree = "do not agree, so the change that was approved is not the change that ran"
-		}
-		fmt.Fprintf(out, "spec         %s (approved, executed, and disclosed digests %s)\n",
-			mark(rep.SpecConsistent), agree)
+		fmt.Fprintf(out, "spec         %s (%s)\n", mark(rep.SpecConsistent), specVerdict(rep))
 	}
 
 	if !rep.OK() {
 		fmt.Fprintln(out, "\nNOT VERIFIED: "+failedChecks(rep))
 		return fmt.Errorf("receipt did not verify: %s", failedChecks(rep))
 	}
+	// Without a pin a forged receipt earned the same VERIFIED as a genuine one, because any key signs
+	// its own bundle. The unpinned result is its own verdict, the one the browser verifier gives.
+	if !pinned {
+		fmt.Fprintln(out, "\nINTACT, BUT UNIDENTIFIED: nothing has been altered since this receipt was "+
+			"signed. Who signed it is unchecked, because no key was pinned. Pass --pubkey with the "+
+			"fingerprint the producing install publishes at /.well-known/loomseal.json.")
+		return nil
+	}
 	fmt.Fprintln(out, "\nVERIFIED: nothing has been altered since this receipt was signed")
+	return nil
+}
+
+// refuseEmptyPin refuses a pin flag that was given with nothing in it. A pin is usually filled in by
+// a command that fetches the published key, and when that fetch fails the flag arrives empty: the
+// verifier then checked against whatever key the file named and reported success, so a pin that was
+// asked for silently became none at all.
+func refuseEmptyPin(cmd *cobra.Command, flag, value string) error {
+	if cmd.Flags().Changed(flag) && strings.TrimSpace(value) == "" {
+		return fmt.Errorf("%w: --%s was given an empty value, most often because the command that "+
+			"fetched the key failed. Pass the published fingerprint, or leave --%s off to check "+
+			"integrity alone", errEmptyPin, flag, flag)
+	}
 	return nil
 }
 
@@ -176,12 +206,100 @@ func failedChecks(rep *audit.BundleReport) string {
 		failed = append(failed, "a disclosed decision is not what the chain committed")
 	}
 	if !rep.SpecConsistent {
-		failed = append(failed, "the approved and the executed change are not the same")
+		if approvedAndExecuted(rep) {
+			failed = append(failed, "the approved and the executed change are not the same")
+		} else {
+			failed = append(failed, "the spec digests this receipt discloses do not agree")
+		}
 	}
 	if len(failed) == 0 {
 		return "a check did not pass"
 	}
 	return strings.Join(failed, "; ")
+}
+
+// decidedBy says who made a decision, as far as the chain recorded it. An install with no tokens
+// records a decision with no actor, and printing the empty fields made the line read "by  ()".
+func decidedBy(d audit.DisclosedDecision) string {
+	switch {
+	case d.Actor == "":
+		return "with no actor recorded"
+	case d.ActorType == "":
+		return "by " + d.Actor
+	default:
+		return "by " + d.Actor + " (" + d.ActorType + ")"
+	}
+}
+
+// specVerdict says which spec digests the receipt let the spec check compare and whether they
+// agreed, naming only the ones present. The line used to name the approved, executed, and disclosed
+// digests on every receipt, which told a reader that a change which was rejected had been approved
+// and executed.
+func specVerdict(rep *audit.BundleReport) string {
+	var names []string
+	for _, verdict := range []string{"approved", "rejected"} {
+		if hasVerdict(rep, verdict) {
+			names = append(names, verdict)
+		}
+	}
+	if name := outcomeName(rep); name != "" && !slices.Contains(names, name) {
+		names = append(names, name)
+	}
+	if rep.SpecPresent {
+		names = append(names, "disclosed")
+	}
+	var subject string
+	switch len(names) {
+	case 0:
+		return "no spec digest to compare"
+	case 1:
+		subject = names[0] + " digests"
+	case 2:
+		subject = names[0] + " and " + names[1] + " digests"
+	default:
+		subject = strings.Join(names[:len(names)-1], ", ") + ", and " + names[len(names)-1] + " digests"
+	}
+	switch {
+	case rep.SpecConsistent:
+		return subject + " agree"
+	case approvedAndExecuted(rep):
+		return subject + " do not agree, so the change that was approved is not the change that ran"
+	default:
+		return subject + " do not agree"
+	}
+}
+
+// approvedAndExecuted reports whether the receipt discloses an approval and the outcome of a run that
+// executed, the only case where a spec disagreement means the change that ran is not the change that
+// was approved.
+func approvedAndExecuted(rep *audit.BundleReport) bool {
+	return outcomeName(rep) == "executed" && hasVerdict(rep, "approved")
+}
+
+// outcomeName names the verified outcome record the way the spec line reads it: executed for a run
+// that ran, and its terminal status for one that ended otherwise, so a rejected run is never called
+// executed. It is empty when there is no verified outcome, which the spec check does not compare.
+func outcomeName(rep *audit.BundleReport) string {
+	if !rep.OutcomePresent || !rep.OutcomeDigestOK {
+		return ""
+	}
+	rec, err := outcome.Parse(rep.OutcomeBody)
+	if err != nil || rec.Status == "" {
+		return ""
+	}
+	switch run.Status(rec.Status) {
+	case run.StatusSucceeded, run.StatusFailed, run.StatusInterrupted:
+		return "executed"
+	default:
+		return rec.Status
+	}
+}
+
+// hasVerdict reports whether the receipt discloses a decision with the given verdict.
+func hasVerdict(rep *audit.BundleReport, verdict string) bool {
+	return slices.ContainsFunc(rep.Decisions, func(d audit.DisclosedDecision) bool {
+		return d.Verdict == verdict
+	})
 }
 
 // printOutcome renders what the run did from the disclosed, digest-verified outcome, so a reader sees

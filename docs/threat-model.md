@@ -45,8 +45,8 @@ on the same conformance vectors, accepting and rejecting the same bundles.
 They cannot submit around it: every entry path shares the one submit call. They cannot approve
 their own held run where a rule requires a second person. They cannot edit the spec after approval,
 because the executor refuses a digest that no longer matches. And they cannot do any of it quietly,
-because the submission, the hold, the decision, and the outcome are all separate chain entries,
-each naming its actor.
+because the submission, the decision, and the outcome are all separate chain entries, each naming
+its actor, and the run itself records which rule held it.
 
 ### An operator who wants to rewrite history
 
@@ -99,8 +99,14 @@ morning. That alarm is the product working, and anyone can run the exercise toda
 **A change made outside SwitchTender.** A person or process holding its own SSH key can change a
 host behind the controller's back, and no audit system records what it never saw. The chain proves
 the record it holds; it does not prove the record is exhaustive. For human operators this boundary
-is organizational, taking the side keys away. For agents it closes structurally, because an agent
-that was only ever given a SwitchTender token has no path around the gate.
+is organizational, taking the side keys away, and SwitchTender makes that workable by holding the
+credentials runs use, or minting them per run and revoking them after, so nobody needs a standing
+key to production. For agents it closes structurally, because an agent that was only ever given a
+SwitchTender token has no path around the gate. What SwitchTender does see is the effect. A scheduled dry run flags any host or Terraform directory that no longer matches
+what your automation asserts, so a change made around the gate to anything your automation manages
+surfaces on the next check, and the fix goes back through the gate. Drift says what diverged, not
+who changed it, and state your automation never asserts is invisible to it. [The side
+door](side-door.md) puts all three parts of this in one place.
 
 **A controller compromised before the write.** Stated above and worth repeating as a limit:
 tamper-evidence begins when the entry is written. Records forged at the source are internally
@@ -144,9 +150,11 @@ loudly, and it is the right trade for a system whose product is the record.
   commit that was. The execution that follows syncs the same remote and fails on the same fault.
 - **Database restored from an older backup.** The head moves backward. A witness raises a finding,
   and bundles exported after the restore point no longer extend the ones exported before it.
-- **Witness offline.** The gap shows up as an unattested window in verification output, reported
-  with its duration rather than hidden. Attestation coverage is a claim the verifier checks, not
-  an assumption.
+- **Witness offline.** The witness sees nothing while it is down, and nothing records its downtime.
+  When it comes back it checks the feed against its signed checkpoint, so a beat it had already
+  witnessed that has since vanished or changed is still a finding. History written and removed
+  entirely while it was away is outside what it saw. Anchors bound that loss independently of any
+  witness. `witness serve` reports a server it cannot reach rather than going quiet.
 - **Signing key lost.** Old bundles still verify against the pinned key. New exports need a new
   key, and the change of key is itself visible to anyone pinning the old fingerprint.
 

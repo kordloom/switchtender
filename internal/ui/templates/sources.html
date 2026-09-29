@@ -7,7 +7,7 @@
 	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
 	<link rel="stylesheet" href="/ui/assets/app.css">
 </head>
-<body data-page="sources"{{if .ReadOnly}} data-readonly="true"{{end}}>
+<body data-page="sources"{{if .ReadOnly}} data-readonly="true"{{end}}{{if .Demo}} data-demo="true"{{end}}>
 	<header class="topbar">
 		<div class="brand"><a href="/ui/"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="SwitchTender"></picture>SwitchTender</a></div>
 	</header>
@@ -16,7 +16,7 @@
 		<div class="page-head">
 			<div class="page-head-text">
 				<h1>Inventory sources</h1>
-				<p class="muted">A source runs an inventory plugin or script and refreshes the hosts into a stored inventory you can run against.</p>
+				<p class="muted">A source reads an inventory plugin config or an inventory file, or runs a script from a project checkout, and refreshes the hosts into a stored inventory you can run against.</p>
 			</div>
 			<button id="source-open" class="button primary">
 				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -35,7 +35,7 @@
 					<input id="src-name" class="input" placeholder="aws production" required>
 				</label>
 				<label class="field-label">Source
-					<input id="src-source" class="input mono" placeholder="aws_ec2.yml or ./inventory.sh" required>
+					<input id="src-source" class="input mono" placeholder="aws_ec2.yml, or a path in the project" required>
 				</label>
 				<label class="field-label">Env credential
 					<select id="src-credential" class="input"><option value="">None</option></select>

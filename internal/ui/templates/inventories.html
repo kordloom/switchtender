@@ -7,7 +7,7 @@
 	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
 	<link rel="stylesheet" href="/ui/assets/app.css">
 </head>
-<body data-page="inventories"{{if .ReadOnly}} data-readonly="true"{{end}}>
+<body data-page="inventories"{{if .ReadOnly}} data-readonly="true"{{end}}{{if .Demo}} data-demo="true"{{end}}>
 	<header class="topbar">
 		<div class="brand"><a href="/ui/"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="SwitchTender"></picture>SwitchTender</a></div>
 	</header>
@@ -67,7 +67,7 @@
 						<input id="inv-vault-field" class="input" placeholder="inventory">
 					</label>
 					<label class="field-label">Token
-						<input id="inv-vault-token" class="input" placeholder="optional, else VAULT_TOKEN">
+						<input id="inv-vault-token" class="input" type="password" autocomplete="off" placeholder="optional, else VAULT_TOKEN when VAULT_ADDR matches">
 					</label>
 				</div>
 				<div id="inv-source-gsm" class="stack" data-source-group hidden>
@@ -81,7 +81,7 @@
 						<input id="inv-gsm-version" class="input" placeholder="latest">
 					</label>
 					<label class="field-label">Access token
-						<input id="inv-gsm-token" class="input" placeholder="optional, else GCP metadata server">
+						<input id="inv-gsm-token" class="input" type="password" autocomplete="off" placeholder="optional, else GCP metadata server">
 					</label>
 				</div>
 				<div id="inv-source-aws" class="stack" data-source-group hidden>
@@ -95,7 +95,7 @@
 						<input id="inv-aws-access-key" class="input" placeholder="optional, else AWS environment">
 					</label>
 					<label class="field-label">Secret access key
-						<input id="inv-aws-secret-key" class="input" placeholder="optional, else AWS environment">
+						<input id="inv-aws-secret-key" class="input" type="password" autocomplete="off" placeholder="optional, else AWS environment">
 					</label>
 				</div>
 				<div id="inv-source-azure" class="stack" data-source-group hidden>
@@ -112,7 +112,7 @@
 						<input id="inv-azure-client" class="input" placeholder="optional service principal">
 					</label>
 					<label class="field-label">Client secret
-						<input id="inv-azure-client-secret" class="input" placeholder="optional service principal">
+						<input id="inv-azure-client-secret" class="input" type="password" autocomplete="off" placeholder="optional service principal">
 					</label>
 				</div>
 				<span id="inv-source-hint" class="field-hint" hidden>Editing keeps the stored source configuration unless you fill these in.</span>

@@ -7,7 +7,7 @@
 
 # Quickstart
 
-No install needed to look around. The [live demo](https://demo.switchtender.com) is a seeded, read-only instance of exactly what you get.
+No install needed to look around. The [live demo](https://demo.switchtender.com/ui/runs?status=pending_approval) is a seeded, read-only instance of exactly what you get.
 
 ## Requirements
 
@@ -22,7 +22,8 @@ already carries Ansible, Python, Terraform, and OpenTofu.
 
     curl -fsSL https://switchtender.com/install.sh | sh
 
-The script downloads the release binary for your platform, checks it against the published
+On a host with `wget` and no `curl`, `wget -qO- https://switchtender.com/install.sh | sh` does the
+same. The script downloads the release binary for your platform, checks it against the published
 checksums, and installs it. It writes to `/usr/local/bin` when it can and to `~/.local/bin`
 otherwise, which is what happens on a stock Mac and on any Linux install without root. That second
 directory is often not on PATH, so the script says so and prints its closing commands with the full
@@ -32,12 +33,13 @@ binary; the commands below assume it is on your PATH, so prefix a locally built 
 
 ## Run the server
 
-    SWITCHTENDER_ENCRYPTION_KEY=change-me SWITCHTENDER_ENCRYPTION_SALT=change-me-too \
-      switchtender serve --addr :8080 --db switchtender.db
+    export SWITCHTENDER_ENCRYPTION_KEY=$(openssl rand -hex 32)
+    export SWITCHTENDER_ENCRYPTION_SALT=$(openssl rand -hex 16)
+    switchtender serve --addr :8080 --db switchtender.db
 
-The key and salt together seal stored credentials at rest with argon2id and AES-256-GCM. Without
-both the server still runs, but credential features stay off. Keep the salt stable across restarts
-or existing credentials cannot be decrypted.
+The key and salt together seal stored credentials at rest with argon2id and AES-256-GCM. Keep both
+with your other secrets: a server started with a different pair cannot open the credentials sealed
+under this one. Without them the server still runs, but credential features stay off.
 
 The first start on an empty database mints an initial admin token and prints it once, so the API
 is authenticated from the first request. Export it for the commands below:
@@ -86,10 +88,10 @@ Distributed execution is a Team feature, so every `switchtender worker` needs a 
 to start without one. Community runs everything on the server itself, which is the default and needs
 no extra process: this section is for when one machine is no longer enough.
 
-Point a worker at the same database and it competes for queued runs:
+Point a worker at the same database, with the same key and salt set as the server's, and it
+competes for queued runs:
 
-    SWITCHTENDER_ENCRYPTION_KEY=change-me SWITCHTENDER_ENCRYPTION_SALT=change-me-too \
-      switchtender worker --db switchtender.db --name laptop
+    switchtender worker --db switchtender.db --name laptop
 
 For more than one machine, use a PostgreSQL DSN as the `--db` value on every process.
 
@@ -99,17 +101,23 @@ nothing able to claim it.
 
 ## Lock down the API
 
-The initial admin token from the first start is yours to keep, but a shared install deserves named
-tokens so the audit trail says who did what. Mint one per person and per CI job:
-
-    switchtender token new --db switchtender.db --name ci
-
-A loopback bind, or `--read-only`, serves without authentication instead, since neither exposes an
-unauthenticated API to the network.
-
-Create user accounts with roles for sign-in:
+The initial admin token from the first start is yours to keep, but a shared install deserves an
+account for each person and each CI job, with tokens bound to them, so the audit trail says who did
+what and each token carries only its account's role. Create the accounts:
 
     SWITCHTENDER_PASSWORD=secret switchtender user new operator-jane --role operator --db switchtender.db
+    SWITCHTENDER_PASSWORD=secret switchtender user new ci-deploy --role operator --db switchtender.db
+
+Then mint a token for each, bound with `--user`:
+
+    switchtender token new --db switchtender.db --user ci-deploy --name ci
+
+A token minted without `--user` is an admin token that names no account, like the initial one, so
+keep those few.
+
+A loopback bind, or `--read-only`, starts without minting an initial token: a loopback API is
+reachable only from this machine, and a read-only one changes nothing. On a loopback bind the API
+asks for a token from the moment the install holds any token or account.
 
 ## Run with Docker
 
@@ -118,56 +126,107 @@ binary:
 
     git clone https://github.com/kordloom/switchtender
     cd switchtender
-    export SWITCHTENDER_ENCRYPTION_KEY=change-me
-    export SWITCHTENDER_ENCRYPTION_SALT=change-me-too
+    export SWITCHTENDER_ENCRYPTION_KEY=$(openssl rand -hex 32)
+    export SWITCHTENDER_ENCRYPTION_SALT=$(openssl rand -hex 16)
     docker compose --profile stack up --build
 
-This starts a server and a PostgreSQL database. The server listens on port 8080. Set
-`SWITCHTENDER_PORT` to change the host port.
+This starts one server on SQLite, with its database and its signing key in a volume, so both
+survive a restart and an upgrade. The server listens on port 8080. Set `SWITCHTENDER_PORT` to change
+the host port. With no terminal to show it on, the initial admin token is written to
+`/data/initial-admin-token` in the container, readable by the service user alone:
 
-Workers are a separate profile because they are Team: `docker compose --profile stack --profile
-workers up --build` adds one, and it needs a license to start.
+    docker compose --profile stack exec server cat /data/initial-admin-token
+
+On a Team license, the `team` profile runs PostgreSQL, a server, and a worker instead. Put the license
+at `./switchtender-license.json`, or name it with `SWITCHTENDER_LICENSE_FILE`, and give every process
+the same signing key, since processes that share one database sign as one install:
+
+    export SWITCHTENDER_AUDIT_KEY=$(openssl rand -hex 32)
+    docker compose --profile team up --build
+
+Keep that key where you can restore it, beside the encryption key and salt.
 
 ## Set up a production server
 
 For a real install, `init` generates the encryption key and salt, creates the first admin account, and
 writes a config file in one step. It can also write a systemd unit:
 
-    switchtender init --db switchtender.db --config switchtender.env --systemd switchtender.service
+    sudo useradd --system --create-home --home-dir /var/lib/switchtender switchtender
+    sudo -u switchtender -H switchtender init --db /var/lib/switchtender/switchtender.db \
+      --config /var/lib/switchtender/switchtender.env \
+      --systemd /var/lib/switchtender/switchtender.service
 
-It prints the admin password once, so save it. Move the unit into place and start it:
+The unit runs the server as the account that ran `init`, and every run the server executes without
+an execution image runs as that account too, which is why `init` runs here as an account made for
+the job rather than as you or as root. It prints the admin password once, so save it. Move the unit
+into place and start it:
 
-    sudo cp switchtender.service /etc/systemd/system/switchtender.service
+    sudo cp /var/lib/switchtender/switchtender.service /etc/systemd/system/switchtender.service
     sudo systemctl enable --now switchtender
 
-Serve HTTPS directly, with no reverse proxy in front, by pointing the server at a certificate and key:
+The unit listens on loopback, which suits a reverse proxy on the same machine. To serve HTTPS
+directly with nothing in front, give it a certificate and key and listen on the network: add
+`--addr :8443 --tls-cert /path/to/tls.crt --tls-key /path/to/tls.key` to the unit's `ExecStart`
+line, then `sudo systemctl daemon-reload && sudo systemctl restart switchtender`. Run by hand, the
+server reads the same key and salt from the file `init` wrote:
 
-    switchtender serve --db switchtender.db --tls-cert tls.crt --tls-key tls.key
+    set -a; . /var/lib/switchtender/switchtender.env; set +a
+    switchtender serve --db /var/lib/switchtender/switchtender.db --addr :8443 \
+      --tls-cert /path/to/tls.crt --tls-key /path/to/tls.key
 
 ## Run on Kubernetes
 
-SwitchTender needs no operator. A Helm chart installs the server and a worker as ordinary pods sharing a
-database:
+The Helm chart runs the server as an ordinary Deployment, with no operator. By default it is the
+Community shape: one server on SQLite, with the whole install on a persistent volume.
 
-The chart is in the repository too, so clone it first if you installed the binary alone:
+The chart is in the repository, so clone it first if you installed the binary alone. Write the keys
+to a file before you install, so you keep them. The salt has to stay the same for the life of the
+install, because every stored credential is sealed against it, and a key or a salt generated afresh
+on an upgrade makes every stored secret unreadable:
 
     git clone https://github.com/kordloom/switchtender
     cd switchtender
-    helm install switchtender ./deploy/helm/switchtender \
-      --set encryptionKey=$(openssl rand -hex 32) \
-      --set encryptionSalt=$(openssl rand -hex 16)
+    printf 'encryptionKey: "%s"\nencryptionSalt: "%s"\nauditKey: "%s"\n' \
+      "$(openssl rand -hex 32)" "$(openssl rand -hex 16)" "$(openssl rand -hex 32)" \
+      > switchtender-secrets.yaml
+    chmod 600 switchtender-secrets.yaml
+    helm install switchtender ./deploy/helm/switchtender -f switchtender-secrets.yaml \
+      --set fullnameOverride=switchtender
 
-Add `--set auditKey=$(openssl rand -hex 32)` too, a 32 byte ed25519 seed as hex, or that install
-cannot sign a receipt. A deployment that shares one database will not create a signing key by itself, because
-every server and worker has to sign as the same install, and a key minted inside one pod would be
-that pod's alone. Without it the chain still records and still verifies, but no receipt, signed
-bundle or trust document can be produced, which is most of why anyone runs this. Keep the seed where
-you can restore it.
+Keep that file in a secret manager, and pass the same `-f switchtender-secrets.yaml` to every
+`helm upgrade`. Or put the three values in a Secret of your own under `SWITCHTENDER_ENCRYPTION_KEY`,
+`SWITCHTENDER_ENCRYPTION_SALT`, and `SWITCHTENDER_AUDIT_KEY` and pass `--set existingSecret=<name>`.
+Copy the values across before you switch an install over: the chart keeps its own Secret rather than
+deleting it, but the pods read only the one you name.
 
-Both values are required, and the salt has to stay the same across upgrades: it is what every
-stored secret was sealed against, so a new salt makes the old ones unreadable. Keep them in a
-secret manager and pass `--set existingSecret=<name>` instead once you have one. The chart pulls
-`ghcr.io/kordloom/switchtender`.
+`auditKey` is the install's signing seed. On SQLite the server mints one itself when it is empty,
+and setting it means you hold the copy to restore. On PostgreSQL it is required, since every server
+and worker has to sign as the same install and none of them mints the key.
+
+`fullnameOverride` names the resources `switchtender` and `switchtender-server` rather than repeating
+the name. Set it on a new install only: renaming an existing install's resources orphans its data
+volume and its keys.
+
+The install prints how to reach the interface. With the default ClusterIP service:
+
+    kubectl port-forward svc/switchtender 8080:8080
+
+The first server to start writes an initial admin token to `/data` in its pod, readable by the
+service user alone:
+
+    kubectl exec deploy/switchtender-server -- cat /data/initial-admin-token
+
+Sign in with it, create named accounts and tokens, and delete it.
+
+On a Team license, point `database.dsn` at PostgreSQL to run more than one server, and set
+`worker.enabled=true` for dedicated workers. Pass the license with
+`--set-file license=switchtender-license.json`: `--set` parses commas and braces and changes it. The
+DSN reaches the pods from a Secret rather than as an argument, so the password is not in the pod
+spec.
+
+`helm uninstall` leaves the data volume and the Secret holding the keys in place. Delete them
+yourself once you are sure. `extraEnv`, `extraEnvFrom`, `extraVolumes`, and `extraVolumeMounts`
+carry anything the chart has no key for, such as a secret source's token or a CA bundle.
 
 ## Try the demo
 
@@ -177,4 +236,5 @@ pipeline, then serves it read-only so it is safe to expose:
 
     switchtender demo --addr :8080
 
-Or with Docker, from a checkout: `docker compose --profile demo up --build`.
+Or with Docker, from a checkout: `docker compose --profile demo up --build`, which serves on port
+8081 so it can run beside the stack. `SWITCHTENDER_DEMO_PORT` moves it.

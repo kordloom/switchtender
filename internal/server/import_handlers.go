@@ -172,6 +172,10 @@ func importHandler(stores importStoresFunc, log *zap.Logger) http.HandlerFunc {
 				return
 			}
 			created, err := plan.Apply(r.Context(), applyStores)
+			if errors.Is(err, importer.ErrAlreadyImported) {
+				respondError(w, log, http.StatusConflict, err.Error())
+				return
+			}
 			if err != nil {
 				log.Error("server: apply import: " + err.Error())
 				respondError(w, log, http.StatusInternalServerError, "could not apply import")

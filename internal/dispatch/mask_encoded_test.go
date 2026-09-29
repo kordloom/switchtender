@@ -18,6 +18,17 @@ import (
 // alignment in both alphabets, and the text URL-unescaped or JSON-unescaped. It asks the attacker's
 // question rather than the masker's, so it holds the masker to the leak and not to its own design.
 func recoverable(text, secret string) bool {
+	// Encodings a tool spreads over lines or spaces, base64 wrapped at a column and a byte dump with
+	// a space between bytes, decode only once the whitespace between their pieces is gone.
+	if stripped := strings.Join(strings.Fields(text), ""); stripped != text && recoverableAsIs(stripped, secret) {
+		return true
+	}
+	return recoverableAsIs(text, secret)
+}
+
+// recoverableAsIs reports whether any six-byte window of secret reads back out of text by any
+// decoding recoverable tries, without joining pieces across whitespace.
+func recoverableAsIs(text, secret string) bool {
 	n := min(6, len(secret))
 	var windows []string
 	for i := 0; i+n <= len(secret); i++ {
@@ -263,5 +274,71 @@ func TestBase64CoreHoldsWhateverSurroundsIt(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// TestMaskerRedactsWhatToolsActuallyPrint covers the encodings the pre-launch sweep read secrets back
+// out of. Every output below was produced by the tool the row names, run on the secret alone, and
+// pasted in, rather than rebuilt by this package: a row built with the masker's own encoder proves
+// only that the masker agrees with itself. The long secrets wrap, which is what made them leak: each
+// line carried a piece of the secret and no line carried the whole.
+//
+//nolint:funlen // Test function.
+func TestMaskerRedactsWhatToolsActuallyPrint(t *testing.T) {
+	t.Parallel()
+	const (
+		ssh = "FAKEssh/M4t+q=\u00e9&\"z"
+		aws = "FAKEaws/Sk3+yq9Pz0wXvT7uLrN2mQ8kJ5hG4fD1"
+		tok = "FAKEtokabcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvw"
+	)
+	tests := []struct {
+		Name   string
+		Secret string
+		Output string
+	}{{ // Test 0: Ansible urlencode, which keeps a slash.
+		Name: "Ansible urlencode, which keeps a slash", Secret: ssh,
+		Output: "FAKEssh/M4t%2Bq%3D%C3%A9%26%22z",
+	}, { // Test 1: Lowercase percent escapes, as .NET and printf write them.
+		Name: "lowercase percent escapes, as .NET and printf write them", Secret: aws,
+		Output: "FAKEaws%2fSk3%2byq9Pz0wXvT7uLrN2mQ8kJ5hG4fD1",
+	}, { // Test 2: JSON with every slash escaped, as PHP writes it.
+		Name: "JSON with every slash escaped, as PHP writes it", Secret: ssh,
+		Output: "FAKEssh\\/M4t+q=\\u00e9&\\\"z",
+	}, { // Test 3: Base64 wrapped at 76, as Python encodebytes writes it.
+		Name: "base64 wrapped at 76, as Python encodebytes writes it", Secret: tok,
+		Output: "RkFLRXRva2FiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6MDEyMzQ1Njc4OWFiY2RlZmdoaWprbG1u\nb3BxcnN0dXZ3eHl6MDEyMzQ1Njc4OWFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3\n",
+	}, { // Test 4: Base64 wrapped at 76, as GNU base64 writes it.
+		Name: "base64 wrapped at 76, as GNU base64 writes it", Secret: tok,
+		Output: "RkFLRXRva2FiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6MDEyMzQ1Njc4OWFiY2RlZmdoaWprbG1u\nb3BxcnN0dXZ3eHl6MDEyMzQ1Njc4OWFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3\n",
+	}, { // Test 5: Hex wrapped at 60, as xxd -p writes it.
+		Name: "hex wrapped at 60, as xxd -p writes it", Secret: aws,
+		Output: "46414b456177732f536b332b797139507a307758765437754c724e326d51\n386b4a35684734664431\n",
+	}, { // Test 6: A byte dump, as GNU od -An -tx1 writes it.
+		Name: "a byte dump, as GNU od -An -tx1 writes it", Secret: aws,
+		Output: " 46 41 4b 45 61 77 73 2f 53 6b 33 2b 79 71 39 50\n 7a 30 77 58 76 54 37 75 4c 72 4e 32 6d 51 38 6b\n 4a 35 68 47 34 66 44 31\n",
+	}, { // Test 7: A byte dump, as BSD od -An -tx1 writes it.
+		Name: "a byte dump, as BSD od -An -tx1 writes it", Secret: aws,
+		Output: "           46  41  4b  45  61  77  73  2f  53  6b  33  2b  79  71  39  50\n           7a  30  77  58  76  54  37  75  4c  72  4e  32  6d  51  38  6b\n           4a  35  68  47  34  66  44  31                                \n\n",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			if strings.Contains(test.Output, test.Secret) {
+				t.Fatalf("the output carries the secret as plain text: %q", test.Output)
+			}
+			if !recoverable(test.Output, test.Secret) {
+				t.Fatalf("the unmasked output does not hold the secret, so this row proves nothing: %q",
+					test.Output)
+			}
+			m := &masker{}
+			m.set([]string{test.Secret})
+			got := m.redactString(test.Output)
+			if recoverable(got, test.Secret) {
+				t.Errorf("the secret can be read back out of the masked output %q", got)
+			}
+			if !strings.Contains(got, maskToken) {
+				t.Errorf("nothing was masked in %q", got)
+			}
+		})
 	}
 }

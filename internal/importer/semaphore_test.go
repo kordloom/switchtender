@@ -3,6 +3,7 @@ package importer_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -173,7 +174,14 @@ func TestSemaphoreImportsARealCurrentBackup(t *testing.T) {
 	if len(plan.Schedules) != 1 || plan.Schedules[0].Cron != "0 3 * * *" {
 		t.Fatalf("schedules = %+v, want the 3am cron", plan.Schedules)
 	}
-	if len(plan.Credentials) != 2 {
-		t.Errorf("credentials = %d, want both keys with re-enter warnings", len(plan.Credentials))
+	// Both keys in this backup are type none, which Semaphore writes as stored and which holds no
+	// secret. They used to import as shells asking for secrets that never existed.
+	if len(plan.Credentials) != 0 {
+		t.Errorf("credentials = %d, want none from two keys that hold nothing", len(plan.Credentials))
+	}
+	if !slices.ContainsFunc(plan.Warnings, func(w string) bool {
+		return strings.Contains(w, `"None", "deploy-key"`) && strings.Contains(w, "type none")
+	}) {
+		t.Errorf("the keys that hold nothing were not named: %v", plan.Warnings)
 	}
 }

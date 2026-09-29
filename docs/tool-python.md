@@ -24,6 +24,8 @@ runs `python3 -m py_compile`, which checks syntax without executing the script.
         vars = json.loads(os.environ.get("SWITCHTENDER_VARS", "{}"))
         region = vars.get("region", "us-east-1")
 
+- Each var whose name a shell variable can hold and whose value is a string, a number, or a boolean
+  also arrives on its own as `SWITCHTENDER_VAR_<name>`, which reads without parsing the JSON.
 - An `env` credential's `KEY=VALUE` lines are set in the environment, read with `os.environ`.
 - A `token` credential is set as `SWITCHTENDER_TOKEN`, ready to send as a bearer token.
 - Credentials attached to the run's inventory arrive the same way.

@@ -236,11 +236,15 @@ func TestSemaphoreKeyKindsAndTheirWarnings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FromSemaphore() error = %v", err)
 	}
-	wantKinds := []credential.Kind{credential.KindSSHKey, credential.KindEnv,
-		credential.KindEnv, credential.KindEnv}
-	for i, cred := range plan.Credentials {
-		if cred.Kind != wantKinds[i] {
-			t.Errorf("key %q kind = %q, want %q", cred.Name, cred.Kind, wantKinds[i])
+	wantKinds := map[string]credential.Kind{"ssh key": credential.KindSSHKey,
+		"login": credential.KindEnv, "untyped": credential.KindEnv}
+	if len(plan.Credentials) != len(wantKinds) {
+		t.Fatalf("credentials = %d, want %d: a type none key holds nothing and is not imported",
+			len(plan.Credentials), len(wantKinds))
+	}
+	for _, cred := range plan.Credentials {
+		if cred.Kind != wantKinds[cred.Name] {
+			t.Errorf("key %q kind = %q, want %q", cred.Name, cred.Kind, wantKinds[cred.Name])
 		}
 		if _, ok := warningContaining(t, plan.Warnings, fmt.Sprintf("key %q", cred.Name),
 			"needs its secret re-entered"); !ok {
@@ -248,12 +252,15 @@ func TestSemaphoreKeyKindsAndTheirWarnings(t *testing.T) {
 				cred.Name, plan.Warnings)
 		}
 	}
-	for _, name := range []string{"nothing", "untyped"} {
+	// A kind the export cannot settle is said so: a login nothing uses, and a type with no match.
+	for _, name := range []string{"login", "untyped"} {
 		if _, ok := warningContaining(t, plan.Warnings, fmt.Sprintf("key %q", name),
-			"verify it is correct"); !ok {
-			t.Errorf("the inexact mapping for %q was not reported.\nwarnings: %v",
-				name, plan.Warnings)
+			"Check it before a run uses it"); !ok {
+			t.Errorf("the unsettled kind for %q was not reported.\nwarnings: %v", name, plan.Warnings)
 		}
+	}
+	if _, ok := warningContaining(t, plan.Warnings, `"nothing"`, "holds no secret"); !ok {
+		t.Errorf("the type none key was not named.\nwarnings: %v", plan.Warnings)
 	}
 }
 

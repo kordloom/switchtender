@@ -98,6 +98,9 @@ func createPolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusNotFound, "policies not enabled")
 			return
 		}
+		if refuseReadOnlyPolicies(w, log, store) {
+			return
+		}
 		var req createPolicyRequest
 		if !decodeStrict(w, log, r.Body, &req) {
 			return
@@ -159,6 +162,9 @@ func updatePolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "policies not enabled")
+			return
+		}
+		if refuseReadOnlyPolicies(w, log, store) {
 			return
 		}
 		var req createPolicyRequest
@@ -258,6 +264,14 @@ func deletePolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 		respondJSON(w, log, http.StatusOK,
 			map[string]string{"deleted": r.PathValue("id")}, wantsPretty(r))
 	}
+}
+
+// refuseReadOnlyPolicies answers a write against a policy source that refuses every write, and reports
+// whether it did. It runs before the license checks: a Community install pinned to a file holding its
+// one policy was answered with the Pro upsell, for a write no tier would accept.
+func refuseReadOnlyPolicies(w http.ResponseWriter, log *zap.Logger, store policy.Store) bool {
+	ro, ok := store.(policy.ReadOnlyStore)
+	return ok && denyReadOnlyPolicies(w, log, ro.ReadOnly())
 }
 
 // denyReadOnlyPolicies reports whether err means the policy source refuses changes, and writes the

@@ -73,10 +73,12 @@ type harness struct {
 // bootstrap adopts the initial admin token the server minted on first boot, then uses it to create
 // the two accounts the phases act as and to mint each one a token of its own.
 //
-// A fresh public install with no tokens mints an admin token and prints it once to its own logs,
-// which is exactly the handover a real operator picks up. The harness reads it from the server
-// pod's log rather than being handed a token out of band: adopting the real first credential is
-// more faithful than minting one past the gate, and it proves the bootstrap path itself works.
+// A fresh public install with no tokens mints an admin token and hands it over once, which is
+// exactly the handover a real operator picks up. A pod has no terminal, so the server writes the
+// token to a file its own account alone can read and names that file in its log, and the harness
+// reads the file from inside the pod the way the quickstart tells an operator to. It is not handed
+// a token out of band: adopting the real first credential is more faithful than minting one past the
+// gate, and it proves the bootstrap path itself works.
 func (h *harness) bootstrap(namespace string) error {
 	// The initial admin token prints on whichever server pod won first-boot initialization, so
 	// every server pod's logs are scanned: an active-active install has two, and reading only the
@@ -98,12 +100,26 @@ func (h *harness) bootstrap(namespace string) error {
 			return fmt.Errorf("read server logs for the initial token: %w", lerr)
 		}
 		allLogs.WriteString(logs)
-		if adminToken == "" {
-			adminToken = parseInitialToken(logs)
+		if adminToken != "" {
+			continue
+		}
+		if adminToken = parseInitialToken(logs); adminToken != "" {
+			continue
+		}
+		path := parseInitialTokenPath(logs)
+		if path == "" {
+			continue
+		}
+		out, cerr := h.kubectl("exec", "-n", namespace, pod, "--", "cat", path)
+		if cerr != nil {
+			return fmt.Errorf("read the initial admin token file %s in %s: %w", path, pod, cerr)
+		}
+		if adminToken = tokenIn(out); adminToken == "" {
+			return fmt.Errorf("the initial admin token file %s in %s holds no token: %q", path, pod, out)
 		}
 	}
 	if adminToken == "" {
-		return fmt.Errorf("no server pod printed an initial admin token; logs:\n%s",
+		return fmt.Errorf("no server pod handed over an initial admin token; logs:\n%s",
 			allLogs.String())
 	}
 	admin := &actor{Name: "initial", Type: "user", Token: adminToken}
@@ -154,16 +170,39 @@ func (h *harness) bootstrap(namespace string) error {
 	return nil
 }
 
-// parseInitialToken pulls the one-time admin token out of the server's boot log. The banner prints
-// it indented on its own line between the "shown only this once" notice and the usage lines.
+// parseInitialToken pulls the one-time admin token out of the server's boot log, for a server that
+// printed it. The banner prints it indented on its own line after the "shown only this once" notice.
 func parseInitialToken(logs string) string {
-	marker := "shown only this once:"
+	return lineAfter(logs, "shown only this once:")
+}
+
+// parseInitialTokenPath pulls the path of the initial admin token file out of the server's boot log,
+// for a server that wrote the token to a file rather than to its log. The banner prints the path
+// indented on its own line after the notice that says so.
+func parseInitialTokenPath(logs string) string {
+	return lineAfter(logs, "which keeps whatever it is given:")
+}
+
+// lineAfter returns the first non-empty line after marker, trimmed, or empty when marker is absent.
+func lineAfter(logs, marker string) string {
 	i := strings.Index(logs, marker)
 	if i < 0 {
 		return ""
 	}
 	for _, line := range strings.Split(logs[i+len(marker):], "\n") {
 		if t := strings.TrimSpace(line); t != "" {
+			return t
+		}
+	}
+	return ""
+}
+
+// tokenIn returns the API token in out, the output of reading the token file inside the pod. kubectl
+// can print its own notices beside the file's contents, so the token is the line carrying the token
+// prefix rather than the whole output.
+func tokenIn(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if t := strings.TrimSpace(line); strings.HasPrefix(t, "swt_") {
 			return t
 		}
 	}

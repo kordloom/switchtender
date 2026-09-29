@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"reflect"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -64,6 +63,9 @@ func walkUnread(doc any, t reflect.Type, prefix string, found map[string]bool) {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
+	if t.Implements(opaqueType) {
+		return
+	}
 	switch value := doc.(type) {
 	case map[string]any:
 		// A map type means the keys are data rather than field names: a dump keyed by object name.
@@ -103,6 +105,16 @@ func walkUnread(doc any, t reflect.Type, prefix string, found map[string]bool) {
 		}
 	}
 }
+
+// unreadOpaque is implemented by a type that reads a value whole, in its own way, so the scan does not
+// descend into it and report the keys it deliberately ignores.
+type unreadOpaque interface {
+	// opaqueToUnread marks the type.
+	opaqueToUnread()
+}
+
+// opaqueType is the unreadOpaque interface, for the check in walkUnread.
+var opaqueType = reflect.TypeFor[unreadOpaque]()
 
 // jsonFields maps a struct's json tag names to the types behind them, descending into embedded
 // structs the way the encoding does.
@@ -147,13 +159,9 @@ func reportUnread(plan *Plan, raw []byte, v any) {
 	if len(paths) == 0 {
 		return
 	}
-	const show = 12
-	shown := paths
-	suffix := ""
-	if len(shown) > show {
-		shown = shown[:show]
-		suffix = ", and " + strconv.Itoa(len(paths)-show) + " more"
-	}
-	plan.warn("this export holds %d field%s this importer does not read, so they are not imported: %s%s",
-		len(paths), plural(len(paths)), strings.Join(shown, ", "), suffix)
+	// Every one is named. The list stopped at twelve and said how many more there were, so the field
+	// that mattered, a template's arguments among them, could be the one a reader never saw. Paths
+	// are structural, one per field and not one per record, so the list stays as short as the schema.
+	plan.warn("this export holds %d field%s this importer does not read, so they are not imported: %s",
+		len(paths), plural(len(paths)), strings.Join(paths, ", "))
 }

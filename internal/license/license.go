@@ -337,7 +337,7 @@ var featureNames = map[Feature]string{
 	FeatureSSO:          "Directory sign-in (OIDC, SAML, LDAP, JWT)",
 	FeaturePolicyFull:   "The full policy engine",
 	FeatureRegister:     "The period change register",
-	FeatureWorkers:      "Distributed workers",
+	FeatureWorkers:      "Running distributed workers",
 	FeaturePostgresInit: "Initializing a new PostgreSQL database",
 	FeatureReconcile:    "One-click drift reconcile",
 }

@@ -359,6 +359,19 @@ function renderBundleRefusal(badge, r) {
 	setStatus("No bundle was published: " + (r.error || "the chain could not be bundled") + ".");
 }
 
+// renderAuditForAdminsOnly explains the audit page to a session below admin, which the server refuses
+// every read on this page. The page used to verify on open regardless, so an operator who followed a
+// link here was greeted by a red "Verify failed: forbidden" badge, which reads as a broken chain, and
+// a bundle button that failed the same way.
+function renderAuditForAdminsOnly() {
+	for (const id of ["audit-badge", "audit-verify", "audit-bundle", "audit-register"]) {
+		const el = document.getElementById(id);
+		if (el) el.hidden = true;
+	}
+	showEmpty("The audit trail is readable by admins. A run you launched carries its own evidence " +
+		"and signed receipt on its page.");
+}
+
 // wireAudit hooks the audit page's three buttons. Verify recomputes the chain and shows a badge,
 // the evidence pack renders the period's change register, and bundle downloads a signed LoomSeal
 // bundle anyone can verify offline with an open verifier.

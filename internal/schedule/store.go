@@ -21,12 +21,13 @@ type Store interface {
 	// racing a delete cannot re-create what was deleted. Save stays create-or-replace for the
 	// create path.
 	Update(ctx context.Context, s *Schedule) error
-	// RecordFire records that a schedule fired at the given time and created the given run. An
-	// empty run id leaves the stored one alone, since a fire that failed created nothing. It
+	// RecordFire records that a schedule fired at the given time, the run it created, and why it
+	// created none. An empty run id leaves the stored one alone, since a fire that failed created
+	// nothing, and failure replaces the stored reason, so a fire that starts a run clears it. It
 	// updates an existing row and never creates one, so a schedule deleted while its run was in
 	// flight stays deleted. A missing row is not an error, because the record is a note about a run
 	// that already happened rather than a change anyone is waiting on.
-	RecordFire(ctx context.Context, id string, at time.Time, runID string) error
+	RecordFire(ctx context.Context, id string, at time.Time, runID, failure string) error
 	// ClaimDue atomically advances a schedule's next fire time from oldNext to newNext and
 	// reports whether this caller won. Concurrent scheduler instances race on the same row; only
 	// the winner fires, so a highly available pair never double-launches. A missing row loses
@@ -86,7 +87,7 @@ func (m *memStore) Update(_ context.Context, s *Schedule) error {
 }
 
 // RecordFire records a fire against an existing schedule, touching only what the fire owns.
-func (m *memStore) RecordFire(_ context.Context, id string, at time.Time, runID string) error {
+func (m *memStore) RecordFire(_ context.Context, id string, at time.Time, runID, failure string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	sc, ok := m.schedules[id]
@@ -98,6 +99,7 @@ func (m *memStore) RecordFire(_ context.Context, id string, at time.Time, runID 
 	if runID != "" {
 		sc.LastRunID = runID
 	}
+	sc.LastError = failure
 	return nil
 }
 

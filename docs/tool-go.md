@@ -32,6 +32,8 @@ exit one with `exit status N` in the log.
         _ = json.Unmarshal([]byte(os.Getenv("SWITCHTENDER_VARS")), &vars)
         region, _ := vars["region"].(string)
 
+- Each var whose name a shell variable can hold and whose value is a string, a number, or a boolean
+  also arrives on its own as `SWITCHTENDER_VAR_<name>`, which reads without parsing the JSON.
 - An `env` credential's `KEY=VALUE` lines are set in the environment, read with `os.Getenv`.
 - A `token` credential is set as `SWITCHTENDER_TOKEN`, ready to send as a bearer token.
 - Credentials attached to the run's inventory arrive the same way.

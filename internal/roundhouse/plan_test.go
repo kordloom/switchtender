@@ -83,8 +83,11 @@ func TestBuildContainerPlanBash(t *testing.T) {
 	if len(plan2.argv) != 3 || plan2.argv[0] != "bash" || plan2.argv[1] != "-n" {
 		t.Errorf("dry-run argv = %v, want bash -n plus a script path", plan2.argv)
 	}
-	if len(plan2.extraEnv) != 1 || !strings.HasPrefix(plan2.extraEnv[0], "SWITCHTENDER_VARS=") {
-		t.Errorf("extraEnv = %v, want a SWITCHTENDER_VARS entry", plan2.extraEnv)
+	// The container gets the same entries a host run does: the JSON of every var and each scalar on
+	// its own.
+	if diff := cmp.Diff([]string{`SWITCHTENDER_VARS={"k":"v"}`, "SWITCHTENDER_VAR_k=v"},
+		plan2.extraEnv); diff != "" {
+		t.Errorf("extraEnv mismatch (-want +got):\n%s", diff)
 	}
 }
 

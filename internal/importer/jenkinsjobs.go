@@ -259,7 +259,7 @@ func JenkinsBundleFromZip(data []byte) ([]byte, error) {
 			len(r.File), maxJenkinsZipEntries)
 	}
 	var jobs []jenkinsJobFile
-	total := 0
+	total, unnamed := 0, 0
 	for _, f := range r.File {
 		if path.Base(f.Name) != "config.xml" || f.FileInfo().IsDir() {
 			continue
@@ -279,9 +279,18 @@ func JenkinsBundleFromZip(data []byte) ([]byte, error) {
 		}
 		name := jenkinsNameFromZipPath(f.Name)
 		if name == "" {
+			unnamed++
 			continue
 		}
 		jobs = append(jobs, jenkinsJobFile{Name: name, Data: data})
+	}
+	// A config.xml with no directory above it naming a job, such as one at the top of the archive,
+	// has no name to import under, so it is refused. Saying no config.xml was found, when one was,
+	// left the reader looking for a file that was right there.
+	if len(jobs) == 0 && unnamed > 0 {
+		return nil, fmt.Errorf("read jenkins archive: no config.xml in it sits under a directory " +
+			"naming its job, so no job has a name to import under. Zip the job's directory, or the " +
+			"jobs directory from your JENKINS_HOME")
 	}
 	if len(jobs) == 0 {
 		return nil, fmt.Errorf("read jenkins archive: no config.xml found in it. Zip the jobs " +

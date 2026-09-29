@@ -52,20 +52,26 @@ held run is admin-only, so an operator-bound agent can never approve its own wor
 
 ## Onboarding an agent
 
-1. Create an account for the agent with the operator role:
+1. Pick the person the agent answers to. Its token is bound to that person's account, so every
+   entry the agent writes names who it acted for. Create the account if they have none:
 
-       switchtender user new agent-bot --role operator
+       switchtender user new dev-lead --role operator
 
-2. Mint a token bound to that account, marked as an agent:
+   It asks for their password, or reads one from `SWITCHTENDER_PASSWORD` when there is no terminal,
+   as in a provisioning script. The agent never signs in: the token in the next step is its only
+   credential. An agent token is capped at the operator role whatever the account holds, so binding
+   it to an admin's account gives the agent nothing more.
 
-       switchtender token new --user agent-bot --name agent-bot --agent --ttl 720h
+2. Mint a token bound to that account, marked as an agent and labeled as the agent:
+
+       switchtender token new --user dev-lead --name agent-bot --agent --ttl 720h
 
    Or from the interface, on the Users page under API tokens, or over the API when you have no shell
    on the server:
 
        curl -X POST https://switchtender.example.com/v1/tokens \
          -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
-         -d '{"name":"agent-bot","username":"agent-bot","kind":"agent","ttl_hours":720}'
+         -d '{"name":"agent-bot","username":"dev-lead","kind":"agent","ttl_hours":720}'
 
    The API refuses a token bound to no account, so a credential minted over the network always names
    the account it acts as and can never exceed that account's role.
@@ -157,7 +163,9 @@ its own reach. The command refuses to start on an admin token. Ad-hoc runs, wher
 a command instead of launching a template a person defined, stay off unless you pass `--allow-adhoc`,
 and the approval policy still covers them when they are on.
 
-The narrowness holds inside a template launch too, which is where it would otherwise leak:
+The narrowness holds inside a template launch too, which is where it would otherwise leak, and it
+holds on the server, so it applies the same whether the agent connects over MCP or calls the API
+directly:
 
 - An agent cannot supply extra vars. Extra vars sit at Ansible's highest precedence, above everything
   the template and the inventory set, so an agent that could send them could rewrite what a vetted
@@ -166,6 +174,8 @@ The narrowness holds inside a template launch too, which is where it would other
 - A `limit` can only narrow. A template that pins its own target refuses a different one, and a
   pattern meaning every host is refused outright, because the risk grade approval policies key on is
   computed partly from how wide a run reaches.
+- An agent cannot aim a template at another inventory or choose its credentials. It launches the
+  template against the target and with the credentials the operator gave it.
 - An argument the tool does not define is refused rather than dropped. A model writing `check_mode`
   instead of `dry_run` is told so, rather than having the flag silently ignored and a real change
   reported back as a preview.
@@ -178,8 +188,11 @@ A held run does not block the agent. The submission answers at once with the run
 `status` says where it stands: `pending_approval` until a person decides, then it runs and ends
 `succeeded` or `failed`, or it ends `rejected` with the reason the person gave in `error`. The agent
 learns the decision by reading the run again, with `GET /v1/runs/{id}` or the `get_run` tool, and
-`GET /v1/runs?status=pending_approval` lists everything still waiting. Reading is all it can do
-about the decision: an agent that tries to approve its own run is refused with 403.
+`GET /v1/runs?status=pending_approval` lists everything still waiting. An agent that would rather
+not poll can stream the run instead: `POST /v1/runs/{id}/stream-ticket` returns a short-lived ticket,
+and `GET /v1/runs/{id}/stream?ticket=...` delivers the run's events as it is released, executes, and
+ends. Reading is all it can do about the decision: an agent that tries to approve its own run is
+refused with 403.
 
 The person who decides is told when the run is held: the chat channels and webhooks the server
 sends finished runs to also carry each hold, naming the rule that held it and who asked, and so
@@ -194,15 +207,15 @@ to wherever the approver already is.
 
 The actor on every chain entry the agent produces is its token's label, `agent-bot` above, and, for
 a token minted with `--agent`, the entry also carries `actor_type: agent` and `on_behalf_of` naming
-the human account behind it. The chain hash commits to all three along with the method, path, time,
-and sequence, so who acted, what kind of actor it was, and whose authority it used are part of what
-the chain proves, not fields someone could rewrite later. That is the difference between a log, which
-is the operator's word for what happened, and a signed chain, which a third party recomputes and
-checks without trusting the operator or the agent.
+the human account behind it, `dev-lead` above. The chain hash commits to all three along with the
+method, path, time, and sequence, so who acted, what kind of actor it was, and whose authority it
+used are part of what the chain proves, not fields someone could rewrite later. That is the
+difference between a log, which is the operator's word for what happened, and a signed chain, which
+a third party recomputes and checks without trusting the operator or the agent.
 
-Every mutation response carries an `Audit-Receipt: seq:hash` header. The agent, or the system
-driving it, can retain receipts and later check each one against the chain, so the party an entry
-belongs to can detect an omission.
+Every mutation response other than signing in or out carries an `Audit-Receipt: seq:hash` header.
+The agent, or the system driving it, can retain receipts and later check each one against the chain,
+so the party an entry belongs to can detect an omission.
 
 Runs record their source, one of api, template, schedule, rerun, reconcile, propose, or trigger,
 along with the actor. `actor:agent-bot` in run search pulls everything the agent ran, and

@@ -5,10 +5,12 @@ package template
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -21,10 +23,35 @@ var (
 	ErrNotFound = errors.New("template not found")
 	// ErrSurvey is returned when launch answers do not satisfy a template's survey.
 	ErrSurvey = errors.New("survey answer invalid")
+	// ErrSurveyField is returned when a survey field's own definition is malformed, which is a
+	// problem with the template rather than with an answer.
+	ErrSurveyField = errors.New("survey field invalid")
 )
 
 // FieldType names the kind of a survey field.
 type FieldType string
+
+// fieldTypeSpellings are the names other tools and the JSON Schema vocabulary give a field type,
+// read as the type a field stores. A template posted with "integer" or "boolean" was refused as an
+// unknown type, though the words mean int and bool to anyone who writes them.
+var fieldTypeSpellings = map[string]FieldType{
+	"integer": FieldInt, "boolean": FieldBool, "string": FieldText, "textarea": FieldMultiline,
+}
+
+// UnmarshalJSON reads a field type, taking the common spellings in fieldTypeSpellings as the type
+// they name.
+func (t *FieldType) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	if typ, ok := fieldTypeSpellings[strings.ToLower(s)]; ok {
+		*t = typ
+		return nil
+	}
+	*t = FieldType(s)
+	return nil
+}
 
 const (
 	// FieldText is a free text string.
@@ -179,23 +206,24 @@ func ValidateSurvey(fields []SurveyField) error {
 		case FieldText, FieldMultiline, "":
 			if f.Pattern != "" {
 				if _, err := regexp.Compile(anchorPattern(f.Pattern)); err != nil {
-					return fmt.Errorf("%w: %q has an invalid pattern: %v", ErrSurvey, f.Var, err)
+					return fmt.Errorf("%w: %q has an invalid pattern: %v", ErrSurveyField, f.Var, err)
 				}
 			}
 			if f.MinLength > 0 && f.MaxLength > 0 && f.MinLength > f.MaxLength {
-				return fmt.Errorf("%w: %q sets min_length above max_length", ErrSurvey, f.Var)
+				return fmt.Errorf("%w: %q sets min_length above max_length", ErrSurveyField, f.Var)
 			}
 		case FieldInt:
 			if f.Min != nil && f.Max != nil && *f.Min > *f.Max {
-				return fmt.Errorf("%w: %q sets min above max", ErrSurvey, f.Var)
+				return fmt.Errorf("%w: %q sets min above max", ErrSurveyField, f.Var)
 			}
 		case FieldBool:
 		case FieldChoice:
 			if len(f.Choices) == 0 {
-				return fmt.Errorf("%w: %q is a choice field with no choices", ErrSurvey, f.Var)
+				return fmt.Errorf("%w: %q is a choice field with no choices", ErrSurveyField, f.Var)
 			}
 		default:
-			return fmt.Errorf("%w: %q has an unknown field type %q", ErrSurvey, f.Var, f.Type)
+			return fmt.Errorf("%w: %q has the type %q, which is not one of text, multiline, int, bool, "+
+				"or choice", ErrSurveyField, f.Var, f.Type)
 		}
 	}
 	return nil

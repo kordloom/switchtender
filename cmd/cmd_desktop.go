@@ -30,6 +30,10 @@ var desktopCmd = &cobra.Command{
 	SilenceErrors: true,
 }
 
+// serveDesktop is true when serve runs on behalf of desktop, which makes its own database on first
+// launch and takes no --db.
+var serveDesktop bool
+
 // runDesktop configures a local single-user serve and opens the UI, then blocks on the server. The
 // loopback port persists in the data directory and is reused across launches, so browser storage
 // keyed by origin, such as the sign-in token and the tour state, survives a restart. A second
@@ -40,6 +44,8 @@ func runDesktop(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	serveDB = filepath.Join(dir, "switchtender.db")
+	serveDesktop = true
+	defer func() { serveDesktop = false }()
 
 	if port, ok := savedDesktopPort(dir); ok && desktopAlive(port) {
 		url := "http://127.0.0.1:" + strconv.Itoa(port) + "/ui/"

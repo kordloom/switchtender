@@ -2,13 +2,16 @@ package importer
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
 
+	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/schedule"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // TestImportedInventoryCannotWriteItsOwnDirectives checks that a name or variable out of somebody
@@ -27,17 +30,22 @@ func TestImportedInventoryCannotWriteItsOwnDirectives(t *testing.T) {
 		Name  string
 		Hosts []importHost
 		Group []importGroup
+		// WantKept is the host variables a value carrying the payload must arrive as, whole and
+		// inert. Nil means the payload was dropped, which must be reported.
+		WantKept map[string]string
 	}{{ // Test 0: The host name carries the payload.
 		Name: "host name",
 		Hosts: []importHost{{
 			Name: "web1\n[all:vars]\n" + interpreter + "=/tmp/evil\nansible_connection=local",
 		}},
-	}, { // Test 1: A host variable value carries it.
+	}, { // Test 1: A host variable value carries it. The value is kept, escaped into one literal,
+		// so it is the odd user name it was and nothing more.
 		Name: "variable value",
 		Hosts: []importHost{{
 			Name:      "web1",
 			Variables: map[string]any{"ansible_user": "bob\n[all:vars]\n" + interpreter + "=/tmp/evil"},
 		}},
+		WantKept: map[string]string{"ansible_user": "bob\n[all:vars]\n" + interpreter + "=/tmp/evil"},
 	}, { // Test 2: A variable name carries it.
 		Name: "variable name",
 		Hosts: []importHost{{
@@ -53,15 +61,29 @@ func TestImportedInventoryCannotWriteItsOwnDirectives(t *testing.T) {
 			t.Parallel()
 			plan := &Plan{}
 			got := buildInventoryINI(plan, "prod fleet", test.Hosts, test.Group, nil)
-			if strings.Contains(got, interpreter) {
-				t.Errorf("the generated inventory sets %s, which points every play at an "+
-					"interpreter of the export's choosing on the executor:\n%s", interpreter, got)
+			// Read the way Ansible reads it: a line of its own is a section or an assignment, and a
+			// host line's words are its variables.
+			for _, line := range strings.Split(got, "\n") {
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(line, "[all:vars]") || strings.HasPrefix(line, interpreter) ||
+					strings.HasPrefix(line, "ansible_connection") {
+					t.Errorf("the export wrote a line of its own into the inventory, %q:\n%s", line, got)
+				}
 			}
-			if strings.Contains(got, "ansible_connection=local") {
-				t.Errorf("the generated inventory redirects the play onto the executor:\n%s", got)
+			vars := parseINIHostVars(t, got)
+			for _, key := range []string{interpreter, "ansible_connection"} {
+				if _, set := vars[key]; set {
+					t.Errorf("the generated inventory sets %s as a live host variable:\n%s", key, got)
+				}
+			}
+			for key, want := range test.WantKept {
+				if vars[key] != want {
+					t.Errorf("%s arrived as %q, want the value kept whole as %q:\n%s", key, vars[key],
+						want, got)
+				}
 			}
 			// Whatever was dropped is reported, so a person reviewing the plan learns of it.
-			if len(plan.Warnings) == 0 {
+			if test.WantKept == nil && len(plan.Warnings) == 0 {
 				t.Error("something was dropped from the inventory with no warning")
 			}
 			for _, w := range plan.Warnings {
@@ -173,6 +195,11 @@ func parseINIHostVars(t *testing.T, content string) map[string]string {
 		tokens := shlexTokens(line)
 		for _, tok := range tokens[1:] { // Skip the host name.
 			if k, v, ok := strings.Cut(tok, "="); ok {
+				// Ansible reads what shlex leaves as a Python literal, so a quoted string is
+				// the string inside it.
+				if decoded, isString := util.PyUnquote(v); isString {
+					v = decoded
+				}
 				vars[k] = v
 			}
 		}
@@ -440,5 +467,33 @@ func TestAWXInventoryKeepsGroupVarsAndChildren(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("imported inventory is missing %q:\n%s", want, got)
 		}
+	}
+}
+
+// TestImportedSecretsStayMasked pins the run-log masker against the literal form. A password is
+// written as a quoted Python literal so Ansible reads it back exactly, and the masker learns secrets
+// from that same text: holding the quoted form would mask a string no run prints, and the bare
+// password would reach the log.
+func TestImportedSecretsStayMasked(t *testing.T) {
+	t.Parallel()
+	passwords := []string{"plainword", `p@ss w'rd"x`, `back\slash`, "1.10", "multi\nline"}
+	for testNum, password := range passwords {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			plan := &Plan{}
+			content := buildInventoryINI(plan, "prod", []importHost{
+				{Name: "web1", Variables: map[string]any{"ansible_password": password}},
+			}, []importGroup{{
+				Name: "db", Hosts: []importHost{{Name: "db1"}},
+				Variables: map[string]any{"ansible_become_password": password + "-become"},
+			}}, nil)
+			secrets := inventory.Secrets(content)
+			for _, want := range []string{password, password + "-become"} {
+				if !slices.Contains(secrets, want) {
+					t.Errorf("the masker does not hold %q, so a run would print it.\nsecrets: %q\n"+
+						"inventory:\n%s", want, secrets, content)
+				}
+			}
+		})
 	}
 }

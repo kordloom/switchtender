@@ -220,3 +220,28 @@ func TestVixieDayFieldsThatCombineDifferentlyAreRefused(t *testing.T) {
 		t.Errorf("the report does not say why the line was refused: %v", plan.Warnings)
 	}
 }
+
+// TestACrontabInventoryIsReportedAsThePathItIs pins what an imported crontab does with --inventory.
+// The guide said a name matching a stored inventory was wired by id. A schedule's own steps carry an
+// inventory as a path and nothing else, so it never was, and the report said nothing. It now says the
+// name is kept as a path and how to reach a stored inventory instead.
+func TestACrontabInventoryIsReportedAsThePathItIs(t *testing.T) {
+	t.Parallel()
+	plan, err := FromCron("Scalars", false)([]byte("0 2 * * * /usr/local/bin/backup\n"), importNow)
+	if err != nil {
+		t.Fatalf("FromCron() error = %v", err)
+	}
+	if len(plan.Schedules) != 1 || plan.Schedules[0].Inventory != "Scalars" {
+		t.Fatalf("schedules = %+v, want one carrying the inventory as given", plan.Schedules)
+	}
+	found := false
+	for _, w := range plan.Warnings {
+		if strings.Contains(w, `--inventory "Scalars" is kept on each schedule as a path`) &&
+			strings.Contains(w, "make it a template") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the inventory kept as a path was not reported: %v", plan.Warnings)
+	}
+}

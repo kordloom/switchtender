@@ -1,5 +1,12 @@
 # Default values for the SwitchTender chart.
 
+# nameOverride replaces the chart name in resource names and labels.
+nameOverride: ""
+# fullnameOverride names every resource outright. Left empty, resources are named after the release
+# and the chart, which reads switchtender-switchtender-server for a release named switchtender. Set it
+# on a new install only: renaming an existing install's resources orphans its data volume and keys.
+fullnameOverride: ""
+
 image:
   # repository is the published multi-arch image. A bare name here is not a shorthand for this
   # project: Kubernetes resolves "switchtender" to docker.io/library/switchtender, a Docker Hub
@@ -51,6 +58,19 @@ persistence:
   size: 2Gi
   # storageClass, empty for the cluster default.
   storageClass: ""
+  # keepOnUninstall leaves the volume in place when the release is uninstalled. It holds the whole
+  # install, and helm uninstall used to delete it without a word. Remove it yourself once you are
+  # sure: kubectl delete pvc <release>-switchtender-data.
+  keepOnUninstall: true
+
+# extraEnv, extraEnvFrom, extraVolumes, and extraVolumeMounts reach every server and worker container,
+# for what the chart has no key of its own for: a secret source's token, a plugin's configuration
+# file, or a CA bundle. They take the Kubernetes shapes as they are, for example
+#   extraEnv: [{name: VAULT_ADDR, value: "https://vault:8200"}]
+extraEnv: []
+extraEnvFrom: []
+extraVolumes: []
+extraVolumeMounts: []
 
 # encryptionKey and encryptionSalt seal credentials at rest with argon2id and AES-256-GCM. Both are
 # required; set them with --set encryptionKey=... --set encryptionSalt=... or point existingSecret
@@ -60,7 +80,9 @@ encryptionKey: ""
 encryptionSalt: ""
 existingSecret: ""
 
-# license is the signed license file a paid tier is turned on with, pasted whole. Leave it empty for
+# license is the signed license file a paid tier is turned on with, pasted whole. Pass it with
+# --set-file license=switchtender-license.json: --set parses commas and braces, and it turns a
+# license into a value that no longer verifies. Leave it empty for
 # Community, which needs no license and never expires. With existingSecret, put the same content
 # under a license.jwt key in that secret instead. Without this the chart could install only
 # Community, so the deployment the quickstart recommends had no way to apply a purchase.

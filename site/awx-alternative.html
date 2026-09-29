@@ -18,7 +18,7 @@
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-	<link rel="stylesheet" href="/styles.css?v=35">
+	<link rel="stylesheet" href="/styles.css?v=37">
 	<!-- st:entity -->
 	<script type="application/ld+json">
 {
@@ -96,7 +96,7 @@
 		<section class="wrap gs-hero reveal">
 			<span class="eyebrow">AWX alternative</span>
 			<h1>The AWX workflow, on one binary.<br><span class="grad">Without the Kubernetes bill.</span></h1>
-			<p class="lede">AWX needs a Kubernetes cluster, an operator, Postgres, Redis, and Receptor before it runs a single playbook, and it has not shipped a release since July 2024. SwitchTender is one Go binary. Download it, run it, and you have job templates, schedules, RBAC, surveys, SSO, workflows, and approvals, plus a live host-by-task matrix AWX never had. Your AWX export imports in one command.</p>
+			<p class="lede">AWX needs a Kubernetes cluster, an operator, Postgres, Redis, and Receptor before it runs a single playbook, and it has not shipped a release since July 2024. SwitchTender is one Go binary. Download it, run it, and you have job templates, schedules, RBAC, surveys, workflows, and approvals, with directory sign-in on Pro, plus a live host-by-task matrix AWX never had. Your AWX export imports in one command.</p>
 			<p class="moment">Here because the operator install path stopped working, an upgrade
 			stalled, or nobody has owned the cluster since the last reorg? That is the usual reason
 			people arrive on this page, and it is a fine reason to move.</p>
@@ -114,7 +114,7 @@
 			<div class="cards cards-3">
 				<article class="card reveal">
 					<h3>The platform tax</h3>
-					<p>Running AWX means running Kubernetes, the AWX Operator, Postgres, and Redis, then keeping all of it patched. That's ongoing platform work every month, keeping the cluster, operator, and datastores patched, just to run playbooks. SwitchTender is one process and one file. Upgrading is replacing a binary. We <a href="/docs/benchmarks#head-to-head">measured both</a>: a 110.5&nbsp;MiB image against about 1.5&nbsp;GiB across the four long-lived containers, before the first job runs.</p>
+					<p>Running AWX means running Kubernetes, the AWX Operator, Postgres, and Redis, then keeping all of it patched. That's ongoing platform work every month, keeping the cluster, operator, and datastores patched, just to run playbooks. SwitchTender is one process and one database. Upgrading is replacing a binary. We <a href="/docs/benchmarks#head-to-head">measured both</a> at SwitchTender v1.76.0: a 110.5&nbsp;MiB image against about 1.5&nbsp;GiB across the four long-lived containers, before the first job runs.</p>
 				</article>
 				<article class="card reveal">
 					<h3>Ansible-only</h3>
@@ -180,7 +180,7 @@
 						<tr><td>RBAC, teams, per-object grants</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
 						<tr><td>LDAP, SAML, OIDC sign-in</td><td class="us"><i class="y"></i> <span class="muted">Pro, $490/yr</span></td><td><span class="muted">Today, yes. Removed on the development branch</span></td></tr>
 						<tr><td>Execution environments</td><td class="us">All seven tools, Docker or Podman</td><td><span class="muted">Ansible only, Podman</span></td></tr>
-						<tr><td>Instance groups</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
+						<tr><td>Instance groups</td><td class="us"><i class="y"></i> <span class="muted">worker queues, Team</span></td><td><i class="y"></i></td></tr>
 						<tr><td>High availability</td><td class="us">Active-active on Postgres <span class="muted">creating the schema is Team; opening an existing one is never gated</span></td><td><span class="muted">Via Kubernetes</span></td></tr>
 						<tr><td>Duration-balanced job splitting</td><td class="us"><i class="y"></i></td><td><span class="muted">Round-robin slicing</span></td></tr>
 						<tr><td>Fleet memory: flaky hosts, trends</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
@@ -199,7 +199,7 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>Where AWX is still ahead</h2>
-				<p>AWX has years in production at large organizations, a deep ecosystem of credential types and inventory plugins, and a large community. SwitchTender is new. Every claim on this page is backed by a test you can run, but it doesn't have AWX's years in production yet. That track record only comes from teams running it, starting with the ones who want the capability without the platform. The ecosystem gap is real, but any team can add a tool, a secret engine, an AI provider, or a channel as a drop-in Go plugin binary, no fork and no rebuild of the server.</p>
+				<p>AWX has years in production at large organizations, a deep ecosystem of credential types and inventory plugins, and a large community. Every claim on this page is backed by a test you can run. The ecosystem gap is real, but any team can add a tool, a secret engine, an AI provider, or a channel as a drop-in Go plugin binary, no fork and no rebuild of the server.</p>
 			</div>
 		</section>
 

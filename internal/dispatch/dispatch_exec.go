@@ -283,6 +283,17 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	if err != nil {
 		return fail(err)
 	}
+	// A stored inventory's secrets came back from materializeInventory. An inventory named by path,
+	// on this host or inside the project checkout just resolved, holds the same kind of secret, so
+	// it is read here, once its final path is known, and masked before anything else is written.
+	var pathSecrets []string
+	if r.InventoryID == "" {
+		pathSecrets = pathInventorySecrets(spec.Inventory)
+		if len(pathSecrets) > 0 {
+			early = append(early, pathSecrets...)
+			mask.set(early)
+		}
+	}
 	d.applyDefaultImage(&spec)
 	// Record the image the run actually executed in. spec.Image was seeded from r.Image and is only
 	// ever filled when it was empty, so a run that pinned its own image sees no change, a run that
@@ -306,10 +317,11 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	// runner that echoes a failed registry login leaks the password into the run's output the way
 	// every other credential is masked against. Both the run's and the project's pull credential
 	// have resolved onto the spec by now, so masking the effective login covers both.
-	allSecrets := make([]string, 0, len(secrets)+len(invSecrets)+len(ownSecrets)+4)
+	allSecrets := make([]string, 0, len(secrets)+len(invSecrets)+len(pathSecrets)+len(ownSecrets)+4)
 	allSecrets = append(allSecrets, secrets...)
 	allSecrets = append(allSecrets, registrySecrets(&spec)...)
 	allSecrets = append(allSecrets, invSecrets...)
+	allSecrets = append(allSecrets, pathSecrets...)
 	allSecrets = append(allSecrets, ownSecrets...)
 	mask.set(allSecrets)
 

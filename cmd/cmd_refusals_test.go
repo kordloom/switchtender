@@ -29,11 +29,99 @@ func setDuration(t *testing.T, p *time.Duration, value time.Duration) {
 	*p = value
 }
 
-// tempDB returns a fresh SQLite path inside the test's own directory, so a command that opens a
-// store never touches a real install or the repository.
+// tempDB returns the path of a new, empty install database inside the test's own directory, so a
+// command that opens a store never touches a real install or the repository.
 func tempDB(t *testing.T) string {
 	t.Helper()
-	return filepath.Join(t.TempDir(), "switchtender.db")
+	return makeDB(t, filepath.Join(t.TempDir(), "switchtender.db"))
+}
+
+// installIdentity reads the producer identity beside db, the key the commands under test signed with.
+func installIdentity(db string) (audit.Identity, error) {
+	dir, err := identityDir(db)
+	if err != nil {
+		return audit.Identity{}, err
+	}
+	return audit.LoadIdentityForStore(db, dir)
+}
+
+// makeDB creates an empty install database at path and returns the path. The commands under test
+// refuse a database that does not exist, since only serve, init, demo, and restore create one.
+func makeDB(t *testing.T, path string) string {
+	t.Helper()
+	bundle, err := openBundle(path)
+	if err != nil {
+		t.Fatalf("create the test database: %v", err)
+	}
+	if err := bundle.Close(); err != nil {
+		t.Fatalf("close the test database: %v", err)
+	}
+	return path
+}
+
+// TestCommandsOnAnInstallRefuseAMissingDatabase pins what a command that works on an existing
+// install does when --db names a SQLite file that is not there. Opening one created it, so a token
+// minted from the wrong directory, or with --db left off, landed in a new empty database the server
+// never reads, and the command reported success. Each now refuses, names the path, and leaves no file.
+func TestCommandsOnAnInstallRefuseAMissingDatabase(t *testing.T) {
+	tests := []struct {
+		Name string
+		Run  func(t *testing.T, db string) error
+	}{{ // Test 0: Minting a token.
+		Name: "token new",
+		Run: func(t *testing.T, db string) error {
+			setString(t, &tokenDB, db)
+			setString(t, &tokenName, "ci")
+			setString(t, &tokenUser, "")
+			setBool(t, &tokenAgent, false)
+			setDuration(t, &tokenTTL, 0)
+			return runTokenNew(testCommand(), nil)
+		},
+	}, { // Test 1: Listing accounts.
+		Name: "user list",
+		Run: func(t *testing.T, db string) error {
+			setString(t, &userDB, db)
+			return runUserList(testCommand(), nil)
+		},
+	}, { // Test 2: Seeding the starter templates.
+		Name: "examples",
+		Run: func(t *testing.T, db string) error {
+			setString(t, &examplesDB, db)
+			return runExamples(testCommand(), nil)
+		},
+	}, { // Test 3: Exporting the audit bundle.
+		Name: "audit bundle",
+		Run: func(t *testing.T, db string) error {
+			setString(t, &bundleDB, db)
+			setString(t, &bundleOut, filepath.Join(t.TempDir(), "bundle.json"))
+			setInt(t, &bundleLimit, 0)
+			setString(t, &bundleKeyDir, t.TempDir())
+			return runAuditBundle(testCommand(), nil)
+		},
+	}, { // Test 4: Backing up, which would otherwise report a clean backup of an empty database.
+		Name: "backup",
+		Run: func(t *testing.T, db string) error {
+			setString(t, &backupDB, db)
+			setString(t, &backupOut, filepath.Join(t.TempDir(), "backup.json"))
+			return runBackup(testCommand(), nil)
+		},
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			// Not parallel: the commands read package-level flag variables.
+			db := filepath.Join(t.TempDir(), "switchtender.db")
+			err := test.Run(t, db)
+			if !errors.Is(err, errNoDatabase) {
+				t.Fatalf("%s against a missing database: error = %v, want errNoDatabase", test.Name, err)
+			}
+			if !strings.Contains(err.Error(), db) || !strings.Contains(err.Error(), "--db") {
+				t.Errorf("%s: the refusal does not name the path and the flag: %v", test.Name, err)
+			}
+			if _, statErr := os.Stat(db); statErr == nil {
+				t.Errorf("%s created %s while refusing it", test.Name, db)
+			}
+		})
+	}
 }
 
 // TestTokenNewRefusesAnAgentTokenWithNoAccount proves an agent token cannot be minted unbound.
@@ -883,7 +971,8 @@ func TestRecordCLIFailsTheCommandItCannotRecord(t *testing.T) {
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			err := recordCLIChange(context.Background(), test.Audits, "/cli/test", test.Body)
+			err := recordCLIChange(context.Background(), test.Audits, filepath.Join(t.TempDir(), "st.db"), "/cli/test",
+				test.Body)
 			if (err != nil) != test.WantErr {
 				t.Fatalf("%s: recordCLIChange() error = %v, want error %v",
 					test.Name, err, test.WantErr)
@@ -920,5 +1009,93 @@ func TestCLIActorNamesTheHostAccount(t *testing.T) {
 	}
 	if got == "cli:" {
 		t.Error("cliActor() named nobody; an entry with an empty actor records a change by no one")
+	}
+}
+
+// TestChoiceFlagsRefuseValuesTheyDoNotKnow pins the three choice flags that coerced an unknown value
+// to their default. A typo in --container-runtime ran docker, one in --container-pull-policy pulled
+// only missing images, and one in --notify-on emailed on failures only, with nothing saying so.
+func TestChoiceFlagsRefuseValuesTheyDoNotKnow(t *testing.T) {
+	tests := []struct {
+		Name     string
+		Run      func() error
+		Set      func(t *testing.T)
+		WantFlag string
+	}{{ // Test 0: serve refuses an unknown runtime.
+		Name: "serve runtime", Run: func() error { return runServe(testCommand(), nil) },
+		Set: func(t *testing.T) { setString(t, &containerRuntime, "rkt") }, WantFlag: "--container-runtime",
+	}, { // Test 1: serve refuses an unknown pull policy.
+		Name: "serve pull policy", Run: func() error { return runServe(testCommand(), nil) },
+		Set: func(t *testing.T) { setString(t, &containerPullPolicy, "sometimes") }, WantFlag: "--container-pull-policy",
+	}, { // Test 2: serve refuses an unknown notification trigger.
+		Name: "serve notify-on", Run: func() error { return runServe(testCommand(), nil) },
+		Set: func(t *testing.T) { setString(t, &notifyOn, "finished") }, WantFlag: "--notify-on",
+	}, { // Test 3: worker refuses an unknown runtime too.
+		Name: "worker runtime", Run: func() error { return runWorker(testCommand(), nil) },
+		Set: func(t *testing.T) { setString(t, &containerRuntime, "rkt") }, WantFlag: "--container-runtime",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			// Not parallel: the commands read package-level flag variables.
+			setString(t, &containerRuntime, "docker")
+			setString(t, &containerPullPolicy, "missing")
+			setString(t, &notifyOn, "failure")
+			setString(t, &serveDB, tempDB(t))
+			setString(t, &workerDB, tempDB(t))
+			test.Set(t)
+			err := test.Run()
+			if !errors.Is(err, ErrUsage) {
+				t.Fatalf("%s: error = %v, want ErrUsage", test.Name, err)
+			}
+			if !strings.Contains(err.Error(), test.WantFlag) {
+				t.Errorf("%s: error = %v, want it to name %s", test.Name, err, test.WantFlag)
+			}
+		})
+	}
+}
+
+// TestServeChoicesAcceptEveryDocumentedValue pins that validation refuses only what the flags never
+// accepted, so no install that started before is refused now. It goes through the same checks serve
+// and worker run.
+func TestServeChoicesAcceptEveryDocumentedValue(t *testing.T) {
+	for _, runtime := range []string{"docker", "podman"} {
+		for _, pull := range []string{"always", "missing", "never"} {
+			for _, on := range []string{"failure", "finish"} {
+				// Not parallel: the checks read package-level flag variables.
+				setString(t, &containerRuntime, runtime)
+				setString(t, &containerPullPolicy, pull)
+				setString(t, &notifyOn, on)
+				if err := checkServeChoices(); err != nil {
+					t.Errorf("runtime %s, pull %s, notify-on %s refused: %v", runtime, pull, on, err)
+				}
+			}
+		}
+	}
+}
+
+// TestServeChoicesRefuseUnknownValues checks the refusal itself, without starting a command, so a
+// regression fails here rather than starting a server in the test above.
+func TestServeChoicesRefuseUnknownValues(t *testing.T) {
+	tests := []struct {
+		Runtime, Pull, On string
+		WantFlag          string
+	}{{ // Test 0: An unknown runtime.
+		Runtime: "rkt", Pull: "missing", On: "failure", WantFlag: "--container-runtime",
+	}, { // Test 1: An unknown pull policy.
+		Runtime: "docker", Pull: "sometimes", On: "failure", WantFlag: "--container-pull-policy",
+	}, { // Test 2: An unknown notification trigger.
+		Runtime: "docker", Pull: "missing", On: "finished", WantFlag: "--notify-on",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			// Not parallel: the checks read package-level flag variables.
+			setString(t, &containerRuntime, test.Runtime)
+			setString(t, &containerPullPolicy, test.Pull)
+			setString(t, &notifyOn, test.On)
+			err := checkServeChoices()
+			if !errors.Is(err, ErrUsage) || !strings.Contains(err.Error(), test.WantFlag) {
+				t.Errorf("checkServeChoices() = %v, want ErrUsage naming %s", err, test.WantFlag)
+			}
+		})
 	}
 }

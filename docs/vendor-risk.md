@@ -8,8 +8,8 @@ here is checkable against the source, the signed releases, or your own running i
 
 KordLoom LLC, a United States company. SwitchTender is source-available under BSL 1.1: read,
 modify, self-host, and run it in production for your own organization, free. Each release
-converts to Apache 2.0 two years after it ships. The bus-factor question is answered in full on
-the [continuity page](continuity.md): the install keeps running, the evidence stays verifiable
+converts to Apache 2.0 two years after it ships. What happens to your install if KordLoom stops is
+answered in full on the [continuity page](continuity.md): the install keeps running, the evidence stays verifiable
 offline forever, and every release from v1.72.0 onward carries its own source tarball inside the signed manifest.
 
 ## Where it runs and what data leaves

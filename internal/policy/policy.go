@@ -396,6 +396,13 @@ type Store interface {
 	Delete(ctx context.Context, id string) error
 }
 
+// ReadOnlyStore is a Store whose policies are changed somewhere else, so every write through it is
+// refused. A caller asks before it runs any other check, since no other answer applies.
+type ReadOnlyStore interface {
+	// ReadOnly returns why writes are refused, wrapping ErrReadOnly.
+	ReadOnly() error
+}
+
 // NewPolicy returns a policy with the given name and a fresh id, its plan-content check disabled so a
 // policy created without a destroy threshold never holds a run on plan content. Callers set the
 // matching criteria and, to enable the plan-content gate, a non-negative MaxDestroy.

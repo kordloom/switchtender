@@ -170,7 +170,7 @@ function mountListFilter() {
 // The script tag sits at the end of the body, so the flag the server stamped there is readable
 // here.
 function closingBody(demo, own) {
-	return isReadOnly() ? demo : own;
+	return isDemo() ? demo : own;
 }
 
 // TOURS is the guided-tour registry. Each tour runs on one page and walks a sequence of steps; a

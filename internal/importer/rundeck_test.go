@@ -410,19 +410,27 @@ func TestRundeckAcceptsQuotedScalars(t *testing.T) {
 	}
 }
 
-// TestRundeckReportsTheFieldNotTheShape checks a bad field inside a bare job list is reported
-// against that list rather than against the wrapped shape the document is not using.
+// TestRundeckReportsTheFieldNotTheShape checks a job with a bad field is skipped with a sentence that
+// names the job and the value, while the jobs around it import. The first version refused the whole
+// export over one field, and blamed the top-level shape for it, which sent an operator editing a
+// file that was fine.
 func TestRundeckReportsTheFieldNotTheShape(t *testing.T) {
 	t.Parallel()
-	const export = "- name: broken\n  nodefilters:\n    dispatch:\n      threadcount: many\n"
-	_, err := FromRundeck("prod")([]byte(export), testNow)
-	if err == nil {
-		t.Fatal("FromRundeck() error = nil, want a refusal naming the bad value")
+	const export = "- name: fine\n  sequence:\n    commands:\n      - exec: /bin/ok\n" +
+		"- name: broken\n  nodefilters:\n    dispatch:\n      threadcount: many\n"
+	plan, err := FromRundeck("prod")([]byte(export), testNow)
+	if err != nil {
+		t.Fatalf("FromRundeck() error = %v, want the broken job skipped and the other imported", err)
 	}
-	if strings.Contains(err.Error(), "into struct") {
-		t.Errorf("error blames the top-level shape for a bad field: %v", err)
+	if len(plan.Templates) != 1 || plan.Templates[0].Name != "fine" {
+		t.Fatalf("templates = %v, want only the job that reads", plan.Templates)
 	}
-	if !strings.Contains(err.Error(), "many") {
-		t.Errorf("error does not name the value that could not be read: %v", err)
+	w, ok := warningContaining(t, plan.Warnings, `job "broken" was skipped`, "many")
+	if !ok {
+		t.Fatalf("the skipped job and the value that did not read were not named.\nwarnings: %v",
+			plan.Warnings)
+	}
+	if strings.Contains(w, "into struct") || strings.Contains(w, "!!seq") {
+		t.Errorf("the warning blames the shape for a bad field: %s", w)
 	}
 }

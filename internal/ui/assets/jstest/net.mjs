@@ -63,7 +63,8 @@ export function installFetch(app, routes, options) {
 		// urls lists the URLs requested so far.
 		get urls() { return handle.calls.map((c) => c.url); },
 
-		// route adds a matcher, which wins over any earlier one it overlaps.
+		// route adds a matcher. The first route that matches a request answers it, so one added
+		// later answers only what no earlier route matched: use only to change an answer.
 		route(matcher, response) {
 			handle.routes.push({ matcher, response });
 			return handle;

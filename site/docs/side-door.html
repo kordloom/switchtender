@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>The side door | SwitchTender docs</title>
+	<meta name="description" content="SwitchTender governs every change that goes through it. The side door is every way a change reaches production without going through it: a person&#39;s own SSH key, a cloud console login, a script run">
+	<link rel="canonical" href="https://switchtender.com/docs/side-door">
+	<meta property="og:title" content="The side door | SwitchTender docs">
+	<meta property="og:description" content="SwitchTender governs every change that goes through it. The side door is every way a change reaches production without going through it: a person&#39;s own SSH key, a cloud console login, a script run">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="https://switchtender.com/docs/side-door">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
+	<meta name="twitter:card" content="summary_large_image">
+	<meta name="twitter:title" content="The side door | SwitchTender docs">
+	<meta name="twitter:description" content="SwitchTender governs every change that goes through it. The side door is every way a change reaches production without going through it: a person&#39;s own SSH key, a cloud console login, a script run">
+	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
+	<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "TechArticle",
+ "about": {
+  "@type": "SoftwareApplication",
+  "name": "SwitchTender",
+  "url": "https://switchtender.com/"
+ },
+ "description": "SwitchTender governs every change that goes through it. The side door is every way a change reaches production without going through it: a person's own SSH key, a cloud console login, a script run",
+ "headline": "The side door",
+ "isPartOf": {
+  "@type": "WebSite",
+  "name": "SwitchTender docs",
+  "url": "https://switchtender.com/docs/"
+ },
+ "publisher": {
+  "@type": "Organization",
+  "name": "KordLoom LLC",
+  "url": "https://kordloom.com"
+ },
+ "url": "https://switchtender.com/docs/side-door"
+}
+</script>
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=2">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/kordloom/switchtender">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door" class="active">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="the-side-door">The side door</h1>
+<p>SwitchTender governs every change that goes through it. The side door is every way a change reaches
+production without going through it: a person's own SSH key, a cloud console login, a script run
+from a laptop. No audit system records what it never saw, so the first question a security team asks
+is how that door closes, and what happens when something still comes through it.</p>
+<p>The answer has three parts. Agents never get a side door. People stop needing one. What still comes
+through turns up.</p>
+<h2 id="agents-never-get-one">Agents never get one</h2>
+<p>An agent holds one credential, its SwitchTender token, minted with <code>--agent</code>. The token is capped at
+operator whatever account it is bound to, so the agent can submit runs and can never approve one,
+manage identity or access, or manage secrets. The SSH keys, cloud logins, and vault passwords its runs
+use are sealed on the server and decrypted only at execution, so the agent never sees them.</p>
+<p>An agent that holds only its SwitchTender token has no way around the gate. For that actor, the
+recorded history and the actual history are the same thing. The <a href="/docs/agents">agent guide</a> walks
+through the setup, and <a href="/docs/agent-red-team">the red team transcript</a> is the attempt to break it.</p>
+<h2 id="people-stop-needing-one">People stop needing one</h2>
+<p>A person keeps a side door open by holding a standing credential to production. SwitchTender removes
+the reason to hold one.</p>
+<ul>
+<li><strong>It holds the keys.</strong> SSH keys, machine logins, and cloud credentials live in SwitchTender, sealed
+at rest and decrypted only for the run that uses them. Operators launch runs through the gate
+without ever handling the key.</li>
+<li><strong>Or it mints them per run.</strong> A Vault dynamic source mints a fresh credential for each run and
+revokes it when the run ends, and an AWS STS source hands each run short-lived role credentials
+that expire on their own. A leaked value is useless minutes later, and there is no standing key to
+leave on a laptop.</li>
+<li><strong>Or the vault you already run keeps them.</strong> HashiCorp Vault, CyberArk, AWS Secrets Manager, Azure
+Key Vault, Google Secret Manager, and 1Password are all read at launch, so the credential stays in
+the system you already trust. <a href="/docs/secrets">Secrets</a> lists every source.</li>
+</ul>
+<p>Once the keys live there, taking standing SSH and console write access away from people is a decision
+your organization can make without stopping work, because the gate is how the work gets done. Keep
+one emergency credential outside SwitchTender, sealed and logged by whatever process your security
+team already runs for break-glass access.</p>
+<h2 id="what-still-comes-through-turns-up">What still comes through turns up</h2>
+<p>A change made around the gate still leaves a mark. Schedule a dry run, Ansible's check mode or a
+Terraform or OpenTofu plan, and every check compares each host and working directory with what your
+automation says it should be. A config file edited by hand over SSH, or a security group changed in a
+cloud console, shows up as <a href="/docs/drift">drift</a> on the next check. One click proposes the fix, held for
+approval like any other change, so the repair goes back through the gate.</p>
+<h2 id="what-this-leaves">What this leaves</h2>
+<ul>
+<li>Drift says what diverged, not who changed it or exactly when. The hosts' own logs, or CloudTrail,
+answer who.</li>
+<li>Drift only sees state your automation declares. A cron job no playbook mentions is invisible to it.</li>
+<li>A change turns up at the next scheduled check, not the moment it happens. The interval is yours to
+set.</li>
+<li>Taking standing access away from people is your organization's decision. SwitchTender makes it
+workable, and the decision stays yours.</li>
+</ul>
+<p>The <a href="/docs/threat-model">threat model</a> covers the rest of what the gate does and does not defend against.</p>
+
+		</main>
+	</div>
+	<div class="foot-legal" style="text-align:center;margin:26px auto 34px;font-size:12px;opacity:.75">SwitchTender&trade; is a trademark of KordLoom LLC. Copyright 2026 KordLoom LLC.</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

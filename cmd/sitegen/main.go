@@ -34,7 +34,7 @@ var order = []string{
 	"tutorial-set-a-secret", "tutorial-migrate",
 	"tool-ansible", "tool-bash", "tool-terraform", "tool-opentofu", "tool-python", "tool-powershell", "tool-go",
 	"concepts", "reliability", "configuration", "desktop", "features", "secrets", "drift",
-	"compliance", "threat-model", "agent-red-team", "sample-evidence-pack", "api", "comparison",
+	"compliance", "threat-model", "side-door", "agent-red-team", "sample-evidence-pack", "api", "comparison",
 }
 
 // titles overrides the sidebar label for a slug where its first heading reads poorly.
@@ -136,8 +136,34 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if err := copyInstaller(); err != nil {
+		return err
+	}
 	fmt.Printf("sitegen: wrote %d pages and the sitemap to %s, and refreshed the entity on %d "+
 		"hand-written pages\n", len(slugs), outDir, entities)
+	return nil
+}
+
+// installerSource is the install script the repository maintains, and installerSite is the copy the
+// site serves at /install.sh.
+const (
+	installerSource = "deploy/install.sh"
+	installerSite   = "site/install.sh"
+)
+
+// copyInstaller publishes the maintained install script as the one the site serves. They were two
+// files kept by hand and a fix landed in only one: for two weeks the script people pipe into a shell
+// printed bare commands that failed and ignored PREFIX, while the repository's copy was already
+// fixed. The served copy is generated now, so CI's check that generated content is current refuses
+// a change to one without the other.
+func copyInstaller() error {
+	body, err := os.ReadFile(installerSource)
+	if err != nil {
+		return fmt.Errorf("read installer: %w", err)
+	}
+	if err := os.WriteFile(installerSite, body, 0o755); err != nil {
+		return fmt.Errorf("write installer: %w", err)
+	}
 	return nil
 }
 

@@ -364,7 +364,12 @@ async function loadSingle(run) {
 	renderDetail();
 	setStatus("");
 	if (!isTerminal(run.status)) {
-		await openStream(run.id, detailState.lastSeq);
+		// What the run printed before the page arrived is read from storage, and the stream picks
+		// up exactly where that read ended. Opened with no log cursor, the stream began at the log's
+		// current end, so the first lines were lost, and a run that finished before the stream
+		// connected showed no output at all.
+		const logSeq = await loadStoredLog(run.id, true);
+		await openStream(run.id, detailState.lastSeq, logSeq);
 		return;
 	}
 	await loadStoredLog(run.id);
@@ -548,15 +553,22 @@ function wireLogDownload(runId) {
 //
 // It reads the tail rather than the whole log. The pane caps itself at logCap anyway, and a finished
 // run's log can be far larger than that.
-async function loadStoredLog(runId) {
+//
+// It returns the store sequence the read ended at, which a live run's stream resumes from, or zero
+// when there was nothing to read or the server did not say.
+async function loadStoredLog(runId, live) {
+	let seq = 0;
 	try {
 		// Ask for the tail rather than the whole log. The pane caps itself at logCap anyway, and it
 		// used to get there by pulling the entire log into the browser and slicing it: a 213 MB log
 		// crossed the network and went through the tab to display a quarter of a megabyte of it.
 		const res = await fetchAuthed("/runs/" + runId + "/logs?tail=" + logCap);
-		if (!res.ok) return;
+		if (!res.ok) return seq;
+		const header = res.headers && res.headers.get ? res.headers.get("Switchtender-Log-Seq") : null;
+		const parsed = parseInt(header || "0", 10);
+		if (Number.isFinite(parsed) && parsed > 0) seq = parsed;
 		const text = await res.text();
-		if (!text.trim()) return;
+		if (!text.trim()) return seq;
 		detailState.logRaw = text.slice(-logCap);
 		// Say so when this is a tail, or the reader takes the first line on screen for the first
 		// line of the run.
@@ -566,19 +578,21 @@ async function loadStoredLog(runId) {
 		renderLogView();
 		const head = document.querySelector("#log-panel h2");
 		if (head) {
+			const label = live ? "Live output" : "Output";
 			head.textContent = detailState.logOmitted > 0
-				? "Output, last " + fmtBytes(detailState.logRaw.length) + " of " +
+				? label + ", last " + fmtBytes(detailState.logRaw.length) + " of " +
 					fmtBytes(detailState.logOmitted + detailState.logRaw.length)
-				: "Output";
+				: label;
 		}
 		document.getElementById("log-panel").hidden = false;
-		// A finished run is not live, so the pane opens at the end, where a failure is.
+		// The pane opens at the end, where a failure is and where a live run's next line lands.
 		const pre = document.getElementById("log");
 		pre.scrollTop = pre.scrollHeight;
 	} catch {
 		// A log that cannot be read leaves the pane hidden rather than showing an empty box: the
 		// full log button is still there and says the same thing more honestly.
 	}
+	return seq;
 }
 
 // GRID_COALESCE_MS is how long a burst of structural events is allowed to gather before the grid is
@@ -682,12 +696,17 @@ async function openStream(runId, afterSeq, logAfterSeq) {
 	});
 	source.addEventListener("end", async () => {
 		source.close();
+		streamState.ended = true;
 		const indicator = document.getElementById("live-indicator");
 		if (indicator) indicator.hidden = true;
 		try {
 			detailState.run = await getJSON("/runs/" + runId);
 			renderHeader(detailState.run);
+			offerRerun(detailState.run);
 		} catch (_) { /* keep the last header on refresh failure */ }
+		// The ended run's stored log is the record, so a pane the stream left empty is filled from
+		// it rather than left blank under a run that printed something.
+		if (!(detailState.logRaw || "").trim()) await loadStoredLog(runId);
 	});
 }
 
@@ -984,9 +1003,13 @@ function renderHeader(run) {
 		if (!known) {
 			resolveInventoryName(run.inventory_id, link);
 		}
-		const inv = field("Inventory", null, link);
-		inv.querySelector(".value").appendChild(copyButton(run.inventory_id, "Copy the inventory id"));
-		el.appendChild(inv);
+		// field draws no value span around a node it is handed, so the span is built here. Asking
+		// the field for one threw, and the page reported this run as missing and drew no Approve.
+		const value = document.createElement("span");
+		value.className = "value";
+		value.appendChild(link);
+		value.appendChild(copyButton(run.inventory_id, "Copy the inventory id"));
+		el.appendChild(field("Inventory", null, value));
 	}
 	if (run.shard_count) {
 		el.appendChild(field("Shards", String(run.shard_count)));

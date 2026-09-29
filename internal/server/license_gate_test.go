@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -158,4 +160,42 @@ func TestProGatesHoldTheLine(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "Pro license does not include") {
 		t.Errorf("full-engine refusal does not name the Pro tier: %s", rec.Body.String())
 	}
+}
+
+// TestAFilePinnedPolicySetAnswersReadOnlyBeforeTheLicense pins the refusal a policy write gets on an
+// install whose policies come from a file. The license checks ran first, so a Community install whose
+// file held its one policy was told to buy Pro for a write that no tier accepts, while an empty file
+// got the documented 409.
+func TestAFilePinnedPolicySetAnswersReadOnlyBeforeTheLicense(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "policies.yml")
+	if err := os.WriteFile(path, []byte("policies:\n  - name: hold-prod\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	store, err := policy.NewFileStore(path)
+	if err != nil {
+		t.Fatalf("NewFileStore() error = %v", err)
+	}
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), WithPolicies(store)).Handler()
+	tests := []struct {
+		Method, Path, Body string
+	}{{ // Test 0: A second plain policy, which Community would refuse as over its cap.
+		Method: http.MethodPost, Path: "/v1/policies", Body: `{"name":"hold stage"}`,
+	}, { // Test 1: A full-engine policy, which Community would refuse as Team.
+		Method: http.MethodPost, Path: "/v1/policies", Body: `{"name":"deny","effect":"deny"}`,
+	}, { // Test 2: An edit into the full engine.
+		Method: http.MethodPut, Path: "/v1/policies/pol_x", Body: `{"name":"deny","effect":"deny"}`,
+	}}
+	asCommunity(t, func() {
+		for testNum, test := range tests {
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(test.Method, test.Path, strings.NewReader(test.Body)))
+			if rec.Code != http.StatusConflict {
+				t.Errorf("test %d: %s %s = %d, want 409 read-only: %s", testNum, test.Method, test.Path,
+					rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), path) {
+				t.Errorf("test %d: the refusal does not name the file to change: %s", testNum, rec.Body.String())
+			}
+		}
+	})
 }

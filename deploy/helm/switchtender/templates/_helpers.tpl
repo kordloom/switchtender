@@ -3,9 +3,13 @@
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-{{/* Fully qualified app name. */}}
+{{/* Fully qualified app name, or fullnameOverride when it is set. */}}
 {{- define "switchtender.fullname" -}}
+{{- if .Values.fullnameOverride -}}
+{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
 {{- printf "%s-%s" .Release.Name (include "switchtender.name" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
 {{- end -}}
 
 {{/* Common labels. */}}

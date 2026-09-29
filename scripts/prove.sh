@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 #
 # prove.sh walks the one claim this product is built on, end to end, against a server it starts
-# itself. Nothing here is staged: every call is a real HTTP request to a real SwitchTender, the
-# deletion it performs genuinely destroys a directory, and the verification at the end genuinely
-# fails once a byte is altered.
+# itself. Every call is a real HTTP request to a real SwitchTender, made with a real token: the agent
+# is an agent token, the person who approves holds a person's token, and the server decides what
+# each may do. The deletion it performs genuinely destroys a directory, and the verification at the
+# end genuinely fails once a byte is altered.
 #
 # It is written as curl rather than as a polished command on purpose. The audience for this is
 # somebody who does not believe the claim yet, and a wall of raw requests they can read beats a
@@ -11,16 +12,19 @@
 #
 #   ./scripts/prove.sh [path-to-switchtender]
 #
-# It needs a SwitchTender binary, curl, and python3. It writes only inside its own temporary
-# directory and removes it on exit.
+# With no argument it uses the switchtender on PATH. PROVE_PORT picks the loopback port (default
+# 18799), and SWITCHTENDER_LICENSE, when it holds a Team license, shows the full rule rather than the
+# Community fallback. It needs curl and python3, writes only inside its own temporary directory, and
+# removes it on exit.
 
 set -euo pipefail
 
-BIN="${1:-./.bin/switchtender}"
+BIN="${1:-$(command -v switchtender || echo ./.bin/switchtender)}"
 PORT="${PROVE_PORT:-18799}"
 API="http://127.0.0.1:${PORT}"
 WORK="$(mktemp -d)"
 SANDBOX="$WORK/sandbox"
+DB="$WORK/prove.db"
 trap 'rm -rf "$WORK"; [ -n "${SRV:-}" ] && kill "$SRV" 2>/dev/null || true' EXIT
 
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
@@ -33,13 +37,30 @@ command -v python3 >/dev/null || fail "python3 is required"
 
 jqp() { python3 -c "import sys,json;d=json.load(sys.stdin);print($1)"; }
 
+step "0. Two people and an agent, each with a token of their own"
+# The accounts exist before the server starts, so it enforces tokens from its first request: a
+# server with no tokens on a loopback bind answers anybody, which would make every refusal below
+# meaningless. The passwords are random and never used; everything here signs in with a token.
+# init creates the install and its first admin, the approver, the way any install starts. The user
+# and token commands work on an existing install and refuse a database that is not there.
+secret() { python3 -c 'import secrets;print(secrets.token_urlsafe(24))'; }
+SWITCHTENDER_ADMIN_PASSWORD="$(secret)" \
+  "$BIN" init --db "$DB" --admin approver --config "$WORK/switchtender.env" >/dev/null 2>&1 \
+  || fail "init could not create the install"
+SWITCHTENDER_PASSWORD="$(secret)" "$BIN" user new dev-lead --role operator --db "$DB" >/dev/null
+# The agent's token is bound to the person it acts for, so the record names both, and --agent caps
+# it below admin whatever that person's role: it can ask for changes and can never decide on one.
+AGENT=$("$BIN" token new --user dev-lead --name release-agent --agent --db "$DB" | jqp 'd["token"]')
+PERSON=$("$BIN" token new --user approver --name approver --db "$DB" | jqp 'd["token"]')
+ok "dev-lead (operator), approver (admin), and release-agent, an agent acting for dev-lead"
+
 step "Starting a SwitchTender on $API"
 mkdir -p "$SANDBOX"
 echo "the quarterly backups nobody kept a second copy of" > "$SANDBOX/backups.txt"
-SWITCHTENDER_ENCRYPTION_KEY=prove-key-not-a-secret \
-SWITCHTENDER_ENCRYPTION_SALT=prove-salt \
+SWITCHTENDER_ENCRYPTION_KEY="$(python3 -c 'import secrets;print(secrets.token_hex(32))')" \
+SWITCHTENDER_ENCRYPTION_SALT="$(python3 -c 'import secrets;print(secrets.token_hex(16))')" \
 SWITCHTENDER_LICENSE="${SWITCHTENDER_LICENSE:-}" \
-  "$BIN" serve --addr "127.0.0.1:${PORT}" --db "$WORK/prove.db" >"$WORK/server.log" 2>&1 &
+  "$BIN" serve --addr "127.0.0.1:${PORT}" --db "$DB" >"$WORK/server.log" 2>&1 &
 SRV=$!
 for _ in $(seq 1 60); do
   [ "$(curl -s -o /dev/null -w '%{http_code}' "$API/healthz" || true)" = "200" ] && break
@@ -47,7 +68,9 @@ for _ in $(seq 1 60); do
 done
 [ "$(curl -s -o /dev/null -w '%{http_code}' "$API/healthz")" = "200" ] \
   || fail "server did not come up; see $WORK/server.log"
-ok "running, and holding a sandbox at $SANDBOX"
+[ "$(curl -s -o /dev/null -w '%{http_code}' "$API/v1/runs")" = "401" ] \
+  || fail "the server answered without a token, so nothing below would prove anything"
+ok "running, answering nobody without a token, and holding a sandbox at $SANDBOX"
 
 step "1. A policy: nothing irreversible runs without a second person"
 # The rule this product is actually about holds on the reversibility grade and refuses a
@@ -55,7 +78,8 @@ step "1. A policy: nothing irreversible runs without a second person"
 # Community does have. The fallback is announced rather than hidden: a demonstration that quietly
 # proves something weaker than it claims is the thing this whole script exists to be the opposite
 # of.
-POLICY=$(curl -sS -X POST "$API/v1/policies" -H 'content-type: application/json' -d '{
+POLICY=$(curl -sS -X POST "$API/v1/policies" -H "authorization: Bearer $PERSON" \
+  -H 'content-type: application/json' -d '{
   "name": "irreversible needs a second pair of eyes",
   "reversibility": "irreversible",
   "effect": "require_approval",
@@ -75,7 +99,8 @@ if [ -z "$POLICY_ID" ]; then
 '
       printf '        SWITCHTENDER_LICENSE to a Team license to see the real rule.
 '
-      POLICY=$(curl -sS -X POST "$API/v1/policies" -H 'content-type: application/json' -d '{
+      POLICY=$(curl -sS -X POST "$API/v1/policies" -H "authorization: Bearer $PERSON" \
+  -H 'content-type: application/json' -d '{
         "name": "hold every bash run",
         "tool": "bash"
       }')
@@ -92,21 +117,22 @@ fi
 
 step "2. An agent asks to delete the backups"
 SUBMIT=$(curl -sS -X POST "$API/v1/runs" -H 'content-type: application/json' \
-  -H 'x-switchtender-actor: release-agent' -H 'x-switchtender-actor-type: agent' -d "{
+  -H "authorization: Bearer $AGENT" -d "{
     \"tool\": \"bash\",
     \"command\": \"rm -rf $SANDBOX\",
     \"labels\": {\"change\": \"prove\"}
   }")
 RUN=$(echo "$SUBMIT" | jqp 'd.get("id","")')
 [ -n "$RUN" ] || fail "run was not accepted: $SUBMIT"
-ok "run $RUN submitted by an agent, not a person"
+ok "run $RUN submitted with the agent's token, not a person's"
 
 step "3. SwitchTender grades it before anything executes"
-DETAIL=$(curl -sS "$API/v1/runs/$RUN")
+DETAIL=$(curl -sS -H "authorization: Bearer $PERSON" "$API/v1/runs/$RUN")
 STATUS=$(echo "$DETAIL" | jqp 'd.get("status","")')
 echo "$DETAIL" | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
+print('   asked by     :', d.get('actor'), '(' + str(d.get('actor_type')) + ')')
 print('   status       :', d.get('status'))
 print('   risk         :', (d.get('risk') or {}).get('level'))
 print('   reversibility:', (d.get('reversibility') or {}).get('class'))
@@ -119,32 +145,21 @@ ls "$SANDBOX" | sed 's/^/     /'
 
 step "4. The agent tries to approve its own request"
 SELF=$(curl -sS -o "$WORK/self.json" -w '%{http_code}' -X POST "$API/v1/runs/$RUN/approve" \
-  -H 'x-switchtender-actor: release-agent' -H 'x-switchtender-actor-type: agent' -d '{}')
-if [ "$TIER" = "team" ]; then
-  if [ "$SELF" = "200" ]; then
-    fail "the agent approved its own run, which is the whole thing this is supposed to prevent"
-  fi
-  ok "refused with HTTP $SELF: $(jqp 'd.get("error","")' < "$WORK/self.json")"
-else
-  printf '   \033[33mnote\033[0m Community cannot demand a distinct approver, so this install let the
-'
-  printf '        agent release its own hold (HTTP %s). That is the separation of duties Team buys,
-' "$SELF"
-  printf '        and it is the reason this step exists.
-'
+  -H "authorization: Bearer $AGENT" -d '{}')
+if [ "$SELF" = "200" ]; then
+  fail "the agent approved its own run, which is the whole thing this is supposed to prevent"
 fi
+ok "refused with HTTP $SELF: an agent token can ask for a change and never decide on one"
 
 step "5. A person approves it"
 APPROVE=$(curl -sS -o "$WORK/approve.json" -w '%{http_code}' -X POST "$API/v1/runs/$RUN/approve" \
-  -H 'x-switchtender-actor: a-human' -H 'x-switchtender-actor-type: user' -d '{}')
-if [ "$TIER" = "team" ] && [ "$APPROVE" != "200" ]; then
-  fail "approval failed with HTTP $APPROVE: $(cat "$WORK/approve.json")"
-fi
-ok "approved by a-human, bound to the exact specification that was graded"
+  -H "authorization: Bearer $PERSON" -d '{}')
+[ "$APPROVE" = "200" ] || fail "approval failed with HTTP $APPROVE: $(cat "$WORK/approve.json")"
+ok "approved by approver, bound to the exact specification that was graded"
 
 step "6. It runs, and the deletion is real"
 for _ in $(seq 1 45); do
-  FINAL=$(curl -sS "$API/v1/runs/$RUN" | jqp 'd.get("status","")')
+  FINAL=$(curl -sS -H "authorization: Bearer $PERSON" "$API/v1/runs/$RUN" | jqp 'd.get("status","")')
   case "$FINAL" in succeeded|failed|canceled) break ;; esac
   sleep 1
 done
@@ -155,7 +170,7 @@ fi
 ok "the sandbox is gone. Nothing here was simulated."
 
 step "7. The trail says how far it can be trusted"
-curl -sS "$API/v1/audit/verify" | python3 -c "
+curl -sS -H "authorization: Bearer $PERSON" "$API/v1/audit/verify" | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
 print('   ok       :', d.get('ok'))
@@ -166,20 +181,34 @@ print('   level    :', d.get('level'), d.get('level_name'))
 ok "a level, not a bare ok. Anchor it and the level rises; this install never did."
 
 step "8. The signed evidence bundle"
-curl -sS "$API/v1/audit/bundle" -o "$WORK/bundle.json"
-python3 -c "
-import json
-d=json.load(open('$WORK/bundle.json'))
-print('   claims    :', len(d.get('claims',[])))
-print('   producer  :', (d.get('producer') or {}).get('key_id','')[:24], '...')
-print('   signatures:', len(d.get('signatures',[])))
-"
-ok "written to $WORK/bundle.json"
+curl -sS -H "authorization: Bearer $PERSON" "$API/v1/audit/bundle" -o "$WORK/bundle.json"
+python3 - "$WORK/bundle.json" <<'PY' || fail "the bundle does not record who asked for the deletion"
+import json, sys
+d = json.load(open(sys.argv[1]))
+print('   claims    :', len(d.get('claims', [])))
+print('   producer  :', (d.get('producer') or {}).get('key_id', '')[:24], '...')
+print('   signatures:', len(d.get('signatures', [])))
+# The submission is the claim a reader cares about: who asked for the deletion, and for whom.
+for c in d.get('claims', []):
+    p = c.get('payload') or {}
+    if p.get('method') == 'POST' and p.get('path') == '/v1/runs':
+        print('   asked by  :', p.get('actor'), '(' + str(p.get('actor_type')) + '), acting for',
+              p.get('on_behalf_of'))
+        ok = p.get('actor_type') == 'agent' and p.get('on_behalf_of') == 'dev-lead'
+        sys.exit(0 if ok else 1)
+sys.exit(1)
+PY
+ok "written to $WORK/bundle.json, naming the agent and the person it acted for"
 
 step "9. Verify it, then alter one character and verify again"
-VERIFY_OK=$("$BIN" verify "$WORK/bundle.json" >/dev/null 2>&1 && echo yes || echo no)
-[ "$VERIFY_OK" = "yes" ] || fail "an untouched bundle did not verify"
-ok "the untouched bundle verifies"
+# Pinned to the key the server publishes, so the check says who signed it as well as that it is
+# intact: an unpinned bundle verifies against whatever key it carries, which proves nothing about
+# whose it is.
+KEY=$(curl -sS "$API/.well-known/loomseal.json" | jqp 'd["key_id"]')
+[ -n "$KEY" ] || fail "the server published no signing key to pin"
+VERIFY_OK=$("$BIN" verify "$WORK/bundle.json" --pubkey "$KEY" >/dev/null 2>&1 && echo yes || echo no)
+[ "$VERIFY_OK" = "yes" ] || fail "an untouched bundle did not verify against the published key"
+ok "the untouched bundle verifies against the published key $KEY"
 
 python3 - "$WORK/bundle.json" "$WORK/tampered.json" <<'PY'
 import json, sys
@@ -203,7 +232,7 @@ PY
 cmp -s "$WORK/bundle.json" "$WORK/tampered.json" \
   && fail "the tampered bundle is byte-identical to the original, so this proves nothing"
 
-if "$BIN" verify "$WORK/tampered.json" >/dev/null 2>&1; then
+if "$BIN" verify "$WORK/tampered.json" --pubkey "$KEY" >/dev/null 2>&1; then
   fail "the altered bundle still verified, which would make the whole product worthless"
 fi
 ok "the altered bundle is refused"
@@ -211,10 +240,11 @@ ok "the altered bundle is refused"
 printf '\n\033[1mThat is the product.\033[0m\n'
 cat <<'EOF'
 
-  An agent asked to destroy something. It was graded, held, and refused its own
-  approval. A person approved the exact specification that was graded. It ran,
-  and the deletion was real. What is left is a signed record that verifies, and
-  stops verifying the moment anyone edits it.
+  An agent asked to destroy something with a token of its own. It was graded,
+  held, and refused when it tried to approve itself. A person approved the exact
+  specification that was graded. It ran, and the deletion was real. What is left
+  is a signed record, naming the agent and the person it acted for, that verifies
+  against the server's published key and stops verifying the moment anyone edits it.
 
   Nothing above trusted this tool's own word for anything: the sandbox really was
   deleted, and the last check fails on purpose.

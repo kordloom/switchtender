@@ -67,6 +67,8 @@ type rundeckArchive struct {
 	// Unread names members under the jobs directory that are not XML documents, so a job this
 	// cannot read is reported rather than mistaken for one that was never there.
 	Unread []string
+	// ACLs names the access control policies the archive carries, which are reported as left out.
+	ACLs []string
 	// Config is the project configuration from files/etc/project.properties.
 	Config map[string]string
 	// HasConfig reports whether the project configuration was found at all, which a genuinely empty
@@ -121,6 +123,8 @@ const (
 	rundeckEntrySCM
 	// rundeckEntryManifest is the archive manifest.
 	rundeckEntryManifest
+	// rundeckEntryACL is an access control policy under the project's acls directory.
+	rundeckEntryACL
 )
 
 // fromRundeckArchive maps a Rundeck project archive into a plan of equivalent objects.
@@ -147,6 +151,12 @@ func fromRundeckArchive(data []byte, inventoryName string, now time.Time) (*Plan
 	for _, name := range arc.Unread {
 		plan.warn("the archive holds %s under the project's jobs directory, which is not a job "+
 			"definition this reads, so nothing was imported from it", oneLine(name))
+	}
+	// An access policy says who may run which job. It was skipped without a word, so the summary
+	// said nothing was left out of an archive whose permissions did not come across.
+	for _, name := range arc.ACLs {
+		plan.warn("the access policy %s was not imported: access here comes from roles, policies, "+
+			"and grants, so recreate who may run what with those", oneLine(name))
 	}
 	for _, file := range arc.Jobs {
 		jobs, err := decodeRundeckXML(file.Data)
@@ -201,6 +211,10 @@ func readRundeckArchive(data []byte) (*rundeckArchive, error) {
 			arc.Unread = append(arc.Unread, name)
 			continue
 		}
+		if kind == rundeckEntryACL {
+			arc.ACLs = append(arc.ACLs, name)
+			continue
+		}
 		if f.UncompressedSize64 > maxRundeckEntrySize {
 			return nil, fmt.Errorf("read rundeck archive: %s is larger than a definition should be",
 				name)
@@ -227,7 +241,7 @@ func readRundeckArchive(data []byte) (*rundeckArchive, error) {
 			arc.SCM = append(arc.SCM, rundeckSCMFromProperties(name, body))
 		case rundeckEntryManifest:
 			manifest = parseManifest(body)
-		case rundeckEntryIgnored, rundeckEntryUnreadJob:
+		case rundeckEntryIgnored, rundeckEntryUnreadJob, rundeckEntryACL:
 		}
 	}
 	if len(arc.Jobs) == 0 && !arc.HasConfig {
@@ -296,6 +310,10 @@ func classifyRundeckEntry(name string) rundeckEntryKind {
 			return rundeckEntryConfig
 		case "scm-export.properties", "scm-import.properties":
 			return rundeckEntrySCM
+		}
+	case "acls":
+		if strings.EqualFold(path.Ext(base), ".aclpolicy") {
+			return rundeckEntryACL
 		}
 	}
 	return rundeckEntryIgnored
@@ -474,12 +492,12 @@ func (p *Plan) addRundeckArchiveProject(arc *rundeckArchive, now time.Time) {
 				"created from it", scm.Mode)
 		case strings.Contains(url, rundeckProjectBasedir):
 			p.warn("the archive's SCM %s configuration points at %s, which is a directory on the "+
-				"Rundeck server rather than a repository this can reach, so no project was created",
-				scm.Mode, oneLine(url))
+				"Rundeck server rather than a repository this can reach, so it was not imported as "+
+				"a project", scm.Mode, oneLine(url))
 		case strings.HasPrefix(strings.ToLower(url), "file:"):
 			p.warn("the archive's SCM %s configuration points at %s, which is a path on the "+
-				"Rundeck server rather than a repository this can reach, so no project was "+
-				"created. Push that repository somewhere this can clone from, then create the "+
+				"Rundeck server rather than a repository this can reach, so it was not imported "+
+				"as a project. Push that repository somewhere this can clone from, then create the "+
 				"project by hand.", scm.Mode, oneLine(url))
 		case created:
 			p.warn("the archive's SCM %s configuration points at a second repository, %s, which "+
@@ -571,7 +589,14 @@ type rundeckXMLJob struct {
 	Sequence rundeckXMLSequence `xml:"sequence"`
 	// Schedule is the job's cadence, absent when the job is not scheduled.
 	Schedule *rundeckXMLSchedule `xml:"schedule"`
+	// Retry is how many times Rundeck retries the job after a failure.
+	Retry string `xml:"retry"`
+	// Notification is where Rundeck reports the job's outcome. Only its presence is read.
+	Notification *rundeckXMLPresence `xml:"notification"`
 }
+
+// rundeckXMLPresence stands for an element whose presence is read and whose content is not.
+type rundeckXMLPresence struct{}
 
 // rundeckXMLContext holds a job's project and the options it prompts for.
 type rundeckXMLContext struct {
@@ -599,6 +624,8 @@ type rundeckXMLOption struct {
 	Secure string `xml:"secure,attr"`
 	// Multivalued lets the option carry several values at once.
 	Multivalued string `xml:"multivalued,attr"`
+	// Regex is a regular expression the whole value must match.
+	Regex string `xml:"regex,attr"`
 	// Description is shown to the person launching the job.
 	Description string `xml:"description"`
 }
@@ -645,6 +672,10 @@ type rundeckXMLCommand struct {
 	StepPlugin *rundeckXMLPlugin `xml:"step-plugin"`
 	// NodeStepPlugin is a node step plugin, which does not map.
 	NodeStepPlugin *rundeckXMLPlugin `xml:"node-step-plugin"`
+	// ScriptArgs are the arguments a script step passes to its script.
+	ScriptArgs string `xml:"scriptargs"`
+	// ErrorHandler is the step Rundeck runs when this one fails. Only its presence is read.
+	ErrorHandler *rundeckXMLPresence `xml:"errorhandler"`
 }
 
 // rundeckXMLJobRef is a reference from one job to another.
@@ -717,6 +748,10 @@ func rundeckJobFromXML(x rundeckXMLJob) rundeckJob {
 		Timeout:          x.Timeout,
 		ScheduleEnabled:  rundeckXMLBoolPtr(x.ScheduleEnabled),
 		ExecutionEnabled: rundeckXMLBoolPtr(x.ExecutionEnabled),
+		Retry:            x.Retry,
+	}
+	if x.Notification != nil {
+		job.Notification = true
 	}
 	for _, o := range x.Context.Options {
 		job.Options = append(job.Options, rundeckOption{
@@ -726,6 +761,7 @@ func rundeckJobFromXML(x rundeckXMLJob) rundeckJob {
 			Enforced:    rundeckXMLBool(o.Enforced),
 			Secure:      rundeckXMLBool(o.Secure),
 			Multivalued: rundeckXMLBool(o.Multivalued),
+			Regex:       o.Regex,
 		})
 	}
 	job.Sequence.KeepGoing = rundeckXMLBool(x.Sequence.KeepGoing)
@@ -749,6 +785,10 @@ func rundeckCommandFromXML(c rundeckXMLCommand) rundeckCommand {
 	cmd := rundeckCommand{
 		Description: c.Description, Exec: c.Exec, Script: c.Script,
 		ScriptInterpreter: c.ScriptInterpreter, ScriptFile: c.ScriptFile, ScriptURL: c.ScriptURL,
+		Args: c.ScriptArgs,
+	}
+	if c.ErrorHandler != nil {
+		cmd.ErrorHandler = true
 	}
 	if c.JobRef != nil {
 		cmd.JobRef = &rundeckJobRef{Name: c.JobRef.Name, Group: c.JobRef.Group}

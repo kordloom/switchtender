@@ -91,6 +91,14 @@ type InstallBinder interface {
 	BindInstall(installID string)
 }
 
+// InstallReader is an audit store that can say which install its chain belongs to, so a process can
+// tell a missing or replaced signing key from a first start before it signs or binds anything.
+type InstallReader interface {
+	// BoundInstall returns the install id of the newest entry that carries one, or the empty string
+	// when no entry does, which is a chain that no install has claimed yet.
+	BoundInstall(ctx context.Context) (string, error)
+}
+
 type Store interface {
 	// Append records one entry, assigning its chain fields from the current head. It refuses an
 	// entry for which IsSpanMarker is true with ErrReservedSpan: the marker means "the server

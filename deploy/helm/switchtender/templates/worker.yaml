@@ -20,6 +20,11 @@ spec:
       app.kubernetes.io/component: worker
   template:
     metadata:
+      annotations:
+        # A change to a Secret the chart writes rolls the pods. They kept the old values until
+        # something else restarted them, so a renewed license or a rotated key did nothing.
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        checksum/db: {{ include (print $.Template.BasePath "/db-secret.yaml") . | sha256sum }}
       labels:
         {{- include "switchtender.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: worker
@@ -30,8 +35,6 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - worker
-            - --db
-            - {{ .Values.database.dsn | quote }}
             - --name
             - $(POD_NAME)
             {{- range .Values.worker.extraArgs }}
@@ -69,16 +72,38 @@ spec:
             - name: SWITCHTENDER_LICENSE
               value: /etc/switchtender/license/license.jwt
             {{- end }}
+            {{- if .Values.database.dsn }}
+            # The DSN carries its password, so it is read from a Secret rather than passed as an
+            # argument, where the pod spec showed it to anyone allowed to list pods.
+            - name: SWITCHTENDER_DB
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "switchtender.fullname" . }}-db
+                  key: SWITCHTENDER_DB
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          {{- if or .Values.license .Values.existingSecret }}
+          {{- if or .Values.license .Values.existingSecret .Values.extraVolumeMounts }}
           volumeMounts:
+            {{- if or .Values.license .Values.existingSecret }}
             - name: license
               mountPath: /etc/switchtender/license
               readOnly: true
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
-      {{- if or .Values.license .Values.existingSecret }}
+      {{- if or .Values.license .Values.existingSecret .Values.extraVolumes }}
       volumes:
+        {{- if or .Values.license .Values.existingSecret }}
         - name: license
           secret:
             secretName: {{ include "switchtender.secretName" . }}
@@ -86,5 +111,9 @@ spec:
               - key: license.jwt
                 path: license.jwt
             optional: true
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- end }}
 {{- end }}

@@ -15,9 +15,10 @@ async function loadInventories() {
 			const fmtChip = document.createElement("span");
 			fmtChip.className = "tool-badge";
 			fmtChip.textContent = parsed.format;
-			fmtChip.dataset.tip = parsed.format === "yaml"
-				? "YAML inventory, read by Ansible's YAML plugin"
-				: "INI inventory: groups in brackets, one host per line";
+			fmtChip.dataset.tip = {
+				yaml: "YAML inventory, read by Ansible's YAML plugin",
+				json: "JSON inventory, the shape ansible-inventory prints and a source keeps",
+			}[parsed.format] || "INI inventory: groups in brackets, one host per line";
 			fmt.appendChild(fmtChip);
 			tr.appendChild(fmt);
 			const count = parsed.hosts.length;
@@ -36,7 +37,7 @@ async function loadInventories() {
 			actions.insertBefore(editButton(() => openInventoryEdit(i), "Click to edit this inventory's hosts and groups"), actions.firstChild);
 			tr.appendChild(actions);
 			inspectable(tr, i.name, [
-				{ label: "Format", value: parsed.format === "yaml" ? "YAML" : "INI" },
+				{ label: "Format", value: parsed.format.toUpperCase() },
 				{ label: "Hosts", value: parsed.format === "yaml" ? "not estimated for YAML" : parsed.hosts.join(", ") },
 				{ label: "Groups", value: parsed.groups.join(", ") },
 				{ label: "Size", value: (String(i.content || "").length) + " bytes" },
@@ -207,14 +208,24 @@ async function loadSources() {
 				target.textContent = "\u2014";
 			}
 			tr.appendChild(target);
+			// Said the way the dispatcher does it. A source with neither an interval nor update on
+			// launch read "on every launch", and it refreshes only when somebody presses Refresh.
 			const cadence = td("");
-			const every = src.sync_interval_seconds
-				? "every " + fmtInterval(src.sync_interval_seconds)
-				: "on every launch";
-			cadence.textContent = src.update_on_launch ? "Before launch, " + every : every;
-			cadence.dataset.tip = src.update_on_launch
-				? "Refreshed before a run targeting this inventory, and on the interval"
-				: "Refreshed on the interval only, not before a launch";
+			const every = src.sync_interval_seconds ? "every " + fmtInterval(src.sync_interval_seconds) : "";
+			if (src.update_on_launch && !every) {
+				cadence.textContent = "Before every launch";
+				cadence.dataset.tip = "Refreshed before each run that targets this inventory";
+			} else if (src.update_on_launch) {
+				cadence.textContent = "Before launch, " + every;
+				cadence.dataset.tip = "Refreshed on the interval, and before a run once the last " +
+					"refresh is older than that";
+			} else if (every) {
+				cadence.textContent = "Every " + fmtInterval(src.sync_interval_seconds);
+				cadence.dataset.tip = "Refreshed on the interval only, not before a launch";
+			} else {
+				cadence.textContent = "Only by hand";
+				cadence.dataset.tip = "Never refreshed by itself. Press Refresh to pull it";
+			}
 			tr.appendChild(cadence);
 			tr.appendChild(tdTime(src.synced_at, "never"));
 			const state = document.createElement("td");
@@ -248,7 +259,10 @@ async function loadSources() {
 					loadSources();
 				} catch (err) {
 					setStatus("Refresh failed: " + err.message);
-					refresh.disabled = false;
+					// The failure is recorded on the source, so the row is redrawn to show it rather
+					// than keeping the state it had before the refresh was tried.
+					document.getElementById("sources").innerHTML = "";
+					loadSources();
 				}
 			});
 			actions.appendChild(refresh);
@@ -345,7 +359,9 @@ function explainReadOnly() {
 	if (!isReadOnly()) return;
 	document.addEventListener("mouseover", (e) => {
 		const b = e.target.closest && e.target.closest("table .button");
-		if (b && !b.title) b.title = "Disabled in this read-only demo. Self-host to use it.";
+		if (b && !b.title) {
+			b.title = isDemo() ? "Disabled in this read-only demo. Self-host to use it." : readOnlyReason() + ".";
+		}
 	});
 }
 

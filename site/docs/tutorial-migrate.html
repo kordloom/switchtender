@@ -60,7 +60,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate" class="active">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate" class="active">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -68,12 +68,13 @@
 <p>You do not rebuild your automation by hand. SwitchTender reads an AWX, Semaphore, Chef, Puppet, Rundeck, or
 Jenkins export, a Rundeck project archive, or a plain crontab, and creates the equivalent objects in
 one pass.</p>
-<p>The five sources do not carry the same things. AWX and Semaphore export a whole control plane, so
+<p>The seven sources do not carry the same things. AWX and Semaphore export a whole control plane, so
 they bring projects, inventories, credential shells, templates, surveys, and schedules. Jenkins
 exports jobs and nothing else, so it brings templates, surveys, and schedules against an inventory
 you name. Rundeck brings those same three, plus one project when you hand it a project archive whose
 source control configuration names a repository this can reach. Neither Rundeck artifact brings an
-inventory. A crontab brings schedules alone. The table is in
+inventory. A crontab brings schedules alone, and Chef and Puppet bring the fleet as a stored inventory
+and nothing else. The table is in
 <a href="/docs/migration#what-each-source-brings-over">what each source brings over</a>.</p>
 <h2 id="from-the-ui">From the UI</h2>
 <ol>
@@ -82,7 +83,7 @@ export command, so gather the project's repositories, inventories, keys, templat
 from its API into one JSON document. Rundeck exports a project's jobs as YAML or JSON, or a whole
 project as an archive from Project Settings; either one uploads and the importer tells them apart
 by content. Jenkins has no export file at all, so zip its <code>jobs</code> directory and upload that.</li>
-<li>Open Migrate from the top of the overview, or go to <code>/ui/migrate</code>.</li>
+<li>Open Migrate from the sidebar, or go to <code>/ui/migrate</code>.</li>
 <li>Choose the format: AWX, Semaphore, Chef, Puppet, Rundeck, or Jenkins. Rundeck and Jenkins ask for the inventory
 their templates should target, since neither names hosts of its own.</li>
 <li>Paste the export, or choose the file, and select Preview. Nothing is written yet. You get a
@@ -90,7 +91,7 @@ report of exactly what would be created, with every warning.</li>
 <li>Select Import to apply it.</li>
 </ol>
 <p>A crontab imports from the command line only. The Migrate page and the <code>/v1/import/{format}</code>
-endpoint take the other four.</p>
+endpoint take the other six.</p>
 <p>Both cap an upload at 25 MiB and answer a larger one with 413. The command line applies no such cap,
 so a Rundeck project archive from a busy project, which carries every execution log alongside the
 definitions the importer reads, may need <code>switchtender import rundeck</code> rather than the page.</p>

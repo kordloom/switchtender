@@ -127,3 +127,34 @@ func TestNewAndAuthenticate(t *testing.T) {
 		t.Errorf("bad role error = %v, want ErrBadRole", err)
 	}
 }
+
+// TestAgentRoleLowersOnlyAdmin pins the ceiling an agent token runs under. An agent may launch
+// and propose work but must never manage identity, access, or secrets, and must never approve its
+// own held run. Every one of those is admin, so lowering admin to operator closes the whole surface
+// at the door regardless of how the agent reaches the API.
+func TestAgentRoleLowersOnlyAdmin(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name     string
+		In       user.Role
+		WantRole user.Role
+	}{{ // Test 0: Admin is the one role that is lowered.
+		Name: "admin", In: user.RoleAdmin, WantRole: user.RoleOperator,
+	}, { // Test 1: Operator is already at the ceiling and is unchanged.
+		Name: "operator", In: user.RoleOperator, WantRole: user.RoleOperator,
+	}, { // Test 2: A viewer is not raised to the ceiling, only capped by it.
+		Name: "viewer", In: user.RoleViewer, WantRole: user.RoleViewer,
+	}, { // Test 3: An unrecognized role is left as it is, and the server refuses it anyway.
+		Name: "unknown", In: user.Role("wizard"), WantRole: user.Role("wizard"),
+	}, { // Test 4: An empty role stays empty rather than becoming an operator.
+		Name: "empty", In: user.Role(""), WantRole: user.Role(""),
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			if diff := cmp.Diff(test.WantRole, user.AgentRole(test.In)); diff != "" {
+				t.Errorf("%s: mismatch (-want +got):\n%s", test.Name, diff)
+			}
+		})
+	}
+}

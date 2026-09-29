@@ -51,6 +51,16 @@ func LoadIdentityForStore(db, dir string) (Identity, error) {
 		identity.KeyEnv, identity.File, dir)
 }
 
+// IdentityPresent reports whether a producer identity can be read for dir without creating one: the
+// seed is in SWITCHTENDER_AUDIT_KEY, or the identity file is in dir.
+func IdentityPresent(dir string) bool {
+	if os.Getenv(identity.KeyEnv) != "" {
+		return true
+	}
+	_, err := os.Stat(filepath.Join(dir, identity.File))
+	return err == nil
+}
+
 // sharedStore reports whether a database address names a store several processes share, where an
 // identity created on one host is not the identity the others will use.
 func sharedStore(db string) bool {

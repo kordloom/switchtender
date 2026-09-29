@@ -138,6 +138,55 @@ func TestValidateCredentialsToolMismatch(t *testing.T) {
 	}
 }
 
+// TestValidateCredentialsNamesWhatIsWrong pins the two ways a stored credential cannot be used. A
+// credential nobody set a secret on, which every imported one is, and one sealed under another key
+// both surfaced as "decrypt credential <id>: open: sealed value too short" in the server log and as a
+// bare 500 to whoever launched. Each now has its own error naming the credential and the fix.
+func TestValidateCredentialsNamesWhatIsWrong(t *testing.T) {
+	t.Parallel()
+	sealer := credential.NewSealer("pass", "salt")
+	rekeyed, err := credential.NewSealer("another pass", "salt").Seal("PRIVATE KEY DATA")
+	if err != nil {
+		t.Fatalf("Seal() error = %v", err)
+	}
+	store := credential.NewMemStore()
+	for _, c := range []*credential.Credential{
+		{ID: "shell", Name: "Demo Credential", Kind: credential.KindSSHKey},
+		{ID: "rekeyed", Name: "prod-ssh", Kind: credential.KindSSHKey, Secret: rekeyed},
+	} {
+		if err := store.Save(context.Background(), c); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+	d := &Dispatcher{credentials: store, sealer: sealer}
+
+	tests := []struct {
+		WantName string
+		WantFix  string
+		Want     error
+		ID       string
+	}{{ // Test 0: A credential with no secret names itself and where to set one.
+		ID: "shell", Want: credential.ErrNoSecret,
+		WantName: `"Demo Credential"`, WantFix: "PUT /v1/credentials/shell",
+	}, { // Test 1: A credential sealed under another key names itself and the key it needs.
+		ID: "rekeyed", Want: credential.ErrUnreadable,
+		WantName: `"prod-ssh"`, WantFix: "SWITCHTENDER_ENCRYPTION_KEY",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			err := d.validateCredentials(context.Background(), run.ToolAnsible, []string{test.ID}, true)
+			if !errors.Is(err, test.Want) {
+				t.Fatalf("validateCredentials(%q) error = %v, want %v", test.ID, err, test.Want)
+			}
+			if !strings.Contains(err.Error(), test.WantName) || !strings.Contains(err.Error(), test.WantFix) {
+				t.Errorf("validateCredentials(%q) error = %q, want it to name %s and say %s",
+					test.ID, err, test.WantName, test.WantFix)
+			}
+		})
+	}
+}
+
 // TestValidateRunInventoryCredentials proves validateRun checks credentials the target inventory
 // attaches, not only the run's own: an undecryptable inventory credential fails at submit rather
 // than at execution, while an Ansible-only inventory credential on a non-Ansible run is allowed,
@@ -979,5 +1028,37 @@ func TestInjectedMaskValues(t *testing.T) {
 				t.Errorf("injectedMaskValues() mismatch (-want +got):\n%s", diff)
 			}
 		})
+	}
+}
+
+// TestAnEnvCredentialThatPrintsABareValueStopsTheRun pins the refusal a secret store's CLI needs. It
+// prints one bare value by default, and an env credential holds KEY=VALUE lines, so the value was
+// skipped as a line with no key: the run went ahead with no secret in its environment and nothing
+// said so. The documented example did exactly that. The run now stops before it starts and says
+// which line, never what the line holds.
+func TestAnEnvCredentialThatPrintsABareValueStopsTheRun(t *testing.T) {
+	t.Parallel()
+	sealer := credential.NewSealer("pass", "salt")
+	sealed, err := sealer.Seal("echo s3cr3t-bare-token")
+	if err != nil {
+		t.Fatalf("Seal() error = %v", err)
+	}
+	store := credential.NewMemStore()
+	if err := store.Save(context.Background(), &credential.Credential{
+		ID: "cred_1", Name: "vault-token", Kind: credential.KindEnv,
+		Source: credential.SourceCommand, Secret: sealed,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	d := &Dispatcher{credentials: store, sealer: sealer}
+	spec := &roundhouse.Spec{}
+	cleanup, _, err := d.materializeCredentials(context.Background(),
+		&run.Run{ID: "run_1", CredentialIDs: []string{"cred_1"}}, spec)
+	defer cleanup()
+	if !errors.Is(err, credential.ErrEnvLine) {
+		t.Fatalf("materializeCredentials() error = %v, want the bare value refused, env = %v", err, spec.Env)
+	}
+	if strings.Contains(err.Error(), "s3cr3t") {
+		t.Errorf("the refusal carries the secret itself: %v", err)
 	}
 }

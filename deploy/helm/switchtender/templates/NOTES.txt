@@ -1,0 +1,18 @@
+SwitchTender is starting{{ if .Values.database.dsn }} on PostgreSQL{{ else }} on SQLite, with the whole install on the volume {{ include "switchtender.fullname" . }}-data{{ end }}.
+
+Reach the interface:
+
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "switchtender.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+
+then open http://127.0.0.1:{{ .Values.service.port }}.
+
+The first server to start writes an initial admin token to /data in its pod, readable by the service
+user alone:
+
+  kubectl exec -n {{ .Release.Namespace }} deploy/{{ include "switchtender.fullname" . }}-server -- cat /data/initial-admin-token
+
+Sign in with it, create named accounts and tokens, then delete it.
+
+Keep the encryption key and salt this install was given. Every stored credential is sealed against
+them, and a new salt on an upgrade leaves those credentials unreadable. helm uninstall leaves the data
+volume and the Secret holding the keys in place.

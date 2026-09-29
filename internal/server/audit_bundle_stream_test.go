@@ -43,7 +43,7 @@ func TestBundleHandlerStreamsTheChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadIdentity: %v", err)
 	}
-	h := auditBundleHandler(&noMaterializeStore{Store: inner}, &id, "v-test", zap.NewNop())
+	h := auditBundleHandler(&noMaterializeStore{Store: inner}, &id, "", "v-test", zap.NewNop())
 
 	for _, limit := range []string{"", "?limit=5"} {
 		rec := httptest.NewRecorder()

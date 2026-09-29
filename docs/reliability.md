@@ -44,7 +44,7 @@ failure a person or a schedule can run again, not a partial state left holding a
 
 ## High availability
 
-On PostgreSQL the control plane runs active-active. Start two or more `serve` processes against the
+High availability is a Team feature. On PostgreSQL the control plane runs active-active. Start two or more `serve` processes against the
 same database, put any load balancer in front, and every replica serves the full API and UI while
 all of them execute work. There is no leader to elect and no coordinator to stand up, because every
 cross-process decision already happens in the store:
@@ -65,10 +65,14 @@ integration suite proves with two replicas on one PostgreSQL: shared claiming wi
 a single fire for a schedule two replicas race for, and a dead replica's run finished by the
 survivor. Kill a replica mid-run and the run fails clean: it is marked interrupted, a terminal state ready for an explicit rerun, never silently re-executed. Only work still leased and unstarted requeues automatically.
 
-To run it: point every replica at the same PostgreSQL with `--db`, share the same
-`SWITCHTENDER_ENCRYPTION_KEY` and `SWITCHTENDER_ENCRYPTION_SALT` so sealed credentials decrypt everywhere, and
-health-check `/healthz` at the balancer. SQLite has no server to share, so it stays a single-node
-deployment by design; PostgreSQL is the HA backend.
+To run it, point every replica at the same PostgreSQL with `SWITCHTENDER_DB`, or `--db`, which puts
+the password on the command line. Give them all the same `SWITCHTENDER_ENCRYPTION_KEY` and
+`SWITCHTENDER_ENCRYPTION_SALT`, so sealed credentials decrypt everywhere, and the same
+`SWITCHTENDER_AUDIT_KEY`, since replicas sharing a database sign as one install and none of them
+mints the key. Health-check `/readyz` at the balancer: it reads the store and fails when the
+database is out of reach, while `/healthz` answers as long as the process is up and would keep a
+replica that cannot reach the database in rotation. SQLite has no server to share, so it stays a
+single-node deployment by design, and PostgreSQL is the HA backend.
 
 ## Splits balance real work
 

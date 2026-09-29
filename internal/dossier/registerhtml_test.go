@@ -180,3 +180,24 @@ func TestRegisterCollapsesItsLargeSections(t *testing.T) {
 		t.Error("the change table has no toggle label on its summary")
 	}
 }
+
+// TestRegisterSaysWhenARunHasNoActor pins the Actor cell for a run launched on an install with no
+// tokens, which records no actor. The cell rendered empty, the one blank in a row an auditor samples.
+func TestRegisterSaysWhenARunHasNoActor(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	doc, err := RenderRegister(&RegisterInput{
+		From: base, To: base.Add(24 * time.Hour), GeneratedAt: base,
+		Runs: []*run.Run{{
+			ID: "run_open", Playbook: "site.yml", Status: run.StatusSucceeded, CreatedAt: base,
+		}},
+		ChainOK: true, ChainCount: 1,
+		Head: &audit.Entry{Seq: 1, Hash: "abc123"},
+	})
+	if err != nil {
+		t.Fatalf("RenderRegister() error = %v", err)
+	}
+	if !strings.Contains(string(doc), "<td>none recorded</td>") {
+		t.Error("a run with no actor left its Actor cell empty rather than saying none was recorded")
+	}
+}

@@ -2,6 +2,7 @@ package pgstore
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -217,11 +218,13 @@ CREATE TABLE IF NOT EXISTS schedules (
 	template_id TEXT NOT NULL DEFAULT '',
 	timezone    TEXT NOT NULL DEFAULT '',
 	org_id      TEXT NOT NULL DEFAULT '',
-	created_by  TEXT NOT NULL DEFAULT ''
+	created_by  TEXT NOT NULL DEFAULT '',
+	last_error  TEXT NOT NULL DEFAULT ''
 );
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT '';
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT '';
+ALTER TABLE schedules ADD COLUMN IF NOT EXISTS last_error TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_schedules_created ON schedules(created_at, id);
 CREATE TABLE IF NOT EXISTS users (
 	id            TEXT PRIMARY KEY,
@@ -503,6 +506,10 @@ CREATE INDEX IF NOT EXISTS idx_runs_actor ON runs(actor, created_at DESC, id DES
 CREATE INDEX IF NOT EXISTS idx_runs_source ON runs(source, source_id, created_at DESC, id DESC);
 `
 
+// ErrForeignSchema is returned when the database holds tables of another application's under the
+// names this schema uses.
+var ErrForeignSchema = errors.New("this database belongs to another application")
+
 // Open connects to the PostgreSQL database at dsn, applies the schema, and returns the bundled
 // stores.
 func Open(dsn string) (*DB, error) {
@@ -523,6 +530,24 @@ func Open(dsn string) (*DB, error) {
 	if err := db.QueryRow("SELECT to_regclass('runs') IS NOT NULL").Scan(&initialized); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("probe postgres schema: %w", err)
+	}
+	// A table named runs is not proof the schema is this product's. Another application's runs
+	// table passed the probe, which skipped the gate above and then failed the migration with an
+	// error about a column nobody had heard of. The columns every version of this schema has had
+	// are what identify it.
+	if initialized {
+		var ours int
+		if err := db.QueryRow(`SELECT count(*) FROM information_schema.columns
+WHERE table_schema = current_schema() AND table_name = 'runs'
+AND column_name IN ('playbook', 'inventory', 'status')`).Scan(&ours); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("probe postgres schema: %w", err)
+		}
+		if ours != 3 {
+			_ = db.Close()
+			return nil, fmt.Errorf("%w: it holds a table named runs that SwitchTender did not create. "+
+				"Point --db at a database of SwitchTender's own", ErrForeignSchema)
+		}
 	}
 	if !initialized {
 		if aerr := license.Allow(license.FeaturePostgresInit); aerr != nil {

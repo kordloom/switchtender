@@ -81,7 +81,7 @@
    "name": "What else can I migrate from?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "Five sources in all. AWX is the one above; the other four are: switchtender import semaphore export.json switchtender import rundeck jobs.yaml --inventory prod switchtender import rundeck project-archive.zip --inventory prod switchtender import jenkins /var/jenkins_home --inventory prod switchtender import cron /etc/crontab --system --inventory prod Semaphore brings projects, inventories, credential shells, templates, surveys, and schedules, the same kinds AWX does apart from the dynamic inventory sources AWX alone carries. Jenkins exports jobs and nothing else, so it brings templates, surveys, and schedules, and --inventory names the hosts those templates target. Rundeck brings the same three from either a job export or a project archive, told apart by content, plus one project from an archive whose source control configuration names a repository this can reach. Neither Rundeck artifact carries a node definition, so no inventory comes from either and --inventory answers for both. A crontab brings schedules alone, one per job line, and no template for them to fire, so each carries its own one-step bash pipeline. That step runs on the SwitchTender host, not on the machine the crontab came from, and the report says so on every cron import. Rundeck, Jenkins, and cron create no credentials at all. The table is in what each source brings over. Jenkins has no single export file: point the importer at a JENKINS_HOME, at its jobs directory, at one job's config.xml, or at a zip of a JENKINS_HOME or a jobs directory. A job is named by the directory holding its config.xml, so a zip whose only entry is a bare config.xml is refused with the reason rather than imported under a name it does not have. Only freestyle jobs import, since a Pipeline job is a Groovy program with no honest mechanical translation. The /v1/import/{format} endpoint and the Migrate page in the UI take awx, semaphore, rundeck, and jenkins; a crontab imports from the command line only. Both cap an upload at 25 MiB, so a Rundeck project archive from a busy project, which carries every execution log beside the definitions the importer reads, may need the command line."
+    "text": "Seven sources in all. AWX is the one above; the other six are: switchtender import semaphore export.json switchtender import chef chef-nodes.json switchtender import puppet puppet.json switchtender import rundeck jobs.yaml --inventory prod switchtender import rundeck project-archive.zip --inventory prod switchtender import jenkins /var/jenkins_home --inventory prod switchtender import cron /etc/crontab --system --inventory prod Semaphore brings projects, inventories, credential shells, templates, surveys, and schedules, the same kinds AWX does apart from the dynamic inventory sources AWX alone carries. Jenkins exports jobs and nothing else, so it brings templates, surveys, and schedules, and --inventory names the hosts those templates target. Rundeck brings the same three from either a job export or a project archive, told apart by content, plus one project from an archive whose source control configuration names a repository this can reach. Neither Rundeck artifact carries a node definition, so no inventory comes from either and --inventory answers for both. A crontab brings schedules alone, one per job line, and no template for them to fire, so each carries its own one-step bash pipeline. That step runs on the SwitchTender host, not on the machine the crontab came from, and the report says so on every cron import. Chef and Puppet bring the fleet as a stored inventory, grouped by environment and, for Chef, by role, and nothing else. Rundeck, Jenkins, cron, Chef, and Puppet create no credentials at all. The table is in what each source brings over. Jenkins has no single export file: point the importer at a JENKINS_HOME, at its jobs directory, at one job's config.xml, or at a zip of a JENKINS_HOME or a jobs directory. A job is named by the directory holding its config.xml, so a zip whose only entry is a bare config.xml is refused with the reason rather than imported under a name it does not have. Only freestyle jobs import, since a Pipeline job is a Groovy program with no honest mechanical translation. The /v1/import/{format} endpoint and the Migrate page in the UI take awx, semaphore, chef, puppet, rundeck, and jenkins, and a crontab imports from the command line only. Both cap an upload at 25 MiB, so a Rundeck project archive from a busy project, which carries every execution log beside the definitions the importer reads, may need the command line."
    }
   },
   {
@@ -201,7 +201,7 @@
    "name": "How mature is SwitchTender?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "Young, and worth saying plainly. AWX has years of production use, a large community, and a commercial edition behind it. Semaphore UI has an established user base. SwitchTender has neither, and if what you need most is a tool thousands of people have already hit the edges of, that is a real reason to choose one of them. What offsets it is verifiability rather than reputation. The audit trail is hash-chained and signed, and a third party can verify a run offline with a separate open-source verifier, so the claims do not rest on trusting the vendor. The license converts to Apache 2.0 on a fixed schedule and the source is available now, so the project outliving the company is a documented path rather than a hope. The continuity and vendor risk pages set out what happens if this goes away."
+    "text": "New, and built so you can check its maturity instead of taking it on reputation. Before any release ships, it is deployed to a fresh Kubernetes cluster and proven against three real machines: a destructive change is held until a person approves it, the receipt is verified offline by a binary that never spoke to the cluster, the previous release upgrades in place and rolls back, and a worker is killed mid-run. The supertest lists every check. The audit trail is hash-chained and signed, and a third party can verify a run offline with a separate open-source verifier, so the claims do not rest on trusting the vendor. The license converts to Apache 2.0 on a fixed schedule and the source is available now, so the project outliving the company is a documented path rather than a hope. The continuity and vendor risk pages cover the rest."
    }
   },
   {
@@ -236,7 +236,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq" class="active">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq" class="active">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -281,8 +281,10 @@ their secrets and you set those once after importing. Dynamic inventory sources 
 sources that run their plugin and refresh the hosts into a stored inventory on a schedule or before a
 run; static inventories import fully.</p>
 <h2 id="what-else-can-i-migrate-from">What else can I migrate from?</h2>
-<p>Five sources in all. AWX is the one above; the other four are:</p>
+<p>Seven sources in all. AWX is the one above; the other six are:</p>
 <pre><code>switchtender import semaphore export.json
+switchtender import chef chef-nodes.json
+switchtender import puppet puppet.json
 switchtender import rundeck jobs.yaml --inventory prod
 switchtender import rundeck project-archive.zip --inventory prod
 switchtender import jenkins /var/jenkins_home --inventory prod
@@ -297,15 +299,17 @@ repository this can reach. Neither Rundeck artifact carries a node definition, s
 from either and <code>--inventory</code> answers for both. A crontab brings schedules alone, one per job line,
 and no template for them to fire, so each carries its own one-step bash pipeline. That step runs on
 the SwitchTender host, not on the machine the crontab came from, and the report says so on every
-cron import. Rundeck, Jenkins, and cron create no credentials at all. The table is in
+cron import. Chef and Puppet bring the fleet as a stored inventory, grouped by environment and, for
+Chef, by role, and nothing else. Rundeck, Jenkins, cron, Chef, and Puppet create no credentials at
+all. The table is in
 <a href="/docs/migration#what-each-source-brings-over">what each source brings over</a>.</p>
 <p>Jenkins has no single export file: point the importer at a <code>JENKINS_HOME</code>, at its <code>jobs</code> directory,
 at one job's <code>config.xml</code>, or at a zip of a <code>JENKINS_HOME</code> or a <code>jobs</code> directory. A job is named by
 the directory holding its <code>config.xml</code>, so a zip whose only entry is a bare <code>config.xml</code> is refused
 with the reason rather than imported under a name it does not have. Only freestyle jobs import,
 since a Pipeline job is a Groovy program with no honest mechanical translation. The
-<code>/v1/import/{format}</code> endpoint and the Migrate page in the UI take awx, semaphore, rundeck, and
-jenkins; a crontab imports from the command line only. Both cap an upload at 25 MiB, so a Rundeck
+<code>/v1/import/{format}</code> endpoint and the Migrate page in the UI take awx, semaphore, chef, puppet,
+rundeck, and jenkins, and a crontab imports from the command line only. Both cap an upload at 25 MiB, so a Rundeck
 project archive from a busy project, which carries every execution log beside the definitions the
 importer reads, may need the command line.</p>
 <h2 id="how-do-i-rerun-the-same-job-on-a-set-of-hosts-without-re-entering-everything">How do I rerun the same job on a set of hosts without re-entering everything?</h2>
@@ -432,15 +436,16 @@ without making them an admin. Grants layer on top of the global role and default
 object nobody granted falls back to the caller's global role. Turn on <code>--strict-grants</code> when you
 want an ungranted object to be invisible instead.</p>
 <h2 id="how-mature-is-switchtender">How mature is SwitchTender?</h2>
-<p>Young, and worth saying plainly. AWX has years of production use, a large community, and a
-commercial edition behind it. Semaphore UI has an established user base. SwitchTender has neither,
-and if what you need most is a tool thousands of people have already hit the edges of, that is a
-real reason to choose one of them.</p>
-<p>What offsets it is verifiability rather than reputation. The audit trail is hash-chained and
-signed, and a third party can verify a run offline with a separate open-source verifier, so the
-claims do not rest on trusting the vendor. The license converts to Apache 2.0 on a fixed schedule
-and the source is available now, so the project outliving the company is a documented path rather
-than a hope. The continuity and vendor risk pages set out what happens if this goes away.</p>
+<p>New, and built so you can check its maturity instead of taking it on reputation. Before any
+release ships, it is deployed to a fresh Kubernetes cluster and proven against three real machines:
+a destructive change is held until a person approves it, the receipt is verified offline by a
+binary that never spoke to the cluster, the previous release upgrades in place and rolls back, and
+a worker is killed mid-run. <a href="/docs/supertest">The supertest</a> lists every check.</p>
+<p>The audit trail is hash-chained and signed, and a third party can verify a run offline with a
+separate open-source verifier, so the claims do not rest on trusting the vendor. The license
+converts to Apache 2.0 on a fixed schedule and the source is available now, so the project
+outliving the company is a documented path rather than a hope. The <a href="/docs/continuity">continuity</a> and
+<a href="/docs/vendor-risk">vendor risk</a> pages cover the rest.</p>
 <h2 id="what-is-the-license">What is the license?</h2>
 <p>Business Source License 1.1: free to self-host and modify, with a restriction on offering it as a
 competing hosted service, and it converts to Apache 2.0 two years after each release. The

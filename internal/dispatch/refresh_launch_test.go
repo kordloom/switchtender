@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -159,6 +161,7 @@ func launchSetup(t *testing.T, sources ...*invsource.Source) (*Dispatcher, *coun
 func TestRefreshOnLaunchOnlyFiresForItsOwnStaleSource(t *testing.T) {
 	t.Parallel()
 	recent := time.Now()
+	plugin := writeSourceFile(t, "plugin.yml")
 
 	tests := []struct {
 		// Name says which run and source pairing is in play.
@@ -172,38 +175,38 @@ func TestRefreshOnLaunchOnlyFiresForItsOwnStaleSource(t *testing.T) {
 	}{{ // Test 0: A run naming no stored inventory has no source to refresh.
 		Name: "a run with no stored inventory",
 		Source: &invsource.Source{
-			ID: "src_1", InventoryID: "inv_dyn", Source: "plugin.yml", UpdateOnLaunch: true,
+			ID: "src_1", InventoryID: "inv_dyn", Source: plugin, UpdateOnLaunch: true,
 		},
 		InventoryID: "", WantDumps: 0,
 	}, { // Test 1: A source for a different inventory is left alone.
 		Name: "a source for another inventory",
 		Source: &invsource.Source{
-			ID: "src_1", InventoryID: "inv_other", Source: "plugin.yml", UpdateOnLaunch: true,
+			ID: "src_1", InventoryID: "inv_other", Source: plugin, UpdateOnLaunch: true,
 		},
 		InventoryID: "inv_dyn", WantDumps: 0,
 	}, { // Test 2: A source that did not opt into update-on-launch is left to its schedule.
 		Name: "not opted into update on launch",
 		Source: &invsource.Source{
-			ID: "src_1", InventoryID: "inv_dyn", Source: "plugin.yml", UpdateOnLaunch: false,
+			ID: "src_1", InventoryID: "inv_dyn", Source: plugin, UpdateOnLaunch: false,
 		},
 		InventoryID: "inv_dyn", WantDumps: 0,
 	}, { // Test 3: An opted-in source synced inside its interval is still fresh.
 		Name: "fresh inside its interval",
 		Source: &invsource.Source{
-			ID: "src_1", InventoryID: "inv_dyn", Source: "plugin.yml", UpdateOnLaunch: true,
+			ID: "src_1", InventoryID: "inv_dyn", Source: plugin, UpdateOnLaunch: true,
 			SyncIntervalSeconds: 3600, SyncedAt: &recent,
 		},
 		InventoryID: "inv_dyn", WantDumps: 0,
 	}, { // Test 4: An opted-in source with no interval refreshes on every launch.
 		Name: "opted in with no interval",
 		Source: &invsource.Source{
-			ID: "src_1", InventoryID: "inv_dyn", Source: "plugin.yml", UpdateOnLaunch: true,
+			ID: "src_1", InventoryID: "inv_dyn", Source: plugin, UpdateOnLaunch: true,
 		},
 		InventoryID: "inv_dyn", WantDumps: 1,
 	}, { // Test 5: An opted-in source past its interval refreshes.
 		Name: "opted in and stale",
 		Source: &invsource.Source{
-			ID: "src_1", InventoryID: "inv_dyn", Source: "plugin.yml", UpdateOnLaunch: true,
+			ID: "src_1", InventoryID: "inv_dyn", Source: plugin, UpdateOnLaunch: true,
 			SyncIntervalSeconds: 1, SyncedAt: ptr(recent.Add(-time.Hour)),
 		},
 		InventoryID: "inv_dyn", WantDumps: 1,
@@ -248,17 +251,19 @@ func TestRefreshOnLaunchWithTheFeatureOffDoesNothing(t *testing.T) {
 func TestSyncDueSourcesRefreshesOnlyWhatIsDue(t *testing.T) {
 	t.Parallel()
 	now := time.Now()
+	due, fresh := writeSourceFile(t, "due.yml"), writeSourceFile(t, "fresh.yml")
+	unscheduled := writeSourceFile(t, "unscheduled.yml")
 	d, dumper := launchSetup(t,
 		&invsource.Source{
-			ID: "src_due", InventoryID: "inv_dyn", Source: "due.yml",
+			ID: "src_due", InventoryID: "inv_dyn", Source: due,
 			SyncIntervalSeconds: 1, SyncedAt: ptr(now.Add(-time.Hour)), CreatedAt: now,
 		},
 		&invsource.Source{
-			ID: "src_fresh", InventoryID: "inv_dyn", Source: "fresh.yml",
+			ID: "src_fresh", InventoryID: "inv_dyn", Source: fresh,
 			SyncIntervalSeconds: 3600, SyncedAt: &now, CreatedAt: now,
 		},
 		&invsource.Source{
-			ID: "src_unscheduled", InventoryID: "inv_dyn", Source: "unscheduled.yml",
+			ID: "src_unscheduled", InventoryID: "inv_dyn", Source: unscheduled,
 			CreatedAt: now,
 		},
 	)
@@ -268,7 +273,7 @@ func TestSyncDueSourcesRefreshesOnlyWhatIsDue(t *testing.T) {
 	dumper.mu.Lock()
 	got := append([]string(nil), dumper.sources...)
 	dumper.mu.Unlock()
-	if len(got) != 1 || got[0] != "due.yml" {
+	if len(got) != 1 || got[0] != due {
 		t.Errorf("dumped %v, want only the source that was due: an unscheduled or freshly synced "+
 			"source must not be re-dumped against a cloud API on every tick", got)
 	}
@@ -379,4 +384,16 @@ func TestRefreshSourceWithTheFeatureOffIsNotFound(t *testing.T) {
 			}
 		})
 	}
+}
+
+// writeSourceFile writes an inventory plugin config a bare source can name, and returns its path. A
+// source naming a path that does not exist is refused before any dump, so a test of when a source
+// refreshes needs its file to be there.
+func writeSourceFile(t *testing.T, name string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, []byte("plugin: constructed\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	return path
 }

@@ -70,10 +70,12 @@ job template in AWX.
 
 ### 1. Start the server
 
-    SWITCHTENDER_ENCRYPTION_KEY=change-me SWITCHTENDER_ENCRYPTION_SALT=change-me-too \
-      ./switchtender serve --addr :8080 --db switchtender.db
+    export SWITCHTENDER_ENCRYPTION_KEY=$(openssl rand -hex 32)
+    export SWITCHTENDER_ENCRYPTION_SALT=$(openssl rand -hex 16)
+    ./switchtender serve --addr :8080 --db switchtender.db
 
-The key and salt seal credentials at rest. Keep the salt stable across restarts. Open
+The key and salt seal credentials at rest. Keep both: a server started with a different pair cannot
+open the credentials sealed under this one. Open
 http://localhost:8080 for the UI. On an empty database the first start mints an initial admin token
 and prints it once, so copy it before moving on.
 
@@ -136,8 +138,8 @@ a text scroll.
 
 ### 8. Add capacity and schedules
 
-Point a worker at the same database to add an executor, and give it a queue name to target specific
-work:
+On a Team license, point a worker at the same database to add an executor, and give it a queue name
+to target specific work:
 
     ./switchtender worker --db switchtender.db --name worker-1
 

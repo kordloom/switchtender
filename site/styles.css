@@ -114,6 +114,13 @@ h1 {
 	background: linear-gradient(110deg, #eafff6 0%, var(--accent) 45%, var(--accent-2) 100%);
 	-webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
 }
+/* A headline with a shorter phone form carries both, and only one is ever displayed, so a screen
+   reader reads one as well. The full home page headline wraps to five lines on a phone. */
+.h1-short { display: none; }
+@media (max-width: 560px) {
+	.h1-long { display: none; }
+	.h1-short { display: inline; }
+}
 .lede { font-size: 19px; color: var(--muted); margin: 24px 0 32px; max-width: 560px; }
 .lede strong { color: var(--text); font-weight: 600; }
 /* Names the dated moment a reader arrived on, sitting between the lede and the buttons. Set
@@ -378,15 +385,21 @@ h1 {
 	   CTA used to be left out of the drawer, so on a phone Get started and GitHub were unreachable,
 	   and on a subpage that carries only the CTA there was no path to the install at all. Both are
 	   full-width rows now, and the bar grows to hold them rather than clipping at its fixed height. */
-	.nav.open .nav-inner { flex-wrap: wrap; height: auto; }
+	.nav.open .nav-inner { flex-wrap: wrap; height: auto; row-gap: 0; }
+	/* The bar keeps its height when the menu opens, so the logo and the close button stay where they
+	   were. The panels take whole rows below it: flex: 1 on the links left them a zero basis, which
+	   beat width: 100%, so they sat in a column beside the logo, and the close button, which follows
+	   them in the markup, wrapped down under the buttons, hundreds of pixels from where it was
+	   tapped open. */
+	.nav.open .brand, .nav.open .nav-toggle { height: 68px; }
 	.nav.open .nav-links,
 	.nav.open .nav-cta {
-		display: flex; flex-direction: column; width: 100%; margin: 0; gap: 16px;
+		display: flex; flex-direction: column; flex: 0 0 100%; width: 100%; margin: 0; gap: 16px;
 		background: rgba(8, 11, 16, 0.96); backdrop-filter: blur(14px); padding: 16px 24px;
 	}
-	.nav.open .nav-links { padding-top: 20px; border-top: 1px solid var(--border); }
+	.nav.open .nav-links { order: 3; padding-top: 20px; border-top: 1px solid var(--border); }
 	.nav.open .nav-cta {
-		padding-bottom: 20px; border-bottom: 1px solid var(--border); align-items: stretch;
+		order: 4; padding-bottom: 20px; border-bottom: 1px solid var(--border); align-items: stretch;
 	}
 	.nav.open .nav-cta .btn, .nav.open .nav-cta .ghost { text-align: center; }
 }

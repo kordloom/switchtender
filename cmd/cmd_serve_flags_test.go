@@ -266,7 +266,7 @@ func TestWorkerRefusesWithoutATeamLicense(t *testing.T) {
 		t.Fatal("runWorker() = nil error on Community; distributed workers are gated and the gate " +
 			"opened")
 	}
-	if !strings.Contains(err.Error(), "Distributed workers") {
+	if !strings.Contains(err.Error(), "Running distributed workers requires a Team license") {
 		t.Errorf("runWorker() error = %v, want the workers gate", err)
 	}
 }

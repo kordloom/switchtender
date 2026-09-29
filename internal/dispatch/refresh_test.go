@@ -53,7 +53,11 @@ func TestValidateBareSource(t *testing.T) {
 		{Name: "directory holding an executable", In: dir, Want: invsource.ErrInvalidSource},
 		// Test 6: A directory with nothing executable in it is a legitimate inventory directory.
 		{Name: "directory with no executable", In: plainDir, Want: nil},
-		{Name: "nonexistent", In: filepath.Join(dir, "ghost"), Want: nil}, // Test 7.
+		// Test 7: A path that is not there is refused. ansible-inventory printed an empty inventory for
+		// it with a clean exit, so a typo refreshed as a success and emptied the stored inventory.
+		{Name: "nonexistent", In: filepath.Join(dir, "ghost"), Want: invsource.ErrInvalidSource},
+		// Test 8: A comma-separated host list is not a path, and ansible-inventory reads it as one.
+		{Name: "host list", In: "web01,web02,", Want: nil},
 	}
 	for i, test := range tests {
 		if err := validateBareSource(test.In); !errors.Is(err, test.Want) {
@@ -99,8 +103,10 @@ func TestDumpSourceRefusesAProjectSourceThatEscapesTheCheckout(t *testing.T) {
 		Want: project.ErrEscapesRepo,
 	}, { // Test 4: An ordinary committed inventory resolves into the checkout.
 		Name: "an ordinary inventory inside the checkout", Source: escapeRepoInventory,
-	}, { // Test 5: A path the sync never wrote passes through on the lexical result.
+	}, { // Test 5: A path the sync never wrote is refused before the dump. ansible-inventory prints
+		// an empty inventory for it with a clean exit, which refreshed the stored inventory to nothing.
 		Name: "a source the sync never wrote", Source: "inventories/never-written.ini",
+		Want: invsource.ErrInvalidSource,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d: %s", testNum, test.Name), func(t *testing.T) {

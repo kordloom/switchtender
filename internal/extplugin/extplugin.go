@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -82,8 +83,12 @@ const pluginEnvPrefix = "SWITCHTENDER_PLUGIN_"
 // anything about this install. Everything else is withheld.
 var pluginPassThrough = map[string]bool{
 	"PATH": true, "HOME": true, "TMPDIR": true, "TMP": true, "TEMP": true,
-	"LANG": true, "LC_ALL": true, "SYSTEMROOT": true, "USERPROFILE": true,
+	"LANG": true, "LC_ALL": true,
 }
+
+// windowsPassThrough names what a Windows process needs on top of pluginPassThrough. Anywhere else
+// these are ordinary variables and are withheld like any other.
+var windowsPassThrough = map[string]bool{"SYSTEMROOT": true, "USERPROFILE": true}
 
 // pluginEnv builds the environment a plugin subprocess runs with: the few variables any process
 // needs, plus anything the operator namespaced for plugins. It is an allowlist because the deny
@@ -96,11 +101,23 @@ func pluginEnv() []string {
 		if !ok {
 			continue
 		}
-		if pluginPassThrough[strings.ToUpper(name)] || strings.HasPrefix(name, pluginEnvPrefix) {
+		if passesToPlugin(name, runtime.GOOS) {
 			out = append(out, kv)
 		}
 	}
 	return out
+}
+
+// passesToPlugin reports whether the environment variable name reaches a plugin on the operating
+// system goos. Windows reads names without regard to case, so Path there is PATH. Everywhere else a
+// name is exact, and one that only matches an allowed name once upper-cased is a different variable.
+func passesToPlugin(name, goos string) bool {
+	if goos != "windows" {
+		return pluginPassThrough[name] || strings.HasPrefix(name, pluginEnvPrefix)
+	}
+	upper := strings.ToUpper(name)
+	return pluginPassThrough[upper] || windowsPassThrough[upper] ||
+		strings.HasPrefix(upper, pluginEnvPrefix)
 }
 
 // load launches one plugin binary, asks what it provides, and registers each seam. It returns the

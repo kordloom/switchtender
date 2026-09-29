@@ -16,12 +16,14 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
-    -ldflags "-s -w -X github.com/kordloom/switchtender/cmd.Version=$VERSION" -o /switchtender .
+    -ldflags "-s -w -X github.com/kordloom/switchtender/cmd.Version=$VERSION -X github.com/kordloom/switchtender/cmd.BuildChannel=container" \
+    -o /switchtender .
 
 # 3.20 left support on 2026-04-01, so the image stopped receiving security patches while it was
 # still being built and published. Track a supported branch and move it on before the next lapses.
 FROM alpine:3.22
-RUN apk add --no-cache ansible-core bash python3 openssh-client ca-certificates
+# jq is here because the Bash guide reads a list or an object out of SWITCHTENDER_VARS with it.
+RUN apk add --no-cache ansible-core bash python3 openssh-client ca-certificates jq
 
 # Terraform and OpenTofu are advertised alongside Ansible, Bash and Python, and an operator who
 # pulls this image to run one of them met "executable file not found in $PATH" instead. The message

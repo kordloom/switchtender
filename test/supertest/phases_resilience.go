@@ -333,6 +333,24 @@ func previousReleaseImage(flagValue, repoDir string) (string, error) {
 	return "ghcr.io/kordloom/switchtender:" + strings.TrimPrefix(prev, "v"), nil
 }
 
+// chartAt writes the Helm chart as it stood at release version into the work directory and returns
+// its path. version carries no leading v, the way an image tag names it.
+func (h *harness) chartAt(version string) (string, error) {
+	dir := filepath.Join(h.work, "chart-v"+version)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return "", err
+	}
+	archive := filepath.Join(h.work, "chart-v"+version+".tar")
+	if _, err := h.run("git", "-C", h.repo, "archive", "--format=tar", "-o", archive,
+		"v"+version, "deploy/helm/switchtender"); err != nil {
+		return "", err
+	}
+	if _, err := h.run("tar", "-xf", archive, "-C", dir); err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "deploy/helm/switchtender"), nil
+}
+
 // previousTag returns the newest tag strictly below the version being built, from a list git has
 // already sorted newest first.
 //
@@ -518,9 +536,17 @@ func (h *harness) phaseUpgradeTeam(prevImage, license string) error {
 	if !ok {
 		return fmt.Errorf("previous image %q carries no tag", prevImage)
 	}
-	install := func(imageRepo, imageTag string) (string, error) {
-		return h.run("helm", "upgrade", "--install", "upteam",
-			filepath.Join(h.repo, "deploy/helm/switchtender"),
+	// The previous release is installed with its own chart, the way its operators installed it, and
+	// then upgraded with this tree's chart. Pairing the old image with this tree's chart tested a
+	// combination nobody runs, and it broke the moment the chart began handing the database to the
+	// processes through an environment variable the old binary does not read: both processes fell
+	// back to a SQLite file of their own, and the worker never saw the run.
+	prevChart, err := h.chartAt(tag)
+	if err != nil {
+		return fmt.Errorf("chart for the previous release %s: %w", tag, err)
+	}
+	install := func(chart, imageRepo, imageTag string) (string, error) {
+		return h.run("helm", "upgrade", "--install", "upteam", chart,
 			"--namespace", "upteam",
 			"--kubeconfig", h.kubeconfig,
 			"--set", "image.repository="+imageRepo,
@@ -535,7 +561,7 @@ func (h *harness) phaseUpgradeTeam(prevImage, license string) error {
 			"--set", "worker.extraArgs={--queue,upteam}",
 			"--wait", "--timeout", "300s")
 	}
-	if out, err := install(repo, tag); err != nil {
+	if out, err := install(prevChart, repo, tag); err != nil {
 		return fmt.Errorf("helm install team-shape %s: %w\n%s\n%s", prevImage, err, out,
 			h.installForensics("upteam"))
 	}
@@ -581,7 +607,8 @@ func (h *harness) phaseUpgradeTeam(prevImage, license string) error {
 	h.pass(phase, "the previous release did real work through its dedicated worker",
 		fmt.Sprintf("run %s, %d chain entries", oldRunID, before.Count))
 
-	if out, err := install("switchtender", "supertest"); err != nil {
+	if out, err := install(filepath.Join(h.repo, "deploy/helm/switchtender"), "switchtender",
+		"supertest"); err != nil {
 		return fmt.Errorf("helm upgrade team-shape to the working tree: %w\n%s\n%s", err, out,
 			h.installForensics("upteam"))
 	}

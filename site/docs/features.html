@@ -80,7 +80,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features" class="active">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features" class="active">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -156,7 +156,7 @@ creating a new PostgreSQL schema, and one-click drift reconcile are Team. Tiers 
 </tr>
 <tr>
 <td>Auth</td>
-<td>User accounts with admin, operator, and viewer roles enforced per route. Bearer tokens hashed at rest. A public bind with no tokens mints an initial admin token at startup and prints it once, so the API is never served open on a network interface; only loopback and read-only may run open, with a warning.</td>
+<td>User accounts with admin, operator, and viewer roles enforced per route. Bearer tokens hashed at rest. A public bind with no tokens mints an initial admin token at startup and hands it over once, printed on a terminal and otherwise written to a file only the server's account can read, so the API is never served open on a network interface; only loopback and read-only may run open, with a warning.</td>
 </tr>
 <tr>
 <td>Approvals</td>
@@ -192,7 +192,7 @@ creating a new PostgreSQL schema, and one-click drift reconcile are Team. Tiers 
 </tr>
 <tr>
 <td>Audit receipts</td>
-<td>Every mutation returns an <code>Audit-Receipt</code> header naming where it landed in the chain. <code>switchtender audit receipt</code> redeems one, so a party who holds a receipt can prove their entry was not dropped.</td>
+<td>Every mutation other than signing in or out returns an <code>Audit-Receipt</code> header naming where it landed in the chain. <code>switchtender audit receipt</code> redeems one, so a party who holds a receipt can prove their entry was not dropped.</td>
 </tr>
 <tr>
 <td>Evidence report (Team)</td>
@@ -200,7 +200,7 @@ creating a new PostgreSQL schema, and one-click drift reconcile are Team. Tiers 
 </tr>
 <tr>
 <td>Launch receipts</td>
-<td>A run created by a recorded request, whether an API launch or a webhook fire, records the <code>seq:link</code> of the chain entry that authorized it, so who asked is redeemable evidence rather than a field the server asserts. A creation entry the chain can no longer produce is reported. A run started by the scheduler, or created before this release, carries none and its dossier says so plainly rather than implying one was lost.</td>
+<td>A run created by a recorded request, whether an API launch or a webhook fire, records the <code>seq:link</code> of the chain entry that authorized it, so who asked is redeemable evidence rather than a field the server asserts. A creation entry the chain can no longer produce is reported. A run the scheduler starts carries one too, pointing at the entry its schedule's fire committed. A run created before launch receipts existed carries none, and its dossier says so plainly rather than implying one was lost.</td>
 </tr>
 <tr>
 <td>Run dossier</td>
@@ -255,7 +255,7 @@ creating a new PostgreSQL schema, and one-click drift reconcile are Team. Tiers 
 <td>Credential values are redacted from run logs, live streams, and events, so a tool that echoes a secret shows <code>***</code> instead of the value.</td>
 </tr>
 <tr>
-<td>High availability</td>
+<td>High availability (Team)</td>
 <td>Two servers on one database share the schedule without double-firing. Tokens can carry a lifetime.</td>
 </tr>
 <tr>
@@ -393,6 +393,10 @@ creating a new PostgreSQL schema, and one-click drift reconcile are Team. Tiers 
 <tr>
 <td>Schedule timezones</td>
 <td>A schedule reads its cron expression in an IANA timezone such as <code>America/New_York</code>, following that zone's daylight-saving shifts, so a nightly window stays put across the year instead of drifting with the server clock. On the day a zone falls back the repeated hour fires once, not twice, and on the day it springs forward a slot inside the hour that never happens fires at the instant the clocks jumped, so a nightly job runs every night of the year.</td>
+</tr>
+<tr>
+<td>Schedule failures</td>
+<td>A fire that starts no run, because a credential has no secret, a policy denied it, or its template is gone, keeps its reason on the schedule. The Schedules page shows the reason in the Last run column beside a link to the last run that did start, and the next fire that starts a run clears it.</td>
 </tr>
 <tr>
 <td>Starter templates</td>

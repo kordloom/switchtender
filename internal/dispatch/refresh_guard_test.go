@@ -70,10 +70,9 @@ func TestRefreshRefusesADangerousBareSource(t *testing.T) {
 		{Name: "a traversing path", Source: dir + "/../escape.ini", Refused: true},
 		{Name: "an empty path", Source: "", Refused: true},
 		{Name: "a plain readable file is allowed", Source: plain},
-		{
-			Name:   "a path that does not exist is left for ansible-inventory to report",
-			Source: filepath.Join(dir, "absent.ini"),
-		},
+		// ansible-inventory does not report a missing path: it prints an empty inventory with a clean
+		// exit, so the refresh succeeded and emptied the stored inventory. It is refused here instead.
+		{Name: "a path that does not exist", Source: filepath.Join(dir, "absent.ini"), Refused: true},
 	}
 	for _, test := range tests {
 		t.Run(test.Name, func(t *testing.T) {

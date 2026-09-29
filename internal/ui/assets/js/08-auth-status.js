@@ -139,11 +139,17 @@ async function getJSON(url) {
 		// Throwing the internal path and a status code instead put developer strings in front of
 		// readers on a dozen surfaces and discarded the only text that said what to do next.
 		const data = await res.json().catch(() => ({}));
-		if (explains(data.error)) throw new Error(data.error);
-		if (res.status === 403) {
-			throw new Error("this view needs a higher role than this session holds");
+		let message = "the server refused with HTTP " + res.status;
+		if (explains(data.error)) {
+			message = data.error;
+		} else if (res.status === 403) {
+			message = "this view needs a higher role than this session holds";
 		}
-		throw new Error("the server refused with HTTP " + res.status);
+		// The status travels with the sentence, so a caller can tell "there is no such thing" from
+		// "the server could not answer" without parsing prose.
+		const err = new Error(message);
+		err.status = res.status;
+		throw err;
 	}
 	return res.json();
 }
@@ -395,9 +401,21 @@ function shortId(id) {
 	return id && id.length > 15 ? id.slice(0, 13) + "…" : (id || "");
 }
 
-// isReadOnly reports whether the server serves a read-only demo, which hides mutating controls.
+// isReadOnly reports whether the server is read-only, which hides mutating controls.
 function isReadOnly() {
 	return document.body.dataset.readonly === "true";
+}
+
+// isDemo reports whether this is the public demo. A server started with --read-only is read-only too,
+// and it is somebody's real install, so the demo's own sentences, the overnight reset and the advice
+// to self-host, are kept to the demo.
+function isDemo() {
+	return document.body.dataset.demo === "true";
+}
+
+// readOnlyReason is what a disabled control says on a read-only server.
+function readOnlyReason() {
+	return isDemo() ? "Disabled in this read-only demo" : "Disabled on this read-only server";
 }
 
 // aiOff reports whether the server said advisory AI is off for this page. A page without the

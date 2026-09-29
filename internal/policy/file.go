@@ -282,6 +282,11 @@ func (s *FileStore) Get(ctx context.Context, id string) (*Policy, error) {
 
 // Save refuses. The file is the source of truth, so a policy change belongs in a diff.
 func (s *FileStore) Save(context.Context, *Policy) error {
+	return s.ReadOnly()
+}
+
+// ReadOnly returns why the file store refuses writes.
+func (s *FileStore) ReadOnly() error {
 	return fmt.Errorf("%w: policies are read from %s, so change them there and let review and "+
 		"deployment apply it", ErrReadOnly, s.path)
 }
