@@ -34,7 +34,7 @@ code, pre { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, 
 
 /* Backgrounds */
 .bg-mesh {
-	position: fixed; inset: -20% -20% auto -20%; height: 120vh; z-index: -2;
+	position: fixed; inset: -20% 0 auto 0; height: 120vh; z-index: -2; pointer-events: none;
 	background:
 		radial-gradient(40% 40% at 18% 12%, rgba(52, 211, 153, 0.22), transparent 70%),
 		radial-gradient(38% 38% at 82% 8%, rgba(34, 211, 238, 0.18), transparent 70%),
@@ -126,9 +126,11 @@ h1 {
 
 .hero-shot { position: relative; }
 .glow {
-	position: absolute; inset: -12% -8%; z-index: 0;
+	position: absolute; inset: 0; z-index: 0; pointer-events: none;
 	background: radial-gradient(50% 50% at 50% 40%, rgba(52, 211, 153, 0.35), transparent 70%);
-	filter: blur(40px);
+	/* The blur paints well past the box on its own, and painted filter output does not widen
+	   the page the way an inset bleed or a transform would. */
+	filter: blur(48px);
 }
 .window {
 	position: relative; z-index: 1; border-radius: 14px; overflow: hidden;
@@ -181,7 +183,12 @@ h1 {
 .cards .card { flex: 0 1 calc(25% - 13.5px); }
 .cards-3 { display: flex; flex-wrap: wrap; justify-content: center; gap: 18px; }
 .cards-3 .card { flex: 0 1 calc(33.333% - 12px); }
-@media (max-width: 860px) { .cards-3 .card { flex-basis: calc(50% - 9px); } }
+@media (max-width: 860px) {
+	.cards-3 .card { flex-basis: calc(50% - 9px); }
+	/* An odd count at two columns would strand the last card alone at half width. Span it instead:
+	   a full-width card reads as deliberate, a floating half-width one reads as a mistake. */
+	.cards-3 .card:last-child:nth-child(odd) { flex-basis: 100%; }
+}
 @media (max-width: 560px) { .cards-3 .card { flex-basis: 100%; } }
 .card {
 	padding: 26px 22px; border-radius: var(--radius);
@@ -303,6 +310,8 @@ h1 {
 .gs-note { max-width: 720px; margin: 24px auto 0; text-align: center; color: var(--muted); font-size: 15.5px; }
 .gs-note a { color: var(--accent); }
 .gs-steps ol { list-style: none; display: grid; gap: 18px; }
+.gs-step > * { min-width: 0; }
+.gs-step pre { overflow-x: auto; }
 .gs-step { display: grid; grid-template-columns: 44px 1fr; gap: 20px; align-items: start; padding: 24px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
 .gs-num { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 19px; color: #05261a; background: linear-gradient(135deg, var(--accent), #6ee7b7); }
 .gs-body h3 { font-family: "Space Grotesk", sans-serif; font-size: 19px; font-weight: 600; margin-bottom: 6px; }
@@ -339,6 +348,7 @@ h1 {
 	.window { transform: none; }
 	.governance { grid-template-columns: 1fr; }
 	.cards .card { flex-basis: calc(50% - 9px); }
+	.cards .card:last-child:nth-child(odd) { flex-basis: 100%; }
 }
 @media (max-width: 560px) {
 	.strip { grid-template-columns: repeat(2, 1fr); gap: 26px; }

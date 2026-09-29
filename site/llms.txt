@@ -21,6 +21,7 @@ seeded read-only tour.
 - [Homepage](https://switchtender.com/): what it is and the live matrix
 - [Pricing](https://switchtender.com/pricing): free to self-host forever, paid tiers for multi-person governance and auditor-ready evidence
 - [Get started](https://switchtender.com/get-started): install and first run
+- [AI agents](https://switchtender.com/agents): give an agent one operator-bound token, gate every run behind human approval, and prove what it did
 - [Quickstart](https://switchtender.com/docs/quickstart): first job in minutes
 - [FAQ](https://switchtender.com/docs/faq): the questions everyone asks
 
@@ -36,6 +37,9 @@ seeded read-only tour.
 ## Docs
 
 - [Concepts](https://switchtender.com/docs/concepts): jobs, templates, fleets, runs
+- [Provable audit](https://switchtender.com/docs/concepts#provable-audit): every mutation is recorded in a fail-closed hash chain before it executes, or refused with a 503
+- Offline verification: signed LoomSeal bundles verify on an air-gapped machine against the key the server publishes at /.well-known/loomseal.json
+- Receipts: every mutation returns an Audit-Receipt header (seq:hash) that later proves the chain still holds that exact entry at that exact position
 - [Tools](https://switchtender.com/docs/features): Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go
 - [Reliability](https://switchtender.com/docs/reliability): sharding, retries, drift detection
 - [Secrets](https://switchtender.com/docs/secrets)

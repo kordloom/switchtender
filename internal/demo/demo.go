@@ -285,11 +285,16 @@ func waitTerminal(ctx context.Context, store run.Store, id string) {
 // materialize writes the embedded assets to a temp directory, recreating their tree, and returns its
 // path. The tree carries the Ansible playbook and inventory plus the Terraform working directory.
 func materialize() (string, error) {
-	dir, err := os.MkdirTemp("", "switchtender-demo-")
-	if err != nil {
+	// A fixed name rather than a random suffix: the path lands in run records, where
+	// switchtender-demo-assets reads as intentional and a scratch dir reads as debris.
+	dir := filepath.Join(os.TempDir(), "switchtender-demo-assets")
+	if err := os.RemoveAll(dir); err != nil {
 		return "", err
 	}
-	err = fs.WalkDir(assets, "assets", func(path string, entry fs.DirEntry, walkErr error) error {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return "", err
+	}
+	err := fs.WalkDir(assets, "assets", func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -383,7 +388,10 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) {
 			{"deploy-bot", "POST", "/v1/pipelines", 6},
 			{"deploy-bot", "POST", "/v1/policies", 5},
 			{"deploy-bot", "POST", "/v1/schedules", 4},
+			{"deploy-bot", "POST", "/v1/runs", 3},
+			{"admin", "POST", "/v1/runs/run_split_demo/approve", 3},
 			{"admin", "DELETE", "/v1/templates/tpl_retired", 2},
+			{"deploy-bot", "POST", "/v1/runs", 1},
 		}
 		for _, h := range history {
 			entry := &audit.Entry{
@@ -397,10 +405,13 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) {
 		}
 	}
 
+	// Each carries placeholder sealed material: the doctor flags a credential with no secret, and
+	// a demo full of warnings reads as misconfigured. Nothing seeded references these, and the
+	// instance is read-only, so the placeholder is never decrypted or injected.
 	creds := []*credential.Credential{
-		{ID: credential.NewID(), Name: "prod-ssh", Kind: credential.KindSSHKey, CreatedAt: ago(72)},
-		{ID: credential.NewID(), Name: "ansible-vault", Kind: credential.KindVaultPassword, CreatedAt: ago(72)},
-		{ID: credential.NewID(), Name: "dockerhub", Kind: credential.KindRegistry, CreatedAt: ago(48)},
+		{ID: credential.NewID(), Name: "prod-ssh", Kind: credential.KindSSHKey, Secret: "demo-placeholder", CreatedAt: ago(72)},
+		{ID: credential.NewID(), Name: "ansible-vault", Kind: credential.KindVaultPassword, Secret: "demo-placeholder", CreatedAt: ago(72)},
+		{ID: credential.NewID(), Name: "dockerhub", Kind: credential.KindRegistry, Secret: "demo-placeholder", CreatedAt: ago(48)},
 	}
 	for _, c := range creds {
 		if err := d.Credentials.Save(ctx, c); err != nil {

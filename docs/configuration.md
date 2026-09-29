@@ -181,8 +181,11 @@ node over the mesh relay, with no database access of its own.
 
 Manages API tokens. Creating the first token turns on authentication.
 
-- `token new --name <label> [--ttl <duration>]` mints a token, printed once. A zero TTL never
-  expires.
+- `token new --name <label> [--user <username>] [--ttl <duration>]` mints a token, printed once. A
+  zero TTL never expires.
+- `--user` binds the token to an account, and the token carries that account's role. A token minted
+  without `--user` is unscoped and acts as admin, so bind every token you hand to a person, a
+  service, or an AI agent. See [running an agent](agents.md).
 - `token list` lists tokens without their secrets.
 - `token revoke <id>` deletes a token.
 

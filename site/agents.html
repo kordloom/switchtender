@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>AI agent change governance · SwitchTender</title>
+	<meta name="description" content="Give an AI agent one operator-bound token, hold every run at a human approval gate, and record each change in a fail-closed hash chain before it executes. Signed bundles verify offline, so what your agents did is evidence, not testimony.">
+	<link rel="canonical" href="https://switchtender.com/agents">
+	<meta property="og:title" content="AI agent change governance · SwitchTender">
+	<meta property="og:description" content="Your agents are changing production. Prove exactly what they did: one scoped token per agent, a human approval gate on every run, and a sealed audit chain an auditor verifies offline.">
+	<meta property="og:type" content="website">
+	<meta property="og:url" content="https://switchtender.com/agents">
+	<meta property="og:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=8">
+	<meta name="twitter:card" content="summary_large_image">
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/styles.css?v=21">
+</head>
+<body>
+	<div class="bg-mesh" aria-hidden="true"></div>
+	<div class="bg-grid" aria-hidden="true"></div>
+
+	<header class="nav" id="nav">
+		<div class="wrap nav-inner">
+			<a class="brand" href="/" aria-label="SwitchTender"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+			<nav class="nav-links">
+				<a href="/#features">Features</a>
+				<a href="/pricing">Pricing</a>
+				<a href="/#compare">Compare</a>
+				<a href="/docs/">Docs</a>
+			</nav>
+			<div class="nav-cta">
+				<a class="ghost" href="https://github.com/kordloom/switchtender">GitHub</a>
+				<a class="btn" href="/get-started">Get started</a>
+			</div>
+			<button class="nav-toggle" id="nav-toggle" aria-label="Menu">
+				<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="7" x2="21" y2="7"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="17" x2="21" y2="17"/></svg>
+			</button>
+		</div>
+	</header>
+
+	<main>
+		<section class="wrap gs-hero reveal">
+			<span class="eyebrow">AI agent change governance</span>
+			<h1>Your agents are changing production.<br><span class="grad">Prove exactly what they did.</span></h1>
+			<p class="lede">Auditors discount logs that cannot prove their own integrity, and they are right to. A normal log is testimony: the operator's word for what happened. A sealed hash chain is evidence: anyone can recompute it, and a single altered byte breaks it. SwitchTender records what an agent changes before the change executes, holds it at a human gate, and signs the trail so a third party can check it without trusting your server.</p>
+			<div class="hero-cta">
+				<a class="btn big" href="/get-started">Get started</a>
+				<a class="ghost big" href="/docs/concepts#provable-audit">How the proof works</a>
+			</div>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>What governed agent changes look like</h2>
+				<p>Six properties, each one testable against a running server. Together they turn agent activity into a record an auditor can rely on.</p>
+			</div>
+			<div class="cards cards-3">
+				<article class="card reveal">
+					<h3>Fail-closed recording</h3>
+					<p>Every mutation is written into the audit chain before its handler runs. If the record cannot be written, the change is refused with a 503 instead of performed silently. There is no path where an agent changes something and nothing is written down.</p>
+				</article>
+				<article class="card reveal">
+					<h3>A receipt for every change</h3>
+					<p>Every mutation returns an <code>Audit-Receipt</code> header naming its sequence and hash. Keep them. A receipt later proves the chain still holds that exact entry at that exact position, so an omission is detectable by the party it happened to.</p>
+				</article>
+				<article class="card reveal">
+					<h3>One credential per agent</h3>
+					<p>Secrets are sealed on the server and decrypt only at execution, so an agent holds exactly one credential: its SwitchTender token. It never sees an SSH key, a cloud login, or a vault password. Revoking that one token shuts the door.</p>
+				</article>
+				<article class="card reveal">
+					<h3>A human approval gate</h3>
+					<p>One empty approval policy gates every run. An agent can queue work all day, and nothing executes until a person releases it. The gate is enforced in the dispatcher, so API-driven and scheduled runs are held the same as manual ones.</p>
+				</article>
+				<article class="card reveal">
+					<h3>Sealed offline verification</h3>
+					<p><code>switchtender audit bundle</code> emits the chain as a signed LoomSeal bundle. It verifies on a machine with no network and no SwitchTender install, against the key the server publishes at <code>/.well-known/loomseal.json</code>.</p>
+				</article>
+				<article class="card reveal">
+					<h3>Actor-level provenance</h3>
+					<p>Every entry names the actor behind it, so an agent's changes stay attributable instead of blurring into a shared account. The <a href="https://demo.switchtender.com">live demo</a> seeds a deploy-bot service account whose API and scheduled runs, and their audit entries, are on screen right now.</p>
+				</article>
+			</div>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>The one-credential architecture</h2>
+				<p>An agent with a pile of credentials has a pile of doors. An agent with one credential has one, and SwitchTender puts a gate on it. <code>switchtender token new --user</code> binds a token to an account, so a token bound to an operator carries the operator role: it can submit runs, but it cannot approve its own work and it cannot change configuration. Add one empty approval policy and every run the agent submits waits for a person. Four commands take you from nothing to an agent whose entire history is evidence.</p>
+			</div>
+			<div class="gs-steps">
+				<ol>
+					<li class="gs-step reveal">
+						<div class="gs-num">1</div>
+						<div class="gs-body">
+							<h3>Create the agent's operator account</h3>
+							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>switchtender user new deploy-agent --role operator --db switchtender.db</code></pre></div>
+						</div>
+					</li>
+					<li class="gs-step reveal">
+						<div class="gs-num">2</div>
+						<div class="gs-body">
+							<h3>Mint the bound token, the only credential the agent gets</h3>
+							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>switchtender token new --name deploy-agent --user deploy-agent --db switchtender.db</code></pre></div>
+						</div>
+					</li>
+					<li class="gs-step reveal">
+						<div class="gs-num">3</div>
+						<div class="gs-body">
+							<h3>Gate everything with one empty policy</h3>
+							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>curl -s -X POST localhost:8080/v1/policies \
+  -H "authorization: Bearer $ADMIN_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"name":"gate-everything"}'</code></pre></div>
+						</div>
+					</li>
+					<li class="gs-step reveal">
+						<div class="gs-num">4</div>
+						<div class="gs-body">
+							<h3>Hand the auditor the bundle</h3>
+							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>switchtender audit bundle --db switchtender.db --out evidence.json</code></pre></div>
+						</div>
+					</li>
+				</ol>
+			</div>
+			<p class="gs-note reveal">This page is about external agents driving the <a href="/docs/api">API</a>. The built-in <a href="/docs/ai">advisory AI</a> is a separate feature: it proposes text and never executes anything.</p>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>What the chain does not prove</h2>
+				<p>An honest page beats a loud one. The chain proves the record was not altered. It does not prove that every change in your infrastructure went through SwitchTender: a person or a process holding its own SSH key can still change a host behind the controller's back, and no audit system can write down what it never saw. For agents, credential scoping is what closes that gap. An agent that holds only a SwitchTender token has no way around the controller, so for that actor, the recorded history and the actual history are the same thing. The gate is its only door, which is exactly what makes the logbook complete.</p>
+			</div>
+		</section>
+
+		<section class="cta wrap reveal">
+			<h2>Put a gate and a logbook between your agents and production.</h2>
+			<div class="hero-cta">
+				<a class="btn big" href="/get-started">Get started</a>
+				<a class="ghost big" href="https://demo.switchtender.com">Watch deploy-bot in the live demo</a>
+			</div>
+		</section>
+	</main>
+
+	<footer class="footer">
+		<div class="wrap footer-inner">
+			<img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="foot-logo">
+			<nav>
+				<a href="https://github.com/kordloom/switchtender">GitHub</a>
+				<a href="/docs/">Docs</a>
+				<a href="/pricing">Pricing</a>
+				<a href="/docs/comparison">Compare</a>
+				<a href="/awx-alternative">vs AWX</a>
+				<a href="/ascender-alternative">vs Ascender</a>
+				<a href="/aap-alternative">vs AAP</a>
+				<a href="/semaphore-alternative">vs Semaphore</a>
+				<a href="/privacy">Privacy</a>
+				<a href="https://github.com/kordloom/switchtender/blob/main/LICENSE">License</a>
+			</nav>
+			<span class="foot-note">Source-available · BSL 1.1 · self-host free</span>
+		</div>
+	</footer>
+	<script src="/app.js?v=6"></script>
+</body>
+</html>
