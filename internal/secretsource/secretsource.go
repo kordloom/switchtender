@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 )
 
 const (
@@ -155,6 +156,22 @@ func ValidKind(kind string) bool {
 	}
 	_, ok := minters[k]
 	return ok
+}
+
+// Kinds returns every supported source kind, sorted: local plus each registered resolver and dynamic
+// engine. It is the exact set ValidKind accepts, so a user-facing hint built from it cannot drift
+// from the resolver and minter tables.
+func Kinds() []string {
+	out := make([]string, 0, len(resolvers)+len(minters)+1)
+	out = append(out, KindLocal)
+	for k := range resolvers {
+		out = append(out, k)
+	}
+	for k := range minters {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // ResolveLeased returns the value a source names and, for a dynamic engine, a lease that revokes the

@@ -75,6 +75,53 @@ func TestMaterializeCommandCredential(t *testing.T) {
 	}
 }
 
+// TestValidateCredentialsToolMismatch verifies an Ansible-only credential attached to a non-Ansible
+// run is rejected at submit rather than silently ignored at execution, and that the same credential is
+// accepted under Ansible and env-based kinds are accepted under any tool.
+func TestValidateCredentialsToolMismatch(t *testing.T) {
+	t.Parallel()
+	sealer := credential.NewSealer("pass", "salt")
+	keySealed, err := sealer.Seal("PRIVATE KEY DATA")
+	if err != nil {
+		t.Fatalf("Seal() error = %v", err)
+	}
+	envSealed, err := sealer.Seal("API_TOKEN=abc123")
+	if err != nil {
+		t.Fatalf("Seal() error = %v", err)
+	}
+	store := credential.NewMemStore()
+	for _, c := range []*credential.Credential{
+		{ID: "ssh", Name: "deploy-key", Kind: credential.KindSSHKey, Secret: keySealed},
+		{ID: "env", Name: "cloud", Kind: credential.KindEnv, Secret: envSealed},
+	} {
+		if err := store.Save(context.Background(), c); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+	d := &Dispatcher{credentials: store, sealer: sealer}
+
+	tests := []struct {
+		Tool string
+		IDs  []string
+		Want error
+	}{
+		{Tool: run.ToolTerraform, IDs: []string{"ssh"}, Want: ErrToolCredential}, // Test 0: ssh key on terraform is rejected.
+		{Tool: run.ToolBash, IDs: []string{"ssh"}, Want: ErrToolCredential},      // Test 1: ssh key on bash is rejected.
+		{Tool: run.ToolAnsible, IDs: []string{"ssh"}, Want: nil},                 // Test 2: ssh key on ansible is fine.
+		{Tool: "", IDs: []string{"ssh"}, Want: nil},                              // Test 3: empty tool means ansible.
+		{Tool: run.ToolTerraform, IDs: []string{"env"}, Want: nil},               // Test 4: env applies to any tool.
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			err := d.validateCredentials(context.Background(), test.Tool, test.IDs)
+			if !errors.Is(err, test.Want) {
+				t.Errorf("validateCredentials(%q) error = %v, want %v", test.Tool, err, test.Want)
+			}
+		})
+	}
+}
+
 func TestMaterializeTokenCredential(t *testing.T) {
 	t.Parallel()
 	sealer := credential.NewSealer("pass", "salt")

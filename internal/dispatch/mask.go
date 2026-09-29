@@ -89,7 +89,10 @@ func (m *masker) redactString(s string) string {
 }
 
 // redactEvent masks the free-text fields of an event in place, covering a task's captured output,
-// message, diff, and any string values a play published with set_stats, however deeply nested.
+// message, diff, any string values a play published with set_stats however deeply nested, and the
+// play, task, and host name fields, since a secret embedded in a task name or a dynamic host name
+// would otherwise reach storage unredacted. Masking is deterministic per value, so a host name that
+// contains a secret substring redacts identically on every event and the host matrix still groups.
 func (m *masker) redactEvent(e *event.Event) {
 	m.mu.RLock()
 	empty := len(m.secrets) == 0
@@ -97,6 +100,9 @@ func (m *masker) redactEvent(e *event.Event) {
 	if empty {
 		return
 	}
+	e.Play = m.redactString(e.Play)
+	e.Task = m.redactString(e.Task)
+	e.Host = m.redactString(e.Host)
 	e.Message = m.redactString(e.Message)
 	e.Stdout = m.redactString(e.Stdout)
 	e.Stderr = m.redactString(e.Stderr)

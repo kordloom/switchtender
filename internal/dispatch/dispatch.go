@@ -103,6 +103,8 @@ type Dispatcher struct {
 	owner string
 	// claimInterval is how often the claim loop polls when idle.
 	claimInterval time.Duration
+	// maxShards caps how many groups a split fans out into.
+	maxShards int
 	// queues names the queues this process serves; empty serves the default pool.
 	queues []string
 	// credentials resolves stored execution secrets, nil when the feature is off.
@@ -167,6 +169,8 @@ type Option func(*config)
 type config struct {
 	// workers is the worker pool size.
 	workers int
+	// maxShards caps how many groups a split fans out into.
+	maxShards int
 	// publisher receives live output for streaming.
 	publisher Publisher
 	// owner identifies this process on leases.
@@ -236,6 +240,12 @@ func WithWorkers(n int) Option {
 	return func(c *config) { c.workers = n }
 }
 
+// WithMaxShards sets the ceiling on how many groups a split fans out into. A value below one restores
+// the default. A split is always bounded by the host count regardless.
+func WithMaxShards(n int) Option {
+	return func(c *config) { c.maxShards = n }
+}
+
 // WithPublisher sets the Publisher that receives live events and log chunks.
 func WithPublisher(p Publisher) Option {
 	return func(c *config) { c.publisher = p }
@@ -282,6 +292,9 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 	if cfg.workers < 1 {
 		cfg.workers = DefaultWorkers
 	}
+	if cfg.maxShards < 1 {
+		cfg.maxShards = DefaultMaxShards
+	}
 	if cfg.publisher == nil {
 		cfg.publisher = noopPublisher{}
 	}
@@ -311,6 +324,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		cancels:            make(map[string]context.CancelFunc),
 		owner:              cfg.owner,
 		claimInterval:      cfg.claimInterval,
+		maxShards:          cfg.maxShards,
 		queues:             cfg.queues,
 		credentials:        cfg.credentials,
 		sealer:             cfg.sealer,
@@ -432,7 +446,7 @@ func (d *Dispatcher) janitor() {
 
 // validateRun checks a run's credential and project references before it is accepted.
 func (d *Dispatcher) validateRun(ctx context.Context, r *run.Run) error {
-	if err := d.validateCredentials(ctx, r.CredentialIDs); err != nil {
+	if err := d.validateCredentials(ctx, r.Tool, r.CredentialIDs); err != nil {
 		return err
 	}
 	if err := d.validateInventory(ctx, r.InventoryID); err != nil {
@@ -617,7 +631,7 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		costs = nil
 	}
 
-	groups := partition(hosts, shards, costs)
+	groups := partition(hosts, min(shards, d.maxShards), costs)
 	count := len(groups)
 	parent := &run.Run{
 		ID: run.NewID(), Playbook: playbook, Inventory: inventory, Kind: run.KindSplit,
@@ -1034,6 +1048,12 @@ func (d *Dispatcher) stepOutputs(child *run.Run) map[string]any {
 	return outputs
 }
 
+// DefaultMaxShards caps how many groups a split fans out into when an operator sets no override, so
+// one submission cannot spawn thousands of child runs and overwhelm the coordinator's per-child
+// polling and the single store writer. The --max-shards flag raises or lowers it; a split is always
+// bounded below by the host count regardless.
+const DefaultMaxShards = 512
+
 // partition splits hosts into at most shards groups balanced by expected cost. Each host weighs
 // its average duration from costs; a host without history weighs the average of the known costs,
 // or one when nothing is known, which degrades to balancing by host count. Hosts are placed
@@ -1339,8 +1359,17 @@ func (d *Dispatcher) Cancel(id string) bool {
 }
 
 // finalize records the terminal status, exit code, failure detail, and end time of r, and sends
-// webhook notifications for top-level runs.
+// webhook notifications for top-level runs. It refuses to resurrect a run another actor already moved
+// to a different terminal state, such as the janitor interrupting an expired lease, so a slow but
+// still alive worker that is reclaimed cannot overwrite the interrupt with a success.
 func (d *Dispatcher) finalize(r *run.Run, status run.Status, exitCode *int, failure string) {
+	if stored, fenced := d.fencedFinalize(r.ID, status); fenced {
+		r.Status = stored
+		d.log.Warn("dispatch: run already finalized by another actor, not overwriting",
+			zap.String("run_id", r.ID), zap.String("stored", string(stored)),
+			zap.String("attempted", string(status)))
+		return
+	}
 	ended := time.Now()
 	r.Status = status
 	r.ExitCode = exitCode
@@ -1348,6 +1377,28 @@ func (d *Dispatcher) finalize(r *run.Run, status run.Status, exitCode *int, fail
 	r.EndedAt = &ended
 	d.save(r)
 	d.notify(r)
+}
+
+// fencedFinalize reports whether a run must not be finalized to status because another actor already
+// moved it to a different terminal state. It first tries to claim the terminal transition atomically
+// from running, the state every executing run finalizes from; a successful claim means no other actor
+// intervened. When the store cannot compare and swap, such as the relay client, or the run was not in
+// running, it falls back to reading the current status. It returns the stored status alongside the
+// decision so the caller can reflect reality. A legitimate finalize from a non running state, such as
+// a rejected run, is never fenced because its stored status already equals the target.
+func (d *Dispatcher) fencedFinalize(id string, status run.Status) (run.Status, bool) {
+	ctx := context.Background()
+	if moved, err := d.store.TransitionStatus(ctx, id, run.StatusRunning, status); err == nil && moved {
+		return status, false
+	}
+	cur, err := d.store.Get(ctx, id)
+	if err != nil {
+		return status, false
+	}
+	if cur.Status.Terminal() && cur.Status != status {
+		return cur.Status, true
+	}
+	return cur.Status, false
 }
 
 // save persists r using a background context so terminal state is recorded even during shutdown.

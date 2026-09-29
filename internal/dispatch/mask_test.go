@@ -62,6 +62,9 @@ func TestMaskerRedactEvent(t *testing.T) {
 	m := &masker{}
 	m.set([]string{"topsecret"})
 	e := event.Event{
+		Play:    "deploy topsecret",
+		Task:    "set topsecret var",
+		Host:    "topsecret-host",
 		Message: "topsecret",
 		Stdout:  "printed topsecret",
 		Stderr:  "warn topsecret",
@@ -76,6 +79,7 @@ func TestMaskerRedactEvent(t *testing.T) {
 	m.redactEvent(&e)
 
 	want := event.Event{
+		Play: "deploy ***", Task: "set *** var", Host: "***-host",
 		Message: "***", Stdout: "printed ***", Stderr: "warn ***", Diff: "-***",
 		Outputs: map[string]any{
 			"leaked": "***",

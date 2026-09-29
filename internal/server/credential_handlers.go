@@ -68,11 +68,12 @@ func createCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 		}
 		if !credential.ValidKind(req.Kind) {
 			respondError(w, log, http.StatusBadRequest,
-				"kind must be ssh_key, vault_password, env, token, become_password, or registry")
+				"kind must be one of: "+credential.KindList()+" (or a registered custom type)")
 			return
 		}
 		if !credential.ValidSource(req.Source) {
-			respondError(w, log, http.StatusBadRequest, "source must be local, command, vault, or gsm")
+			respondError(w, log, http.StatusBadRequest,
+				"source must be one of: "+credential.SourceList())
 			return
 		}
 
@@ -159,7 +160,7 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 			}
 			if !credential.ValidKind(kind) {
 				respondError(w, log, http.StatusBadRequest,
-					"kind must be ssh_key, vault_password, env, token, become_password, or registry")
+					"kind must be one of: "+credential.KindList()+" (or a registered custom type)")
 				return
 			}
 			source := c.Source
@@ -167,7 +168,8 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 				source = req.Source
 			}
 			if !credential.ValidSource(source) {
-				respondError(w, log, http.StatusBadRequest, "source must be local, command, vault, or gsm")
+				respondError(w, log, http.StatusBadRequest,
+					"source must be one of: "+credential.SourceList())
 				return
 			}
 			sealed, err := sealer.Seal(secret)

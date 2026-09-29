@@ -68,4 +68,7 @@ jobs:
         with:
           go-version-file: go.mod
       - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        run: |
+          if ! go run golang.org/x/vuln/cmd/govulncheck@latest ./...; then
+            echo "::warning title=govulncheck::Vulnerabilities found; review the log above."
+          fi

@@ -374,6 +374,8 @@ func (m *memStore) ReclaimStale(_ context.Context, cutoff time.Time) (int, error
 		case StatusRunning:
 			now := time.Now()
 			r.Status = StatusInterrupted
+			r.ClaimedBy = ""
+			r.ClaimedAt = nil
 			r.EndedAt = &now
 			if r.Error == "" {
 				r.Error = "interrupted: executor lease expired"
