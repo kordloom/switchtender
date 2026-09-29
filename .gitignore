@@ -32,6 +32,22 @@ Thumbs.db
 # Env
 .env
 .env.local
+# The files this product writes beside itself, each holding a key, none of them matched by the
+# patterns above. Running init or serve inside a checkout is an ordinary thing to do while trying
+# it out, and every one of these would then be sitting in a working tree waiting for git add -A.
+#
+# switchtender.env holds the master encryption key and its salt: with those two values every stored
+# credential and every backup can be decrypted.
+#
+# producer-key.json is the identity that signs this install's audit bundles. Published, it lets
+# anybody mint a receipt that verifies as this install, which is the one thing the chain exists to
+# make impossible.
+#
+# witness-key.json is the witness's own signing key, and the whole value of a witness signature is
+# that it is not the watched party's.
+switchtender.env
+producer-key.json
+witness-key.json
 .env.*.local
 *.pem
 *.key

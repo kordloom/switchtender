@@ -147,6 +147,21 @@ function setStatus(msg) {
 	if (msg) { el.textContent = msg; el.hidden = false; } else { el.hidden = true; }
 }
 
+// EMPTY_HINTS are what to say on a page with nothing on it yet, for the pages where the product
+// has an answer. A page with no answer says nothing extra rather than filling the space.
+const EMPTY_HINTS = {
+	jobtemplates: {
+		text: "Seed a few starter templates that run with no project, inventory, or credential:",
+		command: "switchtender examples",
+	},
+	runs: { text: "Launch one from a template, or press Launch run above to compose one." },
+	inventories: {
+		text: "An inventory can be typed here, or imported from what you already run:",
+		command: "switchtender import",
+	},
+	projects: { text: "Point one at a git repository and every run records the commit it executed." },
+};
+
 // showEmpty renders a centered empty-state card in place of the status line. keepControls leaves
 // the filter toolbar visible, for an emptiness that is about the query rather than the instance:
 // hiding the controls there took away the search box the person was typing in, which turned a
@@ -161,6 +176,24 @@ function showEmpty(msg, keepControls) {
 		'<path d="M3 14h4l2 3h6l2-3h4"/>' +
 		'<path d="M5.5 5.5h13l2.5 8.5v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4z"/></svg><p></p>';
 	el.querySelector("p").textContent = msg;
+	// An empty list is the moment to say how to stop it being empty. The product already ships the
+	// answer for a fresh install, "switchtender examples", and its own help calls the empty list a
+	// poor first look, but that sentence lived in the docs and the CLI, and never on the page where
+	// somebody is looking at the thing it describes.
+	const hint = EMPTY_HINTS[document.body.dataset.page];
+	if (hint) {
+		const line = document.createElement("p");
+		line.className = "empty-hint";
+		line.textContent = hint.text;
+		if (hint.command) {
+			const code = document.createElement("code");
+			code.textContent = hint.command;
+			line.appendChild(document.createTextNode(" "));
+			line.appendChild(code);
+			line.appendChild(copyButton(hint.command, "Copy this command"));
+		}
+		el.appendChild(line);
+	}
 	if (keepControls) return;
 	// Controls that filter, page, or export an empty list are noise, so they hide with it.
 	for (const sel of [".list-filter", ".runs-toolbar", ".table-foot"]) {
