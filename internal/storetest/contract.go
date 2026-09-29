@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -61,6 +63,12 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("claim skips cancel requested", func(t *testing.T) { testClaimSkipsCancel(t, newStore()) })
 	t.Run("claim skips children of settled parents", func(t *testing.T) {
 		testClaimSkipsChildrenOfSettledParents(t, newStore())
+	})
+	t.Run("run races serialize", func(t *testing.T) {
+		testRunRacesUnderConcurrency(t, newStore())
+	})
+	t.Run("lease clock is one clock", func(t *testing.T) {
+		testLeaseClockIsOneClock(t, newStore())
 	})
 	t.Run("transition status", func(t *testing.T) { testTransitionStatus(t, newStore()) })
 	t.Run("workers", func(t *testing.T) { testWorkers(t, newStore()) })
@@ -1967,6 +1975,185 @@ func testClaimSkipsChildrenOfSettledParents(t *testing.T, store run.Store) {
 	if !errors.Is(err, run.ErrNonePending) {
 		t.Fatalf("Claim() error = %v, want ErrNonePending", err)
 	}
+}
+
+// testLeaseClockIsOneClock verifies that whatever stamps a lease and whatever ages it agree about
+// what time it is.
+//
+// Claim, Heartbeat, and ReclaimStale all read a clock. If they do not read the same one, a worker
+// whose clock runs behind renews its lease into the past and the next sweep interrupts a perfectly
+// healthy run. Heartbeating then makes things worse than not heartbeating, because a run that never
+// renews keeps the stamp Claim gave it and survives. This is checked by measuring the stamps rather
+// than by reading the code, because the two happened to differ by only milliseconds on one machine
+// and by a minute on another.
+func testLeaseClockIsOneClock(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	id := "run_lease_clock"
+	if err := store.Save(ctx, &run.Run{
+		ID: id, Playbook: "site.yml", Status: run.StatusPending, CreatedAt: time.Now().Add(-time.Hour),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	claimed, err := store.Claim(ctx, "worker-a", []string{""})
+	if err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+	if claimed.ClaimedAt == nil {
+		t.Fatal("Claim() stamped no lease time")
+	}
+	atClaim := *claimed.ClaimedAt
+
+	if err := store.Heartbeat(ctx, id, "worker-a"); err != nil {
+		t.Fatalf("Heartbeat() error = %v", err)
+	}
+	got, err := store.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.ClaimedAt == nil {
+		t.Fatal("Heartbeat() left no lease time")
+	}
+	// A renewal must never move the lease backwards. Two clocks in one column is exactly what that
+	// looks like from the outside, whichever way they are skewed.
+	if got.ClaimedAt.Before(atClaim) {
+		t.Errorf("a heartbeat moved the lease from %s back to %s, so whatever stamps it and "+
+			"whatever ages it are reading different clocks, and the sweep will interrupt a healthy "+
+			"run", atClaim.Format(time.RFC3339Nano), got.ClaimedAt.Format(time.RFC3339Nano))
+	}
+	// And a freshly renewed lease is not stale, which is the outcome that actually hurts.
+	if _, err := store.ReclaimStale(ctx, 30*time.Second); err != nil {
+		t.Fatalf("ReclaimStale() error = %v", err)
+	}
+	after, err := store.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get() after sweep error = %v", err)
+	}
+	if after.Status != run.StatusPending || after.ClaimedBy != "worker-a" {
+		t.Errorf("a run that just heartbeated is %q held by %q after the sweep, so a live worker "+
+			"was cut off", after.Status, after.ClaimedBy)
+	}
+}
+
+// testRunRacesUnderConcurrency verifies the run store's compare-and-swap operations actually
+// serialize, rather than appearing to because the tests above ran one call at a time.
+//
+// Every operation here decides whether work runs on real hosts, and several control nodes and
+// workers hit one database at once. A sequential test passes on a store where none of this holds,
+// which is exactly how a guard that did nothing under load shipped once already.
+//
+// Three properties, each measured rather than asserted:
+//
+//   - Only one caller may claim a given run. Two executors running the same playbook on the same
+//     hosts is the most expensive failure this store can produce.
+//   - A run cannot be both canceled and claimed. Whoever loses must see that they lost, because a
+//     cancel that reports success while an executor starts the work is the defect this codebase has
+//     produced more times than any other.
+//   - Only one caller may move a run out of a given status, so a run cannot be approved twice or
+//     finalized into two different outcomes.
+func testRunRacesUnderConcurrency(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	const racers = 8
+
+	for round := range 25 {
+		// One run, many claimers.
+		id := fmt.Sprintf("run_race_claim_%d", round)
+		if err := store.Save(ctx, &run.Run{
+			ID: id, Playbook: "site.yml", Status: run.StatusPending,
+			CreatedAt: time.Now().Add(-time.Hour),
+		}); err != nil {
+			t.Fatalf("Save(%s) error = %v", id, err)
+		}
+		var claims atomic.Int64
+		race(racers, func(i int) {
+			got, err := store.Claim(ctx, fmt.Sprintf("worker-%d", i), []string{""})
+			switch {
+			case errors.Is(err, run.ErrNonePending):
+			case err != nil:
+				t.Errorf("Claim() error = %v", err)
+			case got != nil && got.ID == id:
+				claims.Add(1)
+			}
+		})
+		if got := claims.Load(); got != 1 {
+			t.Fatalf("round %d: %d executors claimed the same run, so the same playbook runs on "+
+				"the same hosts %d times", round, got, got)
+		}
+
+		// Cancel racing claim: at most one may win, and the winner must be the only one.
+		cid := fmt.Sprintf("run_race_cancel_%d", round)
+		if err := store.Save(ctx, &run.Run{
+			ID: cid, Playbook: "site.yml", Status: run.StatusPending,
+			CreatedAt: time.Now().Add(-time.Hour),
+		}); err != nil {
+			t.Fatalf("Save(%s) error = %v", cid, err)
+		}
+		var canceled, claimed atomic.Int64
+		race(racers, func(i int) {
+			if i%2 == 0 {
+				ok, err := store.CancelPending(ctx, cid)
+				if err != nil {
+					t.Errorf("CancelPending() error = %v", err)
+					return
+				}
+				if ok {
+					canceled.Add(1)
+				}
+				return
+			}
+			got, err := store.Claim(ctx, fmt.Sprintf("worker-%d", i), []string{""})
+			if err == nil && got != nil && got.ID == cid {
+				claimed.Add(1)
+			}
+		})
+		if canceled.Load() > 1 {
+			t.Fatalf("round %d: %d callers were told they canceled the same run", round, canceled.Load())
+		}
+		if canceled.Load() == 1 && claimed.Load() > 0 {
+			t.Fatalf("round %d: a run was reported canceled and claimed for execution as well, "+
+				"so work starts on hosts after the API said it would not", round)
+		}
+
+		// One status transition out of a given state.
+		tid := fmt.Sprintf("run_race_transition_%d", round)
+		if err := store.Save(ctx, &run.Run{
+			ID: tid, Playbook: "site.yml", Kind: run.KindSplit,
+			Status: run.StatusPendingApproval, CreatedAt: time.Now().Add(-time.Hour),
+		}); err != nil {
+			t.Fatalf("Save(%s) error = %v", tid, err)
+		}
+		var released atomic.Int64
+		race(racers, func(i int) {
+			ok, err := store.TransitionStatusAndClaim(ctx, tid,
+				run.StatusPendingApproval, run.StatusRunning, fmt.Sprintf("coordinator-%d", i))
+			if err != nil {
+				t.Errorf("TransitionStatusAndClaim() error = %v", err)
+				return
+			}
+			if ok {
+				released.Add(1)
+			}
+		})
+		if got := released.Load(); got != 1 {
+			t.Fatalf("round %d: %d approvals released the same held run, so a split fans out %d "+
+				"times", round, got, got)
+		}
+	}
+}
+
+// race runs fn n times concurrently, released together so the calls actually overlap.
+func race(n int, fn func(i int)) {
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := range n {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			fn(i)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
 }
 
 // testTransitionStatusAndClaim verifies a run moves status and gains an owner in one step.

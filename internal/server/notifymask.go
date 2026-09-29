@@ -89,3 +89,27 @@ func restoreMaskedNotifications(incoming, stored []run.NotifyTarget) []run.Notif
 	}
 	return kept
 }
+
+// maskRun returns a shallow copy of the run with its notification URLs redacted.
+//
+// A template's targets were masked and a run's were not, and a template hands its targets to every
+// run it launches. So the same Slack or webhook URL an admin sees as a redaction came back in full
+// from the run endpoints, which any viewer may read. Masking one of the two places a value appears
+// is not masking it.
+func maskRun(rn *run.Run) *run.Run {
+	if rn == nil || len(rn.Notifications) == 0 {
+		return rn
+	}
+	cp := *rn
+	cp.Notifications = maskedNotifications(rn.Notifications)
+	return &cp
+}
+
+// maskRuns masks a whole list for a list response.
+func maskRuns(list []*run.Run) []*run.Run {
+	out := make([]*run.Run, len(list))
+	for i, rn := range list {
+		out[i] = maskRun(rn)
+	}
+	return out
+}

@@ -1681,9 +1681,14 @@ RETURNING ` + runColumns
 
 // Heartbeat renews owner's lease on a run.
 func (s *store) Heartbeat(ctx context.Context, id, owner string) error {
+	// Stamped from the database clock, the same clock Claim stamps with and ReclaimStale ages
+	// against. Using the calling process's clock put two different clocks in one column: a worker
+	// running a minute behind renewed its lease into the past, and the next sweep interrupted a
+	// perfectly healthy run. Heartbeating made it worse than not heartbeating, because a run that
+	// never renewed kept the database-clock stamp Claim gave it and survived.
 	res, err := s.db.ExecContext(ctx,
-		"UPDATE runs SET claimed_at=$1 WHERE id=$2 AND claimed_by=$3",
-		sqlutil.FormatTime(time.Now()), id, owner)
+		"UPDATE runs SET claimed_at="+pgNowText+" WHERE id=$1 AND claimed_by=$2",
+		id, owner)
 	if err != nil {
 		return fmt.Errorf("heartbeat: %w", err)
 	}

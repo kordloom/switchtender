@@ -176,6 +176,18 @@ func (s *relayServer) heartbeat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid heartbeat body")
 		return
 	}
+	// Renewing a lease keeps a run alive, so it answers the same question every other call does.
+	if pool := poolFrom(r.Context()); pool != nil {
+		stored, gerr := s.store.Get(r.Context(), body.ID)
+		if gerr != nil {
+			writeErr(w, http.StatusNotFound, "run not found")
+			return
+		}
+		if _, ok := pool.allows([]string{stored.Queue}); !ok {
+			writeErr(w, http.StatusNotFound, "run not found")
+			return
+		}
+	}
 	err := s.store.Heartbeat(r.Context(), body.ID, body.Owner)
 	switch {
 	case errors.Is(err, run.ErrNotFound):
@@ -188,16 +200,43 @@ func (s *relayServer) heartbeat(w http.ResponseWriter, r *http.Request) {
 }
 
 // get returns the run with the id in the path, or 404.
-func (s *relayServer) get(w http.ResponseWriter, r *http.Request) {
-	got, err := s.store.Get(r.Context(), r.PathValue("id"))
+// servesRun reports whether the calling pool may touch this run at all, answering the caller and
+// returning nil when it may not.
+//
+// Confining the claim was not confinement. A pool that could not lease a production run could still
+// read it by id, append to its log, and save a terminal status over it, because seven of the eight
+// endpoints never looked at the pool. So the queue bounded which work a token could start and
+// nothing else: a worker in the least trusted segment read the playbook, the inventory, the
+// credential ids, and the extra vars of a production run, and could cancel it. A queue is a
+// boundary or it is not; it cannot be one for a single endpoint.
+func (s *relayServer) servesRun(w http.ResponseWriter, r *http.Request) *run.Run {
+	stored, err := s.store.Get(r.Context(), r.PathValue("id"))
 	switch {
 	case errors.Is(err, run.ErrNotFound):
 		writeErr(w, http.StatusNotFound, "run not found")
+		return nil
 	case err != nil:
-		s.internal(w, "get", err)
-	default:
-		s.writeJSON(w, got)
+		s.internal(w, "read run", err)
+		return nil
 	}
+	if pool := poolFrom(r.Context()); pool != nil {
+		if q, ok := pool.allows([]string{stored.Queue}); !ok {
+			// Answered as not found rather than forbidden. A pool that may not serve this queue has
+			// no business learning that a run with this id exists.
+			_ = q
+			writeErr(w, http.StatusNotFound, "run not found")
+			return nil
+		}
+	}
+	return stored
+}
+
+func (s *relayServer) get(w http.ResponseWriter, r *http.Request) {
+	got := s.servesRun(w, r)
+	if got == nil {
+		return
+	}
+	s.writeJSON(w, got)
 }
 
 // save records a worker's report about a run it is executing.
@@ -222,14 +261,10 @@ func (s *relayServer) save(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "run id does not match the path")
 		return
 	}
-	stored, err := s.store.Get(r.Context(), id)
-	switch {
-	case errors.Is(err, run.ErrNotFound):
-		// A worker only ever reports on a run it claimed, so an unknown id is not a run to create.
-		writeErr(w, http.StatusNotFound, "run not found")
-		return
-	case err != nil:
-		s.internal(w, "save", err)
+	// A worker only ever reports on a run it claimed, so an unknown id is not a run to create, and
+	// a run outside this pool's queues is not this pool's to report on.
+	stored := s.servesRun(w, r)
+	if stored == nil {
 		return
 	}
 	if err := checkWorkerReport(stored, &body); err != nil {
@@ -286,7 +321,10 @@ func checkWorkerReport(stored, reported *run.Run) error {
 	}
 	// A report has to come from the holder. The lease is the only identity available here, since
 	// every worker presents the same token.
-	if reported.ClaimedBy != "" && reported.ClaimedBy != stored.ClaimedBy {
+	// Compared even when the field is absent. Treating an empty value as "no claim to check" meant
+	// a worker omitting claimed_by skipped the holder test entirely and could report on, and
+	// terminate, a run held by somebody else.
+	if reported.ClaimedBy != stored.ClaimedBy {
 		return fmt.Errorf("run is held by another executor")
 	}
 	return nil
@@ -326,13 +364,8 @@ func applyWorkerReport(stored, reported *run.Run) {
 // while deciding is exactly the thing worth forging, so the same question that gates a status
 // report gates the writes that build the record: which runs may be reported on at all.
 func (s *relayServer) heldForReport(w http.ResponseWriter, r *http.Request) bool {
-	stored, err := s.store.Get(r.Context(), r.PathValue("id"))
-	switch {
-	case errors.Is(err, run.ErrNotFound):
-		writeErr(w, http.StatusNotFound, "run not found")
-		return false
-	case err != nil:
-		s.internal(w, "read run", err)
+	stored := s.servesRun(w, r)
+	if stored == nil {
 		return false
 	}
 	// A finished run is not an error, it is a no-op. The store already drops these writes silently,

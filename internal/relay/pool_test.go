@@ -2,6 +2,7 @@ package relay_test
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -203,5 +204,110 @@ func TestRelayRecordsWhatCrossesTheBoundary(t *testing.T) {
 	}
 	if ok, at := audit.Verify(chain); !ok {
 		t.Errorf("the chain does not verify at entry %d", at)
+	}
+}
+
+// TestQueueConfinementCoversEveryEndpoint checks that a queue is a boundary on every relay call,
+// not only on the one that leases work.
+//
+// Confining the claim alone was not confinement. A pool that could not lease a production run could
+// still read it by id, append to its log, and save a terminal status over it, because seven of the
+// eight endpoints never looked at the pool. The queue bounded which work a token could start and
+// nothing else, so a worker in the least trusted segment read the playbook, inventory, credential
+// ids, and extra vars of a production run and could cancel it. A boundary that holds on one call is
+// not a boundary.
+func TestQueueConfinementCoversEveryEndpoint(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "workers.yaml")
+	const dmzToken, prodToken = "tok-dmz", "tok-prod"
+	doc := "workers:\n" +
+		"  - name: dmz\n    token_sha256: " + relay.HashToken(dmzToken) + "\n    queues: [dmz]\n" +
+		"  - name: prod\n    token_sha256: " + relay.HashToken(prodToken) + "\n    queues: [prod]\n"
+	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	pools, err := relay.LoadPools(path)
+	if err != nil {
+		t.Fatalf("LoadPools() error = %v", err)
+	}
+
+	store := run.NewMemStore()
+	held := time.Now()
+	secret := &run.Run{
+		ID: "run_prod", Playbook: "site.yml", Inventory: "prod.ini", Queue: "prod",
+		Status: run.StatusRunning, CreatedAt: time.Now(),
+		ClaimedBy: "prod-worker", ClaimedAt: &held,
+		CredentialIDs: []string{"cred_prod_ssh"},
+		ExtraVars:     map[string]any{"vault_password": "s3cr3t-prod"},
+	}
+	if err := store.Save(ctx, secret); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	ts := httptest.NewServer(relay.NewHandler(store, pools, nil, nil, nil))
+	t.Cleanup(ts.Close)
+
+	// Every endpoint, with the wrong pool's token.
+	probes := []struct {
+		Name   string
+		Method string
+		Path   string
+		Body   string
+	}{
+		{"read the run", http.MethodGet, "/relay/v1/runs/run_prod", ""},
+		{"append output", http.MethodPost, "/relay/v1/runs/run_prod/log", "PLAY RECAP ok=12\n"},
+		{"append events", http.MethodPost, "/relay/v1/runs/run_prod/events", "[]"},
+		{"host summary", http.MethodPost, "/relay/v1/runs/run_prod/host-summary", "[]"},
+		{"task summary", http.MethodPost, "/relay/v1/runs/run_prod/task-summary", "[]"},
+		{"kill the run", http.MethodPost, "/relay/v1/runs/run_prod/save",
+			`{"status":"canceled","error":"killed by another pool"}`},
+		{"renew the lease", http.MethodPost, "/relay/v1/heartbeat",
+			`{"id":"run_prod","owner":"dmz-worker"}`},
+	}
+	for _, p := range probes {
+		req, rerr := http.NewRequestWithContext(ctx, p.Method, ts.URL+p.Path, strings.NewReader(p.Body))
+		if rerr != nil {
+			t.Fatalf("NewRequest() error = %v", rerr)
+		}
+		req.Header.Set("Authorization", "Bearer "+dmzToken)
+		resp, derr := http.DefaultClient.Do(req)
+		if derr != nil {
+			t.Fatalf("Do() error = %v", derr)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode < 400 {
+			t.Errorf("a dmz token could %s on a prod-queue run: %d", p.Name, resp.StatusCode)
+		}
+		if strings.Contains(string(body), "s3cr3t-prod") || strings.Contains(string(body), "cred_prod_ssh") {
+			t.Errorf("%s leaked the run's spec to the wrong pool: %s", p.Name, body)
+		}
+	}
+
+	// Nothing the wrong pool sent was applied.
+	after, err := store.Get(ctx, "run_prod")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if after.Status != run.StatusRunning {
+		t.Errorf("the run is %q, so another pool terminated work it may not even see", after.Status)
+	}
+	if log, lerr := store.Log(ctx, "run_prod"); lerr != nil {
+		t.Fatalf("Log() error = %v", lerr)
+	} else if len(log) != 0 {
+		t.Errorf("another pool wrote %q into the run's record", log)
+	}
+
+	// The owning pool is unaffected.
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/relay/v1/runs/run_prod", nil)
+	req.Header.Set("Authorization", "Bearer "+prodToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("the owning pool was refused its own run: %d", resp.StatusCode)
 	}
 }
