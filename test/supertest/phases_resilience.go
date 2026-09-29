@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -312,12 +313,10 @@ func previousReleaseImage(flagValue, repoDir string) (string, error) {
 	if flagValue != "" {
 		return flagValue, nil
 	}
-	out, err := exec.Command("git", "-C", repoDir, "tag", "--list", "v*",
-		"--sort=-v:refname").Output()
+	tags, err := releaseTags(repoDir)
 	if err != nil {
-		return "", fmt.Errorf("list release tags: %w", err)
+		return "", err
 	}
-	tags := strings.Fields(string(out))
 	if len(tags) == 0 {
 		return "", fmt.Errorf("no release tags are visible; fetch tags or pass -prev-image")
 	}
@@ -333,16 +332,55 @@ func previousReleaseImage(flagValue, repoDir string) (string, error) {
 	return "ghcr.io/kordloom/switchtender:" + strings.TrimPrefix(prev, "v"), nil
 }
 
+// releaseTags returns every release the repository marks, as vX.Y.Z and newest first. A release is
+// marked by its v tag or, where the public history holds the code of releases made before it began,
+// by a snapshot/v tag on the commit carrying that release's tree.
+func releaseTags(repoDir string) ([]string, error) {
+	out, err := exec.Command("git", "-C", repoDir, "tag", "--list", "v*", "snapshot/v*").Output()
+	if err != nil {
+		return nil, fmt.Errorf("list release tags: %w", err)
+	}
+	seen := map[string]bool{}
+	var tags []string
+	for _, tag := range strings.Fields(string(out)) {
+		tag = strings.TrimPrefix(tag, "snapshot/")
+		if !seen[tag] {
+			seen[tag] = true
+			tags = append(tags, tag)
+		}
+	}
+	sort.Slice(tags, func(i, j int) bool {
+		return lessVersion(strings.TrimPrefix(tags[j], "v"), strings.TrimPrefix(tags[i], "v"))
+	})
+	return tags, nil
+}
+
+// releaseRef returns the tag holding release version's code: its v tag, or its snapshot/v tag when
+// the release predates the public history.
+func (h *harness) releaseRef(version string) (string, error) {
+	for _, ref := range []string{"v" + version, "snapshot/v" + version} {
+		if _, err := h.run("git", "-C", h.repo, "rev-parse", "--verify", "--quiet",
+			"refs/tags/"+ref); err == nil {
+			return ref, nil
+		}
+	}
+	return "", fmt.Errorf("no v%s or snapshot/v%s tag in %s", version, version, h.repo)
+}
+
 // chartAt writes the Helm chart as it stood at release version into the work directory and returns
 // its path. version carries no leading v, the way an image tag names it.
 func (h *harness) chartAt(version string) (string, error) {
+	ref, err := h.releaseRef(version)
+	if err != nil {
+		return "", err
+	}
 	dir := filepath.Join(h.work, "chart-v"+version)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return "", err
 	}
 	archive := filepath.Join(h.work, "chart-v"+version+".tar")
 	if _, err := h.run("git", "-C", h.repo, "archive", "--format=tar", "-o", archive,
-		"v"+version, "deploy/helm/switchtender"); err != nil {
+		ref, "deploy/helm/switchtender"); err != nil {
 		return "", err
 	}
 	if _, err := h.run("tar", "-xf", archive, "-C", dir); err != nil {
