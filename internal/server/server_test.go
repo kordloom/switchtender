@@ -1906,6 +1906,14 @@ type failingAudits struct{ err error }
 // Append always fails.
 func (f *failingAudits) Append(context.Context, *audit.Entry) error { return f.err }
 
+// AppendSpanBeat always fails.
+func (f *failingAudits) AppendSpanBeat(context.Context, time.Time, int) (*audit.Entry, error) {
+	return nil, f.err
+}
+
+// SpanBeats returns nothing.
+func (f *failingAudits) SpanBeats(context.Context, int) ([]*audit.Entry, error) { return nil, nil }
+
 // List returns nothing.
 func (f *failingAudits) List(context.Context, int) ([]*audit.Entry, error) { return nil, nil }
 

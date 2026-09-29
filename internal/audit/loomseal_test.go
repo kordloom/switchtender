@@ -1,14 +1,21 @@
 package audit_test
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
+	"github.com/kordloom/loomseal/jcs"
 
 	"github.com/kordloom/switchtender/internal/audit"
 )
@@ -141,6 +148,161 @@ func TestBundleRoundTrip(t *testing.T) {
 	}
 	if perm := info.Mode().Perm(); perm != 0o600 {
 		t.Errorf("identity file mode = %o, want 600, the signing seed must not be world readable", perm)
+	}
+}
+
+// TestBundleMapsSpanBeats pins the span claim mapping: a well-formed span entry becomes the
+// spec-owned span claim with a numeric payload, its chain coordinates stay exactly as stored, and
+// everything else, including a span-marked entry whose path does not parse, stays a generic claim.
+func TestBundleMapsSpanBeats(t *testing.T) {
+	t.Parallel()
+	id, err := audit.LoadIdentity(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadIdentity() error = %v", err)
+	}
+	ctx := context.Background()
+	store := audit.NewMemStore()
+	base := time.Date(2026, 7, 27, 15, 0, 0, 0, time.UTC)
+	for i, path := range []string{"/v1/templates", "/v1/projects"} {
+		if err := store.Append(ctx, &audit.Entry{
+			ID: audit.NewID(), At: base.Add(time.Duration(i) * time.Minute),
+			Actor: "admin", Method: "POST", Path: path,
+		}); err != nil {
+			t.Fatalf("Append() error = %v", err)
+		}
+	}
+	if _, err := store.AppendSpanBeat(ctx, base.Add(time.Hour), 60); err != nil {
+		t.Fatalf("AppendSpanBeat() error = %v", err)
+	}
+	// A span-marked entry whose path does not round-trip, which must stay a generic claim rather
+	// than become a malformed span one.
+	if err := store.Append(ctx, &audit.Entry{
+		ID: audit.NewID(), At: base.Add(2 * time.Hour),
+		Actor: audit.SpanActor, Method: audit.SpanMethod, Path: "/span/oops",
+	}); err != nil {
+		t.Fatalf("Append() near-miss error = %v", err)
+	}
+	chain, err := store.Chain(ctx)
+	if err != nil {
+		t.Fatalf("Chain() error = %v", err)
+	}
+
+	b, err := audit.BuildBundle(chain, id, "test", base.Add(3*time.Hour))
+	if err != nil {
+		t.Fatalf("BuildBundle() error = %v", err)
+	}
+	if len(b.Claims) != 4 {
+		t.Fatalf("claims = %d, want 4", len(b.Claims))
+	}
+
+	span := b.Claims[2]
+	if span.Type != audit.SpanClaimType {
+		t.Errorf("span claim type = %q, want %q", span.Type, audit.SpanClaimType)
+	}
+	// The payload numbers must be numbers, not strings, per the span claim registry entry. The
+	// actor, method, and path members stay alongside them because the chain link commits to those
+	// three, and a verifier recomputes every link from the claim payload alone.
+	wantPayload := map[string]any{
+		"stream": "chain", "cadence_s": int64(60), "beat": int64(1), "count": int64(2),
+		"actor": audit.SpanActor, "method": audit.SpanMethod, "path": audit.SpanPath(1, 2, 60),
+	}
+	if diff := cmp.Diff(wantPayload, span.Payload); diff != "" {
+		t.Errorf("span payload mismatch (-want +got):\n%s", diff)
+	}
+	if span.Chain.Seq != chain[2].Seq || span.Chain.Prev != chain[2].PrevHash ||
+		span.Chain.Link != chain[2].Hash {
+		t.Errorf("span claim chain = %+v, want the stored coordinates of entry 3", span.Chain)
+	}
+
+	// The generic entries and the near-miss keep the generic type and the actor, method, and path
+	// payload the chain link commits to.
+	for _, i := range []int{0, 1, 3} {
+		claim, e := b.Claims[i], chain[i]
+		if claim.Type != audit.ClaimType {
+			t.Errorf("claim %d type = %q, want %q", i, claim.Type, audit.ClaimType)
+		}
+		want := map[string]any{"actor": e.Actor, "method": e.Method, "path": e.Path}
+		if diff := cmp.Diff(want, claim.Payload); diff != "" {
+			t.Errorf("claim %d payload mismatch (-want +got):\n%s", i, diff)
+		}
+	}
+}
+
+// TestBundleSpanClaimLinksRecompute pins that every claim link in a bundled chain holding a span
+// beat recomputes from the bundle document alone, the way the reference verifier does: SHA-256
+// over the canonical JSON array of the sequence, the at bytes exactly as bundled, the payload's
+// actor, method, and path members, and the previous link. The span mapping used to replace the
+// payload, dropping the three members the link commits to, so the verifier hashed empty strings
+// and every bundle holding a span beat failed chain verification at the auditor.
+func TestBundleSpanClaimLinksRecompute(t *testing.T) {
+	t.Parallel()
+	id, err := audit.LoadIdentity(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadIdentity() error = %v", err)
+	}
+	ctx := context.Background()
+	store := audit.NewMemStore()
+	base := time.Date(2026, 8, 3, 4, 32, 10, 435251000, time.UTC)
+	for i := range 3 {
+		if err := store.Append(ctx, &audit.Entry{
+			ID: audit.NewID(), At: base.Add(time.Duration(i) * time.Second),
+			Actor: "cli:operator", Method: "CLI", Path: "/cli/user/create",
+		}); err != nil {
+			t.Fatalf("Append() error = %v", err)
+		}
+	}
+	if _, err := store.AppendSpanBeat(ctx, base.Add(time.Minute), 1); err != nil {
+		t.Fatalf("AppendSpanBeat() error = %v", err)
+	}
+	chain, err := store.Chain(ctx)
+	if err != nil {
+		t.Fatalf("Chain() error = %v", err)
+	}
+	b, err := audit.BuildBundle(chain, id, "test", base.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("BuildBundle() error = %v", err)
+	}
+	raw, err := json.Marshal(b)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	// The decoding below mirrors the verifier: it reads only the bundle bytes, and a payload
+	// member the bundle does not carry is an empty string, never recovered from the store.
+	var doc struct {
+		Claims []struct {
+			At      string `json:"at"`
+			Payload struct {
+				Actor  string `json:"actor"`
+				Method string `json:"method"`
+				Path   string `json:"path"`
+			} `json:"payload"`
+			Chain struct {
+				Seq  int64  `json:"seq"`
+				Prev string `json:"prev"`
+				Link string `json:"link"`
+			} `json:"chain"`
+		} `json:"claims"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if len(doc.Claims) != len(chain) {
+		t.Fatalf("claims = %d, want %d", len(doc.Claims), len(chain))
+	}
+	for i, c := range doc.Claims {
+		payload, err := jcs.Serialize([]any{
+			strconv.FormatInt(c.Chain.Seq, 10), c.At,
+			c.Payload.Actor, c.Payload.Method, c.Payload.Path, c.Chain.Prev,
+		})
+		if err != nil {
+			t.Fatalf("claim %d: jcs.Serialize() error = %v", i, err)
+		}
+		sum := sha256.Sum256(payload)
+		if diff := cmp.Diff(c.Chain.Link, hex.EncodeToString(sum[:])); diff != "" {
+			t.Errorf("claim %d link does not recompute from the bundle alone (-want +got):\n%s",
+				i, diff)
+		}
 	}
 }
 

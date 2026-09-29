@@ -35,7 +35,7 @@
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-	<link rel="stylesheet" href="/styles.css?v=21">
+	<link rel="stylesheet" href="/styles.css?v=22">
 	<style>
 		/* Tier pricing layout. Reuses the card system, adding a price header, a feature checklist,
 		   and a featured-tier ring so the middle tier reads as the recommended one. */
@@ -53,6 +53,12 @@
 		.tier-price b { font-family: "Space Grotesk", sans-serif; font-size: 34px; font-weight: 700; line-height: 1; }
 		.tier-price .cadence { color: var(--muted); font-size: 14px; }
 		.tier-sub { color: var(--muted); font-size: 13px; min-height: 20px; }
+		.tier-payoff {
+			margin: 14px 0 2px; padding: 12px 14px; border-radius: 10px;
+			background: rgba(52, 211, 153, 0.06); border: 1px solid rgba(52, 211, 153, 0.16);
+			font-size: 13.5px; color: var(--text); line-height: 1.55;
+		}
+		.tier-payoff b { color: var(--accent); font-weight: 600; }
 		.tier .btn, .tier .ghost { width: 100%; text-align: center; justify-content: center; margin: 20px 0 4px; }
 		.tier-badge {
 			display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: 0.5px;
@@ -142,6 +148,7 @@
 					<p class="tier-for">Everything AWX does, in one binary, still maintained.</p>
 					<div class="tier-price"><b>$0</b><span class="cadence">forever</span></div>
 					<p class="tier-sub">Self-hosted, single binary, no cluster.</p>
+					<div class="tier-payoff">The <b>complete controller</b> for your own team, forever. No seat cap, no host cap, nothing held back. Most teams never need more, and that is deliberate.</div>
 					<a class="btn" href="/get-started">Get started</a>
 					<ul class="tier-list">
 						<li>Full orchestration: inventory, projects, job templates, schedules, ad hoc runs</li>
@@ -158,9 +165,10 @@
 
 				<article class="card tier tier-featured">
 					<div class="tier-name">Team</div>
-					<p class="tier-for">For when more than one person is accountable for a change.</p>
+					<p class="tier-for">Stop hand-managing who can touch production.</p>
 					<div class="tier-price"><b>$250&ndash;500</b><span class="cadence">/ mo</span></div>
 					<p class="tier-sub">Flat per org. No per-seat bill.</p>
+					<div class="tier-payoff">A leaver loses access the <b>day they leave</b>, risky changes wait for a real sign-off from a link, and no secret lives in a playbook. The monthly access-review scramble disappears. Cheaper than one engineer-day a month.</div>
 					<a class="ghost" href="mailto:hello@kordloom.com?subject=SwitchTender%20Team%20tier">Talk to us</a>
 					<span class="tier-badge">Early access</span>
 					<p class="tier-inherit">Everything in Free, plus:</p>
@@ -176,9 +184,10 @@
 
 				<article class="card tier">
 					<div class="tier-name">Governed</div>
-					<p class="tier-for">For orgs handing evidence to someone external.</p>
+					<p class="tier-for">Turn the audit scramble into a scheduled export.</p>
 					<div class="tier-price"><b>$1,000&ndash;2,500</b><span class="cadence">/ mo</span></div>
 					<p class="tier-sub">Flat per org. Migration priced separately.</p>
+					<div class="tier-payoff">The evidence an auditor asks for <b>generates itself on a schedule</b>, mapped to your controls, and they verify it offline without you in the room. Days of gathering screenshots become one download you can defend. One passed audit pays for the year.</div>
 					<a class="ghost" href="mailto:hello@kordloom.com?subject=SwitchTender%20Governed%20tier">Talk to us</a>
 					<span class="tier-badge">Early access</span>
 					<p class="tier-inherit">Everything in Team, plus:</p>

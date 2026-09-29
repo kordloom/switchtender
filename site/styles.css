@@ -296,9 +296,15 @@ h1 {
 .footer-inner { display: flex; align-items: center; gap: 28px; flex-wrap: wrap; }
 .foot-logo { height: 18px; opacity: 0.85; }
 .footer nav { display: flex; gap: 12px 22px; flex: 1; flex-wrap: wrap; min-width: 0; }
-.footer nav a { color: var(--muted); font-size: 14px; transition: color 0.15s; }
+.footer nav a { color: var(--muted); font-size: 14px; transition: color 0.15s; white-space: nowrap; }
 .footer nav a:hover { color: var(--text); }
 .foot-note { color: #63707d; font-size: 13px; }
+/* On a phone the footer stacks and centers instead of squeezing the link column beside the note. */
+@media (max-width: 640px) {
+	.footer-inner { flex-direction: column; text-align: center; gap: 20px; }
+	.footer nav { flex: none; justify-content: center; row-gap: 14px; }
+	.foot-note { text-align: center; }
+}
 
 /* Get started page */
 .gs-hero { padding: 100px 24px 64px; text-align: center; }

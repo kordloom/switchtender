@@ -207,7 +207,7 @@ func BuildBundle(entries []*Entry, id Identity, version string, at time.Time) (*
 					"precision. Bundle a later range with --limit, or re-export once the chain has "+
 					"advanced past it", ErrExport, e.Seq)
 		}
-		claims = append(claims, BundleClaim{
+		claim := BundleClaim{
 			Type: ClaimType,
 			At:   e.At.UTC().Format(time.RFC3339Nano),
 			Payload: map[string]any{
@@ -216,7 +216,25 @@ func BuildBundle(entries []*Entry, id Identity, version string, at time.Time) (*
 				"path":   e.Path,
 			},
 			Chain: BundleCoordLink{Seq: e.Seq, Prev: e.PrevHash, Link: e.Hash},
-		})
+		}
+		// A span beat becomes the spec-owned span claim, so a verifier reads the beat stream
+		// without knowing this product's path encoding. The span members are added to the payload
+		// rather than replacing it: the chain link commits to actor, method, and path, and the
+		// profile promises every link recomputes from the claim payload alone, so dropping them
+		// left every span claim's link unrecomputable by anyone holding only the bundle. The
+		// registry fixes payload minimums, not maximums, so the extra members are still a valid
+		// span claim. The chain coordinates stay exactly as stored, and a span-marked entry whose
+		// path does not round-trip stays a generic claim rather than becoming a malformed span one.
+		if e.Actor == SpanActor && e.Method == SpanMethod {
+			if beat, count, cadenceS, ok := ParseSpanPath(e.Path); ok {
+				claim.Type = SpanClaimType
+				claim.Payload["stream"] = "chain"
+				claim.Payload["cadence_s"] = int64(cadenceS)
+				claim.Payload["beat"] = beat
+				claim.Payload["count"] = count
+			}
+		}
+		claims = append(claims, claim)
 	}
 	head := entries[len(entries)-1]
 	// A blank head hash is exactly the tamper the chain exists to catch, so it must not take the

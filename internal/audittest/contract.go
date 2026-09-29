@@ -4,6 +4,7 @@ package audittest
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -18,6 +19,20 @@ func Contract(t *testing.T, newStore func() audit.Store) {
 	t.Run("chain verifies", func(t *testing.T) { testChain(t, newStore()) })
 	t.Run("anchors round trip and scope", func(t *testing.T) { testAnchors(t, newStore()) })
 	t.Run("concurrent appends do not fork", func(t *testing.T) { testConcurrentAppend(t, newStore()) })
+	t.Run("span beats increment with counts", func(t *testing.T) { testSpanBeats(t, newStore()) })
+	t.Run("span beat one adopts prior history", func(t *testing.T) { testSpanAdoption(t, newStore()) })
+	t.Run("concurrent span beats never collide", func(t *testing.T) {
+		testConcurrentSpanBeats(t, newStore())
+	})
+	t.Run("ordinary append refuses the span marker", func(t *testing.T) {
+		testReservedSpan(t, newStore())
+	})
+	t.Run("near-miss span entry stays ordinary", func(t *testing.T) {
+		testNearMissSpan(t, newStore())
+	})
+	t.Run("span beats query filters and limits store-side", func(t *testing.T) {
+		testSpanBeatsQuery(t, newStore())
+	})
 	t.Run("empty list is non-nil", func(t *testing.T) {
 		got, err := newStore().List(context.Background(), 10)
 		if err != nil {
@@ -27,6 +42,291 @@ func Contract(t *testing.T, newStore func() audit.Store) {
 			t.Error("List() on an empty store = nil, want a non-nil empty slice")
 		}
 	})
+}
+
+// appendMutations appends n ordinary entries so a span test has history to count.
+func appendMutations(t *testing.T, store audit.Store, base time.Time, n int) {
+	t.Helper()
+	ctx := context.Background()
+	for i := range n {
+		if err := store.Append(ctx, &audit.Entry{
+			ID: audit.NewID(), At: base.Add(time.Duration(i) * time.Minute),
+			Actor: "root", Method: "POST", Path: "/runs",
+		}); err != nil {
+			t.Fatalf("Append() error = %v", err)
+		}
+	}
+}
+
+// checkBeat asserts one appended span beat carries the expected beat, count, and cadence, and that
+// its recorded time was truncated to microseconds, since a nanosecond beat could never be verified
+// by a third party and would poison every bundle after it.
+func checkBeat(t *testing.T, e *audit.Entry, at time.Time, wantBeat, wantCount int64, wantCadence int) {
+	t.Helper()
+	if e == nil {
+		t.Fatal("AppendSpanBeat() returned a nil entry")
+	}
+	if e.Actor != audit.SpanActor || e.Method != audit.SpanMethod {
+		t.Errorf("beat entry actor %q method %q, want %q %q", e.Actor, e.Method,
+			audit.SpanActor, audit.SpanMethod)
+	}
+	beat, count, cadence, ok := audit.ParseSpanPath(e.Path)
+	if !ok {
+		t.Fatalf("beat path %q does not parse back", e.Path)
+	}
+	if beat != wantBeat || count != wantCount || cadence != wantCadence {
+		t.Errorf("beat = %d count = %d cadence = %d, want %d %d %d",
+			beat, count, cadence, wantBeat, wantCount, wantCadence)
+	}
+	if !e.At.Equal(at.Truncate(time.Microsecond)) {
+		t.Errorf("beat at = %s, want %s truncated to microseconds", e.At, at)
+	}
+}
+
+// testSpanBeats verifies beats increment by exactly one with the right counts as ordinary appends
+// interleave: the count is how many entries landed since the previous beat, and a beat right after
+// another counts zero.
+func testSpanBeats(t *testing.T, store audit.Store) {
+	t.Helper()
+	ctx := context.Background()
+	base := time.Date(2026, 7, 6, 0, 0, 0, 1500, time.UTC)
+
+	first, err := store.AppendSpanBeat(ctx, base, 60)
+	if err != nil {
+		t.Fatalf("AppendSpanBeat() error = %v", err)
+	}
+	checkBeat(t, first, base, 1, 0, 60)
+
+	appendMutations(t, store, base.Add(time.Minute), 2)
+	second, err := store.AppendSpanBeat(ctx, base.Add(time.Hour), 60)
+	if err != nil {
+		t.Fatalf("AppendSpanBeat() second error = %v", err)
+	}
+	checkBeat(t, second, base.Add(time.Hour), 2, 2, 60)
+
+	third, err := store.AppendSpanBeat(ctx, base.Add(2*time.Hour), 60)
+	if err != nil {
+		t.Fatalf("AppendSpanBeat() third error = %v", err)
+	}
+	checkBeat(t, third, base.Add(2*time.Hour), 3, 0, 60)
+
+	chain, err := store.Chain(ctx)
+	if err != nil {
+		t.Fatalf("Chain() error = %v", err)
+	}
+	if len(chain) != 5 {
+		t.Fatalf("Chain() len = %d, want 5", len(chain))
+	}
+	if ok, at := audit.Verify(chain); !ok {
+		t.Errorf("Verify() reported a break at %d after span beats", at)
+	}
+	if head := chain[len(chain)-1]; head.Seq != third.Seq || head.Hash != third.Hash {
+		t.Errorf("chain head = seq %d hash %q, want the returned beat seq %d hash %q",
+			head.Seq, head.Hash, third.Seq, third.Hash)
+	}
+}
+
+// testSpanAdoption verifies the first beat on an already-populated chain counts every prior entry,
+// which is what lets a mid-life install adopt beats without renumbering its history.
+func testSpanAdoption(t *testing.T, store audit.Store) {
+	t.Helper()
+	ctx := context.Background()
+	base := time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC)
+	appendMutations(t, store, base, 5)
+
+	beat, err := store.AppendSpanBeat(ctx, base.Add(time.Hour), 300)
+	if err != nil {
+		t.Fatalf("AppendSpanBeat() error = %v", err)
+	}
+	checkBeat(t, beat, base.Add(time.Hour), 1, 5, 300)
+	if beat.Seq != 6 {
+		t.Errorf("beat seq = %d, want 6", beat.Seq)
+	}
+}
+
+// testConcurrentSpanBeats fires many beats at once and checks they mint distinct consecutive beat
+// numbers. This is the HA race: two replicas reading the same last beat and both appending its
+// successor would produce a duplicate, and a duplicate or skipped beat fails every bundle built
+// over the chain, so beat assignment must serialize in the store rather than in one process.
+func testConcurrentSpanBeats(t *testing.T, store audit.Store) {
+	t.Helper()
+	ctx := context.Background()
+	const n = 20
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := range n {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if _, err := store.AppendSpanBeat(ctx, time.Unix(int64(i), 0).UTC(), 60); err != nil {
+				errs <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent AppendSpanBeat() error = %v", err)
+	}
+
+	chain, err := store.Chain(ctx)
+	if err != nil {
+		t.Fatalf("Chain() error = %v", err)
+	}
+	if len(chain) != n {
+		t.Fatalf("Chain() len = %d, want %d", len(chain), n)
+	}
+	for i, e := range chain {
+		beat, count, _, ok := audit.ParseSpanPath(e.Path)
+		if !ok || e.Actor != audit.SpanActor || e.Method != audit.SpanMethod {
+			t.Fatalf("entry %d is not a span beat: %+v", i, e)
+		}
+		// Beats must come out 1..n in chain order: a repeat is a duplicate and a jump is a skip,
+		// and either fails a bundle.
+		if beat != int64(i+1) {
+			t.Errorf("entry %d beat = %d, want %d", i, beat, i+1)
+		}
+		if count != 0 {
+			t.Errorf("entry %d count = %d, want 0 between back-to-back beats", i, count)
+		}
+	}
+	if ok, at := audit.Verify(chain); !ok {
+		t.Errorf("Verify() reported a break at %d after concurrent beats", at)
+	}
+}
+
+// testReservedSpan verifies ordinary Append refuses an entry wearing the span marker, and that the
+// refusal leaves the chain unchanged and the legitimate beat path working. Authentication stores
+// token names verbatim and a request's method and path reach the trail as given, so without this a
+// caller holding a token named for the span actor could inject a beat that renumbers the real ones
+// and fails every bundle built over the chain.
+func testReservedSpan(t *testing.T, store audit.Store) {
+	t.Helper()
+	ctx := context.Background()
+	base := time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC)
+
+	forged := &audit.Entry{
+		ID: audit.NewID(), At: base,
+		Actor: audit.SpanActor, Method: audit.SpanMethod, Path: audit.SpanPath(9, 0, 60),
+	}
+	if err := store.Append(ctx, forged); !errors.Is(err, audit.ErrReservedSpan) {
+		t.Fatalf("Append() of a span marker entry error = %v, want ErrReservedSpan", err)
+	}
+	chain, err := store.Chain(ctx)
+	if err != nil {
+		t.Fatalf("Chain() error = %v", err)
+	}
+	if len(chain) != 0 {
+		t.Fatalf("Chain() len = %d after a refused append, want 0", len(chain))
+	}
+
+	beat, err := store.AppendSpanBeat(ctx, base.Add(time.Minute), 60)
+	if err != nil {
+		t.Fatalf("AppendSpanBeat() after a refusal error = %v", err)
+	}
+	checkBeat(t, beat, base.Add(time.Minute), 1, 0, 60)
+}
+
+// testNearMissSpan verifies an entry that wears the span actor and method but whose path does not
+// round-trip stays an ordinary entry: it appends, it never supplies a beat number, and the next
+// real beat counts it as prior history.
+func testNearMissSpan(t *testing.T, store audit.Store) {
+	t.Helper()
+	ctx := context.Background()
+	base := time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC)
+
+	if err := store.Append(ctx, &audit.Entry{
+		ID: audit.NewID(), At: base,
+		Actor: audit.SpanActor, Method: audit.SpanMethod, Path: "/span/9?count=0",
+	}); err != nil {
+		t.Fatalf("Append() of a near-miss entry error = %v, want it to append as ordinary", err)
+	}
+	chain, err := store.Chain(ctx)
+	if err != nil {
+		t.Fatalf("Chain() error = %v", err)
+	}
+	if len(chain) != 1 {
+		t.Fatalf("Chain() len = %d, want 1", len(chain))
+	}
+	if ok, at := audit.Verify(chain); !ok {
+		t.Errorf("Verify() reported a break at %d after a near-miss append", at)
+	}
+
+	beat, err := store.AppendSpanBeat(ctx, base.Add(time.Minute), 60)
+	if err != nil {
+		t.Fatalf("AppendSpanBeat() error = %v", err)
+	}
+	checkBeat(t, beat, base.Add(time.Minute), 1, 1, 60)
+}
+
+// testSpanBeatsQuery verifies SpanBeats answers only well-formed beats, oldest first, and that a
+// limit keeps the newest ones without letting a near-miss entry use up a slot.
+func testSpanBeatsQuery(t *testing.T, store audit.Store) {
+	t.Helper()
+	ctx := context.Background()
+	base := time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC)
+
+	appendMutations(t, store, base, 2)
+	if _, err := store.AppendSpanBeat(ctx, base.Add(time.Hour), 60); err != nil {
+		t.Fatalf("AppendSpanBeat() error = %v", err)
+	}
+	if err := store.Append(ctx, &audit.Entry{
+		ID: audit.NewID(), At: base.Add(90 * time.Minute),
+		Actor: audit.SpanActor, Method: audit.SpanMethod, Path: "/span/9?count=0",
+	}); err != nil {
+		t.Fatalf("Append() of a near-miss entry error = %v", err)
+	}
+	for i := range 2 {
+		at := base.Add(time.Duration(2+i) * time.Hour)
+		if _, err := store.AppendSpanBeat(ctx, at, 60); err != nil {
+			t.Fatalf("AppendSpanBeat() error = %v", err)
+		}
+	}
+
+	all, err := store.SpanBeats(ctx, 10)
+	if err != nil {
+		t.Fatalf("SpanBeats() error = %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("SpanBeats(10) len = %d, want 3 with the near-miss excluded", len(all))
+	}
+	for i, e := range all {
+		beat, _, _, ok := audit.ParseSpanPath(e.Path)
+		if !ok || !audit.IsSpanMarker(e) {
+			t.Fatalf("SpanBeats(10)[%d] = %+v, want only well-formed beats", i, e)
+		}
+		if beat != int64(i+1) {
+			t.Errorf("SpanBeats(10)[%d] beat = %d, want %d oldest first", i, beat, i+1)
+		}
+		if i > 0 && all[i-1].Seq >= e.Seq {
+			t.Errorf("SpanBeats(10)[%d] seq = %d after %d, want ascending", i, e.Seq, all[i-1].Seq)
+		}
+	}
+
+	// A limit keeps the newest beats, still oldest first within the answer, and the near-miss row
+	// between beats one and two must not consume a slot.
+	capped, err := store.SpanBeats(ctx, 2)
+	if err != nil {
+		t.Fatalf("SpanBeats(2) error = %v", err)
+	}
+	if len(capped) != 2 {
+		t.Fatalf("SpanBeats(2) len = %d, want 2", len(capped))
+	}
+	for i, e := range capped {
+		if beat, _, _, _ := audit.ParseSpanPath(e.Path); beat != int64(i+2) {
+			t.Errorf("SpanBeats(2)[%d] beat = %d, want %d: the newest two, oldest first", i, beat, i+2)
+		}
+	}
+
+	// Asking for three must reach past the near-miss row to beat one. A store that budgets its scan
+	// by span-marked rows rather than by well-formed beats comes up one short here.
+	three, err := store.SpanBeats(ctx, 3)
+	if err != nil {
+		t.Fatalf("SpanBeats(3) error = %v", err)
+	}
+	if len(three) != 3 {
+		t.Fatalf("SpanBeats(3) len = %d, want 3: the near-miss must not use up a slot", len(three))
+	}
 }
 
 // testConcurrentAppend fires many appends at once and checks the chain stays a single intact line:

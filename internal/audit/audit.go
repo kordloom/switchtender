@@ -38,8 +38,20 @@ type Entry struct {
 // Store persists audit entries. Implementations must be safe for concurrent use and must serialize
 // appends so the hash chain stays linear.
 type Store interface {
-	// Append records one entry, assigning its chain fields from the current head.
+	// Append records one entry, assigning its chain fields from the current head. It refuses an
+	// entry for which IsSpanMarker is true with ErrReservedSpan: the marker means "the server
+	// minted this beat", so only AppendSpanBeat may write it.
 	Append(ctx context.Context, e *Entry) error
+	// AppendSpanBeat atomically mints and appends the next span beat: one past the newest
+	// well-formed span entry's beat, or beat one when the chain holds none, with count set to how
+	// many entries were appended after that span entry (for beat one, every prior entry). The read
+	// and the append are one serialized step, since a duplicate or skipped beat fails every bundle
+	// built over the chain. It returns the appended entry.
+	AppendSpanBeat(ctx context.Context, at time.Time, cadenceS int) (*Entry, error)
+	// SpanBeats returns the newest limit span beat entries, those for which IsSpanMarker is true,
+	// answered oldest first so a watcher reads the present end of the stream in chain order. The
+	// filter runs store-side so an unauthenticated feed request never loads the whole chain.
+	SpanBeats(ctx context.Context, limit int) ([]*Entry, error)
 	// List returns up to limit entries, newest first.
 	List(ctx context.Context, limit int) ([]*Entry, error)
 	// Chain returns every entry in chain order, oldest first, for verification.
