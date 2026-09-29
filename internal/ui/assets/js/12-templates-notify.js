@@ -648,12 +648,17 @@ async function openProjectFiles(project) {
 	const list = document.getElementById("tree-list");
 	const filter = document.getElementById("tree-filter");
 	filter.value = "";
+	// A search box over nothing is its own small dead end, so it appears only once there is a list
+	// to search. An install with no project sync, or a project never synced, reaches the catch
+	// below and shows the server's explanation with no controls that cannot do anything.
+	filter.hidden = true;
 	note.textContent = "Loading the checkout.";
 	list.innerHTML = "";
 	overlay.hidden = false;
 	try {
 		const data = await getJSON("/projects/" + encodeURIComponent(project.id) + "/files");
 		const files = data.files || [];
+		filter.hidden = files.length === 0;
 		note.textContent = files.length
 			? files.length + " files in the cached checkout. Click one to view it."
 			: "The checkout is empty.";

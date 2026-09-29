@@ -371,8 +371,11 @@ async function loadDetail(runId) {
 	if (auditLink && !roleAtLeast("admin")) {
 		auditLink.hidden = true;
 	} else if (auditLink) {
+		// The receipt is added once the run is read, below. The id alone cannot find the run's own
+		// creation entry: that entry is written in middleware before the handler runs, so the path
+		// it commits is the collection, /v1/runs, without an id the server does not yet know.
 		auditLink.href = "/ui/audit?q=" + encodeURIComponent(runId);
-		auditLink.dataset.tip = "Click to see every audited change that mentions this run";
+		auditLink.dataset.tip = "Click to see this run's chain entries, its creation included";
 	}
 	const copyLink = document.getElementById("copy-link");
 	if (copyLink) {
@@ -414,6 +417,14 @@ async function loadDetail(runId) {
 	}, 1000);
 	try {
 		const run = await getJSON("/runs/" + runId);
+		// Filtering the trail by the run id matched only entries written after the run existed, so
+		// a run still held for approval matched none of them and its Audit trail button opened an
+		// empty table while the header beside it named the very chain entry that created it. The
+		// receipt carries that sequence, so the link passes both and the page keeps either.
+		if (auditLink && !auditLink.hidden && run.audit_receipt) {
+			auditLink.href = "/ui/audit?q=" + encodeURIComponent(runId) +
+				"&seq=" + encodeURIComponent(String(run.audit_receipt).split(":")[0]);
+		}
 		const rerun = document.getElementById("rerun-run");
 		// A rejected run, and one canceled before it ever started, are decisions not to run it. The
 		// API refuses to replay either, so the button is not offered for them.
@@ -460,7 +471,46 @@ async function loadDetail(runId) {
 		}
 	} catch (e) {
 		setStatus("Failed to load run: " + e.message);
+		// Nothing loaded, so every action on this page acts on nothing. They used to stay enabled:
+		// eight live buttons under one grey line, one of which produced no download, no message,
+		// and no change at all when clicked, because the state they read was never populated. A
+		// run id that does not exist is reachable by an ordinary click, so the page says so and
+		// offers the way back rather than a row of controls that cannot work.
+		const actions = document.querySelector("main.content .actions");
+		if (actions) actions.hidden = true;
+		const header = document.getElementById("run-header");
+		if (header) header.hidden = true;
+		showRunDeadEnd(runId);
 	}
+}
+
+// showRunDeadEnd explains an unreadable run and offers somewhere to go, since the page it replaces
+// has no other exit.
+function showRunDeadEnd(runId) {
+	if (document.getElementById("run-deadend")) return;
+	const host = document.querySelector("main.content");
+	if (!host) return;
+	const box = document.createElement("div");
+	box.id = "run-deadend";
+	box.className = "empty";
+	const p = document.createElement("p");
+	p.textContent = "There is no run " + runId + " on this install. A link to it may be stale, or " +
+		"the run may have been removed with the history it belonged to.";
+	box.appendChild(p);
+	const ways = document.createElement("p");
+	const runs = document.createElement("a");
+	runs.href = "/ui/runs";
+	runs.textContent = "All runs";
+	const audit = document.createElement("a");
+	audit.href = "/ui/audit";
+	audit.textContent = "the audit trail";
+	ways.appendChild(document.createTextNode("Try "));
+	ways.appendChild(runs);
+	ways.appendChild(document.createTextNode(", or "));
+	ways.appendChild(audit);
+	ways.appendChild(document.createTextNode(", which records runs that no longer exist."));
+	box.appendChild(ways);
+	host.appendChild(box);
 }
 
 // postAction sends a POST to the API and returns the parsed JSON body, throwing on an error reply.

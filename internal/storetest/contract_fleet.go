@@ -562,6 +562,14 @@ func testWorkers(t *testing.T, store run.Store) {
 			t.Fatalf("Save() error = %v", err)
 		}
 	}
+	// A shard the same executor claimed. It must not reach the tally: the count is a link into the
+	// runs list, which shows top level runs only, so counting it made the page disagree with what
+	// clicking it opens.
+	parent := "r1"
+	if err := store.Save(ctx, &run.Run{ID: "r1s0", Playbook: "p", Status: run.StatusSucceeded,
+		CreatedAt: base, ClaimedBy: "goat-1", ClaimedAt: &newer, ParentID: &parent}); err != nil {
+		t.Fatalf("Save(shard) error = %v", err)
+	}
 
 	workers, err := store.Workers(ctx)
 	if err != nil {
@@ -571,7 +579,8 @@ func testWorkers(t *testing.T, store run.Store) {
 		t.Fatalf("workers = %d, want 2", len(workers))
 	}
 	if workers[0].Owner != "goat-1" || workers[0].Active != 1 || workers[0].Completed != 1 || !workers[0].LastSeen.Equal(newer) {
-		t.Errorf("first worker = %+v, want goat-1 active 1 completed 1 seen %v", workers[0], newer)
+		t.Errorf("first worker = %+v, want goat-1 active 1 completed 1 seen %v (a completed count "+
+			"of 2 means the shard was tallied, which the runs list can never show)", workers[0], newer)
 	}
 	if workers[1].Owner != "serve-1" || workers[1].Active != 1 {
 		t.Errorf("second worker = %+v, want serve-1 active 1", workers[1])

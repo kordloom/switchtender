@@ -560,7 +560,12 @@ SELECT claimed_by,
 	SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
 	MAX(claimed_at) AS last_seen
 FROM runs
+-- Children are excluded. A worker really does execute shard and step runs, so counting them is
+-- truthful in the abstract, but the count is a link: clicking it opens the runs list, which shows
+-- top level runs only. Counting what the link cannot show made the Workers page disagree with
+-- itself, 20 against a list of 12. The shards are still reachable through their parent.
 WHERE claimed_by != '' AND claimed_at IS NOT NULL AND claimed_at >= $1
+	AND parent_id IS NULL
 GROUP BY claimed_by
 ORDER BY last_seen DESC, claimed_by COLLATE "C"`
 

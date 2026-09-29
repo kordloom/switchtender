@@ -146,6 +146,7 @@ body[data-readonly] [data-mutates]::after { display: none; }
 @media (prefers-reduced-motion: reduce) { .content, .skeleton, .drill:not([hidden]) { animation: none; } }
 
 /* Empty state */
+.list-filter-empty { padding: 28px 4px; color: var(--muted); }
 .empty-state { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 56px 20px; color: var(--muted); text-align: center; }
 .empty-state svg { opacity: 0.45; }
 .empty-state p { margin: 0; font-size: 14px; }

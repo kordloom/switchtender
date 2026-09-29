@@ -60,6 +60,15 @@ function auditChange(method, path) {
 	if (method === "SCHEDULE") {
 		return "Schedule " + (parts[1] || "") + " fired";
 	}
+	// A span beat is the chain attesting that it was alive and unbroken across an interval, which
+	// is why the newest rows on a quiet install are all beats. The generic fallthrough rendered
+	// them "SPAN on span", so the first three rows of the tamper-evident page read as a bug.
+	if (method === "SPAN") {
+		const beat = parts[1] || "";
+		const cadence = /cadence_s=(\d+)/.exec(String(path || ""));
+		const every = cadence ? " covering the previous " + fmtSeconds(Number(cadence[1])) : "";
+		return "Attested the chain was unbroken through beat " + beat + every;
+	}
 	if (method === "RUN") {
 		return "Run " + (parts[1] || "") + " finished " +
 			String(parts[parts.length - 1] || "").replace(/_/g, " ");
@@ -161,8 +170,10 @@ async function loadAudit() {
 		// A ?q= arrival is a search, usually a run id from the run page's Audit trail button, so
 		// the page asks for the server's maximum window instead of its display default: a run
 		// older than the default page filtered to an empty table with nothing explaining why.
-		const preset = new URLSearchParams(location.search).get("q");
-		const data = await getJSON("/audit?limit=" + (preset ? 1000 : AUDIT_PAGE));
+		const params = new URLSearchParams(location.search);
+		const preset = params.get("q");
+		const keepSeq = params.get("seq");
+		const data = await getJSON("/audit?limit=" + (preset || keepSeq ? 1000 : AUDIT_PAGE));
 		const entries = data.entries || [];
 		if (entries.length === 0) {
 			showEmpty("No audit entries yet. Every change is recorded here.");
@@ -197,6 +208,13 @@ async function loadAudit() {
 				{ label: "Entry hash", value: e.hash, block: true, copy: true },
 				{ label: "Previous hash", value: e.prev_hash, block: true },
 			]);
+			// The text filter runs over a row's rendered text, and a run's creation entry names no
+			// run id anywhere in it. Its sequence is the only handle, so the row carries it where
+			// the filter can see it and a link arriving with ?seq= keeps that row alongside the
+			// ones the id does match.
+			if (keepSeq && String(e.seq) === keepSeq) {
+				tr.dataset.keep = "1";
+			}
 			tbody.appendChild(tr);
 		}
 		setStatus("");

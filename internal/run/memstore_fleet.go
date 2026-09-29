@@ -17,6 +17,12 @@ func (m *memStore) Workers(_ context.Context) ([]WorkerInfo, error) {
 		if r.ClaimedBy == "" || r.ClaimedAt == nil || r.ClaimedAt.Before(cutoff) {
 			continue
 		}
+		// Children are excluded, matching both SQL stores. The count is a link into the runs list,
+		// and that list shows top level runs only, so counting shards made the page disagree with
+		// what clicking it opens.
+		if r.ParentID != nil && *r.ParentID != "" {
+			continue
+		}
 		w, ok := byOwner[r.ClaimedBy]
 		if !ok {
 			w = &WorkerInfo{Owner: r.ClaimedBy}

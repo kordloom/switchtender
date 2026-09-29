@@ -237,6 +237,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 	ids := seedConfig(ctx, d, log)
 
 	// Plain runs where db01 flaps between failing and passing, so fleet memory marks it flaky.
+	var replayed string
 	failByRun := []string{"", "db01", "", "db01", ""}
 	for i, failHost := range failByRun {
 		// Alternate origins so the runs list shows the full provenance vocabulary.
@@ -251,6 +252,13 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 			return fmt.Errorf("seed run: %w", err)
 		}
 		settle(ctx, d, r.ID)
+		// The first of these is what the rerun below replays. A run chipped "Rerun" whose tooltip
+		// offers to open the run it replayed has to have one: seeded without it the chip was a
+		// plain span promising a link that did not exist, and the detail page carried no "Rerun
+		// of" row at all.
+		if replayed == "" {
+			replayed = r.ID
+		}
 	}
 
 	// A split where one shard fails, showing the merged matrix and failed-shard isolation.
@@ -280,7 +288,8 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 	// inventory page a click away.
 	last, err := d.Submitter.Submit(ctx, playbook, inv,
 		seedOpts(ctx, d, "rerun", "", "admin",
-			map[string]string{"env": "prod", "team": "edge"}, failVars("edge01")...)...)
+			map[string]string{"env": "prod", "team": "edge"},
+			append(failVars("edge01"), run.WithRerunOf(replayed))...)...)
 	if err != nil {
 		return fmt.Errorf("seed run: %w", err)
 	}
@@ -316,6 +325,8 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 	seedGovernance(ctx, d, playbook, inv, tfDir, ids, log)
 
 	normalizeClaimStamps(ctx, d, log)
+
+	linkScheduleLastRuns(ctx, d, log)
 
 	seedAnchors(ctx, d, log)
 
@@ -866,6 +877,40 @@ func (s seededIDs) id(m map[string]string, name, fallback string) string {
 	return fallback
 }
 
+// linkScheduleLastRuns points each schedule at the newest run it fired.
+//
+// Schedules are stored before the runs exist, so nothing could set the link at seeding time and the
+// Last run column was an empty cell on every row, on a page whose whole subject is cadence. It read
+// as a field the product does not keep, while the runs list a click away showed three runs naming
+// the Nightly audit cadence that fired them.
+func linkScheduleLastRuns(ctx context.Context, d Deps, log *zap.Logger) {
+	if d.Schedules == nil || d.Runs == nil {
+		return
+	}
+	schedules, err := d.Schedules.List(ctx)
+	if err != nil {
+		log.Warn("demo: link schedule last runs: " + err.Error())
+		return
+	}
+	for _, sc := range schedules {
+		runs, err := d.Runs.ListPage(ctx, run.ListFilter{Source: "schedule", SourceID: sc.ID}, 1, 0)
+		if err != nil {
+			log.Warn("demo: link schedule last run: " + err.Error())
+			continue
+		}
+		if len(runs) == 0 {
+			continue
+		}
+		newest := runs[0]
+		at := newest.CreatedAt
+		sc.LastRunID = newest.ID
+		sc.LastRunAt = &at
+		if err := d.Schedules.Save(ctx, sc); err != nil {
+			log.Warn("demo: save schedule last run: " + err.Error())
+		}
+	}
+}
+
 // seedConfig stores browsable sample projects, inventories, credentials, and templates. The templates
 // cover the main tools the engine drives, so the Templates list shows Ansible, Bash, Terraform, Python,
 // and Go presets even on a host that lacks a given tool's binary. It is best effort: a store error is
@@ -1065,9 +1110,15 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) seededIDs {
 	}
 
 	if d.Policies != nil {
+		// The destroy rule demands a distinct approver, because the run it is holding does: seeded
+		// without it, the Second approver column read "any approver" on every row while the run
+		// linked from that same row carried require_distinct_approver. The page told a stranger
+		// that no rule here enforces separation of duties, which is the compliance story the
+		// Policies page exists to tell.
 		tfDestroy := policy.NewPolicy("prod terraform destroy")
 		tfDestroy.Tool, tfDestroy.CommandContains, tfDestroy.ExcludeDryRun, tfDestroy.CreatedAt =
 			run.ToolTerraform, "destroy", true, ago(40)
+		tfDestroy.RequireDistinctApprover = true
 		anyProd := policy.NewPolicy("any production run")
 		anyProd.InventoryID, anyProd.CreatedAt = inventories[0].ID, ago(22)
 
@@ -1096,7 +1147,11 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) seededIDs {
 			{"deploy-bot", "", "platform@example.com", "Deployment service account", user.RoleOperator},
 			{"auditor", "Priya Raman", "priya@example.com", "Compliance", user.RoleViewer},
 		}
-		for _, a := range accounts {
+		// Backdated like every other seeded object. Left at the wall clock all three accounts read
+		// the same "15m ago", tracking container uptime, on an install whose runs, templates,
+		// schedules, credentials and chain are staggered across three days. A column identical on
+		// every row and contradicting the rest of the timeline reads as a field nothing keeps.
+		for i, a := range accounts {
 			u, err := user.New(a.Name, "demo-password", a.Role)
 			if err != nil {
 				log.Warn("demo: build user: " + err.Error())
@@ -1105,6 +1160,7 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) seededIDs {
 			u.FullName = a.FullName
 			u.Email = a.Email
 			u.Title = a.Title
+			u.CreatedAt = ago(80 - i*6)
 			if err := d.Users.Save(ctx, u); err != nil {
 				log.Warn("demo: seed user: " + err.Error())
 			}

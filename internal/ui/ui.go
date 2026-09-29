@@ -13,6 +13,7 @@ import (
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/parser"
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/run"
@@ -68,10 +69,18 @@ func New(log *zap.Logger, docs fs.FS, readOnly bool, matrixCap int, oidcEnabled,
 		log = zap.NewNop()
 	}
 	return &UI{
-		tmpl:        template.Must(template.ParseFS(templateFS, "templates/*.html")),
-		log:         log,
-		docs:        docs,
-		md:          goldmark.New(goldmark.WithExtensions(extension.GFM)),
+		tmpl: template.Must(template.ParseFS(templateFS, "templates/*.html")),
+		log:  log,
+		docs: docs,
+		// Heading ids, the same option cmd/sitegen renders the published docs with. Without them
+		// every in-page anchor in the in-app docs was inert: a visible "download" link moved
+		// nothing but the address bar, and each cross-guide link landed at the top of the right
+		// guide rather than the section it named. The identical markdown jumped correctly on the
+		// marketing site, so the product shipped the broken copy of its own documentation.
+		md: goldmark.New(
+			goldmark.WithExtensions(extension.GFM),
+			goldmark.WithParserOptions(parser.WithAutoHeadingID()),
+		),
 		readOnly:    readOnly,
 		matrixCap:   matrixCap,
 		oidcEnabled: oidcEnabled,
