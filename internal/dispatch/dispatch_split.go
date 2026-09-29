@@ -378,52 +378,87 @@ func (d *Dispatcher) runPipeline(parent *run.Run, steps []run.PipelineStep) {
 	defer stopWatch()
 	go d.watch(watchCtx, parent.ID)
 
-	var failed, canceled bool
+	var res stepsResult
 	if hasDependencies(steps) {
-		failed, canceled = d.runStepsDAG(pipeCtx, parent.Clone(), steps)
+		res = d.runStepsDAG(pipeCtx, parent.Clone(), steps)
 	} else {
-		failed, canceled = d.runStepsLinear(pipeCtx, parent.Clone(), steps)
+		res = d.runStepsLinear(pipeCtx, parent.Clone(), steps)
 	}
 
+	status, reason, code := d.pipelineOutcome(res)
+	d.finalize(parent, status, code, reason)
+	d.publisher.CloseRun(parent.ID)
+}
+
+// pipelineOutcome maps how a pipeline's steps ended onto the parent's terminal record.
+//
+// The interrupted case is the whole reason this is a function rather than an inline switch: a
+// step's own executor dying leaves the coordinator healthy, so stoppedStatus, which reads the
+// coordinator's context, would call the crash a cancel and lose the interrupted state a rerun
+// resumes from. An interrupt is finalized as one on the step's word, not the coordinator's.
+func (d *Dispatcher) pipelineOutcome(res stepsResult) (run.Status, string, *int) {
 	switch {
-	case canceled:
-		d.finalize(parent, d.stoppedStatus(), nil, d.stoppedReason())
-	case failed:
+	case res.interrupted:
+		return run.StatusInterrupted, errShuttingDown.Error(), nil
+	case res.canceled:
+		return d.stoppedStatus(), d.stoppedReason(), nil
+	case res.failed:
 		code := 1
-		d.finalize(parent, run.StatusFailed, &code, "")
+		return run.StatusFailed, "", &code
 	default:
 		code := 0
-		d.finalize(parent, run.StatusSucceeded, &code, "")
+		return run.StatusSucceeded, "", &code
 	}
-	d.publisher.CloseRun(parent.ID)
+}
+
+// stepsResult is how a pipeline's steps ended: failed, canceled by the coordinator, or interrupted
+// because a step's own executor died. Interrupted is distinct from canceled on purpose. A cancel is
+// somebody withdrawing the work; an interrupt is a crash, and only an interrupt is the state a
+// rerun resumes from. Collapsing the two recorded a crashed pipeline as canceled and dropped that
+// recovery signal.
+type stepsResult struct {
+	// failed is set when a step failed and its failure was not continued past.
+	failed bool
+	// canceled is set when the coordinator's own context ended the run.
+	canceled bool
+	// interrupted is set when a step ended interrupted, meaning its executor died under it.
+	interrupted bool
 }
 
 // runStepsLinear executes the steps one after another, stopping at a failure unless the failing
 // step continues on failure. It returns whether any step failed and whether execution was
 // canceled.
-func (d *Dispatcher) runStepsLinear(ctx context.Context, parent *run.Run, steps []run.PipelineStep) (failed, canceled bool) {
+func (d *Dispatcher) runStepsLinear(ctx context.Context, parent *run.Run, steps []run.PipelineStep) stepsResult {
+	var res stepsResult
 	vars := baseStepVars(parent)
 	for i, step := range steps {
 		if ctx.Err() != nil {
-			return failed, true
+			res.canceled = true
+			return res
 		}
 
 		status, outputs := d.runStepAttempts(ctx, parent, step, i, cloneVars(vars))
-		// A step the server stopped ends the pipeline the same way a canceled one does. The parent
-		// records which of the two it was from the dispatcher's own state.
-		if status == run.StatusCanceled || status == run.StatusInterrupted {
-			return failed, true
+		// A step whose executor died is an interrupt, and one the coordinator stopped is a cancel.
+		// The two look alike here and are not: only the interrupt is the state a rerun resumes
+		// from, so the parent has to be told which happened rather than folding both into stopped.
+		switch status {
+		case run.StatusInterrupted:
+			res.interrupted = true
+			return res
+		case run.StatusCanceled:
+			res.canceled = true
+			return res
 		}
 		if status != run.StatusSucceeded {
-			failed = true
+			res.failed = true
 			if !step.ContinueOnFailure {
-				return failed, canceled
+				return res
 			}
 			continue
 		}
 		maps.Copy(vars, outputs)
 	}
-	return failed, canceled
+	return res
 }
 
 // cloneVars copies a variable map, returning nil for an empty one so runs without inputs stay

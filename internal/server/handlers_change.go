@@ -35,6 +35,10 @@ type changeResponse struct {
 	// than left silent, so a partial change is never mistaken for the whole one: an outcome derived
 	// from half a change can say succeeded about work that failed.
 	Withheld int `json:"withheld,omitempty"`
+	// Partial reports that the member fetch hit its cap, so the summary above was derived from an
+	// incomplete membership. Outcome, actors, and span are honest about the runs that were read and
+	// say nothing about the ones beyond the cap, and this flag is what says there were some.
+	Partial bool `json:"partial,omitempty"`
 }
 
 // Change outcomes, derived from the member runs.
@@ -74,11 +78,17 @@ func changeHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Han
 			return
 		}
 		filter := run.ListFilter{LabelKey: run.ChangeLabel, LabelValue: name}
+		// One past the cap, so hitting the cap is observable rather than indistinguishable from a
+		// change of exactly the cap's size.
 		runs, err := store.ListPage(r.Context(), filter, maxListRows+1, 0)
 		if err != nil {
 			log.Error("server: change: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not read the change")
 			return
+		}
+		partial := len(runs) > maxListRows
+		if partial {
+			runs = runs[:maxListRows]
 		}
 		// The same read filter every run list applies. A change is a view over runs, so it may not
 		// show a caller a run they could not have listed directly.
@@ -105,6 +115,7 @@ func changeHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Han
 		resp := summarizeChange(name, visible)
 		resp.Runs, resp.Total, resp.Truncated = shown, total, len(shown) < total
 		resp.Withheld = withheld
+		resp.Partial = partial
 		respondJSON(w, log, http.StatusOK, resp, wantsPretty(r))
 	}
 }

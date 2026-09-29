@@ -38,6 +38,8 @@ func run() int {
 		"Team license file for the paid-tier phase. Also read from SUPERTEST_LICENSE_FILE.")
 	skipTeam := flag.Bool("skip-team", false,
 		"Run only the Community phases. Without a license this is the honest mode, and it says so.")
+	prevImage := flag.String("prev-image", "",
+		"Previous release image the upgrade phase starts from. Empty resolves the newest v* tag.")
 	shots := flag.String("shots", "", "Directory to write UI screenshots into. Empty skips them.")
 	report := flag.String("report", "", "File to append the markdown report to. Empty writes stdout only.")
 	keep := flag.Bool("keep", false, "Leave the cluster running afterward, for poking at a failure.")
@@ -71,6 +73,12 @@ func run() int {
 		return 1
 	}
 
+	previous, perr := previousReleaseImage(*prevImage, repo)
+	if perr != nil {
+		fmt.Fprintln(os.Stderr, perr)
+		return 1
+	}
+
 	phases := []struct {
 		// Name labels the phase in output and in the report.
 		Name string
@@ -81,12 +89,17 @@ func run() int {
 		{"cluster", h.phaseCluster},
 		{"fleet", h.phaseFleet},
 		{"community", h.phaseCommunity},
+		{"upgrade", func() error { return h.phaseUpgrade(previous) }},
 	}
 	if !*skipTeam {
 		phases = append(phases, struct {
 			Name string
 			Run  func() error
 		}{"team", func() error { return h.phaseTeam(*license) }})
+		phases = append(phases, struct {
+			Name string
+			Run  func() error
+		}{"crash", h.phaseCrash})
 	}
 	if *shots != "" {
 		phases = append(phases, struct {

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/kordloom/switchtender/internal/sqlutil"
 	"github.com/kordloom/switchtender/internal/trigger"
@@ -126,4 +127,16 @@ func scanTrigger(sc scanner) (*trigger.Trigger, error) {
 		return nil, err
 	}
 	return &t, nil
+}
+
+// TouchFired stamps the fire time on a trigger that still exists. An UPDATE by id is the whole
+// point: it cannot re-insert a row deletion revoked and it cannot touch the token a rotation
+// replaced, both of which the fire path's old whole-row Save did.
+func (s *triggerStore) TouchFired(ctx context.Context, id string, at time.Time) error {
+	if _, err := s.db.ExecContext(ctx,
+		"UPDATE triggers SET last_fired_at = $1 WHERE id = $2",
+		sqlutil.FormatTime(at), id); err != nil {
+		return fmt.Errorf("touch trigger: %w", err)
+	}
+	return nil
 }

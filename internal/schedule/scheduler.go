@@ -267,7 +267,7 @@ func (s *Scheduler) recordFireEntry(ctx context.Context, sc *Schedule) (context.
 		return ctx, err
 	}
 	entry := &audit.Entry{
-		ID: audit.NewID(), At: time.Now(),
+		ID:    audit.NewID(),
 		Actor: "system:scheduler", ActorType: "system",
 		Method: audit.MethodSchedule, Path: "/schedules/" + sc.ID + "/fired",
 		ContentDigest: digest, Nonce: nonce,

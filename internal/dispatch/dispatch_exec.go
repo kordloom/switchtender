@@ -148,7 +148,10 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	mask := &masker{}
 	// The fold accumulates the run's summaries as its events go by, so finishing needs no second
 	// read of them. Only the tail goroutine writes to it, and it has exited before finish reads it.
-	fold := run.NewSummaryFold(r.CreatedAt)
+	// The fold is stamped with execution time, not creation time. A run can sit held or queued
+	// long past its submission, and every summary this fold produces describes what execution
+	// observed, which happened now.
+	fold := run.NewSummaryFold(d.now())
 	go func() {
 		defer close(tailed)
 		d.tailEvents(r.ID, parent, eventsPath, stop, mask, fold)
@@ -605,6 +608,19 @@ func (d *Dispatcher) recordTerminal(r *run.Run, fin run.Finalization) (run.Statu
 		d.log.Warn("dispatch: run already finalized by another actor, not overwriting",
 			zap.String("run_id", r.ID), zap.String("stored", string(cur.Status)),
 			zap.String("attempted", string(fin.Status)))
+		return cur.Status, false
+	}
+	// The stored run may be live under somebody else. The guard above only refused terminal
+	// states, so a run the janitor requeued and another worker re-claimed, which reads as running
+	// under the new owner, fell through to the unfenced save below: this worker's late cancel
+	// clobbered the other worker's live run, the other worker's next heartbeat found itself
+	// disowned and killed its own tool, and both executions died partway on real hosts while the
+	// record said a person canceled it. A run held by a different owner is not this worker's to
+	// finalize, live or otherwise.
+	if fin.Owner != "" && cur.ClaimedBy != "" && cur.ClaimedBy != fin.Owner {
+		d.log.Warn("dispatch: run is held by another owner, not overwriting",
+			zap.String("run_id", r.ID), zap.String("holder", cur.ClaimedBy),
+			zap.String("this", fin.Owner), zap.String("attempted", string(fin.Status)))
 		return cur.Status, false
 	}
 	// Save writes the whole run, so the terminal fields go on a copy: a save that fails must leave

@@ -153,17 +153,26 @@ func (d *Dispatcher) settleOverrunning() {
 		// permanently attested as timed out, with pending children left stranded under it. Each child
 		// carries the timeout and is swept on its own, and the lease sweep settles a dead coordinator,
 		// so the parent must be skipped here.
-		if r.Kind != "" || r.Timeout <= 0 || r.StartedAt == nil {
+		// The run's own timeout if it set one, otherwise the dispatcher-wide cap. Consulting only
+		// the per-run value made this sweep dead for the common install that sets a global timeout
+		// and no per-run one: a wedged relay there kept its lease fresh, the lease sweep never
+		// touched it, and this skipped it, so the very stall this backstop exists to end ran
+		// forever.
+		effective := time.Duration(r.Timeout) * time.Second
+		if effective <= 0 {
+			effective = d.runTimeout
+		}
+		if r.Kind != "" || effective <= 0 || r.StartedAt == nil {
 			continue
 		}
-		deadline := r.StartedAt.Add(time.Duration(r.Timeout)*time.Second + overrunGrace)
+		deadline := r.StartedAt.Add(effective + overrunGrace)
 		if now.Before(deadline) {
 			continue
 		}
 		fin := run.Finalization{
 			Status: run.StatusFailed,
 			Error: fmt.Sprintf("timed out: still running %s after its %ds timeout, so the control "+
-				"node ended it", now.Sub(*r.StartedAt).Round(time.Second), r.Timeout),
+				"node ended it", now.Sub(*r.StartedAt).Round(time.Second), int(effective.Seconds())),
 			EndedAt: now,
 		}
 		moved, ferr := d.store.FinalizeRunning(d.ctx, r.ID, fin)

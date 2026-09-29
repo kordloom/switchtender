@@ -153,16 +153,11 @@ func scriptToolPlan(spec Spec, pattern string, argv func(path string) []string) 
 	}, cleanup, nil
 }
 
-// isBuiltinTool reports whether tool is one of the seven engines the container runner can execute
-// inside an image.
+// isBuiltinTool reports whether tool is one of the engines the container runner can execute inside
+// an image. It asks the run package rather than restating the set, so a tool added there is a tool
+// this classifier already knows.
 func isBuiltinTool(tool string) bool {
-	switch run.NormalizeTool(tool) {
-	case run.ToolAnsible, run.ToolBash, run.ToolTerraform, run.ToolOpenTofu,
-		run.ToolPython, run.ToolPowerShell, run.ToolGo:
-		return true
-	default:
-		return false
-	}
+	return run.IsBuiltinTool(tool)
 }
 
 // isTerraformTool reports whether tool runs Terraform or OpenTofu, whose dry run distinguishes drift

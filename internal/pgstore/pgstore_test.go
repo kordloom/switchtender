@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -63,7 +64,12 @@ func testDSN(t *testing.T) string {
 	return dsn
 }
 
-// truncateAll clears every table so each contract subtest starts from an empty store.
+// truncateAll clears every table in the database, discovered from the catalog rather than kept as
+// a hand-maintained list. The list drifted: it named the run tables and stopped, while its own
+// comment claimed every table, so a test that trusted the name inherited another test's users and
+// failed on a count it had every right to rely on. Discovery cannot drift. Truncation leaves the
+// tables themselves in place, which matters because schema initialization is detected by table
+// existence and is the licensed act.
 func truncateAll(t *testing.T, dsn string) {
 	t.Helper()
 	db, err := sql.Open("pgx", dsn)
@@ -71,14 +77,35 @@ func truncateAll(t *testing.T, dsn string) {
 		t.Fatalf("open postgres: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	// host_facts and host_facts_history belong here for the same reason as the summary tables:
-	// they outlive the runs that wrote them, so leaving them behind carries one subtest's state
-	// into the next and the estate contract's empty-store assertions see another test's gathers.
-	const q = `TRUNCATE runs, run_logs, run_events, run_host_summary, run_task_summary, schedules,
-		host_facts, host_facts_history`
-	if _, err := db.Exec(q); err != nil {
+	rows, err := db.Query(
+		"SELECT tablename FROM pg_tables WHERE schemaname = current_schema()")
+	if err != nil {
+		t.Fatalf("list tables: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var tables []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatalf("scan table name: %v", err)
+		}
+		tables = append(tables, pq(name))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("list tables: %v", err)
+	}
+	if len(tables) == 0 {
+		return
+	}
+	// One statement, CASCADE for the foreign keys between them.
+	if _, err := db.Exec("TRUNCATE " + strings.Join(tables, ", ") + " CASCADE"); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
+}
+
+// pq quotes an identifier read from the catalog, so a table name never rides into SQL bare.
+func pq(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
 func TestStoreContract(t *testing.T) {

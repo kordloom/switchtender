@@ -35,7 +35,14 @@ func TestEveryCLIMutationIsAudited(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Glob() error = %v", err)
 	}
+	// A guard whose work list is empty is a guard that stopped guarding. If the command files move
+	// or the naming changes, this must fail loudly here rather than pass over nothing.
+	if len(files) == 0 {
+		t.Fatal("Glob(cmd_*.go) matched no files: the command sources moved and this guard is " +
+			"scanning nothing")
+	}
 	fset := token.NewFileSet()
+	audited := 0
 	for _, path := range files {
 		if strings.HasSuffix(path, "_test.go") {
 			continue
@@ -71,11 +78,21 @@ func TestEveryCLIMutationIsAudited(t *testing.T) {
 				}
 				return true
 			})
+			if mutates && records {
+				audited++
+			}
 			if mutates && !records {
 				t.Errorf("%s: %s changes stored state without calling recordCLI, so the change "+
 					"happens with no entry in the audit chain", filepath.Base(path), fn.Name.Name)
 			}
 			return true
 		})
+	}
+	// The scan must have seen the thing it exists to check. Zero audited mutations means the
+	// mutator vocabulary or the recordCLI convention changed out from under this test, and a green
+	// run over a vocabulary that matches nothing is the silent pass this guard forbids elsewhere.
+	if audited == 0 {
+		t.Fatal("the scan found no audited mutation at all: either the mutator list or the " +
+			"recordCLI convention drifted, and this guard is matching nothing")
 	}
 }

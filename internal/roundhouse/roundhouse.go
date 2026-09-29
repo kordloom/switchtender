@@ -321,8 +321,7 @@ func RegisterRunner(tool string, r Runner) {
 	if r == nil {
 		panic("roundhouse: nil runner for " + tool)
 	}
-	switch run.NormalizeTool(tool) {
-	case run.ToolAnsible, run.ToolBash, run.ToolTerraform, run.ToolOpenTofu, run.ToolPython, run.ToolPowerShell, run.ToolGo:
+	if run.IsBuiltinTool(tool) {
 		panic("roundhouse: cannot override the built-in tool " + tool)
 	}
 	if _, exists := extraRunners[run.NormalizeTool(tool)]; exists {

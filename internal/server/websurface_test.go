@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/user"
 )
@@ -152,5 +154,55 @@ func TestCrossSiteWritesAreRefused(t *testing.T) {
 	same.Header.Set("Origin", "https://switchtender.example")
 	if crossSiteWrite(same) {
 		t.Error("the product's own origin was refused, so the UI cannot submit anything")
+	}
+}
+
+// TestARebindingWriteIsRefusedOnAnOpenInstall pins the Host check that closes the gap under the
+// cross-site defense.
+//
+// DNS rebinding makes every browser header lie in unison: the attacker's page rebinds its own
+// hostname to 127.0.0.1, so the fetch is same-origin by every signal a browser sends. The Host is
+// the one thing that cannot lie, because the page can only reach the server through the attacker's
+// own name. A writable install that runs open is loopback-bound by construction, so a browser
+// write for any other name is refused unless a declared proxy fronts the install.
+func TestARebindingWriteIsRefusedOnAnOpenInstall(t *testing.T) {
+	store := run.NewMemStore()
+	// The token store is what turns the auth gate on at all; a server built without one skips
+	// the whole wrap, exactly as serve never does.
+	handler := New(store, &fakeSubmitter{}, zap.NewNop(),
+		WithTokens(auth.NewMemStore())).Handler()
+
+	// The probe endpoint is a write that answers "not enabled" when its store is not wired, so a
+	// request the gate passes is a 404 and one it refuses is a 403: the two outcomes cannot be
+	// confused and nothing needs to actually execute.
+	send := func(host, fetchSite string) int {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/policies",
+			strings.NewReader(`{"name":"p"}`))
+		req.Host = host
+		if fetchSite != "" {
+			req.Header.Set("Sec-Fetch-Site", fetchSite)
+			req.Header.Set("Origin", "http://"+host)
+		}
+		handler.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	// Test 0: The rebound browser write: same-origin by every header, foreign by Host.
+	if got := send("evil.example:8080", "same-origin"); got != http.StatusForbidden {
+		t.Errorf("rebound browser write = %d, want 403", got)
+	}
+
+	// Test 1: The operator's own browser on loopback names keeps working.
+	for _, host := range []string{"127.0.0.1:8080", "localhost:8080", "[::1]:8080"} {
+		if got := send(host, "same-origin"); got != http.StatusNotFound {
+			t.Errorf("loopback browser write on %q = %d, want it through the gate", host, got)
+		}
+	}
+
+	// Test 2: A non-browser client carries no fetch metadata and is untouched, whatever its Host:
+	// curl through an SSH tunnel legitimately names anything.
+	if got := send("evil.example:8080", ""); got != http.StatusNotFound {
+		t.Errorf("non-browser write = %d, want it through the gate on Host alone", got)
 	}
 }

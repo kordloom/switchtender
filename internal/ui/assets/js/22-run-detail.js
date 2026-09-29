@@ -285,8 +285,21 @@ function streamIndicator(source, onReconnect, onClosed) {
 // openPipelineStream refreshes the header and step list as step events arrive, coalescing bursts
 // into one refresh, and settles on the final state at the end signal.
 async function openPipelineStream(pipelineId) {
+	if (streamState.runId !== pipelineId) streamState = { runId: pipelineId, retries: 0, ended: false };
 	const source = new EventSource(await streamURL("/runs/" + pipelineId + "/stream", pipelineId));
-	streamIndicator(source);
+	// The same re-mint loop the single-run stream has, for the same reason: a single-use ticket
+	// means the browser's own retry always gets 401, so without this one laptop sleep killed the
+	// pipeline view for good. The stream carries no cursor, so the reopen's refresh covers the gap.
+	streamIndicator(source, null, () => {
+		if (streamState.ended || streamState.retries >= 6) return false;
+		streamState.retries++;
+		source.close();
+		setTimeout(() => {
+			openPipelineStream(pipelineId).catch(() => {});
+		}, Math.min(15000, 1000 * Math.pow(2, streamState.retries - 1)));
+		return true;
+	});
+	source.addEventListener("open", () => { streamState.retries = 0; });
 	let pending = null;
 	const refresh = async () => {
 		pending = null;
@@ -406,9 +419,22 @@ async function reconcileParent(parentId) {
 // shard and refolds the matrix. That closes the window between the per-shard reads and the stream
 // connecting: whatever the live view missed is on the page by the time the run is finished.
 async function openParentStream(parentId) {
+	if (streamState.runId !== parentId) streamState = { runId: parentId, retries: 0, ended: false };
 	const source = new EventSource(await streamURL("/runs/" + parentId + "/stream", parentId));
-	// The parent stream has no resume cursor, so a reconnect re-reads every shard whole.
-	streamIndicator(source, () => { reconcileParent(parentId).catch(() => {}); });
+	// The parent stream has no resume cursor, so a reconnect re-reads every shard whole. The
+	// re-mint loop exists here for the same reason as everywhere else: single-use tickets make
+	// the browser's own retry a guaranteed 401, and a matrix that dies on one dropped connection
+	// is a live view in name only.
+	streamIndicator(source, () => { reconcileParent(parentId).catch(() => {}); }, () => {
+		if (streamState.ended || streamState.retries >= 6) return false;
+		streamState.retries++;
+		source.close();
+		setTimeout(() => {
+			openParentStream(parentId).then(() => reconcileParent(parentId)).catch(() => {});
+		}, Math.min(15000, 1000 * Math.pow(2, streamState.retries - 1)));
+		return true;
+	});
+	source.addEventListener("open", () => { streamState.retries = 0; });
 	const refreshShards = async () => {
 		try {
 			const shardData = await getJSON("/runs/" + parentId + "/shards");
@@ -580,8 +606,26 @@ function scheduleGrid() {
 // lost every event stored between the history fetch and the stream connecting, which on a run that
 // starts fast is its first tasks. Sending zero replays from the start instead, and the caller's
 // sequence guard discards whatever it already has.
-function runStreamPath(runId, afterSeq) {
-	return "/runs/" + runId + "/stream?after=" + (afterSeq || 0);
+function runStreamPath(runId, afterSeq, logAfterSeq) {
+	let path = "/runs/" + runId + "/stream?after=" + (afterSeq || 0);
+	// The log cursor rides along only on a re-mint. A fresh EventSource never sends
+	// Last-Event-ID, so on a secured install every reconnect used to start the log at its
+	// current end: the lines written during the outage vanished from the live view, and the
+	// operator watching a destructive run had a hole exactly where the interesting part
+	// happened.
+	if (logAfterSeq != null) path += "&logafter=" + logAfterSeq;
+	return path;
+}
+
+// streamCursorOf reads the composite "eventSeq:logSeq" id the server stamps on every frame, so a
+// re-mint can resume both cursors the way an automatic reconnect would have.
+function streamCursorOf(id) {
+	const parts = String(id || "").split(":");
+	if (parts.length !== 2) return null;
+	const ev = Number(parts[0]);
+	const lg = Number(parts[1]);
+	if (!Number.isFinite(ev) || !Number.isFinite(lg)) return null;
+	return { event: ev, log: lg };
 }
 
 // openStream subscribes to the run's live output and applies events, logs, and the end signal.
@@ -598,20 +642,25 @@ function runStreamPath(runId, afterSeq) {
 // have been spent and whether the run already ended, reset when a different run's stream opens.
 let streamState = { runId: "", retries: 0, ended: false };
 
-async function openStream(runId, afterSeq) {
+async function openStream(runId, afterSeq, logAfterSeq) {
 	if (streamState.runId !== runId) streamState = { runId: runId, retries: 0, ended: false };
-	const source = new EventSource(await streamURL(runStreamPath(runId, afterSeq), runId));
+	const source = new EventSource(
+		await streamURL(runStreamPath(runId, afterSeq, logAfterSeq), runId));
 	streamIndicator(source, null, () => {
 		if (streamState.ended || streamState.retries >= 6) return false;
 		streamState.retries++;
 		source.close();
 		const cursor = (detailState && detailState.lastSeq) || afterSeq || 0;
-		setTimeout(() => { openStream(runId, cursor); },
+		const logCursor = detailState && detailState.lastLogSeq != null
+			? detailState.lastLogSeq : logAfterSeq;
+		setTimeout(() => { openStream(runId, cursor, logCursor); },
 			Math.min(15000, 1000 * Math.pow(2, streamState.retries - 1)));
 		return true;
 	});
 	source.addEventListener("open", () => { streamState.retries = 0; });
 	source.addEventListener("event", (e) => {
+		const cur = streamCursorOf(e.lastEventId);
+		if (cur) detailState.lastLogSeq = cur.log;
 		try {
 			const ev = JSON.parse(e.data);
 			if (ev.seq && ev.seq <= (detailState.lastSeq || 0)) return;
@@ -621,6 +670,8 @@ async function openStream(runId, afterSeq) {
 		} catch (_) { /* ignore a malformed event */ }
 	});
 	source.addEventListener("log", (e) => {
+		const cur = streamCursorOf(e.lastEventId);
+		if (cur) detailState.lastLogSeq = cur.log;
 		try { appendLog(JSON.parse(e.data)); } catch (_) { /* ignore a malformed chunk */ }
 		// Tools without structured events stream only log chunks, so the header froze at pending
 		// while the log scrolled. The refresh coalesces, so this is cheap.

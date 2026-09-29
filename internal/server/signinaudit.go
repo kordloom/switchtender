@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"net/http"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -28,7 +27,7 @@ func recordSignIn(ctx context.Context, audits audit.Store, log *zap.Logger,
 		return
 	}
 	entry := &audit.Entry{
-		ID: audit.NewID(), At: time.Now(), Actor: method + ":" + username,
+		ID: audit.NewID(), Actor: method + ":" + username,
 		Method: http.MethodPost, Path: path,
 	}
 	if err := audits.Append(ctx, entry); err != nil {

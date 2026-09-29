@@ -164,7 +164,7 @@ switchtender token revoke &lt;initial-token-id&gt; --db switchtender.db</code></
 				</li>
 			</ol>
 			<div class="gs-callout reveal">
-				<p><strong>Moving from another controller?</strong> AWX, Semaphore, Chef, Puppet, Rundeck, and Jenkins each import in one command: projects, inventories, templates, surveys, and schedules. Ansible Automation Platform, Tower, and Ascender share the AWX export format, and even a crontab imports into governed schedules.</p>
+				<p><strong>Moving from another controller?</strong> Start with <code>switchtender assess awx export.json</code>, which reads the estate and says what comes across, what does not, and which templates nobody currently has to approve, before anything is written. Then AWX, Semaphore, Chef, Puppet, Rundeck, and Jenkins each import in one command: projects, inventories, templates, surveys, and schedules. Ansible Automation Platform, Tower, and Ascender share the AWX export format, and even a crontab imports into governed schedules.</p>
 				<a class="btn" href="/docs/switching-from-awx">Migration guide</a>
 			</div>
 		</section>

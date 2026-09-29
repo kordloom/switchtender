@@ -228,10 +228,10 @@ var worstRank = map[string]int{"skipped": 0, "ok": 1, "changed": 2, "unreachable
 // as it does across pipeline steps, sums its tallies and keeps its most severe outcome. Hosts come
 // back sorted by name so the table reads the same on every generation.
 // eventPage is how many events are folded at a time when a run's per-host outcomes have to be rebuilt
-// from its event stream. It matches the window the run export pages by.
-// eventPage is a var, not a const, only so a test can shrink the window to force multi-page folding
-// without seeding tens of thousands of events. Production never changes it.
-var eventPage = 20_000
+// from its event stream. It matches the window the run export pages by. A test that needs a smaller
+// window passes one to hostSummariesPaged rather than bending this: it was a var once, and a test
+// shrinking it raced every parallel test that folds events.
+const eventPage = 20_000
 
 // hostSummaries returns one run's per-host outcomes.
 //
@@ -247,6 +247,13 @@ var eventPage = 20_000
 // and the runs it was recording with it.
 func hostSummaries(ctx context.Context, runs run.Store, id string,
 	at time.Time) ([]run.HostSummary, error) {
+	return hostSummariesPaged(ctx, runs, id, at, eventPage)
+}
+
+// hostSummariesPaged is hostSummaries with the fold window passed in, so multi-page folding is
+// testable with a handful of events instead of tens of thousands.
+func hostSummariesPaged(ctx context.Context, runs run.Store, id string, at time.Time,
+	page int) ([]run.HostSummary, error) {
 	stored, err := runs.RunHostSummaries(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("read run host summaries: %w", err)
@@ -258,20 +265,20 @@ func hostSummaries(ctx context.Context, runs run.Store, id string,
 	var after int64
 	folded := false
 	for {
-		page, perr := runs.EventsAfter(ctx, id, after, eventPage)
+		events, perr := runs.EventsAfter(ctx, id, after, page)
 		if perr != nil {
 			return nil, fmt.Errorf("read run events: %w", perr)
 		}
-		if len(page) == 0 {
+		if len(events) == 0 {
 			break
 		}
-		fold.Add(page)
+		fold.Add(events)
 		folded = true
 		// Advance by the last event's store sequence, not the page length. The sequence is a global
 		// autoincrement, so a run's events are sparse and high-valued; advancing by count would never
 		// pass them and would re-read the early pages forever.
-		after = page[len(page)-1].Seq
-		if len(page) < eventPage {
+		after = events[len(events)-1].Seq
+		if len(events) < page {
 			break
 		}
 	}
