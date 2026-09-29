@@ -360,6 +360,12 @@ control plane, and the one-command migration off AWX, Semaphore, Rundeck, Jenkin
 complete. The HTTP API is served under a stable `/v1` base path and follows semantic versioning, so
 no breaking change lands within the 1.x line.
 
+## History
+
+SwitchTender was developed privately before its first public release, v1.101.0. The commits before
+it hold the code of every earlier release, v1.18.0 through v1.100.0, tagged `snapshot/vX.Y.Z`.
+Every release from v1.101.0 on is built and signed from this repository.
+
 ## License
 
 Business Source License 1.1. Read the source, run it, and use it in production. Community is free
