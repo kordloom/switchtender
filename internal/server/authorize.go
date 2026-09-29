@@ -498,9 +498,16 @@ func derivedReadFilter(ctx context.Context, authz *authorizer,
 		if v, ok := seen[id]; ok {
 			return v
 		}
+		// The retained decision, not the run. Derived rows outlive the runs that produced them on
+		// purpose, and retention deletes runs, so resolving the run made every summary, drift row,
+		// and state reading whose run had aged out unreadable to a grant-restricted caller. Not
+		// refused and not explained: simply absent, at exactly the depth an audit asks about.
+		//
+		// Still one rule and still failing closed. A run with no retained decision either never
+		// existed or predates the retaining, and both read as unreadable.
 		ok := false
-		if rn, gerr := store.Get(ctx, id); gerr == nil {
-			ok = runReadable(rn, runKeep, orgOf)
+		if auth, gerr := store.RunAuthFor(ctx, id); gerr == nil {
+			ok = runReadable(auth, runKeep, orgOf)
 		}
 		seen[id] = ok
 		return ok
@@ -531,7 +538,7 @@ func probeAnyReadable(ctx context.Context, store run.Store, keep func(id, orgID 
 			return false, err
 		}
 		for _, rn := range page {
-			if runReadable(rn, keep, orgOf) {
+			if runReadable(run.AuthOf(rn), keep, orgOf) {
 				return true, nil
 			}
 		}
@@ -592,7 +599,7 @@ func readableRunsWith(runs []*run.Run, keep func(id, orgID string) bool,
 	}
 	out := make([]*run.Run, 0, len(runs))
 	for _, rn := range runs {
-		if runReadable(rn, keep, orgOf) {
+		if runReadable(run.AuthOf(rn), keep, orgOf) {
 			out = append(out, rn)
 		}
 	}
@@ -606,15 +613,18 @@ func readableRunsWith(runs []*run.Run, keep func(id, orgID string) bool,
 // to is visible through that membership, so its owning org is resolved the same way authorize
 // resolves it and passed into the filter. Passing an empty org here dropped exactly those runs: a
 // strict-grants member saw none of their own org's runs in any run-derived view.
-func runReadable(rn *run.Run, keep func(id, orgID string) bool, orgOf func(string) string) bool {
-	objs := runObjects(rn)
+func runReadable(auth *run.RunAuth, keep func(id, orgID string) bool, orgOf func(string) string) bool {
+	if auth == nil {
+		return false
+	}
+	objs := auth.Objects()
 	if len(objs) == 0 {
 		// An objectless run has nothing for the per-object filter to decide on, so it is scoped by the
 		// org it was stamped with. keep with an empty id resolves to that org's membership alone:
 		// readable[""] is never set, so this is true only when the caller belongs to the run's org, and
 		// an ownerless objectless run is dropped for every strict-grants non-admin, matching what
 		// fetching it by id decides.
-		return keep("", rn.OrgID)
+		return keep("", auth.OrgID)
 	}
 	for _, id := range objs {
 		if !keep(id, orgOf(id)) {
@@ -653,18 +663,11 @@ func (a *authorizer) orgResolverMemo(ctx context.Context) func(object string) st
 // registry credential the actor was never granted, while the rerun handler happened to name it by
 // hand and refused. Every path that asks what a run touches reads this list, so the two cannot
 // disagree again.
+// The list itself lives on run.RunAuth, which is also what a purged run leaves behind, so a live
+// run and a retained decision are scoped by the same objects computed by the same code. Keeping a
+// second copy here would be the same disagreement this comment already records, one layer down.
 func runObjects(rn *run.Run) []string {
-	objs := make([]string, 0, 3+len(rn.CredentialIDs))
-	if rn.ProjectID != "" {
-		objs = append(objs, rn.ProjectID)
-	}
-	if rn.InventoryID != "" {
-		objs = append(objs, rn.InventoryID)
-	}
-	if rn.PullCredentialID != "" {
-		objs = append(objs, rn.PullCredentialID)
-	}
-	return append(objs, rn.CredentialIDs...)
+	return run.AuthOf(rn).Objects()
 }
 
 // authorizeRun reports whether the request actor may exercise want on the run under strict grants.

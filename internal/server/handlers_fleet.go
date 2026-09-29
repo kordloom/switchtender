@@ -10,6 +10,7 @@ import (
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/run"
 	"go.uber.org/zap"
+	"time"
 )
 
 // defaultFleetWindow is the number of recent runs per host considered when no window is given.
@@ -443,4 +444,87 @@ func filterHostHealth(h run.HostHealth, keep func(string) bool) (run.HostHealth,
 		h.LastOutcome = outcomes[0]
 	}
 	return h, true
+}
+
+// estateResponse carries the estate as it stood at an instant.
+type estateResponse struct {
+	// At is the instant asked about, echoed so a stored answer says what question it answers.
+	At time.Time `json:"at"`
+	// Hosts are the facts in effect at that instant, ordered by host.
+	Hosts []run.HostFacts `json:"hosts"`
+	// Total is how many hosts were in effect before the response was capped.
+	Total int `json:"total"`
+	// Truncated reports that Hosts holds fewer than Total, so a caller does not read a prefix as
+	// the whole estate.
+	Truncated bool `json:"truncated,omitempty"`
+	// Horizon is the oldest retained reading, and BeforeHistory reports that the instant asked
+	// about predates it. Without them an empty estate is ambiguous: it looks the same whether the
+	// fleet did not exist yet or the records simply do not reach that far, and an auditor reading
+	// the wrong one concludes something false about the estate.
+	Horizon *time.Time `json:"horizon,omitempty"`
+	// BeforeHistory reports that the instant asked about is older than any retained reading.
+	BeforeHistory bool `json:"before_history,omitempty"`
+	// Withheld counts hosts left out because the run that gathered them could not be read, which
+	// includes the case where that run has been deleted by retention. It is reported rather than
+	// left silent: facts outlive the runs that gathered them on purpose, so asking about a date far
+	// enough back reaches readings whose run is gone, and a grant-restricted caller would otherwise
+	// be handed an empty estate with nothing to say why.
+	Withheld int `json:"withheld,omitempty"`
+}
+
+// estateHandler answers what the estate looked like at an instant.
+//
+// This is the question a live view cannot answer, because a live view holds only what is true now.
+// An auditor asks what was running on the date of the last review, and until the state history
+// existed the honest answer was that nobody could say: each gather overwrote the one before it.
+//
+// The ?at= parameter is RFC 3339 and defaults to now, which makes the current estate the zero
+// argument case of the same query rather than a separate endpoint.
+func estateHandler(store run.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+	if store == nil {
+		panic("server: estateHandler: Store required")
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		at, ok := instantParam(w, log, r, "at", time.Now())
+		if !ok {
+			return
+		}
+		keep, _, ferr := derivedReadFilter(r.Context(), authz, store)
+		if ferr != nil {
+			log.Error("server: read filter: " + ferr.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read the estate")
+			return
+		}
+		hosts, err := store.EstateAt(r.Context(), at, maxListRows+1)
+		if err != nil {
+			log.Error("server: estate at: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read the estate")
+			return
+		}
+		// Facts carry the run that gathered them, so a caller who may not read that run may not
+		// read what it learned about the host. Filtered per row rather than on the whole answer,
+		// the way one host's facts already are: an estate view that skipped this would be the
+		// widest read in the product and the easiest way around every grant on it.
+		visible := make([]run.HostFacts, 0, len(hosts))
+		withheld := 0
+		for _, f := range hosts {
+			if keep(f.RunID) {
+				visible = append(visible, f)
+				continue
+			}
+			withheld++
+		}
+		shown, total := cappedList(visible)
+		resp := estateResponse{
+			At: at, Hosts: shown, Total: total, Truncated: len(shown) < total, Withheld: withheld,
+		}
+		// The horizon is reported whenever it is known, and an instant before it is called out. A
+		// failure to read it leaves both absent rather than failing the request: the estate is the
+		// answer, and this only says how far back the answer can be trusted.
+		if horizon, herr := store.EstateHorizon(r.Context()); herr == nil && !horizon.IsZero() {
+			resp.Horizon = &horizon
+			resp.BeforeHistory = at.Before(horizon)
+		}
+		respondJSON(w, log, http.StatusOK, resp, wantsPretty(r))
+	}
 }

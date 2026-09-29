@@ -46,6 +46,17 @@ func (s *store) PurgeRunsBefore(ctx context.Context, cutoff time.Time) (int, err
 	if err := s.deleteBatched(ctx, "run_logs", cut); err != nil {
 		return 0, fmt.Errorf("purge run logs: %w", err)
 	}
+	// The readability decision is kept before the rows go, because the derived rows this run
+	// governs outlive it. Without this a purge silently made every summary, drift row, and state
+	// reading it governs unreadable to a grant-restricted caller: not refused, not explained, just
+	// absent. ON CONFLICT DO NOTHING, so a re-run of a partially completed purge is harmless.
+	if _, err := s.db.ExecContext(ctx, `
+INSERT INTO run_auth (run_id, org_id, project_id, inventory_id, pull_credential_id, credential_ids)
+SELECT id, org_id, project_id, inventory_id, pull_credential_id, credential_ids
+FROM runs WHERE `+terminalRun+` AND created_at < $1
+ON CONFLICT (run_id) DO NOTHING`, cut); err != nil {
+		return 0, fmt.Errorf("retain run authorization: %w", err)
+	}
 	deleted := 0
 	for {
 		res, err := s.db.ExecContext(ctx, `

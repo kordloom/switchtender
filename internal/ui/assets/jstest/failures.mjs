@@ -27,6 +27,7 @@ export const PLACEHOLDER_PAGES = [
 		vars: { RunID: "run_1", MatrixCap: "2000" } },
 	{ page: "doctor", text: "Running checks.", load: (app) => app.loadDoctor() },
 	{ page: "drift", text: "Loading drift status.", load: (app) => app.loadDrift() },
+	{ page: "estate", text: "Loading the estate.", load: (app) => app.loadEstate() },
 	{ page: "fleet", text: "Loading fleet health.", load: (app) => app.loadFleet() },
 	{ page: "host", text: "Loading host history.", load: (app) => app.loadHost("web01"),
 		vars: { Host: "web01" } },

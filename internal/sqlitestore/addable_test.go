@@ -77,6 +77,14 @@ func TestEveryLaterColumnIsHealable(t *testing.T) {
 		"host_facts.facts (TEXT NOT NULL)",
 		"host_facts.gathered_at (TEXT NOT NULL)",
 		"host_facts.run_id (TEXT NOT NULL)",
+		// host_facts_history arrived whole on 2026-09-15 as a new table, not as columns added to an
+		// existing one, so CREATE TABLE IF NOT EXISTS builds it complete on an upgraded database and
+		// the healer never has an ALTER to perform. Original-era by construction, like every other
+		// entry here.
+		"host_facts_history.bucket (TEXT NOT NULL)",
+		"host_facts_history.facts (TEXT NOT NULL)",
+		"host_facts_history.gathered_at (TEXT NOT NULL)",
+		"host_facts_history.run_id (TEXT NOT NULL)",
 		"inventories.content (TEXT NOT NULL)",
 		"inventories.created_at (TEXT NOT NULL)",
 		"inventory_sources.created_at (TEXT NOT NULL)",

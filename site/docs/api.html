@@ -284,6 +284,21 @@ either licensed or absent.</li>
 </tr>
 <tr>
 <td>GET</td>
+<td><code>/v1/estate</code></td>
+<td>The estate as it stood at an instant. <code>at</code> is RFC 3339 and defaults to now, so the current estate is the same query with no argument. Each host carries the newest facts gathered at or before that instant, so a host holds its last observed state until something newer was seen, and a host first gathered afterward is absent rather than invented. <code>withheld</code> counts hosts left out because the caller may not read the run that gathered them. Retention deleting that run does not withhold it: the purge retains what decided readability, so a reading stays readable to whoever could always read it. <code>horizon</code> is the oldest retained reading and <code>before_history</code> reports that the instant predates it, which separates an estate that was empty from records that do not reach that far.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/estate/diff</code></td>
+<td>What changed between two instants. <code>from</code> is required, <code>to</code> defaults to now. Each host is added, changed, or unobserved, and a changed host names the fact keys that differ with the value at each end. <code>unobserved</code> means nothing gathered that host inside the window, so its state is carried forward rather than confirmed: not known to have changed, and not known not to have. <code>unchanged</code> counts hosts gathered in the window and found identical, which is a different and stronger statement.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/changes/{change}</code></td>
+<td>One change: every run carrying the <code>change</code> label with that value, as one thing. Carries the span, who acted, and an outcome derived from the member runs rather than declared, so it cannot disagree with what happened. A change is what an auditor asks about; a run is what an executor produces. <code>withheld</code> counts members the caller may not read, so a partial change is never mistaken for the whole one.</td>
+</tr>
+<tr>
+<td>GET</td>
 <td><code>/v1/tasks</code></td>
 <td>Per-task duration trends over recent runs.</td>
 </tr>

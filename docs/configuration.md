@@ -140,9 +140,11 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--plugins-dir` | none | Directory of extension plugin binaries loaded at startup. Also `SWITCHTENDER_PLUGINS_DIR`. See [Extend in Go](sdk.md). |
 | `--worker-token` | none | Bearer token that authenticates mesh relay workers and enables the relay endpoints. Also `SWITCHTENDER_WORKER_TOKEN`. Keep it secret. On its own, every worker holding it may lease from every queue. |
 | `--worker-pools` | none | YAML file binding each worker token to the queues it may lease from, so a queue is a boundary rather than a routing hint. |
-| `--retain-runs` | none | Delete terminal runs older than this, for example `90d`. Empty keeps them forever. |
+| `--retain-runs` | none | Delete terminal runs older than this, for example `90d`. Empty keeps them forever. Deleting a run does not make what it left behind unreadable: summaries, drift, and host state history outlive it, and the purge retains the record of who could read the run so those rows stay readable to exactly the same people. That record is dropped automatically once nothing references it. |
 | `--retain-events` | none | Drop run events and logs older than this, for example `30d`. Empty keeps them forever. |
 | `--retain-history` | none | Keep only this many per-host and per-task summaries for each host and each task, for example `500`. Summaries outlive the runs they came from, so this is the only bound on them. Zero keeps every summary forever. A smaller value is raised to 500, the deepest window the fleet views will answer. |
+| `--facts-interval` | `24h` | Minimum spacing between retained host state snapshots. The estate history keeps the newest gather in each period, which is what answers what a host looked like on a date. Zero keeps every gather, at roughly a hundred times the disk. |
+| `--retain-facts` | `400` | Keep only this many host state snapshots for each host. A fact set is hundreds of kilobytes, so unlike summaries this is bounded by default. Zero keeps every snapshot forever. |
 | `--retention-interval` | `1h` | How often the retention sweeper runs. |
 | `--evidence-dir` | none | Directory for periodic change registers. Set together with `--evidence-cadence`. |
 | `--evidence-cadence` | none | How long each change register covers and how often one is written, for example `2160h` for a quarter. Minimum `1h`. Zero writes none. Progress is read from the archive, so a restart resumes from the newest pack rather than starting the period again. |
@@ -195,6 +197,8 @@ node over the mesh relay, with no database access of its own.
 | `--queue` | none | Queue this worker serves. Repeatable. Without any, it serves the default pool. |
 | `--workers` | `4` | Concurrent runs this process executes at once. At least 1: a worker with no slots would lease nothing and sit idle. |
 | `--run-timeout` | `0` | Default cap on how long a run may execute before it is canceled and failed, for example `1h`. Zero leaves runs uncapped. |
+| `--facts-interval` | `24h` | Minimum spacing between retained host state snapshots. Applies only with `--db`: a worker using `--server` reports what it gathered to the control node, which spaces the history with its own setting. |
+| `--retain-facts` | `400` | Snapshots kept per host. Applies only with `--db`, for the same reason. |
 | `--allow-container-ee` | `false` | Allow container execution environments on this worker. Needs Docker. |
 | `--default-image` | none | Fallback execution image for runs that pin none at the run, template, or project level. |
 | `--require-image-digest` | `false` | Reject a container run whose image is not pinned to an `@sha256:` digest. |

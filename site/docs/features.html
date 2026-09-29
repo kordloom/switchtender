@@ -163,6 +163,18 @@ creating a new PostgreSQL schema, and one-click drift reconcile are Team. Tiers 
 <td>Mark a run to require sign-off, or require it automatically by policy on tool, command, target, assessed risk, or who is asking. Community holds one such policy, and matching on risk or on who is asking is part of the full engine, which is Team. A held run never executes until an admin approves or rejects it. The decision is a chain entry committing a digest of the exact spec released, the executor refuses a spec that changed after the decision, and the receipt proves the approved and executed change are the same.</td>
 </tr>
 <tr>
+<td>Reversibility</td>
+<td>Every run is graded on whether it can be taken back: reversible, costly, or irreversible. It is a different question from risk, and the two come apart constantly: restarting a fleet is high risk and undoes itself, while deleting a backup set reads quietly and is permanent. An Ansible run is graded from its playbook's own text, walking plays, tasks, and blocks, and a finished run is graded from what it actually did, so a run that changed nothing has nothing to undo. An approval policy can hold on the grade, which is the rule most people want and could not write: a change nobody can take back needs a second person to agree to it.</td>
+</tr>
+<tr>
+<td>Estate history</td>
+<td>Every fact gather is kept rather than overwritten, so the estate can be reconstructed as it stood on any date since the install. <code>GET /v1/estate?at=</code> answers what was running then; <code>GET /v1/estate/diff?from=&amp;to=</code> answers what moved since, host by host and fact by fact, with the value at each end. Both report how far back the records reach, so an empty answer is never mistaken for an empty estate. Depth and spacing are configurable.</td>
+</tr>
+<tr>
+<td>Changes</td>
+<td>Label runs with a change and read the whole arc as one thing: <code>GET /v1/changes/{name}</code> returns every run that served one intent, its span, everyone who acted, and an outcome derived from the runs rather than declared. A rollback followed by a fix-forward reads as one mixed change, which is what really happened and what a single run can never express.</td>
+</tr>
+<tr>
 <td>Policy as code (Team past one plain rule)</td>
 <td>Point <code>--policy-file</code> at a YAML file and it becomes the source of truth for policies. A rule can hold a run for approval or deny it outright (<code>effect: deny</code>), can scope itself to agents or people (<code>actor_kind</code>), to one named principal (<code>actor</code>), or to a risk floor (<code>min_risk</code>), and can demand that the approver be someone other than the requester (<code>require_distinct_approver</code>), so an agent's authorization boundary is a reviewed diff with a commit behind it. The API refuses policy writes with a 409 that says where to make the change, and a malformed file stops the server rather than silently gating nothing.</td>
 </tr>

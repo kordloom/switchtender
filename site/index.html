@@ -242,6 +242,24 @@ switchtender witness --server https://demo.switchtender.com --once</code></pre>
 					<p class="card-bound">What it doesn't claim: the chain proves the record wasn't altered after writing, not that a compromised controller recorded everything. The full boundary statement is in <a href="/docs/concepts#provable-audit">the docs</a>.</p>
 				</article>
 				<article class="card reveal">
+					<div class="ic ic-gate"></div>
+					<h3>Whether you get a second chance</h3>
+					<p>Risk says how bad a change is. It never says whether you can take it back, and the two come apart constantly: restarting a fleet is high risk and undoes itself, while deleting a backup set reads quietly and is permanent. Every run is graded reversible, costly, or irreversible, and an approval rule can hold on that grade. An Ansible run is graded from its playbook's own text, not guessed from a file name.</p>
+					<p class="card-bound">What it doesn't claim: roles and includes aren't followed, so the scan can only ever raise a grade, never lower one. Work it can't see makes a run look less safe, never more.</p>
+				</article>
+				<article class="card reveal">
+					<div class="ic ic-memory"></div>
+					<h3>Your estate as it was</h3>
+					<p>Every fact gather is kept instead of overwritten, so you can ask what was running on the date of your last audit, and what has moved since: host by host, fact by fact, with the value at each end. Most tools answer only what is true now, because reconstructing the past needs an ordered history nobody can quietly edit.</p>
+					<p class="card-bound">What it doesn't claim: history starts the day you install, not before. Every answer reports how far back the records reach, so an empty one is never mistaken for an empty estate.</p>
+				</article>
+				<article class="card reveal">
+					<div class="ic ic-lineage"></div>
+					<h3>The change, not just the run</h3>
+					<p>Nobody means a run. They mean "we rolled out the fix", which was four runs, a rollback and a fix-forward, across three days. Label them and read the whole arc as one thing, with its span, everyone who acted, and an outcome worked out from the runs rather than typed in by whoever closed it.</p>
+					<p class="card-bound">What it doesn't claim: the outcome is derived, so it can't disagree with the runs. It also can't record an intent nobody wrote down.</p>
+				</article>
+				<article class="card reveal">
 					<div class="ic ic-matrix"></div>
 					<h3>Live host-by-task matrix</h3>
 					<p>Read a run like a dashboard instead of a scrollback. Every host and task paints itself live as the run happens, and each cell opens to its own output and exit code.</p>

@@ -224,6 +224,34 @@ ON CONFLICT(host) DO UPDATE SET
 	}
 	defer func() { _ = stmt.Close() }()
 
+	// The same reading, kept rather than replaced. The statement above answers what a host is now
+	// and overwrites to do it, so before this table existed a gather destroyed the only copy of the
+	// previous one and no estate history accumulated anywhere.
+	hist, err := tx.PrepareContext(ctx, `
+INSERT INTO host_facts_history (host, bucket, run_id, facts, gathered_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(host, bucket) DO UPDATE SET
+	run_id=excluded.run_id, facts=excluded.facts, gathered_at=excluded.gathered_at`)
+	if err != nil {
+		return fmt.Errorf("save host facts: %w", err)
+	}
+	defer func() { _ = hist.Close() }()
+
+	// Bounded here, at the moment of growth, rather than by the retention sweeper. The sweeper only
+	// trims summaries when --retain-history is set, and it defaults to unset, so a sweeper-based cap
+	// would leave this table unbounded on most installs. A fact set is hundreds of kilobytes.
+	prune, err := tx.PrepareContext(ctx, `
+DELETE FROM host_facts_history WHERE host = ? AND bucket NOT IN (
+	SELECT bucket FROM host_facts_history WHERE host = ?
+	ORDER BY `+sqlutil.GatheredOrder+` DESC, bucket DESC LIMIT ?
+)`)
+	if err != nil {
+		return fmt.Errorf("save host facts: %w", err)
+	}
+	defer func() { _ = prune.Close() }()
+	interval := run.FactsInterval()
+	depth := run.FactsDepth()
+
 	for _, f := range facts {
 		if f.Host == "" || len(f.Facts) == 0 {
 			continue
@@ -235,6 +263,15 @@ ON CONFLICT(host) DO UPDATE SET
 		blob, err := json.Marshal(f.Facts)
 		if err != nil {
 			return fmt.Errorf("save host facts: %w", err)
+		}
+		if _, err := hist.ExecContext(ctx, f.Host, run.FactsBucket(at, runID, interval), runID,
+			string(blob), sqlutil.FormatTime(at)); err != nil {
+			return fmt.Errorf("save host facts history: %w", err)
+		}
+		if depth > 0 {
+			if _, err := prune.ExecContext(ctx, f.Host, f.Host, depth); err != nil {
+				return fmt.Errorf("trim host facts history: %w", err)
+			}
 		}
 		if _, err := stmt.ExecContext(ctx, f.Host, runID, string(blob),
 			sqlutil.FormatTime(at)); err != nil {
@@ -613,4 +650,83 @@ ORDER BY last_seen DESC, claimed_by`
 		return nil, fmt.Errorf("list workers: %w", err)
 	}
 	return out, nil
+}
+
+// EstateAt returns the facts in effect for every host at an instant, ordered by host.
+//
+// In effect is the newest gather at or before the instant, so a host keeps its last observed state
+// until something newer was seen. A host whose every reading is later is omitted rather than
+// invented: it had not been observed yet, and reporting it would describe an estate that held
+// machines nobody had looked at.
+//
+// The comparison runs on the trimmed text, not the raw column, for the reason sqlutil.GatheredOrder
+// documents: the stored form drops a trailing zero fraction, so raw text ordering puts a later
+// instant ahead of an earlier one inside the same second and would pick the wrong reading.
+func (s *store) EstateAt(ctx context.Context, at time.Time, limit int) ([]run.HostFacts, error) {
+	// One bucket is chosen per host, not one timestamp. Grouping by host on the maximum time and
+	// joining back on equality returns a row per match rather than per host, so two readings sharing
+	// an instant put the same host in the estate twice. An estate that double counts a host is not
+	// an answer an audit can use. The bucket is half the primary key, so ordering on it after the
+	// time makes the pick a single row whatever the timestamps collide on.
+	q := `
+SELECT h.host, h.run_id, h.facts, h.gathered_at
+FROM host_facts_history h
+WHERE h.bucket = (
+	SELECT b.bucket FROM host_facts_history b
+	WHERE b.host = h.host AND rtrim(b.gathered_at, 'Z') <= rtrim(?, 'Z')
+	ORDER BY rtrim(b.gathered_at, 'Z') DESC, b.bucket DESC
+	LIMIT 1
+)
+ORDER BY h.host`
+	args := []any{sqlutil.FormatTime(at)}
+	if limit > 0 {
+		q += " LIMIT ?"
+		args = append(args, limit)
+	}
+	rows, err := s.db.r.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("estate at: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []run.HostFacts
+	for rows.Next() {
+		var (
+			f        run.HostFacts
+			blob     string
+			gathered string
+		)
+		if err := rows.Scan(&f.Host, &f.RunID, &blob, &gathered); err != nil {
+			return nil, fmt.Errorf("estate at: %w", err)
+		}
+		if err := json.Unmarshal([]byte(blob), &f.Facts); err != nil {
+			return nil, fmt.Errorf("estate at: %w", err)
+		}
+		if f.GatheredAt, err = sqlutil.ParseTime(gathered); err != nil {
+			return nil, fmt.Errorf("estate at: %w", err)
+		}
+		out = append(out, f)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("estate at: %w", err)
+	}
+	return out, nil
+}
+
+// EstateHorizon returns the oldest retained host state reading, zero when none is held.
+func (s *store) EstateHorizon(ctx context.Context) (time.Time, error) {
+	const q = "SELECT MIN(" + sqlutil.GatheredOrder + ") FROM host_facts_history"
+	var oldest sql.NullString
+	if err := s.db.r.QueryRowContext(ctx, q).Scan(&oldest); err != nil {
+		return time.Time{}, fmt.Errorf("estate horizon: %w", err)
+	}
+	if !oldest.Valid || oldest.String == "" {
+		return time.Time{}, nil
+	}
+	// The stored form is trimmed of its trailing Z for ordering, so it is put back before parsing.
+	at, err := sqlutil.ParseTime(oldest.String + "Z")
+	if err != nil {
+		return time.Time{}, fmt.Errorf("estate horizon: %w", err)
+	}
+	return at, nil
 }

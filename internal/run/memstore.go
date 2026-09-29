@@ -17,6 +17,9 @@ type memStore struct {
 	mu sync.RWMutex
 	// runs maps run id to the stored run.
 	runs map[string]*Run
+	// runAuth retains what decided a purged run's readability, so the derived rows that outlive it
+	// stay readable to whoever could always read them.
+	runAuth map[string]RunAuth
 	// byKey maps a non-empty idempotency key to the id of the run that holds it, mirroring the
 	// partial unique index the SQL backends use to dedupe submissions.
 	byKey map[string]string
@@ -28,6 +31,9 @@ type memStore struct {
 	summaries map[string][]HostSummary
 	// facts holds the most recently gathered system facts per host.
 	facts map[string]HostFacts
+	// factsHistory holds every retained gather per host, oldest first, so the store can answer what
+	// a host looked like at a past instant. facts above holds only the newest.
+	factsHistory map[string][]HostFacts
 	// tasks maps run id to its per task duration summaries.
 	tasks map[string][]TaskSummary
 }

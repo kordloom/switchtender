@@ -602,7 +602,7 @@ that variable is unset.</p>
 <tr>
 <td><code>--retain-runs</code></td>
 <td>none</td>
-<td>Delete terminal runs older than this, for example <code>90d</code>. Empty keeps them forever.</td>
+<td>Delete terminal runs older than this, for example <code>90d</code>. Empty keeps them forever. Deleting a run does not make what it left behind unreadable: summaries, drift, and host state history outlive it, and the purge retains the record of who could read the run so those rows stay readable to exactly the same people. That record is dropped automatically once nothing references it.</td>
 </tr>
 <tr>
 <td><code>--retain-events</code></td>
@@ -613,6 +613,16 @@ that variable is unset.</p>
 <td><code>--retain-history</code></td>
 <td>none</td>
 <td>Keep only this many per-host and per-task summaries for each host and each task, for example <code>500</code>. Summaries outlive the runs they came from, so this is the only bound on them. Zero keeps every summary forever. A smaller value is raised to 500, the deepest window the fleet views will answer.</td>
+</tr>
+<tr>
+<td><code>--facts-interval</code></td>
+<td><code>24h</code></td>
+<td>Minimum spacing between retained host state snapshots. The estate history keeps the newest gather in each period, which is what answers what a host looked like on a date. Zero keeps every gather, at roughly a hundred times the disk.</td>
+</tr>
+<tr>
+<td><code>--retain-facts</code></td>
+<td><code>400</code></td>
+<td>Keep only this many host state snapshots for each host. A fact set is hundreds of kilobytes, so unlike summaries this is bounded by default. Zero keeps every snapshot forever.</td>
 </tr>
 <tr>
 <td><code>--retention-interval</code></td>
@@ -745,6 +755,16 @@ node over the mesh relay, with no database access of its own.</p>
 <td><code>--run-timeout</code></td>
 <td><code>0</code></td>
 <td>Default cap on how long a run may execute before it is canceled and failed, for example <code>1h</code>. Zero leaves runs uncapped.</td>
+</tr>
+<tr>
+<td><code>--facts-interval</code></td>
+<td><code>24h</code></td>
+<td>Minimum spacing between retained host state snapshots. Applies only with <code>--db</code>: a worker using <code>--server</code> reports what it gathered to the control node, which spaces the history with its own setting.</td>
+</tr>
+<tr>
+<td><code>--retain-facts</code></td>
+<td><code>400</code></td>
+<td>Snapshots kept per host. Applies only with <code>--db</code>, for the same reason.</td>
 </tr>
 <tr>
 <td><code>--allow-container-ee</code></td>

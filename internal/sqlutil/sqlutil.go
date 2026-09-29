@@ -89,6 +89,12 @@ func FormatTime(t time.Time) string {
 // stopped every existing schedule from firing.
 const TimeOrder = `rtrim(ran_at, 'Z')`
 
+// GatheredOrder is [TimeOrder] for a gathered_at column, and it exists for the same reason: the
+// host state history is ordered on it to decide which snapshots survive a depth cap, and sorting
+// the raw text puts a later instant ahead of an earlier one inside the same second. Trimming a
+// snapshot that is actually the newest is not recoverable, so this ordering is load-bearing.
+const GatheredOrder = `rtrim(gathered_at, 'Z')`
+
 // ParseTime parses a stored time string.
 func ParseTime(s string) (time.Time, error) {
 	return time.Parse(time.RFC3339Nano, strings.TrimSpace(s))

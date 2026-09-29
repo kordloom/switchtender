@@ -236,6 +236,39 @@ type Store interface {
 	// HostFactsFor returns a host's most recently gathered facts, or ErrNotFound when a host has
 	// never been gathered.
 	HostFactsFor(ctx context.Context, host string) (*HostFacts, error)
+	// RunAuthFor returns what decides a run's readability, from the run while it exists and from
+	// the retained decision once retention has deleted it. It returns ErrNotFound when neither is
+	// held.
+	//
+	// One accessor on purpose. Derived rows outlive their runs, so whether somebody may read a
+	// summary, a drift row, or a state reading has to answer the same before and after the run is
+	// purged. Two lookups meant to agree would eventually disagree, silently, in the direction of
+	// showing somebody something.
+	RunAuthFor(ctx context.Context, id string) (*RunAuth, error)
+	// PurgeRunAuth drops retained readability decisions that no longer govern anything, returning
+	// how many were removed. One is written for every run retention deletes, and a busy fleet
+	// deletes runs forever, so without this the decisions are a table that only grows.
+	PurgeRunAuth(ctx context.Context) (int, error)
+	// EstateHorizon returns the oldest retained host state reading, zero when none is held.
+	//
+	// It is what separates "the estate was empty then" from "our records do not reach that far".
+	// Readings are capped per host and gathers only began when the history did, so an instant
+	// before the horizon yields an empty estate for a reason that has nothing to do with what was
+	// running. Reported rather than left to inference, because the two answers look identical and
+	// an auditor reading the wrong one concludes the fleet did not exist.
+	EstateHorizon(ctx context.Context) (time.Time, error)
+	// EstateAt returns the facts in effect for every host at an instant, ordered by host.
+	//
+	// In effect means the newest gather at or before at, so a host keeps its last known state until
+	// something newer was observed, and a host first gathered afterward is absent rather than
+	// invented. This is the question an audit asks and the one a live view cannot answer, because a
+	// live view holds only what is true now.
+	// The limit bounds the query rather than only the response, because a caller cannot cap what
+	// has already been read: an estate is one row per host with its fact set, and the diff reads
+	// two of them, so an unbounded read scales with the fleet and multiplies by concurrency. A
+	// limit at or below zero reads everything, which is for a caller that genuinely needs the whole
+	// estate and knows what it is asking for.
+	EstateAt(ctx context.Context, at time.Time, limit int) ([]HostFacts, error)
 	// SaveTaskSummary replaces the stored per task summaries for a run.
 	SaveTaskSummary(ctx context.Context, runID string, summaries []TaskSummary) error
 	// RunTaskSummaries returns one run's stored per task summaries, ordered by task.

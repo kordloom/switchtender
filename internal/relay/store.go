@@ -193,6 +193,27 @@ func (c *Client) HostFactsFor(context.Context, string) (*run.HostFacts, error) {
 	return nil, ErrUnsupported
 }
 
+// RunAuthFor is a control-node read and is not served to workers. A worker executes what it is
+// leased and never decides who may read anything.
+func (c *Client) RunAuthFor(context.Context, string) (*run.RunAuth, error) {
+	return nil, ErrUnsupported
+}
+
+// PurgeRunAuth is control-node retention and is not served to workers.
+func (c *Client) PurgeRunAuth(context.Context) (int, error) { return 0, ErrUnsupported }
+
+// EstateHorizon is a control-node read and is not served to workers.
+func (c *Client) EstateHorizon(context.Context) (time.Time, error) {
+	return time.Time{}, ErrUnsupported
+}
+
+// EstateAt is a control-node read and is not served to workers. A worker executes runs and reports
+// what it saw; reconstructing the estate at a past instant is the control node's question, and it
+// holds the history to answer it.
+func (c *Client) EstateAt(context.Context, time.Time, int) ([]run.HostFacts, error) {
+	return nil, ErrUnsupported
+}
+
 // TaskTrends is a control-node analytic and is not served to workers.
 func (c *Client) TaskTrends(context.Context, int) ([]run.TaskTrend, error) {
 	return nil, ErrUnsupported

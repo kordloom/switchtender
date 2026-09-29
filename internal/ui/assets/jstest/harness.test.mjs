@@ -223,16 +223,21 @@ test("the stream recorder keeps the URL the page opened and feeds events back", 
 	assert.equal(source.closed, true);
 });
 
-test("ALL_PARTS is every source part the server assembles, in the same order", () => {
-	// assembleAppJS concatenates every .js file under js/ in name order. A part missing from
-	// ALL_PARTS is a part no page test ever evaluates, so the code in it ships untested while the
-	// suite goes on passing: 24-run-compare.js was in exactly that state, and the whole comparison
-	// page was unreachable through loadPage.
-	const onDisk = readdirSync(new URL("../js", import.meta.url))
-		.filter((n) => n.endsWith(".js"))
-		.sort();
-	assert.deepEqual(ALL_PARTS, onDisk,
-		"ALL_PARTS has drifted from js/, so some shipped part is never loaded by any test");
+test("ALL_PARTS follows the same rule the server assembles by", () => {
+	// assembleAppJS concatenates every .js file under js/ in name order. This used to be a written
+	// list checked against the directory, because a part missing from it is a part no page test
+	// evaluates: the code ships untested while the suite goes on passing, which is exactly where
+	// 24-run-compare.js sat, with the whole comparison page unreachable through loadPage.
+	//
+	// It reads the directory now, so there is no list to forget and nothing to drift. What is left
+	// worth asserting is the rule itself, since the harness and the server have to agree on it:
+	// every .js part, nothing else, in name order.
+	const onDisk = readdirSync(new URL("../js", import.meta.url));
+	assert.ok(ALL_PARTS.length > 0, "no parts were loaded, so every page test runs against nothing");
+	assert.deepEqual(ALL_PARTS, [...ALL_PARTS].sort(), "parts are out of the server's name order");
+	assert.ok(ALL_PARTS.every((n) => n.endsWith(".js")), "a non-script part was loaded");
+	assert.equal(ALL_PARTS.length, onDisk.filter((n) => n.endsWith(".js")).length,
+		"the harness is skipping a shipped part");
 });
 
 test("every placeholder the templates prefill has a page driving it", () => {

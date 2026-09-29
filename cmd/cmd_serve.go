@@ -276,6 +276,13 @@ var retainEvents string
 // retainHistory holds the value of the --retain-history flag, a count of summaries per host.
 var retainHistory int
 
+// factsInterval holds the value of the --facts-interval flag, the minimum spacing between retained
+// host state snapshots.
+var factsInterval time.Duration
+
+// retainFacts holds the value of the --retain-facts flag, a count of host state snapshots per host.
+var retainFacts int
+
 // retentionInterval holds the value of the --retention-interval flag.
 var retentionInterval time.Duration
 
@@ -603,6 +610,14 @@ func init() {
 			"500. Summaries outlive the runs they came from, so this is the only bound on them. "+
 			"Zero keeps every summary forever. Values below "+
 			strconv.Itoa(run.MinRetainSummaries)+" are raised to it.")
+	serveCmd.Flags().DurationVar(&factsInterval, "facts-interval", run.DefaultFactsInterval,
+		"Minimum spacing between retained host state snapshots, for example 24h. The estate history "+
+			"keeps the newest gather in each period, which is what answers what a host looked like "+
+			"on a date. Zero keeps every gather, at roughly a hundred times the disk.")
+	serveCmd.Flags().IntVar(&retainFacts, "retain-facts", run.DefaultFactsDepth,
+		"Keep only this many host state snapshots for each host. A fact set is hundreds of "+
+			"kilobytes, so unlike summaries this is bounded by default. Zero keeps every snapshot "+
+			"forever.")
 	serveCmd.Flags().DurationVar(&retentionInterval, "retention-interval", retention.DefaultInterval,
 		"How often the retention sweeper runs.")
 	serveCmd.Flags().StringVar(&smtpAddr, "smtp-addr", "",
@@ -962,6 +977,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		}
 		proxies = append(proxies, n)
 	}
+	run.SetFactsInterval(factsInterval)
+	run.SetFactsDepth(retainFacts)
 	server.SetTrustedProxies(proxies)
 	server.SetClientIPHeader(serveClientIPHeader)
 

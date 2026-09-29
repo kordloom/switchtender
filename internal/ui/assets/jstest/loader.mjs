@@ -42,7 +42,7 @@
 //   Everything not stubbed. Observers record and never fire, clipboard and window.open and confirm
 //   are recorders, and Blob and object URLs are placeholders. If a flow depends on one of these
 //   doing something, the test has to say what it should do rather than assume.
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import vm from "node:vm";
 
 import { createClock } from "./clock.mjs";
@@ -268,15 +268,13 @@ export function fireWindow(app, type, init) {
 
 // ALL_PARTS is every source part in the order the server concatenates them, for a test that drives
 // a whole page rather than one function and needs whatever that page reaches for.
-export const ALL_PARTS = [
-	"01-boot.js", "02-page-data.js", "03-page-docs.js", "04-tour.js", "05-workflow-editor.js",
-	"06-workflow-canvas.js", "07-nav-theme.js", "08-auth-status.js", "09-audit.js",
-	"10-modals-credentials.js", "11-projects-migrate.js", "12-templates-notify.js",
-	"13-fileviewer-inventory.js", "14-inventories-workers.js", "15-overview-doctor.js",
-	"16-runs-list.js", "17-cron.js", "18-host-page.js", "19-cron-preview.js",
-	"20-held-copy-stream.js", "21-user-profile.js", "22-run-detail.js", "23-run-matrix.js",
-	"24-run-compare.js",
-];
+// Read from the directory rather than listed, in the same name order the server concatenates. A
+// written list drifts: the server globs js/ and serves whatever is there, so a new part was served
+// to every user while every test that drives a whole page silently ran without it. The part would
+// look tested, because the suite passes, and nothing it defines would exist.
+export const ALL_PARTS = readdirSync(new URL("../js/", import.meta.url))
+	.filter((name) => name.endsWith(".js"))
+	.sort();
 
 // sandboxOf returns the raw globals behind a loaded handle, for the helpers that install stubs.
 export function sandboxOf(app) {

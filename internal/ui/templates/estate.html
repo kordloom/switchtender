@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Estate - SwitchTender</title>
+	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="estate"{{if .ReadOnly}} data-readonly="true"{{end}}>
+	<header class="topbar">
+		<div class="brand"><a href="/ui/"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="SwitchTender"></picture>SwitchTender</a></div>
+	</header>
+
+	<main class="content">
+		<a class="back" href="/ui/">Back to overview</a>
+		<h1>Estate</h1>
+		<p class="muted">What the fleet looked like on a date, and what has moved since. Every fact gather is kept rather than overwritten, so a past date is an answer rather than a guess. A host holds its last observed state until something newer was seen.</p>
+
+		<div class="estate-controls">
+			<label for="estate-at">As of</label>
+			<input type="date" id="estate-at">
+			<label for="estate-from">Compare with</label>
+			<input type="date" id="estate-from">
+			<button type="button" id="estate-load" class="primary">Show</button>
+		</div>
+
+		<div id="estate-horizon" class="muted" hidden></div>
+		<div id="status" class="muted">Loading the estate.</div>
+
+		<div class="list-scroll">
+		<table class="runs" id="estate-table" hidden>
+			<thead>
+				<tr>
+					<th>Host</th>
+					<th id="estate-col-state">State</th>
+					<th>Facts</th>
+					<th>Gathered</th>
+				</tr>
+			</thead>
+			<tbody id="estate"></tbody>
+		</table>
+		</div>
+	</main>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>

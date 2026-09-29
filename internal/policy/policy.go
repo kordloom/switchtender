@@ -76,6 +76,14 @@ type Policy struct {
 	// MinRisk matches only runs whose assessed risk is at least this level: low, medium, or high.
 	// Empty matches any risk. It turns the advisory risk grade into an enforceable criterion.
 	MinRisk string `json:"min_risk,omitempty"`
+	// Reversibility matches only runs at least as hard to undo as this class: reversible, costly,
+	// or irreversible. Empty matches any run.
+	//
+	// It is a floor, so "costly" covers costly and irreversible and leaves a dry run alone. This is
+	// the criterion for the rule an operator actually wants to write, which is that a change nobody
+	// can take back needs a second person to agree to it. Risk cannot express that: a fleet restart
+	// grades high and undoes itself, while deleting a backup set grades quietly and is forever.
+	Reversibility string `json:"reversibility,omitempty"`
 	// Effect is what a matched blanket policy does: require_approval holds the run, deny refuses
 	// the submission. Empty means require_approval.
 	Effect string `json:"effect,omitempty"`
@@ -117,6 +125,9 @@ func (p *Policy) Matches(r *run.Run) bool {
 		return false
 	}
 	if p.MinRisk != "" && !meetsRiskFloor(run.AssessRisk(r).Level, p.MinRisk) {
+		return false
+	}
+	if p.Reversibility != "" && !run.MeetsReversibilityFloor(reversibilityOf(r), p.Reversibility) {
 		return false
 	}
 	return true
@@ -235,6 +246,13 @@ func (p *Policy) Validate() error {
 		return fmt.Errorf("min_risk must be %q, %q, or %q, not %q",
 			run.RiskLow, run.RiskMedium, run.RiskHigh, p.MinRisk)
 	}
+	// Refused at load rather than at match time. An unrecognized floor matches nothing, so a
+	// misspelled class would leave the rule loaded, listed, and silently never firing, which is the
+	// worst shape for a control whose whole job is to stop a change nobody can take back.
+	if p.Reversibility != "" && !run.ValidReversibility(p.Reversibility) {
+		return fmt.Errorf("reversibility must be %q, %q, or %q, not %q",
+			run.Reversible, run.ReversibleCostly, run.Irreversible, p.Reversibility)
+	}
 	if p.Denies() && p.MaxDestroy >= 0 {
 		return fmt.Errorf("a deny policy cannot set max_destroy: a plan-content rule holds an " +
 			"apply for review, and a denied run is never planned at all")
@@ -344,4 +362,17 @@ func NewPolicy(name string) *Policy {
 // NewID returns a random policy identifier prefixed with "pol_".
 func NewID() string {
 	return idgen.New("pol_", 6)
+}
+
+// reversibilityOf reads the grade already attached to a run, falling back to grading it here.
+//
+// A grade computed from the run alone is blind to an Ansible playbook, because the work is inside a
+// file and the run carries only its path. A caller that could read the playbook attaches the richer
+// grade first, and this prefers it: without that, a rule written to hold anything that cannot be
+// undone would never fire on the tool this product exists to run.
+func reversibilityOf(r *run.Run) string {
+	if r.Reversibility != nil {
+		return r.Reversibility.Class
+	}
+	return run.AssessReversibility(r).Class
 }
