@@ -137,10 +137,22 @@ self-contained HTML that a reviewer reads without tooling and checks against the
 **A witness remembers what the server can no longer take back.** `switchtender witness`, run on a
 machine the server's operator does not control, polls the public beat feed, keeps a signed
 checkpoint of what it saw, and raises a finding when a beat goes missing, a witnessed beat comes
-back rewritten, or the head regresses. Its memory is first write wins, so a rewrite is reported on
-every watch and never signed into the checkpoint as if it were the truth. The checkpoint's signer is
-pinned to the witness's own key, so a state file replaced by a forger is refused rather than
-believed, and one state file holds one server.
+back rewritten, or the head regresses. Its memory is first write wins, so a rewrite is never signed
+into the checkpoint as if it were the truth, and a standing condition is reported when it appears
+and again when it changes, not once per poll. The checkpoint's signer is pinned to the witness's
+own key, so a state file replaced by a forger is refused rather than believed, and one state file
+holds one server.
+
+**A hosted witness answers auditors, not just operators.** `switchtender witness serve` watches
+any number of servers from one process, records every finding durably, and serves what it has
+witnessed over a read-only API. Its centerpiece is the attestation: a countersigned statement of
+the head it holds for a server, when it saw it, and how many findings it has ever recorded there.
+A relying party fetches one and verifies it offline with `switchtender witness verify-attestation`
+against the witness key they pinned. The watched operator cannot mint one, cannot alter one, and
+cannot answer one that disagrees with the chain they serve, which turns "our history is intact"
+from a claim the operator makes into one a third party signs. When the witness cannot see a feed,
+the attestation says so rather than going quiet, because a server going dark on its witness is
+itself a signal.
 
 **Receipts make an omission detectable by the party it happened to.** Every mutation returns an
 `Audit-Receipt: seq:link` header naming where it was recorded. Keep them. `switchtender audit
