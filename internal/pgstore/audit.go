@@ -26,6 +26,9 @@ type rowQuerier interface {
 
 // auditStore is an audit.Store backed by the shared PostgreSQL database.
 type auditStore struct {
+	// installID stamps every appended entry, empty when no identity is bound. It is set once at
+	// startup, before the server accepts a request, so it needs no lock of its own.
+	installID string
 	// db is the open database handle shared with the run store.
 	db *sql.DB
 }
@@ -51,12 +54,13 @@ func (s *auditStore) Append(ctx context.Context, e *audit.Entry) error {
 		return err
 	}
 	cp := *e
+	audit.BindEntryInstall(&cp, s.installID)
 	audit.Link(prev, &cp)
-	const q = `INSERT INTO audit_entries (id, at, actor, actor_type, on_behalf_of, method, path, content_digest, seq, prev_hash, hash, nonce)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
+	const q = `INSERT INTO audit_entries (id, at, actor, actor_type, on_behalf_of, method, path, content_digest, seq, prev_hash, hash, nonce, install_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
 	if _, err := tx.ExecContext(ctx, q,
 		cp.ID, sqlutil.FormatTime(cp.At), cp.Actor, cp.ActorType, cp.OnBehalfOf, cp.Method,
-		cp.Path, cp.ContentDigest, cp.Seq, cp.PrevHash, cp.Hash, cp.Nonce); err != nil {
+		cp.Path, cp.ContentDigest, cp.Seq, cp.PrevHash, cp.Hash, cp.Nonce, cp.InstallID); err != nil {
 		return fmt.Errorf("append audit entry: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -106,12 +110,13 @@ func (s *auditStore) AppendSpanBeat(ctx context.Context, at time.Time, cadenceS 
 		return nil, fmt.Errorf("append span beat: %w", err)
 	}
 	e := audit.NewSpanEntry(at, beat, count, cadenceS)
+	audit.BindEntryInstall(e, s.installID)
 	audit.Link(prev, e)
-	const q = `INSERT INTO audit_entries (id, at, actor, actor_type, on_behalf_of, method, path, content_digest, seq, prev_hash, hash, nonce)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
+	const q = `INSERT INTO audit_entries (id, at, actor, actor_type, on_behalf_of, method, path, content_digest, seq, prev_hash, hash, nonce, install_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
 	if _, err := tx.ExecContext(ctx, q,
 		e.ID, sqlutil.FormatTime(e.At), e.Actor, e.ActorType, e.OnBehalfOf, e.Method, e.Path,
-		e.ContentDigest, e.Seq, e.PrevHash, e.Hash, e.Nonce); err != nil {
+		e.ContentDigest, e.Seq, e.PrevHash, e.Hash, e.Nonce, e.InstallID); err != nil {
 		return nil, fmt.Errorf("append span beat: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -182,7 +187,7 @@ func (s *auditStore) SpanBeats(ctx context.Context, limit int) ([]*audit.Entry, 
 	if limit < 1 {
 		limit = 1
 	}
-	const q = `SELECT id, at, actor, actor_type, on_behalf_of, method, path, content_digest, seq, prev_hash, hash, nonce FROM audit_entries
+	const q = `SELECT id, at, actor, actor_type, on_behalf_of, method, path, content_digest, seq, prev_hash, hash, nonce, install_id FROM audit_entries
 WHERE actor = $1 AND method = $2 ORDER BY seq DESC LIMIT $3`
 	rows, err := s.db.QueryContext(ctx, q, audit.SpanActor, audit.SpanMethod, audit.SpanScanLimit(limit))
 	if err != nil {
@@ -196,7 +201,7 @@ func (s *auditStore) List(ctx context.Context, limit int) ([]*audit.Entry, error
 	if limit < 1 {
 		limit = 1
 	}
-	const q = `SELECT id, at, actor, actor_type, on_behalf_of, method, path, content_digest, seq, prev_hash, hash, nonce FROM audit_entries
+	const q = `SELECT id, at, actor, actor_type, on_behalf_of, method, path, content_digest, seq, prev_hash, hash, nonce, install_id FROM audit_entries
 ORDER BY seq DESC LIMIT $1`
 	rows, err := s.db.QueryContext(ctx, q, limit)
 	if err != nil {
@@ -207,7 +212,7 @@ ORDER BY seq DESC LIMIT $1`
 
 // Chain returns every entry in chain order, oldest first, for verification.
 func (s *auditStore) Chain(ctx context.Context) ([]*audit.Entry, error) {
-	const q = `SELECT id, at, actor, actor_type, on_behalf_of, method, path, content_digest, seq, prev_hash, hash, nonce FROM audit_entries
+	const q = `SELECT id, at, actor, actor_type, on_behalf_of, method, path, content_digest, seq, prev_hash, hash, nonce, install_id FROM audit_entries
 ORDER BY seq ASC`
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
@@ -219,7 +224,7 @@ ORDER BY seq ASC`
 // ChainScan streams every entry in chain order, oldest first, one row at a time, so verifying a
 // long trail never materializes it.
 func (s *auditStore) ChainScan(ctx context.Context, afterSeq int64, fn func(*audit.Entry) error) error {
-	const q = `SELECT id, at, actor, actor_type, on_behalf_of, method, path, content_digest, seq, prev_hash, hash, nonce FROM audit_entries
+	const q = `SELECT id, at, actor, actor_type, on_behalf_of, method, path, content_digest, seq, prev_hash, hash, nonce, install_id FROM audit_entries
 WHERE seq > $1 ORDER BY seq ASC`
 	rows, err := s.db.QueryContext(ctx, q, afterSeq)
 	if err != nil {
@@ -232,7 +237,7 @@ WHERE seq > $1 ORDER BY seq ASC`
 			at string
 		)
 		if err := rows.Scan(&e.ID, &at, &e.Actor, &e.ActorType, &e.OnBehalfOf, &e.Method, &e.Path,
-			&e.ContentDigest, &e.Seq, &e.PrevHash, &e.Hash, &e.Nonce); err != nil {
+			&e.ContentDigest, &e.Seq, &e.PrevHash, &e.Hash, &e.Nonce, &e.InstallID); err != nil {
 			return fmt.Errorf("chain scan audit entries: %w", err)
 		}
 		if e.At, err = sqlutil.ParseTime(at); err != nil {
@@ -259,7 +264,7 @@ func scanSpanBeats(rows *sql.Rows, limit int) ([]*audit.Entry, error) {
 			at string
 		)
 		if err := rows.Scan(&e.ID, &at, &e.Actor, &e.ActorType, &e.OnBehalfOf, &e.Method, &e.Path,
-			&e.ContentDigest, &e.Seq, &e.PrevHash, &e.Hash, &e.Nonce); err != nil {
+			&e.ContentDigest, &e.Seq, &e.PrevHash, &e.Hash, &e.Nonce, &e.InstallID); err != nil {
 			return nil, fmt.Errorf("scan span beat: %w", err)
 		}
 		var err error
@@ -288,7 +293,7 @@ func scanAudit(rows *sql.Rows) ([]*audit.Entry, error) {
 			at string
 		)
 		if err := rows.Scan(&e.ID, &at, &e.Actor, &e.ActorType, &e.OnBehalfOf, &e.Method, &e.Path,
-			&e.ContentDigest, &e.Seq, &e.PrevHash, &e.Hash, &e.Nonce); err != nil {
+			&e.ContentDigest, &e.Seq, &e.PrevHash, &e.Hash, &e.Nonce, &e.InstallID); err != nil {
 			return nil, fmt.Errorf("scan audit entry: %w", err)
 		}
 		var err error
@@ -367,3 +372,6 @@ func (s *auditStore) Anchors(ctx context.Context, seq int64) ([]*audit.Anchor, e
 	}
 	return out, nil
 }
+
+// BindInstall sets the install every later append is stamped with.
+func (s *auditStore) BindInstall(installID string) { s.installID = installID }

@@ -131,6 +131,16 @@ type User struct {
 	Links []string `json:"links,omitempty"`
 	// Notes is free text about the account, such as why it exists or when it should be reviewed.
 	Notes string `json:"notes,omitempty"`
+	// Source names what created the account: empty or "local" for one an administrator made, or the
+	// directory that provisioned it, such as "ldap", "jwt", or "saml".
+	//
+	// It exists so a directory identity cannot quietly take over an account it did not create. The
+	// provisioning path matched on username alone, so an identity provider asserting the username of
+	// a local administrator was handed that administrator's account and role. That is safe on the
+	// defaults, where the username comes from a subject or a directory search, and it is account
+	// takeover the moment an operator points the username claim at an email attribute against an
+	// issuer that lets a user assert their own address.
+	Source string `json:"source,omitempty"`
 	// CreatedAt is when the user was created.
 	CreatedAt time.Time `json:"created_at"`
 }

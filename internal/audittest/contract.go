@@ -5,6 +5,7 @@ package audittest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -43,6 +44,9 @@ func Contract(t *testing.T, newStore func() audit.Store) {
 	})
 	t.Run("content and actor fields round trip and are committed", func(t *testing.T) {
 		testCommittedFields(t, newStore())
+	})
+	t.Run("a bound install round trips and the chain still verifies", func(t *testing.T) {
+		testInstallBinding(t, newStore())
 	})
 	t.Run("empty list is non-nil", func(t *testing.T) {
 		got, err := newStore().List(context.Background(), 10)
@@ -841,5 +845,58 @@ func testCommittedFields(t *testing.T, store audit.Store) {
 	if audit.EntryHash(&forgedType) == got.Hash {
 		t.Error("actor_type is not committed by the link, so an agent's change can be presented as a " +
 			"person's")
+	}
+}
+
+// testInstallBinding pins that binding an install both reaches storage and leaves the chain
+// verifiable, on every backend.
+//
+// The install id is folded into the chain link, so the read path has to return it. When it was
+// added to the hash without a column to hold it, every entry hashed one way on the way in and
+// another on the way back, and the whole chain reported broken at entry one. Nothing failed: the
+// binding is set only by the serving command, so no test ever set it and every store test ran with
+// it empty. This is that test.
+func testInstallBinding(t *testing.T, store audit.Store) {
+	t.Helper()
+	binder, ok := store.(audit.InstallBinder)
+	if !ok {
+		t.Fatalf("%T does not bind an install, so its chain links cannot name one", store)
+	}
+	const installID = "in_0123456789ab"
+	binder.BindInstall(installID)
+
+	ctx := context.Background()
+	at := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	for i := 0; i < 3; i++ {
+		e := &audit.Entry{
+			ID: fmt.Sprintf("aud_bind%d", i), At: at.Add(time.Duration(i) * time.Second),
+			Actor: "release-token", ActorType: "token", Method: "POST", Path: "/v1/runs",
+		}
+		if err := store.Append(ctx, e); err != nil {
+			t.Fatalf("Append() error = %v", err)
+		}
+		if e.InstallID != installID {
+			t.Fatalf("appended entry install_id = %q, want %q", e.InstallID, installID)
+		}
+	}
+
+	chain, err := store.Chain(ctx)
+	if err != nil {
+		t.Fatalf("Chain() error = %v", err)
+	}
+	if len(chain) != 3 {
+		t.Fatalf("chain length = %d, want 3", len(chain))
+	}
+	for _, e := range chain {
+		// Read back from storage, not the struct that was written, since the whole failure was a
+		// value that survived the write and vanished on the way out.
+		if e.InstallID != installID {
+			t.Errorf("entry %d read back with install_id %q, want %q", e.Seq, e.InstallID, installID)
+		}
+	}
+	if ok, brokeAt := audit.Verify(chain); !ok {
+		t.Fatalf("a chain written by a bound install does not verify, broke at %d. The install id "+
+			"is hashed into every link, so a read path that cannot return it breaks the chain.",
+			brokeAt)
 	}
 }

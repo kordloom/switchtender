@@ -232,7 +232,7 @@
 </tr>
 <tr>
 <td>Teams and grants</td>
-<td>Group users into teams and grant read, use, or manage on a specific project, template, inventory, or credential, each level implying the ones below it. A read grant delegates view of one object without a global viewer role; a manage grant delegates editing and deleting without global admin. Grants layer on the global role and default open, or lock down with strict grants.</td>
+<td>Group users into teams and grant read, use, or manage on a specific project, template, inventory, or credential, each level implying the ones below it. A read grant delegates view of one object without a global viewer role; a manage grant delegates editing and deleting without global admin. Grants layer on the global role and default open, so an ungranted object falls back to the caller's global role: separation between organizations is not enforced until <code>--strict-grants</code> is on.</td>
 </tr>
 <tr>
 <td>Reach isolated networks</td>
@@ -323,8 +323,16 @@
 <td><code>switchtender import awx</code> and <code>import semaphore</code> read an export and create the equivalent projects, inventories, templates, surveys, schedules, and credential shells, with a dry-run report first. <code>switchtender import rundeck</code> reads a Rundeck job export, converting Quartz schedules and refusing to downgrade secure options to plaintext. <code>switchtender import cron</code> brings a crontab under governance, turning each cron line into an approved, recorded schedule.</td>
 </tr>
 <tr>
+<td>Offboarding record</td>
+<td>A schedule and a webhook trigger each record who created it. Neither stops firing when that account is deleted, because a schedule is organization infrastructure and a trigger's token belongs to the trigger, so halting production work the moment somebody leaves would be its own outage. The record is what an offboarding review needs to decide which to reassign or rotate.</td>
+</tr>
+<tr>
+<td>Schedule overlap</td>
+<td>A schedule waits for its own previous run. A five-minute schedule whose playbook takes eight minutes skips the tick rather than stacking a second copy of the same work on the same hosts, and stays on its cadence rather than firing the moment the slow run ends. Each skip is logged.</td>
+</tr>
+<tr>
 <td>Schedule timezones</td>
-<td>A schedule reads its cron expression in an IANA timezone such as <code>America/New_York</code>, following that zone's daylight-saving shifts, so a nightly window stays put across the year instead of drifting with the server clock. On the day a zone falls back the repeated hour fires once, not twice. A slot inside the hour a zone skips forward does not exist that day and does not fire, so avoid scheduling in the transition hour if the run must happen every day.</td>
+<td>A schedule reads its cron expression in an IANA timezone such as <code>America/New_York</code>, following that zone's daylight-saving shifts, so a nightly window stays put across the year instead of drifting with the server clock. On the day a zone falls back the repeated hour fires once, not twice, and on the day it springs forward a slot inside the hour that never happens fires at the instant the clocks jumped, so a nightly job runs every night of the year.</td>
 </tr>
 <tr>
 <td>Starter templates</td>

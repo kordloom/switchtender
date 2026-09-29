@@ -263,6 +263,8 @@ func (o *OIDCAuth) provision(ctx context.Context, username string, vouched bool)
 	if err != nil {
 		return nil, err
 	}
+	// Provisioned by the identity provider, so another source cannot later claim this account.
+	u.Source = "oidc"
 	if err := o.users.Save(ctx, u); err != nil {
 		return nil, err
 	}

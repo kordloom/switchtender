@@ -25,7 +25,7 @@ function mountDetail(shards) {
 	page.renderDetail = () => { handle.rendered++; };
 	page.renderShards = () => { handle.shardRenders++; };
 	page.setStatus = () => {};
-	page.streamURL = (path) => path;
+	page.streamURL = async (path) => path;
 	page.EventSource = function (url) {
 		handle.url = url;
 		this.addEventListener = (name, fn) => { handle.listeners[name] = fn; };
@@ -54,9 +54,11 @@ test("runStreamPath always carries the resume cursor, zero included", () => {
 	}
 });
 
-test("openStream opens the live stream with a cursor even from an empty history", () => {
+test("openStream opens the live stream with a cursor even from an empty history", async () => {
 	const handle = mountDetail();
-	handle.page.openStream("run_1", 0);
+	// Awaited because the URL now carries a minted ticket rather than the reader's own token, so
+	// building it is a request rather than string concatenation.
+	await handle.page.openStream("run_1", 0);
 	assert.equal(handle.url, "/runs/run_1/stream?after=0");
 });
 

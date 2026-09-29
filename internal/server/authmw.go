@@ -36,6 +36,9 @@ type authGate struct {
 	jwt *JWTAuth
 	// audits records authenticated mutations, nil when the trail is off.
 	audits audit.Store
+	// tickets mints and redeems the short-lived permissions the event stream is opened with, since
+	// EventSource cannot set a header and a bearer token in a URL reaches every access log.
+	tickets *streamTickets
 	// log records authentication activity, never token material.
 	log *zap.Logger
 	// authz enforces object grants so a manage grant can delegate editing a specific object beyond
@@ -142,9 +145,21 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 
 		plain := auth.FromHeader(r.Header.Get("Authorization"))
 		if plain == "" && isStream(r) {
-			// EventSource cannot set headers, so the stream endpoint alone accepts the token as
-			// a query parameter.
-			plain = r.URL.Query().Get("access_token")
+			// EventSource cannot set headers, so the stream endpoint takes a short-lived ticket in
+			// the query instead. It used to take the caller's own bearer token there. The
+			// application never wrote that URL into an href and the chain records only the path, but
+			// a URL is not private: nginx, Traefik, and an ALB all log the full request line by
+			// default, so a thirty-day session credential ended up in access logs and everything
+			// downstream of them. A ticket opens one run, once, for thirty seconds.
+			if actor, ok := g.tickets.redeem(r.URL.Query().Get("ticket"), streamRunID(r)); ok {
+				if !g.decide(w, r, actor) {
+					return
+				}
+				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), actorKey{}, actor)))
+				return
+			}
+			unauthorized(w)
+			return
 		}
 		if plain == "" {
 			unauthorized(w)
@@ -878,6 +893,13 @@ func (g *authGate) touch(tok *auth.Token) {
 }
 
 // isStream reports whether the request targets the live stream endpoint.
+// streamRunID returns the run id from a stream path, so a ticket is checked against the run it is
+// being presented on rather than any run.
+func streamRunID(r *http.Request) string {
+	p := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1"), "/stream")
+	return strings.TrimPrefix(p, "/runs/")
+}
+
 func isStream(r *http.Request) bool {
 	p := strings.TrimPrefix(r.URL.Path, "/v1")
 	return r.Method == http.MethodGet && strings.HasSuffix(p, "/stream") &&

@@ -34,6 +34,8 @@ type Scheduler struct {
 	submitter Submitter
 	// templates resolves schedules that fire stored templates, nil when unused.
 	templates template.Store
+	// runActive reports whether a schedule's previous run is still going, nil when overlap is allowed.
+	runActive RunActive
 	// audits records each fire as a chain entry before the run exists, nil when no trail is kept.
 	// With it, a scheduled run carries a creation receipt like any other and can be receipted.
 	audits audit.Store
@@ -61,6 +63,25 @@ func WithTemplates(store template.Store) SchedulerOption {
 // scheduled run has the same creation evidence as one a person requested.
 func WithAudits(store audit.Store) SchedulerOption {
 	return func(s *Scheduler) { s.audits = store }
+}
+
+// RunActive reports whether the run named is still going, so a schedule does not start a second copy
+// of work the first has not finished.
+type RunActive func(ctx context.Context, runID string) (bool, error)
+
+// WithRunActive makes a schedule wait for its own previous run rather than stacking on top of it.
+//
+// A schedule fired whenever its next run time came due, with no regard for what it started last
+// time. A five-minute schedule whose playbook takes eight minutes therefore accumulated concurrent
+// copies of itself against the same hosts, and Ansible tasks that are not idempotent interleaved:
+// two runs installing a package, restarting a service, or holding the same lock, with neither aware
+// of the other. Nothing capped how many piled up.
+//
+// Skipping is the safe direction. A run that is simply slow gets left alone until it finishes and
+// the schedule resumes on its normal cadence, where firing anyway compounds whatever made it slow.
+// Without this option the old behavior stands, so a caller that wants overlap keeps it.
+func WithRunActive(active RunActive) SchedulerOption {
+	return func(s *Scheduler) { s.runActive = active }
 }
 
 // WithInterval sets how often due schedules are checked. Values below one are ignored.
@@ -134,6 +155,19 @@ func (s *Scheduler) tick(now time.Time) {
 			s.log.Error("schedule: next fire: "+err.Error(), zap.String("schedule_id", sc.ID))
 			continue
 		}
+		// A schedule does not start a second copy of work its own previous run has not finished.
+		// This is checked before the row is claimed so a skipped tick still advances the next run
+		// time, which is what keeps the schedule on its cadence instead of firing the moment the
+		// slow run ends.
+		if s.overlaps(sc) {
+			if _, err := s.store.ClaimDue(s.ctx, sc.ID, *sc.NextRunAt, next); err != nil {
+				s.log.Error("schedule: advance past overlap: "+err.Error(),
+					zap.String("schedule_id", sc.ID))
+			}
+			s.log.Warn("schedule: previous run still going, skipping this fire",
+				zap.String("schedule_id", sc.ID), zap.String("run_id", sc.LastRunID))
+			continue
+		}
 		// Win the row before firing so concurrent scheduler instances never double-launch.
 		won, err := s.store.ClaimDue(s.ctx, sc.ID, *sc.NextRunAt, next)
 		if err != nil {
@@ -157,6 +191,26 @@ func (s *Scheduler) tick(now time.Time) {
 			s.log.Error("schedule: record fire: "+err.Error(), zap.String("schedule_id", sc.ID))
 		}
 	}
+}
+
+// overlaps reports whether the schedule's own previous run is still going.
+//
+// A read error counts as not overlapping. Refusing to fire because the run store could not be read
+// would turn a transient database problem into silently skipped automation, which is the failure
+// nobody notices; firing may at worst produce the overlap this avoids, which is visible.
+func (s *Scheduler) overlaps(sc *Schedule) bool {
+	if s.runActive == nil || sc.LastRunID == "" {
+		return false
+	}
+	active, err := s.runActive(s.ctx, sc.LastRunID)
+	if err != nil {
+		if s.ctx.Err() == nil {
+			s.log.Error("schedule: check previous run: "+err.Error(),
+				zap.String("schedule_id", sc.ID), zap.String("run_id", sc.LastRunID))
+		}
+		return false
+	}
+	return active
 }
 
 // fireRecord is the canonical body a schedule's fire entry commits: which schedule fired and what

@@ -36,7 +36,15 @@ func (v *ChainScanner) Feed(e *Entry) {
 	}
 	// A null entry is a broken chain, not a crash: fed slices are decoded from documents handed
 	// over by whoever is being audited.
-	if e == nil || e.Hash == "" || e.Seq < 1 || e.Hash != EntryHash(e) {
+	if e == nil || e.Hash == "" || e.Seq < 1 {
+		v.brokeAt = v.count
+		return
+	}
+	// Likewise an entry that cannot be canonicalized at all. Recomputing through EntryHash panics
+	// on one, and a row carrying a sequence above 2^53 or invalid UTF-8 is precisely what tampering
+	// with the audit log looks like, so the walk reported it by crashing.
+	want, err := checkedEntryHash(e)
+	if err != nil || e.Hash != want {
 		v.brokeAt = v.count
 		return
 	}

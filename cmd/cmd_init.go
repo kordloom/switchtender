@@ -80,6 +80,8 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("build admin: %w", err)
 	}
+	// The first administrator is local, and is exactly the account a misconfigured username claim would otherwise be handed.
+	admin.Source = "local"
 	if err := recordCLI(cmd.Context(), bundle.Audits(), "/cli/init/admin"); err != nil {
 		return err
 	}

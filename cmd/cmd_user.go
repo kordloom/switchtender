@@ -103,6 +103,8 @@ func runUserNew(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("create user: %w", err)
 	}
+	// Made here rather than by a directory, so a directory identity of the same name cannot later be handed this account.
+	u.Source = "local"
 	if err := users.Save(cmd.Context(), u); err != nil {
 		return fmt.Errorf("save user: %w", err)
 	}

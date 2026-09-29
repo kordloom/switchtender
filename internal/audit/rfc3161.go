@@ -324,6 +324,22 @@ func checkTimestampToken(token, want []byte, nonce *big.Int) error {
 	return nil
 }
 
+// tokenGenTime returns the time a TSTInfo says it was generated, and whether it could be read.
+//
+// The field is required and sits fifth, after version, policy, messageImprint, and serialNumber, so
+// it is reached by decoding the named prefix rather than walking the optional tail the nonce lives
+// in.
+func tokenGenTime(tstInfo []byte) (time.Time, bool) {
+	var info tsaTSTInfo
+	if _, err := asn1.Unmarshal(tstInfo, &info); err != nil {
+		return time.Time{}, false
+	}
+	if info.GenTime.IsZero() {
+		return time.Time{}, false
+	}
+	return info.GenTime, true
+}
+
 // tokenNonce returns the nonce a TSTInfo echoes, and whether it carries one at all.
 //
 // The nonce sits in the optional tail after genTime, which the named fields stop short of because
@@ -469,6 +485,14 @@ func verifyTokenSignature(sd tsaSignedData) error {
 	if len(infos) == 0 {
 		return fmt.Errorf("the token carries no signature, so nothing vouches for it")
 	}
+	// Exactly one, matching the reference verifier. Accepting the first of several that verifies
+	// would let a forger attach their own signer beside the authority's and have the token pass on
+	// whichever one happens to check out, which is a different token from the one the authority
+	// issued.
+	if len(infos) != 1 {
+		return fmt.Errorf("the token carries %d signatures, and a timestamp token has one",
+			len(infos))
+	}
 	certs, err := tokenCertificates(sd)
 	if err != nil {
 		return err
@@ -505,6 +529,18 @@ func verifyOneSigner(info tsaSignerInfo, sd tsaSignedData, certs []*x509.Certifi
 	}
 	if err := checkSignedAttrs(info, sd); err != nil {
 		return err
+	}
+	// The authority has to have been able to issue it when it says it did. A token whose genTime
+	// falls outside its signer's validity window was either issued by a certificate that had expired
+	// or backdated before it existed, and either way the certificate does not vouch for that
+	// instant. Expiry alone is not checked, deliberately: a token is routinely read long after its
+	// signer's certificate lapsed, and that says nothing about when it was issued.
+	if genTime, ok := tokenGenTime(sd.EncapContentInfo.EContent); ok {
+		if genTime.Before(cert.NotBefore) || genTime.After(cert.NotAfter) {
+			return fmt.Errorf("the token says it was issued at %s, which is outside its signer's "+
+				"validity from %s to %s", genTime.UTC().Format(time.RFC3339),
+				cert.NotBefore.UTC().Format(time.RFC3339), cert.NotAfter.UTC().Format(time.RFC3339))
+		}
 	}
 	algo, err := signatureAlgorithm(info)
 	if err != nil {

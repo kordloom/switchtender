@@ -45,6 +45,12 @@ type Trigger struct {
 	RequireSignature bool `json:"require_signature"`
 	// LastFiredAt is when the trigger last launched a run.
 	LastFiredAt *time.Time `json:"last_fired_at,omitempty"`
+	// CreatedBy names the actor who created the trigger, empty for one that predates the field.
+	//
+	// A trigger's token is a bearer credential belonging to the trigger, not to a person, so removing
+	// an account does not revoke it and deliberately does not stop the trigger. Recording who created
+	// it is what lets an offboarding review find the ones worth rotating.
+	CreatedBy string `json:"created_by,omitempty"`
 	// CreatedAt is when the trigger was created.
 	CreatedAt time.Time `json:"created_at"`
 }

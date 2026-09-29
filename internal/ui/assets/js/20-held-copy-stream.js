@@ -486,14 +486,29 @@ async function postAction(path, payload, method) {
 	return body;
 }
 
-// streamURL appends the stored token to a stream path, since EventSource cannot set headers. It is
-// for that one case only: a URL built here must be opened and dropped, never written into an href,
-// where the credential would sit in the DOM and travel with anything the reader copies or shares.
-function streamURL(path) {
-	const token = apiToken();
-	if (!token) return API + path;
+// streamURL puts a short-lived ticket on a stream path, since EventSource cannot set headers.
+//
+// It used to put the reader's own bearer token there. The URL was always opened and dropped, never
+// written into an href, but a URL is not private once it leaves the browser: nginx, Traefik, and an
+// ALB all log the full request line by default, so a thirty-day session credential ended up in
+// access logs and everything downstream of them. A ticket in the same position opens one run, once,
+// and dies in thirty seconds.
+//
+// The ticket is minted over the ordinary header-authenticated route, so nothing about who may watch
+// a run changes. When there is no token at all the install is running open and the plain path works.
+async function streamURL(path, runId) {
+	if (!apiToken()) return API + path;
 	const sep = path.includes("?") ? "&" : "?";
-	return API + path + sep + "access_token=" + encodeURIComponent(token);
+	try {
+		const res = await postAction("/runs/" + encodeURIComponent(runId) + "/stream-ticket", {});
+		if (res && res.ticket) {
+			return API + path + sep + "ticket=" + encodeURIComponent(res.ticket);
+		}
+	} catch (err) {
+		// Fall through: the stream will answer 401 and the indicator will show it, which is a
+		// clearer failure than opening a stream that silently receives nothing.
+	}
+	return API + path;
 }
 
 // lastSeq returns the highest store sequence among events, or zero when none carry one. It is

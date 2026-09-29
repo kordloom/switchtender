@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -61,6 +62,17 @@ func claimGroups(v any) []string {
 	return nil
 }
 
+// errForeignAccount is returned when a directory identity names an account another source owns.
+var errForeignAccount = errors.New("account belongs to another source")
+
+// accountSource names an account's origin for a refusal message, spelling the empty case out.
+func accountSource(s string) string {
+	if s == "" {
+		return "a local administrator"
+	}
+	return s
+}
+
 // provisionFromDirectory finds the local account for username or creates it with role. When driveRole
 // is true, an existing account's role is updated to match, so a directory or token is the source of
 // truth for authorization. source labels the log line, for example ldap or jwt.
@@ -68,6 +80,28 @@ func provisionFromDirectory(ctx context.Context, users user.Store, log *zap.Logg
 	username string, role user.Role, driveRole bool, source string) (*user.User, error) {
 	u, err := users.FindByUsername(ctx, username)
 	if err == nil {
+		// An account another source owns is not this one's to sign in as. Matching on username alone
+		// meant an identity provider asserting the name of a local administrator was handed that
+		// administrator's account and role, and with driveRole on it could raise its own role too.
+		// Safe on the defaults, where the username is a subject or a directory search result, and
+		// account takeover as soon as an operator points the username claim at an email attribute
+		// against an issuer that lets a user assert their own address. OIDC already refuses the
+		// equivalent when the provider does not vouch for the address.
+		//
+		// An account with no source recorded predates the field, so it cannot be told apart from one
+		// this same directory provisioned. Those are still adopted, because refusing them would lock
+		// out every directory user on upgrade, and the ambiguity is logged so it is visible rather
+		// than assumed away.
+		switch u.Source {
+		case source:
+		case "":
+			log.Warn(source + ": signing in to account " + username + ", which records no source. " +
+				"It cannot be told apart from a local account of the same name; set its source to " +
+				"remove the ambiguity")
+		default:
+			return nil, fmt.Errorf("%w: account %q belongs to %q, not %q", errForeignAccount,
+				username, accountSource(u.Source), source)
+		}
 		if driveRole && u.Role != role {
 			u.Role = role
 			if err := users.Update(ctx, u); err != nil {
@@ -88,6 +122,7 @@ func provisionFromDirectory(ctx context.Context, users user.Store, log *zap.Logg
 	if err != nil {
 		return nil, err
 	}
+	u.Source = source
 	if err := users.Save(ctx, u); err != nil {
 		return nil, err
 	}

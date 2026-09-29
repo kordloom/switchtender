@@ -67,6 +67,15 @@ type Schedule struct {
 	CreatedAt time.Time `json:"created_at"`
 	// NextRunAt is when the schedule fires next.
 	NextRunAt *time.Time `json:"next_run_at,omitempty"`
+	// CreatedBy names the actor who created the schedule, empty for one that predates the field or
+	// was created before any authentication existed.
+	//
+	// It changes nothing about when the schedule fires. A schedule is organization infrastructure
+	// rather than one person's property, so deleting an account deliberately does not stop the work
+	// that account set up: halting production automation the moment somebody is offboarded is its
+	// own outage. What was missing is the record of who set it up, which is what an offboarding
+	// review actually needs in order to decide, so it is recorded and left at that.
+	CreatedBy string `json:"created_by,omitempty"`
 	// LastRunAt is when the schedule last fired.
 	LastRunAt *time.Time `json:"last_run_at,omitempty"`
 	// LastRunID is the run created by the most recent fire.
@@ -179,7 +188,94 @@ func NextFire(spec string, after time.Time) (time.Time, error) {
 				"daylight-saving repeat", ErrBadCron, spec)
 		}
 	}
+	// The other transition loses a fire rather than doubling one. On the day a zone springs forward
+	// the scheduled wall clock may not exist at all, and the cron library steps over the whole day to
+	// the next one, so a nightly job set for the skipped hour simply does not run that day, silently
+	// and once a year. Firing at the instant the clock jumped is the closest real time to what was
+	// asked for, and it is what a person who wrote "run at 02:00 nightly" means on the one night
+	// 02:00 is not a time.
+	if skipped, ok := skippedBySpringForward(spec, after, next); ok {
+		return skipped, nil
+	}
 	return next, nil
+}
+
+// skippedBySpringForward reports the instant to fire at when the zone jumped over the scheduled wall
+// clock between after and next, and whether that happened at all.
+//
+// It only looks when the offset actually grew across the gap, so an ordinary advance does no extra
+// work. The schedule is then re-read in UTC, which has no transitions, to learn the wall clock the
+// expression would have picked had the clocks not moved. Interpreting that wall clock back in the
+// real zone is what answers the question: Go resolves a local time that does not exist to the
+// instant the jump landed on, so a slot inside the lost hour comes back as the transition itself,
+// and a slot outside it comes back unchanged and is left alone.
+func skippedBySpringForward(spec string, after, next time.Time) (time.Time, bool) {
+	loc := next.Location()
+	_, afterOffset := after.In(loc).Zone()
+	_, nextOffset := next.In(loc).Zone()
+	if nextOffset <= afterOffset {
+		return time.Time{}, false
+	}
+	shadow, err := cron.ParseStandard(utcSpec(spec))
+	if err != nil {
+		return time.Time{}, false
+	}
+	local := after.In(loc)
+	asUTC := time.Date(local.Year(), local.Month(), local.Day(), local.Hour(), local.Minute(),
+		local.Second(), local.Nanosecond(), time.UTC)
+	wall := shadow.Next(asUTC)
+	if wall.IsZero() {
+		return time.Time{}, false
+	}
+	// Whether that wall clock exists in the real zone. Reading it back is only the test, never the
+	// answer: Go resolves a time the jump erased by applying an offset, and which side it lands on is
+	// not something to depend on. Here it lands an hour before the jump, which is earlier than the
+	// schedule asked for rather than later.
+	probe := time.Date(wall.Year(), wall.Month(), wall.Day(), wall.Hour(), wall.Minute(),
+		wall.Second(), wall.Nanosecond(), loc)
+	if probe.Hour() == wall.Hour() && probe.Minute() == wall.Minute() {
+		return time.Time{}, false
+	}
+	jump := transitionInstant(after, next, loc, afterOffset)
+	if jump.IsZero() || !jump.After(after) || !jump.Before(next) {
+		return time.Time{}, false
+	}
+	return jump, true
+}
+
+// transitionInstant returns the first second between after and next whose zone offset is no longer
+// the one in force at after, which is the moment the clocks jumped.
+//
+// A binary search rather than a table lookup, because the standard library exposes no transition
+// list. Second granularity is enough: a zone change lands on a whole second, and a cron slot is
+// minute-granular.
+func transitionInstant(after, next time.Time, loc *time.Location, beforeOffset int) time.Time {
+	lo, hi := after.In(loc).Truncate(time.Second), next.In(loc).Truncate(time.Second)
+	if _, off := hi.Zone(); off == beforeOffset {
+		return time.Time{}
+	}
+	for hi.Sub(lo) > time.Second {
+		mid := lo.Add(hi.Sub(lo) / 2)
+		if _, off := mid.Zone(); off == beforeOffset {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+	return hi
+}
+
+// utcSpec returns spec with its zone descriptor replaced by UTC, so the same expression can be read
+// as wall clocks with no transitions in them.
+func utcSpec(spec string) string {
+	trimmed := strings.TrimSpace(spec)
+	if rest, ok := strings.CutPrefix(trimmed, "CRON_TZ="); ok {
+		if _, expr, found := strings.Cut(rest, " "); found {
+			return "CRON_TZ=UTC " + strings.TrimSpace(expr)
+		}
+		return trimmed
+	}
+	return "CRON_TZ=UTC " + trimmed
 }
 
 // sameLocalMinute reports whether two instants fall in the same wall-clock minute of the same zone

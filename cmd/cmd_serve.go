@@ -900,6 +900,16 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		producer = &id
 		log.Info("producer identity ready", zap.String("key_id", id.KeyID()),
 			zap.String("install_id", id.InstallID))
+		// Every entry appended from here carries the install, so its link commits to who produced
+		// it. Without this a published receipt could be lifted whole by a second install: keep the
+		// claims and the genuine third-party anchor, rewrite the producer, re-sign, and a relying
+		// party pinning that second key reads somebody else's history as its own.
+		if binder, ok := bundle.Audits().(audit.InstallBinder); ok {
+			binder.BindInstall(id.InstallID)
+		} else {
+			log.Warn("audit store cannot be bound to this install, so its entries will not commit " +
+				"to who produced them")
+		}
 	}
 
 	closePlugins, err := extplugin.Load(pluginsDir(servePluginsDir), log)
@@ -958,7 +968,19 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	scheduler := schedule.NewScheduler(schedules, disp, log,
 		schedule.WithInterval(scheduleInterval), schedule.WithTemplates(bundle.Templates()),
-		schedule.WithAudits(bundle.Audits()))
+		schedule.WithAudits(bundle.Audits()),
+		// A schedule waits for its own previous run rather than stacking a second copy of the same
+		// work on the same hosts.
+		schedule.WithRunActive(func(ctx context.Context, runID string) (bool, error) {
+			r, err := store.Get(ctx, runID)
+			if errors.Is(err, run.ErrNotFound) {
+				return false, nil
+			}
+			if err != nil {
+				return false, err
+			}
+			return !r.Status.Terminal(), nil
+		}))
 	scheduler.Start()
 	defer scheduler.Close()
 

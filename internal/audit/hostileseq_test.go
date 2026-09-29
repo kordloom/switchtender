@@ -40,7 +40,7 @@ func TestLinkOfStillPanicsForOurOwnEntries(t *testing.T) {
 				"a link nothing can recompute")
 		}
 	}()
-	_ = linkOf(claimObject(1<<60, "2026-08-24T00:00:00Z", "a", "POST", "/p", "", "", "", ""))
+	_ = linkOf(claimObject(1<<60, "2026-08-24T00:00:00Z", "a", "POST", "/p", "", "", "", "", ""))
 }
 
 // TestVerifyBundleChainRefusesAnEmptyBundle checks a document carrying no claims does not report

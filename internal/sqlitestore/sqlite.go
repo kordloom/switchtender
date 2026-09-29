@@ -163,7 +163,8 @@ CREATE TABLE IF NOT EXISTS schedules (
 	last_run_id TEXT NOT NULL DEFAULT '',
 	template_id TEXT NOT NULL DEFAULT '',
 	timezone    TEXT NOT NULL DEFAULT '',
-	org_id      TEXT NOT NULL DEFAULT ''
+	org_id      TEXT NOT NULL DEFAULT '',
+	created_by  TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_schedules_created ON schedules(created_at, id);
 CREATE TABLE IF NOT EXISTS users (
@@ -177,7 +178,8 @@ CREATE TABLE IF NOT EXISTS users (
 	phone         TEXT NOT NULL DEFAULT '',
 	title         TEXT NOT NULL DEFAULT '',
 	links         TEXT NOT NULL DEFAULT '',
-	notes         TEXT NOT NULL DEFAULT ''
+	notes         TEXT NOT NULL DEFAULT '',
+	source        TEXT NOT NULL DEFAULT ''
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE TABLE IF NOT EXISTS tokens (
@@ -255,7 +257,8 @@ CREATE TABLE IF NOT EXISTS triggers (
 	signing_secret    TEXT NOT NULL DEFAULT '',
 	require_signature INTEGER NOT NULL DEFAULT 0,
 	last_fired_at     TEXT,
-	created_at        TEXT NOT NULL
+	created_at        TEXT NOT NULL,
+	created_by        TEXT NOT NULL DEFAULT ''
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_triggers_hash ON triggers(token_hash);
 CREATE TABLE IF NOT EXISTS audit_entries (
@@ -270,7 +273,8 @@ CREATE TABLE IF NOT EXISTS audit_entries (
 	seq       INTEGER NOT NULL DEFAULT 0,
 	prev_hash TEXT NOT NULL DEFAULT '',
 	hash      TEXT NOT NULL DEFAULT '',
-	nonce     TEXT NOT NULL DEFAULT ''
+	nonce     TEXT NOT NULL DEFAULT '',
+	install_id TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS audit_anchors (
 	id    TEXT PRIMARY KEY,
@@ -767,6 +771,15 @@ func migrateRuns(db *sql.DB) error {
 		"ALTER TABLE audit_anchors ADD COLUMN install_id TEXT NOT NULL DEFAULT ''"); err != nil &&
 		!strings.Contains(err.Error(), "duplicate column name") {
 		return fmt.Errorf("add anchor install_id column: %w", err)
+	}
+	// An entry records the install that wrote it, which is folded into its chain link so a receipt
+	// cannot be presented as another install's history. The column has to exist wherever the link
+	// is recomputed: hashing a value the read path cannot return breaks every chain in the install.
+	// An entry from before the column has none, and hashes exactly as it did when it was written.
+	if _, err := db.Exec(
+		"ALTER TABLE audit_entries ADD COLUMN install_id TEXT NOT NULL DEFAULT ''"); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("add entry install_id column: %w", err)
 	}
 	return nil
 }

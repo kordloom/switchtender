@@ -64,15 +64,46 @@ func TestNextFireAcrossDaylightSaving(t *testing.T) {
 		}
 	})
 
-	t.Run("spring forward skips the hour that does not exist", func(t *testing.T) {
+	t.Run("spring forward fires at the instant the clock jumped", func(t *testing.T) {
 		t.Parallel()
 		got := walk("CRON_TZ=America/Chicago 0 2 * * *",
-			time.Date(2026, 3, 6, 12, 0, 0, 0, tz), 3)
+			time.Date(2026, 3, 6, 12, 0, 0, 0, tz), 4)
 		want := []string{
 			"2026-03-07 02:00 CST",
-			// 2026-03-08 02:00 does not exist in this zone.
+			// 2026-03-08 02:00 does not exist: the clock goes 01:59:59 CST to 03:00:00 CDT. The run
+			// happens at the jump rather than being lost for the day.
+			"2026-03-08 03:00 CDT",
 			"2026-03-09 02:00 CDT",
 			"2026-03-10 02:00 CDT",
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("fire %d = %s, want %s (full sequence %v)", i, got[i], want[i], got)
+			}
+		}
+		// Every nominal day is covered, which is the property that was lost.
+		for _, day := range []string{"2026-03-07", "2026-03-08", "2026-03-09", "2026-03-10"} {
+			var seen bool
+			for _, f := range got {
+				if f[:10] == day {
+					seen = true
+				}
+			}
+			if !seen {
+				t.Errorf("no fire on %s, so a nightly job silently skipped a day: %v", day, got)
+			}
+		}
+	})
+
+	t.Run("a schedule outside the lost hour is untouched", func(t *testing.T) {
+		t.Parallel()
+		// 05:00 exists on the transition day, so nothing should move.
+		got := walk("CRON_TZ=America/Chicago 0 5 * * *",
+			time.Date(2026, 3, 6, 12, 0, 0, 0, tz), 3)
+		want := []string{
+			"2026-03-07 05:00 CST",
+			"2026-03-08 05:00 CDT",
+			"2026-03-09 05:00 CDT",
 		}
 		for i := range want {
 			if got[i] != want[i] {
@@ -95,4 +126,51 @@ func TestNextFireAcrossDaylightSaving(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestSpringForwardInOtherZones checks the transition-instant behavior is not tuned to one zone, and
+// that a southern-hemisphere zone, whose transitions run the other way round in the calendar, is
+// handled the same.
+func TestSpringForwardInOtherZones(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		Zone string
+		Spec string
+		From string
+		Want string
+	}{
+		// Europe/London jumps 01:00 to 02:00 on 2026-03-29.
+		{"Europe/London", "0 1 * * *", "2026-03-28T12:00:00", "2026-03-29 02:00"},
+		// Australia/Sydney jumps 02:00 to 03:00 on 2026-10-04.
+		{"Australia/Sydney", "0 2 * * *", "2026-10-03T12:00:00", "2026-10-04 03:00"},
+	} {
+		t.Run(tc.Zone, func(t *testing.T) {
+			t.Parallel()
+			loc, err := time.LoadLocation(tc.Zone)
+			if err != nil {
+				t.Skip("no tzdata for " + tc.Zone)
+			}
+			from, err := time.ParseInLocation("2006-01-02T15:04:05", tc.From, loc)
+			if err != nil {
+				t.Fatalf("ParseInLocation: %v", err)
+			}
+			// Walk to the fire on the transition day.
+			at := from
+			var got string
+			for range 3 {
+				next, err := NextFire("CRON_TZ="+tc.Zone+" "+tc.Spec, at)
+				if err != nil {
+					t.Fatalf("NextFire: %v", err)
+				}
+				at = next
+				if next.In(loc).Format("2006-01-02 15:04") == tc.Want {
+					got = tc.Want
+					break
+				}
+			}
+			if got != tc.Want {
+				t.Errorf("no fire at %s in %s; the lost hour swallowed the run", tc.Want, tc.Zone)
+			}
+		})
+	}
 }

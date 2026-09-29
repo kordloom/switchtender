@@ -111,6 +111,11 @@ func createScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 			Steps:      scheduleSteps(req.Steps, nil),
 			TemplateID: req.TemplateID, OrgID: run.SubmitterOrgFrom(r.Context()),
 			Enabled: scheduleEnabled(req.Enabled, true), CreatedAt: time.Now(),
+			// Recorded so an offboarding review can find what somebody set up. It does not change
+			// when the schedule fires: deleting the person who created it deliberately does not stop
+			// the automation, because halting production work the moment somebody leaves is its own
+			// outage. What was missing was the record needed to make that call.
+			CreatedBy: actorName(r),
 		}
 		if err := sc.Validate(); err != nil {
 			msg := "invalid schedule"
@@ -199,6 +204,9 @@ func updateScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 			TemplateID: req.TemplateID, OrgID: existing.OrgID,
 			Enabled: scheduleEnabled(req.Enabled, existing.Enabled), CreatedAt: existing.CreatedAt,
 			LastRunAt: existing.LastRunAt, LastRunID: existing.LastRunID,
+			// Carried through an edit: the field records who set the schedule up, not who last
+			// touched it, and rewriting it on every edit would erase exactly what it is for.
+			CreatedBy: existing.CreatedBy,
 		}
 		if err := sc.Validate(); err != nil {
 			msg := "invalid schedule"

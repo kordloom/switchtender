@@ -194,10 +194,12 @@ CREATE TABLE IF NOT EXISTS schedules (
 	last_run_id TEXT NOT NULL DEFAULT '',
 	template_id TEXT NOT NULL DEFAULT '',
 	timezone    TEXT NOT NULL DEFAULT '',
-	org_id      TEXT NOT NULL DEFAULT ''
+	org_id      TEXT NOT NULL DEFAULT '',
+	created_by  TEXT NOT NULL DEFAULT ''
 );
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT '';
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE schedules ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_schedules_created ON schedules(created_at, id);
 CREATE TABLE IF NOT EXISTS users (
 	id            TEXT PRIMARY KEY,
@@ -210,7 +212,8 @@ CREATE TABLE IF NOT EXISTS users (
 	phone         TEXT NOT NULL DEFAULT '',
 	title         TEXT NOT NULL DEFAULT '',
 	links         TEXT NOT NULL DEFAULT '',
-	notes         TEXT NOT NULL DEFAULT ''
+	notes         TEXT NOT NULL DEFAULT '',
+	source        TEXT NOT NULL DEFAULT ''
 );
 -- The profile columns are added rather than declared above, so a database created before them is
 -- migrated by the same statement that creates a fresh one. Empty is the default everywhere, so an
@@ -221,6 +224,7 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS links TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT '';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE TABLE IF NOT EXISTS tokens (
 	id           TEXT PRIMARY KEY,
@@ -314,8 +318,10 @@ CREATE TABLE IF NOT EXISTS triggers (
 	signing_secret    TEXT NOT NULL DEFAULT '',
 	require_signature INTEGER NOT NULL DEFAULT 0,
 	last_fired_at     TEXT,
-	created_at        TEXT NOT NULL
+	created_at        TEXT NOT NULL,
+	created_by        TEXT NOT NULL DEFAULT ''
 );
+ALTER TABLE triggers ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT '';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_triggers_hash ON triggers(token_hash);
 CREATE TABLE IF NOT EXISTS audit_entries (
 	id        TEXT PRIMARY KEY,
@@ -329,7 +335,8 @@ CREATE TABLE IF NOT EXISTS audit_entries (
 	seq       BIGINT NOT NULL DEFAULT 0,
 	prev_hash TEXT NOT NULL DEFAULT '',
 	hash      TEXT NOT NULL DEFAULT '',
-	nonce     TEXT NOT NULL DEFAULT ''
+	nonce     TEXT NOT NULL DEFAULT '',
+	install_id TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS audit_anchors (
 	id    TEXT PRIMARY KEY,
@@ -413,6 +420,10 @@ ALTER TABLE audit_entries ADD COLUMN IF NOT EXISTS actor_type TEXT NOT NULL DEFA
 ALTER TABLE audit_entries ADD COLUMN IF NOT EXISTS on_behalf_of TEXT NOT NULL DEFAULT '';
 ALTER TABLE audit_entries ADD COLUMN IF NOT EXISTS content_digest TEXT NOT NULL DEFAULT '';
 ALTER TABLE audit_entries ADD COLUMN IF NOT EXISTS nonce TEXT NOT NULL DEFAULT '';
+-- The install that wrote an entry is folded into its chain link, so the column has to exist
+-- wherever the link is recomputed. Without it the read path returns nothing for a value the
+-- write path hashed, and every chain in the install reports broken at its first entry.
+ALTER TABLE audit_entries ADD COLUMN IF NOT EXISTS install_id TEXT NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS credential_types (
 	id         TEXT PRIMARY KEY,
 	name       TEXT NOT NULL,
