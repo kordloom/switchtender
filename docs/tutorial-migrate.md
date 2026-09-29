@@ -12,8 +12,9 @@ the equivalent projects, inventories, templates, surveys, schedules, and credent
 
 ## From the UI
 
-1. Export from your current tool. `awx export` produces a JSON document. Semaphore exports its
-   project the same way.
+1. Export from your current tool. `awx export` produces a JSON document. Semaphore has no single
+   export command, so gather the project's repositories, inventories, keys, templates, and schedules
+   from its API into one JSON document.
 2. Open Migrate from the top of the overview, or go to `/ui/migrate`.
 3. Paste the export and select Preview. Nothing is written yet. You get a report of exactly what
    would be created, with every warning.

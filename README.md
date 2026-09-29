@@ -196,8 +196,9 @@ One line with a Go toolchain installed:
 
 Or grab a build for your platform from the [releases page](https://github.com/kordloom/switchtender/releases):
 a `SwitchTender.dmg` for macOS, a `windows_amd64.zip` for Windows, or a `tar.gz` of the binary for
-macOS and Linux. Each release ships a cosign-signed `SHA256SUMS`; see [verifying a
-release](SECURITY.md#verifying-a-release). Or build from source:
+macOS and Linux. Verify any download with `switchtender version --verify`, which checks the running
+binary against the release's published hashes; see [verifying a release](SECURITY.md#verifying-a-release)
+for that and for the cosign signature CI-built releases carry. Or build from source:
 
     go build -o switchtender .
 

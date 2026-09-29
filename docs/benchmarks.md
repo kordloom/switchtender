@@ -4,27 +4,27 @@ Measured numbers for the questions people actually ask: how fast does it start, 
 it hold at idle, and how big is the binary. Every number below was measured on a release-flag build,
 the method is shown so you can reproduce it on your own hardware, and nothing here is a projection.
 
-Re-measured on 2026-08-10, on a ten-core Apple Silicon laptop and inside an Alpine Linux container on
-the same machine. Memory and binary sizes are mebibytes, the unit `ps` and `/proc` report. Your
-hardware will differ; the method will not.
+The boot, memory, and binary figures here were re-measured on 2026-08-18 against v1.66.1, on a ten-core
+Apple Silicon laptop and inside an Alpine Linux container on the same machine. The container head to
+head further down is a 2026-08-10 snapshot; its competitor images were re-confirmed unchanged on
+2026-08-18. Memory and binary sizes are mebibytes, the unit `ps` and `/proc` report. Your hardware will
+differ; the method will not.
 
-These figures are the current main build. The footprint and binary size hold for the released
-version. The lower no-encryption boot comes from UI asset compression moving off the startup path;
-a build older than that change comes up nearer 70 ms.
+These figures are the current release, v1.66.1. The lower no-encryption boot comes from UI asset
+compression moving off the startup path; a build older than that change comes up slower.
 
-The point of re-measuring: across dozens of releases, a full security-hardening pass, and custom
-credential types, the footprint did not grow, and the no-encryption boot dropped when UI asset
-compression moved off the startup path. That is the
-number worth watching over time, not any single reading.
+The point of re-measuring: across dozens of releases, a full security-hardening pass, custom credential
+types, and new governance features, the binary moved only from about 29 to 31 mebibytes and the idle
+memory held flat. That stability is the number worth watching over time, not any single reading.
 
 ## Boot and memory
 
 | Measurement | Value |
 |-------------|-------|
-| Cold boot to serving, no encryption key | 26 ms |
-| Cold boot to serving, credential encryption on | 70 ms |
+| Cold boot to serving, no encryption key | 28 ms |
+| Cold boot to serving, credential encryption on | 77 ms |
 | Resident memory at idle, Linux | 32 MiB |
-| Stripped binary, arm64 | 29.8 MiB |
+| Stripped binary, arm64 | 31.4 MiB |
 
 Boot times are the median of five trials after a warm-up run, timed in process from launch to a
 served `/healthz`, so no shell or subprocess overhead is counted. Memory is resident size three
@@ -48,15 +48,15 @@ A stripped release build, `go build -trimpath -ldflags "-s -w"`:
 
 | Platform | Size |
 |----------|------|
-| linux/arm64 | 28.8 MiB |
-| darwin/arm64 | 29.8 MiB |
-| linux/amd64 | 30.7 MiB |
+| linux/arm64 | 30.4 MiB |
+| darwin/arm64 | 31.4 MiB |
+| linux/amd64 | 32.4 MiB |
 
 That single file is the whole control plane: server, workers, UI, importers, and the CLI.
 
 ## Reproduce it
 
-The repository carries the harness the boot and memory rows came from, and the 2026-08-02 figures
+The repository carries the harness the boot and memory rows came from, and the 2026-08-18 figures
 above are its output:
 
     go run ./cmd/bench
@@ -92,9 +92,9 @@ memory is the server process's `VmRSS` three seconds after it began serving. Ima
 | Cold boot to serving | 24 ms | 45 ms | not a single number; see below |
 | Idle resident memory | 32 MiB | 42 MiB | the sum of web, task, database, and Redis |
 
-The boot row matches the first table's 26 ms within noise: after asset compression moved off the
+The boot row is close to the first table's in-process figure: after asset compression moved off the
 startup path, the process comes up fast enough that `docker start` overhead is most of what is left,
-so the container figure and the in-process figure converge. Both are ours, measured the same day.
+so the container figure and the in-process figure converge. Both are ours.
 
 **Semaphore is a genuinely light one-binary competitor, and we boot faster than it.** In its
 single-container mode with an embedded SQLite database, the configuration measured here, it comes up
