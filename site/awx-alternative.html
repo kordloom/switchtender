@@ -18,7 +18,7 @@
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-	<link rel="stylesheet" href="/styles.css?v=31">
+	<link rel="stylesheet" href="/styles.css?v=32">
 </head>
 <body>
 	<div class="bg-mesh" aria-hidden="true"></div>
@@ -63,7 +63,7 @@
 			<div class="cards cards-3">
 				<article class="card reveal">
 					<h3>The platform tax</h3>
-					<p>Running AWX means running Kubernetes, the AWX Operator, Postgres, and Redis, then keeping all of it patched. That's a week of platform work every month, just to run playbooks. SwitchTender is one process and one file. Upgrading is replacing a binary. We <a href="/docs/benchmarks#head-to-head">measured both</a>: a 40&nbsp;MiB image against roughly 1.6&nbsp;GiB across four containers, before the first job runs.</p>
+					<p>Running AWX means running Kubernetes, the AWX Operator, Postgres, and Redis, then keeping all of it patched. That's ongoing platform work every month, keeping the cluster, operator, and datastores patched, just to run playbooks. SwitchTender is one process and one file. Upgrading is replacing a binary. We <a href="/docs/benchmarks#head-to-head">measured both</a>: a 40&nbsp;MiB image against roughly 1.6&nbsp;GiB across four containers, before the first job runs.</p>
 				</article>
 				<article class="card reveal">
 					<h3>Ansible-only</h3>
@@ -161,7 +161,7 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>Move in one command</h2>
-				<p>Export from AWX, import into SwitchTender. Projects, inventories, templates, surveys, and schedules come across, with a dry run first so you see the plan before anything is written.</p>
+				<p>Export from AWX, import into SwitchTender. Projects, inventories, templates, surveys, and schedules come across, with a dry run first so you see the plan before anything is written. Credential secrets are the one thing that does not: AWX will not export a vault password, SSH key, or cloud secret in the clear, which is the behavior you want, so you re-enter those once against the imported credential shells. The import lists exactly which ones need it.</p>
 			</div>
 			<div class="gs-steps">
 				<ol>

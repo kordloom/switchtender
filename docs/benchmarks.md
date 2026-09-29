@@ -10,8 +10,10 @@ head further down is a 2026-08-10 snapshot; its competitor images were re-confir
 2026-08-18. Memory and binary sizes are mebibytes, the unit `ps` and `/proc` report. Your hardware will
 differ; the method will not.
 
-These figures are the current release, v1.66.1. The lower no-encryption boot comes from UI asset
-compression moving off the startup path; a build older than that change comes up slower.
+These boot and memory figures were measured on v1.66.1. They hold steady from one release to the
+next, which is the point below, so they are not re-timed for every tag. The lower no-encryption boot
+comes from UI asset compression moving off the startup path; a build older than that change comes up
+slower.
 
 The point of re-measuring: across dozens of releases, a full security-hardening pass, custom credential
 types, and new governance features, the binary moved only from about 29 to 31 mebibytes and the idle
@@ -94,7 +96,9 @@ memory is the server process's `VmRSS` three seconds after it began serving. Ima
 
 The boot row is close to the first table's in-process figure: after asset compression moved off the
 startup path, the process comes up fast enough that `docker start` overhead is most of what is left,
-so the container figure and the in-process figure converge. Both are ours.
+so the container figure and the in-process figure converge. Both are ours, measured on different
+builds (v1.62.0 in this head to head, v1.66.1 in the boot table above) and days, so read the small
+gap between 24 ms and 28 ms as build and method, not a contradiction.
 
 **Semaphore is a genuinely light one-binary competitor, and we boot faster than it.** In its
 single-container mode with an embedded SQLite database, the configuration measured here, it comes up

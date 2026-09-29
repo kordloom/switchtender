@@ -118,6 +118,14 @@ separate them:
 Sealing needs a key. Set `SWITCHTENDER_ENCRYPTION_KEY` and a stable `SWITCHTENDER_ENCRYPTION_SALT` before
 storing an externally sourced credential or inventory. The sealed value never leaves SwitchTender.
 
+Back up the key and salt the way you back up any root secret. Whoever holds them can decrypt every
+stored credential, and losing them makes the sealed values unrecoverable, so every credential has to
+be re-entered. Keep the salt stable for the life of an install; changing it has the same effect as
+losing the key. There is no in-place key rotation yet: rotating the key means re-provisioning each
+stored credential under the new key, so plan a rotation as a re-entry pass rather than a background
+re-seal. For a compromised key, treat every credential it sealed as exposed, rotate those upstream
+secrets at their source, and re-enter them under a fresh key and salt.
+
 See [Set a secret](tutorial-set-a-secret.md) for the step-by-step, including the API calls.
 
 ## Custom credential types

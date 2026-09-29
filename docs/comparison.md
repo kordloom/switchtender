@@ -11,7 +11,7 @@ This page is an honest side-by-side. It states where SwitchTender is ahead, wher
 where it is behind, because credibility comes from being straight about all three.
 
 Every claim about another product was checked against that vendor's own documentation on
-2026-07-31, for AWX 24.6.1, Ansible Automation Platform 2.7, Semaphore 2.18.29, Ascender 25.4.0,
+2026-08-10, for AWX 24.6.1, Ansible Automation Platform 2.7, Semaphore 2.19.7, Ascender 25.4.0,
 and Rundeck 6.0.1. All of these ship, and a comparison decays the day it is written. Check a row
 against the current release before relying on it, and open an issue if one has gone stale.
 
@@ -128,7 +128,7 @@ store that stays consistent while a fleet writes to it.
 
 ## Sources
 
-Fetched and read on 2026-07-31.
+Fetched and read on 2026-08-10.
 
 1. AWX install and operator defaults: <https://github.com/ansible/awx/blob/devel/INSTALL.md>, <https://raw.githubusercontent.com/ansible/awx-operator/devel/roles/installer/defaults/main.yml>
 2. AAP deployment models and system requirements: <https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7>
