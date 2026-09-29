@@ -42,6 +42,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("non-terminal runs", func(t *testing.T) { testNonTerminal(t, newStore()) })
 	t.Run("fleet health ranking", func(t *testing.T) { testFleetHealth(t, newStore()) })
 	t.Run("run summaries round trip", func(t *testing.T) { testRunSummaries(t, newStore()) })
+	t.Run("append summaries accumulate", func(t *testing.T) { testAppendSummaries(t, newStore()) })
 	t.Run("drift status", func(t *testing.T) { testDriftStatus(t, newStore()) })
 	t.Run("drift and fleet health agree after a purge", func(t *testing.T) {
 		testDriftSurvivesPurge(t, newStore())
@@ -936,6 +937,83 @@ func testRunSummaries(t *testing.T, store run.Store) {
 	// A run with no summaries answers empty, not an error.
 	if none, err := store.RunHostSummaries(ctx, "rs-none"); err != nil || len(none) != 0 {
 		t.Errorf("RunHostSummaries(unknown) = %v, %v, want empty", none, err)
+	}
+}
+
+// testAppendSummaries verifies the SummaryAppender capability: a report split across batches lands its
+// first batch as a replace and appends the rest, upserting by key without disturbing the run's other
+// rows. This is what lets a run wider than one report batch accumulate its full summary instead of the
+// relay server reading and rewriting the whole growing set on every continuation.
+func testAppendSummaries(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	appender, ok := store.(run.SummaryAppender)
+	if !ok {
+		t.Fatalf("%T does not implement run.SummaryAppender", store)
+	}
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+
+	// Batch one replaces, clearing any partial from an earlier attempt.
+	if err := store.SaveHostSummary(ctx, "rw", []run.HostSummary{
+		{Host: "h1", OK: 1, Worst: "ok", RanAt: base},
+		{Host: "h2", OK: 1, Worst: "ok", RanAt: base},
+	}); err != nil {
+		t.Fatalf("SaveHostSummary(batch 1) error = %v", err)
+	}
+	// A continuation appends only its own hosts, leaving batch one in place.
+	if err := appender.AppendHostSummary(ctx, "rw", []run.HostSummary{
+		{Host: "h3", Changed: 1, Worst: "changed", RanAt: base},
+		{Host: "h4", OK: 1, Worst: "ok", RanAt: base},
+	}); err != nil {
+		t.Fatalf("AppendHostSummary(batch 2) error = %v", err)
+	}
+	// A host repeated in a later batch upserts to its newest outcome, not a second row.
+	if err := appender.AppendHostSummary(ctx, "rw", []run.HostSummary{
+		{Host: "h1", Failures: 1, Worst: "failed", RanAt: base},
+	}); err != nil {
+		t.Fatalf("AppendHostSummary(update) error = %v", err)
+	}
+
+	got, err := store.RunHostSummaries(ctx, "rw")
+	if err != nil {
+		t.Fatalf("RunHostSummaries() error = %v", err)
+	}
+	if want := []string{"h1", "h2", "h3", "h4"}; len(got) != len(want) {
+		t.Fatalf("host summaries = %d rows, want %d (no truncation, no duplicate)", len(got), len(want))
+	} else {
+		for i, h := range want {
+			if got[i].Host != h {
+				t.Fatalf("hosts = %+v, want %v ordered by host", got, want)
+			}
+		}
+	}
+	if got[0].Worst != "failed" || got[0].Failures != 1 {
+		t.Errorf("h1 = %+v, want the appended update (failed), not the original ok", got[0])
+	}
+
+	// Tasks accumulate and upsert the same way.
+	if err := store.SaveTaskSummary(ctx, "rw", []run.TaskSummary{{Task: "t1", Seconds: 1, RanAt: base}}); err != nil {
+		t.Fatalf("SaveTaskSummary() error = %v", err)
+	}
+	if err := appender.AppendTaskSummary(ctx, "rw", []run.TaskSummary{{Task: "t2", Seconds: 2, RanAt: base}}); err != nil {
+		t.Fatalf("AppendTaskSummary() error = %v", err)
+	}
+	if err := appender.AppendTaskSummary(ctx, "rw", []run.TaskSummary{{Task: "t1", Seconds: 9, RanAt: base}}); err != nil {
+		t.Fatalf("AppendTaskSummary(update) error = %v", err)
+	}
+	tasks, err := store.RunTaskSummaries(ctx, "rw")
+	if err != nil {
+		t.Fatalf("RunTaskSummaries() error = %v", err)
+	}
+	if len(tasks) != 2 || tasks[0].Task != "t1" || tasks[0].Seconds != 9 {
+		t.Fatalf("tasks = %+v, want t1 upserted to 9 and t2 present", tasks)
+	}
+
+	// An empty batch is a no-op, matching Save.
+	if err := appender.AppendHostSummary(ctx, "rw", nil); err != nil {
+		t.Fatalf("AppendHostSummary(empty) error = %v", err)
+	}
+	if again, _ := store.RunHostSummaries(ctx, "rw"); len(again) != 4 {
+		t.Fatalf("empty append changed the set to %d rows, want 4", len(again))
 	}
 }
 

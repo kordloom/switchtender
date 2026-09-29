@@ -1742,6 +1742,91 @@ func (s *store) SaveTaskSummary(ctx context.Context, runID string, summaries []r
 	return nil
 }
 
+// AppendHostSummary upserts the given per-host summaries into the run's set, keyed by (run_id, host),
+// leaving the run's other rows in place, so a relay report continued across batches writes only its
+// batch instead of the whole growing set. It fences a terminal run and ignores an empty batch.
+func (s *store) AppendHostSummary(ctx context.Context, runID string, summaries []run.HostSummary) error {
+	if len(summaries) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("append host summary: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if fenced, err := summaryFenced(ctx, tx, runID); err != nil {
+		return fmt.Errorf("append host summary: %w", err)
+	} else if fenced {
+		return nil
+	}
+	dry, err := runIsDryRun(ctx, tx, runID)
+	if err != nil {
+		return fmt.Errorf("append host summary: %w", err)
+	}
+	stmt, err := tx.PrepareContext(ctx, `
+INSERT INTO run_host_summary
+	(`+hostSummaryColumns+`)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(run_id, host) DO UPDATE SET
+	ok=excluded.ok, changed=excluded.changed, failures=excluded.failures,
+	unreachable=excluded.unreachable, skipped=excluded.skipped, worst=excluded.worst,
+	duration_seconds=excluded.duration_seconds, ran_at=excluded.ran_at, dry_run=excluded.dry_run`)
+	if err != nil {
+		return fmt.Errorf("append host summary: %w", err)
+	}
+	defer func() { _ = stmt.Close() }()
+
+	for _, hs := range summaries {
+		if _, err := stmt.ExecContext(ctx, runID, hs.Host, hs.OK, hs.Changed, hs.Failures,
+			hs.Unreachable, hs.Skipped, hs.Worst, hs.DurationSeconds, sqlutil.FormatTime(hs.RanAt),
+			sqlutil.BoolToInt(dry)); err != nil {
+			return fmt.Errorf("append host summary: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("append host summary: %w", err)
+	}
+	return nil
+}
+
+// AppendTaskSummary upserts the given per-task summaries into the run's set, keyed by (run_id, task),
+// with the same fencing and empty-batch behavior as AppendHostSummary.
+func (s *store) AppendTaskSummary(ctx context.Context, runID string, summaries []run.TaskSummary) error {
+	if len(summaries) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("append task summary: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if fenced, err := summaryFenced(ctx, tx, runID); err != nil {
+		return fmt.Errorf("append task summary: %w", err)
+	} else if fenced {
+		return nil
+	}
+	stmt, err := tx.PrepareContext(ctx, `
+INSERT INTO run_task_summary (run_id, task, seconds, ran_at)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(run_id, task) DO UPDATE SET seconds=excluded.seconds, ran_at=excluded.ran_at`)
+	if err != nil {
+		return fmt.Errorf("append task summary: %w", err)
+	}
+	defer func() { _ = stmt.Close() }()
+
+	for _, ts := range summaries {
+		if _, err := stmt.ExecContext(ctx, runID, ts.Task, ts.Seconds, sqlutil.FormatTime(ts.RanAt)); err != nil {
+			return fmt.Errorf("append task summary: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("append task summary: %w", err)
+	}
+	return nil
+}
+
 // TaskTrends aggregates each task's durations over its most recent window runs.
 func (s *store) TaskTrends(ctx context.Context, window int) ([]run.TaskTrend, error) {
 	if window < 1 {

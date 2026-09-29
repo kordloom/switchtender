@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/kordloom/switchtender/internal/audit"
 	"io"
 	"net/http"
 	"strconv"
@@ -14,6 +13,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/event"
@@ -60,6 +60,10 @@ type relayServer struct {
 	policies policy.Store
 	// store is the shared run store the worker's calls read and write.
 	store run.Store
+	// appender writes a continued report's batch by upserting only its rows, so a report split across
+	// many batches does not rewrite the whole accumulated set on each one. It is the same object as
+	// store, narrowed to the capability, asserted once at construction.
+	appender run.SummaryAppender
 	// pools maps a presented token to the worker pool it belongs to and the queues that pool may
 	// lease from.
 	pools *Pools
@@ -77,13 +81,21 @@ func NewHandler(store run.Store, pools *Pools, log *zap.Logger,
 	if store == nil {
 		panic("relay: Store required")
 	}
+	appender, ok := store.(run.SummaryAppender)
+	if !ok {
+		// A relay server exists to persist worker reports at fleet scale, and a store that cannot
+		// append a report batch would rewrite the whole set on every continuation. Every real store
+		// implements it; refusing one that does not is a wiring error worth failing on immediately.
+		panic("relay: Store must implement run.SummaryAppender")
+	}
 	if pools == nil || len(pools.pools) == 0 {
 		panic("relay: at least one worker pool required")
 	}
 	if log == nil {
 		log = zap.NewNop()
 	}
-	s := &relayServer{store: store, pools: pools, log: log, policies: policies, audits: audits}
+	s := &relayServer{store: store, appender: appender, pools: pools, log: log,
+		policies: policies, audits: audits}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /relay/v1/policies", s.listPolicies)
 	mux.HandleFunc("POST /relay/v1/claim", s.claim)
@@ -546,45 +558,6 @@ func continuesReport(r *http.Request) bool {
 	return r.URL.Query().Get("part") == "continue"
 }
 
-// mergeHostSummaries returns stored with incoming layered over it, one entry per host, so a continuation
-// batch adds to what the run already reported and a repeated host takes its newest outcome.
-func mergeHostSummaries(stored, incoming []run.HostSummary) []run.HostSummary {
-	byHost := make(map[string]run.HostSummary, len(stored)+len(incoming))
-	order := make([]string, 0, len(stored)+len(incoming))
-	for _, list := range [][]run.HostSummary{stored, incoming} {
-		for _, s := range list {
-			if _, seen := byHost[s.Host]; !seen {
-				order = append(order, s.Host)
-			}
-			byHost[s.Host] = s
-		}
-	}
-	out := make([]run.HostSummary, 0, len(order))
-	for _, host := range order {
-		out = append(out, byHost[host])
-	}
-	return out
-}
-
-// mergeTaskSummaries is mergeHostSummaries for per-task timings, keyed by task.
-func mergeTaskSummaries(stored, incoming []run.TaskSummary) []run.TaskSummary {
-	byTask := make(map[string]run.TaskSummary, len(stored)+len(incoming))
-	order := make([]string, 0, len(stored)+len(incoming))
-	for _, list := range [][]run.TaskSummary{stored, incoming} {
-		for _, s := range list {
-			if _, seen := byTask[s.Task]; !seen {
-				order = append(order, s.Task)
-			}
-			byTask[s.Task] = s
-		}
-	}
-	out := make([]run.TaskSummary, 0, len(order))
-	for _, task := range order {
-		out = append(out, byTask[task])
-	}
-	return out
-}
-
 // maxRelayElements bounds how many items one relay call may carry.
 //
 // A count cap is not a work cap on its own: "[{},{},{}...]" fits a million empty structs into a
@@ -668,15 +641,15 @@ func (s *relayServer) saveHostSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
+	// The first batch replaces the run's set, which clears any partial from an earlier attempt. Each
+	// continuation upserts only its own hosts, so a report across many batches writes each host once
+	// rather than rewriting the whole growing set on every batch.
 	if continuesReport(r) {
-		stored, err := s.store.RunHostSummaries(r.Context(), id)
-		if err != nil {
-			s.internal(w, "read host summary", err)
+		if err := s.appender.AppendHostSummary(r.Context(), id, summaries); err != nil {
+			s.internal(w, "append host summary", err)
 			return
 		}
-		summaries = mergeHostSummaries(stored, summaries)
-	}
-	if err := s.store.SaveHostSummary(r.Context(), id, summaries); err != nil {
+	} else if err := s.store.SaveHostSummary(r.Context(), id, summaries); err != nil {
 		s.internal(w, "save host summary", err)
 		return
 	}
@@ -878,14 +851,11 @@ func (s *relayServer) saveTaskSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if continuesReport(r) {
-		stored, err := s.store.RunTaskSummaries(r.Context(), id)
-		if err != nil {
-			s.internal(w, "read task summary", err)
+		if err := s.appender.AppendTaskSummary(r.Context(), id, summaries); err != nil {
+			s.internal(w, "append task summary", err)
 			return
 		}
-		summaries = mergeTaskSummaries(stored, summaries)
-	}
-	if err := s.store.SaveTaskSummary(r.Context(), id, summaries); err != nil {
+	} else if err := s.store.SaveTaskSummary(r.Context(), id, summaries); err != nil {
 		s.internal(w, "save task summary", err)
 		return
 	}

@@ -255,6 +255,22 @@ type Store interface {
 	TrimSummaries(ctx context.Context, keep int) (int, error)
 }
 
+// SummaryAppender adds a batch of per-host or per-task summaries to a run's stored set, upserting by
+// key and leaving the run's other rows untouched. Where SaveHostSummary replaces a run's entire set,
+// Append only writes the rows it is given. A store that persists summaries implements it so a relay
+// report split across many batches writes each batch once, rather than the relay server reading and
+// rewriting the whole accumulated set on every continuation, which grows the work quadratically with
+// the number of hosts. It is a focused capability, kept off Store so the transport stores that carry a
+// report to the control node are not made to implement a persistence detail they never serve.
+type SummaryAppender interface {
+	// AppendHostSummary upserts the given per-host summaries into the run's set, keyed by host. It
+	// fences a terminal run and is a no-op for an empty batch, matching SaveHostSummary.
+	AppendHostSummary(ctx context.Context, runID string, summaries []HostSummary) error
+	// AppendTaskSummary upserts the given per-task summaries into the run's set, keyed by task, with
+	// the same fencing and empty-batch behavior.
+	AppendTaskSummary(ctx context.Context, runID string, summaries []TaskSummary) error
+}
+
 // WorkerWindow bounds how far back Workers looks for leases. Terminal runs keep their last lease
 // stamp, so without a bound the listing would aggregate every run ever recorded and report
 // workers dead for months.
@@ -1017,6 +1033,40 @@ func (m *memStore) SaveHostSummary(_ context.Context, runID string, summaries []
 	return nil
 }
 
+// AppendHostSummary upserts the given per-host summaries into the run's set, keyed by host, leaving
+// hosts already recorded in place. It fences a terminal run and ignores an empty batch, matching
+// SaveHostSummary, so a relay report continued across batches accumulates the same way it would in a
+// persisting store.
+func (m *memStore) AppendHostSummary(_ context.Context, runID string, summaries []HostSummary) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, known := m.runs[runID]
+	if known && r.Status.Terminal() {
+		return nil
+	}
+	if len(summaries) == 0 {
+		return nil
+	}
+	dry := known && r.DryRun
+	existing := m.summaries[runID]
+	at := make(map[string]int, len(existing))
+	for i := range existing {
+		at[existing[i].Host] = i
+	}
+	for _, hs := range summaries {
+		hs.RunID = runID
+		hs.DryRun = dry
+		if i, ok := at[hs.Host]; ok {
+			existing[i] = hs
+		} else {
+			at[hs.Host] = len(existing)
+			existing = append(existing, hs)
+		}
+	}
+	m.summaries[runID] = existing
+	return nil
+}
+
 // newerHostSummary reports whether a comes before b when host summaries read newest first. Two
 // summaries can share an instant, and the map they are gathered from has no order, so the run id
 // decides ties, descending. Without it the answer changes from one call to the next and disagrees
@@ -1218,6 +1268,35 @@ func (m *memStore) SaveTaskSummary(_ context.Context, runID string, summaries []
 		cp[i].RunID = runID
 	}
 	m.tasks[runID] = cp
+	return nil
+}
+
+// AppendTaskSummary upserts the given per-task summaries into the run's set, keyed by task, leaving
+// tasks already recorded in place, with the same fencing and empty-batch behavior as SaveTaskSummary.
+func (m *memStore) AppendTaskSummary(_ context.Context, runID string, summaries []TaskSummary) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if r, ok := m.runs[runID]; ok && r.Status.Terminal() {
+		return nil
+	}
+	if len(summaries) == 0 {
+		return nil
+	}
+	existing := m.tasks[runID]
+	at := make(map[string]int, len(existing))
+	for i := range existing {
+		at[existing[i].Task] = i
+	}
+	for _, ts := range summaries {
+		ts.RunID = runID
+		if i, ok := at[ts.Task]; ok {
+			existing[i] = ts
+		} else {
+			at[ts.Task] = len(existing)
+			existing = append(existing, ts)
+		}
+	}
+	m.tasks[runID] = existing
 	return nil
 }
 
