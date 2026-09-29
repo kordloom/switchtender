@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS runs (
 	step_index    INTEGER,
 	retry_of      TEXT,
 	attempt       INTEGER NOT NULL DEFAULT 0,
+	steps         TEXT NOT NULL DEFAULT '',
 	extra_vars    TEXT NOT NULL DEFAULT '',
 	outputs       TEXT NOT NULL DEFAULT '',
 	claimed_by    TEXT NOT NULL DEFAULT '',
@@ -515,7 +516,7 @@ func migrateRuns(db *sql.DB) error {
 		!strings.Contains(err.Error(), "duplicate column name") {
 		return fmt.Errorf("add notifications column: %w", err)
 	}
-	for _, column := range []string{"source", "source_id", "actor", "rerun_of", "labels"} {
+	for _, column := range []string{"source", "source_id", "actor", "rerun_of", "labels", "steps"} {
 		if _, err := db.Exec(
 			"ALTER TABLE runs ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''"); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {
@@ -727,7 +728,7 @@ func (d *DB) Close() error {
 // runColumns is the shared select list so every read scans the same columns in the same order.
 const runColumns = `id, playbook, inventory, status, exit_code, error, created_at, started_at,
 	ended_at, parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index,
-	retry_of, attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested,
+	retry_of, attempt, steps, extra_vars, outputs, claimed_by, claimed_at, cancel_requested,
 	credential_ids, project_id, commit_sha, inventory_id, queue, tool, command, dry_run,
 	proposed_from, intent, image, pull_credential_id, idempotency_key, timeout, notifications,
 	source, source_id, actor, rerun_of, labels`
@@ -739,11 +740,11 @@ func (s *store) Save(ctx context.Context, r *run.Run) error {
 INSERT INTO runs
 	(id, playbook, inventory, status, exit_code, error, created_at, started_at, ended_at,
 	 parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index, retry_of,
-	 attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested, credential_ids,
+	 attempt, steps, extra_vars, outputs, claimed_by, claimed_at, cancel_requested, credential_ids,
 	 project_id, commit_sha, inventory_id, queue, tool, command, dry_run, proposed_from, intent,
 	 image, pull_credential_id, idempotency_key, timeout, notifications,
 	 source, source_id, actor, rerun_of, labels)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -751,7 +752,8 @@ ON CONFLICT(id) DO UPDATE SET
 	parent_id=excluded.parent_id, shard_index=excluded.shard_index,
 	shard_count=excluded.shard_count, limit_pattern=excluded.limit_pattern,
 	kind=excluded.kind, step_name=excluded.step_name, step_index=excluded.step_index,
-	retry_of=excluded.retry_of, attempt=excluded.attempt, extra_vars=excluded.extra_vars,
+	retry_of=excluded.retry_of, attempt=excluded.attempt, steps=excluded.steps,
+	extra_vars=excluded.extra_vars,
 	outputs=excluded.outputs, claimed_by=excluded.claimed_by, claimed_at=excluded.claimed_at,
 	cancel_requested=MAX(runs.cancel_requested, excluded.cancel_requested),
 	credential_ids=excluded.credential_ids,
@@ -767,7 +769,7 @@ ON CONFLICT(id) DO UPDATE SET
 		sqlutil.FormatTime(r.CreatedAt), sqlutil.NullTime(r.StartedAt), sqlutil.NullTime(r.EndedAt),
 		sqlutil.NullString(r.ParentID), sqlutil.NullInt(r.ShardIndex), sqlutil.NullInt(r.ShardCount), r.Limit,
 		r.Kind, r.StepName, sqlutil.NullInt(r.StepIndex), sqlutil.NullString(r.RetryOf), r.Attempt,
-		sqlutil.JSONMap(r.ExtraVars), sqlutil.JSONMap(r.Outputs), r.ClaimedBy, sqlutil.NullTime(r.ClaimedAt),
+		marshalSteps(r.Steps), sqlutil.JSONMap(r.ExtraVars), sqlutil.JSONMap(r.Outputs), r.ClaimedBy, sqlutil.NullTime(r.ClaimedAt),
 		sqlutil.BoolToInt(r.CancelRequested), sqlutil.JoinIDs(r.CredentialIDs), r.ProjectID, r.CommitSHA,
 		r.InventoryID, r.Queue, r.Tool, r.Command, sqlutil.BoolToInt(r.DryRun), r.ProposedFrom, r.Intent,
 		r.Image, r.PullCredentialID, r.IdempotencyKey, r.Timeout, marshalNotifications(r.Notifications),
@@ -1669,10 +1671,11 @@ func scanRun(s scanner) (*run.Run, error) {
 		dryRun   int
 		notifs   string
 		labels   string
+		steps    string
 	)
 	if err := s.Scan(&r.ID, &r.Playbook, &r.Inventory, &status, &exit, &r.Error,
 		&created, &started, &ended, &parent, &shardIdx, &shardCnt, &r.Limit,
-		&r.Kind, &r.StepName, &stepIdx, &retryOf, &r.Attempt, &extra, &outputs,
+		&r.Kind, &r.StepName, &stepIdx, &retryOf, &r.Attempt, &steps, &extra, &outputs,
 		&r.ClaimedBy, &claimed, &cancelI, &credIDs, &r.ProjectID, &r.CommitSHA,
 		&r.InventoryID, &r.Queue, &r.Tool, &r.Command, &dryRun, &r.ProposedFrom, &r.Intent,
 		&r.Image, &r.PullCredentialID, &r.IdempotencyKey, &r.Timeout, &notifs,
@@ -1693,6 +1696,9 @@ func scanRun(s scanner) (*run.Run, error) {
 	}
 	r.Outputs = outs
 	if r.Labels, err = parseLabels(labels); err != nil {
+		return nil, err
+	}
+	if r.Steps, err = parseSteps(steps); err != nil {
 		return nil, err
 	}
 	if r.ClaimedAt, err = sqlutil.ParseNullTime(claimed); err != nil {
@@ -1760,6 +1766,31 @@ func parseLabels(s string) (map[string]string, error) {
 		return nil, fmt.Errorf("parse labels: %w", err)
 	}
 	return out, nil
+}
+
+// marshalSteps encodes a pipeline's step graph for storage, returning empty for no steps so an
+// ordinary run stores nothing rather than a JSON null.
+func marshalSteps(steps []run.PipelineStep) string {
+	if len(steps) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(steps)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+// parseSteps decodes a stored step graph. An empty column means the run is not a pipeline parent.
+func parseSteps(s string) ([]run.PipelineStep, error) {
+	if s == "" {
+		return nil, nil
+	}
+	var steps []run.PipelineStep
+	if err := json.Unmarshal([]byte(s), &steps); err != nil {
+		return nil, fmt.Errorf("parse steps: %w", err)
+	}
+	return steps, nil
 }
 
 // marshalNotifications encodes per-run notification targets for storage, empty for none.

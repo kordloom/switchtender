@@ -41,7 +41,7 @@ Semaphore works the same way with `import semaphore`.
 | AWX job template | Template, with job slicing becoming shard count.|
 | AWX survey | Template survey, field for field, with the field types translated.|
 | AWX schedule | Schedule, with the recurrence rule converted to cron.|
-| AWX credential | Credential shell with its kind mapped, secret omitted.|
+| AWX credential | Credential shell with its kind mapped from its type and its configured inputs, secret omitted.|
 | Semaphore repository | Project.|
 | Semaphore static inventory | Stored inventory.|
 | Semaphore template | Template, with survey variables mapped.|
@@ -60,3 +60,11 @@ inventories, templates, and schedules, is in place and ready to run once the sec
   and skipped rather than converted to a wrong cadence.
 - Non-git projects are skipped, since there is no repository to source playbooks from.
 - A credential type without an exact match maps to the environment kind and is flagged for review.
+- Secrets are never in an export, so every credential is created as a shell and its secret has to be
+  re-entered. The non-secret settings AWX did export, such as the user to connect as and how to
+  become root, are reported with the credential so they can be entered alongside it rather than
+  looked up in the system being retired. Only known non-secret fields are reported, so a custom
+  credential type cannot spill a secret into the plan.
+- An AWX machine credential covers both key and password login under one type. Which one it is comes
+  from whether the export configured a key or a password, so a password credential does not arrive as
+  a key credential that fails the first time it runs.

@@ -947,6 +947,9 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 		Status: run.StatusPending, CreatedAt: time.Now(),
 	}
 	run.ApplyOptions(parent, opts)
+	// The graph is stored on the parent so a pipeline held for approval can still be executed after
+	// a restart, and so a finished pipeline can show the shape it ran.
+	parent.Steps = steps
 	// A retried pipeline returns the original parent instead of running its steps a second time.
 	if existing, err := d.idempotentLookup(ctx, parent.IdempotencyKey); err != nil {
 		return nil, err
@@ -957,6 +960,9 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 		return nil, err
 	}
 	d.resolveQueue(ctx, parent)
+	if parent.Status != run.StatusPendingApproval && d.pipelineRequiresApproval(ctx, parent, steps) {
+		parent.Status = run.StatusPendingApproval
+	}
 	created, dup, err := d.idempotentSave(ctx, parent)
 	if err != nil {
 		return nil, err
@@ -964,6 +970,10 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 	if dup {
 		// A concurrent submission won the key; return its parent and start no steps here.
 		return created, nil
+	}
+	if parent.Status == run.StatusPendingApproval {
+		// Held for an approver. Approve starts it, since no claim loop picks up a pipeline parent.
+		return parent, nil
 	}
 
 	d.wg.Add(1)
@@ -1053,27 +1063,33 @@ func cloneVars(vars map[string]any) map[string]any {
 // is spent. Every attempt is its own child run with an attempt number, so each try keeps a full
 // matrix, events, and history. The step receives vars as its extra vars, and on success the
 // values it published with set_stats come back for its dependents.
-func (d *Dispatcher) runStepAttempts(ctx context.Context, parent *run.Run, step run.PipelineStep,
-	idx int, vars map[string]any) (run.Status, map[string]any) {
+// stepRun builds the run a pipeline step executes as. The approval gate and the executor both go
+// through this, so a policy is always evaluated against exactly what would run rather than against a
+// separately assembled approximation that could drift from it.
+func stepRun(parent *run.Run, step run.PipelineStep, idx, attempt int, vars map[string]any) *run.Run {
 	inventory := step.Inventory
 	if inventory == "" {
 		inventory = parent.Inventory
 	}
+	i := idx
+	return &run.Run{
+		ID: run.NewID(), Playbook: step.Playbook, Inventory: inventory,
+		Tool: step.Tool, Command: step.Command, DryRun: step.DryRun,
+		Status: run.StatusPending, CreatedAt: time.Now(),
+		ParentID: &parent.ID, StepIndex: &i, StepName: step.Name, Attempt: attempt,
+		ExtraVars: vars, CredentialIDs: parent.CredentialIDs, ProjectID: parent.ProjectID,
+		Queue: parent.Queue,
+	}
+}
 
+func (d *Dispatcher) runStepAttempts(ctx context.Context, parent *run.Run, step run.PipelineStep,
+	idx int, vars map[string]any) (run.Status, map[string]any) {
 	status := run.StatusFailed
 	for attempt := 0; attempt <= step.Retries; attempt++ {
 		if ctx.Err() != nil {
 			return run.StatusCanceled, nil
 		}
-		i := idx
-		child := &run.Run{
-			ID: run.NewID(), Playbook: step.Playbook, Inventory: inventory,
-			Tool: step.Tool, Command: step.Command, DryRun: step.DryRun,
-			Status: run.StatusPending, CreatedAt: time.Now(),
-			ParentID: &parent.ID, StepIndex: &i, StepName: step.Name, Attempt: attempt,
-			ExtraVars: vars, CredentialIDs: parent.CredentialIDs, ProjectID: parent.ProjectID,
-			Queue: parent.Queue,
-		}
+		child := stepRun(parent, step, idx, attempt, vars)
 		if err := d.store.Save(context.Background(), child); err != nil {
 			d.log.Error("dispatch: save pipeline step: "+err.Error(), zap.String("run_id", parent.ID))
 			return run.StatusFailed, nil

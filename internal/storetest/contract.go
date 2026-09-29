@@ -23,6 +23,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("save and get", func(t *testing.T) { testSaveGet(t, newStore()) })
 	t.Run("provenance round trip", func(t *testing.T) { testProvenance(t, newStore()) })
 	t.Run("host facts", func(t *testing.T) { testHostFacts(t, newStore()) })
+	t.Run("pipeline steps round trip", func(t *testing.T) { testPipelineSteps(t, newStore()) })
 	t.Run("get missing", func(t *testing.T) { testGetNotFound(t, newStore()) })
 	t.Run("idempotency key dedup", func(t *testing.T) { testByIdempotencyKey(t, newStore()) })
 	t.Run("save updates existing", func(t *testing.T) { testSaveUpdate(t, newStore()) })
@@ -1537,6 +1538,48 @@ func testProvenance(t *testing.T, store run.Store) {
 	}
 	if diff := cmp.Diff(saved.Labels, got.Labels); diff != "" {
 		t.Errorf("labels mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// testPipelineSteps verifies a pipeline's step graph round trips through Save and Get, including the
+// dependencies between steps. A pipeline held for approval is executed from the stored graph, so
+// losing it would mean an approved workflow could no longer run, and an ordinary run must store no
+// steps at all rather than an empty list.
+func testPipelineSteps(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	saved := &run.Run{
+		ID: "run_pipe", Playbook: "release", Kind: run.KindPipeline,
+		Status: run.StatusPendingApproval, CreatedAt: time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC),
+		Steps: []run.PipelineStep{
+			{Name: "plan", Tool: "terraform", Command: "terraform plan"},
+			{Name: "apply", Tool: "terraform", Command: "terraform apply", DependsOn: []string{"plan"},
+				Retries: 2, ContinueOnFailure: true},
+		},
+	}
+	if err := store.Save(ctx, saved); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	got, err := store.Get(ctx, "run_pipe")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if diff := cmp.Diff(saved.Steps, got.Steps); diff != "" {
+		t.Errorf("steps mismatch (-want +got):\n%s", diff)
+	}
+
+	plain := &run.Run{
+		ID: "run_plain", Playbook: "site.yml", Status: run.StatusSucceeded,
+		CreatedAt: time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC),
+	}
+	if err := store.Save(ctx, plain); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	gotPlain, err := store.Get(ctx, "run_plain")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if len(gotPlain.Steps) != 0 {
+		t.Errorf("plain run steps = %v, want none", gotPlain.Steps)
 	}
 }
 

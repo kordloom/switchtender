@@ -116,3 +116,10 @@ Approval can also be required by policy rather than by choice. A policy matches 
 text, or target inventory, and any matching run is held automatically at submission, so the gate
 cannot be skipped by omitting the flag. Policies are enforced in the dispatcher, so a scheduled or
 triggered run is gated the same as one launched by hand.
+
+A workflow is gated by the same policies as a single run. Every step is checked when the workflow is
+submitted, and a match holds the whole workflow before any step starts, so a gated command cannot be
+slipped past an approver by wrapping it in a workflow. The whole workflow is held rather than the one
+matching step, because a change applied halfway is worse than one that never started. Approving
+releases the workflow and it runs from the top; the step graph is stored with it, so an approval that
+arrives after a restart still runs the workflow that was approved.
