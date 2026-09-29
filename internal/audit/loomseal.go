@@ -195,6 +195,10 @@ func BuildBundle(entries []*Entry, id Identity, version string, at time.Time) (*
 			ErrExport, brokeAt, entries[brokeAt-1].Seq)
 	}
 	claims := make([]BundleClaim, 0, len(entries))
+	// The newest span beat turned into a claim so far, so each beat's time can be checked against
+	// the one before it while the claims are built.
+	var prevSpanAt time.Time
+	var prevSpanBeat int64
 	for _, e := range entries {
 		// An entry recorded before times were truncated carries nanoseconds, and a verifier that
 		// normalizes through microseconds recomputes a different link. Such a bundle verifies here
@@ -227,6 +231,16 @@ func BuildBundle(entries []*Entry, id Identity, version string, at time.Time) (*
 		// path does not round-trip stays a generic claim rather than becoming a malformed span one.
 		if e.Actor == SpanActor && e.Method == SpanMethod {
 			if beat, count, cadenceS, ok := ParseSpanPath(e.Path); ok {
+				// A verifier fails a bundle whose beat time does not strictly advance past the beat
+				// before it, where a cadence gap is only reported. Neither entry of such a pair can
+				// be repaired, since each link commits to the time it holds, so a chain poisoned by
+				// an older build that wrote a beat behind its predecessor is caught here rather
+				// than at the auditor. See CheckBeatAdvance for how a backward clock is kept from
+				// making one now: the beat is skipped, not moved.
+				if err := checkSpanAdvance(prevSpanAt, prevSpanBeat, e.At, beat); err != nil {
+					return nil, err
+				}
+				prevSpanAt, prevSpanBeat = e.At, beat
 				claim.Type = SpanClaimType
 				claim.Payload["stream"] = "chain"
 				claim.Payload["cadence_s"] = int64(cadenceS)
@@ -265,6 +279,20 @@ func BuildBundle(entries []*Entry, id Identity, version string, at time.Time) (*
 		Claims:     claims,
 		Signatures: []any{},
 	}, nil
+}
+
+// checkSpanAdvance reports why a bundle cannot be built when a beat's time does not advance past
+// the beat before it. A zero prevAt means this is the first beat in the range, which has nothing to
+// advance past.
+func checkSpanAdvance(prevAt time.Time, prevBeat int64, at time.Time, beat int64) error {
+	if prevAt.IsZero() || at.After(prevAt) {
+		return nil
+	}
+	return fmt.Errorf("%w: span beat %d at %s does not advance past beat %d at %s, so every verifier "+
+		"rejects a bundle carrying both. Neither entry can be repaired, since its link commits to the "+
+		"time it holds. Bundle a later range with --limit, or re-export once the chain has advanced "+
+		"past them", ErrExport, beat, at.UTC().Format(time.RFC3339Nano), prevBeat,
+		prevAt.UTC().Format(time.RFC3339Nano))
 }
 
 // SignBundleDoc signs a bundle and returns its canonical signed bytes. Signing is delegated to the

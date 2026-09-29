@@ -65,6 +65,29 @@ func init() {
 			"Zero leaves beats off.")
 }
 
+// demoPaths returns the database the demo seeds and serves, and the directory its producer identity
+// lives in. An empty --db means a fresh temporary SQLite file.
+//
+// The identity follows the resolved database, the way serve and audit bundle do, rather than the
+// raw flag. Reading the flag put it in the working directory whenever --db was empty, since the
+// directory of an empty path is the current one. That is where a default install keeps its
+// production key, because the default database path is a bare filename, so running the demo from a
+// serve directory published the production install identity, public key, and fingerprint on the
+// demo's unauthenticated trust document. Run anywhere else it dropped a fresh private key into an
+// unrelated directory.
+func demoPaths() (db, keyDir string, err error) {
+	db = demoDB
+	if db == "" {
+		f, err := os.CreateTemp("", "switchtender-demo-*.db")
+		if err != nil {
+			return "", "", fmt.Errorf("demo database: %w", err)
+		}
+		db = f.Name()
+		_ = f.Close()
+	}
+	return db, filepath.Dir(db), nil
+}
+
 // runDemo seeds a database and serves it read-only until interrupted.
 func runDemo(cmd *cobra.Command, _ []string) error {
 	log, err := logutil.New()
@@ -73,14 +96,9 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 	}
 	defer func() { _ = log.Sync() }()
 
-	db := demoDB
-	if db == "" {
-		f, err := os.CreateTemp("", "switchtender-demo-*.db")
-		if err != nil {
-			return fmt.Errorf("demo database: %w", err)
-		}
-		db = f.Name()
-		_ = f.Close()
+	db, keyDir, err := demoPaths()
+	if err != nil {
+		return err
 	}
 
 	bundle, err := openBundle(db)
@@ -142,7 +160,7 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 	// The demo publishes a signing identity too, so a visitor can fetch the trust document and check
 	// an exported bundle end to end rather than take the description on faith.
 	var demoProducer *audit.Identity
-	if id, err := audit.LoadIdentity(filepath.Dir(demoDB)); err != nil {
+	if id, err := audit.LoadIdentity(keyDir); err != nil {
 		log.Warn("producer identity unavailable: " + err.Error())
 	} else {
 		demoProducer = &id

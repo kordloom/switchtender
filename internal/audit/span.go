@@ -2,6 +2,7 @@ package audit
 
 import (
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -65,6 +66,57 @@ func NextSpanBeat(headSeq, lastSpanSeq, lastSpanBeat int64) (beat, count int64) 
 		return 1, headSeq
 	}
 	return lastSpanBeat + 1, headSeq - lastSpanSeq
+}
+
+// BeatGranularity is the smallest gap the chain can hold between two beats. A recorded time is
+// truncated to microseconds before anything hashes it, so two beats closer together than this land
+// on the same stored instant. See Link.
+const BeatGranularity = time.Microsecond
+
+// CheckBeatAdvance reports whether a beat carrying at may be appended after the newest beat in the
+// chain, which was recorded at prev. It returns a ClockBehindError naming beat and both times when
+// the time does not strictly advance. A zero prev means the chain holds no beat yet, so there is
+// nothing to advance past.
+//
+// A verifier fails a bundle outright when a beat's time does not strictly advance past the beat
+// before it, unlike a cadence gap, which is only reported with its bounds and duration. Clocks do
+// move backward in practice, from an NTP step on a running server, a virtual machine resuming from
+// a snapshot, or a restart after an offline correction. The beat is skipped rather than moved
+// forward to fit, because a beat's time is a signed claim about when the population was counted:
+// writing a time the clock did not read would make the attestation say something false, which is
+// the one thing this chain exists to rule out. A skipped beat costs a longer unattested window,
+// which the record reports honestly.
+func CheckBeatAdvance(at, prev time.Time, beat int64) error {
+	if prev.IsZero() {
+		return nil
+	}
+	// Both sides are compared at the granularity the chain stores, since a beat leading the last one
+	// by nanoseconds alone is written as the same instant and does not advance.
+	at, prev = at.Truncate(BeatGranularity), prev.Truncate(BeatGranularity)
+	if at.After(prev) {
+		return nil
+	}
+	return &ClockBehindError{Prev: prev, At: at, Beat: beat}
+}
+
+// SpanScanLimit returns how many span-marked rows a store may read to answer a request for limit
+// well-formed beats.
+//
+// The well-formedness test stays on the client side: a near-miss row wears the span actor and
+// method without a round-tripping path, and it must be skipped without consuming a result slot,
+// which the query cannot express. The scan still has to be bounded, or a chain holding fewer beats
+// than the caller asked for reads every span-marked row it has, which is the whole table for a
+// chain that beats. Four times the limit plus a floor reaches past any realistic run of near-miss
+// rows while keeping the read proportional to what was asked for.
+func SpanScanLimit(limit int) int {
+	const factor, floor = 4, 64
+	if limit < 1 {
+		limit = 1
+	}
+	if limit > (math.MaxInt-floor)/factor {
+		return math.MaxInt
+	}
+	return limit*factor + floor
 }
 
 // NewSpanEntry builds the chain entry for one beat. It is appended like any mutation, so the

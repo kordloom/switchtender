@@ -111,6 +111,32 @@ func (m *masker) longest() int {
 	return len(m.secrets[0])
 }
 
+// partialTail returns the length of the longest suffix of buf that is a proper prefix of some secret,
+// and so could be the leading part of a secret a later chunk completes. It is at most the longest
+// secret minus one byte, since a whole secret occurrence is redacted rather than withheld. A suffix
+// that begins no secret returns zero, so ordinary output is not held back. The stream masker withholds
+// exactly this suffix when it drains a quiet run, releasing everything before it.
+func (m *masker) partialTail(buf []byte) int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if len(m.secrets) == 0 || len(buf) == 0 {
+		return 0
+	}
+	// The longest possible partial is one byte short of the longest secret, and never more than the
+	// buffer itself. secrets is sorted longest first, so the head bounds it.
+	maxLen := min(len(m.secrets[0])-1, len(buf))
+	// Try the longest candidate suffix first; the first that begins a secret is the answer.
+	for w := maxLen; w > 0; w-- {
+		suffix := buf[len(buf)-w:]
+		for _, sec := range m.secrets {
+			if len(suffix) < len(sec) && bytes.HasPrefix(sec, suffix) {
+				return w
+			}
+		}
+	}
+	return 0
+}
+
 // wholeSecretCut returns a release point at or after cut that no secret occurrence straddles.
 //
 // Splitting an occurrence would leave half of it in the released bytes, where redaction can no
@@ -195,6 +221,35 @@ func (s *streamMasker) next(chunk []byte) []byte {
 	cut := s.mask.wholeSecretCut(buf, len(buf)-keep)
 	s.tail = append(s.tail[:0], buf[cut:]...)
 	return s.mask.redact(buf[:cut])
+}
+
+// drain releases the part of the withheld tail that is safe to emit while the stream is still open,
+// redacted. It keeps back only the longest suffix of the tail that is a proper prefix of some secret,
+// which could still be the leading half of a secret a later chunk completes; everything before that
+// suffix cannot begin a secret that continues past it and is released. A tail that is not a partial
+// secret, as a slow run's ordinary output is, is released whole, so the log advances instead of
+// sitting blank. What it keeps is carried in the tail exactly as next would carry it, so a following
+// chunk still reassembles a straddling secret, and flush releases that remainder once the stream ends.
+func (s *streamMasker) drain() []byte {
+	if s.mask == nil {
+		out := s.tail
+		s.tail = nil
+		return out
+	}
+	if len(s.tail) == 0 {
+		return nil
+	}
+	w := s.mask.partialTail(s.tail)
+	if w >= len(s.tail) {
+		// Every byte could still be the start of a secret, so none of it is safe to release yet.
+		return nil
+	}
+	// Release everything before the risky suffix and keep that suffix. A fresh slice backs the new
+	// tail so it cannot alias the emitted bytes, which redact may return pointing into the old tail.
+	cut := len(s.tail) - w
+	out := s.mask.redact(s.tail[:cut])
+	s.tail = append([]byte(nil), s.tail[cut:]...)
+	return out
 }
 
 // flush releases the withheld end of the stream, redacted. It is called once the stream is finished,

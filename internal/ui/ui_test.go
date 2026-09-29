@@ -15,7 +15,7 @@ import (
 
 func TestUIRoutes(t *testing.T) {
 	t.Parallel()
-	handler := ui.New(zap.NewNop(), nil, false, 50000, false, false).Handler()
+	handler := ui.New(zap.NewNop(), nil, false, 50000, false, false, false).Handler()
 
 	tests := []struct {
 		Name         string
@@ -82,7 +82,7 @@ func TestUIDocs(t *testing.T) {
 		"README.md":   {Data: []byte("# Overview\n\nWelcome to the docs.\n")},
 		"concepts.md": {Data: []byte("# Concepts\n\n| A | B |\n|---|---|\n| 1 | 2 |\n")},
 	}
-	handler := ui.New(zap.NewNop(), docs, false, 0, false, false).Handler()
+	handler := ui.New(zap.NewNop(), docs, false, 0, false, false, false).Handler()
 
 	tests := []struct {
 		Name         string
@@ -118,5 +118,37 @@ func TestUIDocs(t *testing.T) {
 				t.Errorf("body does not contain %q", test.WantContains)
 			}
 		})
+	}
+}
+
+// TestAppJSAssembledFromParts pins the app.js assembly: the served script is exactly the
+// embedded js/ source parts concatenated in name order, and the parts themselves are not
+// served. The order is part of the program, so a part that goes missing or serves alone is a
+// broken build, not a smaller download.
+func TestAppJSAssembledFromParts(t *testing.T) {
+	t.Parallel()
+	handler := ui.New(zap.NewNop(), nil, false, 50000, false, false, false).Handler()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ui/assets/app.js", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("app.js = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if len(body) < 100000 {
+		t.Fatalf("app.js is %d bytes, too small to be the assembled application", len(body))
+	}
+	// Spot functions from the first, a middle, and the last source part must all be present,
+	// which fails if any part is dropped from the assembly.
+	for _, marker := range []string{"function syncBrandLogos", "const auditCollections", "function buildModel"} {
+		if !strings.Contains(body, marker) {
+			t.Errorf("assembled app.js is missing %q, so a source part was dropped", marker)
+		}
+	}
+	// A source part must not be reachable on its own.
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ui/assets/js/01-boot.js", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("js/01-boot.js = %d, want 404: parts ship only inside app.js", rec.Code)
 	}
 }

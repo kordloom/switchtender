@@ -31,7 +31,7 @@ variable.
 
 ## init
 
-Bootstraps a new deployment: it creates the database and the first admin account, writes an
+Bootstraps a new deployment. It creates the database and the first admin account, writes an
 environment file, and optionally a systemd unit. Run it once, then start `serve`.
 
 | Flag | Default | Purpose |
@@ -146,7 +146,7 @@ retention, or the API rejects every request.
 
 ## desktop
 
-Runs SwitchTender as a local desktop application: it serves on a private loopback port, stores its
+Runs SwitchTender as a local desktop application. It serves on a private loopback port, stores its
 data in a per-user directory, and opens the web UI in the default browser. It takes no flags. Set
 `SWITCHTENDER_DESKTOP_NO_BROWSER` to skip opening a browser. See [Desktop](desktop.md) for packaging a
 macOS app or a Windows installer.

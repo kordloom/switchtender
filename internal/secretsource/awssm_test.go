@@ -6,8 +6,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -128,5 +130,67 @@ func TestResolveAWSConfigErrors(t *testing.T) {
 				t.Errorf("error = %v, want ErrResolve", err)
 			}
 		})
+	}
+}
+
+// TestAWSResolveCredentialsRegion checks that a config-controlled region is validated before it can be
+// spliced into the request authority. A region like "evil.example.com#" would otherwise build
+// https://secretsmanager.evil.example.com#.amazonaws.com/, whose host the SSRF guard reads as a benign
+// public name, sending the SigV4-signed request and any ambient AWS session token to the attacker. The
+// same shared credential resolver guards the STS minter. It sets AWS_* environment, so it is serial.
+func TestAWSResolveCredentialsRegion(t *testing.T) {
+	t.Setenv("AWS_ACCESS_KEY_ID", "")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+	t.Setenv("AWS_REGION", "")
+	t.Setenv("AWS_DEFAULT_REGION", "")
+
+	// Precondition: the raw interpolation of an escaping region yields an attacker host that the SSRF
+	// guard accepts, which is exactly what the region check must prevent.
+	escaped := fmt.Sprintf("https://%s.%s.amazonaws.com/", awsService, "evil.example.com#")
+	u, err := url.Parse(escaped)
+	if err != nil || u.Hostname() != "secretsmanager.evil.example.com" {
+		t.Fatalf("precondition: interpolated host = %q, %v; want secretsmanager.evil.example.com", u.Hostname(), err)
+	}
+	if err := checkResolveURL(escaped); err != nil {
+		t.Fatalf("precondition: checkResolveURL(%q) = %v, want nil", escaped, err)
+	}
+
+	base := awsConfig{AccessKeyID: "AKID", SecretAccessKey: "secret"}
+	// Test 0: Regions that would escape the amazonaws.com authority are rejected.
+	bad := []string{
+		"evil.example.com#",
+		"evil.example.com/",
+		"evil.example.com?",
+		"us-east-1@evil.example.com",
+		"us east 1",
+		"US-EAST-1",
+		"pct%23",
+	}
+	for _, region := range bad {
+		c := base
+		c.Region = region
+		if _, _, err := awsResolveCredentials(c); !errors.Is(err, ErrResolve) {
+			t.Errorf("region %q = %v, want ErrResolve", region, err)
+		}
+	}
+
+	// Test 1: A valid region resolves and builds the expected regional authority.
+	c := base
+	c.Region = "us-east-1"
+	_, region, err := awsResolveCredentials(c)
+	if err != nil || region != "us-east-1" {
+		t.Fatalf("valid region = %q, %v; want us-east-1", region, err)
+	}
+	got, err := url.Parse(fmt.Sprintf("https://%s.%s.amazonaws.com/", awsService, region))
+	if err != nil || got.Hostname() != "secretsmanager.us-east-1.amazonaws.com" {
+		t.Errorf("endpoint host = %q, %v; want secretsmanager.us-east-1.amazonaws.com", got.Hostname(), err)
+	}
+
+	// Test 2: The STS minter shares the credential resolver, so an escaping region is rejected there
+	// too, before any request that would carry ambient AWS credentials.
+	stsCfg := `{"role_arn":"arn:aws:iam::123456789012:role/x","region":"evil.example.com#",` +
+		`"access_key_id":"a","secret_access_key":"b"}`
+	if _, _, err := mintAWSSTS(context.Background(), stsCfg); !errors.Is(err, ErrResolve) {
+		t.Errorf("sts escaping region = %v, want ErrResolve", err)
 	}
 }

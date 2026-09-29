@@ -8,7 +8,7 @@
 # Documentation
 
 SwitchTender runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go across a fleet and treats every run as
-structured data. One binary: `serve` is the API, the executor, the scheduler, and the web UI.
+structured data. One binary. `serve` is the API, the executor, the scheduler, and the web UI.
 `worker` adds capacity.
 State lives in one database, SQLite by default or PostgreSQL by DSN. These pages also render inside
 the app at `/ui/docs`.

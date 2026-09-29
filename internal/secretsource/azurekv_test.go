@@ -121,3 +121,44 @@ func TestResolveAzure(t *testing.T) {
 		t.Errorf("bad config error = %v, want ErrResolve", err)
 	}
 }
+
+// TestAzureVaultBase checks that a config-controlled vault name is validated before it can be spliced
+// into the request authority, so a name like "evil.example.com#" cannot make the resolver send its
+// managed-identity token to an attacker's host, while a legitimate name still builds the Key Vault
+// data-plane URL. It does not run in parallel, so it reads azureEndpoint at its default empty value
+// while the parallel resolver test is paused before mutating it.
+func TestAzureVaultBase(t *testing.T) {
+	// Test 0: Names that would escape the vault.azure.net authority are rejected before any request,
+	// covering the '#', '/', '?', '@', ':', '%', and whitespace variants.
+	bad := []string{
+		"evil.example.com#",
+		"evil.example.com/",
+		"evil.example.com?",
+		"evil@example.com",
+		"has space",
+		"bad:name",
+		"pct%23",
+	}
+	for _, name := range bad {
+		if _, err := azureVaultBase(name); !errors.Is(err, ErrResolve) {
+			t.Errorf("azureVaultBase(%q) = %v, want ErrResolve", name, err)
+		}
+	}
+
+	// Test 1: A legitimate vault name builds the https://<name>.vault.azure.net base URL.
+	got, err := azureVaultBase("my-vault-01")
+	if err != nil {
+		t.Fatalf("azureVaultBase valid name: %v", err)
+	}
+	if got != "https://my-vault-01.vault.azure.net" {
+		t.Errorf("base = %q, want https://my-vault-01.vault.azure.net", got)
+	}
+
+	// Test 2: resolveAzure rejects an escaping vault name before it fetches a managed-identity token,
+	// so the token is never sent to the attacker's host. No auth path is configured, so without the
+	// name check the resolver would build https://evil.example.com and read the IMDS token for it.
+	cfgBytes, _ := json.Marshal(azureConfig{Vault: "evil.example.com#", Secret: "ci"})
+	if _, err := resolveAzure(context.Background(), string(cfgBytes)); !errors.Is(err, ErrResolve) {
+		t.Errorf("resolveAzure escaping vault = %v, want ErrResolve", err)
+	}
+}

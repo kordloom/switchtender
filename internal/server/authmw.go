@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"path"
 	"strconv"
@@ -258,14 +259,26 @@ func (g *authGate) record(w http.ResponseWriter, actor string, r *http.Request) 
 	return true
 }
 
+// errNoAccounts is returned when a token names an owning account but no account store is wired, so
+// the token's role cannot be read.
+var errNoAccounts = errors.New("token is bound to an account but accounts are not configured")
+
 // roleFor resolves a token to its user's role. Tokens without an owner come from the command
 // line and carry admin rights; tokens whose owner is gone stop working.
+//
+// A token that names an owner is refused when there is no account store to read that owner from.
+// The missing store used to resolve to admin, which is the one direction an unreadable role must
+// never move: a token minted for a viewer would have carried admin rights for as long as the store
+// was absent, and nothing in the reply would have said so. Every path that binds a token to an
+// account needs an account store to do it, so on a real serve path the store is always there and
+// this is unreachable; if it ever becomes reachable it denies rather than promotes.
 func (g *authGate) roleFor(ctx context.Context, tok *auth.Token) (user.Role, error) {
 	if tok.UserID == "" {
 		return user.RoleAdmin, nil
 	}
 	if g.users == nil {
-		return user.RoleAdmin, nil
+		g.log.Error("server: " + errNoAccounts.Error())
+		return "", errNoAccounts
 	}
 	u, err := g.users.Get(ctx, tok.UserID)
 	if err != nil {

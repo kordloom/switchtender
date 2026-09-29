@@ -13,21 +13,25 @@ import (
 const purgeBatch = 5000
 
 // PurgeEventsBefore drops the events and logs of terminal runs created before cutoff, keeping the
-// run records and their summaries. It returns how many runs were trimmed.
+// run records and their summaries. It returns how many runs were trimmed, counting only runs that
+// actually held events or logs to remove. The count is taken before the deletes, since afterward
+// the rows are gone, and each EXISTS rides the run_id index so it stays a single cheap query.
 func (s *store) PurgeEventsBefore(ctx context.Context, cutoff time.Time) (int, error) {
 	cut := sqlutil.FormatTime(cutoff)
+	var trimmed int
+	err := s.db.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM runs WHERE `+terminalRun+` AND created_at < $1
+	AND (EXISTS (SELECT 1 FROM run_events WHERE run_events.run_id = runs.id)
+	     OR EXISTS (SELECT 1 FROM run_logs WHERE run_logs.run_id = runs.id))`, cut).
+		Scan(&trimmed)
+	if err != nil {
+		return 0, fmt.Errorf("purge events: %w", err)
+	}
 	if err := s.deleteBatched(ctx, "run_events", cut); err != nil {
 		return 0, fmt.Errorf("purge events: %w", err)
 	}
 	if err := s.deleteBatched(ctx, "run_logs", cut); err != nil {
 		return 0, fmt.Errorf("purge logs: %w", err)
-	}
-	var trimmed int
-	err := s.db.QueryRowContext(ctx, `
-SELECT COUNT(*) FROM runs WHERE `+terminalRun+` AND created_at < $1`, cut).
-		Scan(&trimmed)
-	if err != nil {
-		return 0, fmt.Errorf("purge events: %w", err)
 	}
 	return trimmed, nil
 }

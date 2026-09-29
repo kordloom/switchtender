@@ -388,10 +388,17 @@ func TestStoreMigratesProvenance(t *testing.T) {
 		t.Fatalf("Close() error = %v", err)
 	}
 
-	// Strip the provenance columns to mimic a database from before they existed.
+	// Strip the provenance columns to mimic a database from before they existed. The search indexes
+	// over them go first: a database that predates the columns has neither, and SQLite refuses to
+	// drop a column an index still covers.
 	raw, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatalf("open raw db: %v", err)
+	}
+	for _, index := range []string{"idx_runs_actor", "idx_runs_source"} {
+		if _, err := raw.Exec("DROP INDEX IF EXISTS " + index); err != nil {
+			t.Fatalf("simulate old schema, drop %s: %v", index, err)
+		}
 	}
 	for _, column := range []string{"source", "source_id", "actor", "rerun_of", "labels", "steps"} {
 		if _, err := raw.Exec("ALTER TABLE runs DROP COLUMN " + column); err != nil {

@@ -26,12 +26,12 @@ var auditReceiptCmd = &cobra.Command{
 	Long: `Check that the audit chain still contains a receipt the server issued.
 
 Every mutation returns an Audit-Receipt header naming the chain position it was recorded at. Keep
-those receipts. This redeems one: it confirms the chain holds that exact link at that exact
+those receipts. This redeems one. It confirms the chain holds that exact link at that exact
 sequence, and that the chain around it verifies.
 
 This is what a hash chain alone cannot give you. A chain proves that what it holds was not altered.
 It cannot prove nothing is missing, because the same process decides both what happens and what gets
-written down. A receipt you hold moves that from the server's word to your evidence: a server that
+written down. A receipt you hold moves that from the server's word to your evidence. A server that
 omitted the entry cannot produce a chain containing your receipt.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runAuditReceipt,

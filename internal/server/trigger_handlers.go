@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -343,14 +344,15 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 		// A webhook is delivered at least once. GitHub and its peers redeliver on a timeout or a
 		// non-2xx, and without a key a redelivery of the same event fires a second real run.
 		//
-		// The delivery identifies the event, not the trigger. Keying on the trigger alone was wrong
-		// in both directions: two different pushes seconds apart collapsed into one run, so the
-		// second commit silently never deployed and the git host was told it had, while a captured
-		// delivery replayed byte for byte produced a fresh run every time because the bucket had
-		// moved on. A sender that supplies no delivery id falls back to the trigger, which is the
-		// old behavior and the best that can be done without one.
-		existing, key, err := run.ResolveDedupe(r.Context(), store, "trigger",
-			tg.ID+hookDelivery(r), time.Now())
+		// The delivery identifies the event, not the trigger. When it carries a delivery id the
+		// dedupe keys on a stable hash of the trigger and that id with no time component, so a
+		// redelivery or a captured replay collapses onto the first run no matter how much later it
+		// lands. Keying on a time bucket was wrong in both directions: two different pushes seconds
+		// apart collapsed into one run, so the second commit silently never deployed and the git host
+		// was told it had, while a replay outside the bucket fired a fresh run every time because the
+		// bucket had moved on. A sender that supplies no delivery id falls back to the bounded time
+		// bucket keyed on the trigger, the old behavior and the best that can be done without one.
+		existing, key, err := resolveHookDedupe(r.Context(), store, tg.ID, hookDelivery(r), time.Now())
 		if err != nil {
 			log.Error("server: resolve trigger dedupe: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not fire the trigger")
@@ -360,6 +362,26 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 			respondJSON(w, log, http.StatusAccepted, existing, wantsPretty(r))
 			return
 		}
+
+		// Recorded before anything launches and fail-closed, the same ordering the authenticated
+		// middleware uses for a mutation: a webhook fire that cannot be written to the tamper-evident
+		// chain does not happen. Recording after Submit left a launched run with no chain entry
+		// whenever the audit store was unhealthy, the exact condition the middleware fail-closes on
+		// with 503. The trigger is known here, so the entry says which webhook fired; the run does not
+		// exist yet, and a pre-execution entry needs no run id.
+		if audits != nil {
+			entry := &audit.Entry{
+				ID: audit.NewID(), At: time.Now(), Actor: "webhook:" + tg.ID,
+				Method: http.MethodPost, Path: "/hooks/" + tg.ID + "/fired",
+			}
+			if aerr := audits.Append(r.Context(), entry); aerr != nil {
+				log.Error("server: record webhook fire: " + aerr.Error())
+				respondError(w, log, http.StatusServiceUnavailable,
+					"refused: the webhook fire could not be recorded in the audit trail")
+				return
+			}
+		}
+
 		opts = append(opts, run.WithIdempotencyKey(key),
 			run.WithSource("trigger", tg.ID), run.WithActor("trigger "+tg.Name))
 		var created *run.Run
@@ -372,22 +394,6 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 			log.Error("server: fire trigger: " + err.Error())
 			respondError(w, log, http.StatusBadGateway, "could not launch the template")
 			return
-		}
-
-		// Recorded here rather than in the middleware, where a probe of a guessed token would have
-		// been written down just as permanently and every entry read identically. By this point the
-		// trigger is known, so the record says which webhook fired and what it launched, which is
-		// what somebody reading the trail actually needs.
-		if audits != nil {
-			entry := &audit.Entry{
-				ID: audit.NewID(), At: time.Now(), Actor: "webhook:" + tg.ID,
-				Method: http.MethodPost, Path: "/hooks/" + tg.ID + "/fired/" + created.ID,
-			}
-			if aerr := audits.Append(r.Context(), entry); aerr != nil {
-				// Logged rather than surfaced. The run has already started, so refusing here would
-				// report a failure for work that is under way.
-				log.Error("server: record webhook fire: " + aerr.Error())
-			}
 		}
 		now := time.Now()
 		tg.LastFiredAt = &now
@@ -417,6 +423,36 @@ func hookDelivery(r *http.Request) string {
 		}
 	}
 	return ""
+}
+
+// stableHookEpoch is the fixed instant a webhook delivery's dedupe key is derived at, so the key
+// carries no live time bucket and a redelivery collapses onto the first run however late it lands.
+// Only its constancy matters; the value is otherwise arbitrary. Deriving the key through
+// run.DedupeKey keeps it inside the server's reserved idempotency namespace, which ClientKey refuses
+// to mint, so a caller cannot plant a run under the key a later delivery would compute.
+var stableHookEpoch = time.Unix(0, 0).UTC()
+
+// resolveHookDedupe returns the run a repeat of this delivery already created, nil when there is
+// none, and the idempotency key a fresh run must carry.
+//
+// With a delivery id the key is stable, hashing the trigger and the delivery with no time component,
+// so a replay is idempotent regardless of timing and the store's unique index collapses a concurrent
+// redelivery onto one run. Without a delivery id it falls back to the bounded time-bucketed dedupe
+// keyed on the trigger, the old behavior and the best available without an id.
+func resolveHookDedupe(ctx context.Context, store run.Store, triggerID, delivery string,
+	now time.Time) (*run.Run, string, error) {
+	if delivery == "" {
+		return run.ResolveDedupe(ctx, store, "trigger", triggerID, now)
+	}
+	key := run.DedupeKey("trigger", triggerID+delivery, stableHookEpoch)
+	existing, err := store.ByIdempotencyKey(ctx, key)
+	if errors.Is(err, run.ErrNotFound) {
+		return nil, key, nil
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	return existing, key, nil
 }
 
 // verifyHookSignature reads the request body and checks its X-Hub-Signature-256 against the

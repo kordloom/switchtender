@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -21,6 +22,12 @@ import (
 
 // awsService is the SigV4 service name for Secrets Manager.
 const awsService = "secretsmanager"
+
+// awsRegionPattern matches a valid AWS region name: lowercase letters, digits, and interior hyphens.
+// It rejects the '.', '/', '@', ':', '#', '%', and whitespace that could splice a region into a
+// different request authority, so a config-controlled region cannot redirect a signed request that
+// carries the host's AWS credentials to an attacker's host.
+var awsRegionPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`)
 
 // awsTarget is the Secrets Manager JSON API action a resolve calls.
 const awsTarget = "secretsmanager.GetSecretValue"
@@ -154,6 +161,10 @@ func awsResolveCredentials(cfg awsConfig) (awsCredentials, string, error) {
 	if region == "" {
 		return awsCredentials{}, "", fmt.Errorf(
 			"%w: aws needs region in the config or the AWS_REGION environment", ErrResolve)
+	}
+	if !awsRegionPattern.MatchString(region) {
+		return awsCredentials{}, "", fmt.Errorf(
+			"%w: aws region %q is not a valid region name", ErrResolve, region)
 	}
 	return awsCredentials{AccessKeyID: access, SecretAccessKey: secret, SessionToken: session}, region, nil
 }

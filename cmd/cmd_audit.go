@@ -25,7 +25,7 @@ var auditExpectKey string
 // auditVerifyCmd verifies a signed audit export offline.
 var auditVerifyCmd = &cobra.Command{
 	Use:   "verify <export.json>",
-	Short: "Verify an audit export offline: recompute the chain and check the signature.",
+	Short: "Verify an audit export offline. Recompute the chain and check the signature.",
 	Args:  cobra.ExactArgs(1),
 	// A failed verification is a real result, not a usage error, so keep the output clean.
 	SilenceUsage: true,

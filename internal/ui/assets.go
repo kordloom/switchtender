@@ -9,6 +9,7 @@ import (
 	"mime"
 	"net/http"
 	"path"
+	"sort"
 	"strings"
 )
 
@@ -68,7 +69,59 @@ func newAssetHandler(assets fs.FS) *assetHandler {
 	if err != nil {
 		panic("ui: prepare assets: " + err.Error())
 	}
+	h.assembleAppJS()
 	return h
+}
+
+// assembleAppJS builds the served app.js by concatenating the source files under js/ in name
+// order. The application script is written as many files so a change touches one focused file,
+// but it ships as the single script the templates already load. Order is part of the program:
+// constants must initialize before the code below them runs, so the numeric prefixes on the
+// source files are load-bearing and concatenation preserves them.
+//
+// Each part is separated by a newline rather than butted directly against the next. Concatenating
+// raw bytes meant a part whose last line had no terminator glued two statements into one, which is
+// a syntax error for most pairs and a silently different program for the rest. Nothing enforced
+// that terminator, the failure would have landed in the shipped bundle rather than in a source
+// file, and the node test loader joins the same parts with a newline of its own, so the suite would
+// have gone on passing while the served script did not parse.
+//
+// Nothing under js/ is served on its own. Removing only the .js parts left any other file in that
+// directory reachable at its own URL while never appearing in app.js, so a note, a backup copy, or
+// a snippet parked beside the sources shipped to anyone who asked for it by name.
+func (h *assetHandler) assembleAppJS() {
+	var names, extras []string
+	for p := range h.assets {
+		switch {
+		case !strings.HasPrefix(p, "js/"):
+		case strings.HasSuffix(p, ".js"):
+			names = append(names, p)
+		default:
+			extras = append(extras, p)
+		}
+	}
+	if len(names) == 0 {
+		panic("ui: no js/ source parts embedded for app.js")
+	}
+	sort.Strings(names)
+	var body []byte
+	for _, p := range names {
+		body = append(body, h.assets[p].body...)
+		if len(body) > 0 && body[len(body)-1] != '\n' {
+			body = append(body, '\n')
+		}
+		delete(h.assets, p)
+	}
+	for _, p := range extras {
+		delete(h.assets, p)
+	}
+	sum := sha256.Sum256(body)
+	h.assets["app.js"] = asset{
+		body:        body,
+		gzipped:     gzipBody(body),
+		contentType: mime.TypeByExtension(".js"),
+		etag:        `"` + hex.EncodeToString(sum[:16]) + `"`,
+	}
 }
 
 // gzipBody returns the gzip encoded form of body, or nil when compression does not shrink it or

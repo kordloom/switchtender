@@ -119,6 +119,9 @@ body[data-readonly] [data-mutates]::after { display: none; }
 
 /* Read-only demo banner and the inline note that sits beside a disabled form action. */
 .ro-banner { background: var(--surface-2); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius); padding: 9px 14px; margin-bottom: 16px; font-size: 13px; color: var(--text); }
+/* Advisory AI off notice: an accent-bordered callout so the disabled ask panel reads as off at a glance, not a muted afterthought. */
+.ask-off { background: var(--accent-soft); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius); padding: 10px 14px; margin-top: 10px; font-size: 13px; color: var(--text); line-height: 1.55; }
+.ask-off a { white-space: nowrap; }
 .ro-note { font-size: 12px; color: var(--muted); font-style: italic; }
 
 /* Content fades in on load, and tables shimmer with skeletons while their data arrives. */
@@ -354,6 +357,9 @@ input.tile-filter { width: 240px; max-width: 46vw; padding: 7px 11px 7px 31px; f
 /* Tables */
 table.runs { width: 100%; border-collapse: separate; border-spacing: 0; background-color: var(--surface); background-image: linear-gradient(180deg, var(--card-top), transparent 30%); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow); }
 table.runs th, table.runs td { text-align: left; padding: 10px 16px; border-bottom: 1px solid var(--border-muted); }
+/* Faint vertical dividers between columns, the mirror of the row borders. Half the strength of a
+   row border so columns read as separated without the grid feeling boxed in. */
+table.runs th:not(:last-child), table.runs td:not(:last-child) { border-right: 1px solid color-mix(in srgb, var(--border-muted) 67%, transparent); }
 table.runs thead th { background: var(--surface-2); font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border); }
 table.runs tbody tr:last-child td { border-bottom: none; }
 table.runs tbody tr { transition: background 0.08s ease; }
@@ -533,6 +539,16 @@ table.matrix td { padding: 3px; text-align: center; }
 .button:hover { text-decoration: none; background: var(--surface-3); border-color: var(--muted); }
 .button:disabled { opacity: 0.5; cursor: default; }
 .button.danger { color: var(--failed); border-color: var(--failed); }
+/* Split launch button: a primary Launch joined to a caret that opens the one advanced option. */
+.split-btn { position: relative; display: inline-flex; vertical-align: middle; }
+.split-main { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.split-caret { border-top-left-radius: 0; border-bottom-left-radius: 0; border-left-color: rgba(0, 0, 0, 0.18); margin-left: -1px; padding-left: 8px; padding-right: 8px; }
+.split-caret svg { width: 13px; height: 13px; }
+.launch-menu { position: fixed; z-index: 200; min-width: 260px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3); padding: 6px; }
+.launch-menu-item { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; padding: 8px 10px; background: none; border: none; border-radius: var(--radius); cursor: pointer; color: var(--text); font-family: inherit; }
+.launch-menu-item:hover { background: var(--surface-2); }
+.launch-menu-title { font-size: 13.5px; font-weight: 600; }
+.launch-menu-desc { font-size: 12px; }
 .button.danger:hover { background: var(--failed); color: #fff; }
 
 /* Shard and step rows */
@@ -765,9 +781,10 @@ button.topbar-link { background: none; border: none; padding: 0; font: inherit; 
 .explain-note { font-size: 12px; }
 .explain-body { font-size: 13.5px; line-height: 1.55; white-space: pre-wrap; color: var(--text); }
 
-/* Action columns sit flush right so button clusters align under their header. */
-th.col-actions { text-align: right; }
-table.runs td:last-child:has(> button) { text-align: right; white-space: nowrap; }
+/* Action columns sit flush right so button clusters align under their header. The table.runs
+   qualifier is needed to beat the generic left-aligned `table.runs th` rule on specificity. */
+table.runs th.col-actions, th.col-actions { text-align: center; }
+table.runs td:last-child:has(> button) { text-align: center; white-space: nowrap; }
 
 /* Duration sparklines: a single accent line whose numbers live in the table beside it. */
 .duration-spark { display: block; }
@@ -844,6 +861,9 @@ body[data-page="login"] .topbar { background: transparent; backdrop-filter: none
 .docs-content th, .docs-content td { padding: 8px 12px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border-muted); }
 .docs-content tr:last-child td { border-bottom: none; }
 .docs-content th { background: var(--surface-2); font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+/* Guide links in a doc table read as filled buttons so the click target is unmistakable. */
+.docs-content td a[href^="/ui/docs/"] { display: inline-block; padding: 4px 12px; background: var(--primary-bg); color: var(--primary-text); border-radius: var(--radius); font-size: 13px; font-weight: 600; line-height: 1.45; white-space: nowrap; transition: filter 0.12s ease, transform 0.12s var(--ease); }
+.docs-content td a[href^="/ui/docs/"]:hover { text-decoration: none; filter: brightness(1.08); transform: translateY(-1px); }
 .docs-content blockquote { margin: 1em 0; padding: 0.3em 1em; border-left: 3px solid var(--accent); color: var(--muted); }
 .docs-content img { max-width: 100%; border-radius: var(--radius); }
 .docs-content hr { border: none; border-top: 1px solid var(--border-muted); margin: 1.6em 0; }

@@ -61,9 +61,19 @@ func TestResolveVault(t *testing.T) {
 	if _, err := resolveVault(context.Background(), cfg("secret/data/ci", "token", "")); !errors.Is(err, ErrResolve) {
 		t.Errorf("missing token error = %v, want ErrResolve", err)
 	}
-	// Test 6: VAULT_TOKEN supplies the token when the config omits it.
+	// Test 6: VAULT_TOKEN supplies the token when the config omits it and the addr is the pinned
+	// VAULT_ADDR, the server's own Vault.
+	t.Setenv("VAULT_ADDR", srv.URL)
 	t.Setenv("VAULT_TOKEN", "hvs.test")
 	if got, err := resolveVault(context.Background(), cfg("secret/data/ci", "token", "")); err != nil || got != "kv2-secret" {
 		t.Errorf("VAULT_TOKEN fallback = %q, %v; want kv2-secret", got, err)
+	}
+	// Test 7: A config addr that is not the pinned VAULT_ADDR does not receive the env VAULT_TOKEN.
+	// Were it sent, the mock server would accept it and return the secret; the read must fail instead,
+	// so the server's Vault token cannot reach an attacker-chosen host.
+	t.Setenv("VAULT_ADDR", "https://vault.internal.example:8200")
+	t.Setenv("VAULT_TOKEN", "hvs.test")
+	if _, err := resolveVault(context.Background(), cfg("secret/data/ci", "token", "")); !errors.Is(err, ErrResolve) {
+		t.Errorf("unpinned addr fallback error = %v, want ErrResolve", err)
 	}
 }

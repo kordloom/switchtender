@@ -127,7 +127,7 @@ want typed prompts at launch. Launch it with one click.
 ### 7. Watch the run
 
 The run detail page paints a host-by-task matrix live as the run executes, with per-task drill-down
-into stdout, stderr, return code, and diff. No other controller in the field does this. A run is structure, not
+into stdout, stderr, return code, and diff. A run is structure, not
 a text scroll.
 
 ### 8. Add capacity and schedules

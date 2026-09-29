@@ -60,7 +60,7 @@
 						<span class="ov-h ov-h-go"></span>
 					</div>
 					<div id="ov-fleet" class="ov-list"></div>
-					<div class="ask-block ask-panel" id="ask-panel">
+					<div class="ask-block ask-panel" id="ask-panel" data-ai-enabled="{{if .AIEnabled}}1{{else}}0{{end}}">
 						<h3 class="ask-title">Ask about your fleet</h3>
 						<div class="ask-row">
 							<input id="ask-input" class="input" placeholder="Why might web01 be flaky?" aria-label="Ask a question about the fleet">

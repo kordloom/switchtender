@@ -246,6 +246,9 @@ CREATE TABLE IF NOT EXISTS audit_anchors (
 CREATE INDEX IF NOT EXISTS idx_audit_anchor_seq ON audit_anchors(seq);
 CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_entries(at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_seq ON audit_entries(seq);
+-- Span beats are a narrow slice of the chain selected by actor and method and ordered by seq.
+-- Without this the unauthenticated beat feed and every beat append walked the whole entries table.
+CREATE INDEX IF NOT EXISTS idx_audit_span ON audit_entries(actor, method, seq);
 CREATE TABLE IF NOT EXISTS policies (
 	id               TEXT PRIMARY KEY,
 	name             TEXT NOT NULL DEFAULT '',
@@ -572,13 +575,17 @@ func migrateRuns(db *sql.DB) error {
 // they cover exist even on a database created before those columns were added. The claim index
 // keeps the executor poll from walking the whole table oldest-first, the status index keeps the
 // summary counts off the fat run rows, and the lease index bounds the janitor sweep and the
-// worker listing as history grows.
+// worker listing as history grows. The actor and source indexes back the runs view's fielded
+// search, whose equality filters otherwise walked the whole table; each carries the page ordering
+// behind its filtered columns so the search pages without a sort.
 func ensureRunIndexes(db *sql.DB) error {
 	for _, stmt := range []string{
 		`CREATE INDEX IF NOT EXISTS idx_runs_pending_claim ON runs(queue, created_at, id)
 			WHERE status='pending' AND claimed_by='' AND kind=''`,
 		"CREATE INDEX IF NOT EXISTS idx_runs_status_parent ON runs(status, parent_id)",
 		"CREATE INDEX IF NOT EXISTS idx_runs_leased ON runs(claimed_at) WHERE claimed_by<>''",
+		"CREATE INDEX IF NOT EXISTS idx_runs_actor ON runs(actor, created_at DESC, id DESC)",
+		"CREATE INDEX IF NOT EXISTS idx_runs_source ON runs(source, source_id, created_at DESC, id DESC)",
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			return fmt.Errorf("create run index: %w", err)

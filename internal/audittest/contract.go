@@ -24,6 +24,9 @@ func Contract(t *testing.T, newStore func() audit.Store) {
 	t.Run("concurrent span beats never collide", func(t *testing.T) {
 		testConcurrentSpanBeats(t, newStore())
 	})
+	t.Run("span beat refuses a clock behind the last beat", func(t *testing.T) {
+		testSpanBeatAdvances(t, newStore())
+	})
 	t.Run("ordinary append refuses the span marker", func(t *testing.T) {
 		testReservedSpan(t, newStore())
 	})
@@ -144,6 +147,95 @@ func testSpanAdoption(t *testing.T, store audit.Store) {
 	}
 }
 
+// testSpanBeatAdvances verifies a beat is written only when its time strictly leads the beat before
+// it, and that a caller's time that does not is refused with nothing written.
+//
+// A verifier fails a bundle outright when a beat's time does not advance past its predecessor,
+// where a cadence gap is only reported, and a link commits to the time its entry holds, so neither
+// beat of such a pair can ever be repaired. Clocks step backward from an NTP correction on a
+// running server, a virtual machine resuming from a snapshot, or a restart after an offline fix.
+// The store refuses those beats rather than moving them forward to fit, because a beat's time is a
+// signed claim: a time the clock never read would be a false statement in an attestation. The
+// number is not consumed, so the beat that eventually lands carries it and the numbering stays
+// contiguous, which is what keeps a skipped beat a reported gap instead of a deleted window.
+func testSpanBeatAdvances(t *testing.T, store audit.Store) {
+	t.Helper()
+	ctx := context.Background()
+	base := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+
+	first, err := store.AppendSpanBeat(ctx, base, 60)
+	if err != nil {
+		t.Fatalf("AppendSpanBeat() error = %v", err)
+	}
+
+	// The clock stepped an hour backward, and an equal reading is what a verifier rejects too, not
+	// only an earlier one. Both are refused, and neither may leave anything behind in the chain.
+	for _, at := range []time.Time{base.Add(-time.Hour), base} {
+		refused, err := store.AppendSpanBeat(ctx, at, 60)
+		if !errors.Is(err, audit.ErrClockBehind) {
+			t.Fatalf("AppendSpanBeat() at %s error = %v, want audit.ErrClockBehind: a beat whose "+
+				"time is a signed claim must not be written at a time the clock did not read", at, err)
+		}
+		if refused != nil {
+			t.Errorf("AppendSpanBeat() at %s returned entry %+v, want nil", at, refused)
+		}
+		checkHead(t, store, first, 1)
+	}
+
+	// Once real time passes the last beat the cadence resumes on its own, at the caller's own time.
+	ahead, err := store.AppendSpanBeat(ctx, base.Add(time.Hour), 60)
+	if err != nil {
+		t.Fatalf("AppendSpanBeat() with a recovered clock error = %v", err)
+	}
+	if want := base.Add(time.Hour); !ahead.At.Equal(want) {
+		t.Errorf("beat two at = %s, want the caller's time %s exactly", ahead.At, want)
+	}
+	// The refused beats did not burn their number: a missing beat number is a deleted window and
+	// fails a bundle, where the longer interval is only reported as a gap.
+	checkBeat(t, ahead, base.Add(time.Hour), 2, 0, 60)
+
+	// The advance has to hold in what was stored, not just in what was handed back.
+	chain, err := store.Chain(ctx)
+	if err != nil {
+		t.Fatalf("Chain() error = %v", err)
+	}
+	if len(chain) != 2 {
+		t.Fatalf("Chain() len = %d, want 2: only the two accepted beats", len(chain))
+	}
+	var prev *audit.Entry
+	for i, e := range chain {
+		if !audit.IsSpanMarker(e) {
+			t.Fatalf("chain entry %d is not a span beat: %+v", i, e)
+		}
+		if prev != nil && !e.At.After(prev.At) {
+			t.Errorf("stored beat %d at %s does not advance past %s", i, e.At, prev.At)
+		}
+		prev = e
+	}
+	if ok, at := audit.Verify(chain); !ok {
+		t.Errorf("Verify() reported a break at %d after a backward clock", at)
+	}
+}
+
+// checkHead asserts the chain still ends at want and holds wantLen entries, so a refused beat is
+// shown to have written nothing rather than merely returned an error.
+func checkHead(t *testing.T, store audit.Store, want *audit.Entry, wantLen int) {
+	t.Helper()
+	chain, err := store.Chain(context.Background())
+	if err != nil {
+		t.Fatalf("Chain() error = %v", err)
+	}
+	if len(chain) != wantLen {
+		t.Fatalf("Chain() len = %d after a refused beat, want %d: a refused beat writes nothing",
+			len(chain), wantLen)
+	}
+	head := chain[len(chain)-1]
+	if head.Seq != want.Seq || head.Hash != want.Hash || !head.At.Equal(want.At) {
+		t.Errorf("chain head = seq %d hash %q at %s, want seq %d hash %q at %s",
+			head.Seq, head.Hash, head.At, want.Seq, want.Hash, want.At)
+	}
+}
+
 // testConcurrentSpanBeats fires many beats at once and checks they mint distinct consecutive beat
 // numbers. This is the HA race: two replicas reading the same last beat and both appending its
 // successor would produce a duplicate, and a duplicate or skipped beat fails every bundle built
@@ -154,14 +246,28 @@ func testConcurrentSpanBeats(t *testing.T, store audit.Store) {
 	const n = 20
 	var wg sync.WaitGroup
 	errs := make(chan error, n)
-	for i := range n {
+	deadline := time.Now().Add(30 * time.Second)
+	for range n {
 		wg.Add(1)
-		go func(i int) {
+		go func() {
 			defer wg.Done()
-			if _, err := store.AppendSpanBeat(ctx, time.Unix(int64(i), 0).UTC(), 60); err != nil {
-				errs <- err
+			// Whichever caller loses the race by a microsecond reads a clock that has not passed the
+			// beat the winner just wrote, and the store refuses it rather than recording a time that
+			// was never read. Here that means retrying with a fresh reading, which is what the
+			// emitter does on its next tick, so every beat still lands and the numbering is checked
+			// end to end.
+			for {
+				_, err := store.AppendSpanBeat(ctx, time.Now().UTC(), 60)
+				switch {
+				case err == nil:
+					return
+				case !errors.Is(err, audit.ErrClockBehind) || time.Now().After(deadline):
+					errs <- err
+					return
+				}
+				time.Sleep(time.Millisecond)
 			}
-		}(i)
+		}()
 	}
 	wg.Wait()
 	close(errs)

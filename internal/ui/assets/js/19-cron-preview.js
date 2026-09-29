@@ -1,0 +1,212 @@
+// openScheduleEdit fills the schedule dialog with an existing record and switches it to edit mode.
+// wireCronPreview shows the next firings for the cron spec as it is typed, so a schedule is
+// verifiable before saving.
+function wireCronPreview() {
+	const input = document.getElementById("schedule-cron");
+	const out = document.getElementById("cron-preview");
+	if (!input || !out) return;
+	let timer = 0;
+	const update = async () => {
+		const spec = input.value.trim();
+		if (!spec) { out.textContent = ""; return; }
+		try {
+			const data = await getJSON("/schedules/preview?cron=" + encodeURIComponent(spec));
+			const times = (data.next || []).slice(0, 3).map((t) =>
+				new Date(t).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }));
+			out.textContent = times.length ? "Next: " + times.join("  ·  ") : "";
+			out.classList.remove("error-text");
+		} catch {
+			out.textContent = "Invalid cron expression";
+			out.classList.add("error-text");
+		}
+	};
+	input.addEventListener("input", () => {
+		window.clearTimeout(timer);
+		timer = window.setTimeout(update, 350);
+	});
+	update();
+}
+
+function openScheduleEdit(s) {
+	const form = document.getElementById("schedule-form");
+	form.dataset.editId = s.id;
+	document.getElementById("schedule-name").value = s.name || "";
+	document.getElementById("schedule-cron").value = s.cron || "";
+	document.getElementById("schedule-template").value = s.template_id || "";
+	document.getElementById("schedule-status").textContent = "";
+	setModalTitle("schedule", "Edit schedule");
+	document.getElementById("schedule-modal").hidden = false;
+}
+
+// wireScheduleForm hooks the schedule dialog up to POST /schedules for a new schedule and PUT
+// /schedules/{id} when editing. The New button resets the dialog to add mode.
+function wireScheduleForm() {
+	const form = document.getElementById("schedule-form");
+	fillTemplateSelect(document.getElementById("schedule-template"));
+	const resetToCreate = () => {
+		delete form.dataset.editId;
+		document.getElementById("schedule-name").value = "";
+		document.getElementById("schedule-cron").value = "";
+		document.getElementById("schedule-template").value = "";
+		document.getElementById("schedule-status").textContent = "";
+		setModalTitle("schedule", "Add a schedule");
+	};
+	const openBtn = document.getElementById("schedule-open");
+	if (openBtn) openBtn.addEventListener("click", resetToCreate);
+
+	const submitBtn = form.querySelector('button[type="submit"]');
+	// inFlight drops a second submit while the first is still posting, so a fast double click on Save
+	// stores the schedule once rather than twice. A modal save stays on the page, so the button is
+	// re-enabled once the request settles either way, leaving the dialog usable for the next schedule.
+	let inFlight = false;
+	form.addEventListener("submit", async (e) => {
+		e.preventDefault();
+		if (inFlight) return;
+		const status = document.getElementById("schedule-status");
+		const editId = form.dataset.editId;
+		const templateID = document.getElementById("schedule-template").value;
+		if (!templateID) {
+			status.textContent = "Pick a template.";
+			return;
+		}
+		const payload = {
+			name: document.getElementById("schedule-name").value.trim(),
+			cron: document.getElementById("schedule-cron").value.trim(),
+			template_id: templateID,
+		};
+		inFlight = true;
+		if (submitBtn) submitBtn.disabled = true;
+		try {
+			if (editId) {
+				await postAction("/schedules/" + editId, payload, "PUT");
+			} else {
+				await postAction("/schedules", payload);
+			}
+			resetToCreate();
+			status.textContent = "Saved.";
+			closeModal("schedule");
+			document.getElementById("schedules").innerHTML = "";
+			loadSchedules();
+		} catch (err) {
+			status.textContent = "Save failed: " + err.message;
+		} finally {
+			inFlight = false;
+			if (submitBtn) submitBtn.disabled = false;
+		}
+	});
+}
+
+// scheduleTarget describes what a schedule fires.
+function scheduleTarget(s) {
+	if (s.steps && s.steps.length) {
+		return "pipeline, " + s.steps.length + " steps";
+	}
+	if (s.shards) {
+		return "split x" + s.shards + "  " + (s.playbook || "");
+	}
+	return s.playbook || "";
+}
+
+// fillInventorySelect loads stored inventories into a select and returns an id to name map, so the
+// policy table can show an inventory name instead of an id. It is best effort: a load failure just
+// leaves the picker with its Any option.
+async function fillInventorySelect(select) {
+	const byID = {};
+	try {
+		const data = await getJSON("/inventories");
+		for (const inv of data.inventories || []) {
+			byID[inv.id] = inv.name;
+			if (select) {
+				const opt = document.createElement("option");
+				opt.value = inv.id;
+				opt.textContent = inv.name;
+				select.appendChild(opt);
+			}
+		}
+	} catch (_) { /* inventories disabled or unauthorized; picker keeps only Any */ }
+	return byID;
+}
+
+// anyCell returns a table cell showing a muted "any", used where a policy criterion is empty and so
+// matches every value.
+function anyCell() {
+	const cell = document.createElement("td");
+	const span = document.createElement("span");
+	span.className = "muted";
+	span.textContent = "any";
+	cell.appendChild(span);
+	return cell;
+}
+
+// openPolicyEdit fills the policy dialog with an existing rule and switches it to edit mode, so a
+// saved policy is changed in place rather than deleted and recreated.
+function openPolicyEdit(p) {
+	const form = document.getElementById("policy-form");
+	form.dataset.editId = p.id;
+	document.getElementById("policy-name").value = p.name;
+	document.getElementById("policy-tool").value = p.tool || "";
+	document.getElementById("policy-command").value = p.command_contains || "";
+	document.getElementById("policy-inventory").value = p.inventory_id || "";
+	document.getElementById("policy-exclude-dry").checked = !!p.exclude_dry_run;
+	document.getElementById("policy-status").textContent = "";
+	setModalTitle("policy", "Edit policy");
+	document.getElementById("policy-modal").hidden = false;
+}
+
+// wirePolicyForm hooks the policy dialog up to POST /policies for a new rule and PUT /policies/{id}
+// when editing. The New button resets the dialog to add mode.
+function wirePolicyForm() {
+	const form = document.getElementById("policy-form");
+	fillInventorySelect(document.getElementById("policy-inventory"));
+	const resetToCreate = () => {
+		delete form.dataset.editId;
+		document.getElementById("policy-name").value = "";
+		document.getElementById("policy-tool").value = "";
+		document.getElementById("policy-command").value = "";
+		document.getElementById("policy-inventory").value = "";
+		document.getElementById("policy-exclude-dry").checked = false;
+		document.getElementById("policy-status").textContent = "";
+		setModalTitle("policy", "Add a policy");
+	};
+	const openBtn = document.getElementById("policy-open");
+	if (openBtn) openBtn.addEventListener("click", resetToCreate);
+
+	const submitBtn = form.querySelector('button[type="submit"]');
+	// inFlight drops a second submit while the first is still posting, so a fast double click on Save
+	// stores the policy once rather than twice. A modal save stays on the page, so the button is
+	// re-enabled once the request settles either way, leaving the dialog usable for the next policy.
+	let inFlight = false;
+	form.addEventListener("submit", async (e) => {
+		e.preventDefault();
+		if (inFlight) return;
+		const status = document.getElementById("policy-status");
+		const editId = form.dataset.editId;
+		const payload = {
+			name: document.getElementById("policy-name").value.trim(),
+			tool: document.getElementById("policy-tool").value,
+			command_contains: document.getElementById("policy-command").value.trim(),
+			inventory_id: document.getElementById("policy-inventory").value,
+			exclude_dry_run: document.getElementById("policy-exclude-dry").checked,
+		};
+		inFlight = true;
+		if (submitBtn) submitBtn.disabled = true;
+		try {
+			if (editId) {
+				await postAction("/policies/" + editId, payload, "PUT");
+			} else {
+				await postAction("/policies", payload);
+			}
+			resetToCreate();
+			status.textContent = "Saved.";
+			closeModal("policy");
+			document.getElementById("policies").innerHTML = "";
+			loadPolicies();
+		} catch (err) {
+			status.textContent = "Save failed: " + err.message;
+		} finally {
+			inFlight = false;
+			if (submitBtn) submitBtn.disabled = false;
+		}
+	});
+}
+

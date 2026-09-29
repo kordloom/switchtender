@@ -4,9 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/spanbeat"
@@ -160,6 +164,54 @@ func TestBeatFailureDoesNotStopLoop(t *testing.T) {
 		t.Fatal("the loop did not try again after a failed beat")
 	}
 	emitter.Close()
+}
+
+// stoppedClockStore hands the store the same instant for every beat, which is what a wall clock
+// that stepped backward or stopped looks like from the emitter's side. The first beat lands, and
+// every beat after it fails to advance past that one, so the store refuses it.
+type stoppedClockStore struct {
+	// Store is embedded so only the frozen-time method needs defining.
+	audit.Store
+}
+
+// AppendSpanBeat appends every beat at one fixed instant, ignoring the time it was handed.
+func (s stoppedClockStore) AppendSpanBeat(ctx context.Context, _ time.Time, cadenceS int) (*audit.Entry, error) {
+	return s.Store.AppendSpanBeat(ctx, time.Unix(1700000000, 0).UTC(), cadenceS)
+}
+
+// TestBeatWarnsWhenTheClockMovedBackward verifies the operator is told when a beat was refused
+// because this machine's clock had not passed the last beat. The record itself shows only a
+// reported gap, which is the honest thing for it to show, so the warning is how an operator learns
+// the clock is the reason rather than the collector dying.
+func TestBeatWarnsWhenTheClockMovedBackward(t *testing.T) {
+	t.Parallel()
+	core, logs := observer.New(zap.WarnLevel)
+
+	// A beat recorded at the time it was asked for warns about nothing, so the check is not simply
+	// warning on every beat.
+	ordinary := audit.NewMemStore()
+	quiet := spanbeat.NewEmitter(ordinary, time.Second, zap.New(core))
+	quiet.Start()
+	if !waitFor(t, 3*time.Second, func() bool { return chainLen(t, ordinary) >= 2 }) {
+		quiet.Close()
+		t.Fatal("no beats appended")
+	}
+	quiet.Close()
+	if logs.Len() != 0 {
+		t.Fatalf("ordinary beats logged %v, want no warning", logs.All())
+	}
+
+	moved := spanbeat.NewEmitter(stoppedClockStore{Store: audit.NewMemStore()}, time.Second, zap.New(core))
+	moved.Start()
+	if !waitFor(t, 3*time.Second, func() bool { return logs.Len() > 0 }) {
+		moved.Close()
+		t.Fatal("a refused beat produced no warning, so an operator never learns the clock is why " +
+			"the heartbeat went quiet")
+	}
+	moved.Close()
+	if got := logs.All()[0].Message; !strings.Contains(got, "has not passed the last beat") {
+		t.Errorf("warning = %q, want it to say the clock has not passed the last beat", got)
+	}
 }
 
 // TestNewEmitterPanics pins the constructor contract: a nil store or a cadence that is not a whole

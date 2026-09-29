@@ -178,7 +178,10 @@ type Store interface {
 	// reading the existing log. Returns ErrNotFound if the run is absent.
 	LastEventSeq(ctx context.Context, id string) (int64, error)
 	// PurgeEventsBefore drops the events and logs of terminal runs created before cutoff, keeping
-	// the run records and their summaries. It returns how many runs were trimmed.
+	// the run records and their summaries. It returns how many runs were trimmed, counting only
+	// runs that actually held events or logs to remove. A terminal run older than cutoff that had
+	// nothing to trim is not counted, so the number reports runs whose data was removed, not every
+	// eligible run.
 	PurgeEventsBefore(ctx context.Context, cutoff time.Time) (int, error)
 	// PurgeRunsBefore deletes terminal runs created before cutoff along with their events and logs,
 	// keeping the per host and per task summaries that power the cross-run views. It returns how
@@ -1146,7 +1149,8 @@ func (m *memStore) LastEventSeq(_ context.Context, id string) (int64, error) {
 }
 
 // PurgeEventsBefore drops the events and logs of terminal runs created before cutoff, keeping the
-// run records and their summaries. It returns how many runs were trimmed.
+// run records and their summaries. It returns how many runs were trimmed, counting only runs that
+// actually held events or logs to remove.
 func (m *memStore) PurgeEventsBefore(_ context.Context, cutoff time.Time) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

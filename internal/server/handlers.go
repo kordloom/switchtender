@@ -340,41 +340,31 @@ func reconcileDriftHandler(store run.Store, submitter Submitter, authz *authoriz
 		}
 
 		// Authorize every object the proposal will touch, so a reconcile cannot borrow a project,
-		// inventory, or credentials the actor was never granted.
-		objects := append([]string{check.ProjectID, check.InventoryID}, check.CredentialIDs...)
+		// inventory, or credentials the actor was never granted. The registry credential that pulls
+		// the execution image is one of them, since the reconcile runs inside the check's pinned image.
+		objects := append([]string{check.ProjectID, check.InventoryID, check.PullCredentialID},
+			check.CredentialIDs...)
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
 			return
 		}
 
-		opts := []run.SubmitOption{
-			run.WithTool(check.Tool),
+		// The proposal reruns the check's own execution spec, so it carries the image, pull
+		// credential, and timeout the check ran under. Hand-building the options dropped those, so a
+		// reconcile of a containerized check escaped its pinned image and ran on the host under the
+		// default timeout. The one difference from a plain rerun is the dry-run flag: the check
+		// observed drift in check mode, the reconcile applies it for real, so DryRun is forced off
+		// after the spec sets it.
+		opts := append(check.ExecutionOptions(),
+			run.WithDryRun(false),
 			run.WithRequireApproval(true),
 			run.WithProposedFrom(check.ID),
 			run.WithSource("reconcile", check.ID),
 			run.WithActor(actorName(r)),
-		}
+		)
 		if tool == run.ToolAnsible {
 			// The Ansible fix reruns the playbook limited to the drifted host, applying exactly the
 			// divergent tasks.
 			opts = append(opts, run.WithLimit(host))
-		} else {
-			// The Terraform or OpenTofu fix applies the drifted working directory for real.
-			opts = append(opts, run.WithCommand(check.Command))
-		}
-		if check.ProjectID != "" {
-			opts = append(opts, run.WithProject(check.ProjectID))
-		}
-		if check.InventoryID != "" {
-			opts = append(opts, run.WithInventory(check.InventoryID))
-		}
-		if len(check.CredentialIDs) > 0 {
-			opts = append(opts, run.WithCredentialIDs(check.CredentialIDs))
-		}
-		if len(check.ExtraVars) > 0 {
-			opts = append(opts, run.WithExtraVars(check.ExtraVars))
-		}
-		if check.Queue != "" {
-			opts = append(opts, run.WithQueue(check.Queue))
 		}
 		proposal, err := submitter.Submit(r.Context(), check.Playbook, check.Inventory, opts...)
 		if err != nil {
@@ -1185,6 +1175,10 @@ func listRunsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.H
 			respondError(w, log, http.StatusInternalServerError, "could not list runs")
 			return
 		}
+		// Whether another page follows is decided by what the store returned, before the read filter
+		// thins it. Computing it from the trimmed page reported no more whenever the filter dropped a
+		// row from a full page, so later readable runs never paged in.
+		storeFullPage := len(runs) == limit
 		runs, err = readableRuns(r.Context(), authz, runs)
 		if err != nil {
 			log.Error("server: filter runs: " + err.Error())
@@ -1197,11 +1191,30 @@ func listRunsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.H
 			respondError(w, log, http.StatusInternalServerError, "could not list runs")
 			return
 		}
+		// The status totals are an install-wide aggregate, so they are withheld from a caller who may
+		// read no runs at all, the same aggregate-withholding the drift and task views do. Otherwise
+		// a strict-grants viewer refused every run by name still learned how much activity the install
+		// had. A visible run on this page already proves the caller reads something, so the scan only
+		// runs when the page is empty of readable runs.
+		anyReadable := len(runs) > 0
+		if !anyReadable {
+			_, ar, ferr := derivedReadFilter(r.Context(), authz, store)
+			if ferr != nil {
+				log.Error("server: read filter: " + ferr.Error())
+				respondError(w, log, http.StatusInternalServerError, "could not list runs")
+				return
+			}
+			anyReadable = ar
+		}
+		summary := runSummary{}
+		if anyReadable {
+			summary = summarize(counts)
+		}
 		respondJSON(w, log, http.StatusOK, listRunsResponse{
 			Runs:    maskRuns(runs),
 			Count:   len(runs),
-			Summary: summarize(counts),
-			HasMore: len(runs) == limit,
+			Summary: summary,
+			HasMore: storeFullPage,
 		}, wantsPretty(r))
 	}
 }
@@ -1481,6 +1494,12 @@ func runStreamHandler(streamer Streamer, store run.Store, authz *authorizer, log
 			return
 		}
 
+		// A split or pipeline parent runs no tool of its own, so its own event log stays empty and
+		// re-reading the store for it emits nothing. Its children publish their events under the
+		// parent topic as they run, so the payload a wake carries is the only copy the parent stream
+		// ever sees. Such a run forwards the wake payload rather than draining its own log.
+		coordinator := rn.Kind == run.KindSplit || rn.Kind == run.KindPipeline
+
 		var wake <-chan live.Message
 		if streamer != nil {
 			ch, cancel := streamer.Subscribe(id)
@@ -1573,7 +1592,7 @@ func runStreamHandler(streamer Streamer, store run.Store, authz *authorizer, log
 				return
 			case <-draining:
 				return
-			case _, ok := <-wake:
+			case msg, ok := <-wake:
 				// A closed hub channel means the run ended and the topic is gone. Receiving
 				// without checking made it always ready, so the loop stopped waiting and
 				// re-queried the store as fast as it could: tens of thousands of statements a
@@ -1587,6 +1606,15 @@ func runStreamHandler(streamer Streamer, store run.Store, authz *authorizer, log
 					writeSSE(w, "end", streamCursor(lastSeq, logSeq), nil)
 					flusher.Flush()
 					return
+				}
+				if coordinator && (msg.Type == "event" || msg.Type == "log") {
+					// The parent's own log is empty, so the loop's drain has nothing to send for it.
+					// Forward the child's event or log straight from the wake, which is the only
+					// place a coordinator's live output exists. The cursor stays the parent's, which
+					// carries no meaningful sequence, since the page merging shard histories folds
+					// these by content and reconciles from the shards when the run ends.
+					writeSSE(w, msg.Type, streamCursor(lastSeq, logSeq), msg.Data)
+					flusher.Flush()
 				}
 			case <-ticker.C:
 			}

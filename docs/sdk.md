@@ -134,7 +134,7 @@ Drop the binary in a directory and point the server at it:
 At startup the server launches each executable in the directory, asks what it provides, and
 registers every seam it declares. One plugin serves any mix of tools, notifiers, AI providers, and
 secret engines from a single `Extension`. The process speaks gRPC over a local socket with mutual
-TLS, supervised by the server: it starts with the server and exits with it. The worker command
+TLS, supervised by the server. It starts with the server and exits with it. The worker command
 takes the same flag, so a plugged-in tool runs wherever runs execute.
 
 A plugin that fails to launch or describe itself is logged and skipped, so one broken binary does

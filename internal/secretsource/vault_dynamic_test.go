@@ -79,6 +79,20 @@ func TestMintVaultDynamic(t *testing.T) {
 	if _, _, err := mintVaultDynamic(context.Background(), cfg("database/creds/app", "password", "")); !errors.Is(err, ErrResolve) {
 		t.Errorf("missing token error = %v, want ErrResolve", err)
 	}
+	// Test 6: VAULT_TOKEN mints the secret when the config omits the token and the addr is the pinned
+	// VAULT_ADDR, the server's own Vault.
+	t.Setenv("VAULT_ADDR", srv.URL)
+	t.Setenv("VAULT_TOKEN", "hvs.test")
+	if value, _, err := mintVaultDynamic(context.Background(), cfg("database/creds/app", "password", "")); err != nil || value != "s3cr3t-pw" {
+		t.Errorf("VAULT_TOKEN fallback = %q, %v; want s3cr3t-pw", value, err)
+	}
+	// Test 7: A config addr that is not the pinned VAULT_ADDR does not receive the env VAULT_TOKEN, so
+	// the server's Vault token cannot reach an attacker-chosen host.
+	t.Setenv("VAULT_ADDR", "https://vault.internal.example:8200")
+	t.Setenv("VAULT_TOKEN", "hvs.test")
+	if _, _, err := mintVaultDynamic(context.Background(), cfg("database/creds/app", "password", "")); !errors.Is(err, ErrResolve) {
+		t.Errorf("unpinned addr fallback error = %v, want ErrResolve", err)
+	}
 }
 
 func TestResolveLeased(t *testing.T) {

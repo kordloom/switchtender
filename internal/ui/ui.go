@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"sync"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
@@ -21,9 +22,11 @@ import (
 //go:embed templates/*.html
 var templateFS embed.FS
 
-// assetFS holds the static CSS and JavaScript.
+// assetFS holds the static CSS and JavaScript. The entries are named individually so the jstest
+// tree beside them, the node --test suite for the js/ parts, is never embedded or served.
 //
-//go:embed assets/*
+//go:embed assets/app.css assets/favicon.png assets/fonts assets/js
+//go:embed assets/logo-train-tracks.png assets/logo-train-tracks-dark.png
 var assetFS embed.FS
 
 // UI renders the web interface.
@@ -34,6 +37,9 @@ type UI struct {
 	log *zap.Logger
 	// docs is the documentation tree rendered in-app, nil when not wired.
 	docs fs.FS
+	// docCache holds each rendered documentation page by slug. The tree is embedded, so a page's
+	// HTML is the same for the life of the binary and is built on its first request only.
+	docCache sync.Map
 	// md renders documentation markdown to HTML.
 	md goldmark.Markdown
 	// readOnly hides mutating controls in the pages for a read-only demo.
@@ -45,12 +51,15 @@ type UI struct {
 	oidcEnabled bool
 	// samlEnabled shows the SAML sign-in button on the sign-in page when set.
 	samlEnabled bool
+	// aiEnabled reports whether an advisory AI provider is configured, so the overview can make the
+	// ask panel clearly unavailable rather than looking usable and failing on the first question.
+	aiEnabled bool
 }
 
 // New parses the embedded templates and returns a UI. It panics if the embedded templates fail to
 // parse, which is a build time programming error. docs, when non-nil, is the documentation tree
 // served under /ui/docs; readOnly hides the launch panel and run action buttons for a demo.
-func New(log *zap.Logger, docs fs.FS, readOnly bool, matrixCap int, oidcEnabled, samlEnabled bool) *UI {
+func New(log *zap.Logger, docs fs.FS, readOnly bool, matrixCap int, oidcEnabled, samlEnabled, aiEnabled bool) *UI {
 	if log == nil {
 		log = zap.NewNop()
 	}
@@ -63,6 +72,7 @@ func New(log *zap.Logger, docs fs.FS, readOnly bool, matrixCap int, oidcEnabled,
 		matrixCap:   matrixCap,
 		oidcEnabled: oidcEnabled,
 		samlEnabled: samlEnabled,
+		aiEnabled:   aiEnabled,
 	}
 }
 
@@ -104,7 +114,7 @@ func (u *UI) Handler() http.Handler {
 
 // index renders the overview home page.
 func (u *UI) index(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "overview.html", map[string]any{"ReadOnly": u.readOnly})
+	u.render(w, "overview.html", map[string]any{"ReadOnly": u.readOnly, "AIEnabled": u.aiEnabled})
 }
 
 // runs renders the run history page.

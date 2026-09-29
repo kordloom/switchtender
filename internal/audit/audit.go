@@ -45,8 +45,15 @@ type Store interface {
 	// AppendSpanBeat atomically mints and appends the next span beat: one past the newest
 	// well-formed span entry's beat, or beat one when the chain holds none, with count set to how
 	// many entries were appended after that span entry (for beat one, every prior entry). The read
-	// and the append are one serialized step, since a duplicate or skipped beat fails every bundle
-	// built over the chain. It returns the appended entry.
+	// and the append are one serialized step, since a duplicate or missing beat number fails every
+	// bundle built over the chain. It returns the appended entry.
+	//
+	// A time that does not strictly advance past the newest beat is refused with ErrClockBehind and
+	// nothing is written. A beat's time is a signed claim about when the population was counted, so
+	// recording a time the clock did not read would put a false statement in an attestation. A
+	// backward clock therefore skips the beat, and the longer interval is reported by a verifier as
+	// a gap with its bounds and duration. The beat number is not consumed, so the next accepted
+	// beat takes it and the numbering stays contiguous.
 	AppendSpanBeat(ctx context.Context, at time.Time, cadenceS int) (*Entry, error)
 	// SpanBeats returns the newest limit span beat entries, those for which IsSpanMarker is true,
 	// answered oldest first so a watcher reads the present end of the stream in chain order. The

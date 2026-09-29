@@ -2,9 +2,11 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kordloom/switchtender/internal/user"
 )
@@ -197,5 +199,33 @@ func TestTokenNewUserUnknownRefused(t *testing.T) {
 	}
 	if len(list) != 0 {
 		t.Fatalf("tokens after refused mint = %d, want 0", len(list))
+	}
+}
+
+// TestTokenNewRefusesNegativeTTL verifies a mistyped lifetime is refused before anything is minted.
+// Only a positive --ttl sets an expiry, so a negative value silently produced the opposite of what
+// was asked for: an operator handing out what they believed was a short-lived credential handed out
+// one that never expires.
+func TestTokenNewRefusesNegativeTTL(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "tokens.db")
+	tokenDB, tokenName, tokenTTL = db, "oops", -time.Hour
+	t.Cleanup(func() { tokenDB, tokenName, tokenTTL = "", "", 0 })
+
+	err := runTokenNew(testCommand(), nil)
+	if !errors.Is(err, ErrUsage) {
+		t.Fatalf("runTokenNew() error = %v, want it to wrap ErrUsage", err)
+	}
+
+	tokens, _, closeStores, openErr := openTokens(db)
+	if openErr != nil {
+		t.Fatalf("openTokens() error = %v", openErr)
+	}
+	defer func() { _ = closeStores() }()
+	list, listErr := tokens.List(context.Background())
+	if listErr != nil {
+		t.Fatalf("List() error = %v", listErr)
+	}
+	if len(list) != 0 {
+		t.Errorf("tokens after a refused mint = %d, want 0: the refusal must happen before minting", len(list))
 	}
 }

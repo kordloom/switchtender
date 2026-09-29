@@ -271,6 +271,9 @@ CREATE TABLE IF NOT EXISTS audit_anchors (
 CREATE INDEX IF NOT EXISTS idx_audit_anchor_seq ON audit_anchors(seq);
 CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_entries(at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_seq ON audit_entries(seq);
+-- Span beats are a narrow slice of the chain selected by actor and method and ordered by seq.
+-- Without this the unauthenticated beat feed and every beat append walked the whole entries table.
+CREATE INDEX IF NOT EXISTS idx_audit_span ON audit_entries(actor, method, seq);
 CREATE TABLE IF NOT EXISTS policies (
 	id               TEXT PRIMARY KEY,
 	name             TEXT NOT NULL DEFAULT '',
@@ -348,6 +351,12 @@ CREATE INDEX IF NOT EXISTS idx_runs_pending_claim ON runs(queue, created_at, id)
 	WHERE status='pending' AND claimed_by='' AND kind='';
 CREATE INDEX IF NOT EXISTS idx_runs_status_parent ON runs(status, parent_id);
 CREATE INDEX IF NOT EXISTS idx_runs_leased ON runs(claimed_at) WHERE claimed_by<>'';
+-- The runs view search takes actor:, source:, and from: as equality filters and pages the result
+-- newest first, so each index carries the page ordering behind the filtered column. Without them
+-- every fielded search walked the whole runs table. They come after the column migrations above,
+-- since a database created before those columns cannot be indexed on them.
+CREATE INDEX IF NOT EXISTS idx_runs_actor ON runs(actor, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_source ON runs(source, source_id, created_at DESC, id DESC);
 `
 
 // store is a run.Store backed by a PostgreSQL database.

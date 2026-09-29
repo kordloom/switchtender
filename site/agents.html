@@ -3,14 +3,14 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>AI agent change governance · SwitchTender</title>
+	<title>AI agent change governance | SwitchTender</title>
 	<meta name="description" content="Give an AI agent one operator-bound token, hold every run at a human approval gate, and record each change in a fail-closed hash chain before it executes. Signed bundles verify offline, so what your agents did is evidence, not testimony.">
 	<link rel="canonical" href="https://switchtender.com/agents">
-	<meta property="og:title" content="AI agent change governance · SwitchTender">
+	<meta property="og:title" content="AI agent change governance | SwitchTender">
 	<meta property="og:description" content="Your agents are changing production. Prove exactly what they did: one scoped token per agent, a human approval gate on every run, and a sealed audit chain an auditor verifies offline.">
 	<meta property="og:type" content="website">
 	<meta property="og:url" content="https://switchtender.com/agents">
-	<meta property="og:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=8">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
 	<meta name="twitter:card" content="summary_large_image">
 	<link rel="icon" href="/favicon.ico" sizes="any">
 	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
@@ -18,7 +18,7 @@
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-	<link rel="stylesheet" href="/styles.css?v=22">
+	<link rel="stylesheet" href="/styles.css?v=26">
 </head>
 <body>
 	<div class="bg-mesh" aria-hidden="true"></div>
@@ -47,7 +47,7 @@
 		<section class="wrap gs-hero reveal">
 			<span class="eyebrow">AI agent change governance</span>
 			<h1>Your agents are changing production.<br><span class="grad">Prove exactly what they did.</span></h1>
-			<p class="lede">Auditors discount logs that cannot prove their own integrity, and they are right to. A normal log is testimony: the operator's word for what happened. A sealed hash chain is evidence: anyone can recompute it, and a single altered byte breaks it. SwitchTender records what an agent changes before the change executes, holds it at a human gate, and signs the trail so a third party can check it without trusting your server.</p>
+			<p class="lede">Auditors discount logs that can't prove their own integrity, and they're right to. A normal log is testimony: the operator's word for what happened. A sealed hash chain is evidence: anyone can recompute it, and a single altered byte breaks it. SwitchTender records what an agent changes before the change executes, holds it at a human gate, and signs the trail so a third party can check it without trusting your server.</p>
 			<div class="hero-cta">
 				<a class="btn big" href="/get-started">Get started</a>
 				<a class="ghost big" href="/docs/concepts#provable-audit">How the proof works</a>
@@ -90,7 +90,7 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>The one-credential architecture</h2>
-				<p>An agent with a pile of credentials has a pile of doors. An agent with one credential has one, and SwitchTender puts a gate on it. <code>switchtender token new --user</code> binds a token to an account, so a token bound to an operator carries the operator role: it can submit runs, but it cannot approve its own work and it cannot change configuration. Add one empty approval policy and every run the agent submits waits for a person. Four commands take you from nothing to an agent whose entire history is evidence.</p>
+				<p>An agent with a pile of credentials has a pile of doors. An agent with one credential has one, and SwitchTender puts a gate on it. <code>switchtender token new --user</code> binds a token to an account, so a token bound to an operator carries the operator role. It can submit runs, but it cannot approve its own work and it cannot change configuration. Add one empty approval policy and every run the agent submits waits for a person. Four commands take you from nothing to an agent whose entire history is evidence.</p>
 			</div>
 			<div class="gs-steps">
 				<ol>
@@ -133,7 +133,7 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>What the chain does not prove</h2>
-				<p>An honest page beats a loud one. The chain proves the record was not altered. It does not prove that every change in your infrastructure went through SwitchTender: a person or a process holding its own SSH key can still change a host behind the controller's back, and no audit system can write down what it never saw. For agents, credential scoping is what closes that gap. An agent that holds only a SwitchTender token has no way around the controller, so for that actor, the recorded history and the actual history are the same thing. The gate is its only door, which is exactly what makes the logbook complete.</p>
+				<p>The chain proves the record was not altered. It does not prove that every change in your infrastructure went through SwitchTender. A person or a process holding its own SSH key can still change a host behind the controller's back, and no audit system can write down what it never saw. For agents, credential scoping is what closes that gap. An agent that holds only a SwitchTender token has no way around the controller, so for that actor, the recorded history and the actual history are the same thing.</p>
 			</div>
 		</section>
 
@@ -158,10 +158,11 @@
 				<a href="/ascender-alternative">vs Ascender</a>
 				<a href="/aap-alternative">vs AAP</a>
 				<a href="/semaphore-alternative">vs Semaphore</a>
+				<a href="/rundeck-alternative">vs Rundeck</a>
 				<a href="/privacy">Privacy</a>
 				<a href="https://github.com/kordloom/switchtender/blob/main/LICENSE">License</a>
 			</nav>
-			<span class="foot-note">Source-available · BSL 1.1 · self-host free</span>
+			<span class="foot-note">Source-available. BSL 1.1. Self-host free.</span>
 		</div>
 	</footer>
 	<script src="/app.js?v=6"></script>

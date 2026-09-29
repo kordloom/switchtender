@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -444,6 +445,63 @@ func TestBuildBundleRefusesAnUnsoundChain(t *testing.T) {
 			}
 			if !test.WantErr && err != nil {
 				t.Errorf("BuildBundle() on an intact chain error = %v", err)
+			}
+		})
+	}
+}
+
+// TestBuildBundleRefusesNonAdvancingSpanBeats covers a chain minted before beat times were clamped,
+// on a machine whose clock stepped backward between two beats.
+//
+// A verifier fails a bundle outright when a beat's time does not strictly advance past the beat
+// before it, where a cadence gap is only reported. A link commits to the time its entry holds, so
+// neither beat of such a pair can be repaired and every bundle covering both fails forever. It is
+// refused at build time for the same reason a nanosecond entry is: a bundle that builds here and
+// fails at the auditor has already been handed over by the time anyone finds out.
+func TestBuildBundleRefusesNonAdvancingSpanBeats(t *testing.T) {
+	t.Parallel()
+	id, err := audit.LoadIdentity(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadIdentity() error = %v", err)
+	}
+	tests := []struct {
+		Name    string
+		Steps   []time.Duration
+		WantErr bool
+	}{{ // Test 0: Beats a minute apart build, so the check is not refusing every beat chain.
+		Name: "advancing", Steps: []time.Duration{0, time.Minute, 2 * time.Minute}, WantErr: false,
+	}, { // Test 1: The clock stepped backward, so the third beat precedes the second.
+		Name: "backward", Steps: []time.Duration{0, 2 * time.Minute, time.Minute}, WantErr: true,
+	}, { // Test 2: Equal times do not advance either, which is what the verifier tests for.
+		Name: "equal", Steps: []time.Duration{0, time.Minute, time.Minute}, WantErr: true,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			base := time.Date(2026, 7, 27, 15, 0, 0, 0, time.UTC)
+			entries := make([]*audit.Entry, 0, len(test.Steps))
+			var prev *audit.Entry
+			for i, step := range test.Steps {
+				e := audit.NewSpanEntry(base.Add(step), int64(i+1), 0, 60)
+				audit.Link(prev, e)
+				entries = append(entries, e)
+				prev = e
+			}
+			// The chain itself is sound; only the beat times are wrong, so the refusal under test is
+			// the one being reached rather than the range check ahead of it.
+			if ok, brokeAt := audit.Verify(entries); !ok {
+				t.Fatalf("the test chain does not verify at %d", brokeAt)
+			}
+			_, err := audit.BuildBundle(entries, id, "v1.0.0", time.Now())
+			if test.WantErr {
+				if !errors.Is(err, audit.ErrExport) {
+					t.Errorf("BuildBundle() error = %v, want ErrExport: a bundle whose beats do not "+
+						"advance is rejected by every verifier and cannot be repaired", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("BuildBundle() on advancing beats error = %v", err)
 			}
 		})
 	}

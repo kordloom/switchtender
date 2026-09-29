@@ -2,11 +2,18 @@
 // watcher can tell a quiet chain from one whose tail was removed. Each beat numbers itself one
 // past the last and counts the entries appended since, and a bundle over a chain with a duplicate
 // or missing beat fails verification, which is what makes the silence itself attestable.
+//
+// A beat whose time does not advance past the last one is not written. A beat's time is a signed
+// claim, so recording a time the clock did not read would be a false statement in an attestation.
+// The emitter logs the refusal and keeps beating, and the record carries a longer unattested window
+// that a verifier reports as a gap.
 package spanbeat
 
 import (
 	"context"
+	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -14,11 +21,49 @@ import (
 	"github.com/kordloom/switchtender/internal/audit"
 )
 
+// Stats is a reading of the process-wide beat counters.
+type Stats struct {
+	// Last is when this process last appended a beat, zero when it has appended none.
+	Last time.Time
+	// Appended is how many beats this process has written since start.
+	Appended int64
+	// Suppressed is how many beats were refused because the clock had not passed the last beat.
+	// Each one is an unattested window that the record will show as a gap.
+	Suppressed int64
+}
+
+// Beat counters live in the package rather than on an Emitter because the metrics endpoint is built
+// from the run store and cannot reach the emitter the serve command created. One process runs one
+// emitter, so a package counter and an emitter field would hold the same number either way.
+var (
+	// appended counts beats written since this process started.
+	appended atomic.Int64
+	// suppressed counts beats refused because the clock had not passed the last beat.
+	suppressed atomic.Int64
+	// lastBeatUnixNano holds when the last beat was written, zero when none has been.
+	lastBeatUnixNano atomic.Int64
+)
+
+// ReadStats returns the beat counters for this process, for the metrics endpoint. Going quiet is
+// only a bounded gap in the record, so it has to be loud here: alert on suppressed beats rising or
+// on the age of the last beat passing the cadence.
+func ReadStats() Stats {
+	var last time.Time
+	if ns := lastBeatUnixNano.Load(); ns != 0 {
+		last = time.Unix(0, ns).UTC()
+	}
+	return Stats{Last: last, Appended: appended.Load(), Suppressed: suppressed.Load()}
+}
+
 // AnchorFunc fixes a freshly appended beat entry somewhere outside this install. The wiring
 // decides what an anchor is, so this package stays free of network code.
 type AnchorFunc func(ctx context.Context, e *audit.Entry) error
 
-// Emitter periodically appends a span beat to the audit chain.
+// Emitter periodically appends a span beat to the audit chain. A tick whose clock has not passed
+// the last beat writes nothing and logs a warning, since a beat's time is a signed claim and a time
+// the clock did not read would be a false statement in an attestation. The skipped beat leaves a
+// gap in the record, which a verifier reports rather than fails, and the cadence resumes on its own
+// once real time passes the last beat.
 type Emitter struct {
 	// store is the audit store the beats are appended to.
 	store audit.Store
@@ -89,12 +134,31 @@ func (e *Emitter) Start() {
 // beat appends one span beat, then anchors it when an anchor function is configured and the store
 // keeps anchors. A failure of either is logged and the loop carries on: a missed beat shows up in
 // the feed as a widening gap, which is exactly the signal the beats exist to give.
+//
+// A clock that has not passed the last beat is not a failure to retry differently. The store
+// refuses the beat, because a beat's time is a signed claim and writing a time the clock did not
+// read would be a false statement in an attestation. The refusal is logged at warning level, the
+// loop keeps its cadence, and the beat lands on a later tick once real time passes the last beat.
+// What the record shows in the meantime is a gap, which a verifier reports with its bounds and
+// duration rather than failing.
 func (e *Emitter) beat(now time.Time) {
 	entry, err := e.store.AppendSpanBeat(e.ctx, now, int(e.cadence/time.Second))
 	if err != nil {
+		var behind *audit.ClockBehindError
+		if errors.As(err, &behind) {
+			suppressed.Add(1)
+			e.log.Warn("spanbeat: this clock has not passed the last beat, so no beat was written "+
+				"and the record will show an unattested window until it does. Fix the clock, and "+
+				"prefer NTP slewing over stepping",
+				zap.Int64("beat", behind.Beat), zap.Duration("behind", behind.Behind()),
+				zap.Time("last_beat", behind.Prev), zap.Time("clock", behind.At))
+			return
+		}
 		e.log.Error("spanbeat: append beat: " + err.Error())
 		return
 	}
+	appended.Add(1)
+	lastBeatUnixNano.Store(entry.At.UnixNano())
 	beat, _, _, _ := audit.ParseSpanPath(entry.Path)
 	e.log.Debug("spanbeat: beat appended", zap.Int64("beat", beat), zap.Int64("seq", entry.Seq))
 	if e.anchor == nil {

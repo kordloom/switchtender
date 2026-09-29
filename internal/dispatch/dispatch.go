@@ -848,9 +848,23 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 	// since rejecting a split cancels the shards held with it. Excluding every canceled shard went
 	// too far the other way: the orphan sweep also cancels shards when a control node dies, and
 	// retrying those is the whole recovery path after a crash. The orphan reason is what separates
-	// the two, and it is already recorded on the shard.
+	// the two on a healthy parent, and it is already recorded on a shard the sweep canceled before it
+	// started.
+	//
+	// A shard that was still running when the coordinator died is different: the sweep only sets its
+	// cancel flag, and its own executor finalizes it canceled with no error, indistinguishable by
+	// error text from a user cancel. When the parent itself is interrupted the whole split crashed,
+	// so every shard that did not succeed is an orphan of that crash and must be retried, including
+	// the mid-flight ones most likely to have partially applied. A user cancel leaves the parent
+	// failed or canceled, not interrupted, so this does not sweep up a shard a person stopped on a
+	// healthy run.
+	parentInterrupted := parent.Status == run.StatusInterrupted
 	for _, s := range shards {
 		switch {
+		case s.Status == run.StatusSucceeded:
+			// A shard that already finished green is never rerun.
+		case parentInterrupted:
+			failed = append(failed, s)
 		case s.Status == run.StatusFailed, s.Status == run.StatusInterrupted:
 			failed = append(failed, s)
 		case s.Status == run.StatusCanceled && s.Error == run.OrphanError():
@@ -1617,9 +1631,13 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	case cerr != nil:
 		d.log.Error("dispatch: could not check for a cancel before starting: "+cerr.Error(),
 			zap.String("run_id", r.ID))
+		// The run is left non-terminal for the sweep to reclaim and mark interrupted, then retry.
+		// So the tailer is stopped but the run is not closed to viewers: CloseRun signals that a run
+		// finished producing output, which would stop a co-located live viewer from watching a run
+		// that is about to run again. Closing the socket without that end signal, the way the stream
+		// handler's draining early-return does, lets the viewer reconnect and resume.
 		close(stop)
 		<-tailed
-		d.publisher.CloseRun(r.ID)
 		return run.StatusRunning
 	case cur.CancelRequested:
 		close(stop)
@@ -1972,9 +1990,11 @@ func (d *Dispatcher) tailEvents(id, parent, path string, stop <-chan struct{}, m
 	}
 }
 
-// flushEventLines parses a batch of event lines, redacts known secrets from them, stores them in
-// one write, and publishes them, echoing child events to the parent topic when the run belongs to
-// a split or pipeline. A single damaged line is logged and skipped so the rest of the batch lands.
+// flushEventLines parses a batch of event lines, redacts known secrets from them, appends them to
+// the run's own event log in one write, and publishes them to the run's topic. When the run is a
+// child of a split or pipeline, it also publishes them to the parent's topic, where the parent's
+// stream forwards them live, since a coordinator keeps no event log of its own to re-read. A single
+// damaged line is logged and skipped so the rest of the batch lands.
 func (d *Dispatcher) flushEventLines(id, parent string, lines [][]byte, mask *masker) {
 	var events []event.Event
 	for _, raw := range lines {
