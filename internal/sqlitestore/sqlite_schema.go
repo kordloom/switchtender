@@ -273,6 +273,7 @@ CREATE TABLE IF NOT EXISTS policies (
 	tool             TEXT NOT NULL DEFAULT '',
 	command_contains TEXT NOT NULL DEFAULT '',
 	inventory_id     TEXT NOT NULL DEFAULT '',
+	queue            TEXT NOT NULL DEFAULT '',
 	exclude_dry_run  INTEGER NOT NULL DEFAULT 0,
 	max_destroy      INTEGER NOT NULL DEFAULT -1,
 	actor_kind       TEXT NOT NULL DEFAULT '',
@@ -771,7 +772,7 @@ func migratePolicies(db *sql.DB) error {
 		!strings.Contains(err.Error(), "duplicate column name") {
 		return fmt.Errorf("migrate policies: %w", err)
 	}
-	for _, column := range []string{"actor_kind", "actor", "min_risk", "effect"} {
+	for _, column := range []string{"actor_kind", "actor", "min_risk", "effect", "queue"} {
 		if _, err := db.Exec(
 			"ALTER TABLE policies ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''"); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -106,5 +107,83 @@ func TestTheRunListAgreesWithFetchingARunByID(t *testing.T) {
 	if strings.Contains(body, secret) {
 		t.Errorf("the list returns the run's extra vars, which carry the values a survey filled in:\n%s",
 			body)
+	}
+}
+
+// TestListRunsCursorCountsTheStorePage pins that pagination advances by what the store read, not
+// by what the caller was allowed to see.
+//
+// The read filter thins the page after the store returns it. A caller advancing its offset by the
+// visible rows re-read the refused ones on the next page, so Load more repeated rows for every
+// strict-grants reader whose page had a hole in it.
+func TestListRunsCursorCountsTheStorePage(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	runs := run.NewMemStore()
+	users := user.NewMemStore()
+	grants := grant.NewMemStore()
+	orgs := org.NewMemStore()
+	projects := project.NewMemStore()
+	for _, p := range []*project.Project{
+		{ID: "proj_a", Name: "a", RepoURL: "https://example.com/a.git"},
+		{ID: "proj_b", Name: "b", RepoURL: "https://example.com/b.git"},
+	} {
+		if err := projects.Save(ctx, p); err != nil {
+			t.Fatalf("Save() project error = %v", err)
+		}
+	}
+	base := time.Date(2026, 8, 30, 10, 0, 0, 0, time.UTC)
+	for i := 0; i < 4; i++ {
+		proj := "proj_a"
+		if i%2 == 1 {
+			proj = "proj_b"
+		}
+		if err := runs.Save(ctx, &run.Run{
+			ID: "run_cursor_" + string(rune('0'+i)), Playbook: "p.yml", ProjectID: proj,
+			Status: run.StatusSucceeded, CreatedAt: base.Add(time.Duration(i) * time.Minute),
+		}); err != nil {
+			t.Fatalf("Save() run error = %v", err)
+		}
+	}
+	u, err := user.New("pager", "pw", user.RoleOperator)
+	if err != nil {
+		t.Fatalf("user.New() error = %v", err)
+	}
+	if err := users.Save(ctx, u); err != nil {
+		t.Fatalf("Save() user error = %v", err)
+	}
+	if err := grants.Save(ctx, &grant.Grant{
+		ID: "grant_a", Subject: u.ID, Object: "proj_a", Access: grant.AccessRead,
+		CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("Save() grant error = %v", err)
+	}
+	handler := New(runs, &fakeSubmitter{run: &run.Run{ID: "run_x"}}, zap.NewNop(),
+		WithGrants(grants, true), WithOrgs(orgs), WithProjects(projects), WithUsers(users)).Handler()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/runs?limit=2&offset=0", nil)
+	req = req.WithContext(context.WithValue(req.Context(), actorKey{},
+		Actor{UserID: u.ID, Role: user.RoleOperator, Name: "pager"}))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Runs []struct {
+			ID string `json:"id"`
+		} `json:"runs"`
+		HasMore    bool `json:"has_more"`
+		NextOffset int  `json:"next_offset"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.NextOffset != 2 {
+		t.Errorf("next_offset = %d, want 2: the cursor counts the store's page of two, not the %d "+
+			"row(s) this caller may see", body.NextOffset, len(body.Runs))
+	}
+	if !body.HasMore {
+		t.Error("has_more = false with two more rows in the store")
 	}
 }

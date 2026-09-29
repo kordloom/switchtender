@@ -521,12 +521,14 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /v1/credential-types/{id}", deleteCredTypeHandler(s.credTypes, s.log))
 	mux.Handle("POST /v1/credentials", createCredentialHandler(s.credentials, s.credTypes, s.sealer, authz, s.log))
 	mux.Handle("PUT /v1/credentials/{id}", updateCredentialHandler(s.credentials, s.sealer, authz, s.log))
-	mux.Handle("GET /v1/credentials", listCredentialsHandler(s.credentials, authz, s.log))
-	// refs lets a credential or project delete refuse to orphan an object that still uses it.
+	// refs lets a credential or project delete refuse to orphan an object that still uses it, and
+	// gives the credential list the same reading so its Used by column cannot disagree.
 	refs := &refChecker{
 		templates: s.templates, inventories: s.inventories,
 		projects: s.projects, invSources: s.invSources, schedules: s.schedules,
+		policies: s.policies,
 	}
+	mux.Handle("GET /v1/credentials", listCredentialsHandler(s.credentials, refs, authz, s.log))
 	mux.Handle("DELETE /v1/credentials/{id}", deleteCredentialHandler(s.credentials, refs, s.log))
 	mux.Handle("POST /v1/projects", createProjectHandler(s.projects, authz, s.log))
 	mux.Handle("PUT /v1/projects/{id}", updateProjectHandler(s.projects, authz, s.log))
@@ -537,7 +539,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/inventories", createInventoryHandler(s.inventories, authz, s.sealer, s.log))
 	mux.Handle("PUT /v1/inventories/{id}", updateInventoryHandler(s.inventories, authz, s.sealer, s.log))
 	mux.Handle("GET /v1/inventories", listInventoriesHandler(s.inventories, authz, s.log))
-	mux.Handle("DELETE /v1/inventories/{id}", deleteInventoryHandler(s.inventories, s.log))
+	mux.Handle("DELETE /v1/inventories/{id}", deleteInventoryHandler(s.inventories, refs, s.log))
 	mux.Handle("POST /v1/policies", createPolicyHandler(s.policies, s.log))
 	mux.Handle("GET /v1/policies", listPoliciesHandler(s.policies, s.log))
 	mux.Handle("PUT /v1/policies/{id}", updatePolicyHandler(s.policies, s.log))
@@ -556,7 +558,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/templates", createTemplateHandler(s.templates, authz, s.log))
 	mux.Handle("PUT /v1/templates/{id}", updateTemplateHandler(s.templates, authz, s.log))
 	mux.Handle("GET /v1/templates", listTemplatesHandler(s.templates, authz, s.log))
-	mux.Handle("DELETE /v1/templates/{id}", deleteTemplateHandler(s.templates, s.log))
+	mux.Handle("DELETE /v1/templates/{id}", deleteTemplateHandler(s.templates, refs, s.log))
 	mux.Handle("POST /v1/templates/{id}/launch", launchTemplateHandler(s.templates, s.submitter, authz, s.log))
 	mux.Handle("POST /v1/teams", createTeamHandler(s.teams, s.log))
 	mux.Handle("GET /v1/teams", listTeamsHandler(s.teams, s.log))

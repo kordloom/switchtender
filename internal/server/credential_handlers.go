@@ -105,6 +105,9 @@ type credentialView struct {
 	// NeedsSecret reports that the credential has no sealed secret yet, as imported credential shells
 	// do until their secret is set.
 	NeedsSecret bool `json:"needs_secret"`
+	// UsedBy names the configuration objects that reference this credential, keyed by kind, from the
+	// same reading the delete guard uses. Absent when nothing references it.
+	UsedBy map[string][]string `json:"used_by,omitempty"`
 }
 
 // createCredentialHandler seals and stores a new credential.
@@ -463,7 +466,7 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 }
 
 // listCredentialsHandler returns all credentials without secret material.
-func listCredentialsHandler(store credential.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+func listCredentialsHandler(store credential.Store, refs *refChecker, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "credentials not enabled")
@@ -483,9 +486,23 @@ func listCredentialsHandler(store credential.Store, authz *authorizer, log *zap.
 			respondError(w, log, http.StatusInternalServerError, "could not list credentials")
 			return
 		}
+		// The same reading the delete guard uses, so the column and the guard cannot disagree. A
+		// failed lookup leaves the field absent rather than asserting emptiness.
+		var refMap map[string]usedBy
+		if refs != nil {
+			if m, err := refs.allCredentialRefs(r.Context()); err == nil {
+				refMap = m
+			} else {
+				log.Error("server: credential references: " + err.Error())
+			}
+		}
 		views := make([]credentialView, 0, len(visible))
 		for _, c := range visible {
-			views = append(views, credentialView{Credential: c, NeedsSecret: c.Secret == ""})
+			v := credentialView{Credential: c, NeedsSecret: c.Secret == ""}
+			if u, ok := refMap[c.ID]; ok {
+				v.UsedBy = u
+			}
+			views = append(views, v)
 		}
 		respondJSON(w, log, http.StatusOK,
 			listCredentialsResponse{Credentials: views, Count: len(views)}, wantsPretty(r))

@@ -533,10 +533,14 @@ func Render(in *Input) ([]byte, error) {
 // is the position an anchor has to reach to cover the creation.
 func entryRole(e *audit.Entry) string {
 	switch {
-	case strings.HasSuffix(e.Path, "/approve"):
+	case e.Method == audit.MethodDecision && strings.Contains(e.Path, "/decision/"):
+		// The committed decision, not the HTTP attempt: an attempt is recorded whether or not the
+		// separation gate let it take, so labeling attempts credited refused self-approvals to the
+		// requester and let a failed re-approve overwrite the true approver's name.
+		if strings.HasSuffix(e.Path, "/rejected") {
+			return "Rejected"
+		}
 		return "Approved"
-	case strings.HasSuffix(e.Path, "/reject"):
-		return "Rejected"
 	case strings.HasSuffix(e.Path, "/cancel"):
 		return "Canceled"
 	case strings.HasSuffix(e.Path, "/retry"):

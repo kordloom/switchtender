@@ -166,7 +166,8 @@ func ProposeApplyFor(ctx context.Context, store run.Store, policies []*policy.Po
 	if p := policy.Requiring(policies, proposal); p != nil {
 		proposal.Status = run.StatusPendingApproval
 		proposal.HeldByPolicy = p.Label()
-		proposal.RequireDistinctApprover = p.RequireDistinctApprover
+		proposal.RequireDistinctApprover = proposal.RequireDistinctApprover ||
+			policy.RequireDistinct(policies, proposal)
 	}
 
 	err := store.Save(ctx, proposal)

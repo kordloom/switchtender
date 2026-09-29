@@ -270,19 +270,26 @@ function renderVerifyVerdict(badge, r) {
 // bundle anyone can verify offline with an open verifier.
 function wireAudit() {
 	const badge = document.getElementById("audit-badge");
+	const runVerify = async () => {
+		badge.hidden = false;
+		badge.className = "chip none";
+		badge.textContent = "Verifying...";
+		try {
+			renderVerifyVerdict(badge, await getJSON("/audit/verify"));
+		} catch (err) {
+			badge.className = "chip failed";
+			badge.textContent = "Verify failed: " + err.message;
+		}
+	};
 	const verify = document.getElementById("audit-verify");
 	if (verify) {
-		verify.addEventListener("click", async () => {
-			badge.hidden = false;
-			badge.className = "chip none";
-			badge.textContent = "Verifying...";
-			try {
-				renderVerifyVerdict(badge, await getJSON("/audit/verify"));
-			} catch (err) {
-				badge.className = "chip failed";
-				badge.textContent = "Verify failed: " + err.message;
-			}
-		});
+		verify.addEventListener("click", runVerify);
+	}
+	// The chain verifies itself the moment the page opens. Tamper evidence shown only after a
+	// button press read as a log that merely claims integrity; the page's whole point is that the
+	// claim is checked, so the verdict leads instead of waiting to be asked for.
+	if (badge) {
+		runVerify();
 	}
 	const reg = document.getElementById("audit-register");
 	if (reg) {

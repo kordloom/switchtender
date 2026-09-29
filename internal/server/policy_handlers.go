@@ -21,6 +21,8 @@ type createPolicyRequest struct {
 	CommandContains string `json:"command_contains,omitempty"`
 	// InventoryID matches a run targeting this stored inventory, empty for any.
 	InventoryID string `json:"inventory_id,omitempty"`
+	// Queue matches a run routed to this worker queue, empty for any.
+	Queue string `json:"queue,omitempty"`
 	// ExcludeDryRun leaves dry-run runs unmatched.
 	ExcludeDryRun bool `json:"exclude_dry_run,omitempty"`
 	// MaxDestroy holds a matched terraform or opentofu run for approval when its plan would destroy
@@ -78,7 +80,7 @@ func createPolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 		}
 		p := &policy.Policy{
 			ID: policy.NewID(), Name: req.Name, Tool: req.Tool,
-			CommandContains: req.CommandContains, InventoryID: req.InventoryID,
+			CommandContains: req.CommandContains, InventoryID: req.InventoryID, Queue: req.Queue,
 			ExcludeDryRun: req.ExcludeDryRun, MaxDestroy: resolveMaxDestroy(req.MaxDestroy),
 			ActorKind: req.ActorKind, Actor: req.Actor, MinRisk: req.MinRisk, Effect: req.Effect,
 			RequireDistinctApprover: req.RequireDistinctApprover,
@@ -132,7 +134,7 @@ func updatePolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 		}
 		p := &policy.Policy{
 			ID: id, Name: req.Name, Tool: req.Tool,
-			CommandContains: req.CommandContains, InventoryID: req.InventoryID,
+			CommandContains: req.CommandContains, InventoryID: req.InventoryID, Queue: req.Queue,
 			ExcludeDryRun: req.ExcludeDryRun, MaxDestroy: resolveMaxDestroy(req.MaxDestroy),
 			ActorKind: req.ActorKind, Actor: req.Actor, MinRisk: req.MinRisk, Effect: req.Effect,
 			RequireDistinctApprover: req.RequireDistinctApprover,

@@ -43,7 +43,17 @@ func AssessRisk(r *Run) Risk {
 	var reasons []string
 	level := RiskLow
 
-	lower := strings.ToLower(r.Command + " " + r.Playbook)
+	// Extra vars are scanned too: a variable is string material a playbook or script splices into
+	// what it executes, so a destructive command riding in -e graded low and slipped past a
+	// min_risk hold while the same text on the command line was caught.
+	var vars strings.Builder
+	for _, v := range r.ExtraVars {
+		if sv, ok := v.(string); ok {
+			vars.WriteByte(' ')
+			vars.WriteString(sv)
+		}
+	}
+	lower := strings.ToLower(r.Command + " " + r.Playbook + vars.String())
 	for _, m := range destructiveMarkers {
 		if strings.Contains(lower, m) {
 			reasons = append(reasons, "destructive command: "+strings.TrimSpace(m))

@@ -107,6 +107,16 @@
 /* A control the read-only demo blocks stays visible, so the page still conveys what the product
    does, but reads as unavailable and stays hoverable so it can explain why. The rule matches on
    the marker rather than the disabled attribute, since rows are built after the read-only pass. */
+/* The proof strip above the run header: the one line that says this run is provable. */
+.chain-callout { display: inline-flex; align-items: center; gap: 7px; margin: 0 0 10px; padding: 6px 12px; border: 1px solid color-mix(in srgb, var(--ok) 45%, var(--border)); background: color-mix(in srgb, var(--ok) 9%, transparent); color: var(--ok); border-radius: 999px; font-size: 12.5px; font-weight: 600; width: fit-content; }
+.chain-callout:hover { text-decoration: none; background: color-mix(in srgb, var(--ok) 16%, transparent); }
+.chain-callout svg { flex: none; }
+
+/* The two artifacts that make a run provable used to be two of nine identical gray buttons, so
+   nothing on the page signaled that this product's runs come with proof. They carry the accent. */
+.button.evidence { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); font-weight: 600; }
+.button.evidence:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+
 body[data-readonly] [data-mutates], body[data-readonly] .button[disabled] {
 	opacity: 0.45;
 	cursor: not-allowed;
@@ -382,9 +392,17 @@ input.tile-filter { width: 240px; max-width: 46vw; padding: 7px 11px 7px 31px; f
    inside its own box instead of clipping the last columns off the page. The table itself keeps
    display:table and width:100%, so it fills the wrapper when the columns fit and grows past it (which
    the wrapper then scrolls) when they do not. */
-.list-scroll { overflow-x: auto; overflow-y: visible; border-radius: var(--radius-lg); }
+.list-scroll { overflow-x: auto; overflow-y: visible; border-radius: var(--radius-lg);
+	/* A table wider than its wrapper used to clip its last columns with nothing saying so, and the
+	   two columns operators scan first, Started and Duration, looked absent. The local-attached
+	   cover rides the content's far right edge: while more columns wait off-screen it is out of
+	   view and the fixed shadow shows; at the end of the scroll it slides over and hides it. */
+	background:
+		linear-gradient(to left, var(--surface) 45%, transparent) right / 44px 100% no-repeat local,
+		linear-gradient(to left, color-mix(in srgb, var(--text) 16%, transparent), transparent)
+			right / 18px 100% no-repeat scroll; }
 table.runs { width: 100%; border-collapse: separate; border-spacing: 0; background-color: var(--surface); background-image: linear-gradient(180deg, var(--card-top), transparent 30%); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow); }
-table.runs th, table.runs td { text-align: left; padding: 10px 16px; border-bottom: 1px solid var(--border-muted); }
+table.runs th, table.runs td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border-muted); }
 /* Faint vertical dividers between columns, the mirror of the row borders. Half the strength of a
    row border so columns read as separated without the grid feeling boxed in. */
 table.runs th:not(:last-child), table.runs td:not(:last-child) { border-right: 1px solid color-mix(in srgb, var(--border-muted) 67%, transparent); }
@@ -394,7 +412,7 @@ table.runs tbody tr { transition: background 0.08s ease; }
 table.runs tbody tr.row-nav, table.runs tbody tr.row-inspect { cursor: pointer; }
 table.runs tbody tr.row-nav:hover, table.runs tbody tr.row-inspect:hover { background: var(--surface-2); }
 table.runs td button + button { margin-left: 8px; }
-table.runs td.mono { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+table.runs td.mono { max-width: 118px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Status badges */
 .badge { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 2px 9px; min-width: 96px; border-radius: 999px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.01em; line-height: 1.6; white-space: nowrap; border: 1px solid transparent; }
@@ -452,7 +470,7 @@ table.runs td.mono { max-width: 380px; overflow: hidden; text-overflow: ellipsis
 .run-header { display: flex; flex-wrap: wrap; gap: 12px 28px; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 18px; }
 .run-header .field { display: flex; flex-direction: column; gap: 3px; }
 .run-header .field .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 600; }
-.run-header .field .value { font-size: 14px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.run-header .field .value { font-size: 14px; font-family: var(--mono); }
 
 /* Panels */
 .panel { background-color: var(--surface); background-image: linear-gradient(180deg, var(--card-top), transparent 46%); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px 20px; margin-bottom: 18px; box-shadow: var(--shadow); }
@@ -551,11 +569,13 @@ table.matrix { border-collapse: separate; border-spacing: 0; }
 table.matrix thead th { position: sticky; top: 0; z-index: 3; background: var(--surface-2); padding: 9px 12px; font-size: 12px; font-weight: 600; white-space: nowrap; text-align: left; color: var(--muted); border-bottom: 1px solid var(--border-muted); }
 table.matrix tbody th a { color: inherit; }
 table.matrix tbody th a:hover { color: var(--accent); text-decoration: none; }
-table.matrix tbody th { position: sticky; left: 0; z-index: 2; background: var(--surface-2); padding: 7px 14px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; white-space: nowrap; text-align: left; border-right: 1px solid var(--border-muted); border-bottom: 1px solid var(--border-muted); }
+table.matrix tbody th { position: sticky; left: 0; z-index: 2; background: var(--surface-2); padding: 7px 14px; font-family: var(--mono); font-size: 12.5px; white-space: nowrap; text-align: left; border-right: 1px solid var(--border-muted); border-bottom: 1px solid var(--border-muted); }
 table.matrix thead th.corner { position: sticky; left: 0; z-index: 4; border-right: 1px solid var(--border-muted); }
 table.matrix td { padding: 3px; text-align: center; }
 .cell { margin: 0 auto; }
-.cell { width: 30px; height: 24px; border-radius: 4px; cursor: pointer; transition: transform 0.08s ease, box-shadow 0.08s ease; }
+.cell { width: 44px; height: 30px; border-radius: 5px; cursor: pointer; transition: transform 0.08s ease, box-shadow 0.08s ease; }
+/* At fleet scale the grid earns its density back so five hundred hosts still fit a screen. */
+table.matrix.dense .cell { width: 30px; height: 24px; border-radius: 4px; }
 .cell.ok { background: var(--ok); }
 .cell.changed { background: var(--changed); }
 .cell.failed { background: var(--failed); }
@@ -581,7 +601,7 @@ table.matrix td { padding: 3px; text-align: center; }
 .tl-bar.changed { background: var(--changed); }
 .tl-bar.failed { background: var(--failed); }
 .tl-bar.skipped { background: var(--skipped); }
-.tl-dur { font-size: 12px; color: var(--muted); text-align: right; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.tl-dur { font-size: 12px; color: var(--muted); text-align: right; font-family: var(--mono); }
 
 /* Buttons */
 .actions { margin-top: 8px; }
@@ -619,7 +639,7 @@ table.matrix td { padding: 3px; text-align: center; }
 .shards { display: flex; flex-direction: column; gap: 8px; }
 .shard-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); transition: border-color 0.08s ease; }
 .shard-row:hover { border-color: var(--accent); text-decoration: none; }
-.shard-label { font-size: 13px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.shard-label { font-size: 13px; font-family: var(--mono); }
 
 /* Drill panel */
 /* Above the sticky topbar (62) and the side rail (70): a drawer whose close button paints under
@@ -633,12 +653,12 @@ table.matrix td { padding: 3px; text-align: center; }
 .drill h3 { margin: 0 0 16px; font-size: 15px; font-weight: 600; padding-right: 24px; }
 .drill .field { margin-bottom: 13px; }
 .drill .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 600; }
-.drill .value { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; word-break: break-word; margin-top: 3px; }
-.drill-pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; margin: 5px 0 0; max-height: 220px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.drill .value { font-family: var(--mono); font-size: 13px; word-break: break-word; margin-top: 3px; }
+.drill-pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; margin: 5px 0 0; max-height: 220px; overflow: auto; font-family: var(--mono); font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
 .drill-note { color: var(--changed); font-size: 12px; margin-top: 10px; }
 
 /* Live log */
-.log { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; max-height: 380px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.5; white-space: pre-wrap; margin: 0; }
+.log { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; max-height: 380px; overflow: auto; font-family: var(--mono); font-size: 12px; line-height: 1.5; white-space: pre-wrap; margin: 0; }
 .live-dot { font-size: 12px; color: var(--ok); display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
 .live-dot::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); animation: pulse 1.4s infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
@@ -1128,6 +1148,9 @@ body[data-theme="dark"] {
 .activity { display: flex; align-items: flex-end; gap: 6px; padding: 4px 2px 0; }
 .activity-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; }
 .activity-bar { display: flex; flex-direction: column-reverse; justify-content: flex-start; width: 100%; max-width: 34px; min-height: 66px; }
+/* The dedicated activity page used to draw the same 66px sparkline as the overview embed over an
+   otherwise blank screen, which read as a placeholder. Only the full page gets the tall columns. */
+body[data-page="activity"] .activity-bar { min-height: 240px; max-width: 60px; }
 .activity-seg { width: 100%; border-radius: 3px; margin-top: 2px; }
 .activity-seg.succeeded { background: var(--ok); }
 .activity-seg.failed { background: var(--failed); }
@@ -1140,7 +1163,7 @@ body[data-theme="dark"] {
 .seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 2px; gap: 2px; }
 .seg-btn { appearance: none; -webkit-appearance: none; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 12px; font-weight: 600; line-height: 1; padding: 5px 10px; border-radius: 999px; cursor: pointer; transition: color .15s var(--ease), background .15s var(--ease); display: inline-flex; align-items: center; justify-content: center; }
 .seg-btn:hover { color: var(--text); }
-.seg-btn.active { background: var(--accent); color: #fff; box-shadow: 0 1px 5px -1px color-mix(in srgb, var(--accent) 55%, transparent); }
+.seg-btn.active { background: var(--accent); color: var(--primary-text); box-shadow: 0 1px 5px -1px color-mix(in srgb, var(--accent) 55%, transparent); }
 .seg-btn.icon { padding: 5px 8px; }
 .seg-btn.icon svg { width: 15px; height: 15px; display: block; }
 .activity-filter { padding: 5px 12px; font-size: 12.5px; width: 120px; border-radius: 999px; transition: width .18s var(--ease); }
@@ -1207,7 +1230,7 @@ a.origin-chip:hover { text-decoration: none; background: var(--accent-soft); col
 .origin-chip.reconcile, .origin-chip.propose { background: color-mix(in srgb, var(--changed) 16%, transparent); color: var(--changed); }
 .origin-actor { margin-left: 7px; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
 table.runs td:has(> .origin-chip) { white-space: nowrap; }
-.label-chip { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 6px; background: var(--surface-3); color: var(--muted); font-family: var(--mono); font-size: 11px; }
+.label-chip { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 6px; background: var(--surface-3); color: var(--muted); font-family: var(--mono); font-size: 11px; max-width: 104px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 .label-chip:hover { text-decoration: none; background: var(--accent-soft); color: var(--accent); }
 .label-wrap .label-chip:first-child { margin-left: 0; }
 
@@ -1407,7 +1430,7 @@ td.col-labels { white-space: nowrap; }
 .label-more:hover { border-style: solid; }
 /* A run's playbook stays on one line, truncated, so every row keeps the same height. The full
    value is on the cell's title and in the export. */
-td.col-playbook .clamp { display: block; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+td.col-playbook .clamp { display: block; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 td.col-playbook .clamp .linkish { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 /* Two label chips sit side by side; the column holds them without pushing the row taller. */
 td.col-labels .label-wrap { flex-wrap: nowrap; }

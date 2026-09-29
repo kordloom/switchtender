@@ -371,8 +371,9 @@ Origin column that links back to the template, schedule, or earlier run.</li>
 <li>Runs carry labels, arbitrary key values such as env=prod or ticket=OPS-123, set at launch and
 clickable in the list to filter by that pair.</li>
 <li>The runs search box accepts fielded terms alongside free text: status:failed, tool:bash,
-source:schedule, actor:alice, host:web01, and label:env=prod, all resolved by the server across
-the whole history rather than the loaded page.</li>
+source:schedule, actor:alice, host:web01, worker:web-01, held_by:&quot;prod freeze&quot;, and
+label:env=prod, all resolved by the server across the whole history rather than the loaded
+page. A value holding spaces is double-quoted.</li>
 <li>Playbook names open the file itself, read only, from the project's cached checkout.</li>
 </ul>
 <h2 id="host-facts">Host facts</h2>
@@ -394,6 +395,7 @@ next database off to the side and swap it in without a gap in service.</li>
 
 		</main>
 	</div>
+	<div class="foot-legal" style="text-align:center;margin:26px auto 34px;font-size:12px;opacity:.75">SwitchTender&trade; is a trademark of KordLoom LLC. Copyright 2026 KordLoom LLC.</div>
 	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
 </body>
 </html>

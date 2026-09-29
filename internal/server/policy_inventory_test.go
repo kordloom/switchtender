@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -144,5 +145,42 @@ func TestInventoryContentSources(t *testing.T) {
 				t.Errorf("%s: response leaked the raw content config: %s", test.Name, rec.Body.String())
 			}
 		})
+	}
+}
+
+// TestPolicyCarriesQueue verifies the queue criterion survives create and update. The stores kept
+// the column while the API dropped the field, so a deny scoped to one queue saved over REST came
+// back matching every queue.
+func TestPolicyCarriesQueue(t *testing.T) {
+	t.Parallel()
+	store := policy.NewMemStore()
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), WithPolicies(store)).Handler()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/policies",
+		strings.NewReader(`{"name":"dmz only","queue":"dmz","effect":"deny"}`)))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create = %d, want 201: %s", rec.Code, rec.Body.String())
+	}
+	var created policy.Policy
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	if created.Queue != "dmz" {
+		t.Fatalf("created queue = %q, want dmz", created.Queue)
+	}
+
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/v1/policies/"+created.ID,
+		strings.NewReader(`{"name":"dmz only","queue":"dmz","effect":"deny"}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	got, err := store.Get(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Queue != "dmz" {
+		t.Errorf("updated queue = %q, want dmz; the rule now matches every queue", got.Queue)
 	}
 }

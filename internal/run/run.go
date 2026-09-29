@@ -773,6 +773,12 @@ func (r *Run) ExecutionOptions() []SubmitOption {
 	if r.Image != "" {
 		opts = append(opts, WithImage(r.Image, r.PullCredentialID))
 	}
+	if r.PinnedCommit != "" {
+		// The pin decides what a run is allowed to execute, so a shard or retry of a pinned run
+		// carries it: without this the parent was pinned to the judged commit while its children
+		// executed whatever the branch had become.
+		opts = append(opts, WithPinnedCommit(r.PinnedCommit))
+	}
 	return opts
 }
 

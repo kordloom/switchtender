@@ -26,6 +26,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("save updates existing", func(t *testing.T) { testSaveUpdate(t, newStore()) })
 	t.Run("list newest first", func(t *testing.T) { testList(t, newStore()) })
 	t.Run("list page and status counts", func(t *testing.T) { testListPage(t, newStore()) })
+	t.Run("list filter by worker and holding rule", func(t *testing.T) { testListWorkerAndHeldBy(t, newStore()) })
 	t.Run("pagination at volume", func(t *testing.T) { testPaginationAtVolume(t, newStore()) })
 	t.Run("log append and read", func(t *testing.T) { testLog(t, newStore()) })
 	t.Run("log after cursor", func(t *testing.T) { testLogAfter(t, newStore()) })

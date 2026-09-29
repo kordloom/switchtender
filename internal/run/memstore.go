@@ -162,6 +162,12 @@ func (m *memStore) ListPage(ctx context.Context, filter ListFilter, limit, offse
 				continue
 			}
 		}
+		if filter.ClaimedBy != "" && r.ClaimedBy != filter.ClaimedBy {
+			continue
+		}
+		if filter.HeldBy != "" && r.HeldByPolicy != filter.HeldBy {
+			continue
+		}
 		if filter.Host != "" && !m.runTouchedHost(r.ID, filter.Host) {
 			continue
 		}

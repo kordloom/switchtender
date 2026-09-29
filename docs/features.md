@@ -115,8 +115,9 @@ What SwitchTender does today.
 - Runs carry labels, arbitrary key values such as env=prod or ticket=OPS-123, set at launch and
   clickable in the list to filter by that pair.
 - The runs search box accepts fielded terms alongside free text: status:failed, tool:bash,
-  source:schedule, actor:alice, host:web01, and label:env=prod, all resolved by the server across
-  the whole history rather than the loaded page.
+  source:schedule, actor:alice, host:web01, worker:web-01, held_by:"prod freeze", and
+  label:env=prod, all resolved by the server across the whole history rather than the loaded
+  page. A value holding spaces is double-quoted.
 - Playbook names open the file itself, read only, from the project's cached checkout.
 
 ## Host facts

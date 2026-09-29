@@ -326,11 +326,23 @@ func restoreRedactedInventoryContent(incoming, stored string) (content, refuse s
 }
 
 // deleteInventoryHandler removes an inventory.
-func deleteInventoryHandler(store inventory.Store, log *zap.Logger) http.HandlerFunc {
+func deleteInventoryHandler(store inventory.Store, refs *refChecker, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "inventories not enabled")
 			return
+		}
+		if refs != nil {
+			used, err := refs.inventoryRefs(r.Context(), r.PathValue("id"))
+			if err != nil {
+				log.Error("server: inventory references: " + err.Error())
+				respondError(w, log, http.StatusInternalServerError, "could not check inventory references")
+				return
+			}
+			if !used.empty() {
+				respondInUse(w, log, "inventory in use", used, wantsPretty(r))
+				return
+			}
 		}
 		err := store.Delete(r.Context(), r.PathValue("id"))
 		if errors.Is(err, inventory.ErrNotFound) {

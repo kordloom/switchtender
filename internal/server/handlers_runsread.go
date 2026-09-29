@@ -21,6 +21,10 @@ type listRunsResponse struct {
 	Summary runSummary `json:"summary"`
 	// HasMore reports whether another page follows this one.
 	HasMore bool `json:"has_more"`
+	// NextOffset is where the next page starts in the store's own ordering. It advances by the
+	// page the store returned, before the read filter thinned it: a strict-grants caller advancing
+	// by the rows it could see re-read the rows it could not, and Load more repeated the page.
+	NextOffset int `json:"next_offset"`
 }
 
 // runSummary is the per-status rollup of all top-level runs, shown as cards above the list.
@@ -33,6 +37,9 @@ type runSummary struct {
 	Failed int `json:"failed"`
 	// Active is how many are running or pending.
 	Active int `json:"active"`
+	// AwaitingApproval is how many are held at the approval gate, the number the overview leads
+	// with: it is the governance story in one figure.
+	AwaitingApproval int `json:"awaiting_approval"`
 }
 
 // summarize folds status counts into the summary the runs view shows.
@@ -47,6 +54,8 @@ func summarize(counts map[run.Status]int) runSummary {
 			s.Failed += n
 		case run.StatusRunning, run.StatusPending:
 			s.Active += n
+		case run.StatusPendingApproval:
+			s.AwaitingApproval += n
 		}
 	}
 	return s
@@ -79,12 +88,40 @@ type stepsResponse struct {
 	Count int `json:"count"`
 }
 
+// fieldedTokens splits a query into terms, keeping a double-quoted value together with the key it
+// belongs to. Splitting on spaces alone made every multi-word value unaddressable: an approval
+// rule is named in prose, so held_by:"prod terraform destroy" fell apart into free text and the
+// deep link from a policy row could never say which rule it meant.
+func fieldedTokens(q string) []string {
+	var tokens []string
+	var cur strings.Builder
+	inQuote := false
+	for _, r := range q {
+		switch {
+		case r == '"':
+			inQuote = !inQuote
+		case r == ' ' && !inQuote:
+			if cur.Len() > 0 {
+				tokens = append(tokens, cur.String())
+				cur.Reset()
+			}
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	if cur.Len() > 0 {
+		tokens = append(tokens, cur.String())
+	}
+	return tokens
+}
+
 // parseFieldedQuery splits a search string into fielded terms and free text. status:, tool:,
-// source:, actor:, and host: fill their filters, label:key=value matches a run label, and
-// everything else stays free text. Explicit query parameters win over fielded terms.
+// source:, actor:, host:, worker:, and held_by: fill their filters, label:key=value matches a run
+// label, and everything else stays free text. A value holding spaces is double-quoted. Explicit
+// query parameters win over fielded terms.
 func parseFieldedQuery(q string, filter *run.ListFilter) {
 	var free []string
-	for _, token := range strings.Fields(q) {
+	for _, token := range fieldedTokens(q) {
 		key, value, ok := strings.Cut(token, ":")
 		if !ok || value == "" {
 			free = append(free, token)
@@ -108,6 +145,13 @@ func parseFieldedQuery(q string, filter *run.ListFilter) {
 			filter.SourceID = value
 		case "host":
 			filter.Host = value
+		case "worker":
+			// The executor that claimed the run, so a worker's row opens the work it did.
+			filter.ClaimedBy = value
+		case "held_by":
+			// The approval rule that held the run. The stored field is historical, so pair it with
+			// status:pending_approval to see only what the rule is holding now.
+			filter.HeldBy = value
 		case "label":
 			if lk, lv, ok := strings.Cut(value, "="); ok && lk != "" {
 				filter.LabelKey, filter.LabelValue = lk, lv
@@ -151,7 +195,8 @@ func listRunsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.H
 		limit = min(limit, maxRunsPage)
 		offset := queryInt(r, "offset")
 		filter := run.ListFilter{
-			Status:      r.URL.Query().Get("status"),
+			// Normalized like the fielded status: term; a mixed-case value silently matched nothing.
+			Status:      strings.ToLower(r.URL.Query().Get("status")),
 			OldestFirst: r.URL.Query().Get("order") == "oldest",
 		}
 		parseFieldedQuery(r.URL.Query().Get("q"), &filter)
@@ -174,6 +219,7 @@ func listRunsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.H
 		// thins it. Computing it from the trimmed page reported no more whenever the filter dropped a
 		// row from a full page, so later readable runs never paged in.
 		storeFullPage := len(runs) == limit
+		nextOffset := offset + len(runs)
 		runs, err = readableRuns(r.Context(), authz, runs)
 		if err != nil {
 			log.Error("server: filter runs: " + err.Error())
@@ -206,10 +252,11 @@ func listRunsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.H
 			summary = summarize(counts)
 		}
 		respondJSON(w, log, http.StatusOK, listRunsResponse{
-			Runs:    maskRuns(runs),
-			Count:   len(runs),
-			Summary: summary,
-			HasMore: storeFullPage,
+			Runs:       maskRuns(runs),
+			Count:      len(runs),
+			Summary:    summary,
+			HasMore:    storeFullPage,
+			NextOffset: nextOffset,
 		}, wantsPretty(r))
 	}
 }

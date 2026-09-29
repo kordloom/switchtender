@@ -3,6 +3,7 @@ package dispatch
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/project"
@@ -110,6 +111,58 @@ func (d *Dispatcher) resolveProject(r *run.Run, spec *roundhouse.Spec) (cleanup 
 		}
 	}
 	return cleanup, nil
+}
+
+// pinHeldRunCommit stamps the commit a held git-backed run is allowed to execute, at the moment it
+// is held.
+//
+// Approval binds the spec digest, but for a run drawn from a git project the spec names a branch,
+// and the branch is a moving pointer: between the approver's yes and the worker's claim, HEAD can
+// advance, so the release executed code nobody judged. The plan gate already pins its proposals;
+// blanket holds did not. Pinning at hold time makes the approver's decision mean the commit that
+// was current when the request was made, and execution already refuses a pin that no longer
+// matches. A sync failure downgrades to an unpinned hold, which is exactly the old behavior, but
+// says so on the run so the approver can see the guarantee is absent rather than assume it.
+func (d *Dispatcher) pinHeldRunCommit(r *run.Run) {
+	if r.Status != run.StatusPendingApproval || r.ProjectID == "" || r.PinnedCommit != "" {
+		return
+	}
+	if d.projects == nil || d.syncer == nil {
+		return
+	}
+	fail := func(err error) {
+		d.log.Warn("dispatch: pin held run commit: " + err.Error())
+		r.Warning = strings.TrimSpace(r.Warning + " The commit could not be pinned when this run " +
+			"was held, so approval releases whatever the branch holds at execution time.")
+	}
+	p, err := d.projects.Get(context.Background(), r.ProjectID)
+	if err != nil {
+		fail(err)
+		return
+	}
+	sshKey := ""
+	if p.CredentialID != "" {
+		if d.credentials == nil || d.sealer == nil {
+			fail(credential.ErrNoKey)
+			return
+		}
+		c, err := d.credentials.Get(context.Background(), p.CredentialID)
+		if err != nil {
+			fail(err)
+			return
+		}
+		if sshKey, err = d.sealer.Open(c.Secret); err != nil {
+			fail(err)
+			return
+		}
+	}
+	wt, err := d.syncer.Sync(p, sshKey)
+	if err != nil {
+		fail(err)
+		return
+	}
+	defer wt.Cleanup()
+	r.PinnedCommit = wt.SHA
 }
 
 // stampCommit records the commit a sync checked out and refuses a run pinned to a different one. The

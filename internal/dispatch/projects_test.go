@@ -349,3 +349,65 @@ func TestResolveProjectRefusesPathsThatEscapeTheCheckout(t *testing.T) {
 		})
 	}
 }
+
+// TestHeldGitRunIsPinnedToTheCommitTheApproverSaw pins the gap between approval and execution.
+//
+// Approval binds the spec digest, but a git-backed spec names a branch, and a branch is a moving
+// pointer: between the approver's yes and the worker's claim, HEAD can advance, so the release
+// executed code nobody judged. The plan gate pinned its proposals; blanket policy holds did not. A
+// held git run now records the commit that was current when it was held, the same field execution
+// already refuses to move past.
+func TestHeldGitRunIsPinnedToTheCommitTheApproverSaw(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := newEscapeRepo(t)
+	cache := t.TempDir()
+	syncer, err := project.NewSyncer(cache)
+	if err != nil {
+		t.Fatalf("NewSyncer() error = %v", err)
+	}
+	projects := project.NewMemStore()
+	p := &project.Project{ID: "proj_pin", Name: "infra", RepoURL: repo, Branch: "main"}
+	if err := projects.Save(ctx, p); err != nil {
+		t.Fatalf("Save(project) error = %v", err)
+	}
+	d := New(run.NewMemStore(), roundhouse.RunnerFunc(
+		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
+			return roundhouse.Result{ExitCode: 0}, nil
+		}), zap.NewNop(), WithProjects(projects, syncer), WithNoJanitor())
+	defer d.Close()
+
+	held, err := d.Submit(ctx, escapeRepoPlaybook, "",
+		run.WithProject("proj_pin"), run.WithRequireApproval(true))
+	if err != nil {
+		t.Fatalf("Submit(held) error = %v", err)
+	}
+	if held.Status != run.StatusPendingApproval {
+		t.Fatalf("status = %q, want pending_approval", held.Status)
+	}
+	if held.PinnedCommit == "" {
+		t.Fatal("a held git run carries no pinned commit: approval would release whatever the " +
+			"branch holds at execution time, which is the code nobody judged")
+	}
+	if held.Warning != "" {
+		t.Errorf("a successful pin left a warning: %q", held.Warning)
+	}
+
+	// The pin travels to everything derived from the run.
+	child := &run.Run{ID: "run_child"}
+	inheritExecution(child, held)
+	if child.PinnedCommit != held.PinnedCommit {
+		t.Errorf("child pin = %q, want the parent's %q: a shard of a pinned run must execute the "+
+			"judged commit", child.PinnedCommit, held.PinnedCommit)
+	}
+
+	// A run that is not held syncs and executes normally, unpinned.
+	free, err := d.Submit(ctx, escapeRepoPlaybook, "", run.WithProject("proj_pin"))
+	if err != nil {
+		t.Fatalf("Submit(free) error = %v", err)
+	}
+	if free.PinnedCommit != "" {
+		t.Errorf("an unheld run was pinned to %q; ordinary runs float on the branch by design",
+			free.PinnedCommit)
+	}
+}

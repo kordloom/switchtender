@@ -101,6 +101,7 @@ async function loadPolicies() {
 			tr.appendChild(toolCell);
 			tr.appendChild(p.command_contains ? td(p.command_contains, "mono") : anyCell());
 			tr.appendChild(p.inventory_id ? td(invByID[p.inventory_id] || p.inventory_id) : anyCell());
+			tr.appendChild(p.queue ? td(p.queue, "mono") : anyCell());
 			const destroyCell = document.createElement("td");
 			if (p.max_destroy !== undefined && p.max_destroy !== null && p.max_destroy >= 0) {
 				const span = document.createElement("span");
@@ -147,9 +148,12 @@ async function loadPolicies() {
 			const ruleHeld = heldByRule(held, p);
 			if (ruleHeld > 0) {
 				const link = document.createElement("a");
-				link.href = "/ui/runs?q=" + encodeURIComponent("status:pending_approval");
+				// The link names the rule, quoted since rules are named in prose, so the count and
+				// its destination finally agree: it used to open every held run on the install.
+				link.href = "/ui/runs?q=" +
+					encodeURIComponent('held_by:"' + (p.name || p.id) + '" status:pending_approval');
 				link.textContent = ruleHeld === 1 ? "1 run waiting" : ruleHeld + " runs waiting";
-				link.dataset.tip = "Click to see the runs held for approval";
+				link.dataset.tip = "Click to see the runs this rule is holding";
 				holding.appendChild(link);
 			} else {
 				holding.textContent = "nothing waiting";

@@ -351,11 +351,23 @@ func listTemplatesHandler(store template.Store, authz *authorizer, log *zap.Logg
 }
 
 // deleteTemplateHandler removes a template.
-func deleteTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFunc {
+func deleteTemplateHandler(store template.Store, refs *refChecker, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "templates not enabled")
 			return
+		}
+		if refs != nil {
+			used, err := refs.templateRefs(r.Context(), r.PathValue("id"))
+			if err != nil {
+				log.Error("server: template references: " + err.Error())
+				respondError(w, log, http.StatusInternalServerError, "could not check template references")
+				return
+			}
+			if !used.empty() {
+				respondInUse(w, log, "template in use", used, wantsPretty(r))
+				return
+			}
 		}
 		err := store.Delete(r.Context(), r.PathValue("id"))
 		if errors.Is(err, template.ErrNotFound) {

@@ -119,6 +119,42 @@ func TestRequires(t *testing.T) {
 	}
 }
 
+// TestRequireDistinctIsOrderIndependent pins that separation of duties composes by OR across every
+// matching rule.
+//
+// The flag used to be copied from whichever matching rule came first, so a stricter rule later in
+// the list silently did nothing: two admins could reorder policies and lower a control without
+// either of them touching the control itself. If any rule covering the run demands a second
+// person, the run demands a second person, in either order, and a deny rule's flag stays out of it.
+func TestRequireDistinctIsOrderIndependent(t *testing.T) {
+	t.Parallel()
+	lax := &policy.Policy{InventoryID: "inv_prod", MaxDestroy: policy.DisabledMaxDestroy}
+	strict := &policy.Policy{
+		Tool: "terraform", MaxDestroy: policy.DisabledMaxDestroy, RequireDistinctApprover: true,
+	}
+	r := &run.Run{Tool: "terraform", InventoryID: "inv_prod"}
+
+	if !policy.RequireDistinct([]*policy.Policy{lax, strict}, r) {
+		t.Error("the stricter rule listed second was dropped, which lowers separation of duties by ordering")
+	}
+	if !policy.RequireDistinct([]*policy.Policy{strict, lax}, r) {
+		t.Error("the stricter rule listed first should hold too")
+	}
+	if policy.RequireDistinct([]*policy.Policy{lax}, r) {
+		t.Error("no matching rule demands a second person, so none is required")
+	}
+	// A plan-content rule's demand counts: the plan gate holds under the same requirement.
+	plan := &policy.Policy{Tool: "terraform", MaxDestroy: 2, RequireDistinctApprover: true}
+	if !policy.RequireDistinct([]*policy.Policy{lax, plan}, r) {
+		t.Error("a plan-content rule demanding a second person was ignored")
+	}
+	// A non-matching strict rule stays out of it.
+	other := &policy.Policy{Tool: "bash", MaxDestroy: policy.DisabledMaxDestroy, RequireDistinctApprover: true}
+	if policy.RequireDistinct([]*policy.Policy{lax, other}, r) {
+		t.Error("a rule that does not cover this run must not add requirements to it")
+	}
+}
+
 // TestPlanGated covers the plan gate scope check: a plan-content policy (MaxDestroy >= 0) matching a
 // run gates it, a blanket policy (MaxDestroy < 0) does not, and a plan-content policy that does not
 // match does not gate.

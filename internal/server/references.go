@@ -9,6 +9,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
+	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/template"
@@ -42,6 +43,8 @@ type refChecker struct {
 	schedules schedule.Store
 	// invSources are searched for credential and project references.
 	invSources invsource.Store
+	// policies are searched for inventory references.
+	policies policy.Store
 }
 
 // credentialRefs returns the configuration objects that still use the credential id.
@@ -89,6 +92,67 @@ func (c *refChecker) credentialRefs(ctx context.Context, id string) (usedBy, err
 			if s.CredentialID == id {
 				out["inventory_sources"] = append(out["inventory_sources"], nameOr(s.Name, s.ID))
 			}
+		}
+	}
+	return out, nil
+}
+
+// allCredentialRefs returns every credential's users in one pass over the four stores, keyed by
+// credential id. The list endpoint uses it so the Used by column speaks with the same voice as the
+// delete guard: the column used to count templates alone, so a credential holding a project's
+// deploy key read as unused right up until the delete was refused for being in use.
+func (c *refChecker) allCredentialRefs(ctx context.Context) (map[string]usedBy, error) {
+	out := map[string]usedBy{}
+	add := func(id, kind, name string) {
+		if id == "" {
+			return
+		}
+		if out[id] == nil {
+			out[id] = usedBy{}
+		}
+		out[id][kind] = append(out[id][kind], name)
+	}
+	if c.templates != nil {
+		list, err := c.templates.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, t := range list {
+			for _, id := range t.CredentialIDs {
+				add(id, "templates", nameOr(t.Name, t.ID))
+			}
+		}
+	}
+	if c.inventories != nil {
+		list, err := c.inventories.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, i := range list {
+			for _, id := range i.CredentialIDs {
+				add(id, "inventories", nameOr(i.Name, i.ID))
+			}
+		}
+	}
+	if c.projects != nil {
+		list, err := c.projects.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range list {
+			add(p.CredentialID, "projects", nameOr(p.Name, p.ID))
+			if p.PullCredentialID != p.CredentialID {
+				add(p.PullCredentialID, "projects", nameOr(p.Name, p.ID))
+			}
+		}
+	}
+	if c.invSources != nil {
+		list, err := c.invSources.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, sc := range list {
+			add(sc.CredentialID, "inventory_sources", nameOr(sc.Name, sc.ID))
 		}
 	}
 	return out, nil
@@ -184,6 +248,65 @@ func nameOr(name, id string) string {
 		return name
 	}
 	return id
+}
+
+// inventoryRefs returns the configuration objects that still use the inventory id. A dangling
+// reference is worse than a refused delete: a template launches with no hosts and a policy scoped
+// to the inventory silently stops matching.
+func (c *refChecker) inventoryRefs(ctx context.Context, id string) (usedBy, error) {
+	out := usedBy{}
+	if c.templates != nil {
+		list, err := c.templates.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, t := range list {
+			if t.InventoryID == id {
+				out["templates"] = append(out["templates"], nameOr(t.Name, t.ID))
+			}
+		}
+	}
+	if c.policies != nil {
+		list, err := c.policies.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range list {
+			if p.InventoryID == id {
+				out["policies"] = append(out["policies"], nameOr(p.Name, p.ID))
+			}
+		}
+	}
+	if c.invSources != nil {
+		list, err := c.invSources.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range list {
+			if s.InventoryID == id {
+				out["inventory_sources"] = append(out["inventory_sources"], nameOr(s.Name, s.ID))
+			}
+		}
+	}
+	return out, nil
+}
+
+// templateRefs returns the schedules that still launch the template id, so deleting it cannot leave
+// a timer firing at nothing.
+func (c *refChecker) templateRefs(ctx context.Context, id string) (usedBy, error) {
+	out := usedBy{}
+	if c.schedules != nil {
+		list, err := c.schedules.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, sc := range list {
+			if sc.TemplateID == id {
+				out["schedules"] = append(out["schedules"], nameOr(sc.Name, sc.ID))
+			}
+		}
+	}
+	return out, nil
 }
 
 // respondInUse writes a 409 naming what still references the object, so the caller knows what to

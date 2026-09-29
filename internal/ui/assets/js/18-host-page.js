@@ -7,7 +7,9 @@ function renderHostSummary(host, runs) {
 	let changed = 0;
 	let busy = 0;
 	for (const r of runs) {
-		if (r.outcome === "failed" || r.outcome === "unreachable") failed++;
+		// The API's field is worst, not outcome: counting a field that does not exist made
+		// Failures read zero and Success rate 100% while the table below showed red chips.
+		if (r.worst === "failed" || r.worst === "unreachable") failed++;
 		if (r.changed) changed += r.changed;
 		busy += r.duration_seconds || 0;
 	}
@@ -152,12 +154,18 @@ async function loadDrift() {
 			runCell.appendChild(runLink);
 			tr.appendChild(runCell);
 			const actions = document.createElement("td");
-			if (h.drifted_tasks > 0 && !isReadOnly() && canOperate()) {
+			if (h.drifted_tasks > 0) {
+				// Rendered even when the viewer cannot act, dimmed by the read-only convention like
+				// every other page. Hiding it left a headed Actions column empty on every row of the
+				// public demo, which read as half-built.
 				const btn = document.createElement("button");
 				btn.type = "button";
 				btn.className = "button";
+				btn.dataset.mutates = "true";
 				btn.textContent = "Propose reconcile";
-				btn.addEventListener("click", () => proposeReconcile(h.host, btn));
+				if (!isReadOnly() && canOperate()) {
+					btn.addEventListener("click", () => proposeReconcile(h.host, btn));
+				}
 				actions.appendChild(btn);
 			}
 			tr.appendChild(actions);
@@ -403,9 +411,12 @@ async function loadSchedules() {
 			const target = document.createElement("td");
 			if (s.template_id) {
 				const tpl = document.createElement("a");
-				tpl.href = "/ui/templates";
-				tpl.textContent = tplByID[s.template_id] || "template";
-				tpl.dataset.tip = "Open templates";
+				// The link lands on the named template rather than the whole list: the list honors
+				// ?q=, so arriving unfiltered made the reader search again for a name already known.
+				const tplName = tplByID[s.template_id];
+				tpl.href = tplName ? "/ui/templates?q=" + encodeURIComponent(tplName) : "/ui/templates";
+				tpl.textContent = tplName || "template";
+				tpl.dataset.tip = tplName ? "Open " + tplName : "Open templates";
 				target.appendChild(tpl);
 			} else {
 				target.textContent = scheduleTarget(s);

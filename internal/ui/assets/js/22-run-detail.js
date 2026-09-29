@@ -226,7 +226,7 @@ function scheduleHeaderRefresh(runId) {
 // not a stream at all, fires its error with the source already closed and never retries: saying
 // "reconnecting" forever was a promise nothing was keeping. That state now says the live view is
 // gone and offers the reload that actually resumes it.
-function streamIndicator(source, onReconnect) {
+function streamIndicator(source, onReconnect, onClosed) {
 	const indicator = document.getElementById("live-indicator");
 	if (!indicator) return;
 	indicator.hidden = false;
@@ -240,6 +240,16 @@ function streamIndicator(source, onReconnect) {
 	};
 	source.onerror = () => {
 		if (source.readyState === 2) {
+			// The browser gave up and will never retry this source. On a secured install that is
+			// every drop, because the ticket in the URL was consumed on first open, so the live
+			// view used to die on one sleep or idle-recycle. The caller re-mints a fresh ticket
+			// and resumes from its cursor; only when it declines, out of retries, is the view
+			// honestly lost.
+			if (onClosed && onClosed()) {
+				dropped = true;
+				indicator.textContent = "reconnecting";
+				return;
+			}
 			indicator.textContent = "";
 			const link = document.createElement("a");
 			link.href = location.href;
@@ -396,6 +406,7 @@ async function openParentStream(parentId) {
 		} catch (_) { /* ignore a malformed event */ }
 	});
 	source.addEventListener("end", async () => {
+		streamState.ended = true;
 		source.close();
 		try {
 			detailState.run = await getJSON("/runs/" + parentId);
@@ -543,9 +554,30 @@ function runStreamPath(runId, afterSeq) {
 // openStream subscribes to the run's live output and applies events, logs, and the end signal.
 // It resumes after afterSeq so history is never re-sent, and skips any event at or before the
 // cursor in case a reconnect replays one.
+//
+// Reconnection is owned here rather than left to EventSource. A stream ticket is single-use by
+// design, so the browser's automatic reconnect replayed a consumed ticket and got 401: one laptop
+// sleep, background tab, or load-balancer idle-recycle permanently killed the live view on every
+// secured install, and the resume cursor built for exactly that moment never fired. On an error
+// the source is closed and reopened with a fresh ticket and the last applied sequence, with a
+// small backoff, so the view survives the network instead of dying on it.
+// streamState tracks the recovery loop for the run stream now open: how many re-mints in a row
+// have been spent and whether the run already ended, reset when a different run's stream opens.
+let streamState = { runId: "", retries: 0, ended: false };
+
 async function openStream(runId, afterSeq) {
+	if (streamState.runId !== runId) streamState = { runId: runId, retries: 0, ended: false };
 	const source = new EventSource(await streamURL(runStreamPath(runId, afterSeq), runId));
-	streamIndicator(source);
+	streamIndicator(source, null, () => {
+		if (streamState.ended || streamState.retries >= 6) return false;
+		streamState.retries++;
+		source.close();
+		const cursor = (detailState && detailState.lastSeq) || afterSeq || 0;
+		setTimeout(() => { openStream(runId, cursor); },
+			Math.min(15000, 1000 * Math.pow(2, streamState.retries - 1)));
+		return true;
+	});
+	source.addEventListener("open", () => { streamState.retries = 0; });
 	source.addEventListener("event", (e) => {
 		try {
 			const ev = JSON.parse(e.data);
@@ -557,6 +589,9 @@ async function openStream(runId, afterSeq) {
 	});
 	source.addEventListener("log", (e) => {
 		try { appendLog(JSON.parse(e.data)); } catch (_) { /* ignore a malformed chunk */ }
+		// Tools without structured events stream only log chunks, so the header froze at pending
+		// while the log scrolled. The refresh coalesces, so this is cheap.
+		scheduleHeaderRefresh(runId);
 	});
 	source.addEventListener("end", async () => {
 		source.close();
@@ -649,10 +684,54 @@ function renderWarningCallout(run) {
 	host.hidden = false;
 }
 
+// inventoryNames caches stored-inventory names by id for the header, filled once per page.
+let inventoryNames = null;
+
+// resolveInventoryName fills the header's inventory link with the stored inventory's name once the
+// list answers, leaving the unfiltered link in place when it cannot.
+async function resolveInventoryName(id, link) {
+	if (inventoryNames === null) {
+		inventoryNames = {};
+		try {
+			const data = await getJSON("/inventories");
+			for (const i of data.inventories || []) inventoryNames[i.id] = i.name;
+		} catch { /* the unfiltered link still works */ }
+	}
+	const name = inventoryNames[id];
+	if (name && link.isConnected) {
+		link.textContent = name;
+		link.href = "/ui/inventories?q=" + encodeURIComponent(name);
+		link.dataset.tip = "Open " + name;
+	}
+}
+
 // renderHeader fills the run header fields.
 function renderHeader(run) {
 	const el = document.getElementById("run-header");
 	el.innerHTML = "";
+	// The proof strip. A run whose request is committed to the chain is the product's whole story,
+	// and it used to be invisible here: the spec digest was one of ten identical fields and the
+	// evidence exports two of nine identical buttons. One line above the header now says it.
+	const oldStrip = document.getElementById("chain-callout");
+	if (oldStrip) oldStrip.remove();
+	if (run.audit_receipt) {
+		const strip = document.createElement("a");
+		strip.id = "chain-callout";
+		strip.className = "chain-callout";
+		strip.href = "/ui/audit";
+		strip.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" ' +
+			'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ' +
+			'aria-hidden="true"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/>' +
+			'<polyline points="8.5 12 11 14.5 15.5 9.5"/></svg>';
+		const text = document.createElement("span");
+		const seq = String(run.audit_receipt).split(":")[0];
+		text.textContent = "On the tamper-evident chain \u00b7 entry " + seq +
+			(run.approved_spec_digest ? " \u00b7 spec digest bound at approval" : "");
+		strip.appendChild(text);
+		strip.dataset.tip = "This run's request is committed to the hash chain and its evidence " +
+			"verifies offline. Click to open the trail";
+		el.parentNode.insertBefore(strip, el);
+	}
 	el.appendChild(field("Status", null, badge(run.status)));
 	const runField = field("Run", shortId(run.id), null, run.id);
 	runField.querySelector(".value").appendChild(copyButton(run.id, "Copy the full run id"));
@@ -761,12 +840,16 @@ function renderHeader(run) {
 		el.appendChild(inv);
 	} else if (run.inventory_id) {
 		// A run launched from a stored inventory carries the id, not a path, so the header showed no
-		// inventory at all and the run dead-ended. Link to the inventory list rather than leaving it
-		// blank, and carry the id for copy.
+		// inventory at all and the run dead-ended. The name is resolved from the inventory list and
+		// the link lands filtered on it; until the lookup returns, the link still works unfiltered.
 		const link = document.createElement("a");
-		link.href = "/ui/inventories";
-		link.textContent = "stored inventory";
-		link.dataset.tip = "This run ran against a stored inventory. Open inventories";
+		const known = inventoryNames && inventoryNames[run.inventory_id];
+		link.href = known ? "/ui/inventories?q=" + encodeURIComponent(known) : "/ui/inventories";
+		link.textContent = known || "stored inventory";
+		link.dataset.tip = "This run ran against a stored inventory. Open it";
+		if (!known) {
+			resolveInventoryName(run.inventory_id, link);
+		}
 		const inv = field("Inventory", null, link);
 		inv.querySelector(".value").appendChild(copyButton(run.inventory_id, "Copy the inventory id"));
 		el.appendChild(inv);

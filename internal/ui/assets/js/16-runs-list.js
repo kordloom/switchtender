@@ -140,7 +140,7 @@ async function loadRuns() {
 		showListControls();
 		renderSummary(data.summary || {});
 		appendRunRows(tbody, runs);
-		wireRunsMore(tbody, runs.length, data.has_more);
+		wireRunsMore(tbody, data.next_offset || runs.length, data.has_more);
 	} catch (e) {
 		// A failure from a superseded load says nothing about the table a newer load already drew,
 		// so it is dropped the same way a superseded success is. Clearing here wiped good rows and
@@ -493,7 +493,9 @@ function wireRunsMore(tbody, offset, hasMore) {
 			const data = await getJSON(runsPageURL(offset));
 			const runs = data.runs || [];
 			appendRunRows(tbody, runs);
-			wireRunsMore(tbody, offset + runs.length, data.has_more);
+			// The server's cursor counts the page it read, not the rows this caller may see, so a
+			// strict-grants reader stops re-reading, and repeating, the rows it was refused.
+			wireRunsMore(tbody, data.next_offset || offset + runs.length, data.has_more);
 		} catch (e) {
 			setStatus("Failed to load more runs: " + e.message);
 		} finally {

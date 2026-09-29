@@ -306,9 +306,26 @@ async function loadWorkers() {
 			}
 			health.appendChild(chip);
 			tr.appendChild(health);
-			tr.appendChild(td(String(w.active)));
-			tr.appendChild(td(String(w.completed || 0)));
-			tr.appendChild(td(String(w.failed || 0)));
+			// The counts open the worker's own runs rather than dead-ending: the row used to show
+			// numbers with no way to see the work behind them.
+			const workerQ = (extra) => "/ui/runs?q=" +
+				encodeURIComponent("worker:" + w.owner + (extra ? " " + extra : ""));
+			const runsCell = (n, extra, tip) => {
+				const cell = document.createElement("td");
+				if (n > 0) {
+					const a = document.createElement("a");
+					a.href = workerQ(extra);
+					a.textContent = String(n);
+					a.dataset.tip = tip;
+					cell.appendChild(a);
+				} else {
+					cell.textContent = String(n);
+				}
+				return cell;
+			};
+			tr.appendChild(runsCell(w.active, "status:running", "Click to open this executor's active runs"));
+			tr.appendChild(runsCell(w.completed || 0, "status:succeeded", "Click to open this executor's completed runs"));
+			tr.appendChild(runsCell(w.failed || 0, "status:failed", "Click to open this executor's failed runs"));
 			tr.appendChild(tdTime(w.last_seen));
 			tbody.appendChild(tr);
 		}

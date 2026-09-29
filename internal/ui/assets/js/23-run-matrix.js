@@ -137,6 +137,10 @@ function renderMatrix(model) {
 
 	const cap = matrixCap();
 	const cellCount = hosts.length * tasks.length;
+	// Small runs get roomy cells; the dense grid returns past a few hundred cells so a real fleet
+	// still fits a screen. A six-host demo run used to draw postage stamps in half-empty panels.
+	const matrixEl = document.getElementById("matrix");
+	if (matrixEl) matrixEl.classList.toggle("dense", cellCount > 240);
 	if (cap > 0 && cellCount > cap) {
 		detailState.overCap = true;
 		renderMatrixTooLarge(hosts.length, tasks.length, cellCount, cap);

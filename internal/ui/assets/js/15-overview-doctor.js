@@ -83,9 +83,10 @@ async function loadOverview() {
 	try {
 		// Each half fails alone: one refused endpoint used to blank the whole dashboard, runs,
 		// fleet, and all, when the other half had answered fine.
-		const [runsRes, fleetRes] = await Promise.allSettled([
+		const [runsRes, fleetRes, chainRes] = await Promise.allSettled([
 			getJSON("/runs"),
 			getJSON("/fleet"),
+			getJSON("/audit/verify"),
 		]);
 		if (runsRes.status === "rejected" && fleetRes.status === "rejected") {
 			throw runsRes.reason;
@@ -95,7 +96,9 @@ async function loadOverview() {
 		// The headline cards describe the whole install, so they are drawn from the summary the
 		// response carries rather than counted off the page of runs beside it.
 		const summary = runsRes.status === "fulfilled" ? (runsRes.value.summary || null) : null;
-		renderOverviewMetrics(runs, hosts, summary);
+		// The chain verdict is admin-gated, so a viewer's overview quietly keeps the ops tiles.
+		const chain = chainRes.status === "fulfilled" ? chainRes.value : null;
+		renderOverviewMetrics(runs, hosts, summary, chain);
 		renderActivity(runs);
 		renderRecentRuns(runs.slice(0, 8));
 		renderFleetSnapshot(hosts);
@@ -108,7 +111,7 @@ async function loadOverview() {
 }
 
 // renderOverviewMetrics fills the headline metric strip from the run and fleet data.
-function renderOverviewMetrics(runs, hosts, summary) {
+function renderOverviewMetrics(runs, hosts, summary, chain) {
 	// The cards say "Total runs", so they have to mean it. Counting the page the API returned made
 	// them describe the newest page instead: on any install past that page size the total was flatly
 	// wrong and the success rate was computed over a sample, while the correct install-wide numbers
@@ -128,13 +131,40 @@ function renderOverviewMetrics(runs, hosts, summary) {
 			else if (r.status === "failed") failed++;
 		}
 	}
-	const rate = total ? Math.round((succeeded / total) * 100) + "%" : "-";
+	// Finished runs are the denominator: dividing by everything pending, held, or canceled dragged
+	// the rate down while the Failed card beside it said zero.
+	const finished = succeeded + failed;
+	const rate = finished ? Math.round((succeeded / finished) * 100) + "%" : "-";
 	const el = document.getElementById("ov-metrics");
 	el.innerHTML = "";
 	el.appendChild(statCard(total, "Total runs", ""));
-	el.appendChild(statCard(rate, "Success rate", ""));
-	el.appendChild(statCard(failed, "Failed", failed ? "failed" : ""));
-	el.appendChild(statCard(hosts.length, "Hosts tracked", ""));
+	el.appendChild(statCard(rate, "Success rate", failed ? "failed" : ""));
+	if (chain && typeof chain.count === "number") {
+		// The two tiles no competitor can show: the tamper-evident record and the approval gate.
+		// They used to be Failed and Hosts tracked, the same four numbers every AWX screen shows,
+		// so the product's actual story never appeared above the fold.
+		const chainCard = statCard(chain.count, chain.ok ? "Changes on the chain \u00b7 verified"
+			: "Chain BROKEN at " + chain.broke_at, chain.ok ? "ok" : "failed");
+		chainCard.dataset.tip = chain.ok
+			? "Every entry hash-verified against the tamper-evident chain. Click for the trail"
+			: "The chain does not verify. Open the audit trail";
+		chainCard.style.cursor = "pointer";
+		chainCard.addEventListener("click", () => { location.href = "/ui/audit"; });
+		el.appendChild(chainCard);
+		const waiting = (summary && summary.awaiting_approval) || 0;
+		const gate = statCard(waiting, "Awaiting approval", waiting ? "changed" : "");
+		gate.dataset.tip = waiting
+			? "Runs held at the approval gate. Click to review them"
+			: "Nothing is waiting at the approval gate";
+		gate.style.cursor = "pointer";
+		gate.addEventListener("click", () => {
+			location.href = "/ui/runs?q=" + encodeURIComponent("status:pending_approval");
+		});
+		el.appendChild(gate);
+	} else {
+		el.appendChild(statCard(failed, "Failed", failed ? "failed" : ""));
+		el.appendChild(statCard(hosts.length, "Hosts tracked", ""));
+	}
 	el.hidden = false;
 }
 
@@ -151,11 +181,23 @@ function renderRecentRuns(runs) {
 		row.className = "ov-row";
 		row.href = "/ui/runs/" + r.id;
 		row.appendChild(badge(r.status));
+		// Ansible is the default and carries no badge, so the builder returns null for it.
+		const tool = toolBadgeEl(r);
+		if (tool) row.appendChild(tool);
 		const name = document.createElement("span");
 		name.className = "ov-row-name";
 		name.textContent = toolLabel(r);
 		name.title = r.playbook || r.command || r.id;
 		row.appendChild(name);
+		// The row used to be one word left, one word right, and dead space between. The tool badge
+		// and the duration the row already knows fill it without a second fetch.
+		const dur = fmtDuration(r.started_at, r.ended_at);
+		if (dur) {
+			const d = document.createElement("span");
+			d.className = "ov-row-meta";
+			d.textContent = dur;
+			row.appendChild(d);
+		}
 		const started = r.started_at || r.created_at;
 		const meta = document.createElement("span");
 		meta.className = "ov-row-meta";
@@ -496,7 +538,11 @@ function renderActivityBars(el, model) {
 			if (!part.n) continue;
 			const seg = document.createElement("div");
 			seg.className = "activity-seg " + part.cls;
-			seg.style.height = Math.max(3, Math.round((part.n / model.max) * 64)) + "px";
+			// The tallest bar fills the chart it lives in: 64px on the overview embed, the full
+			// column on the activity page. A fixed 64 made the dedicated page render a tall empty
+			// panel with the same tiny sparkline at the bottom.
+			const chartHeight = document.body.dataset.page === "activity" ? 232 : 64;
+			seg.style.height = Math.max(3, Math.round((part.n / model.max) * chartHeight)) + "px";
 			bar.appendChild(seg);
 		}
 		if (!total) bar.appendChild(Object.assign(document.createElement("div"), { className: "activity-seg empty" }));
@@ -734,6 +780,9 @@ function renderFleetSnapshot(hosts) {
 		name.className = "ov-row-name mono";
 		name.textContent = h.host;
 		row.appendChild(name);
+		if (h.recent && h.recent.length) {
+			row.appendChild(sparkline(h.recent, h.recent_runs));
+		}
 		const meta = document.createElement("span");
 		meta.className = "ov-row-meta" + (h.failures ? " fail-count" : "");
 		meta.textContent = h.failures + " / " + h.total + " failed";
