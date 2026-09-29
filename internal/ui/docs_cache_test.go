@@ -54,7 +54,7 @@ func TestDocsPagesAreRenderedOnce(t *testing.T) {
 		"README.md":   {Data: []byte("# Overview\n\nSee [concepts](concepts.md).\n")},
 		"concepts.md": {Data: []byte("# Concepts\n\n| A | B |\n|---|---|\n| 1 | 2 |\n")},
 	}}
-	handler := ui.New(zap.NewNop(), docs, false, 0, false, false, false).Handler()
+	handler := ui.New(zap.NewNop(), docs, false, 0, false, false, false, "").Handler()
 
 	get := func(t *testing.T, path string) string {
 		t.Helper()

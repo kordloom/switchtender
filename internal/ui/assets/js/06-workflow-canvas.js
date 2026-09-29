@@ -351,6 +351,8 @@ document.addEventListener("DOMContentLoaded", () => {
 		loadDetail(document.body.dataset.runId);
 	} else if (page === "fleet") {
 		loadFleet();
+	} else if (page === "activity") {
+		loadActivityPage();
 	} else if (page === "drift") {
 		loadDrift();
 	} else if (page === "host") {

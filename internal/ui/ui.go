@@ -49,6 +49,9 @@ type UI struct {
 	matrixCap int
 	// oidcEnabled shows the single sign-on button on the sign-in page when set.
 	oidcEnabled bool
+	// oidcBrand names the OIDC provider ("google", "microsoft", ...) so the sign-in button carries
+	// that provider's label and mark. Empty renders a generic single sign-on button.
+	oidcBrand string
 	// samlEnabled shows the SAML sign-in button on the sign-in page when set.
 	samlEnabled bool
 	// aiEnabled reports whether an advisory AI provider is configured, so the overview can make the
@@ -59,7 +62,7 @@ type UI struct {
 // New parses the embedded templates and returns a UI. It panics if the embedded templates fail to
 // parse, which is a build time programming error. docs, when non-nil, is the documentation tree
 // served under /ui/docs; readOnly hides the launch panel and run action buttons for a demo.
-func New(log *zap.Logger, docs fs.FS, readOnly bool, matrixCap int, oidcEnabled, samlEnabled, aiEnabled bool) *UI {
+func New(log *zap.Logger, docs fs.FS, readOnly bool, matrixCap int, oidcEnabled, samlEnabled, aiEnabled bool, oidcBrand string) *UI {
 	if log == nil {
 		log = zap.NewNop()
 	}
@@ -71,6 +74,7 @@ func New(log *zap.Logger, docs fs.FS, readOnly bool, matrixCap int, oidcEnabled,
 		readOnly:    readOnly,
 		matrixCap:   matrixCap,
 		oidcEnabled: oidcEnabled,
+		oidcBrand:   oidcBrand,
 		samlEnabled: samlEnabled,
 		aiEnabled:   aiEnabled,
 	}
@@ -88,6 +92,7 @@ func (u *UI) Handler() http.Handler {
 	mux.HandleFunc("GET /ui/runs/{id}/compare", u.compare)
 	mux.HandleFunc("GET /ui/runs", u.runs)
 	mux.HandleFunc("GET /ui/fleet", u.fleet)
+	mux.HandleFunc("GET /ui/activity", u.activity)
 	mux.HandleFunc("GET /ui/doctor", u.doctor)
 	mux.HandleFunc("GET /ui/drift", u.drift)
 	mux.HandleFunc("GET /ui/hosts/{host}", u.host)
@@ -214,13 +219,19 @@ func (u *UI) sources(w http.ResponseWriter, _ *http.Request) {
 
 // login renders the token sign in page.
 func (u *UI) login(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "login.html", map[string]any{"OIDCEnabled": u.oidcEnabled, "SAMLEnabled": u.samlEnabled,
-		"ReadOnly": u.readOnly})
+	u.render(w, "login.html", map[string]any{"OIDCEnabled": u.oidcEnabled, "OIDCBrand": u.oidcBrand,
+		"SAMLEnabled": u.samlEnabled, "ReadOnly": u.readOnly})
 }
 
 // schedules renders the schedules page.
 func (u *UI) schedules(w http.ResponseWriter, _ *http.Request) {
 	u.render(w, "schedules.html", map[string]any{"ReadOnly": u.readOnly})
+}
+
+// activity renders the full-page activity view: the windowed run chart with an outcome breakdown and
+// a CSV export of the bucketed data.
+func (u *UI) activity(w http.ResponseWriter, _ *http.Request) {
+	u.render(w, "activity.html", map[string]any{"ReadOnly": u.readOnly})
 }
 
 // workflows renders the visual workflow editor, where steps are wired into a graph and run as a
