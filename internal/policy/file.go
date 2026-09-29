@@ -46,6 +46,8 @@ type filePolicy struct {
 	CommandContains string `yaml:"command_contains,omitempty" json:"command_contains,omitempty"`
 	// InventoryID matches a run targeting this stored inventory. Empty matches any.
 	InventoryID string `yaml:"inventory_id,omitempty" json:"inventory_id,omitempty"`
+	// Queue matches a run routed to this worker queue. Empty matches any.
+	Queue string `yaml:"queue,omitempty" json:"queue,omitempty"`
 	// ExcludeDryRun leaves dry-run runs unmatched.
 	ExcludeDryRun bool `yaml:"exclude_dry_run,omitempty" json:"exclude_dry_run,omitempty"`
 	// MaxDestroy holds a matched terraform or opentofu run when its plan would destroy more than
@@ -159,6 +161,7 @@ func (s *FileStore) load() ([]*Policy, error) {
 			Tool:                    fp.Tool,
 			CommandContains:         fp.CommandContains,
 			InventoryID:             fp.InventoryID,
+			Queue:                   fp.Queue,
 			ExcludeDryRun:           fp.ExcludeDryRun,
 			MaxDestroy:              maxDestroy,
 			ActorKind:               fp.ActorKind,

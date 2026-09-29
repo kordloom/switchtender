@@ -301,3 +301,52 @@ func TestDenyPolicyRefusesSubmission(t *testing.T) {
 		}
 	}
 }
+
+// TestPlanGateCarriesDistinctApproverOntoTheApply covers the one rule the dispatcher's policy pass
+// cannot reach.
+//
+// policy.Requiring only considers rules with no destroy limit, so a plan-content rule is excluded
+// from it by design. The plan gate finds that rule itself with policy.Exceeding and held the apply
+// correctly, naming the rule and the count, but it copied only the name. The requirement went
+// nowhere, so the run with the largest blast radius in the product, an apply that blew past its
+// destroy limit, was the one an operator could release for themselves.
+func TestPlanGateCarriesDistinctApproverOntoTheApply(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	policies := policy.NewMemStore()
+	if err := policies.Save(ctx, &policy.Policy{
+		ID: policy.NewID(), Name: "prod destroy limit", Tool: run.ToolTerraform, MaxDestroy: 2,
+		RequireDistinctApprover: true,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	d := New(store, planRunner("Plan: 0 to add, 0 to change, 9 to destroy"), nil,
+		WithPolicies(policies))
+	defer d.Close()
+
+	created, err := d.Submit(ctx, "", "", run.WithTool(run.ToolTerraform),
+		run.WithCommand("infra/prod"), run.WithActor("casey"), run.WithActorType("session"))
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	waitTerminal(t, store, created.ID)
+
+	proposal := waitProposal(t, store, created.ID)
+	if proposal.Status != run.StatusPendingApproval {
+		t.Fatalf("proposed apply status = %q, want pending_approval", proposal.Status)
+	}
+	if !proposal.RequireDistinctApprover {
+		t.Errorf("the apply held for destroying 9 against a limit of 2 does not carry its rule's "+
+			"distinct-approver requirement, so %q can release their own destroy", proposal.Actor)
+	}
+	if !strings.Contains(proposal.HeldByPolicy, "prod destroy limit") {
+		t.Errorf("held by = %q, want it to name the rule", proposal.HeldByPolicy)
+	}
+	if _, err := d.Approve(ctx, proposal.ID, "casey", "session"); !errors.Is(err, ErrSelfApproval) {
+		t.Errorf("self approval error = %v, want ErrSelfApproval", err)
+	}
+	if _, err := d.Approve(ctx, proposal.ID, "dana", "session"); err != nil {
+		t.Errorf("a second person could not approve the apply: %v", err)
+	}
+}

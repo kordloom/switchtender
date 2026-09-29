@@ -83,12 +83,31 @@ func listOrgsHandler(store org.Store, log *zap.Logger) http.HandlerFunc {
 	}
 }
 
-// deleteOrgHandler removes an organization and its memberships.
-func deleteOrgHandler(store org.Store, log *zap.Logger) http.HandlerFunc {
+// deleteOrgHandler removes an organization and its memberships, refusing while anything still
+// belongs to it.
+//
+// A schedule stamps its organization and nothing revalidates that when it fires, so deleting an
+// organization used to leave its nightly playbooks launching with real credentials under a tenant
+// that no longer existed. Templates, inventories, and projects were left owned by nobody the same
+// way. Naming what is still attached is the answer a credential and a project already give.
+func deleteOrgHandler(store org.Store, refs *refChecker, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "organizations not enabled")
 			return
+		}
+		if refs != nil {
+			used, rerr := refs.orgRefs(r.Context(), r.PathValue("id"))
+			if rerr != nil {
+				log.Error("server: org references: " + rerr.Error())
+				respondError(w, log, http.StatusInternalServerError,
+					"could not check organization references")
+				return
+			}
+			if !used.empty() {
+				respondInUse(w, log, "organization in use", used, wantsPretty(r))
+				return
+			}
 		}
 		err := store.Delete(r.Context(), r.PathValue("id"))
 		if errors.Is(err, org.ErrNotFound) {

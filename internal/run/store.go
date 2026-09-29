@@ -68,6 +68,19 @@ func AbandonedParent(r *Run, cutoff time.Time) bool {
 // Finalization is everything an executor learns by running a run: how it ended and the facts that
 // explain it. It is one value because a store writes it as one statement, so a run is never left
 // terminal with the facts missing.
+// Progress is what an executor learns about a run while it is still under way, as opposed to the
+// facts that explain how it ended, which travel in a Finalization.
+type Progress struct {
+	// StartedAt is when execution began. It is applied only when the stored run has none, so a
+	// repeated report cannot move a start time backward.
+	StartedAt *time.Time
+	// Warning is the executor's advisory note. Empty leaves the stored one alone.
+	Warning string
+	// Outputs are the set_stats values published so far. Nil leaves the stored ones alone.
+	Outputs map[string]any
+}
+
+// Finalization holds the facts that explain how a run ended.
 type Finalization struct {
 	// Status is the terminal status the run reached.
 	Status Status
@@ -88,6 +101,20 @@ type Finalization struct {
 	// It is resolved with the project and is one of the grantable objects a run's authorization is
 	// built from, so losing it silently narrows what the stored run is checked against.
 	PullCredentialID string
+	// Owner is the executor lease this write must still hold, and empty when the caller is not an
+	// executor finalizing its own run.
+	//
+	// The terminal write fenced on status alone. That is enough on the relay path, where the HTTP
+	// layer has already checked the per-claim capability, but not for a second in-process dispatcher
+	// on a shared database: one whose pending-to-running save failed, then lost its heartbeats to a
+	// partition, could come back after the janitor requeued the run and another worker claimed and
+	// started it, and terminalize the run the second worker was still executing. Status matched,
+	// because the second worker had made it running again.
+	//
+	// It is left empty deliberately by the two callers that are not executors: the sweep that ends a
+	// run for overrunning its timeout, and the relay handler, which is gated on the claim secret
+	// instead. Naming it here is what keeps that a stated choice rather than an omission.
+	Owner string
 	// Outputs are the values the run published with set_stats, which a later pipeline step reads as
 	// its inputs. They are folded from the run's events as it finishes, so the terminal write is the
 	// first and only chance to store them.
@@ -180,6 +207,18 @@ type Store interface {
 	// running runs only. The caller must treat a false or an error as "the run did not finish here"
 	// and leave it for the sweep.
 	FinalizeRunning(ctx context.Context, id string, fin Finalization) (bool, error)
+	// ApplyRunningProgress records what an executor learned while a run is under way, in one write
+	// fenced on the run still being running and still held by owner. It changes nothing and returns
+	// false otherwise.
+	//
+	// The relay's progress handler used to re-read the row, check it was not terminal, and then save
+	// the whole row back. Between that read and that write the janitor could settle the run, and the
+	// save then restored the status, the lease, and the cleared claim secret from the snapshot: the
+	// run was resurrected, the worker kept executing under a lease the control node had already
+	// declared dead, and its later terminal report put a second, contradictory outcome on the audit
+	// chain beside the interrupted one the sweep had already committed. A fenced write cannot do
+	// that, for the same reason FinalizeRunning cannot.
+	ApplyRunningProgress(ctx context.Context, id, owner string, p Progress) (bool, error)
 	// Workers lists executors by the leases they hold, most recently seen first. Only leases
 	// stamped within WorkerWindow count, so the listing stays bounded as run history grows.
 	Workers(ctx context.Context) ([]WorkerInfo, error)
@@ -393,6 +432,8 @@ func NewMemStore() Store {
 // different run is rejected with ErrDuplicateKey so a concurrent retry cannot create a second run. A
 // stored cancel request survives the replace so a stale snapshot cannot erase a concurrent cancel.
 func (m *memStore) Save(_ context.Context, r *Run) error {
+	// Cleaned here so every backend stores the same bytes for the same input.
+	r.Sanitize()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if r.IdempotencyKey != "" {
@@ -936,10 +977,14 @@ func (m *memStore) StampApprovedSpec(_ context.Context, id, digest string) error
 // FinalizeRunning moves a running run to its terminal status and records the exit code, failure
 // detail, resolved image, and end time in the same locked write.
 func (m *memStore) FinalizeRunning(_ context.Context, id string, fin Finalization) (bool, error) {
+	fin.SanitizeText()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.runs[id]
 	if !ok || r.Status != StatusRunning {
+		return false, nil
+	}
+	if fin.Owner != "" && r.ClaimedBy != fin.Owner {
 		return false, nil
 	}
 	ended := fin.EndedAt
@@ -952,6 +997,28 @@ func (m *memStore) FinalizeRunning(_ context.Context, id string, fin Finalizatio
 	r.Outputs = fin.Outputs
 	r.Warning = fin.Warning
 	r.EndedAt = &ended
+	return true, nil
+}
+
+// ApplyRunningProgress records a worker's progress on a run it still holds, in one locked write.
+func (m *memStore) ApplyRunningProgress(_ context.Context, id, owner string, p Progress) (bool, error) {
+	p.SanitizeText()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.runs[id]
+	if !ok || r.Status != StatusRunning || r.ClaimedBy != owner {
+		return false, nil
+	}
+	if r.StartedAt == nil && p.StartedAt != nil {
+		started := *p.StartedAt
+		r.StartedAt = &started
+	}
+	if p.Warning != "" {
+		r.Warning = p.Warning
+	}
+	if len(p.Outputs) > 0 {
+		r.Outputs = p.Outputs
+	}
 	return true, nil
 }
 

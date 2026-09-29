@@ -36,6 +36,10 @@ func respondJSON(w http.ResponseWriter, log *zap.Logger, status int, v any, pret
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	// API responses are per-caller and often carry the account roster, tokens, or credential
+	// metadata. Without this a browser or an intermediary may write them to a disk cache that
+	// outlives the session, readable afterward from the profile directory of a shared machine.
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	if _, err := w.Write(body); err != nil {
 		log.Error("server: write response: " + err.Error())

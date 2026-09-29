@@ -488,6 +488,21 @@ func WithHeldByPolicy(label string) SubmitOption {
 	return func(r *Run) { r.HeldByPolicy = label }
 }
 
+// WithRequireDistinctApprover carries a rule's second-pair-of-eyes requirement onto a run held by
+// that rule, so the requester cannot release their own change.
+//
+// It exists for the paths that hold a run themselves rather than through the dispatcher's policy
+// pass. The plan gate is the one that matters: it holds an apply for exceeding a destroy limit and
+// names the rule that stopped it, but the rule's requirement was not carried, so the highest
+// consequence run in the product was the one where the control quietly did not apply.
+func WithRequireDistinctApprover(require bool) SubmitOption {
+	return func(r *Run) {
+		if require {
+			r.RequireDistinctApprover = true
+		}
+	}
+}
+
 // WithAuditReceiptOf records that this run was set in motion by the request behind receipt, for a
 // run created after that request returned. It is deliberately not part of ExecutionOptions: rerun,
 // shard retry, and reconcile replay those, and each is a new request with its own authorization.

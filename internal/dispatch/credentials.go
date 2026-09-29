@@ -458,7 +458,13 @@ func (d *Dispatcher) injectTypedCredential(ctx context.Context, c *credential.Cr
 		return "", fmt.Errorf("materialize credential %s: %w", c.ID, err)
 	}
 	spec.Env = append(spec.Env, inj.Env...)
-	*secrets = append(*secrets, inj.Secrets...)
+	// The same fail-safe the built-in kinds use. Taking inj.Secrets raw meant a custom type whose
+	// fields nobody marked secret injected its values with nothing in the mask list: the sealed JSON
+	// blob is what reached the masker, and that string never appears in tool output, so an
+	// ansible-playbook -vvv, a bash step running env, or a provider debug line wrote the value into
+	// the stored log and the live stream unredacted. Nothing requires a field to be marked, so
+	// forgetting the flag is a one-word mistake with no warning attached to it.
+	*secrets = append(*secrets, injectedMaskValues(inj)...)
 	if len(inj.ExtraVars) == 0 {
 		return "", nil
 	}

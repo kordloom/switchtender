@@ -143,6 +143,12 @@ func (c *Client) FinalizeRunning(context.Context, string, run.Finalization) (boo
 	return false, ErrUnsupported
 }
 
+// ApplyRunningProgress is a control-node write and is not served to workers. A relay worker reports
+// its progress through Save, and the control node applies that report to the run it holds.
+func (c *Client) ApplyRunningProgress(context.Context, string, string, run.Progress) (bool, error) {
+	return false, ErrUnsupported
+}
+
 // Workers is a control-node query and is not served to workers.
 func (c *Client) Workers(context.Context) ([]run.WorkerInfo, error) { return nil, ErrUnsupported }
 

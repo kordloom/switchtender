@@ -14,7 +14,8 @@ import (
 type createGrantRequest struct {
 	// Subject is a user id (user_...) or a team id (team_...). Required.
 	Subject string `json:"subject"`
-	// Object is a project, template, inventory, or credential id. Required.
+	// Object is a project, template, inventory, or credential id, or a worker queue named as
+	// queue:<name>. Required.
 	Object string `json:"object"`
 	// Access is use or manage. Required.
 	Access grant.Access `json:"access"`

@@ -123,7 +123,11 @@ func createInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 		if denyNonAdminInventoryCommand(w, r, log, source, req.ContentConfig, "") {
 			return
 		}
-		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, req.CredentialIDs...)) {
+		// The queue is authorized alongside the credentials: pinning an inventory to a queue routes
+		// every run that targets it to that queue's workers, so it reaches the same segment a run
+		// naming the queue directly would.
+		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse,
+			append([]string{queueObject(req.Queue)}, req.CredentialIDs...)...)) {
 			return
 		}
 		// Putting an inventory in an organization gives every member of it use, and taking it out
@@ -182,7 +186,11 @@ func updateInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 		if denyNonAdminInventoryCommand(w, r, log, source, req.ContentConfig, existing.ContentSource) {
 			return
 		}
-		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, req.CredentialIDs...)) {
+		// The queue is authorized alongside the credentials: pinning an inventory to a queue routes
+		// every run that targets it to that queue's workers, so it reaches the same segment a run
+		// naming the queue directly would.
+		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse,
+			append([]string{queueObject(req.Queue)}, req.CredentialIDs...)...)) {
 			return
 		}
 		// Both directions of an organization change are checked: entering one gives every member

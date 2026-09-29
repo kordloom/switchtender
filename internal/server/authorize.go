@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -361,6 +362,23 @@ func (a *authorizer) authorizeAll(ctx context.Context, want grant.Access, object
 		}
 	}
 	return nil
+}
+
+// queueObject names a worker queue as a grant object, or returns empty when no queue was asked for
+// so authorizeAll skips it the way it skips any unset object.
+//
+// The queues a worker token may lease from were confined by the pool file and described in the code
+// as the blast radius of that token. The queue a submitter could ask for was checked nowhere: it was
+// copied off the request body onto the run, no authorizer or policy referenced the field, and the
+// claim query filters on queue alone. So a low-privilege caller could post queue "prod" and have the
+// production relay execute their run inside the production segment, on a host holding that segment's
+// machine identity. Authorizing it here puts the submit side under the same rules as the lease side.
+func queueObject(queue string) string {
+	queue = strings.TrimSpace(queue)
+	if queue == "" {
+		return ""
+	}
+	return grant.QueueObject(queue)
 }
 
 // denyOnAuthzError writes the response for an authorization failure and reports whether the request

@@ -12,7 +12,11 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"strings"
 	"time"
+
+	"crypto/x509"
+	"crypto/x509/pkix"
 )
 
 // timestampLimit caps how much of a timestamp authority's reply is read, so a hostile or broken
@@ -27,6 +31,15 @@ var (
 	signedDataOID = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 2}
 	// tstInfoOID names TSTInfo, the payload inside a token that says what was timestamped.
 	tstInfoOID = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 16, 1, 4}
+
+	// The algorithms a timestamp authority signs with, in both the combined spelling and the bare
+	// key spelling that names its digest separately.
+	oidRSAEncryption   = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 1}
+	oidSHA256WithRSA   = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 11}
+	oidRSAPSS          = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 10}
+	oidECPublicKey     = asn1.ObjectIdentifier{1, 2, 840, 10045, 2, 1}
+	oidECDSAWithSHA256 = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 2}
+	oidEd25519         = asn1.ObjectIdentifier{1, 3, 101, 112}
 )
 
 // tsaAlgorithm is the hash algorithm identifier in a timestamp request.
@@ -173,11 +186,12 @@ func Timestamp(ctx context.Context, client *http.Client, tsaURL, link string) (s
 // on. Anyone who could edit the anchors table could rewrite the link and leave a proof that commits to
 // something else, and every artifact still read as timestamped by an authority.
 //
-// What this checks is what the token itself says: that an authority's token commits to the digest of
-// this link, in the right shape, with a SHA-256 imprint. What it deliberately does not check is the
-// authority's signing certificate: the trust decision about which authority to believe belongs to the
-// relying party, who has the token and can hold it against the chain their own tooling trusts. Saying so
-// is the point; claiming a check we do not perform is what the finding was about.
+// What this checks is that an authority's token commits to the digest of this link, in the right
+// shape, with a SHA-256 imprint, and that the token is really signed by the certificate it carries.
+// What it deliberately does not check is whether that certificate chains to an authority worth
+// believing: that trust decision belongs to the relying party, who has the token and can hold it
+// against the roots their own tooling trusts. Saying so is the point; claiming a check we do not
+// perform is what the finding was about, and for a while the unperformed check was the signature.
 func VerifyTimestampProof(link, proof string) error {
 	if proof == "" {
 		return fmt.Errorf("this anchor carries no embedded proof, so there is nothing to verify offline")
@@ -207,9 +221,7 @@ type tsaContentInfo struct {
 	Content asn1.RawValue `asn1:"explicit,optional,tag:0"`
 }
 
-// tsaSignedData is the CMS SignedData a timestamp token carries. Only the parts needed to read what
-// the token commits to are named; the signature is checked by a verifier reading the finished
-// bundle, offline and with no trust in this install.
+// tsaSignedData is the CMS SignedData a timestamp token carries.
 type tsaSignedData struct {
 	// Version is the structure version.
 	Version int
@@ -217,11 +229,11 @@ type tsaSignedData struct {
 	DigestAlgorithms asn1.RawValue `asn1:"set"`
 	// EncapContentInfo holds the TSTInfo being signed.
 	EncapContentInfo tsaEncapContentInfo
-	// Certificates carries the signer's certificate chain, unread here.
+	// Certificates carries the signer's certificate chain, which the signature check reads.
 	Certificates asn1.RawValue `asn1:"optional,tag:0"`
 	// CRLs is unread.
 	CRLs asn1.RawValue `asn1:"optional,tag:1"`
-	// SignerInfos holds the authority's signature, unread here.
+	// SignerInfos holds the authority's signature.
 	SignerInfos asn1.RawValue `asn1:"set"`
 }
 
@@ -259,15 +271,22 @@ type tsaTSTInfo struct {
 // time somewhere this install cannot rewrite, and found out otherwise at an audit, which is the
 // worst moment to learn it.
 //
-// Exactly two things are checked, and it is worth being plain about which. The imprint must equal
-// the digest that was sent. The nonce must equal the one that was sent whenever the token carries a
+// Three things are checked, and it is worth being plain about which. The imprint must equal the
+// digest that was sent. The nonce must equal the one that was sent whenever the token carries a
 // nonce at all; a token without one passes, since the imprint already binds the reply to this link
-// and RFC 3161 has a conforming authority echo what it was given.
+// and RFC 3161 has a conforming authority echo what it was given. And the token's signature must
+// verify under the certificate the token carries.
 //
-// The signature is deliberately not checked here. Whether the authority is worth trusting is the
-// relying party's call, made offline against the token in the finished bundle, and a check made here
-// would only be this install vouching for itself. What must be true before storing it is narrower:
-// this token is about this link, and it was issued for this request.
+// The signature check used to be skipped, described as leaving the trust decision to the relying
+// party. It did not leave a decision to anybody: the offline verifier ran this same function, so
+// nothing anywhere read SignerInfos, and a token an operator typed themselves passed as third-party
+// evidence. An operator could truncate their chain, answer their own timestamp request, and every
+// artifact then reported the head as fixed somewhere the install could not rewrite.
+//
+// What is still deliberately not checked is the certificate chain: no root store is consulted and
+// expiry is not judged, because a token is routinely read long after its certificate expired.
+// Whether a given authority is worth believing remains the relying party's call, made against the
+// certificate that travels in the bundle.
 func checkTimestampToken(token, want []byte, nonce *big.Int) error {
 	var ci tsaContentInfo
 	if _, err := asn1.Unmarshal(token, &ci); err != nil {
@@ -298,6 +317,9 @@ func checkTimestampToken(token, want []byte, nonce *big.Int) error {
 	if got, ok := tokenNonce(sd.EncapContentInfo.EContent); ok && nonce != nil && got.Cmp(nonce) != 0 {
 		return fmt.Errorf("token echoes a different nonce than the one sent, so it answers some " +
 			"other request and says nothing about when this chain reached here")
+	}
+	if err := verifyTokenSignature(sd); err != nil {
+		return fmt.Errorf("token signature: %w", err)
 	}
 	return nil
 }
@@ -386,4 +408,215 @@ func NewAnchor(ctx context.Context, client *http.Client, kind, ref, shape, insta
 	}
 	a.Proof = proof
 	return a, nil
+}
+
+// contentTypeAttrOID and messageDigestAttrOID name the two signed attributes RFC 5652 requires a
+// signer to cover, and which bind the signature to this payload rather than to any other.
+var (
+	contentTypeAttrOID   = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 3}
+	messageDigestAttrOID = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 4}
+)
+
+// tsaSignerInfo is one CMS SignerInfo: who signed, over what, and with which algorithm.
+type tsaSignerInfo struct {
+	// Version is 1 for an issuer-and-serial signer identifier.
+	Version int
+	// SID identifies the signing certificate. Only issuer and serial is read; a token identifying
+	// its signer by subject key identifier is refused rather than guessed at.
+	SID issuerAndSerial
+	// DigestAlgorithm is the hash the signed attributes were taken with.
+	DigestAlgorithm pkix.AlgorithmIdentifier
+	// SignedAttrs are the attributes actually covered by the signature. RFC 3161 requires them.
+	SignedAttrs asn1.RawValue `asn1:"optional,tag:0"`
+	// SignatureAlgorithm names how the signature was produced.
+	SignatureAlgorithm pkix.AlgorithmIdentifier
+	// Signature is the signature value.
+	Signature []byte
+	// UnsignedAttrs is not covered by the signature and is not read.
+	UnsignedAttrs asn1.RawValue `asn1:"optional,tag:1"`
+}
+
+// issuerAndSerial identifies a certificate the way CMS does.
+type issuerAndSerial struct {
+	// Issuer is the DER of the issuer name, compared byte for byte against a candidate certificate.
+	Issuer asn1.RawValue
+	// Serial is the certificate serial number.
+	Serial *big.Int
+}
+
+// cmsAttribute is one signed attribute: an OID and its set of values.
+type cmsAttribute struct {
+	// Type names the attribute.
+	Type asn1.ObjectIdentifier
+	// Values holds the attribute's values, of which the two this reads carry exactly one.
+	Values asn1.RawValue `asn1:"set"`
+}
+
+// verifyTokenSignature checks that the authority named in the token actually signed it.
+//
+// This is the half a relying party cannot supply for itself. Whether a given authority is worth
+// believing is their trust decision, made against the certificate in the finished bundle, and this
+// deliberately does not make it: no chain is built, no root store is consulted, and expiry is not
+// judged, because a token is routinely read long after the certificate that signed it expired.
+// What is checked is that the signature verifies under the certificate the token carries, and that
+// the signature covers this payload: without that, a token is a value anybody can type, and an
+// operator could truncate their own chain and mint an anchor over the new head.
+func verifyTokenSignature(sd tsaSignedData) error {
+	var infos []tsaSignerInfo
+	if _, err := asn1.UnmarshalWithParams(fullSet(sd.SignerInfos), &infos, "set"); err != nil {
+		return fmt.Errorf("decode signer infos: %w", err)
+	}
+	if len(infos) == 0 {
+		return fmt.Errorf("the token carries no signature, so nothing vouches for it")
+	}
+	certs, err := tokenCertificates(sd)
+	if err != nil {
+		return err
+	}
+	if len(certs) == 0 {
+		return fmt.Errorf("the token carries no certificate, so its signature cannot be checked " +
+			"offline. Request the token with the certificate included")
+	}
+	// One verified signer is what the format needs: a token is signed by one authority, and any
+	// signer that does verify is a signer who saw this payload.
+	var problems []string
+	for _, info := range infos {
+		if err := verifyOneSigner(info, sd, certs); err != nil {
+			problems = append(problems, err.Error())
+			continue
+		}
+		return nil
+	}
+	return fmt.Errorf("no signer on the token verifies: %s", strings.Join(problems, "; "))
+}
+
+// verifyOneSigner checks a single SignerInfo against the certificates the token carries.
+func verifyOneSigner(info tsaSignerInfo, sd tsaSignedData, certs []*x509.Certificate) error {
+	cert := findSigner(info.SID, certs)
+	if cert == nil {
+		return fmt.Errorf("the token names a signer whose certificate it does not carry")
+	}
+	// RFC 3161 requires signed attributes, and they are what makes the signature specific to this
+	// payload. Signing the content directly is permitted by CMS in general but not here, and
+	// accepting it would let a signature taken over some other TSTInfo be presented with this one.
+	if len(info.SignedAttrs.Bytes) == 0 {
+		return fmt.Errorf("the token's signature covers no signed attributes, so it does not bind " +
+			"the payload it travels with")
+	}
+	if err := checkSignedAttrs(info, sd); err != nil {
+		return err
+	}
+	algo, err := signatureAlgorithm(info)
+	if err != nil {
+		return err
+	}
+	// The signature is taken over the attributes re-tagged as a SET, which is how CMS says to
+	// serialize them for signing even though they travel under an implicit [0].
+	return cert.CheckSignature(algo, fullSet(info.SignedAttrs), info.Signature)
+}
+
+// checkSignedAttrs confirms the signed attributes name this payload: the content type the token
+// declares, and a message digest equal to the hash of the TSTInfo it carries.
+func checkSignedAttrs(info tsaSignerInfo, sd tsaSignedData) error {
+	var attrs []cmsAttribute
+	if _, err := asn1.UnmarshalWithParams(fullSet(info.SignedAttrs), &attrs, "set"); err != nil {
+		return fmt.Errorf("decode signed attributes: %w", err)
+	}
+	var sawType, sawDigest bool
+	for _, attr := range attrs {
+		switch {
+		case attr.Type.Equal(contentTypeAttrOID):
+			var got asn1.ObjectIdentifier
+			if _, err := asn1.Unmarshal(attr.Values.Bytes, &got); err != nil {
+				return fmt.Errorf("decode the signed content type: %w", err)
+			}
+			if !got.Equal(sd.EncapContentInfo.EContentType) {
+				return fmt.Errorf("the signature covers content type %v but the token carries %v",
+					got, sd.EncapContentInfo.EContentType)
+			}
+			sawType = true
+		case attr.Type.Equal(messageDigestAttrOID):
+			var got []byte
+			if _, err := asn1.Unmarshal(attr.Values.Bytes, &got); err != nil {
+				return fmt.Errorf("decode the signed message digest: %w", err)
+			}
+			sum := sha256.Sum256(sd.EncapContentInfo.EContent)
+			if !bytes.Equal(got, sum[:]) {
+				return fmt.Errorf("the signature covers a different payload than the token carries")
+			}
+			sawDigest = true
+		}
+	}
+	if !sawType || !sawDigest {
+		return fmt.Errorf("the token's signed attributes omit the content type or the message " +
+			"digest, so the signature does not bind the payload")
+	}
+	return nil
+}
+
+// signatureAlgorithm maps a signer's algorithm identifiers onto the algorithm x509 verifies with.
+//
+// A signature algorithm is either spelled out whole, or given as the bare key algorithm with the
+// digest named separately, so both spellings are resolved here. Only SHA-256 digests are accepted,
+// which is the digest this product requests and the only one the imprint check allows.
+func signatureAlgorithm(info tsaSignerInfo) (x509.SignatureAlgorithm, error) {
+	switch {
+	case info.SignatureAlgorithm.Algorithm.Equal(oidSHA256WithRSA):
+		return x509.SHA256WithRSA, nil
+	case info.SignatureAlgorithm.Algorithm.Equal(oidECDSAWithSHA256):
+		return x509.ECDSAWithSHA256, nil
+	case info.SignatureAlgorithm.Algorithm.Equal(oidEd25519):
+		return x509.PureEd25519, nil
+	case info.SignatureAlgorithm.Algorithm.Equal(oidRSAPSS):
+		return x509.SHA256WithRSAPSS, nil
+	case info.SignatureAlgorithm.Algorithm.Equal(oidRSAEncryption):
+		if !info.DigestAlgorithm.Algorithm.Equal(sha256OID) {
+			return 0, fmt.Errorf("the token is signed with digest %v, and only SHA-256 is accepted",
+				info.DigestAlgorithm.Algorithm)
+		}
+		return x509.SHA256WithRSA, nil
+	case info.SignatureAlgorithm.Algorithm.Equal(oidECPublicKey):
+		if !info.DigestAlgorithm.Algorithm.Equal(sha256OID) {
+			return 0, fmt.Errorf("the token is signed with digest %v, and only SHA-256 is accepted",
+				info.DigestAlgorithm.Algorithm)
+		}
+		return x509.ECDSAWithSHA256, nil
+	default:
+		return 0, fmt.Errorf("the token is signed with algorithm %v, which is not one this reads",
+			info.SignatureAlgorithm.Algorithm)
+	}
+}
+
+// findSigner returns the carried certificate the signer identifier names, or nil when it is absent.
+func findSigner(sid issuerAndSerial, certs []*x509.Certificate) *x509.Certificate {
+	for _, cert := range certs {
+		if cert.SerialNumber.Cmp(sid.Serial) == 0 && bytes.Equal(cert.RawIssuer, sid.Issuer.FullBytes) {
+			return cert
+		}
+	}
+	return nil
+}
+
+// tokenCertificates parses the certificate set a token carries.
+func tokenCertificates(sd tsaSignedData) ([]*x509.Certificate, error) {
+	if len(sd.Certificates.Bytes) == 0 {
+		return nil, nil
+	}
+	// The set travels under an implicit [0]; x509 wants the bare concatenated certificates.
+	certs, err := x509.ParseCertificates(sd.Certificates.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("decode the token's certificates: %w", err)
+	}
+	return certs, nil
+}
+
+// fullSet returns an implicitly tagged constructed value re-tagged as a universal SET, which is the
+// encoding CMS signs and the encoding encoding/asn1 will decode into a slice.
+func fullSet(v asn1.RawValue) []byte {
+	reTagged := asn1.RawValue{Class: asn1.ClassUniversal, Tag: asn1.TagSet, IsCompound: true, Bytes: v.Bytes}
+	out, err := asn1.Marshal(reTagged)
+	if err != nil {
+		return nil
+	}
+	return out
 }

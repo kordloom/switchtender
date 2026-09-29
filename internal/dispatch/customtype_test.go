@@ -118,3 +118,74 @@ func TestTypedCredentialWithoutTypesConfiguredFails(t *testing.T) {
 			"run authenticating with nothing")
 	}
 }
+
+// TestMaterializeCustomTypeWithNoSecretFieldMasksEverything covers the case the test above does not:
+// a type whose fields nobody marked secret.
+//
+// The built-in kinds route their values through injectedMaskValues, which masks every value an
+// injector produced when the injector named none, deliberately, so an injector that names an empty
+// set cannot leak its own values by accident. The custom-type path took the named set raw, so
+// forgetting the flag produced a credential whose value reached the run environment with nothing in
+// the mask list: the only thing the masker held was the sealed JSON blob, a string that never
+// appears in tool output. An ansible-playbook -vvv, a bash step running env, or a provider debug
+// line then wrote the key into the stored log and the live stream in the clear. Nothing in the API
+// requires a field to be marked, so this is a one-word mistake with no warning attached.
+func TestMaterializeCustomTypeWithNoSecretFieldMasksEverything(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	sealer := credential.NewSealer("pass", "salt")
+	const value = "dd-live-APIKEYVALUE-9999"
+
+	types := credential.NewMemTypeStore()
+	typ := &credential.CredentialType{
+		ID:   "ctype_datadog",
+		Name: "Datadog API",
+		// No field is marked secret, which is the mistake this covers.
+		Fields:       []credential.Field{{Name: "api_key"}},
+		EnvInjectors: map[string]string{"DATADOG_API_KEY": "{{api_key}}"},
+	}
+	if err := typ.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if err := types.Save(ctx, typ); err != nil {
+		t.Fatalf("Save() type error = %v", err)
+	}
+
+	fields, err := json.Marshal(map[string]string{"api_key": value})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	sealed, err := sealer.Seal(string(fields))
+	if err != nil {
+		t.Fatalf("Seal() error = %v", err)
+	}
+	creds := credential.NewMemStore()
+	if err := creds.Save(ctx, &credential.Credential{
+		ID: "cred_dd", Name: "datadog", TypeID: "ctype_datadog", Secret: sealed,
+	}); err != nil {
+		t.Fatalf("Save() credential error = %v", err)
+	}
+
+	d := &Dispatcher{credentials: creds, credentialTypes: types, sealer: sealer}
+	spec := &roundhouse.Spec{}
+	cleanup, secrets, err := d.materializeCredentials(ctx,
+		&run.Run{ID: "run_1", CredentialIDs: []string{"cred_dd"}}, spec)
+	defer cleanup()
+	if err != nil {
+		t.Fatalf("materializeCredentials() error = %v", err)
+	}
+
+	if !slices.Contains(spec.Env, "DATADOG_API_KEY="+value) {
+		t.Fatalf("env = %v, want the key injected", spec.Env)
+	}
+	if !slices.Contains(secrets, value) {
+		t.Errorf("the injected value is not in the mask list %v, so a run that echoes its "+
+			"environment writes %q into the stored log unredacted", secrets, value)
+	}
+	// The masker must actually redact it, which is the property the mask list exists for.
+	m := &masker{}
+	m.set(secrets)
+	if got := string(m.redact([]byte("TASK output: DATADOG_API_KEY=" + value))); strings.Contains(got, value) {
+		t.Errorf("the masker left the value in the output: %q", got)
+	}
+}

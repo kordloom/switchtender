@@ -566,7 +566,8 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 			return
 		}
 
-		objects := append([]string{req.ProjectID, req.InventoryID, req.PullCredentialID}, req.CredentialIDs...)
+		objects := append([]string{req.ProjectID, req.InventoryID, req.PullCredentialID,
+			queueObject(req.Queue)}, req.CredentialIDs...)
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
 			return
 		}
@@ -691,7 +692,7 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 			}
 		}
 
-		objects := append([]string{req.ProjectID}, req.CredentialIDs...)
+		objects := append([]string{req.ProjectID, queueObject(req.Queue)}, req.CredentialIDs...)
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
 			return
 		}

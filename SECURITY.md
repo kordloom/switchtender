@@ -47,6 +47,12 @@ Verify the signature over the checksums, then the archive against them:
 
     shasum -a 256 -c SHA256SUMS --ignore-missing
 
+`SHA256SUMS` covers `BINARY_SHA256SUMS` as well as the archives, so the two checks above also
+establish the manifest that `switchtender version --verify` reads. That matters because `--verify`
+fetches the manifest over HTTPS and compares the running executable against it: on its own that
+trusts whoever can write the release assets. Checking the signature once, out of band, is what turns
+it into a check on the build rather than a check on GitHub.
+
 ## Security posture
 
 - Secrets are encrypted at rest with AES-GCM under an Argon2id-derived key, decrypt only inside the

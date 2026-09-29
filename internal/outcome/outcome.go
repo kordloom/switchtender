@@ -68,9 +68,37 @@ type Record struct {
 	Hosts []RecordHost `json:"hosts,omitempty"`
 	// Tasks are the per-task durations, sorted by task.
 	Tasks []RecordTask `json:"tasks,omitempty"`
+	// Children are the shards or pipeline steps this run coordinated, empty for an ordinary run.
+	//
+	// A coordinator executes nothing itself, so its own log, hosts, and tasks are empty and the
+	// record committed for a five-step pipeline said nothing whatever about the five executions. It
+	// carried the approved graph through the spec digest and a terminal status, and log_sha256 of
+	// nothing. The children never reached the chain either, because their own outcome commit is
+	// skipped precisely so it can be rolled up here, so a step that failed under continue-on-failure
+	// left no record anywhere. Each child's log digest is included, which is what lets a reader hold
+	// the stored output of any one step against the receipt.
+	Children []RecordChild `json:"children,omitempty"`
 }
 
 // RecordHost is one host's result in a run, the counts an auditor reads.
+// RecordChild is one shard or pipeline step rolled into its coordinator's outcome.
+type RecordChild struct {
+	// RunID is the child's run id.
+	RunID string `json:"run_id"`
+	// Name is the step's name, empty for a shard, which is identified by its index instead.
+	Name string `json:"name,omitempty"`
+	// Index is the child's position: the step index for a pipeline, the shard index for a split.
+	Index *int `json:"index,omitempty"`
+	// Attempt is which try this run was, so a retried step is distinguishable from its predecessor.
+	Attempt int `json:"attempt,omitempty"`
+	// Status is the terminal status the child reached.
+	Status string `json:"status"`
+	// ExitCode is the child's exit code, null when it never produced one.
+	ExitCode *int `json:"exit_code"`
+	// LogSHA256 digests the child's captured output, so its stored log can be held against this.
+	LogSHA256 string `json:"log_sha256,omitempty"`
+}
+
 type RecordHost struct {
 	// Host is the target host.
 	Host string `json:"host"`
@@ -161,6 +189,12 @@ func Body(ctx context.Context, store run.Store, r *run.Run) ([]byte, error) {
 	}
 	sort.Slice(out.Tasks, func(i, j int) bool { return out.Tasks[i].Task < out.Tasks[j].Task })
 
+	children, err := childRecords(ctx, store, r)
+	if err != nil {
+		return nil, err
+	}
+	out.Children = children
+
 	return json.Marshal(out)
 }
 
@@ -210,4 +244,66 @@ func Parse(body []byte) (Record, error) {
 	var rec Record
 	err := json.Unmarshal(body, &rec)
 	return rec, err
+}
+
+// childRecords assembles the shards or pipeline steps a coordinator ran, newest attempt included, so
+// its outcome says what actually executed rather than only that the graph was approved.
+//
+// A run is either a split or a pipeline, never both, so one of the two reads comes back empty. Order
+// is by index then attempt then id, fixed rather than incidental, because the record is hashed into
+// the chain and two orderings of the same runs would produce two digests for one history.
+func childRecords(ctx context.Context, store run.Store, r *run.Run) ([]RecordChild, error) {
+	if r.ParentID != nil {
+		return nil, nil
+	}
+	shards, err := store.Shards(ctx, r.ID)
+	if err != nil {
+		return nil, err
+	}
+	steps, err := store.Steps(ctx, r.ID)
+	if err != nil {
+		return nil, err
+	}
+	kids := append(append([]*run.Run(nil), shards...), steps...)
+	if len(kids) == 0 {
+		return nil, nil
+	}
+	seen := make(map[string]bool, len(kids))
+	out := make([]RecordChild, 0, len(kids))
+	for _, c := range kids {
+		if c == nil || seen[c.ID] {
+			continue
+		}
+		seen[c.ID] = true
+		logSHA, err := logDigest(ctx, store, c.ID)
+		if err != nil {
+			return nil, err
+		}
+		index := c.StepIndex
+		if index == nil {
+			index = c.ShardIndex
+		}
+		out = append(out, RecordChild{
+			RunID: c.ID, Name: c.StepName, Index: index, Attempt: c.Attempt,
+			Status: string(c.Status), ExitCode: c.ExitCode, LogSHA256: logSHA,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		ai, bi := -1, -1
+		if a.Index != nil {
+			ai = *a.Index
+		}
+		if b.Index != nil {
+			bi = *b.Index
+		}
+		if ai != bi {
+			return ai < bi
+		}
+		if a.Attempt != b.Attempt {
+			return a.Attempt < b.Attempt
+		}
+		return a.RunID < b.RunID
+	})
+	return out, nil
 }

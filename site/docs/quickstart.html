@@ -86,10 +86,12 @@ each host's measured duration in recent runs.</p>
 </code></pre>
 <p>For more than one machine, use a PostgreSQL DSN as the <code>--db</code> value on every process.</p>
 <h2 id="lock-down-the-api">Lock down the API</h2>
-<p>Creating the first token turns on authentication. Until then the API is open so a fresh install
-works immediately.</p>
+<p>The first start on an empty database mints an initial admin token and prints it once, so the API
+is authenticated from the first request. Keep that token or replace it with named ones:</p>
 <pre><code>switchtender token new --db switchtender.db --name ci
 </code></pre>
+<p>A loopback bind, or <code>--read-only</code>, serves without authentication instead, since neither exposes an
+unauthenticated API to the network.</p>
 <p>Create user accounts with roles for sign-in:</p>
 <pre><code>SWITCHTENDER_PASSWORD=secret switchtender user new operator-jane --role operator --db switchtender.db
 </code></pre>

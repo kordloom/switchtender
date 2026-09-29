@@ -30,7 +30,7 @@ import (
 // token or cloud credentials, is outside our prefix and survives.
 func resolveCommand(ctx context.Context, command string) (string, error) {
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
-	cmd.Env = util.RunEnviron()
+	cmd.Env = util.SecretFetchEnviron()
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	if err := cmd.Run(); err != nil {

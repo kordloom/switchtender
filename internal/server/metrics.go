@@ -30,11 +30,28 @@ const metricsHistogramWindow = 10000
 // exposition format, computed from the store at scrape time so no counter state lives in the
 // process. The status gauges come from a grouped count, and the histograms are derived from the
 // most recent metricsHistogramWindow runs, so a scrape stays cheap however large history grows.
-func metricsHandler(store run.Store, chain *chainHealth, log *zap.Logger) http.HandlerFunc {
+// The scrape is withheld entirely from a caller who may read no runs, rather than emitted with some
+// series dropped. Its equivalents on the API already do this: GET /v1/workers and GET /v1/fleet nil
+// their lists for such a caller. This endpoint took no authorizer at all, so under strict grants a
+// viewer in one tenant could scrape every executor name, every queue name, the estate's host count,
+// how many hosts are failing, and the audit-chain gauges for work they are refused by name
+// everywhere else. Partial series would still leak the shape of the estate, so the answer is empty.
+func metricsHandler(store run.Store, chain *chainHealth, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: metricsHandler: Store required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
+		_, anyReadable, ferr := derivedReadFilter(r.Context(), authz, store)
+		if ferr != nil {
+			log.Error("server: metrics read filter: " + ferr.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not compute metrics")
+			return
+		}
+		if !anyReadable {
+			w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		byStatus, err := store.RunStatusCounts(r.Context())
 		if err != nil {
 			log.Error("server: metrics: " + err.Error())

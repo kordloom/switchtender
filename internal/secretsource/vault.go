@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"os"
 	"strings"
+
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // httpMaxBody caps a resolver's HTTP response so a misbehaving endpoint cannot exhaust memory.
@@ -102,7 +104,7 @@ func vaultResolveToken(configToken, addr string) (string, error) {
 		return configToken, nil
 	}
 	if envAddr := os.Getenv("VAULT_ADDR"); envAddr != "" && sameVaultEndpoint(addr, envAddr) {
-		if token := os.Getenv("VAULT_TOKEN"); token != "" {
+		if token := os.Getenv(util.EnvVaultToken); token != "" {
 			return token, nil
 		}
 	}

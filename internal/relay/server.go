@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -421,17 +422,23 @@ func (s *relayServer) save(w http.ResponseWriter, r *http.Request) {
 		}
 		fresh.Status = run.StatusRunning
 	}
-	if fresh.StartedAt == nil {
-		fresh.StartedAt = stored.StartedAt
-	}
-	if stored.Warning != "" {
-		fresh.Warning = stored.Warning
-	}
-	if len(stored.Outputs) > 0 {
-		fresh.Outputs = stored.Outputs
-	}
-	if err := s.store.Save(r.Context(), fresh); err != nil {
+	// The progress itself lands through a fenced write rather than a whole-row save. Saving the
+	// re-read snapshot still lost the race it was meant to close: between the Get above and the
+	// write, the sweep could settle the run, and the save then restored its status, its lease, and
+	// its cleared claim secret from a snapshot taken before that happened. One statement that
+	// carries the fence cannot be overtaken that way.
+	moved, err := s.store.ApplyRunningProgress(r.Context(), id, fresh.ClaimedBy, run.Progress{
+		StartedAt: stored.StartedAt,
+		Warning:   stored.Warning,
+		Outputs:   stored.Outputs,
+	})
+	if err != nil {
 		s.internal(w, "save", err)
+		return
+	}
+	if !moved {
+		writeErr(w, http.StatusConflict,
+			"the run settled elsewhere while this report was in flight, so it was not applied")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -526,6 +533,12 @@ func applyWorkerReport(stored, reported *run.Run) {
 	stored.Warning = reported.Warning
 	stored.StartedAt = reported.StartedAt
 	stored.EndedAt = reported.EndedAt
+	// Timing is the executor's to report, but not without bound. Both values are digested into the
+	// run's outcome entry and travel in its receipt, so a compromised relay could otherwise attest an
+	// execution window that never happened: dated inside an approved maintenance window while
+	// running outside it, or before the approval that released the run. They are held inside what
+	// the control node itself observed.
+	clampReportTimes(stored, time.Now())
 	// The lease is not taken from the wire. Copying it let a worker clear a live parent's holder,
 	// and a parent that is running with no holder is exactly what the abandoned-parent sweep
 	// settles, so one request turned into a remote kill switch on any long-running split or
@@ -534,6 +547,60 @@ func applyWorkerReport(stored, reported *run.Run) {
 	if len(reported.Outputs) > 0 {
 		stored.Outputs = reported.Outputs
 	}
+}
+
+// clampReportTimes holds a worker's reported timing inside the window the control node observed,
+// and says so when it had to move one.
+//
+// The bounds are facts this node knows first hand: a run cannot have started before it was created,
+// and nothing can have happened after now. A worker whose clock is merely skewed keeps running with
+// a note rather than being refused, since refusing would strand real work over a wrong clock, but
+// the values that reach the chain are ones this node can stand behind.
+func clampReportTimes(r *run.Run, now time.Time) {
+	floor, ceiling := r.CreatedAt, now
+	var moved bool
+	if r.StartedAt != nil {
+		if bounded, ok := clampTime(*r.StartedAt, floor, ceiling); ok {
+			r.StartedAt, moved = &bounded, true
+		}
+	}
+	if r.EndedAt != nil {
+		// A run cannot end before it started, so the start is the floor once there is one.
+		endFloor := floor
+		if r.StartedAt != nil && r.StartedAt.After(endFloor) {
+			endFloor = *r.StartedAt
+		}
+		if bounded, ok := clampTime(*r.EndedAt, endFloor, ceiling); ok {
+			r.EndedAt, moved = &bounded, true
+		}
+	}
+	if moved {
+		r.Warning = appendWarning(r.Warning, "the executor reported a time outside the window this "+
+			"control node observed, so the recorded times were held to that window")
+	}
+}
+
+// clampTime returns t held between floor and ceiling, and whether it had to move.
+func clampTime(t, floor, ceiling time.Time) (time.Time, bool) {
+	switch {
+	case t.Before(floor):
+		return floor, true
+	case t.After(ceiling):
+		return ceiling, true
+	default:
+		return t, false
+	}
+}
+
+// appendWarning adds note to an existing warning without losing what was already there.
+func appendWarning(existing, note string) string {
+	if existing == "" {
+		return note
+	}
+	if strings.Contains(existing, note) {
+		return existing
+	}
+	return existing + "; " + note
 }
 
 // heldForReport reports whether the run named in the request is one a worker may write a record

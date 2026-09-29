@@ -69,7 +69,7 @@ instead of scrollback.
 The full head-to-head, including where SwitchTender is behind, is in the
 [comparison](docs/comparison.md).
 
-Checked against vendor documentation on 2026-07-31, for AWX 24.6.1 and Semaphore 2.18.29. These
+Checked against vendor documentation on 2026-08-10, for AWX 24.6.1 and Semaphore 2.19.7. These
 products ship, and a table like this decays. If a row is out of date, open an issue and it gets
 corrected.
 
@@ -195,8 +195,9 @@ One line with a Go toolchain installed:
     go install github.com/kordloom/switchtender@latest
 
 Or grab a build for your platform from the [releases page](https://github.com/kordloom/switchtender/releases):
-a `SwitchTender.dmg` for macOS, a `windows_amd64.zip` for Windows, or a `tar.gz` of the binary for
-macOS and Linux. Verify any download with `switchtender version --verify`, which checks the running
+a `windows_amd64.zip` for Windows, a `tar.gz` of the binary for macOS and Linux, or a `deb`, `rpm`,
+or `apk` package. On macOS the binary is the desktop app: run `switchtender desktop` and it opens
+the UI in its own window. Verify any download with `switchtender version --verify`, which checks the running
 binary against the release's published hashes; see [verifying a release](SECURITY.md#verifying-a-release)
 for that and for the cosign signature CI-built releases carry. Or build from source:
 

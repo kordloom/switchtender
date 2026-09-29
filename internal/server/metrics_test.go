@@ -44,7 +44,7 @@ func TestMetricsHandler(t *testing.T) {
 		}
 	}
 
-	handler := metricsHandler(store, nil, zap.NewNop())
+	handler := metricsHandler(store, nil, nil, zap.NewNop())
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if rec.Code != http.StatusOK {
@@ -111,7 +111,7 @@ func TestMetricsChainGauges(t *testing.T) {
 	health := newChainHealth(audits, "")
 	// Re-verify on every scrape so the test reads fresh state; production coalesces on an interval.
 	health.minInterval = 0
-	handler := metricsHandler(store, health, zap.NewNop())
+	handler := metricsHandler(store, health, nil, zap.NewNop())
 
 	body := scrape(t, handler)
 	for _, want := range []string{
@@ -179,7 +179,7 @@ func TestMetricsChainGaugesReportABreak(t *testing.T) {
 	store := run.NewMemStore()
 	audits := seedChain(t, 3)
 	health := newChainHealth(&tamperedChain{Store: audits, at: 2}, "")
-	handler := metricsHandler(store, health, zap.NewNop())
+	handler := metricsHandler(store, health, nil, zap.NewNop())
 	body := scrape(t, handler)
 	if !strings.Contains(body, "switchtender_audit_chain_verified 0") ||
 		!strings.Contains(body, "switchtender_audit_chain_broke_at 2") {
@@ -214,7 +214,7 @@ func TestMetricsChainGaugesCatchInPlaceTamper(t *testing.T) {
 	health := newChainHealth(chain, "")
 	// Each scrape re-verifies, the whole point: a forward-only cursor would never re-read entry 2.
 	health.minInterval = 0
-	handler := metricsHandler(store, health, zap.NewNop())
+	handler := metricsHandler(store, health, nil, zap.NewNop())
 
 	if body := scrape(t, handler); !strings.Contains(body, "switchtender_audit_chain_verified 1") {
 		t.Fatalf("first scrape did not verify a sound chain:\n%s", grepLines(body, "switchtender_audit"))
@@ -236,7 +236,7 @@ func TestMetricsChainGaugesNeverVerifiedIsNotSound(t *testing.T) {
 	failing := &failingChain{Store: seedChain(t, 2)}
 	failing.fail.Store(true)
 	health := newChainHealth(failing, "")
-	handler := metricsHandler(store, health, zap.NewNop())
+	handler := metricsHandler(store, health, nil, zap.NewNop())
 	// The very first scrape cannot read the chain. A chain never verified must not read as sound.
 	body := scrape(t, handler)
 	if !strings.Contains(body, "switchtender_audit_chain_verified 0") ||
@@ -253,7 +253,7 @@ func TestMetricsChainGaugesGoStaleOnReadFailure(t *testing.T) {
 	failing := &failingChain{Store: audits}
 	health := newChainHealth(failing, "")
 	health.minInterval = 0
-	handler := metricsHandler(store, health, zap.NewNop())
+	handler := metricsHandler(store, health, nil, zap.NewNop())
 
 	if body := scrape(t, handler); !strings.Contains(body, "switchtender_audit_health_stale 0") {
 		t.Fatalf("healthy scrape reads stale:\n%s", grepLines(body, "switchtender_audit"))

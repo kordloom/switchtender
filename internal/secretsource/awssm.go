@@ -148,9 +148,9 @@ func resolveAWS(ctx context.Context, config string) (string, error) {
 // the standard AWS environment variables for any empty field. It errors when the access key, secret
 // key, or region cannot be found, since none can be assumed.
 func awsResolveCredentials(cfg awsConfig) (awsCredentials, string, error) {
-	access := util.FirstNonEmpty(cfg.AccessKeyID, os.Getenv("AWS_ACCESS_KEY_ID"))
-	secret := util.FirstNonEmpty(cfg.SecretAccessKey, os.Getenv("AWS_SECRET_ACCESS_KEY"))
-	session := util.FirstNonEmpty(cfg.SessionToken, os.Getenv("AWS_SESSION_TOKEN"))
+	access := util.FirstNonEmpty(cfg.AccessKeyID, os.Getenv(util.EnvAWSAccessKeyID))
+	secret := util.FirstNonEmpty(cfg.SecretAccessKey, os.Getenv(util.EnvAWSSecretAccessKey))
+	session := util.FirstNonEmpty(cfg.SessionToken, os.Getenv(util.EnvAWSSessionToken))
 	region := util.FirstNonEmpty(cfg.Region, os.Getenv("AWS_REGION"), os.Getenv("AWS_DEFAULT_REGION"))
 
 	if access == "" || secret == "" {

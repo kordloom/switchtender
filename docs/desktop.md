@@ -14,14 +14,20 @@ no container, no Kubernetes.
 ## Download
 
 Every release attaches ready-to-run downloads on the
-[releases page](https://github.com/kordloom/switchtender/releases): a `SwitchTender.dmg` for macOS with
-the app inside, a `windows_amd64.zip` holding `switchtender.exe`, and `tar.gz` archives of the binary
-for macOS and Linux. A `SHA256SUMS` file lists the checksum of each one.
+[releases page](https://github.com/kordloom/switchtender/releases): a `windows_amd64.zip` holding
+`switchtender.exe`, `tar.gz` archives of the binary for macOS and Linux, and `deb`, `rpm`, and `apk`
+packages. A `SHA256SUMS` file lists the checksum of each one.
+
+There is no separate download for the desktop app. The binary is the app: `switchtender desktop`
+picks a loopback port, keeps its data in a per-user directory, and opens the UI. A macOS `.app`
+bundle and a `SwitchTender.dmg` are built by the release workflow and appear on releases it produces;
+releases assembled by hand carry the archives above and nothing else, so check the page for what is
+actually attached rather than assuming.
 
 The downloads are not yet signed with a developer certificate, so the operating system warns that
-the developer is unidentified on first launch. On macOS, right-click the app and choose Open, then
-Open again. On Windows, choose More info and then Run anyway. A signed release removes the warning
-and is planned.
+the developer is unidentified on first launch. On macOS, right-click and choose Open, then Open
+again. On Windows, choose More info and then Run anyway. A signed release removes the warning and
+is planned.
 
 ## Run it
 

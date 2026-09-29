@@ -1160,6 +1160,9 @@ func scanHostSummary(rows *sql.Rows) (run.HostSummary, error) {
 // Save inserts or replaces the run identified by r.ID. The cancel flag merges with MAX so a
 // replace from a stale snapshot cannot erase a cancel another process just requested.
 func (s *store) Save(ctx context.Context, r *run.Run) error {
+	// Cleaned here so a stray byte from a tool's output cannot make this write behave differently
+	// from the same write on PostgreSQL.
+	r.Sanitize()
 	const q = `
 INSERT INTO runs
 	(id, playbook, inventory, status, exit_code, error, created_at, started_at, ended_at,
@@ -1379,7 +1382,12 @@ func (s *store) Shards(ctx context.Context, parentID string) ([]*run.Run, error)
 
 // Steps returns the pipeline step runs of a parent ordered by step index.
 func (s *store) Steps(ctx context.Context, parentID string) ([]*run.Run, error) {
-	const q = "SELECT " + runColumns + " FROM runs WHERE parent_id=? ORDER BY step_index, attempt"
+	// The same NULL-ordering hazard the shard listing above was fixed for, left here. SQLite sorts
+	// NULLs first and PostgreSQL sorts them last, and step_index is nullable, so the two backends
+	// returned different orders for the same rows. GET /runs/{id}/steps is not gated on kind, so
+	// calling it on a split parent lists shard children, every one of which has a null step index.
+	const q = "SELECT " + runColumns +
+		" FROM runs WHERE parent_id=? ORDER BY step_index IS NULL, step_index, attempt"
 	return s.queryRuns(ctx, "list steps", q, parentID)
 }
 
@@ -2777,19 +2785,48 @@ func (s *store) StampApprovedSpec(ctx context.Context, id, digest string) error 
 // detail, resolved image, and end time in the same statement, so a run is never terminal with the
 // facts that explain it missing.
 func (s *store) FinalizeRunning(ctx context.Context, id string, fin run.Finalization) (bool, error) {
+	fin.SanitizeText()
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE runs SET status=?, exit_code=?, error=?, image=?, commit_sha=?,
 pull_credential_id=?, outputs=?, warning=?, ended_at=?
-WHERE id=? AND status=?`,
+WHERE id=? AND status=? AND (?='' OR claimed_by=?)`,
 		string(fin.Status), sqlutil.NullInt(fin.ExitCode), fin.Error, fin.Image,
 		fin.CommitSHA, fin.PullCredentialID, sqlutil.JSONMap(fin.Outputs), fin.Warning,
-		sqlutil.FormatTime(fin.EndedAt), id, string(run.StatusRunning))
+		sqlutil.FormatTime(fin.EndedAt), id, string(run.StatusRunning), fin.Owner, fin.Owner)
 	if err != nil {
 		return false, fmt.Errorf("finalize running run: %w", err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
 		return false, fmt.Errorf("finalize running run: %w", err)
+	}
+	return n > 0, nil
+}
+
+// ApplyRunningProgress records a worker's progress in one write fenced on the run still being
+// running and still held by owner, so a report in flight cannot resurrect a run the sweep settled.
+//
+// started_at uses COALESCE so a repeated report never moves a start time backward, and warning and
+// outputs keep their stored value when the report carries none, which is what lets one statement
+// stand in for the read-modify-write this replaced.
+func (s *store) ApplyRunningProgress(ctx context.Context, id, owner string,
+	p run.Progress) (bool, error) {
+	p.SanitizeText()
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE runs SET started_at=COALESCE(NULLIF(started_at,''), ?),
+warning=CASE WHEN ?='' THEN warning ELSE ? END,
+outputs=CASE WHEN ?='' THEN outputs ELSE ? END
+WHERE id=? AND status=? AND claimed_by=?`,
+		sqlutil.NullTime(p.StartedAt),
+		p.Warning, p.Warning,
+		sqlutil.JSONMap(p.Outputs), sqlutil.JSONMap(p.Outputs),
+		id, string(run.StatusRunning), owner)
+	if err != nil {
+		return false, fmt.Errorf("apply running progress: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("apply running progress: %w", err)
 	}
 	return n > 0, nil
 }

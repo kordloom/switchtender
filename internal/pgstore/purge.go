@@ -156,7 +156,7 @@ func (s *store) trimSummaryTable(ctx context.Context, trim summaryTrim, keep int
 	del := fmt.Sprintf(`
 DELETE FROM %s WHERE %s = $1 AND (run_id, %s) NOT IN (
 	SELECT run_id, %s FROM %s WHERE %s = $1
-	ORDER BY `+sqlutil.TimeOrder+` DESC, run_id DESC LIMIT $2
+	ORDER BY `+sqlutil.TimeOrder+` DESC, run_id COLLATE "C" DESC LIMIT $2
 )`, trim.table, trim.column, trim.column, trim.column, trim.table, trim.column)
 	deleted := 0
 	for _, key := range keys {

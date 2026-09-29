@@ -2,6 +2,8 @@ package importer
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -366,5 +368,52 @@ func TestFromRundeckMalformed(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestRundeckAcceptsQuotedScalars pins that a job export whose numeric fields are quoted still
+// imports, which is how Rundeck's own published job definitions are written.
+//
+// threadcount decoded straight into an int, so one quoted scalar failed the whole document. The
+// bare-list attempt's error was then discarded in favor of the wrapped attempt's, so the operator
+// was told the top level was the wrong shape when the top level was fine.
+func TestRundeckAcceptsQuotedScalars(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile(filepath.Join("testdata", "rundeck-quoted-scalars.yaml"))
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	plan, err := FromRundeck("prod")(raw, testNow)
+	if err != nil {
+		t.Fatalf("FromRundeck() error = %v, want a quoted threadcount to import", err)
+	}
+	if len(plan.Templates) != 1 {
+		t.Fatalf("templates = %d, want 1", len(plan.Templates))
+	}
+	if got := plan.Templates[0].Forks; got != 4 {
+		t.Errorf("forks = %d, want the quoted threadcount 4", got)
+	}
+	if len(plan.Schedules) != 1 {
+		t.Fatalf("schedules = %d, want 1", len(plan.Schedules))
+	}
+	if got := plan.Schedules[0].Cron; got != "30 2 * * *" {
+		t.Errorf("cron = %q, want 30 2 * * *", got)
+	}
+}
+
+// TestRundeckReportsTheFieldNotTheShape checks a bad field inside a bare job list is reported
+// against that list rather than against the wrapped shape the document is not using.
+func TestRundeckReportsTheFieldNotTheShape(t *testing.T) {
+	t.Parallel()
+	const export = "- name: broken\n  nodefilters:\n    dispatch:\n      threadcount: many\n"
+	_, err := FromRundeck("prod")([]byte(export), testNow)
+	if err == nil {
+		t.Fatal("FromRundeck() error = nil, want a refusal naming the bad value")
+	}
+	if strings.Contains(err.Error(), "into struct") {
+		t.Errorf("error blames the top-level shape for a bad field: %v", err)
+	}
+	if !strings.Contains(err.Error(), "many") {
+		t.Errorf("error does not name the value that could not be read: %v", err)
 	}
 }

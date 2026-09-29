@@ -169,3 +169,81 @@ func TestEveryRunRecordsTheRulesInForce(t *testing.T) {
 		t.Errorf("stored set = %+v, want the digest recorded at submit", stored.PolicySet)
 	}
 }
+
+// TestDistinctApproverBindsARunBornHeld covers the gap the test above could not see: it submits
+// plainly, and a run submitted with approval already requested took a different path.
+//
+// WithRequireApproval sets the status to pending_approval before the dispatcher runs, and the policy
+// pass was guarded on that status, so a run that asked to be held skipped the rule that governs it.
+// The run was held, so it looked governed, and HeldByPolicy read "requested at submission" rather
+// than naming the rule. But require_distinct_approver was never copied, so the requester could
+// release their own change. Both /v1/ai/propose-run and /v1/drift/reconcile set that flag on every
+// submission, so the control failed on precisely the runs an agent proposes.
+func TestDistinctApproverBindsARunBornHeld(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	policies := policy.NewMemStore()
+	if err := policies.Save(ctx, &policy.Policy{
+		ID: "pol_1", Name: "production apply", MaxDestroy: -1,
+		RequireDistinctApprover: true,
+	}); err != nil {
+		t.Fatalf("Save policy: %v", err)
+	}
+	store := run.NewMemStore()
+	d := New(store, okRunner(), zap.NewNop(), WithPolicies(policies))
+
+	r, err := d.Submit(ctx, "", "", run.WithTool(run.ToolBash), run.WithCommand("terraform destroy"),
+		run.WithActor("casey"), run.WithActorType("session"),
+		// The one difference from the test above, and the whole bug.
+		run.WithRequireApproval(true))
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if r.Status != run.StatusPendingApproval {
+		t.Fatalf("status = %s, want pending_approval", r.Status)
+	}
+	if !r.RequireDistinctApprover {
+		t.Errorf("a run that asked to be held did not pick up its rule's distinct-approver " +
+			"requirement, so the requester can approve their own change")
+	}
+	if r.HeldByPolicy != "production apply" {
+		t.Errorf("held by = %q, want the rule that governs it rather than the submitter's request",
+			r.HeldByPolicy)
+	}
+
+	// The control has to actually refuse, not merely be recorded.
+	if _, err := d.Approve(ctx, r.ID, "casey", "session"); !errors.Is(err, ErrSelfApproval) {
+		t.Errorf("self approval error = %v, want ErrSelfApproval", err)
+	}
+	if _, err := d.Approve(ctx, r.ID, "dana", "session"); err != nil {
+		t.Errorf("a second person could not approve: %v", err)
+	}
+}
+
+// TestRequestedHoldStillNamesItselfWithNoRule checks hoisting the policy pass did not cost the
+// fallback: a run held only because the caller asked, under an install with no matching rule, still
+// says so rather than storing an empty reason.
+func TestRequestedHoldStillNamesItselfWithNoRule(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	d := New(store, okRunner(), zap.NewNop(), WithPolicies(policy.NewMemStore()))
+
+	r, err := d.Submit(ctx, "", "", run.WithTool(run.ToolBash), run.WithCommand("deploy"),
+		run.WithActor("casey"), run.WithActorType("session"), run.WithRequireApproval(true))
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if r.Status != run.StatusPendingApproval {
+		t.Fatalf("status = %s, want pending_approval", r.Status)
+	}
+	if r.HeldByPolicy != holdRequested {
+		t.Errorf("held by = %q, want %q", r.HeldByPolicy, holdRequested)
+	}
+	if r.RequireDistinctApprover {
+		t.Error("a run held only by request gained a distinct-approver requirement no rule set")
+	}
+	if _, err := d.Approve(ctx, r.ID, "casey", "session"); err != nil {
+		t.Errorf("the requester could not withdraw a hold they asked for: %v", err)
+	}
+}

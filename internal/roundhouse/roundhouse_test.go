@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -102,25 +103,72 @@ func TestAnsibleRunnerArgs(t *testing.T) {
 	}
 }
 
-func TestArgsExtraVarsJSON(t *testing.T) {
+// TestArgsExtraVarsGoInAFileNotOnArgv checks a run's own extra vars reach ansible-playbook through a
+// private file rather than on the command line.
+//
+// Every credential-derived value already took that route, deliberately, so the password stays off
+// argv. The run's own vars did not, and a template survey collects them with no password field type,
+// so a secret is collected as ordinary text. ps auxww showed them to any local account on the
+// executor for the life of the run, and for a container run the same argv became the docker command
+// line and stayed in the container's Config.Cmd for docker inspect to read afterward.
+func TestArgsExtraVarsGoInAFileNotOnArgv(t *testing.T) {
 	t.Parallel()
-	args, err := playbookArgs(Spec{Playbook: "p.yml", ExtraVars: map[string]any{"version": "1.2.3"}})
+	spec := Spec{Playbook: "p.yml", ExtraVars: map[string]any{"db_password": "hunter2"}}
+
+	cleanup, err := materializeExtraVars(&spec)
+	if err != nil {
+		t.Fatalf("materializeExtraVars() error = %v", err)
+	}
+	defer cleanup()
+
+	args, err := playbookArgs(spec)
 	if err != nil {
 		t.Fatalf("playbookArgs() error = %v", err)
 	}
-	want := []string{"--extra-vars", `{"version":"1.2.3"}`, "--", "p.yml"}
+	for _, a := range args {
+		if strings.Contains(a, "hunter2") {
+			t.Fatalf("the value is on argv, where ps shows it to any local account: %v", args)
+		}
+	}
+	if len(spec.ExtraVarsFiles) != 1 {
+		t.Fatalf("extra vars files = %v, want the one just written", spec.ExtraVarsFiles)
+	}
+	path := spec.ExtraVarsFiles[0]
+	want := []string{"--extra-vars", "@" + path, "--", "p.yml"}
 	if diff := cmp.Diff(want, args); diff != "" {
 		t.Errorf("args mismatch (-want +got):\n%s", diff)
+	}
+
+	// The vars still reach the playbook, and the file is not readable by other accounts.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(data) != `{"db_password":"hunter2"}` {
+		t.Errorf("vars file holds %q, want the extra vars", data)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("vars file mode = %o, want 600", perm)
+	}
+
+	// Cleanup removes it, so a run does not leave its variables on the executor's disk.
+	cleanup()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("the vars file outlived the run: %v", err)
 	}
 }
 
 func TestArgsExtraVarsMarshalError(t *testing.T) {
 	t.Parallel()
-	// A channel cannot be JSON encoded. Building the args must fail rather than silently run the
+	// A channel cannot be JSON encoded. Materializing must fail rather than silently run the
 	// playbook without the extra vars, which could drop a variable gating a destructive task.
-	_, err := playbookArgs(Spec{Playbook: "p.yml", ExtraVars: map[string]any{"bad": make(chan int)}})
-	if err == nil {
-		t.Fatal("playbookArgs() with unmarshalable extra vars = nil error, want failure")
+	spec := Spec{Playbook: "p.yml", ExtraVars: map[string]any{"bad": make(chan int)}}
+	if _, err := materializeExtraVars(&spec); err == nil {
+		t.Fatal("materializeExtraVars() with unmarshalable extra vars = nil error, want failure")
 	}
 }
 
@@ -200,5 +248,59 @@ func TestArgsTagsVerbosityForksDiff(t *testing.T) {
 		if strings.Contains(strings.Join(plain, " "), absent) {
 			t.Errorf("plain run emitted %q: %v", absent, plain)
 		}
+	}
+}
+
+// TestContainerPlanKeepsExtraVarsOffTheDockerCommandLine covers the wiring rather than the helper.
+//
+// For a container run the playbook argv becomes the docker run command line, and the container keeps
+// it in Config.Cmd, so docker inspect shows it after the run has finished. A survey answer collected
+// as ordinary text, which is the only kind there is, was therefore readable on the executor long
+// after the run ended.
+func TestContainerPlanKeepsExtraVarsOffTheDockerCommandLine(t *testing.T) {
+	t.Parallel()
+	spec := Spec{
+		Tool: "ansible", Playbook: "p.yml", Dir: t.TempDir(),
+		ExtraVars: map[string]any{"db_password": "hunter2"},
+	}
+
+	plan, cleanup, err := toolContainerPlan(spec)
+	if err != nil {
+		t.Fatalf("toolContainerPlan() error = %v", err)
+	}
+	defer cleanup()
+
+	for _, a := range plan.argv {
+		if strings.Contains(a, "hunter2") {
+			t.Fatalf("the value is in the container command line, which docker inspect keeps: %v",
+				plan.argv)
+		}
+	}
+
+	// It still reaches the playbook: the file is referenced and mounted into the container.
+	var ref string
+	for i, a := range plan.argv {
+		if a == "--extra-vars" && i+1 < len(plan.argv) && strings.HasPrefix(plan.argv[i+1], "@") {
+			ref = strings.TrimPrefix(plan.argv[i+1], "@")
+		}
+	}
+	if ref == "" {
+		t.Fatalf("no extra vars file is referenced, so the variables were dropped: %v", plan.argv)
+	}
+	var mounted bool
+	for _, m := range plan.mounts {
+		if m.path == ref {
+			mounted = true
+		}
+	}
+	if !mounted {
+		t.Errorf("the vars file %q is not mounted, so the playbook cannot read it", ref)
+	}
+	data, err := os.ReadFile(ref)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if !strings.Contains(string(data), "hunter2") {
+		t.Errorf("the vars file lost the value: %s", data)
 	}
 }

@@ -6,11 +6,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -88,6 +91,9 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	})
 	t.Run("transition status", func(t *testing.T) { testTransitionStatus(t, newStore()) })
 	t.Run("finalize running is one write", func(t *testing.T) { testFinalizeRunning(t, newStore()) })
+	t.Run("running progress is fenced", func(t *testing.T) { testApplyRunningProgress(t, newStore()) })
+	t.Run("unrepresentable text is stored", func(t *testing.T) { testUnrepresentableText(t, newStore()) })
+	t.Run("backends agree on edges", func(t *testing.T) { testBackendEdgeParity(t, newStore()) })
 	t.Run("workers", func(t *testing.T) { testWorkers(t, newStore()) })
 	t.Run("retention purge", func(t *testing.T) { testPurge(t, newStore()) })
 	t.Run("summary trim bounds growth", func(t *testing.T) { testTrimSummaries(t, newStore()) })
@@ -157,6 +163,310 @@ func testTransitionStatus(t *testing.T, store run.Store) {
 	}
 }
 
+// testBackendEdgeParity pins three places the two backends answered differently for the same data.
+//
+// None of them needed unusual input. INTEGER is 64 bits on SQLite and 32 on PostgreSQL, so a run
+// timeout past two billion was stored by one and refused by the other with an encoding error, and
+// the same submission answered 202 or 500 depending on the database behind it. step_index is
+// nullable and SQLite sorts NULLs first where PostgreSQL sorts them last, so the steps listing, which
+// is not gated on kind and therefore lists a split parent's shard children too, came back in a
+// different order. And PostgreSQL's LIKE treats a backslash as an escape where SQLite's does not, so
+// one search term matched different rows.
+func testBackendEdgeParity(t *testing.T, store run.Store) {
+	ctx := context.Background()
+
+	// A timeout past what a 32-bit column holds is stored, not refused, and comes back bounded.
+	big := sampleRun("run_big")
+	big.Timeout = 3_000_000_000
+	big.IdempotencyKey = "idem_big"
+	if err := store.Save(ctx, big); err != nil {
+		t.Fatalf("Save() with an oversized timeout error = %v", err)
+	}
+	got, err := store.Get(ctx, "run_big")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Timeout != math.MaxInt32 {
+		t.Errorf("timeout = %d, want it held at %d so both backends store the same value",
+			got.Timeout, math.MaxInt32)
+	}
+
+	// Children with a null step index sort last, the same way on both backends.
+	parent := sampleRun("run_parent")
+	parent.Status = run.StatusRunning
+	parent.IdempotencyKey = "idem_parent"
+	if err := store.Save(ctx, parent); err != nil {
+		t.Fatalf("Save() parent error = %v", err)
+	}
+	for i, spec := range []struct {
+		ID    string
+		Index *int
+	}{
+		{"run_step_b", intPtr(1)},
+		{"run_step_null", nil},
+		{"run_step_a", intPtr(0)},
+	} {
+		child := sampleRun(spec.ID)
+		child.ParentID = &parent.ID
+		child.StepIndex = spec.Index
+		child.IdempotencyKey = fmt.Sprintf("idem_child_%d", i)
+		if err := store.Save(ctx, child); err != nil {
+			t.Fatalf("Save() child %s error = %v", spec.ID, err)
+		}
+	}
+	steps, err := store.Steps(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("Steps() error = %v", err)
+	}
+	order := make([]string, 0, len(steps))
+	for _, st := range steps {
+		order = append(order, st.ID)
+	}
+	want := []string{"run_step_a", "run_step_b", "run_step_null"}
+	if diff := cmp.Diff(want, order); diff != "" {
+		t.Errorf("steps order mismatch, so the two backends disagree (-want +got):\n%s", diff)
+	}
+
+	// Host ordering is byte order on both backends. PostgreSQL's default glibc collation sorts text
+	// linguistically, so the same host set came back in a different order, and the summary trim uses
+	// the same kind of tiebreaker to choose which rows to delete.
+	hostRun := sampleRun("run_hosts")
+	hostRun.Status = run.StatusRunning
+	hostRun.DryRun = false
+	hostRun.IdempotencyKey = "idem_hosts"
+	if err := store.Save(ctx, hostRun); err != nil {
+		t.Fatalf("Save() host run error = %v", err)
+	}
+	summaries := make([]run.HostSummary, 0, 4)
+	for _, host := range []string{"web1", "Web2", "web-10", "web_3"} {
+		summaries = append(summaries, run.HostSummary{Host: host, OK: 1})
+	}
+	if err := store.SaveHostSummary(ctx, hostRun.ID, summaries); err != nil {
+		t.Fatalf("SaveHostSummary() error = %v", err)
+	}
+	health, err := store.FleetHealth(ctx, 50)
+	if err != nil {
+		t.Fatalf("FleetHealth() error = %v", err)
+	}
+	// These four all have zero failures, so they tie on the primary key and the text tiebreaker is
+	// the only thing ordering them against each other.
+	mine := map[string]bool{"web1": true, "Web2": true, "web-10": true, "web_3": true}
+	hosts := make([]string, 0, 4)
+	for _, h := range health {
+		if mine[h.Host] {
+			hosts = append(hosts, h.Host)
+		}
+	}
+	wantHosts := []string{"Web2", "web-10", "web1", "web_3"} // byte order
+	if diff := cmp.Diff(wantHosts, hosts); diff != "" {
+		t.Errorf("tied hosts are not in byte order, so the two backends order them differently "+
+			"(-want +got):\n%s", diff)
+	}
+
+	// A backslash in a search term is a literal on both backends, not an escape on one.
+	slashed := sampleRun("run_slash")
+	slashed.Command = `deploy c:\builds\web`
+	slashed.IdempotencyKey = "idem_slash"
+	if err := store.Save(ctx, slashed); err != nil {
+		t.Fatalf("Save() slashed error = %v", err)
+	}
+	page, err := store.ListPage(ctx, run.ListFilter{Query: `c:\builds`}, 50, 0)
+	if err != nil {
+		t.Fatalf("ListPage() error = %v", err)
+	}
+	var found bool
+	for _, r := range page {
+		if r.ID == "run_slash" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("a search term containing a backslash did not match the run holding it, so the "+
+			"two backends read the term differently (%d rows returned)", len(page))
+	}
+}
+
+// intPtr returns a pointer to n, for the nullable index columns above.
+func intPtr(n int) *int { return &n }
+
+// testUnrepresentableText checks a run whose text carries a NUL byte or invalid UTF-8 is stored and
+// finished the same way on every backend.
+//
+// The backends disagreed, and the disagreement lost the run. SQLite stores arbitrary bytes, so such a
+// run finished normally. PostgreSQL refuses both with SQLSTATE 22021, so the terminal write failed,
+// FinalizeRunning reported no change, the run stayed running until the lease sweep interrupted it,
+// and the real outcome and exit code were gone. Nothing unusual is needed to reach it: the text comes
+// from whatever a tool printed as it failed, from an imported inventory, or from a JSON body
+// carrying an escaped NUL. The contract suite never exercised a byte outside ASCII, which is why the
+// divergence sat there.
+func testUnrepresentableText(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	// A NUL, a lone continuation byte, and a truncated multi-byte sequence.
+	nasty := "boom\x00 \xff\xfe end \xe2\x82"
+
+	r := sampleRun("run_text")
+	r.Status = run.StatusRunning
+	r.Command = "echo " + nasty
+	r.Error = ""
+	r.IdempotencyKey = "idem_text"
+	r.ExtraVars = map[string]any{"note": nasty, "count": 3}
+	r.Labels = map[string]string{"env": nasty}
+	if err := store.Save(ctx, r); err != nil {
+		t.Fatalf("Save() with unrepresentable text error = %v", err)
+	}
+
+	code := 2
+	fin := run.Finalization{
+		Status: run.StatusFailed, ExitCode: &code, Error: nasty,
+		Warning: nasty, Outputs: map[string]any{"tail": nasty},
+		EndedAt: time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC),
+	}
+	moved, err := store.FinalizeRunning(ctx, "run_text", fin)
+	if err != nil {
+		t.Fatalf("FinalizeRunning() with unrepresentable text error = %v", err)
+	}
+	if !moved {
+		t.Fatal("FinalizeRunning() recorded nothing, so the run keeps running and its outcome is lost")
+	}
+
+	got, err := store.Get(ctx, "run_text")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Status != run.StatusFailed {
+		t.Errorf("status = %q, want failed", got.Status)
+	}
+	if got.ExitCode == nil || *got.ExitCode != code {
+		t.Errorf("exit code = %v, want %d", got.ExitCode, code)
+	}
+	// What is stored must be readable text, and it must still say something about what happened.
+	for _, field := range []struct {
+		Name  string
+		Value string
+	}{
+		{"command", got.Command}, {"error", got.Error}, {"warning", got.Warning},
+	} {
+		if !utf8.ValidString(field.Value) {
+			t.Errorf("%s round-tripped as invalid UTF-8: %q", field.Name, field.Value)
+		}
+		if strings.ContainsRune(field.Value, 0) {
+			t.Errorf("%s round-tripped with a NUL byte: %q", field.Name, field.Value)
+		}
+	}
+	if !strings.Contains(got.Error, "boom") || !strings.Contains(got.Error, "end") {
+		t.Errorf("error lost the readable part of what the tool said: %q", got.Error)
+	}
+	if !strings.Contains(got.Command, "echo") {
+		t.Errorf("command lost its readable part: %q", got.Command)
+	}
+}
+
+// testApplyRunningProgress checks the non-terminal write is fenced the same way the terminal one is:
+// it records progress for a run still running under the reporting worker, and changes nothing for a
+// run that has settled, that another worker now holds, or that does not exist.
+//
+// The relay used to re-read the run, check it was not terminal, and save the whole row. The sweep
+// could settle the run inside that window, and the save then restored the status, the lease, and the
+// cleared claim secret from the pre-sweep snapshot. The run came back to life under a lease the
+// control node had declared dead, and its later terminal report put a second outcome on the chain
+// beside the interrupted one already committed for it.
+func testApplyRunningProgress(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	started := time.Date(2026, 2, 3, 4, 0, 0, 0, time.UTC)
+	progress := run.Progress{
+		StartedAt: &started,
+		Warning:   "one host was unreachable",
+		Outputs:   map[string]any{"stage": "deploy"},
+	}
+
+	r := sampleRun("run_prog")
+	r.Status = run.StatusRunning
+	r.ClaimedBy = "worker-a"
+	r.StartedAt = nil
+	r.Warning = ""
+	r.Outputs = nil
+	r.IdempotencyKey = "idem_prog"
+	if err := store.Save(ctx, r); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	ok, err := store.ApplyRunningProgress(ctx, "run_prog", "worker-a", progress)
+	if err != nil {
+		t.Fatalf("ApplyRunningProgress() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("ApplyRunningProgress() changed nothing for a running run it holds")
+	}
+	got, err := store.Get(ctx, "run_prog")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.StartedAt == nil || !got.StartedAt.Equal(started) {
+		t.Errorf("started at = %v, want %v", got.StartedAt, started)
+	}
+	if got.Warning != progress.Warning {
+		t.Errorf("warning = %q, want %q", got.Warning, progress.Warning)
+	}
+	if got.Outputs["stage"] != "deploy" {
+		t.Errorf("outputs = %v, want the reported stage", got.Outputs)
+	}
+
+	// A repeated report must not move the start time, so a retry cannot rewrite when work began.
+	later := started.Add(time.Hour)
+	if _, err := store.ApplyRunningProgress(ctx, "run_prog", "worker-a",
+		run.Progress{StartedAt: &later}); err != nil {
+		t.Fatalf("ApplyRunningProgress(repeat) error = %v", err)
+	}
+	if got, err = store.Get(ctx, "run_prog"); err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.StartedAt == nil || !got.StartedAt.Equal(started) {
+		t.Errorf("a repeated report moved the start time to %v, want %v", got.StartedAt, started)
+	}
+	// An empty report leaves what is stored alone rather than blanking it.
+	if got.Warning != progress.Warning || got.Outputs["stage"] != "deploy" {
+		t.Errorf("an empty report cleared stored progress: warning=%q outputs=%v",
+			got.Warning, got.Outputs)
+	}
+
+	// Another worker's report is refused, so a reclaimed executor cannot write onto the run the
+	// worker that replaced it now holds.
+	if ok, err := store.ApplyRunningProgress(ctx, "run_prog", "worker-b",
+		run.Progress{Warning: "from the wrong worker"}); err != nil {
+		t.Fatalf("ApplyRunningProgress(other worker) error = %v", err)
+	} else if ok {
+		t.Error("a worker that does not hold the run wrote progress onto it")
+	}
+
+	// The case that matters: the sweep settles the run, and a report already in flight must not
+	// bring it back.
+	settled := run.Finalization{Status: run.StatusInterrupted, Error: "executor lease expired",
+		EndedAt: time.Date(2026, 2, 3, 5, 0, 0, 0, time.UTC)}
+	if moved, err := store.FinalizeRunning(ctx, "run_prog", settled); err != nil || !moved {
+		t.Fatalf("FinalizeRunning() moved = %v, err = %v", moved, err)
+	}
+	if ok, err := store.ApplyRunningProgress(ctx, "run_prog", "worker-a",
+		run.Progress{Warning: "still going"}); err != nil {
+		t.Fatalf("ApplyRunningProgress(settled) error = %v", err)
+	} else if ok {
+		t.Error("a report resurrected a run the sweep had already settled")
+	}
+	if got, err = store.Get(ctx, "run_prog"); err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Status != run.StatusInterrupted {
+		t.Errorf("status = %q, want it to stay interrupted", got.Status)
+	}
+
+	// A run that does not exist changes nothing and is not an error.
+	if ok, err := store.ApplyRunningProgress(ctx, "run_missing", "worker-a",
+		run.Progress{Warning: "x"}); err != nil {
+		t.Fatalf("ApplyRunningProgress(missing) error = %v", err)
+	} else if ok {
+		t.Error("a missing run reported a change")
+	}
+}
+
 // testFinalizeRunning checks the terminal write: it moves a running run and records every fact that
 // explains how it ended in the same operation, and it changes nothing at all for a run that is not
 // running, whether that run is still queued, already terminal, or missing. A store that moved the
@@ -187,6 +497,19 @@ func testFinalizeRunning(t *testing.T, store run.Store) {
 	r.IdempotencyKey = "idem_fin"
 	if err := store.Save(ctx, r); err != nil {
 		t.Fatalf("Save() error = %v", err)
+	}
+
+	// A write claiming a lease the run does not carry changes nothing. The relay path is gated on the
+	// claim secret at the HTTP layer, but a second in-process dispatcher on a shared database is not:
+	// one that lost its heartbeats to a partition, came back after the janitor requeued the run, and
+	// found another worker had claimed and started it would otherwise terminalize that worker's live
+	// run, because the status fence alone was satisfied by the second worker making it running again.
+	stale := fin
+	stale.Owner = "worker-that-lost-the-lease"
+	if moved, err := store.FinalizeRunning(ctx, "run_fin", stale); err != nil {
+		t.Fatalf("FinalizeRunning(stale lease) error = %v", err)
+	} else if moved {
+		t.Error("a finalize naming a lease the run does not hold was applied")
 	}
 
 	ok, err := store.FinalizeRunning(ctx, "run_fin", fin)

@@ -2,6 +2,8 @@ package importer_test
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -92,4 +94,54 @@ func TestSemaphoreSecretSurveyIsNotImportedAsPlainText(t *testing.T) {
 	}
 	assertWarns(t, plan.Warnings, "vault_pass")
 	assertWarns(t, plan.Warnings, "credential")
+}
+
+// TestSemaphoreImportsAProjectBackup pins the shape Semaphore's own backup writes: a flat
+// single-project document whose top level is the project itself.
+//
+// The importer read only a `projects` wrapper, which Semaphore does not produce. A real backup
+// therefore matched nothing and was refused with "nothing in this document was recognized", so the
+// documented one-command migration failed on the only file a Semaphore operator can actually
+// produce. The fixture mirrors BackupFormat's top-level keys.
+func TestSemaphoreImportsAProjectBackup(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile(filepath.Join("testdata", "semaphore-backup.json"))
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	plan, err := importer.FromSemaphore(raw, fixedTime)
+	if err != nil {
+		t.Fatalf("FromSemaphore() error = %v", err)
+	}
+
+	if len(plan.Projects) != 1 {
+		t.Fatalf("projects = %d, want the backup's one repository", len(plan.Projects))
+	}
+	if got := plan.Projects[0].RepoURL; got != "https://git.example.com/infra.git" {
+		t.Errorf("repo url = %q, want the backup's git_url", got)
+	}
+	if len(plan.Inventories) != 1 {
+		t.Fatalf("inventories = %d, want 1", len(plan.Inventories))
+	}
+	if !strings.Contains(plan.Inventories[0].Content, "web01.acme.internal") {
+		t.Errorf("inventory lost its hosts:\n%s", plan.Inventories[0].Content)
+	}
+	if len(plan.Credentials) != 1 {
+		t.Errorf("credentials = %d, want the backup's one key", len(plan.Credentials))
+	}
+	if len(plan.Templates) != 1 {
+		t.Fatalf("templates = %d, want 1", len(plan.Templates))
+	}
+	if got := plan.Templates[0].Playbook; got != "site.yml" {
+		t.Errorf("playbook = %q, want site.yml", got)
+	}
+	if len(plan.Templates[0].Survey) != 1 {
+		t.Errorf("survey vars = %d, want the one the backup carries", len(plan.Templates[0].Survey))
+	}
+	if len(plan.Schedules) != 1 {
+		t.Fatalf("schedules = %d, want 1", len(plan.Schedules))
+	}
+	if got := plan.Schedules[0].Cron; got != "0 2 * * *" {
+		t.Errorf("cron = %q, want 0 2 * * *", got)
+	}
 }

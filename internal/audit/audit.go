@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -143,16 +144,33 @@ func claimObject(seq int64, at, actor, method, path, prev, actorType, onBehalfOf
 }
 
 // linkOf serializes a claim object canonically and returns its hex SHA-256, the chain link.
+//
+// It is for the producing side, where the claim is built from a stored entry whose fields this
+// package controls. Serialize then fails only on a value type the map cannot hold, so hashing the
+// error text would silently produce a link nothing can reproduce, and an impossible input is a
+// programming fault rather than a runtime condition to paper over.
+//
+// Anything recomputing a link from a document somebody else wrote must use [checkedLinkOf]. The
+// values there are not ours: a bundle carrying a sequence above 2^53 is refused by JCS, and this
+// function turned that into a panic in the middle of `switchtender verify`, so a hostile receipt
+// crashed the verifier with a stack trace instead of being reported as not verified.
 func linkOf(claim map[string]any) string {
+	link, err := checkedLinkOf(claim)
+	if err != nil {
+		panic("audit: " + err.Error())
+	}
+	return link
+}
+
+// checkedLinkOf is linkOf for a claim whose values came from outside, reporting a refusal rather
+// than panicking on one this package did not build.
+func checkedLinkOf(claim map[string]any) (string, error) {
 	canonical, err := jcs.Serialize(claim)
 	if err != nil {
-		// Serialize fails only on a value type this map cannot hold: every value here is a string or
-		// an int64. Hashing the error text would silently produce a link nothing can reproduce, so an
-		// impossible input is a programming fault, not a runtime condition to paper over.
-		panic("audit: canonicalize entry: " + err.Error())
+		return "", fmt.Errorf("canonicalize entry: %w", err)
 	}
 	sum := sha256.Sum256(canonical)
-	return hex.EncodeToString(sum[:])
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // MaxCanonicalDigestBytes is the largest body canonicalized before digesting. A larger body is

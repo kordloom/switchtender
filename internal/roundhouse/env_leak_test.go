@@ -40,6 +40,34 @@ func TestConfigDoesNotReachAHostRun(t *testing.T) {
 				secret, strings.TrimSpace(got))
 		}
 	}
+	// The credentials the server reads under names it did not choose are stripped too. A deployment
+	// resolving secrets from Vault or AWS Secrets Manager sets these, they carry no SwitchTender
+	// prefix, and the masker never held them, so a one-line shell run printed the token that opens
+	// every secret the server can reach into a stored log.
+	t.Setenv("VAULT_TOKEN", "hvs.probe-vault-token")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "probe-aws-secret-key")
+	t.Setenv("AWS_SESSION_TOKEN", "probe-aws-session-token")
+	t.Setenv("AWS_ACCESS_KEY_ID", "probe-aws-access-key-id")
+	ambient := newToolRouter(false, "", "", false, ContainerLimits{})
+	var ambientOut bytes.Buffer
+	if _, err := ambient.bash.Run(context.Background(), Spec{
+		Command: "echo V=$VAULT_TOKEN S=$AWS_SECRET_ACCESS_KEY T=$AWS_SESSION_TOKEN " +
+			"I=$AWS_ACCESS_KEY_ID",
+		Dir: os.TempDir(),
+	}, &ambientOut); err != nil {
+		t.Fatalf("Run() ambient error = %v", err)
+	}
+	for _, secret := range []string{
+		"hvs.probe-vault-token", "probe-aws-secret-key", "probe-aws-session-token",
+		"probe-aws-access-key-id",
+	} {
+		if strings.Contains(ambientOut.String(), secret) {
+			t.Errorf("a run printed the server's %q, so anyone who may submit one holds the "+
+				"credential the secret store is reached with: %q",
+				secret, strings.TrimSpace(ambientOut.String()))
+		}
+	}
+
 	// The host's own environment still reaches the run, since a playbook is often meant to use it.
 	if !strings.Contains(os.Getenv("PATH"), "/") {
 		t.Skip("no PATH to check inheritance against")

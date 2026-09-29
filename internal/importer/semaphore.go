@@ -13,11 +13,58 @@ import (
 	"github.com/kordloom/switchtender/internal/template"
 )
 
-// semaphoreExport is a Semaphore export: a list of projects, each carrying its own repositories,
-// inventories, keys, templates, and schedules.
+// semaphoreExport is a Semaphore export in either shape one arrives in.
+//
+// Semaphore's own project backup is a flat single-project document: its top level is the project,
+// carrying meta, templates, repositories, keys, inventories, and schedules directly. Only the
+// multi-project wrapper was read, so a real backup matched nothing and the import refused the file
+// outright, telling the operator their export contained nothing recognizable. Both shapes are
+// accepted here and normalized to the same list.
 type semaphoreExport struct {
-	// Projects are the Semaphore projects.
+	// Projects carries the wrapper shape, a list of projects each holding its own assets.
 	Projects []semaphoreProject `json:"projects"`
+	// Meta names the project in a single-project backup.
+	Meta *semaphoreMeta `json:"meta"`
+	// The remaining fields are a single-project backup's own top-level assets.
+	Repositories []semaphoreRepo      `json:"repositories"`
+	Inventories  []semaphoreInventory `json:"inventories"`
+	Keys         []semaphoreKey       `json:"keys"`
+	Templates    []semaphoreTemplate  `json:"templates"`
+	Schedules    []semaphoreSchedule  `json:"schedules"`
+}
+
+// semaphoreMeta is the project block of a single-project backup.
+type semaphoreMeta struct {
+	// Name is the project name.
+	Name string `json:"name"`
+}
+
+// projects returns the projects to import from whichever shape the document used.
+func (e semaphoreExport) projects() []semaphoreProject {
+	if len(e.Projects) > 0 {
+		return e.Projects
+	}
+	flat := semaphoreProject{
+		Repositories: e.Repositories,
+		Inventories:  e.Inventories,
+		Keys:         e.Keys,
+		Templates:    e.Templates,
+		Schedules:    e.Schedules,
+	}
+	if e.Meta != nil {
+		flat.Name = e.Meta.Name
+	}
+	if flat.empty() {
+		return nil
+	}
+	return []semaphoreProject{flat}
+}
+
+// empty reports whether a project carries nothing worth importing, so a document that parsed but
+// held no assets is refused rather than reported as a successful import of nothing.
+func (p semaphoreProject) empty() bool {
+	return len(p.Repositories) == 0 && len(p.Inventories) == 0 && len(p.Keys) == 0 &&
+		len(p.Templates) == 0 && len(p.Schedules) == 0
 }
 
 // semaphoreProject is one Semaphore project with its nested assets.
@@ -111,10 +158,10 @@ func FromSemaphore(data []byte, now time.Time) (*Plan, error) {
 		return nil, fmt.Errorf("parse semaphore export: %w", err)
 	}
 	plan := &Plan{}
-	for _, proj := range export.Projects {
+	for _, proj := range export.projects() {
 		plan.addSemaphoreProject(proj, now)
 	}
-	if err := plan.requireObjects("projects with repositories, inventories, keys, or templates"); err != nil {
+	if err := plan.requireObjects("repositories, inventories, keys, or templates"); err != nil {
 		return nil, err
 	}
 	return plan, nil

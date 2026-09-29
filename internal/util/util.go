@@ -13,6 +13,10 @@ import (
 var secretKeyStems = []string{
 	"password", "passwd", "passphrase", "secret", "token", "apikey", "api_key",
 	"private_key", "privatekey",
+	// An Authorization header's value is the credential itself, and it is written as an ordinary
+	// name and value on a curl line, in an inventory, and in a playbook variable alike. Without this
+	// stem a bearer token sat in the clear everywhere this classifier is consulted.
+	"authorization",
 }
 
 // SecretKey reports whether the value stored under a key is secret material. It matches the stems

@@ -61,8 +61,16 @@ the time, and the sequence number, so the record of what the agent did is fixed 
 <h2 id="the-one-credential-architecture">The one-credential architecture</h2>
 <p>Give the agent exactly one credential: an operator-bound SwitchTender token. It never holds prod
 credentials. SSH keys, cloud credentials, and vault passwords stay sealed in SwitchTender, decrypt
-only at execution, and are never returned by the API, so the agent cannot read a secret out and go
-around the gate. The gate is its only door.</p>
+only at execution, and are never returned by the API, so the agent cannot read one out of the
+credential store or copy one to somewhere you cannot see. Every use of one is recorded against the
+run that used it.</p>
+<p>What that does not mean is that a credential attached to a run is hidden from the run. A run is code
+you asked to execute with that credential in scope, so it can print the value in a form the log
+masker does not recognize, exactly as it can in Jenkins, GitHub Actions, or any other runner. The
+masker removes a secret that appears verbatim, which stops the ordinary accident of echoing a
+variable; it is not a boundary against a script written to defeat it. Scope the operator token to
+the credentials it genuinely needs, and treat the ability to attach a credential to a run as
+equivalent to holding it.</p>
 <p>The operator role bounds what the door allows. An operator can submit, cancel, and retry runs and
 launch templates. It cannot approve runs, manage configuration, or read the audit page. Approving a
 held run is admin-only, so an operator-bound agent can never approve its own work.</p>
@@ -93,8 +101,9 @@ propose work but can never manage identity, access, or secrets, and can never ap
 run. That cap is enforced at the door, so it holds however the agent reaches the API, not only
 through the client below. <code>--agent</code> requires <code>--user</code>, because an agent acting on behalf of nobody
 is exactly the accountability gap the identity closes. The TTL forces rotation, here monthly.</p>
-<p>Creating the first token turns authentication on for the whole install, so make sure an admin
-account exists before the agent holds the only credential.</p>
+<p>A public bind on an empty database already minted an initial admin token at first start, so
+authentication is on before the agent holds any credential. Make sure a human admin account
+exists too, so the agent's held runs have somebody who can approve them.</p>
 </li>
 <li>
 <p>Decide what a human must approve. An approval policy with no criteria matches every run, so one

@@ -1,11 +1,19 @@
 package audit
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	cryptorand "crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/asn1"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"math/big"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -133,9 +141,12 @@ func bigOne() *big.Int { return big.NewInt(1) }
 // genTime returns a fixed generation time for a synthesized token.
 func genTime() time.Time { return time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC) }
 
-// tokenOver builds a minimal CMS SignedData carrying a TSTInfo over digest, which is the shape an
-// authority returns. It is unsigned, because what is being tested is what the token commits to
-// rather than who vouched for it.
+// tokenOver builds a CMS SignedData carrying a TSTInfo over digest, signed by a throwaway authority,
+// which is the shape a real authority returns.
+//
+// It used to build the same structure unsigned, and every test here passed, because nothing on
+// either the fetch path or the offline path read SignerInfos. A helper that cannot produce a real
+// signature is a helper that cannot tell a real token from a typed one.
 func tokenOver(t *testing.T, digest []byte) []byte {
 	t.Helper()
 	return tokenOverTail(t, digest, nil)
@@ -144,6 +155,26 @@ func tokenOver(t *testing.T, digest []byte) []byte {
 // tokenOverTail builds the same token with tail appended after genTime, so a test can place the
 // optional fields an authority may return there: an accuracy, a nonce, or nothing.
 func tokenOverTail(t *testing.T, digest, tail []byte) []byte {
+	t.Helper()
+	encoded := tstInfoBytes(t, digest, tail)
+	sd := signedDataOver(t, encoded)
+	sdBytes, err := asn1.Marshal(sd)
+	if err != nil {
+		t.Fatalf("marshal SignedData: %v", err)
+	}
+	ci := tsaContentInfo{
+		ContentType: signedDataOID,
+		Content:     asn1.RawValue{Class: 2, Tag: 0, IsCompound: true, Bytes: sdBytes},
+	}
+	out, err := asn1.Marshal(ci)
+	if err != nil {
+		t.Fatalf("marshal ContentInfo: %v", err)
+	}
+	return out
+}
+
+// tstInfoBytes marshals the TSTInfo a token signs, which is the part that says what was timestamped.
+func tstInfoBytes(t *testing.T, digest, tail []byte) []byte {
 	t.Helper()
 	info := tsaTSTInfo{
 		Version: 1,
@@ -165,21 +196,256 @@ func tokenOverTail(t *testing.T, digest, tail []byte) []byte {
 	if err != nil {
 		t.Fatalf("marshal TSTInfo: %v", err)
 	}
-	sd := tsaSignedData{
+	return encoded
+}
+
+// testAuthority is the throwaway timestamp authority the token helpers sign with, created once so a
+// test that builds several tokens does not pay for a key each time.
+var testAuthority = sync.OnceValues(newTestAuthority)
+
+// authority is a signing certificate and its key, standing in for a timestamp authority.
+type authority struct {
+	// Cert is the certificate a token carries so a verifier can check the signature offline.
+	Cert *x509.Certificate
+	// Key signs the token's attributes.
+	Key *ecdsa.PrivateKey
+}
+
+// newTestAuthority mints a self-signed certificate to sign test tokens with.
+func newTestAuthority() (*authority, error) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), cryptorand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(4242),
+		Subject:      pkix.Name{CommonName: "switchtender test timestamp authority"},
+		NotBefore:    time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC),
+		NotAfter:     time.Date(2040, 1, 1, 0, 0, 0, 0, time.UTC),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageTimeStamping},
+	}
+	der, err := x509.CreateCertificate(cryptorand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		return nil, err
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		return nil, err
+	}
+	return &authority{Cert: cert, Key: key}, nil
+}
+
+// signedDataOver wraps a DER TSTInfo in a CMS SignedData signed by the test authority, with the
+// content type and message digest attributes a verifier requires.
+func signedDataOver(t *testing.T, encoded []byte) tsaSignedData {
+	t.Helper()
+	auth, err := testAuthority()
+	if err != nil {
+		t.Fatalf("build the test authority: %v", err)
+	}
+	sum := sha256.Sum256(encoded)
+	typeValue, err := asn1.Marshal(tstInfoOID)
+	if err != nil {
+		t.Fatalf("marshal content type: %v", err)
+	}
+	digestValue, err := asn1.Marshal(sum[:])
+	if err != nil {
+		t.Fatalf("marshal message digest: %v", err)
+	}
+	attrs := []cmsAttribute{
+		{Type: contentTypeAttrOID, Values: asn1.RawValue{
+			Class: asn1.ClassUniversal, Tag: asn1.TagSet, IsCompound: true, Bytes: typeValue}},
+		{Type: messageDigestAttrOID, Values: asn1.RawValue{
+			Class: asn1.ClassUniversal, Tag: asn1.TagSet, IsCompound: true, Bytes: digestValue}},
+	}
+	signedAttrs, err := asn1.Marshal(attrs)
+	if err != nil {
+		t.Fatalf("marshal signed attributes: %v", err)
+	}
+	// The signature covers the attributes as a universal SET, which is not the tag they travel
+	// under: they arrive as an implicit [0]. Signing the bytes they are marshaled as, rather than
+	// the bytes CMS says to sign, produces a token that looks right and verifies nowhere.
+	inner, err := innerBytes(signedAttrs)
+	if err != nil {
+		t.Fatalf("retag signed attributes: %v", err)
+	}
+	toSign := sha256.Sum256(fullSet(asn1.RawValue{Bytes: inner}))
+	sig, err := ecdsa.SignASN1(cryptorand.Reader, auth.Key, toSign[:])
+	if err != nil {
+		t.Fatalf("sign the token: %v", err)
+	}
+	info := tsaSignerInfo{
+		Version: 1,
+		SID: issuerAndSerial{
+			Issuer: asn1.RawValue{FullBytes: auth.Cert.RawIssuer},
+			Serial: auth.Cert.SerialNumber,
+		},
+		DigestAlgorithm:    pkix.AlgorithmIdentifier{Algorithm: sha256OID},
+		SignedAttrs:        asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: 0, IsCompound: true, Bytes: inner},
+		SignatureAlgorithm: pkix.AlgorithmIdentifier{Algorithm: oidECDSAWithSHA256},
+		Signature:          sig,
+	}
+	infoBytes, err := asn1.Marshal([]tsaSignerInfo{info})
+	if err != nil {
+		t.Fatalf("marshal signer info: %v", err)
+	}
+	infoInner, err := innerBytes(infoBytes)
+	if err != nil {
+		t.Fatalf("retag signer infos: %v", err)
+	}
+	return tsaSignedData{
 		Version:          3,
-		DigestAlgorithms: asn1.RawValue{Class: 0, Tag: 17, IsCompound: true, Bytes: nil},
+		DigestAlgorithms: asn1.RawValue{Class: asn1.ClassUniversal, Tag: asn1.TagSet, IsCompound: true},
 		EncapContentInfo: tsaEncapContentInfo{EContentType: tstInfoOID, EContent: encoded},
-		SignerInfos:      asn1.RawValue{Class: 0, Tag: 17, IsCompound: true, Bytes: nil},
+		Certificates: asn1.RawValue{
+			Class: asn1.ClassContextSpecific, Tag: 0, IsCompound: true, Bytes: auth.Cert.Raw},
+		SignerInfos: asn1.RawValue{
+			Class: asn1.ClassUniversal, Tag: asn1.TagSet, IsCompound: true, Bytes: infoInner},
+	}
+}
+
+// innerBytes returns the content octets of a DER value, dropping its tag and length so the caller
+// can re-tag the same content.
+func innerBytes(der []byte) ([]byte, error) {
+	var raw asn1.RawValue
+	if _, err := asn1.Unmarshal(der, &raw); err != nil {
+		return nil, err
+	}
+	return raw.Bytes, nil
+}
+
+// TestTimestampTokenSignatureIsVerified is the check that was missing: nothing anywhere read
+// SignerInfos, so a token an operator built themselves passed as third-party evidence.
+//
+// The consequence was the whole point of an anchor undone. An operator could truncate their chain,
+// answer their own timestamp request with an unsigned token over the new head, and from then on
+// `switchtender verify` reported an anchor with a timestamp token that fixes the chain, and the
+// evidence dossier said the head was fixed somewhere the install cannot rewrite. Each row here is a
+// token that used to be accepted.
+func TestTimestampTokenSignatureIsVerified(t *testing.T) {
+	t.Parallel()
+	value := sha256.Sum256([]byte("the head an operator wants to pass off as timestamped"))
+
+	tests := []struct {
+		Name    string
+		Token   []byte
+		WantErr string
+	}{{ // Test 0: Nobody signed it. This is the token the old helper built and the old code took.
+		Name: "unsigned", Token: unsignedTokenOver(t, value[:]),
+		WantErr: "carries no signature",
+	}, { // Test 1: Signed by a key that is not the certificate the token presents.
+		Name: "signed by another key", Token: forgedSignatureTokenOver(t, value[:]),
+		WantErr: "no signer on the token verifies",
+	}, { // Test 2: Validly signed, then its payload swapped for one over a different head.
+		Name: "payload swapped after signing", Token: swappedPayloadTokenOver(t, value[:]),
+		WantErr: "covers a different payload",
+	}, { // Test 3: The certificate the signature needs was left out, so nothing can check it.
+		Name: "no certificate carried", Token: certlessTokenOver(t, value[:]),
+		WantErr: "carries no certificate",
+	}}
+
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			err := checkTimestampToken(test.Token, value[:], nil)
+			if err == nil {
+				t.Fatalf("%s: a token nobody vouched for was accepted as third-party proof",
+					test.Name)
+			}
+			if !strings.Contains(err.Error(), test.WantErr) {
+				t.Errorf("%s: error = %v, want one containing %q", test.Name, err, test.WantErr)
+			}
+		})
+	}
+}
+
+// TestVerifyTimestampProofRefusesAnUnsignedToken pins the same refusal on the offline path, which is
+// the one a relying party actually runs. Both paths share the check, and that sharing is why the gap
+// existed in both at once.
+func TestVerifyTimestampProofRefusesAnUnsignedToken(t *testing.T) {
+	t.Parallel()
+	const link = "aa00000000000000000000000000000000000000000000000000000000000011"
+	raw, err := hex.DecodeString(link)
+	if err != nil {
+		t.Fatalf("DecodeString() error = %v", err)
+	}
+	sum := sha256.Sum256(raw)
+	proof := base64.StdEncoding.EncodeToString(unsignedTokenOver(t, sum[:]))
+
+	if err := VerifyTimestampProof(link, proof); err == nil {
+		t.Fatal("a self-made unsigned token verified offline as third-party proof")
+	}
+
+	// The honest token still verifies, so the refusal is about the signature and not about the shape.
+	good := base64.StdEncoding.EncodeToString(tokenOver(t, sum[:]))
+	if err := VerifyTimestampProof(link, good); err != nil {
+		t.Errorf("a properly signed token was refused: %v", err)
+	}
+}
+
+// unsignedTokenOver builds a token carrying an empty SignerInfos set, the shape every token in this
+// package used to have.
+func unsignedTokenOver(t *testing.T, digest []byte) []byte {
+	t.Helper()
+	return wrapSignedData(t, func(sd *tsaSignedData) {
+		sd.SignerInfos = asn1.RawValue{
+			Class: asn1.ClassUniversal, Tag: asn1.TagSet, IsCompound: true}
+		sd.Certificates = asn1.RawValue{}
+	}, digest, nil)
+}
+
+// certlessTokenOver builds a validly signed token that omits the signing certificate, so a verifier
+// offline has nothing to check the signature against.
+func certlessTokenOver(t *testing.T, digest []byte) []byte {
+	t.Helper()
+	return wrapSignedData(t, func(sd *tsaSignedData) {
+		sd.Certificates = asn1.RawValue{}
+	}, digest, nil)
+}
+
+// forgedSignatureTokenOver builds a token whose signature bytes are not the authority's, standing in
+// for anyone who edits a token and re-signs with a key of their own.
+func forgedSignatureTokenOver(t *testing.T, digest []byte) []byte {
+	t.Helper()
+	return wrapSignedData(t, func(sd *tsaSignedData) {
+		// Flip the last byte of the encoded signer infos, which lands inside the signature value.
+		b := append([]byte(nil), sd.SignerInfos.Bytes...)
+		b[len(b)-1] ^= 0xFF
+		sd.SignerInfos.Bytes = b
+	}, digest, nil)
+}
+
+// swappedPayloadTokenOver builds a token signed over one head and then carrying another, which is
+// the substitution the message-digest attribute exists to catch.
+func swappedPayloadTokenOver(t *testing.T, digest []byte) []byte {
+	t.Helper()
+	other := sha256.Sum256([]byte("a head nobody timestamped"))
+	return wrapSignedData(t, nil, other[:], func(sd *tsaSignedData) {
+		sd.EncapContentInfo.EContent = tstInfoBytes(t, digest, nil)
+	})
+}
+
+// wrapSignedData builds a signed token over digest, applies before to the SignedData ahead of
+// wrapping and after once it is built, and returns the DER ContentInfo.
+func wrapSignedData(t *testing.T, before func(*tsaSignedData), digest []byte,
+	after func(*tsaSignedData)) []byte {
+	t.Helper()
+	sd := signedDataOver(t, tstInfoBytes(t, digest, nil))
+	if before != nil {
+		before(&sd)
+	}
+	if after != nil {
+		after(&sd)
 	}
 	sdBytes, err := asn1.Marshal(sd)
 	if err != nil {
 		t.Fatalf("marshal SignedData: %v", err)
 	}
-	ci := tsaContentInfo{
+	out, err := asn1.Marshal(tsaContentInfo{
 		ContentType: signedDataOID,
 		Content:     asn1.RawValue{Class: 2, Tag: 0, IsCompound: true, Bytes: sdBytes},
-	}
-	out, err := asn1.Marshal(ci)
+	})
 	if err != nil {
 		t.Fatalf("marshal ContentInfo: %v", err)
 	}

@@ -303,7 +303,14 @@ func BuildBundle(entries []*Entry, id Identity, version string, at time.Time) (*
 		Chain: &BundleChain{
 			Profile: ChainProfile,
 			Keyed:   false,
-			Head:    BundleCoord{Seq: head.Seq, Link: head.Hash},
+			// The install this history belongs to, stated the same way the tree profile states it.
+			// A linear chain link is a hash of the entry's own fields and commits to nothing about
+			// who produced it, so without this a second install could take a published receipt, keep
+			// its claims and its genuine third-party timestamp anchor, rewrite only the producer
+			// block, re-sign with its own key, and have a relying party pinning that second key read
+			// the first install's history as its own.
+			Params: map[string]string{"install_id": id.InstallID},
+			Head:   BundleCoord{Seq: head.Seq, Link: head.Hash},
 		},
 		Claims:     claims,
 		Signatures: []any{},

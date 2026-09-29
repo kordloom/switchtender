@@ -573,12 +573,40 @@ const pgUniqueViolation = "23505"
 const migrateLockKey = 7973821001
 
 // migrate applies the schema under a transaction-scoped advisory lock.
+// collationNote records why the text tiebreakers in this file say COLLATE "C".
+//
+// SQLite always orders text by bytes. PostgreSQL orders it by the database collation, which on the
+// default postgres:16 image and on most managed instances is a glibc locale that sorts
+// linguistically, so punctuation and case are weighted differently. The two backends therefore
+// returned the same rows in different orders for the same data: an identical four-host set came back
+// as Web2, web-10, web1, web_3 on one and web1, web-10, Web2, web_3 on the other. On a listing that
+// is cosmetic. On the summary trim it is not, because that query picks which rows to delete, so a
+// tie decided differently meant the two backends kept and destroyed different history. The alpine
+// image CI runs its PostgreSQL service on hides this, since musl has no collation tables and falls
+// back to byte order.
 func migrate(db *sql.DB) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("migration lock: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	// Bound how long this transaction will wait for a lock, and how long any one statement may run.
+	//
+	// An ADD COLUMN IF NOT EXISTS that changes nothing still takes AccessExclusiveLock, and this
+	// transaction issues one for every declared column plus the schema's own ALTERs, so it ends up
+	// holding an exclusive lock on every table until it commits. Every process calls Open, workers
+	// included, so this runs on ordinary starts and not only on upgrades. With no timeout a new node
+	// coming up behind one long read queued for the lock, and because the lock queue is first in
+	// first out every later reader queued behind the migration: one slow retention purge or chain
+	// scan could stall the whole cluster, API, claim loop and heartbeats alike, for as long as it
+	// ran. Failing fast instead means the starting process retries rather than freezing everyone
+	// else, which is the direction this should fail in.
+	if _, err := tx.Exec("SET LOCAL lock_timeout = '5s'"); err != nil {
+		return fmt.Errorf("migration lock timeout: %w", err)
+	}
+	if _, err := tx.Exec("SET LOCAL statement_timeout = '60s'"); err != nil {
+		return fmt.Errorf("migration statement timeout: %w", err)
+	}
 	if _, err := tx.Exec("SELECT pg_advisory_xact_lock($1)", migrateLockKey); err != nil {
 		return fmt.Errorf("migration lock: %w", err)
 	}
@@ -748,6 +776,9 @@ func scanHostSummary(rows *sql.Rows) (run.HostSummary, error) {
 // Save inserts or replaces the run identified by r.ID. The cancel flag merges with GREATEST so a
 // replace from a stale snapshot cannot erase a cancel another process just requested.
 func (s *store) Save(ctx context.Context, r *run.Run) error {
+	// Cleaned here rather than left to fail: PostgreSQL refuses a NUL byte and invalid UTF-8 with
+	// SQLSTATE 22021, and the write that carried them is the one recording what the run did.
+	r.Sanitize()
 	const q = `
 INSERT INTO runs
 	(id, playbook, inventory, status, exit_code, error, created_at, started_at, ended_at,
@@ -921,7 +952,10 @@ func runSearchClause(query string) (string, []any) {
 	}
 	parts := make([]string, len(runSearchColumns))
 	for i, col := range runSearchColumns {
-		parts[i] = "lower(" + col + ") LIKE $1"
+		// ESCAPE '' turns off PostgreSQL's default backslash escape, which SQLite's LIKE does not
+		// have. Without it the same search term matched different rows on the two backends: a term
+		// containing a backslash was read as an escape here and as a literal there.
+		parts[i] = "lower(" + col + ") LIKE $1 ESCAPE ''"
 	}
 	return "(" + strings.Join(parts, " OR ") + ")", []any{"%" + term + "%"}
 }
@@ -957,7 +991,10 @@ func (s *store) Shards(ctx context.Context, parentID string) ([]*run.Run, error)
 
 // Steps returns the pipeline step runs of a parent ordered by step index then attempt.
 func (s *store) Steps(ctx context.Context, parentID string) ([]*run.Run, error) {
-	const q = "SELECT " + runColumns + " FROM runs WHERE parent_id=$1 ORDER BY step_index, attempt"
+	// NULLS LAST for the same reason the shard listing above states it: SQLite sorts NULLs first and
+	// PostgreSQL last, and step_index is nullable.
+	const q = "SELECT " + runColumns +
+		" FROM runs WHERE parent_id=$1 ORDER BY step_index NULLS LAST, attempt"
 	return s.queryRuns(ctx, "list steps", q, parentID)
 }
 
@@ -1071,7 +1108,7 @@ SELECT host,
 	STRING_AGG(run_id, ',' ORDER BY rn) AS recent_runs
 FROM recent
 GROUP BY host
-ORDER BY failures DESC, host`
+ORDER BY failures DESC, host COLLATE "C"` // C collation matches SQLite's byte order; see collationNote.
 
 	rows, err := s.db.QueryContext(ctx, q, window)
 	if err != nil {
@@ -1160,7 +1197,7 @@ WITH checks AS (
 	FROM run_host_summary hs
 	WHERE hs.dry_run = 1
 )
-SELECT host, changed, run_id, ran_at FROM checks WHERE rn = 1 ORDER BY changed DESC, host`
+SELECT host, changed, run_id, ran_at FROM checks WHERE rn = 1 ORDER BY changed DESC, host COLLATE "C"`
 
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
@@ -1509,7 +1546,7 @@ SELECT claimed_by,
 FROM runs
 WHERE claimed_by != '' AND claimed_at IS NOT NULL AND claimed_at >= $1
 GROUP BY claimed_by
-ORDER BY last_seen DESC, claimed_by`
+ORDER BY last_seen DESC, claimed_by COLLATE "C"`
 
 	rows, err := s.db.QueryContext(ctx, q, sqlutil.FormatTime(time.Now().Add(-run.WorkerWindow)))
 	if err != nil {
@@ -2373,19 +2410,46 @@ func (s *store) StampApprovedSpec(ctx context.Context, id, digest string) error 
 // detail, resolved image, and end time in the same statement, so a run is never terminal with the
 // facts that explain it missing.
 func (s *store) FinalizeRunning(ctx context.Context, id string, fin run.Finalization) (bool, error) {
+	fin.SanitizeText()
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE runs SET status=$1, exit_code=$2, error=$3, image=$4, commit_sha=$5,
 pull_credential_id=$6, outputs=$7, warning=$8, ended_at=$9
-WHERE id=$10 AND status=$11`,
+WHERE id=$10 AND status=$11 AND ($12='' OR claimed_by=$12)`,
 		string(fin.Status), sqlutil.NullInt(fin.ExitCode), fin.Error, fin.Image,
 		fin.CommitSHA, fin.PullCredentialID, sqlutil.JSONMap(fin.Outputs), fin.Warning,
-		sqlutil.FormatTime(fin.EndedAt), id, string(run.StatusRunning))
+		sqlutil.FormatTime(fin.EndedAt), id, string(run.StatusRunning), fin.Owner)
 	if err != nil {
 		return false, fmt.Errorf("finalize running run: %w", err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
 		return false, fmt.Errorf("finalize running run: %w", err)
+	}
+	return n > 0, nil
+}
+
+// ApplyRunningProgress records a worker's progress in one write fenced on the run still being
+// running and still held by owner, so a report in flight cannot resurrect a run the sweep settled.
+//
+// started_at uses COALESCE so a repeated report never moves a start time backward, and warning and
+// outputs keep their stored value when the report carries none, which is what lets one statement
+// stand in for the read-modify-write this replaced.
+func (s *store) ApplyRunningProgress(ctx context.Context, id, owner string,
+	p run.Progress) (bool, error) {
+	p.SanitizeText()
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE runs SET started_at=COALESCE(NULLIF(started_at,''), $1),
+warning=CASE WHEN $2='' THEN warning ELSE $2 END,
+outputs=CASE WHEN $3='' THEN outputs ELSE $3 END
+WHERE id=$4 AND status=$5 AND claimed_by=$6`,
+		sqlutil.NullTime(p.StartedAt), p.Warning, sqlutil.JSONMap(p.Outputs),
+		id, string(run.StatusRunning), owner)
+	if err != nil {
+		return false, fmt.Errorf("apply running progress: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("apply running progress: %w", err)
 	}
 	return n > 0, nil
 }

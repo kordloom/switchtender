@@ -722,7 +722,7 @@ node over the mesh relay, with no database access of its own.</p>
 </tbody>
 </table>
 <h2 id="token">token</h2>
-<p>Manages API tokens. Creating the first token turns on authentication.</p>
+<p>Manages API tokens. A public bind on an empty database mints an initial admin token at startup.</p>
 <ul>
 <li><code>token new --name &lt;label&gt; [--user &lt;username&gt;] [--ttl &lt;duration&gt;]</code> mints a token, printed once. A
 zero TTL never expires.</li>
@@ -806,17 +806,21 @@ switchtender demo --db demo.db --no-seed       # serves the prepared data in und
 answering the whole time the replacement is being built.</p>
 <h2 id="version">version</h2>
 <p>Prints the SwitchTender version.</p>
-<h2 id="global-flags">Global flags</h2>
+<h2 id="output-flags">Output flags</h2>
+<p>JSON goes to stdout compact by default. Three commands take <code>--pretty</code> to indent it; it is not a
+global flag, so passing it elsewhere is an error rather than a no-op.</p>
 <table>
 <thead>
 <tr>
 <th>Flag</th>
+<th>Where</th>
 <th>Purpose</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>--pretty</code></td>
+<td><code>token</code> and its subcommands, <code>audit anchor</code>, <code>audit receipt</code></td>
 <td>Indent JSON output instead of the compact default.</td>
 </tr>
 </tbody>
@@ -842,6 +846,24 @@ names none, so confinement cannot be escaped by omission.</p>
 <p>Generate a digest with <code>printf %s &quot;$TOKEN&quot; | shasum -a 256</code>. A malformed file stops the server rather
 than falling back to no confinement, because an install that believes it is segmented and is not is
 worse than one that refuses to start.</p>
+<p>That confines the lease side. The submit side is confined by granting the queue, which is a grantable
+object named <code>queue:&lt;name&gt;</code>:</p>
+<pre><code>curl -X POST localhost:8080/v1/grants \
+  -H &quot;Authorization: Bearer $TOKEN&quot; \
+  -d '{&quot;subject&quot;: &quot;team_sre&quot;, &quot;object&quot;: &quot;queue:prod&quot;, &quot;access&quot;: &quot;use&quot;}'
+</code></pre>
+<p>A queue nobody has granted follows the same rule every other object does: the global role decides,
+unless <code>--strict-grants</code> is on, in which case an ungranted queue is refused. Granting a queue makes
+it access-controlled, so only the subjects named may route work to it. The grant is checked wherever
+a queue is chosen: on a run, on a template, on an inventory, and at launch against the template's own
+queue.</p>
+<p>An install that has not turned strict grants on can gate a queue with a rule instead, since a policy
+matches on <code>queue</code>:</p>
+<pre><code>policies:
+  - name: hold anything headed for production
+    queue: prod
+    require_distinct_approver: true
+</code></pre>
 <h2 id="what-a-relay-worker-writes-into-the-audit-trail">What a relay worker writes into the audit trail</h2>
 <p>A relay worker runs where the control node cannot see it, so two moments are recorded: the run
 leaving for that machine, and the outcome coming back.</p>

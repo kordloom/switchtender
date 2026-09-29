@@ -61,6 +61,14 @@ func securityHeaders(next http.Handler) http.Handler {
 			"default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "+
 				"connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; "+
 				"object-src 'none'")
+		// Pin the browser to HTTPS once it has arrived over it. An operator who reaches an install on
+		// a hostile network over plain HTTP once hands the sign-in POST, and with it a bearer token
+		// good for thirty days, to anyone on the path; with this, every visit after the first is
+		// immune. It is set only on a TLS request, so an install behind a plaintext loopback proxy or
+		// one still being set up is not locked out of a scheme it does not serve.
+		if r.TLS != nil {
+			h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
 		next.ServeHTTP(w, r)
 	})
 }

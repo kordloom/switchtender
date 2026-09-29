@@ -1,0 +1,61 @@
+{
+  "projects": [
+    {"name": "Infra", "scm_type": "git", "scm_url": "https://git.example.com/infra.git", "scm_branch": "main"}
+  ],
+  "inventory": [
+    {
+      "name": "Production",
+      "related": {
+        "hosts": [
+          {"name": "web01.acme.internal", "variables": "ansible_user: deploy"},
+          {"name": "web02.acme.internal"},
+          {"name": "db01.acme.internal"}
+        ],
+        "groups": [
+          {
+            "name": "web",
+            "related": {"hosts": [{"name": "web01.acme.internal"}, {"name": "web02.acme.internal"}]}
+          },
+          {
+            "name": "db",
+            "related": {"hosts": [{"name": "db01.acme.internal"}]}
+          }
+        ]
+      }
+    }
+  ],
+  "credentials": [
+    {"name": "prod-ssh", "credential_type": {"name": "Machine"}, "inputs": {"username": "deploy"}}
+  ],
+  "job_templates": [
+    {
+      "name": "Deploy Web",
+      "playbook": "site.yml",
+      "job_type": "run",
+      "limit": "web",
+      "project": {"name": "Infra"},
+      "inventory": {"name": "Production"},
+      "related": {
+        "credentials": [{"name": "prod-ssh", "credential_type": {"name": "Machine"}}]
+      }
+    }
+  ],
+  "workflow_job_templates": [
+    {
+      "name": "Release",
+      "related": {
+        "workflow_nodes": [
+          {
+            "identifier": "build",
+            "unified_job_template": {"name": "Deploy Web"},
+            "related": {"success_nodes": [{"identifier": "smoke"}]}
+          },
+          {
+            "identifier": "smoke",
+            "unified_job_template": {"name": "Deploy Web"}
+          }
+        ]
+      }
+    }
+  ]
+}

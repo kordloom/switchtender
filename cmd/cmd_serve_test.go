@@ -8,10 +8,11 @@ import (
 	"testing"
 )
 
-// TestTokenCountGuard covers the pre-bind decision that refuses to serve an unauthenticated public
-// API. The count-error case is the fail-closed fix: an unreadable token store must refuse to start,
-// where the former guard skipped the check and fell through to bind on the guess that no tokens
-// existed.
+// TestTokenCountGuard covers the pre-bind decision about authentication. The count-error case is the
+// fail-closed fix: an unreadable token store must refuse to start, where the former guard skipped the
+// check and fell through to bind on the guess that no tokens existed. The bootstrap case is the
+// other half: a public bind on an empty store used to be refused outright, which made the documented
+// first command exit 1 on every fresh install.
 func TestTokenCountGuard(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -22,7 +23,7 @@ func TestTokenCountGuard(t *testing.T) {
 		ExternalAuth bool
 		Loopback     bool
 		Addr         string
-		WantWarn     bool
+		WantPosture  servePosture
 		WantErr      bool
 	}{
 		{ // Test 0: Tokens exist, so serving is allowed with no warning.
@@ -36,11 +37,13 @@ func TestTokenCountGuard(t *testing.T) {
 			Name: "count error loopback", Count: 0, CountErr: errors.New("db locked"),
 			Loopback: true, Addr: "127.0.0.1:8080", WantErr: true,
 		},
-		{ // Test 3: An empty readable store on a public bind with no other auth is refused.
-			Name: "empty public no auth", Count: 0, Addr: "0.0.0.0:8080", WantErr: true,
+		{ // Test 3: An empty readable store on a public bind with no other auth mints a token, so
+			// the bind is authenticated from the first request and the documented command still works.
+			Name: "empty public no auth", Count: 0, Addr: "0.0.0.0:8080",
+			WantPosture: postureBootstrap,
 		},
 		{ // Test 4: An empty store on loopback is allowed with a warning.
-			Name: "empty loopback", Count: 0, Loopback: true, Addr: "127.0.0.1:8080", WantWarn: true,
+			Name: "empty loopback", Count: 0, Loopback: true, Addr: "127.0.0.1:8080", WantPosture: postureWarn,
 		},
 		{ // Test 5: An empty store with external auth on a public bind serves with no warning,
 			// because the API is not unauthenticated: an install configured for single sign-on
@@ -51,19 +54,20 @@ func TestTokenCountGuard(t *testing.T) {
 			Name: "empty sso public", Count: 0, ExternalAuth: true, Addr: "0.0.0.0:8080",
 		},
 		{ // Test 6: An empty store in read-only mode on a public bind is allowed with a warning.
-			Name: "empty read-only public", Count: 0, ReadOnly: true, Addr: "0.0.0.0:8080", WantWarn: true,
+			Name: "empty read-only public", Count: 0, ReadOnly: true, Addr: "0.0.0.0:8080",
+			WantPosture: postureWarn,
 		},
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			warn, err := tokenCountGuard(test.Count, test.CountErr, test.ReadOnly,
+			posture, err := tokenCountGuard(test.Count, test.CountErr, test.ReadOnly,
 				test.ExternalAuth, test.Loopback, test.Addr)
 			if (err != nil) != test.WantErr {
 				t.Errorf("%s: err = %v, want error: %v", test.Name, err, test.WantErr)
 			}
-			if warn != test.WantWarn {
-				t.Errorf("%s: warn = %v, want %v", test.Name, warn, test.WantWarn)
+			if posture != test.WantPosture {
+				t.Errorf("%s: posture = %v, want %v", test.Name, posture, test.WantPosture)
 			}
 		})
 	}
