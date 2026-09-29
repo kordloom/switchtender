@@ -64,6 +64,9 @@ var puppetFacts = []string{"fqdn", "ipaddress", "osfamily", "operatingsystem",
 // Accepts a PuppetDB nodes query, a PuppetDB facts query, or the plain list of certnames that
 // `puppet node list` prints, because which of those somebody has depends on what they can reach.
 func FromPuppet(data []byte, now time.Time) (*Plan, error) {
+	if err := refuseJSONTail(data); err != nil {
+		return nil, err
+	}
 	plan := &Plan{}
 	nodes, facts, err := decodePuppet(data)
 	if err != nil {

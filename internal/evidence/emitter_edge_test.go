@@ -307,7 +307,7 @@ func TestPackNameIsUniquePerPeriodAndAlwaysUTC(t *testing.T) {
 	// The same instant in another zone is the same period and must produce the same name.
 	tokyo, err := time.LoadLocation("Asia/Tokyo")
 	if err != nil {
-		t.Skipf("time zone database unavailable: %v", err)
+		t.Fatalf("the zone database is embedded in this binary, so this is a real failure: %v", err)
 	}
 	from, to := base, base.Add(6*time.Hour)
 	if diff := cmp.Diff(packName(from, to), packName(from.In(tokyo), to.In(tokyo))); diff != "" {

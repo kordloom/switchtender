@@ -30,6 +30,15 @@ func main() {
 	os.Exit(run())
 }
 
+// phase is one stage of a supertest run, named for the console and for the report.
+type phase struct {
+	// Name labels the phase in output and in the report.
+	Name string
+	// Run is the phase itself. An error here is a harness failure that stops the run; a product
+	// failure is recorded in the ledger and the run continues.
+	Run func() error
+}
+
 // run executes every phase, renders the report, and returns the process exit code, so main stays
 // a single os.Exit and deferred teardown always runs.
 func run() int {
@@ -80,13 +89,7 @@ func run() int {
 		return 1
 	}
 
-	phases := []struct {
-		// Name labels the phase in output and in the report.
-		Name string
-		// Run is the phase itself. An error here is a harness failure that stops the run; a
-		// product failure is recorded in the ledger and the run continues.
-		Run func() error
-	}{
+	phases := []phase{
 		{"cluster", h.phaseCluster},
 		{"fleet", h.phaseFleet},
 		{"community", h.phaseCommunity},
@@ -103,40 +106,27 @@ func run() int {
 		{"dr", h.phaseDR},
 	}
 	if !*skipTeam {
-		phases = append(phases, struct {
-			Name string
-			Run  func() error
-		}{"team", func() error { return h.phaseTeam(*license) }})
-		phases = append(phases, struct {
-			Name string
-			Run  func() error
-		}{"crash", h.phaseCrash})
-		phases = append(phases, struct {
-			Name string
-			Run  func() error
-		}{"upgrade-team", func() error { return h.phaseUpgradeTeam(previous, *license) }})
-		phases = append(phases, struct {
-			Name string
-			Run  func() error
-		}{"ha", func() error { return h.phaseHA(*license) }})
+		phases = append(phases, phase{"team", func() error { return h.phaseTeam(*license) }})
+		phases = append(phases, phase{"crash", h.phaseCrash})
+		phases = append(phases, phase{"upgrade-team", func() error {
+			return h.phaseUpgradeTeam(previous, *license)
+		}})
+		phases = append(phases, phase{"ha", func() error { return h.phaseHA(*license) }})
 	}
 	if *shots != "" {
-		phases = append(phases, struct {
-			Name string
-			Run  func() error
-		}{"screenshots", func() error { return h.phaseShots(*shots) }})
+		phases = append(phases, phase{"screenshots", func() error { return h.phaseShots(*shots) }})
 	}
 
-	for i, phase := range phases {
-		fmt.Printf("\n== %s\n", phase.Name)
-		if err := phase.Run(); err != nil {
-			h.fail(phase.Name, "the phase itself completed", err)
+	for i, ph := range phases {
+		fmt.Printf("\n== %s\n", ph.Name)
+		if err := ph.Run(); err != nil {
+			h.fail(ph.Name, "the phase itself completed", err)
 			// The phases behind this one are recorded as not reached, never silently absent: a
 			// ledger listing only what ran reads as though everything ran, and the crash
 			// coverage once vanished exactly that way.
 			for _, skipped := range phases[i+1:] {
 				h.fail(skipped.Name, "the phase ran",
-					fmt.Errorf("not reached: %s failed before it", phase.Name))
+					fmt.Errorf("not reached: %s failed before it", ph.Name))
 			}
 			break
 		}
@@ -216,12 +206,17 @@ func (h *harness) renderReport() string {
 	b.WriteString("assertion that trusts the product's own word for what happened.\n\n")
 	b.WriteString("| | Phase | Claim | Evidence |\n|---|---|---|---|\n")
 	for _, c := range h.checks {
-		verdict, detail := "✅", c.Detail
+		// A failure's evidence is truncated because it carries forensics, an event tail or a log
+		// tail, and the section below reproduces it in full. A passing claim has no such section,
+		// so its evidence is folded onto one line rather than cut: dropping it here would drop it
+		// everywhere. Both go through cell, because the row broke on the passing path for the
+		// whole life of the harness while only the failing path was guarded.
+		verdict, detail := "✅", foldLines(c.Detail)
 		if c.Err != nil {
 			verdict, detail = "❌", oneLine(c.Err.Error())
 		}
 		fmt.Fprintf(&b, "| %s | %s | %s | %s |\n",
-			verdict, c.Phase, c.Name, strings.ReplaceAll(detail, "|", "\\|"))
+			verdict, cell(c.Phase), cell(c.Name), cell(detail))
 	}
 	fmt.Fprintf(&b, "\n**%d checks, %d failed.**\n", len(h.checks), h.failed())
 	// The table squeezes every failure to one line; the forensics a failure carries, an event
@@ -237,4 +232,31 @@ func (h *harness) renderReport() string {
 		}
 	}
 	return b.String()
+}
+
+// cell renders a value as one table cell.
+//
+// A Markdown row ends at the first newline and splits at every unescaped separator, so a value
+// carrying either one silently changes the shape of the table rather than appearing in it. Every
+// cell goes through here, including the phase and the claim: escaping only the evidence left a
+// claim that named two things with a bar between them rendering as an extra column.
+func cell(s string) string {
+	return strings.ReplaceAll(oneLine(s), "|", "\\|")
+}
+
+// foldLines puts a multi-line value on one line, keeping every line rather than the first.
+//
+// Evidence for a claim that held is read in the table or not at all, so truncating it there is
+// losing it. A command's output arrives with the newlines the command wrote.
+func foldLines(s string) string {
+	if !strings.Contains(s, "\n") {
+		return s
+	}
+	var kept []string
+	for _, line := range strings.Split(s, "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			kept = append(kept, trimmed)
+		}
+	}
+	return strings.Join(kept, " · ")
 }

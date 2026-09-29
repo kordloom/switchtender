@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -296,7 +297,83 @@ func previousReleaseImage(flagValue, repoDir string) (string, error) {
 	if len(tags) == 0 {
 		return "", fmt.Errorf("no release tags are visible; fetch tags or pass -prev-image")
 	}
-	return "ghcr.io/kordloom/switchtender:" + strings.TrimPrefix(tags[0], "v"), nil
+	building, err := chartAppVersion(repoDir)
+	if err != nil {
+		return "", err
+	}
+	prev := previousTag(tags, building)
+	if prev == "" {
+		return "", fmt.Errorf("no release tag is older than %s, which the chart says this tree "+
+			"builds; fetch tags or pass -prev-image", building)
+	}
+	return "ghcr.io/kordloom/switchtender:" + strings.TrimPrefix(prev, "v"), nil
+}
+
+// previousTag returns the newest tag strictly below the version being built, from a list git has
+// already sorted newest first.
+//
+// Taking the newest tag outright is the bug this exists to prevent. Between a release being tagged
+// and the chart being bumped for the next one, the newest tag names the very version the working
+// tree builds, so the upgrade phase upgraded a version to itself and the rollback phase rolled it
+// back to itself. Both reported green while neither crossed a version boundary, which is the one
+// thing they exist to cross.
+func previousTag(sortedNewestFirst []string, building string) string {
+	for _, tag := range sortedNewestFirst {
+		if lessVersion(strings.TrimPrefix(tag, "v"), building) {
+			return tag
+		}
+	}
+	return ""
+}
+
+// lessVersion reports whether version a orders before version b, comparing dotted numbers.
+//
+// Release tags here are plain major.minor.patch, so this compares the numeric fields and treats a
+// missing or unparsable field as zero rather than guessing at an ordering it cannot know.
+func lessVersion(a, b string) bool {
+	fieldsA, fieldsB := strings.Split(a, "."), strings.Split(b, ".")
+	for i := 0; i < len(fieldsA) || i < len(fieldsB); i++ {
+		na, nb := versionField(fieldsA, i), versionField(fieldsB, i)
+		if na != nb {
+			return na < nb
+		}
+	}
+	return false
+}
+
+// versionField returns the number at one position of a split version, or zero when it is absent or
+// not a number.
+func versionField(fields []string, i int) int {
+	if i >= len(fields) {
+		return 0
+	}
+	n, err := strconv.Atoi(fields[i])
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// chartAppVersion reads the version this tree builds from the chart.
+//
+// The chart is the one place that names it: it is bumped before a tag is cut, precisely so that
+// what an install without an explicit image tag deploys is the version being prepared.
+func chartAppVersion(repoDir string) (string, error) {
+	raw, err := os.ReadFile(filepath.Join(repoDir, "deploy/helm/switchtender/Chart.yaml"))
+	if err != nil {
+		return "", fmt.Errorf("read the chart to learn which version this tree builds: %w", err)
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		rest, ok := strings.CutPrefix(strings.TrimSpace(line), "appVersion:")
+		if !ok {
+			continue
+		}
+		if v := strings.Trim(strings.TrimSpace(rest), `"'`); v != "" {
+			return v, nil
+		}
+	}
+	return "", fmt.Errorf("the chart names no appVersion, so nothing says which version this " +
+		"tree builds")
 }
 
 // phaseRollback proves the upgrade is reversible: the same release rolled back to the previous

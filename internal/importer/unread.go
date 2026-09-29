@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"bytes"
 	"encoding/json"
 	"reflect"
 	"sort"
@@ -33,8 +34,14 @@ var envelopeKeys = map[string]bool{
 // Paths are reported by shape rather than by index, so a thousand templates carrying the same
 // unread field produce one line instead of a thousand.
 func unreadPaths(raw []byte, v any) []string {
+	// Decoded rather than unmarshaled, and only the first value, so a trailing document cannot silence
+	// this. Unmarshal refuses the whole input when anything follows the first value, and returning nil
+	// on that error turned the one net for data this importer never looked at off for exactly the file
+	// where it mattered: the report said no fields went unread because it had failed to read any.
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
 	var doc any
-	if err := json.Unmarshal(raw, &doc); err != nil {
+	if err := dec.Decode(&doc); err != nil {
 		return nil
 	}
 	found := map[string]bool{}

@@ -245,6 +245,42 @@ jobs:
       # behavior without a commit.
       - name: Install ansible
         run: pipx install ansible-core==2.18.1
+      # The engine contract holds the real tools to what the runners believe about them, and the
+      # contract turns an absent tool into a failure rather than a skip, because a skip reports as a
+      # pass. That makes installing them part of the gate rather than a convenience: v1.96.0 was
+      # refused publication because this list named seven engines and the gate shipped one.
+      #
+      # Pinned for the same reason ansible is: a gate whose toolchain floats changes behavior with
+      # no commit. Installed only when absent, so a runner image that already carries one is not
+      # fought with, and named out loud at the end so a missing tool fails here rather than inside
+      # the suite.
+      - name: Install the engines this runner does not ship
+        env:
+          TOFU_VERSION: "1.8.7"
+          TERRAFORM_VERSION: "1.9.8"
+        run: |
+          set -euo pipefail
+          if ! command -v tofu >/dev/null 2>&1; then
+            curl -fsSL -o /tmp/tofu.zip \
+              "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip"
+            sudo unzip -qo /tmp/tofu.zip tofu -d /usr/local/bin
+          fi
+          if ! command -v terraform >/dev/null 2>&1; then
+            curl -fsSL -o /tmp/terraform.zip \
+              "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+            sudo unzip -qo /tmp/terraform.zip terraform -d /usr/local/bin
+          fi
+          if ! command -v pwsh >/dev/null 2>&1; then
+            sudo snap install powershell --classic
+          fi
+          # Every engine the contract requires is named here, so a missing one fails at this step
+          # with the tool's name rather than deep inside the suite. A test reads both workflows and
+          # fails when this list and the contract's list drift apart, which is the drift that made
+          # a gate demand seven engines while installing one.
+          for binary in ansible-playbook bash python3 go pwsh terraform tofu; do
+            command -v "$binary" >/dev/null 2>&1 || { echo "missing engine binary: $binary" >&2; exit 1; }
+          done
+          tofu version && terraform version && pwsh --version
       - name: Run the real SSH fleet suite
         run: go test -tags integration -v -timeout 10m ./internal/integration/...
 

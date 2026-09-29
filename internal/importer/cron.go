@@ -44,6 +44,9 @@ func FromCron(inventory string, system bool) func([]byte, time.Time) (*Plan, err
 		s := bufio.NewScanner(bytes.NewReader(data))
 		s.Buffer(make([]byte, 0, 64*1024), 1<<20)
 		lineNo := 0
+		// The zone the lines below are read in. Empty means the server's local time, which is what a
+		// crontab with no CRON_TZ means.
+		zone := ""
 		for s.Scan() {
 			lineNo++
 			raw := strings.TrimSpace(s.Text())
@@ -51,13 +54,35 @@ func FromCron(inventory string, system bool) func([]byte, time.Time) (*Plan, err
 				continue
 			}
 			if cronEnvAssignment.MatchString(raw) {
+				name, value, _ := strings.Cut(raw, "=")
+				name, value = strings.TrimSpace(name), strings.Trim(strings.TrimSpace(value), `"'`)
+				// CRON_TZ is not an ordinary variable. It reads the schedule of every line below it in
+				// a different zone, so skipping it as environment carried every following job across
+				// at the server's local time, under a warning that said an environment variable had
+				// not come across. A nightly window moves by whole hours that way, and the report
+				// named the wrong thing as the loss.
+				if strings.EqualFold(name, "CRON_TZ") {
+					if _, err := time.LoadLocation(value); err != nil {
+						p.warn("line %d sets CRON_TZ to %q, which is not a zone this system knows, so "+
+							"the schedules below it import at the server's local time: %v",
+							lineNo, clipLine(value), err)
+						zone = ""
+						continue
+					}
+					zone = value
+					continue
+				}
 				p.warn("line %d sets an environment variable (%s), which imported schedules do not "+
-					"carry; set it in the run or the inventory instead", lineNo, strings.SplitN(raw, "=", 2)[0])
+					"carry; set it in the run or the inventory instead", lineNo, name)
 				continue
 			}
 			expr, user, command, ok := splitCronLine(raw, system)
 			if !ok {
 				p.warn("line %d is not a schedule and was skipped: %q", lineNo, clipLine(raw))
+				continue
+			}
+			if why, diverges := vixieDayFieldsDiverge(expr); diverges {
+				p.warn("line %d was not imported: %s", lineNo, why)
 				continue
 			}
 			if strings.HasPrefix(expr, "@reboot") {
@@ -73,7 +98,7 @@ func FromCron(inventory string, system bool) func([]byte, time.Time) (*Plan, err
 			// dropped with a warning that did not say a weekly backup had not come across.
 			p.addSchedule(&schedule.Schedule{
 				ID: schedule.NewID(), Name: fmt.Sprintf("cron line %d", lineNo),
-				Cron:      StandardizeCron(expr),
+				Cron: StandardizeCron(expr), Timezone: zone,
 				Inventory: inventory, Enabled: true, CreatedAt: now,
 				Steps: []run.PipelineStep{{Name: "cron", Tool: run.ToolBash, Command: command}},
 			}, "the crontab", now)
@@ -136,4 +161,41 @@ func clipLine(s string) string {
 		return s
 	}
 	return s[:limit] + "..."
+}
+
+// vixieDayFieldsDiverge reports whether a crontab line's two day fields combine differently here than
+// they do in the cron that wrote it.
+//
+// Cron treats the day of month and the day of week as alternatives when both are restricted, and as
+// requirements when either is not. What decides "restricted" is the difference. Vixie asks whether the
+// field text begins with a star, so "*/2" is unrestricted to it and the pair is ANDed. The parser this
+// product schedules with asks whether the field is a star, so "*/2" is a restriction and the pair is
+// ORed.
+//
+// So "0 0 1 * */2" means the first of the month, and only when that day is an even weekday. Imported,
+// it meant every first of the month and also every even weekday, which fires roughly fifteen times as
+// often and on days the crontab never would. Nothing said so: the expression came across character for
+// character and read correctly to anyone checking it.
+//
+// There is no faithful way to write the ANDed pair as one expression a parser that ORs will read
+// correctly, and every approximation fires on days the operator did not choose. So the line is refused
+// and named, which is the rule this importer already follows for a workflow whose nodes disagree about
+// their limit or their inventory.
+func vixieDayFieldsDiverge(expr string) (string, bool) {
+	fields := strings.Fields(expr)
+	if len(fields) != 5 {
+		return "", false
+	}
+	dom, dow := fields[2], fields[4]
+	// Whether each cron considers the pair a requirement rather than a choice.
+	vixieRequiresBoth := strings.HasPrefix(dom, "*") || strings.HasPrefix(dow, "*")
+	hereRequiresBoth := dom == "*" || dow == "*"
+	if vixieRequiresBoth == hereRequiresBoth {
+		return "", false
+	}
+	return fmt.Sprintf("its day-of-month %q and day-of-week %q combine differently here than in the "+
+		"cron that wrote it. A field beginning with a star is unrestricted to cron, so it requires "+
+		"both days to match; a field that is not exactly a star is a restriction here, so either day "+
+		"matching is enough. The line would fire on days it never has. Recreate it as a schedule that "+
+		"restricts one day field and leaves the other a plain star.", oneLine(dom), oneLine(dow)), true
 }

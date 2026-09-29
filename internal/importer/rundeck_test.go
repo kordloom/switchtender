@@ -223,9 +223,18 @@ func TestFromRundeckSchedule(t *testing.T) {
 	if len(plan.Templates) != 3 {
 		t.Fatalf("templates = %d, want 3", len(plan.Templates))
 	}
-	if len(plan.Schedules) != 2 {
-		t.Fatalf("schedules = %d, want 2 (the paused one is left out); warnings %v",
+	// Three, because a paused schedule comes across paused. It used to be left behind, which lost the
+	// cadence somebody had written and parked, and meant re-enabling it later was writing it again from
+	// memory. What must never happen is the other direction: paused at the source, armed here.
+	if len(plan.Schedules) != 3 {
+		t.Fatalf("schedules = %d, want 3 including the paused one; warnings %v",
 			len(plan.Schedules), plan.Warnings)
+	}
+	for _, sc := range plan.Schedules {
+		if sc.Name == "Paused" && sc.Enabled {
+			t.Error("a schedule Rundeck had paused imported armed, so a job the estate had stopped " +
+				"running starts running again on a cadence nobody asked for")
+		}
 	}
 	byName := map[string]string{}
 	for _, sc := range plan.Schedules {

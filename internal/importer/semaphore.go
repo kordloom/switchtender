@@ -147,12 +147,18 @@ type semaphoreSchedule struct {
 	CronFormat string `json:"cron_format"`
 	// Template names the template the schedule runs.
 	Template string `json:"template"`
+	// Active reports whether Semaphore fires this schedule; absent means active, which is what an
+	// export written before the field existed means.
+	Active *bool `json:"active"`
 }
 
 // FromSemaphore maps a Semaphore export into a Plan of SwitchTender objects with cross-references
 // wired by generated id. Like the AWX mapping it records warnings rather than failing on an asset
 // it cannot map cleanly.
 func FromSemaphore(data []byte, now time.Time) (*Plan, error) {
+	if err := refuseJSONTail(data); err != nil {
+		return nil, err
+	}
 	var export semaphoreExport
 	if err := json.Unmarshal(data, &export); err != nil {
 		return nil, fmt.Errorf("parse semaphore export: %w", err)
@@ -243,9 +249,13 @@ func (p *Plan) addSemaphoreProject(proj semaphoreProject, now time.Time) {
 		}
 		// Semaphore's cron format is taken verbatim, so it is validated like any other before it
 		// becomes a stored row.
+		// Armed only if Semaphore had it armed. This was hardcoded true, so a schedule somebody had
+		// deactivated in Semaphore came across live and started firing a template on a cadence its own
+		// estate had turned off, which the migration report counted as one more schedule carried
+		// faithfully.
 		p.addSchedule(&schedule.Schedule{
 			ID: schedule.NewID(), Name: s.Name, Cron: s.CronFormat, TemplateID: id,
-			Enabled: true, CreatedAt: now,
+			Enabled: s.Active == nil || *s.Active, CreatedAt: now,
 		}, "this Semaphore export", now)
 	}
 }

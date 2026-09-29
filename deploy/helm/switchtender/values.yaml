@@ -20,9 +20,9 @@ server:
 
 worker:
   # enabled deploys dedicated workers alongside the server. Off by default, because a worker is
-  # distributed execution, which is Team: without a licence the process refuses to start, so the
+  # distributed execution, which is Team: without a license the process refuses to start, so the
   # chart's own default produced a pod that crash-looped on a Community install. The server runs
-  # everything itself, which is what Community is for. Turn this on with a licence set.
+  # everything itself, which is what Community is for. Turn this on with a license set.
   enabled: false
   # replicas runs this many workers.
   replicas: 1

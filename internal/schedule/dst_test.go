@@ -21,7 +21,7 @@ func TestNextFireAcrossDaylightSaving(t *testing.T) {
 	t.Parallel()
 	tz, err := time.LoadLocation("America/Chicago")
 	if err != nil {
-		t.Skip("no tzdata available")
+		t.Fatalf("the zone database is embedded in this binary, so a zone that will not load is a real failure: %v", err)
 	}
 
 	// walk drives NextFire the way the tick loop does: fire, then ask for the next fire after that.
@@ -148,7 +148,7 @@ func TestSpringForwardInOtherZones(t *testing.T) {
 			t.Parallel()
 			loc, err := time.LoadLocation(tc.Zone)
 			if err != nil {
-				t.Skip("no tzdata for " + tc.Zone)
+				t.Fatalf("the zone database is embedded in this binary, so %s failing to load is a real failure: %v", tc.Zone, err)
 			}
 			from, err := time.ParseInLocation("2006-01-02T15:04:05", tc.From, loc)
 			if err != nil {

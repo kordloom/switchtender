@@ -16,6 +16,14 @@ var weekdayCron = map[string]string{
 // expression, reporting whether the conversion succeeded. Intervals a cron cannot express, such as
 // every three days, are refused so the caller can warn rather than emit a wrong cadence.
 func RRULEToCron(rrule string) (string, bool) {
+	// A rule that is more than one rule cannot become one cron expression. parseRRULE folds every
+	// RRULE line into one map, so a schedule carrying two of them silently imported as whichever keys
+	// happened to win, and an EXRULE or EXDATE was not read at all: a window that excluded a date
+	// imported firing on it. Both are refused so the caller names the schedule rather than emitting a
+	// cadence that is not in the file.
+	if _, compound := rruleCompound(rrule); compound {
+		return "", false
+	}
 	parts := parseRRULE(rrule)
 	freq := parts["FREQ"]
 	interval := parts["INTERVAL"]
@@ -56,12 +64,28 @@ func RRULEToCron(rrule string) (string, bool) {
 		if !dividesEvenly(interval, 60) {
 			return "", false
 		}
-		return everyField(interval) + " * * * *", true
+		// BYMINUTE beside a step is two statements about the same field, and which one a reader means
+		// is a guess. Refused rather than guessed.
+		if interval != "1" && parts["BYMINUTE"] != "" {
+			return "", false
+		}
+		field, ok := steppedFrom(startMinute, interval, 59)
+		if !ok {
+			return "", false
+		}
+		return field + " * * * *", true
 	case "HOURLY":
 		if !dividesEvenly(interval, 24) {
 			return "", false
 		}
-		return minute + " " + everyField(interval) + " * * *", true
+		if interval != "1" && parts["BYHOUR"] != "" {
+			return "", false
+		}
+		field, ok := steppedFrom(startHour, interval, 23)
+		if !ok {
+			return "", false
+		}
+		return minute + " " + field + " * * *", true
 	case "DAILY":
 		if interval != "1" {
 			return "", false
@@ -115,6 +139,9 @@ func RRULEToCron(rrule string) (string, bool) {
 // rruleProblem says why a rule could not become a cron expression, so a skipped schedule tells the
 // operator what to do rather than only that something failed.
 func rruleProblem(rrule string) string {
+	if why, compound := rruleCompound(rrule); compound {
+		return why
+	}
 	parts := parseRRULE(rrule)
 	switch {
 	case parts["COUNT"] != "":
@@ -126,6 +153,56 @@ func rruleProblem(rrule string) string {
 	default:
 		return "its cadence cannot be expressed as cron"
 	}
+}
+
+// rruleCompound reports why a rule holds more than one cadence, and whether it does.
+//
+// AWX writes the whole recurrence into one field, and iCalendar allows more than one RRULE in it plus
+// EXRULE and EXDATE to take dates back out. A cron expression is one cadence with no exclusions, so
+// neither can be carried, and both were being read as though they were not there: the second RRULE's
+// keys overwrote the first's, and an exclusion was ignored, which imported a schedule that fires on the
+// dates its own rule removed. A maintenance window excluding a holiday is the ordinary case.
+func rruleCompound(rrule string) (string, bool) {
+	rules, exclusions := 0, 0
+	for field := range strings.FieldsSeq(strings.ReplaceAll(rrule, "\n", " ")) {
+		upper := strings.ToUpper(field)
+		switch {
+		case strings.HasPrefix(upper, "RRULE:"):
+			rules++
+		case strings.HasPrefix(upper, "EXRULE:"), strings.HasPrefix(upper, "EXDATE:"),
+			strings.HasPrefix(upper, "EXDATE;"):
+			exclusions++
+		}
+	}
+	switch {
+	case exclusions > 0:
+		return "it takes dates back out of its own recurrence, and a cron entry has no way to say " +
+			"except, so set it by hand with the exclusions handled another way", true
+	case rules > 1:
+		return "it holds " + strconv.Itoa(rules) + " recurrence rules and a cron entry expresses one " +
+			"cadence, so set it by hand as whichever of them is still wanted", true
+	}
+	return "", false
+}
+
+// steppedFrom renders a cron step field that keeps the offset the rule starts at.
+//
+// An interval alone loses the phase. A rule every 15 minutes from :07 fires at 07, 22, 37 and 52, and
+// "*/15" fires at 00, 15, 30 and 45: the same cadence shifted, which for an hourly rule is a whole-hours
+// move of a maintenance window. Cron can say this exactly, as a range from the offset with a step, so
+// the offset is kept rather than rounded down to the top of the hour or the top of the day.
+func steppedFrom(phase, interval string, high int) (string, bool) {
+	if interval == "1" {
+		return "*", true
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(phase))
+	if err != nil || n < 0 || n > high {
+		return "", false
+	}
+	if n == 0 {
+		return "*/" + interval, true
+	}
+	return strconv.Itoa(n) + "-" + strconv.Itoa(high) + "/" + interval, true
 }
 
 // parseRRULE extracts the KEY=VALUE pairs from an iCalendar rule. AWX writes DTSTART and RRULE on

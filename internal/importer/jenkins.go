@@ -189,6 +189,11 @@ func decodeJenkins(data []byte) ([]jenkinsBundledJob, error) {
 	if err != nil {
 		return nil, err
 	}
+	// One root element, because XML has exactly one. Go's decoder reads the first and stops, so two
+	// config.xml files appended together imported as the first job alone. See wholedoc.go.
+	if err := refuseXMLTail(data); err != nil {
+		return nil, err
+	}
 	root, err := jenkinsRootElement(data)
 	if err != nil {
 		return nil, err

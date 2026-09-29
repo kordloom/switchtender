@@ -13,6 +13,7 @@ import (
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/template"
+	"strconv"
 )
 
 // awxExport is the top level of an awx export document, keyed by asset type.
@@ -126,6 +127,8 @@ type awxHost struct {
 	Name string `json:"name"`
 	// Variables holds host variables as a map or a YAML string.
 	Variables json.RawMessage `json:"variables"`
+	// Enabled reports whether AWX runs anything against this host; absent means enabled.
+	Enabled *bool `json:"enabled"`
 }
 
 // awxGroup is a named group of hosts.
@@ -146,6 +149,9 @@ type awxGroup struct {
 type awxGroupRelated struct {
 	// Hosts are the group's members.
 	Hosts []awxHost `json:"hosts"`
+	// Children are the groups nested under this one. awxkit writes them here as whole group objects,
+	// while a hand-written export names them as strings at the top level, so both shapes arrive.
+	Children []awxGroup `json:"children"`
 }
 
 // hosts returns the group's members from whichever place the export carried them.
@@ -162,6 +168,71 @@ func (g awxGroup) hosts() []awxHost {
 		return g.Related.Hosts
 	}
 	return nil
+}
+
+// childNames returns the groups nested under this one, from whichever place the export carried them.
+//
+// The top-level form names them as strings and was the only form read. awxkit nests them as whole group
+// objects instead, so a real export imported every group flat: the [name:children] sections were empty,
+// and a play targeting a parent group reached none of the hosts underneath it while the host count and
+// the group count both came out right.
+func (g awxGroup) childNames() []string {
+	if len(g.Children) > 0 {
+		return g.Children
+	}
+	if g.Related == nil {
+		return nil
+	}
+	out := make([]string, 0, len(g.Related.Children))
+	for _, child := range g.Related.Children {
+		if name := strings.TrimSpace(child.Name); name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// maxGroupNesting bounds how deep the walk below follows a group's children. AWX itself allows deep
+// nesting and an export is untrusted input, so the walk is bounded rather than trusting the file.
+const maxGroupNesting = 32
+
+// flattenGroups returns every group an inventory holds, including the ones that appear only nested
+// inside another group's related block.
+//
+// A nested child is a group in its own right: it has its own hosts and its own variables. Reading only
+// the list at the inventory level meant those existed nowhere in the imported inventory, so the hosts
+// under a subgroup were missing entirely unless they happened to be listed at the inventory level too.
+//
+// The fuller record of a group wins when it appears twice, since awxkit writes the whole object in one
+// place and a bare reference in the other, and which one comes first is not something to depend on.
+func flattenGroups(groups []awxGroup) []awxGroup {
+	var out []awxGroup
+	at := map[string]int{}
+	var walk func(gs []awxGroup, depth int)
+	walk = func(gs []awxGroup, depth int) {
+		if depth > maxGroupNesting {
+			return
+		}
+		for _, g := range gs {
+			name := strings.TrimSpace(g.Name)
+			if name == "" {
+				continue
+			}
+			if idx, dup := at[name]; dup {
+				if len(g.hosts()) > len(out[idx].hosts()) {
+					out[idx] = g
+				}
+				continue
+			}
+			at[name] = len(out)
+			out = append(out, g)
+			if g.Related != nil {
+				walk(g.Related.Children, depth+1)
+			}
+		}
+	}
+	walk(groups, 0)
+	return out
 }
 
 // awxJobTemplate is an AWX job template.
@@ -331,6 +402,11 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 	if err := dec.Decode(&export); err != nil {
 		return nil, fmt.Errorf("parse awx export: %w", err)
 	}
+	// A decoder reads one value and stops, so the rest of the file has to be checked separately. See
+	// wholedoc.go: this refusal came free from json.Unmarshal until the move to a decoder above.
+	if err := refuseJSONTail(data); err != nil {
+		return nil, err
+	}
 	plan := &Plan{}
 
 	projectIDs := map[string]string{}
@@ -378,7 +454,9 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 		}
 		obj := &inventory.Inventory{
 			ID: inventory.NewID(), Name: inv.Name,
-			Content: buildInventoryINI(plan, inv.Name, convertHosts(hosts), convertGroups(groups),
+			Content: buildInventoryINI(plan, inv.Name,
+				plan.convertHosts(hosts, "inventory "+quoteName(inv.Name)),
+				plan.convertGroups(flattenGroups(groups), "inventory "+quoteName(inv.Name)),
 				decodeVars(inv.Variables)),
 			CreatedAt: now,
 		}
@@ -643,25 +721,61 @@ func (p *Plan) addSchedules(owner string, schedules []awxSchedule, templateID st
 	}
 }
 
-// convertHosts adapts AWX hosts to the shared import host shape, decoding host variables.
-func convertHosts(hosts []awxHost) []importHost {
+// convertHosts adapts AWX hosts to the shared import host shape, decoding host variables and leaving
+// out the hosts AWX had switched off.
+//
+// A disabled host sits in an AWX inventory and takes part in nothing: AWX runs against the enabled
+// members and passes it over. The field was not on the struct, so it could not be read, and the host
+// came across indistinguishable from a live one. That is the rare import error that does something
+// rather than failing to do something, because the next play targeting all reaches a machine the
+// estate had deliberately held back, and the operator who disabled it has no reason to look.
+//
+// Left out rather than carried and marked, because what this writes is INI inventory content and INI
+// has no off switch for a host. The count and the names are reported, since a host that disappears
+// with nothing said about it is its own kind of wrong.
+func (p *Plan) convertHosts(hosts []awxHost, where string) []importHost {
 	out := make([]importHost, 0, len(hosts))
+	var off []string
 	for _, h := range hosts {
+		if h.Enabled != nil && !*h.Enabled {
+			off = append(off, h.Name)
+			continue
+		}
 		out = append(out, importHost{Name: h.Name, Variables: decodeVars(h.Variables)})
+	}
+	if len(off) > 0 {
+		p.warn("%s: %d host%s disabled in AWX %s left out, since AWX runs nothing against %s and "+
+			"importing %s would put %s in reach of the next play that targets all: %s",
+			where, len(off), plural(len(off)), wasWere(len(off)), itOrThem(len(off)),
+			itOrThem(len(off)), itOrThem(len(off)), clipNames(off))
 	}
 	return out
 }
 
 // convertGroups adapts AWX groups to the shared import group shape.
-func convertGroups(groups []awxGroup) []importGroup {
+func (p *Plan) convertGroups(groups []awxGroup, where string) []importGroup {
 	out := make([]importGroup, 0, len(groups))
 	for _, g := range groups {
 		out = append(out, importGroup{
-			Name: g.Name, Hosts: convertHosts(g.hosts()),
-			Variables: decodeVars(g.Variables), Children: g.Children,
+			Name: g.Name, Hosts: p.convertHosts(g.hosts(), where+", group "+quoteName(g.Name)),
+			Variables: decodeVars(g.Variables), Children: g.childNames(),
 		})
 	}
 	return out
+}
+
+// clipNames renders a list of names for a warning, capped so one line stays one line.
+func clipNames(names []string) string {
+	const show = 8
+	if len(names) <= show {
+		return strings.Join(names, ", ")
+	}
+	return strings.Join(names[:show], ", ") + ", and " + strconv.Itoa(len(names)-show) + " more"
+}
+
+// quoteName renders a name for a warning, on one line and in quotes.
+func quoteName(name string) string {
+	return strconv.Quote(oneLine(name))
 }
 
 // decodeVars decodes host variables from either a JSON object or a YAML or JSON string.

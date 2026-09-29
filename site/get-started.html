@@ -123,7 +123,7 @@
 					<div class="gs-num">2</div>
 					<div class="gs-body">
 						<h3>Serve</h3>
-						<p>Start the server. SQLite is the default. Point <code>--db</code> at a Postgres DSN when you want more than one instance. Creating a new PostgreSQL schema needs a Team license; opening one that already exists is never gated, in any licence state. Set the encryption pair if you plan to store credentials. On a public address with no tokens yet, serve mints your initial admin token and prints it once, so the API requires auth from its very first request; only loopback and <code>--read-only</code> may run open, and it says so.</p>
+						<p>Start the server. SQLite is the default. Point <code>--db</code> at a Postgres DSN when you want more than one instance. Creating a new PostgreSQL schema needs a Team license; opening one that already exists is never gated, in any license state. Set the encryption pair if you plan to store credentials. On a public address with no tokens yet, serve mints your initial admin token and prints it once, so the API requires auth from its very first request; only loopback and <code>--read-only</code> may run open, and it says so.</p>
 						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code><span class="c"># optional, only needed for stored secrets</span>
 export SWITCHTENDER_ENCRYPTION_KEY=change-me
 export SWITCHTENDER_ENCRYPTION_SALT=change-me-too

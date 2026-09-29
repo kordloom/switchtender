@@ -189,6 +189,11 @@ func FromRundeck(inventory string) func([]byte, time.Time) (*Plan, error) {
 		if IsRundeckArchive(data) {
 			return fromRundeckArchive(data, inventory, now)
 		}
+		// yaml.Unmarshal decodes the first document of a stream and ignores the rest, so a file of
+		// per-project exports separated by --- imported one project and reported that as the estate.
+		if err := refuseYAMLTail(data); err != nil {
+			return nil, err
+		}
 		jobs, err := decodeRundeck(data)
 		if err != nil {
 			return nil, err
@@ -276,17 +281,17 @@ func (p *Plan) addRundeckJob(job rundeckJob, inventoryName string, now time.Time
 	if job.Schedule == nil {
 		return
 	}
-	if job.ScheduleEnabled != nil && !*job.ScheduleEnabled {
-		p.warn("job %q has a schedule that is disabled in Rundeck, so it was not imported", name)
-		return
-	}
 	spec, ok := p.rundeckCron(job, name)
 	if !ok {
 		return
 	}
+	// A schedule disabled in Rundeck comes across disabled rather than being left behind. Dropping it
+	// was safe and lossy: the cadence somebody had written and parked was gone, so re-enabling it later
+	// meant writing it again from memory, and the four formats disagreed about the same situation while
+	// AWX, Jenkins and Semaphore all carry theirs switched off. addSchedule says which ones arrive off.
 	p.addSchedule(&schedule.Schedule{
 		ID: schedule.NewID(), Name: name, Cron: spec, TemplateID: tmpl.ID,
-		Enabled: true, CreatedAt: now,
+		Enabled: job.ScheduleEnabled == nil || *job.ScheduleEnabled, CreatedAt: now,
 	}, "rundeck", now)
 }
 

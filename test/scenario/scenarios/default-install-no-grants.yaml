@@ -13,7 +13,6 @@ why: |
 
 environment:
   grants: open
-  store: memory
 
 fixtures:
   users:

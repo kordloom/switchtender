@@ -78,12 +78,17 @@ func (in *Install) Close() {
 	}
 }
 
-// Build constructs the install a scenario declares, in one grant mode.
+// Build constructs the install a scenario declares, in one grant mode, on one store backend.
 //
 // Everything here is the product's own: the stores it ships, the handler serve mounts, and the
 // token middleware a real request passes through. A scenario that passed against a hand-rolled
 // stand-in for any of those would be testing the stand-in.
-func Build(s *Scenario, mode GrantMode, dir string) (*Install, error) {
+//
+// The backend is a parameter rather than read from the scenario, because the suite runs every
+// scenario on every backend the scenario admits. The language supported sqlite from the start and
+// no scenario named it, so every property was only ever asked of the in-memory stores and any
+// answer the SQL stores gave differently was invisible.
+func Build(s *Scenario, mode GrantMode, backend string, dir string) (*Install, error) {
 	if target := s.Environment.Target; target != "" && target != TargetInProcess {
 		return nil, fmt.Errorf("scenario %q targets %q, which this runner does not implement: it "+
 			"must fail rather than pass, since a scenario that silently did not run reads as "+
@@ -93,7 +98,7 @@ func Build(s *Scenario, mode GrantMode, dir string) (*Install, error) {
 		Roles: map[string]string{}, Fakes: map[string]Fake{}}
 	ctx := context.Background()
 
-	st, err := openStores(s.Environment.Store, dir)
+	st, err := openStores(backend, dir)
 	if err != nil {
 		return nil, err
 	}

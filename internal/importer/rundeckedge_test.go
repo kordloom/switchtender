@@ -322,10 +322,15 @@ func TestRundeckThreadCountIsReadAsForks(t *testing.T) {
 	}
 }
 
-// TestRundeckDisabledJobAndScheduleAreHandledDifferently pins the split the doc comments describe:
-// a disabled job still imports with a note, but a disabled schedule is not created. Creating a
-// schedule that Rundeck had switched off would start a job nobody expected to run.
-func TestRundeckDisabledJobAndScheduleAreHandledDifferently(t *testing.T) {
+// TestRundeckDisabledJobAndScheduleBothComeAcrossSwitchedOff pins one policy over four importers.
+//
+// A disabled schedule used to be left behind here while AWX, Jenkins and Semaphore all carried theirs
+// switched off, so the same situation had two answers depending on which tool somebody was leaving.
+// Dropping it is the safe half of the problem and loses the other half: the expression is gone, so
+// turning the job back on months later means reconstructing the cadence from memory.
+//
+// What must hold in every format is the direction that does something. Off at the source, off here.
+func TestRundeckDisabledJobAndScheduleBothComeAcrossSwitchedOff(t *testing.T) {
 	t.Parallel()
 	const doc = `- name: disabled-job
   executionEnabled: false
@@ -344,15 +349,23 @@ func TestRundeckDisabledJobAndScheduleAreHandledDifferently(t *testing.T) {
 	if len(plan.Templates) != 2 {
 		t.Fatalf("templates = %d, want 2: both jobs still import", len(plan.Templates))
 	}
-	if len(plan.Schedules) != 0 {
-		t.Errorf("schedules = %d, want 0: a schedule disabled in Rundeck is not created",
-			len(plan.Schedules))
+	if len(plan.Schedules) != 1 {
+		t.Fatalf("schedules = %d, want the disabled one carried rather than dropped: %v",
+			len(plan.Schedules), plan.Warnings)
+	}
+	if plan.Schedules[0].Enabled {
+		t.Error("a schedule disabled in Rundeck imported armed, which starts a job the estate had " +
+			"switched off")
+	}
+	if plan.Schedules[0].Cron == "" {
+		t.Error("the schedule came across with no expression, so carrying it gained nothing")
 	}
 	if _, ok := warningContaining(t, plan.Warnings, `job "disabled-job" is disabled`); !ok {
 		t.Errorf("the disabled job was not noted.\nwarnings: %v", plan.Warnings)
 	}
-	if _, ok := warningContaining(t, plan.Warnings, "schedule that is disabled in Rundeck"); !ok {
-		t.Errorf("the disabled schedule was not reported.\nwarnings: %v", plan.Warnings)
+	if _, ok := warningContaining(t, plan.Warnings, "switched off at the source"); !ok {
+		t.Errorf("nothing said the schedule arrives switched off, so the count of schedules reads as "+
+			"a count of cadences that fire.\nwarnings: %v", plan.Warnings)
 	}
 }
 

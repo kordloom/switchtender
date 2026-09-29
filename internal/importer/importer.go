@@ -131,6 +131,13 @@ func (p *Plan) addSchedule(sc *schedule.Schedule, source string, now time.Time) 
 		return
 	}
 	sc.NextRunAt = &next
+	if !sc.Enabled {
+		// Said out loud, because the report counts schedules and says nothing about which of them
+		// fire. A count of six read as six cadences running, and an operator who saw the number had no
+		// way to tell that two of them arrived switched off exactly as they were at the source.
+		p.warn("schedule %q from %s is switched off at the source, so it comes across switched off "+
+			"and will not fire until somebody enables it", sc.Name, source)
+	}
 	p.Schedules = append(p.Schedules, sc)
 }
 
@@ -354,8 +361,16 @@ func mapSurveyType(awxType string) (template.FieldType, bool) {
 		return template.FieldText, true
 	case "integer":
 		return template.FieldInt, true
-	case "multiplechoice", "multiselect":
+	case "multiplechoice":
 		return template.FieldChoice, true
+	case "multiselect":
+		// Not exact, and it was reported as exact. A multiselect prompt accepts several answers and
+		// there is no field kind here that does, so the answer set collapses to one. Collapsing it is
+		// forced; calling it exact is not, and the assessment a prospect reads before deciding to
+		// migrate is the one place that has to say which fields come across whole and which lose
+		// something. The caller turns false into a named warning, so the loss now appears in the
+		// report instead of being discovered after the move.
+		return template.FieldChoice, false
 	case "float":
 		return template.FieldText, false
 	default:

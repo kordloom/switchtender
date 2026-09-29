@@ -1,6 +1,7 @@
 package roundhouse
 
 import (
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -21,7 +22,12 @@ var advertisedEngines = map[string]string{
 // enginesCIMustRun are the engines the CI environment installs and therefore must actually execute.
 // A skip here is a silent loss of coverage on a headline claim, which is the failure mode this file
 // exists to prevent.
-var enginesCIMustRun = []string{"ansible", "bash", "python", "go"}
+// Every advertised engine is here now. Three of them were absent for the life of this list, so the
+// contract that holds a tool to what its runner believes skipped for those three and reported a pass,
+// which is the failure this file was written to prevent and did not.
+var enginesCIMustRun = []string{
+	"ansible", "bash", "python", "go", "terraform", "opentofu", "powershell",
+}
 
 // TestEveryAdvertisedEngineIsExercisedOrNamed makes an absent engine visible.
 //
@@ -51,10 +57,33 @@ func TestEveryAdvertisedEngineIsExercisedOrNamed(t *testing.T) {
 
 	for _, want := range enginesCIMustRun {
 		binary := advertisedEngines[want]
-		if _, err := exec.LookPath(binary); err != nil {
+		if _, err := exec.LookPath(binary); err != nil && mustBeRunnableHere(want) {
 			t.Errorf("%s (%s) is not runnable, so its execution test skipped rather than ran. "+
 				"This engine is advertised and CI installs it, so a skip here is lost coverage on "+
 				"a headline claim, not an environment quirk.", want, binary)
 		}
 	}
+}
+
+// mustBeRunnableHere reports whether an absent engine is a failure in this environment rather than a
+// gap this environment states and moves past.
+//
+// One owner, because two tests ask it. This one checks that every engine CI installs is executable,
+// and the tool contract beside it checks that each engine's tool behaves as its runner believes. Both
+// have to treat a developer's machine and the release gate differently, and a rule written twice is a
+// rule that ends up meaning two things: extending the must-run list to the last three engines made
+// this test fail on any machine without PowerShell while the contract correctly skipped.
+//
+// The gate sets SWITCHTENDER_REQUIRE_FULL_SUITE, which is the same switch the PostgreSQL contract and
+// the drift tests already read for exactly this purpose.
+func mustBeRunnableHere(engine string) bool {
+	if os.Getenv("SWITCHTENDER_REQUIRE_FULL_SUITE") != "1" {
+		return false
+	}
+	for _, want := range enginesCIMustRun {
+		if want == engine {
+			return true
+		}
+	}
+	return false
 }

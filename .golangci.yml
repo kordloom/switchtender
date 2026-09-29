@@ -26,6 +26,12 @@ linters:
       - path: (.+)_test\.go
         linters:
           - bodyclose
+      # The spelling guard's table names every British form it hunts, so misspell finds twenty-four
+      # of them in the one file whose job is to hold them. Excluding the guard is what lets the guard
+      # exist; the words it lists are data, not prose this project wrote by mistake.
+      - path: ^spelling_test\.go$
+        linters:
+          - misspell
 
 formatters:
   enable:

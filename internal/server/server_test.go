@@ -1785,7 +1785,7 @@ func TestSchedulePreviewTimezone(t *testing.T) {
 	}
 	zone, err := time.LoadLocation("America/New_York")
 	if err != nil {
-		t.Skipf("timezone database unavailable: %v", err)
+		t.Fatalf("the zone database is embedded in this binary, so this is a real failure: %v", err)
 	}
 	for i, fire := range got.Next {
 		if h, m := fire.In(zone).Hour(), fire.In(zone).Minute(); h != 2 || m != 0 {

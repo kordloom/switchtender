@@ -179,12 +179,16 @@ func TestMapSurveyTypeFallsBackToTextWithoutClaimingExactness(t *testing.T) {
 		{AWXType: "textarea", WantType: template.FieldText, WantExact: true},         // Test 1.
 		{AWXType: "integer", WantType: template.FieldInt, WantExact: true},           // Test 2.
 		{AWXType: "multiplechoice", WantType: template.FieldChoice, WantExact: true}, // Test 3.
-		{AWXType: "multiselect", WantType: template.FieldChoice, WantExact: true},    // Test 4.
-		{AWXType: "float", WantType: template.FieldText, WantExact: false},           // Test 5.
-		{AWXType: "", WantType: template.FieldText, WantExact: false},                // Test 6.
-		{AWXType: "something_new", WantType: template.FieldText, WantExact: false},   // Test 7.
-		{AWXType: "TEXT", WantType: template.FieldText, WantExact: false},            // Test 8: case matters.
-		{AWXType: "password", WantType: template.FieldText, WantExact: false},        // Test 9.
+		// Test 4: a multiselect prompt takes several answers and nothing here does, so the answer set
+		// collapses to one. The collapse is forced; reporting it as exact was not, and this row said
+		// exact while the test above it says only equivalent mappings may. The assessment a prospect
+		// reads before migrating is the one place that has to name what a field loses.
+		{AWXType: "multiselect", WantType: template.FieldChoice, WantExact: false},
+		{AWXType: "float", WantType: template.FieldText, WantExact: false},         // Test 5.
+		{AWXType: "", WantType: template.FieldText, WantExact: false},              // Test 6.
+		{AWXType: "something_new", WantType: template.FieldText, WantExact: false}, // Test 7.
+		{AWXType: "TEXT", WantType: template.FieldText, WantExact: false},          // Test 8: case matters.
+		{AWXType: "password", WantType: template.FieldText, WantExact: false},      // Test 9.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.AWXType), func(t *testing.T) {

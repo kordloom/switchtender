@@ -11,6 +11,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/template"
+	"strings"
 )
 
 // awxWorkflow is an AWX workflow job template: a graph of nodes, each running a job template, wired
@@ -339,6 +340,23 @@ func (p *Plan) addWorkflow(wf awxWorkflow, jobs map[string]awxJobTemplate, now t
 			}
 			steps[j].DependsOn = append(steps[j].DependsOn, steps[i].Name)
 		}
+		// An always edge is carried by letting the upstream step fail, and that flag belongs to the
+		// step rather than to one edge leaving it. So a node with an always edge to one place and a
+		// success edge to another cannot be expressed: setting the flag lets BOTH proceed after a
+		// failure, and the step that was meant to run only on success ran on failure too. Deploy on
+		// success beside notify always is an everyday shape, and it imported as deploy after a failed
+		// build, silently.
+		//
+		// Both edges pointing at the same node is not that case. There the two statements agree about
+		// one step and always is the stronger of them, which is what AWX does too, so it is carried.
+		if always, successOnly := n.edgeConflict(byKey, steps); len(always) > 0 && len(successOnly) > 0 {
+			p.warn("workflow %q was not imported: node %s runs %s whatever it does, and %s only when "+
+				"it succeeds. A pipeline step lets everything downstream continue or nothing, so "+
+				"carrying the first would let the second run after a failure. Split the node in two, "+
+				"or make the always edge a success edge if that is what it meant.",
+				name, nodeLabel(n), strings.Join(always, ", "), strings.Join(successOnly, ", "))
+			return ""
+		}
 		if n.continues() {
 			steps[i].ContinueOnFailure = true
 		}
@@ -373,12 +391,29 @@ func (p *Plan) addWorkflow(wf awxWorkflow, jobs map[string]awxJobTemplate, now t
 		p.warn("workflow %q was not imported: %v", name, err)
 		return ""
 	}
+	nodeInventory, err := workflowInventory(nodes, jobs)
+	if err != nil {
+		p.warn("workflow %q was not imported: %v", name, err)
+		return ""
+	}
+	timeout := p.workflowTimeout(name, nodes, jobs)
 
 	tpl := &template.Template{
 		ID: template.NewID(), Name: name, Steps: steps, ProjectID: projectID, CreatedAt: now,
-		Tags: splitAWXTags(tags), SkipTags: splitAWXTags(skipTags),
+		Tags: splitAWXTags(tags), SkipTags: splitAWXTags(skipTags), Timeout: timeout,
 	}
-	if inv := string(wf.Inventory); inv != "" {
+	inv := string(wf.Inventory)
+	if inv == "" {
+		// The workflow names none, so its steps ran against whatever their own job templates named.
+		// That was read nowhere and the workflow imported with no inventory at all, which is a run
+		// against no hosts rather than the run AWX performed.
+		inv = nodeInventory
+	} else if nodeInventory != "" && nodeInventory != inv {
+		p.warn("workflow %q runs against inventory %q and its nodes' job templates name %q. The "+
+			"workflow's own inventory wins here, as it does in AWX when the workflow sets one, so "+
+			"every step now targets %q.", name, inv, nodeInventory, inv)
+	}
+	if inv != "" {
 		if id, ok := inventoryIDs[inv]; ok {
 			tpl.InventoryID = id
 		} else {
@@ -403,12 +438,6 @@ func (p *Plan) addWorkflow(wf awxWorkflow, jobs map[string]awxJobTemplate, now t
 	return tpl.ID
 }
 
-// workflowLimit returns the one host limit a workflow's nodes agree on.
-//
-// A limit is pipeline wide here: every child run copies the parent's and a step never names its own.
-// So nodes limited differently, or a limit on some nodes and not others, cannot be expressed. Both
-// are refused rather than resolved, because every way of resolving them runs some node against hosts
-// its operator had excluded.
 // workflowTags returns the tags and skip tags every node in the workflow shares, refusing when they
 // disagree.
 //
@@ -452,6 +481,12 @@ func workflowTags(nodes []awxWorkflowNode, jobs map[string]awxJobTemplate) (tags
 	return tags, skip, nil
 }
 
+// workflowLimit returns the one host limit a workflow's nodes agree on.
+//
+// A limit is pipeline wide here: every child run copies the parent's and a step never names its own.
+// So nodes limited differently, or a limit on some nodes and not others, cannot be expressed. Both
+// are refused rather than resolved, because every way of resolving them runs some node against hosts
+// its operator had excluded.
 func workflowLimit(nodes []awxWorkflowNode, jobs map[string]awxJobTemplate) (string, error) {
 	limit := jobs[string(nodes[0].UnifiedJobTemplate)].Limit
 	for _, n := range nodes[1:] {
@@ -591,4 +626,123 @@ func dedupeStrings(in []string) []string {
 		}
 	}
 	return out
+}
+
+// successEdges returns the edges taken only when this node succeeds, from wherever the export put them.
+func (n awxWorkflowNode) successEdges() []awxNodeRef {
+	out := append([]awxNodeRef(nil), n.SuccessNodes...)
+	if n.Related != nil {
+		out = append(out, n.Related.SuccessNodes...)
+	}
+	return out
+}
+
+// alwaysEdges returns the edges taken whatever this node did, from wherever the export put them.
+func (n awxWorkflowNode) alwaysEdges() []awxNodeRef {
+	out := append([]awxNodeRef(nil), n.AlwaysNodes...)
+	if n.Related != nil {
+		out = append(out, n.Related.AlwaysNodes...)
+	}
+	return out
+}
+
+// edgeConflict returns the step names this node runs unconditionally and the ones it runs only on
+// success, resolved through the graph so two keys naming one node are seen as one node.
+//
+// A step named by both kinds of edge is not in the second list. The two statements are about the same
+// step, always is the stronger, and carrying it is what AWX does.
+func (n awxWorkflowNode) edgeConflict(byKey map[string]int,
+	steps []run.PipelineStep) (always, successOnly []string) {
+	alwaysAt := map[int]bool{}
+	for _, next := range n.alwaysEdges() {
+		if j, ok := byKey[string(next)]; ok {
+			alwaysAt[j] = true
+		}
+	}
+	for j := range alwaysAt {
+		always = append(always, quoteName(steps[j].Name))
+	}
+	seen := map[int]bool{}
+	for _, next := range n.successEdges() {
+		j, ok := byKey[string(next)]
+		if !ok || alwaysAt[j] || seen[j] {
+			continue
+		}
+		seen[j] = true
+		successOnly = append(successOnly, quoteName(steps[j].Name))
+	}
+	sort.Strings(always)
+	sort.Strings(successOnly)
+	return always, successOnly
+}
+
+// workflowTimeout returns the runtime cap a workflow's nodes agree on, warning when they do not.
+//
+// A job template's timeout imports on a plain template and was the one per-node field a workflow threw
+// away in silence: a node capped at five minutes became a step with no cap at all, so a hung task that
+// AWX would have killed runs until something else stops it. The pipeline holds one cap, so nodes that
+// disagree cannot all be honored.
+//
+// The longest is taken rather than refusing the workflow, because a cap is a safety net and the longest
+// of them still bounds every step, while refusing would drop a graph over a field that does not change
+// what runs. The report names what changed for which node, since a step whose cap grew is a step whose
+// hang now lasts longer than its operator set.
+func (p *Plan) workflowTimeout(name string, nodes []awxWorkflowNode,
+	jobs map[string]awxJobTemplate) int {
+	longest, at := 0, ""
+	shortened := false
+	for _, n := range nodes {
+		seconds := jobs[string(n.UnifiedJobTemplate)].Timeout
+		if seconds <= 0 {
+			continue
+		}
+		if longest == 0 {
+			longest, at = seconds, nodeLabel(n)
+			continue
+		}
+		if seconds != longest {
+			shortened = true
+		}
+		if seconds > longest {
+			longest, at = seconds, nodeLabel(n)
+		}
+	}
+	if shortened {
+		p.warn("workflow %q has nodes with different runtime caps, and a workflow template holds one, "+
+			"so every step is capped at the longest of them: %d seconds, from node %s. A step that had "+
+			"a shorter cap can now run longer than it could in AWX.", name, longest, at)
+	}
+	return longest
+}
+
+// workflowInventory returns the one inventory a workflow's nodes agree on.
+//
+// A pipeline holds one inventory and a step names none, so this is the fourth thing AWX scopes per
+// node that has to be resolved before the template exists. It was the only one that was not: the
+// workflow's own inventory was read and every node's job template inventory was discarded without a
+// word. A workflow that named no inventory of its own therefore imported with none, which is not the
+// run AWX performed but a run against nothing, and a workflow whose nodes targeted different fleets
+// imported as though they targeted one.
+//
+// Nodes that disagree refuse the workflow, for the reason the limit does: every way of resolving them
+// runs some step against hosts its operator had not chosen. A node whose job template names no
+// inventory does not force a refusal, because AWX would have taken the workflow's own in that case.
+func workflowInventory(nodes []awxWorkflowNode, jobs map[string]awxJobTemplate) (string, error) {
+	found := ""
+	for _, n := range nodes {
+		inv := string(jobs[string(n.UnifiedJobTemplate)].Inventory)
+		if inv == "" {
+			continue
+		}
+		if found == "" {
+			found = inv
+			continue
+		}
+		if inv != found {
+			return "", fmt.Errorf("node %s runs against inventory %q while another runs against %q, "+
+				"and a workflow template applies one inventory to every step",
+				nodeLabel(n), oneLine(inv), oneLine(found))
+		}
+	}
+	return found, nil
 }

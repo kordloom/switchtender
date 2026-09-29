@@ -26,47 +26,62 @@ func TestScenarios(t *testing.T) {
 	}
 	for _, s := range all {
 		t.Run(s.Name, func(t *testing.T) {
-			built := map[GrantMode]*Install{}
-			// Closed on the parent, after the comparison below has run. Registering the close on
-			// the per-mode subtest tore both installs down before the sibling comparison reached
-			// them: on the memory backend a closed install keeps answering, so the check quietly
-			// compared two live installs and looked fine, and on sqlite every read failed
-			// identically on both sides, so the comparison agreed and reported nothing. A check
-			// that cannot fail is worse than one that is missing.
-			t.Cleanup(func() {
-				for _, in := range built {
-					in.Close()
-				}
-			})
-			for _, mode := range s.Modes() {
-				t.Run(string(mode), func(t *testing.T) {
-					built[mode] = runScenario(t, s, mode)
+			for _, backend := range s.Backends() {
+				t.Run(backend, func(t *testing.T) {
+					runScenarioOnBackend(t, s, backend)
 				})
 			}
-			// The two modes are compared once both exist. Everything strict grants changes has to
-			// be a removal, and the scenario has already been built twice, so the comparison costs
-			// nothing beyond the reads.
-			open, haveOpen := built[GrantsOpen]
-			strict, haveStrict := built[GrantsStrict]
-			if !haveOpen || !haveStrict {
-				return
-			}
-			t.Run("strict only narrows", func(t *testing.T) {
-				for _, failure := range CheckModeNarrowing(open, strict) {
-					t.Errorf("%s", failure)
-				}
-			})
 		})
 	}
 }
 
+// runScenarioOnBackend runs one scenario in every grant mode on one store backend, then compares the
+// two modes against each other.
+//
+// The comparison stays inside one backend. Comparing an open install on memory against a strict one
+// on sqlite would attribute a storage difference to the grant mode, which is the kind of finding
+// that wastes a day.
+func runScenarioOnBackend(t *testing.T, s *Scenario, backend string) {
+	t.Helper()
+	built := map[GrantMode]*Install{}
+	// Closed on the parent, after the comparison below has run. Registering the close on the
+	// per-mode subtest tore both installs down before the sibling comparison reached them: on the
+	// memory backend a closed install keeps answering, so the check quietly compared two live
+	// installs and looked fine, and on sqlite every read failed identically on both sides, so the
+	// comparison agreed and reported nothing. A check that cannot fail is worse than one that is
+	// missing.
+	t.Cleanup(func() {
+		for _, in := range built {
+			in.Close()
+		}
+	})
+	for _, mode := range s.Modes() {
+		t.Run(string(mode), func(t *testing.T) {
+			built[mode] = runScenario(t, s, mode, backend)
+		})
+	}
+	// The two modes are compared once both exist. Everything strict grants changes has to be a
+	// removal, and the scenario has already been built twice, so the comparison costs nothing
+	// beyond the reads.
+	open, haveOpen := built[GrantsOpen]
+	strict, haveStrict := built[GrantsStrict]
+	if !haveOpen || !haveStrict {
+		return
+	}
+	t.Run("strict only narrows", func(t *testing.T) {
+		for _, failure := range CheckModeNarrowing(open, strict) {
+			t.Errorf("%s", failure)
+		}
+	})
+}
+
 // runScenario builds one install, checks everything that must be true of it, and hands the install
 // back so the two grant modes can be compared once both are built.
-func runScenario(t *testing.T, s *Scenario, mode GrantMode) *Install {
+func runScenario(t *testing.T, s *Scenario, mode GrantMode, backend string) *Install {
 	t.Helper()
-	in, err := Build(s, mode, t.TempDir())
+	in, err := Build(s, mode, backend, t.TempDir())
 	if err != nil {
-		t.Fatalf("building %s: %v", s.Path(), err)
+		t.Fatalf("building %s on %s: %v", s.Path(), backend, err)
 	}
 
 	for _, c := range s.Cases {
@@ -96,7 +111,7 @@ func TestTheKindTargetRefusesRatherThanPasses(t *testing.T) {
 		Environment: Environment{Target: TargetKind},
 		Cases:       []Case{{Name: "c", Why: "w"}},
 	}
-	_, err := Build(s, GrantsOpen, t.TempDir())
+	_, err := Build(s, GrantsOpen, "memory", t.TempDir())
 	if err == nil {
 		t.Fatal("a scenario targeting a Kind cluster built in process, so it would report a pass " +
 			"for an environment it never stood up")
@@ -338,7 +353,7 @@ func TestEveryDerivedViewIsActuallyExercised(t *testing.T) {
 	}
 	named := map[string]bool{}
 	for _, s := range all {
-		in, berr := Build(s, GrantsOpen, t.TempDir())
+		in, berr := Build(s, GrantsOpen, "memory", t.TempDir())
 		if berr != nil {
 			t.Fatalf("building %s: %v", s.Path(), berr)
 		}
@@ -378,4 +393,36 @@ func TestEveryDerivedViewIsActuallyExercised(t *testing.T) {
 				"belongs in derivedViews where the id invariant will check it", path)
 		}
 	}
+}
+
+// TestBothBackendsAreActuallyExercised keeps the matrix from collapsing back to one store.
+//
+// The language admitted sqlite from the first version and no scenario ever named it, so for its whole
+// life the battery was asked only of the in-memory stores and any answer the SQL stores gave
+// differently was invisible. When that was fixed, the fix did nothing: every scenario pinned
+// store: memory, so Backends correctly returned one backend and the suite passed in the same time as
+// before. Nothing reported that, because a suite that runs half of what it claims still goes green.
+//
+// So the population is counted rather than assumed. A scenario may still pin a backend, but only when
+// its question is about that backend, and at least one scenario has to reach each of them.
+func TestBothBackendsAreActuallyExercised(t *testing.T) {
+	t.Parallel()
+	all, err := Load(scenarioDir)
+	if err != nil {
+		t.Fatalf("Load(%s): %v", scenarioDir, err)
+	}
+	reached := map[string]int{}
+	for _, s := range all {
+		for _, backend := range s.Backends() {
+			reached[backend]++
+		}
+	}
+	for _, backend := range []string{"memory", "sqlite"} {
+		if reached[backend] == 0 {
+			t.Errorf("no scenario runs on the %s backend, so every property in the battery is only "+
+				"asked of the other one and any answer this store gives differently is invisible",
+				backend)
+		}
+	}
+	t.Logf("scenarios per backend: memory %d, sqlite %d", reached["memory"], reached["sqlite"])
 }

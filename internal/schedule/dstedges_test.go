@@ -57,7 +57,7 @@ func TestADailyScheduleFiresOnceEveryCalendarDayForAYear(t *testing.T) {
 			t.Parallel()
 			loc, err := time.LoadLocation(test.Zone)
 			if err != nil {
-				t.Skip("no tzdata for " + test.Zone)
+				t.Fatalf("the zone database is embedded in this binary, so %s failing to load is a real failure: %v", test.Zone, err)
 			}
 			sc := &Schedule{
 				Cron: fmt.Sprintf("0 %d * * *", test.Hour), Timezone: test.Zone, Playbook: "site.yml",
@@ -119,7 +119,7 @@ func TestAScheduleInsideTheRepeatedHourFiresOnce(t *testing.T) {
 			t.Parallel()
 			loc, err := time.LoadLocation(test.Zone)
 			if err != nil {
-				t.Skip("no tzdata for " + test.Zone)
+				t.Fatalf("the zone database is embedded in this binary, so %s failing to load is a real failure: %v", test.Zone, err)
 			}
 			from, err := time.ParseInLocation("2006-01-02T15:04:05", test.From, loc)
 			if err != nil {
@@ -151,7 +151,7 @@ func TestAScheduleInsideALostHalfHourStillFires(t *testing.T) {
 	t.Parallel()
 	loc, err := time.LoadLocation("Australia/Lord_Howe")
 	if err != nil {
-		t.Skip("no tzdata for Australia/Lord_Howe")
+		t.Fatalf("the zone database is embedded in this binary, so Australia/Lord_Howe failing to load is a real failure: %v", err)
 	}
 	// The clock goes 01:59:59 to 02:30:00 on 2026-10-04, so 02:15 does not exist that day.
 	sc := &Schedule{Cron: "15 2 * * *", Timezone: "Australia/Lord_Howe", Playbook: "site.yml"}
@@ -189,7 +189,7 @@ func TestTheTimezoneFieldReachesTheDaylightSavingCorrections(t *testing.T) {
 	t.Parallel()
 	chicago, err := time.LoadLocation("America/Chicago")
 	if err != nil {
-		t.Skip("no tzdata available")
+		t.Fatalf("the zone database is embedded in this binary, so a zone that will not load is a real failure: %v", err)
 	}
 	sc := &Schedule{Cron: "0 2 * * *", Timezone: "America/Chicago", Playbook: "site.yml"}
 	inline := &Schedule{Cron: "CRON_TZ=America/Chicago 0 2 * * *", Playbook: "site.yml"}

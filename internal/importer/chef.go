@@ -57,6 +57,9 @@ var chefFacts = []string{"fqdn", "ipaddress", "platform", "platform_version", "o
 // Accepts what the Chef tools actually emit: an array of node documents, a single node document, or
 // an object keyed by node name.
 func FromChef(data []byte, now time.Time) (*Plan, error) {
+	if err := refuseJSONTail(data); err != nil {
+		return nil, err
+	}
 	nodes, shape, err := decodeChefNodes(data)
 	if err != nil {
 		return nil, err

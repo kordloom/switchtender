@@ -412,6 +412,21 @@ func (s *Scenario) Modes() []GrantMode {
 	}
 }
 
+// Backends returns the store backends this scenario runs on.
+//
+// Both, unless the scenario pins one. The language admitted sqlite from the start and no scenario
+// ever named it, so every property in the battery was only ever asked of the in-memory stores, and
+// any answer the SQL stores gave differently was invisible. A scenario pins a backend only when its
+// question is about that backend.
+func (s *Scenario) Backends() []string {
+	switch s.Environment.Store {
+	case "memory", "sqlite":
+		return []string{s.Environment.Store}
+	default:
+		return []string{"memory", "sqlite"}
+	}
+}
+
 // Path returns where the scenario was loaded from.
 func (s *Scenario) Path() string { return s.path }
 

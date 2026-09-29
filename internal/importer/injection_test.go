@@ -274,7 +274,8 @@ func TestImportedSchedulesAreUsable(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
 	plan := &Plan{}
-	plan.addSchedule(&schedule.Schedule{ID: "sch_1", Name: "nightly", Cron: "0 2 * * *", TemplateID: "tpl_1"}, "test", now)
+	plan.addSchedule(&schedule.Schedule{ID: "sch_1", Name: "nightly", Cron: "0 2 * * *",
+		TemplateID: "tpl_1", Enabled: true}, "test", now)
 	plan.addSchedule(&schedule.Schedule{ID: "sch_2", Name: "broken", Cron: "*/0 * * * *", TemplateID: "tpl_1"}, "test", now)
 	plan.addSchedule(&schedule.Schedule{ID: "sch_3", Name: "nonsense", Cron: "not a cron at all ; rm -rf /", TemplateID: "tpl_1"}, "test", now)
 

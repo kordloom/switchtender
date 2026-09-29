@@ -317,3 +317,109 @@ func TestWorkflowTagsAreCarriedOrRefused(t *testing.T) {
 		})
 	}
 }
+
+// TestWorkflowInventoryIsCarriedOrRefused covers the fourth thing AWX scopes per node, and the only
+// one this importer never resolved.
+//
+// A pipeline holds one inventory and a step names none, so a workflow's nodes either agree on where
+// they run or the workflow cannot be expressed. That is the same rule the limit, the tags and the
+// extra vars already follow. Inventory was not resolved at all: the workflow's own was read and every
+// node's job template inventory was discarded silently.
+//
+// Two shapes were wrong because of it. A workflow naming no inventory of its own imported with none,
+// which is a run against no hosts rather than the run AWX performed. And a workflow whose nodes
+// targeted different fleets imported as though they targeted one, with nothing said.
+func TestWorkflowInventoryIsCarriedOrRefused(t *testing.T) {
+	t.Parallel()
+	// Its own export rather than the shared helper, because the inventories have to be declared at
+	// the top level and that helper splices only into the workflow object.
+	build := func(t *testing.T, nodeA, nodeB, workflow string) *Plan {
+		t.Helper()
+		export := `{
+		  "inventories": [
+		    {"name": "prod", "host_vars": {}, "hosts": [{"name": "p1"}]},
+		    {"name": "staging", "host_vars": {}, "hosts": [{"name": "s1"}]}
+		  ],
+		  "projects": [{"name": "infra", "scm_type": "git", "scm_url": "https://e.com/i.git"}],
+		  "job_templates": [` + jobTemplate("a", nodeA) + `,` + jobTemplate("b", nodeB) + `],
+		  "workflow_job_templates": [{
+		    "name": "rollout",` + workflow + `
+		    "workflow_nodes": [
+		      {"id": 1, "identifier": "first", "unified_job_template": "a", "success_nodes": [2]},
+		      {"id": 2, "identifier": "second", "unified_job_template": "b"}
+		    ]
+		  }]
+		}`
+		plan, err := FromAWX([]byte(export), time.Unix(0, 0).UTC())
+		if err != nil {
+			t.Fatalf("FromAWX() error = %v", err)
+		}
+		return plan
+	}
+	tests := []struct {
+		// Name says what the case proves.
+		Name string
+		// A and B are the two nodes' job template fields.
+		A, B string
+		// Workflow is what the workflow itself names, spliced in beside its name.
+		Workflow string
+		// WantInventory is the inventory the imported template must target, by name.
+		WantInventory string
+		// Refused is set when the workflow must not import at all.
+		Refused bool
+		// WantWarning is a phrase the report must carry.
+		WantWarning string
+	}{{
+		Name: "nodes agree and the workflow names none",
+		A:    `, "inventory": "prod"`, B: `, "inventory": "prod"`,
+		WantInventory: "prod",
+	}, {
+		Name: "nodes disagree",
+		A:    `, "inventory": "prod"`, B: `, "inventory": "staging"`,
+		Refused: true, WantWarning: "runs against inventory",
+	}, {
+		Name: "the workflow's own inventory wins and says so",
+		A:    `, "inventory": "staging"`, B: `, "inventory": "staging"`,
+		Workflow: ` "inventory": "prod",`, WantInventory: "prod",
+		WantWarning: "wins here",
+	}, {
+		Name: "a node naming none does not refuse, because AWX would take the workflow's",
+		A:    `, "inventory": "prod"`, B: "",
+		WantInventory: "prod",
+	}}
+	for _, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Parallel()
+			plan := build(t, test.A, test.B, test.Workflow)
+			warnings := strings.Join(plan.Warnings, "\n")
+			if test.WantWarning != "" && !strings.Contains(warnings, test.WantWarning) {
+				t.Errorf("no warning mentioned %q, so the loss is not in the report: %v",
+					test.WantWarning, plan.Warnings)
+			}
+			if test.Refused {
+				for _, tpl := range plan.Templates {
+					if tpl.Name == "rollout" {
+						t.Fatalf("a workflow whose nodes run against different inventories imported "+
+							"anyway, targeting inventory id %q, so some step now runs against hosts "+
+							"its operator did not choose", tpl.InventoryID)
+					}
+				}
+				return
+			}
+			tpl := workflowTemplate(t, plan)
+			if tpl.InventoryID == "" {
+				t.Fatalf("the workflow imported with no inventory, so it runs against no hosts "+
+					"rather than the fleet AWX ran it against. warnings: %v", plan.Warnings)
+			}
+			var gotName string
+			for _, inv := range plan.Inventories {
+				if inv.ID == tpl.InventoryID {
+					gotName = inv.Name
+				}
+			}
+			if gotName != test.WantInventory {
+				t.Errorf("workflow targets inventory %q, want %q", gotName, test.WantInventory)
+			}
+		})
+	}
+}

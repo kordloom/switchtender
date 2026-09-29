@@ -7,7 +7,6 @@ why: |
 
 environment:
   grants: strict
-  store: memory
 
 fixtures:
   orgs:

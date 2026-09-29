@@ -4,10 +4,10 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Pricing | SwitchTender</title>
-	<meta name="description" content="Running SwitchTender and proving every change are free forever: leave AWX in one command with the receipts included. Pro adds SSO at $490. Team adds the full policy engine, PostgreSQL and active-active HA, distributed workers, and audit-ready change registers, priced flat per org by fleet band and verified offline with no phone-home. Enterprise adds hosted witness, evidence custody, and evidence operations on your audit calendar.">
+	<meta name="description" content="Automation is free. Audit season is not. Running every tool and proving what ran cost nothing, on any number of hosts. You pay for directory sign-in, enforced policy, active-active HA, and the period change register assembled from your real run history.">
 	<link rel="canonical" href="https://switchtender.com/pricing">
 	<meta property="og:title" content="Pricing | SwitchTender">
-	<meta property="og:description" content="Running SwitchTender and proving every change are free forever: leave AWX in one command with the receipts included. Pro adds SSO at $490. Team adds the full policy engine, PostgreSQL and active-active HA, distributed workers, and audit-ready change registers, priced flat per org by fleet band and verified offline with no phone-home. Enterprise adds hosted witness, evidence custody, and evidence operations on your audit calendar.">
+	<meta property="og:description" content="Automation is free. Audit season is not. Running every tool and proving what ran cost nothing, on any number of hosts. You pay for directory sign-in, enforced policy, active-active HA, and the period change register assembled from your real run history.">
 	<meta property="og:type" content="website">
 	<meta property="og:url" content="https://switchtender.com/pricing">
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
@@ -44,6 +44,29 @@
 		@media (max-width: 1100px) { .cards-4 { grid-template-columns: repeat(2, 1fr); } }
 		@media (max-width: 640px) { .cards-4 { grid-template-columns: 1fr; } }
 		.tiers .tier { display: flex; flex-direction: column; text-align: left; position: relative; }
+		/* The four tiers say different amounts above their buttons, so as four independent columns the
+		   calls to action landed at four different heights and every band below them did too. Subgrid
+		   gives all four cards one set of rows, each sized to the tallest card, so a band lines up
+		   across the row. Scoped to the width where the four sit on one line: below that they wrap and
+		   the row gap between cards is doing real work, which a shared row track would flatten. The
+		   first link in a card is its main call to action whether it is filled or outlined, which is
+		   what puts Enterprise's "Talk to us" on the line with the other three. */
+		@media (min-width: 1101px) {
+			@supports (grid-template-rows: subgrid) {
+				.cards-4.tiers { grid-template-rows: repeat(10, auto); row-gap: 0; }
+				.tiers .tier { display: grid; grid-template-rows: subgrid; grid-row: span 10; }
+				.tiers .tier > .tier-name { grid-row: 1; }
+				.tiers .tier > .tier-for { grid-row: 2; }
+				.tiers .tier > .tier-price { grid-row: 3; }
+				.tiers .tier > .tier-sub { grid-row: 4; }
+				.tiers .tier > .tier-payoff { grid-row: 5; }
+				.tiers .tier > a:nth-of-type(1) { grid-row: 6; align-self: end; }
+				.tiers .tier > a:nth-of-type(2) { grid-row: 7; align-self: end; }
+				.tiers .tier > .tier-inherit { grid-row: 8; }
+				.tiers .tier > .tier-list { grid-row: 9; align-self: start; }
+				.tiers .tier > .fineprint { grid-row: 10; align-self: start; }
+			}
+		}
 		.tier-featured { border-color: rgba(52, 211, 153, 0.5); background: var(--surface-2); }
 		.tier-featured::before {
 			content: "Start here"; position: absolute; top: -11px; left: 22px;
@@ -197,15 +220,15 @@
 	<main>
 		<section class="wrap gs-hero reveal">
 			<span class="eyebrow">Pricing</span>
-			<h1>You never pay for permission to run it.<br><span class="grad">You pay for SSO, scale, and the paperwork.</span></h1>
+			<h1>Automation is free.<br><span class="grad">Audit season is not.</span></h1>
 			<p class="lede">
-				One binary, four tiers. Community runs every tool, imports your whole AWX estate, and
-				produces signed receipts anyone can verify offline: free forever, and not a trial.
-				Pro adds directory sign-in at the price the rest of this market charges for it.
-				Team adds what a second team makes necessary: the full policy engine, PostgreSQL
-				and active-active HA, distributed workers, and audit-ready change
-				registers. Enterprise adds the parts we operate for you. Every license is a signed
-				file the binary checks offline, so nothing ever phones home.
+				Every run leaves evidence anyone can verify offline: a tamper-evident chain, a signed
+				receipt, and an open verifier that never contacts us. That part is free forever, with
+				no host cap, no seat cap, and no expiry. You pay when an organization has to answer
+				for the work: directory sign-in, enforced policy, active-active HA, distributed
+				workers, and the period change register assembled from your real run history. One
+				binary, four tiers, and a signed license the binary checks offline, so nothing ever
+				phones home.
 			</p>
 		</section>
 
@@ -252,20 +275,20 @@
 					<div class="tier-name">Team</div>
 					<p class="tier-for">Community runs it. Team governs it.</p>
 					<div class="tier-price"><b>$9,900</b><span class="cadence">per year, flat per org</span></div>
-					<p class="tier-sub">By fleet band: <b>$9,900</b> to 250 hosts &middot; <b>$18,000</b> to 500 &middot; <b>$36,000</b> to 1,000 &middot; <b>$54,000</b> unlimited hosts. Each band is double the hosts for about double the price, and nobody is ever metered. Bands are self-reported at renewal: no telemetry, no seat counting, no usage audit.</p>
-					<div class="tier-payoff">A signed license file, verified offline by the binary you already run. Thirty-day trial from an email, no card. <b>A lapsed license takes nothing</b>: paid features stop, and your data, evidence, and every Community feature keep working.</div>
+					<p class="tier-sub">By fleet band: <b>$9,900</b> to 250 hosts &middot; <b>$18,000</b> to 500 &middot; <b>$36,000</b> to 1,000 &middot; <b>$54,000</b> unlimited. Self-reported at renewal: no telemetry, no seat counting, no usage audit.</p>
+					<div class="tier-payoff">The quarter-end evidence scramble, ended. <b>The period change register</b> is your SOC 2 CC8.1 and ISO 27001 A.8.32 export, assembled from the runs that actually happened rather than from screenshots somebody gathered by hand three months later.</div>
 					<a class="btn" href="mailto:licensing@switchtender.com?subject=SwitchTender%20Team%20trial&body=Org%20name%3A%0AFleet%20band%20(250%2F500%2F1000%2Funlimited)%3A%0AComing%20from%20(AWX%2FAAP%2FSemaphore%2FRundeck%2Fother)%3A%0A">Start a 30-day trial</a>
 					<a class="ghost" href="mailto:licensing@switchtender.com?subject=Buy%20SwitchTender%20Team">Buy Team</a>
 					<p class="tier-inherit">Everything in Pro, plus:</p>
 					<ul class="tier-list">
+						<li><b>The period change register</b>: the SOC 2 CC8.1 / ISO 27001 A.8.32 evidence export, assembled from your real run history</li>
 						<li><b>The full policy engine</b>: unlimited policies, outright denials, risk floors, separation of duties, and agent-scoped rules</li>
 						<li><b>PostgreSQL</b> and active-active <b>HA</b></li>
 						<li><b>Distributed workers</b> and queues, for fleets one machine cannot reach</li>
 						<li><b>One-click drift reconcile</b>, from detection to a held, approvable fix</li>
-						<li><b>The period change register</b>: the SOC 2 CC8.1 / ISO 27001 A.8.32 evidence export, assembled from your real run history</li>
 						<li><b>Support with a clock on it</b>: a Severity 1 report, production runs blocked with no workaround, gets an engineer's first response within 12 hours, every day of the year. Severities and clocks are <a href="/terms#support" style="color: var(--accent);">defined in the terms</a>, not implied</li>
 					</ul>
-					<p class="fineprint" style="margin-top:12px;">Card checkout is on the way. Today the trial and the purchase are an email, and the signed license usually lands within hours.</p>
+					<p class="fineprint" style="margin-top:12px;">A signed license file, verified offline by the binary you already run. Thirty-day trial from an email, no card. Purchase by invoice, net 30, and the signed license usually lands within hours. <b>A lapsed license takes nothing</b>: paid features stop, and your data, evidence, and every Community feature keep working.</p>
 				</article>
 
 				<article class="card tier">
@@ -286,30 +309,6 @@
 					</ul>
 				</article>
 
-			</div>
-
-			<div class="sprint reveal" id="founding">
-				<div class="sprint-head">
-					<h3>The Founding 10</h3>
-					<p>The first ten Team subscriptions, priced for the risk the first ten take.</p>
-				</div>
-				<p>Buying infrastructure software from a company with no public customers is a real risk,
-				and pretending otherwise would insult the person taking it. So the first ten organizations
-				that license Team at the 500 band or above pay <b>half price in year one, 75% in year
-				two, and 90% in year three</b>, in dollars written into the terms, and from year four a
-					founding renewal never rises more than 5% over the prior year, whatever happens to list price. At the
-				1,000 band that is $18,000 in year one against a $36,000 list. A founding customer can
-				also walk away within 90 days of the first order for a full refund, because asking the
-				first ten to bet on a vendor with no references deserves a real exit. Ten because that is
-				the honest white-glove capacity of a founder-led company, not a marketing number.</p>
-				<p>What we ask back is participation, not marketing rights: a few reference conversations a
-				year on reasonable notice, and a case study we may only publish with your written approval.
-				Your communications team saying no to any of it is never a breach and never changes your
-				price. The exact terms, including that sentence, are
-				<a href="/terms#founding" style="color: var(--accent);">in the terms</a>. Founding pricing
-				for Enterprise is negotiated on the order form. The program closes when the tenth order is
-				signed, and the count is real.</p>
-				<p style="margin-bottom:0"><a class="btn" href="mailto:licensing@switchtender.com?subject=Founding%2010&body=Org%20name%3A%0AFleet%20band%20(500%2F1000%2Funlimited)%3A%0AComing%20from%20(AWX%2FAAP%2FSemaphore%2FRundeck%2Fother)%3A%0A">Claim a founding slot</a></p>
 			</div>
 
 			<p class="pricing-note">

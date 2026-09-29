@@ -509,6 +509,13 @@ func stepRun(parent *run.Run, step run.PipelineStep, idx, attempt int, vars map[
 	// A step names its own tool, command, playbook, and inventory, so those are not inherited. How
 	// the run is executed still comes from the pipeline: the environment it runs in, the credentials
 	// it may use, the project it reads from, the queue it lands on, and how long it may take.
+	//
+	// Which side of that line each field falls on is stated once, in the table the guard test beside
+	// this reads, and the guard fails the build for a field of run.Run that is on neither side. It was
+	// a hand-kept list under a comment before, so every field added to a run since defaulted to not
+	// carrying, silently: Tags and SkipTags were dropped, which ran the plays an operator had excluded,
+	// and the policy gate graded each step off this same value and so decided on a run whose scope did
+	// not match the one that would execute.
 	child.CredentialIDs = parent.CredentialIDs
 	child.ProjectID = parent.ProjectID
 	child.InventoryID = parent.InventoryID
@@ -519,6 +526,26 @@ func stepRun(parent *run.Run, step run.PipelineStep, idx, attempt int, vars map[
 	child.Labels = parent.Labels
 	child.Actor = parent.Actor
 	child.ActorType = parent.ActorType
+	// The account behind the credential, beside the credential's name. A person's token and their
+	// browser session record different names, so anything asking who caused a step to run gets a
+	// half-answer from the name alone.
+	child.ActorUserID = parent.ActorUserID
+	// What Ansible was told to run and how much of it. These are the fields that decide which plays
+	// and tasks execute, so dropping them does not narrow a step, it widens it: a pipeline submitted
+	// with --skip-tags destructive ran every step with nothing skipped.
+	child.Tags = parent.Tags
+	child.SkipTags = parent.SkipTags
+	child.Verbosity = parent.Verbosity
+	child.Forks = parent.Forks
+	child.DiffMode = parent.DiffMode
+	// The rules that were in force when the pipeline was submitted. Recorded on every run precisely so
+	// that "no rule applied" and "there were no rules" do not leave the same trace, which they did for
+	// every step of every pipeline.
+	child.PolicySet = parent.PolicySet
+	// A commit the pipeline is held to is a commit every step is held to. The executor refuses a run
+	// whose sync produced anything else, and a pinned pipeline whose steps were unpinned would run
+	// approved-at-a-revision work against whatever the branch holds now.
+	child.PinnedCommit = parent.PinnedCommit
 	// A step is scoped to the pipeline's tenant. A step may name no stored object, so without the
 	// parent's org it would be an objectless run readable across every tenant.
 	child.OrgID = parent.OrgID

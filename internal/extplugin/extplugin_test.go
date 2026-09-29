@@ -248,15 +248,50 @@ func waitTerminal(t *testing.T, baseURL, id string) string {
 
 // waitFile polls for the notifier's file until it appears or the deadline passes, and returns its
 // contents.
+// TestWaitFileWaitsForContentNotExistence pins the helper above against the race it lost once.
+//
+// The notifier is a subprocess. It creates its file and then writes to it, and a reader that treats
+// the create as the signal gets the zero bytes in between. That empty string then failed an
+// assertion about what the plugin recorded, which pointed at the plugin rather than at the read, and
+// it reproduced on no developer machine because the window only opens under load.
+func TestWaitFileWaitsForContentNotExistence(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "notified")
+	// Created empty, exactly as the subprocess leaves it for the instant before it writes.
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatalf("create the empty file: %v", err)
+	}
+	const want = "run_0123456789abcdef|0|key="
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		_ = os.WriteFile(path, []byte(want), 0o600)
+	}()
+	if got := waitFile(t, path); got != want {
+		t.Errorf("waitFile returned %q, want %q: it read the file before the writer filled it", got, want)
+	}
+}
+
 func waitFile(t *testing.T, path string) string {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
+	appeared := false
 	for {
+		// Content, not existence. The notifier is a subprocess: it creates the file and then writes
+		// to it, and os.ReadFile succeeds on the zero bytes in between. Returning that empty string
+		// failed the caller's comparison against the run id with a message about what the notifier
+		// recorded, which read as the plugin misbehaving rather than as this helper reading too
+		// early. It cost a release gate one red run on a loaded machine and reproduces on none.
 		data, err := os.ReadFile(path)
 		if err == nil {
-			return string(data)
+			appeared = true
+			if len(bytes.TrimSpace(data)) > 0 {
+				return string(data)
+			}
 		}
 		if time.Now().After(deadline) {
+			if appeared {
+				t.Fatalf("notifier file %s appeared and stayed empty", path)
+			}
 			t.Fatalf("notifier file %s never appeared", path)
 		}
 		time.Sleep(50 * time.Millisecond)
