@@ -129,6 +129,17 @@ func BuildBundle(entries []*Entry, id Identity, version string, at time.Time) (*
 		if e.Seq != entries[0].Seq+int64(i) {
 			return nil, fmt.Errorf("%w: entries are not contiguous at sequence %d", ErrExport, e.Seq)
 		}
+		// An entry recorded before times were truncated carries nanoseconds, and a verifier that
+		// normalizes through microseconds recomputes a different link. Such a bundle verifies here
+		// and fails at the auditor, which is the worst place to find out, so it is refused at build
+		// time with the reason. The entry cannot be repaired: its hash commits to the time it holds.
+		if e.At.Nanosecond()%1000 != 0 {
+			return nil, fmt.Errorf(
+				"%w: entry %d was recorded at nanosecond precision, before this was corrected, so "+
+					"its link cannot be recomputed by a verifier that carries time at microsecond "+
+					"precision. Bundle a later range with --limit, or re-export once the chain has "+
+					"advanced past it", ErrExport, e.Seq)
+		}
 		claims = append(claims, BundleClaim{
 			Type: ClaimType,
 			At:   e.At.UTC().Format(time.RFC3339Nano),
