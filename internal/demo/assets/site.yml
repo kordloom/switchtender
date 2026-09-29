@@ -8,7 +8,14 @@
       command: "sleep {{ work | default(1) }}"
       changed_when: false
     - name: Apply configuration
-      command: /bin/false
+      # The failure carries the output a real config apply would, so the drill panel has a
+      # story to show instead of a bare return code.
+      shell: |
+        echo "applying revision 4f2c19e to {{ inventory_hostname }}"
+        echo "validating rendered unit files"
+        echo "error: nginx.service: directive 'worker_connections' invalid in [Service] section" >&2
+        echo "error: rendered config failed validation, rolling back to revision 9b8d02a" >&2
+        exit 1
       when: inventory_hostname == (fail_host | default(''))
     - name: Restart service
       debug:
