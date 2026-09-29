@@ -149,12 +149,15 @@ Add a schedule in Schedules with a cron expression to fire a template on a caden
   a user or a team `use` or `manage` on a specific project, template, inventory, or credential.
 - Notifications are configured on the server with `--notify-*` flags and cover eleven channels:
   webhook, Slack, Mattermost, Rocket.Chat, Discord, Microsoft Teams, ntfy, PagerDuty, Grafana,
-  Twilio SMS, and email.
+  Twilio SMS, and email. Every finished run reaches every channel configured that way. A template
+  can additionally name its own targets in the template dialog, for the seven channels that need
+  only a URL: webhook, Slack, Mattermost, Rocket.Chat, Discord, Microsoft Teams, and ntfy.
 
 ## What is not one to one yet
 
-- Notification routing is server-wide. AWX attaches notification templates to a single job
-  template; SwitchTender delivers every finished run to every configured channel.
+- Per-template notification routing covers seven of the eleven channels. PagerDuty, Grafana, Twilio,
+  and email are configured once on the server and fire for every run, so a single template cannot
+  page its own PagerDuty service the way an AWX notification template can.
 - Execution environments are a single pinned container image behind a flag, not a managed catalog.
 
 If something you rely on is missing, open an issue. The gap with AWX is being closed on purpose.

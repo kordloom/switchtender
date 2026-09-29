@@ -8,7 +8,8 @@
 # Secrets
 
 Secrets live in credentials. Each is sealed at rest with AES-256-GCM, is never returned by the API,
-and reaches a run only while it executes, in a temporary file or environment that is wiped afterward.
+and reaches a run only while it executes, in the environment or a temporary file created mode 0600
+and deleted when the run ends.
 If a tool prints a secret, SwitchTender redacts it from the run's log, live stream, and events, so the
 output shows `***` instead of the value.
 

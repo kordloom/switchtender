@@ -682,6 +682,18 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	// The producer identity signs LoomSeal bundles and is published so a relying party can pin its
+	// fingerprint. It is created on first start beside the database. A failure to create it is not
+	// fatal: the server still runs and still records the audit chain, it just cannot attribute a
+	// bundle, which is better than refusing to start over an export feature.
+	var producer *audit.Identity
+	if id, err := audit.LoadIdentity(filepath.Dir(serveDB)); err != nil {
+		log.Warn("producer identity unavailable, bundles cannot be attributed: " + err.Error())
+	} else {
+		producer = &id
+		log.Info("producer identity ready", zap.String("key_id", id.KeyID()),
+			zap.String("install_id", id.InstallID))
+	}
 
 	closePlugins, err := extplugin.Load(pluginsDir(servePluginsDir), log)
 	if err != nil {
@@ -809,6 +821,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			server.WithInventories(bundle.Inventories()),
 			server.WithPolicies(bundle.Policies()),
 			server.WithAudit(bundle.Audits()),
+			server.WithProducerIdentity(producer, resolveVersion()),
 			server.WithAuditSigner(auditSigner),
 			server.WithInventorySources(bundle.InventorySources(), disp),
 			server.WithTriggers(bundle.Triggers(), sealer),

@@ -12,6 +12,14 @@ import (
 	"github.com/kordloom/switchtender/internal/event"
 )
 
+// orphanError is stamped on a child canceled because its split or pipeline parent was interrupted.
+// Every store writes the same text, so a reclaimed run reads the same way whichever store holds it.
+const orphanError = "canceled: the parent run was interrupted"
+
+// OrphanError returns the failure text a child carries when its parent's coordinator died and the
+// sweep canceled it, so the SQL stores stamp the same reason the in-memory one does.
+func OrphanError() string { return orphanError }
+
 // Store persists runs, their captured log output, and their structured events.
 // Implementations must be safe for concurrent use.
 type Store interface {
@@ -478,7 +486,8 @@ func (m *memStore) Heartbeat(_ context.Context, id, owner string) error {
 }
 
 // ReclaimStale requeues stale claimed pending runs and interrupts stale running runs. The lease was
-// stamped by this same process, so its own clock is the authoritative one.
+// stamped by this same process, so its own clock is the authoritative one. Interrupting a split or
+// pipeline parent orphans its children, so they are resolved in the same sweep.
 func (m *memStore) ReclaimStale(_ context.Context, ttl time.Duration) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -505,7 +514,47 @@ func (m *memStore) ReclaimStale(_ context.Context, ttl time.Duration) (int, erro
 			changed++
 		}
 	}
-	return changed, nil
+	return changed + m.resolveOrphans(), nil
+}
+
+// resolveOrphans settles the children of an interrupted parent, whose coordinator died holding the
+// rollup. A child no executor has started is canceled outright, since nothing will ever collect it
+// and leaving it pending means it is still claimable long after its split is over. A child already
+// executing is asked to stop through the cancel flag its executor watches. It runs under m.mu.
+func (m *memStore) resolveOrphans() int {
+	orphaned := make(map[string]bool)
+	for id, r := range m.runs {
+		if r.Status == StatusInterrupted && (r.Kind == KindSplit || r.Kind == KindPipeline) {
+			orphaned[id] = true
+		}
+	}
+	if len(orphaned) == 0 {
+		return 0
+	}
+	changed := 0
+	for _, r := range m.runs {
+		if r.ParentID == nil || !orphaned[*r.ParentID] {
+			continue
+		}
+		switch r.Status {
+		case StatusPending, StatusPendingApproval:
+			now := time.Now()
+			r.Status = StatusCanceled
+			r.ClaimedBy = ""
+			r.ClaimedAt = nil
+			r.EndedAt = &now
+			if r.Error == "" {
+				r.Error = orphanError
+			}
+			changed++
+		case StatusRunning:
+			if !r.CancelRequested {
+				r.CancelRequested = true
+				changed++
+			}
+		}
+	}
+	return changed
 }
 
 // RequestCancel marks the run so whichever process holds it stops it.

@@ -505,15 +505,14 @@ func TestLeaseUsesDatabaseClock(t *testing.T) {
 		t.Errorf("ReclaimStale(1h) = %d, want 0 for a lease seconds old", n)
 	}
 
-	// The stored text is fixed width, so comparing it as text orders it the same way comparing it as
-	// a timestamp does. RFC 3339 trims trailing zeros from the fractional second, which would make the
-	// width vary and the two orderings disagree.
+	// The stamp is written by SQL rather than by this process, which is what removes the skew. Its
+	// exact width does not matter because the sweep casts it to a timestamp before comparing.
 	var stamp string
 	if err := raw.QueryRowContext(ctx,
 		"SELECT claimed_at FROM runs WHERE id=$1", "run_clock").Scan(&stamp); err != nil {
 		t.Fatalf("select claimed_at: %v", err)
 	}
-	if len(stamp) != len("2026-07-30T06:00:00.000000000Z") {
-		t.Errorf("claimed_at = %q, want a fixed width UTC stamp", stamp)
+	if _, err := time.Parse(time.RFC3339Nano, stamp); err != nil {
+		t.Errorf("claimed_at = %q, want an RFC 3339 timestamp: %v", stamp, err)
 	}
 }

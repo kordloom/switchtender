@@ -207,12 +207,15 @@ by dragging from a step's edge onto another, and run the graph as a pipeline.</l
 a user or a team <code>use</code> or <code>manage</code> on a specific project, template, inventory, or credential.</li>
 <li>Notifications are configured on the server with <code>--notify-*</code> flags and cover eleven channels:
 webhook, Slack, Mattermost, Rocket.Chat, Discord, Microsoft Teams, ntfy, PagerDuty, Grafana,
-Twilio SMS, and email.</li>
+Twilio SMS, and email. Every finished run reaches every channel configured that way. A template
+can additionally name its own targets in the template dialog, for the seven channels that need
+only a URL: webhook, Slack, Mattermost, Rocket.Chat, Discord, Microsoft Teams, and ntfy.</li>
 </ul>
 <h2 id="what-is-not-one-to-one-yet">What is not one to one yet</h2>
 <ul>
-<li>Notification routing is server-wide. AWX attaches notification templates to a single job
-template; SwitchTender delivers every finished run to every configured channel.</li>
+<li>Per-template notification routing covers seven of the eleven channels. PagerDuty, Grafana, Twilio,
+and email are configured once on the server and fire for every run, so a single template cannot
+page its own PagerDuty service the way an AWX notification template can.</li>
 <li>Execution environments are a single pinned container image behind a flag, not a managed catalog.</li>
 </ul>
 <p>If something you rely on is missing, open an issue. The gap with AWX is being closed on purpose.</p>

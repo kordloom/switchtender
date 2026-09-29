@@ -1,12 +1,14 @@
 package relay_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -74,6 +76,12 @@ func TestServerRoundTrip(t *testing.T) {
 		t.Errorf("claimed_by = %q, want worker-a", got.ClaimedBy)
 	}
 
+	// Output is coalesced, so finishing the run is what flushes the last of it.
+	got.Status = run.StatusSucceeded
+	if err := c.Save(ctx, got); err != nil {
+		t.Fatalf("Save(succeeded) error = %v", err)
+	}
+
 	// The writes reached the backing store through the relay.
 	gotLog, err := backing.Log(ctx, "run_mesh")
 	if err != nil {
@@ -96,6 +104,168 @@ func TestServerRoundTrip(t *testing.T) {
 	want := []run.HostSummary{{RunID: "run_mesh", Host: "web01", Changed: 1}}
 	if diff := cmp.Diff(want, gotSummaries, cmpopts.EquateEmpty()); diff != "" {
 		t.Errorf("backing host summaries mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// countingRelay stands up a relay server that counts the log posts reaching it, returning the Client
+// and a func that reads the count so a test can measure requests rather than assert about them.
+func countingRelay(t *testing.T) (*relay.Client, run.Store, func() int) {
+	t.Helper()
+	backing := run.NewMemStore()
+	var mu sync.Mutex
+	posts := 0
+	inner := relay.NewHandler(backing, testWorkerToken, nil)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/log") {
+			mu.Lock()
+			posts++
+			mu.Unlock()
+		}
+		inner.ServeHTTP(w, r)
+	}))
+	t.Cleanup(ts.Close)
+	c := relay.NewClient(relay.NewHTTPTransport(ts.URL, testWorkerToken, ts.Client()))
+	return c, backing, func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return posts
+	}
+}
+
+// TestAppendLogCoalesces proves many small writes cost far fewer requests than writes, and that
+// finishing the run flushes every byte. Without coalescing each write is its own POST, which is what
+// made a chatty run on a remote worker a request per chunk.
+func TestAppendLogCoalesces(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, backing, posts := countingRelay(t)
+
+	r := &run.Run{ID: "run_chatty", Playbook: "site.yml", Status: run.StatusRunning, CreatedAt: time.Now()}
+	if err := c.Save(ctx, r); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	const writes = 500
+	var want strings.Builder
+	for i := range writes {
+		line := fmt.Sprintf("line %d\n", i)
+		want.WriteString(line)
+		if err := c.AppendLog(ctx, "run_chatty", []byte(line)); err != nil {
+			t.Fatalf("AppendLog(%d) error = %v", i, err)
+		}
+	}
+	r.Status = run.StatusSucceeded
+	if err := c.Save(ctx, r); err != nil {
+		t.Fatalf("Save(succeeded) error = %v", err)
+	}
+
+	// 500 writes must not cost 500 requests. The bound is generous so the test measures coalescing
+	// rather than the exact timing of the delay flush.
+	if got := posts(); got >= writes/10 {
+		t.Errorf("log posts = %d for %d writes, want far fewer", got, writes)
+	}
+	t.Logf("%d writes cost %d log posts", writes, posts())
+
+	// Nothing was stranded by the buffering.
+	gotLog, err := backing.Log(ctx, "run_chatty")
+	if err != nil {
+		t.Fatalf("backing Log() error = %v", err)
+	}
+	if diff := cmp.Diff(want.String(), string(gotLog)); diff != "" {
+		t.Errorf("backing log mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// TestAppendLogFlushesOnDelay proves a run that goes quiet still has its output posted without
+// waiting for the run to finish, so a live tail is not held back by an unfilled batch.
+func TestAppendLogFlushesOnDelay(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, backing, posts := countingRelay(t)
+
+	r := &run.Run{ID: "run_quiet", Playbook: "site.yml", Status: run.StatusRunning, CreatedAt: time.Now()}
+	if err := c.Save(ctx, r); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := c.AppendLog(ctx, "run_quiet", []byte("one line\n")); err != nil {
+		t.Fatalf("AppendLog() error = %v", err)
+	}
+	if got := posts(); got != 0 {
+		t.Fatalf("log posts = %d immediately after a small write, want 0", got)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for posts() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	gotLog, err := backing.Log(ctx, "run_quiet")
+	if err != nil {
+		t.Fatalf("backing Log() error = %v", err)
+	}
+	if diff := cmp.Diff("one line\n", string(gotLog)); diff != "" {
+		t.Errorf("delayed flush mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// TestAppendLogFlushesOnSize proves a burst larger than the batch size posts without waiting out the
+// delay, so a loud run does not buffer without bound between flushes.
+func TestAppendLogFlushesOnSize(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, backing, posts := countingRelay(t)
+
+	r := &run.Run{ID: "run_loud", Playbook: "site.yml", Status: run.StatusRunning, CreatedAt: time.Now()}
+	if err := c.Save(ctx, r); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	big := bytes.Repeat([]byte("x"), 128<<10)
+	if err := c.AppendLog(ctx, "run_loud", big); err != nil {
+		t.Fatalf("AppendLog() error = %v", err)
+	}
+	if got := posts(); got != 1 {
+		t.Errorf("log posts = %d after an oversized write, want 1 without waiting", got)
+	}
+	gotLog, err := backing.Log(ctx, "run_loud")
+	if err != nil {
+		t.Fatalf("backing Log() error = %v", err)
+	}
+	if len(gotLog) != len(big) {
+		t.Errorf("backing log = %d bytes, want %d", len(gotLog), len(big))
+	}
+}
+
+// TestAppendLogOrderUnderConcurrency proves coalesced output keeps the order it was written in when
+// the size and delay flushes overlap, since a scrambled log is worse than a chatty one.
+func TestAppendLogOrderUnderConcurrency(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, backing, _ := countingRelay(t)
+
+	r := &run.Run{ID: "run_order", Playbook: "site.yml", Status: run.StatusRunning, CreatedAt: time.Now()}
+	if err := c.Save(ctx, r); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	var want strings.Builder
+	for i := range 200 {
+		line := fmt.Sprintf("%04d\n", i)
+		want.WriteString(line)
+		if err := c.AppendLog(ctx, "run_order", []byte(line)); err != nil {
+			t.Fatalf("AppendLog(%d) error = %v", i, err)
+		}
+		if i%50 == 0 {
+			time.Sleep(2 * relay.LogBatchDelayForTest())
+		}
+	}
+	r.Status = run.StatusSucceeded
+	if err := c.Save(ctx, r); err != nil {
+		t.Fatalf("Save(succeeded) error = %v", err)
+	}
+	gotLog, err := backing.Log(ctx, "run_order")
+	if err != nil {
+		t.Fatalf("backing Log() error = %v", err)
+	}
+	if diff := cmp.Diff(want.String(), string(gotLog)); diff != "" {
+		t.Errorf("log order mismatch (-want +got):\n%s", diff)
 	}
 }
 

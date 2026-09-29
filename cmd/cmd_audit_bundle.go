@@ -1,0 +1,119 @@
+package cmd
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/kordloom/switchtender/internal/audit"
+)
+
+var (
+	// bundleDB is the --db value for the audit bundle command.
+	bundleDB string
+	// bundleOut is the --out value; empty writes to standard output.
+	bundleOut string
+	// bundleLimit caps how many of the newest entries the bundle carries.
+	bundleLimit int
+	// bundleKeyDir overrides where the producer identity is read from or created.
+	bundleKeyDir string
+)
+
+// auditBundleCmd emits the audit chain as a signed LoomSeal bundle.
+var auditBundleCmd = &cobra.Command{
+	Use:   "bundle",
+	Short: "Emit the audit chain as a signed LoomSeal bundle anyone can verify offline.",
+	Long: `Emit the audit chain as a signed LoomSeal bundle.
+
+A bundle is a self-contained record. It carries the entries, the chain links, the public key that
+signed it, and the signature, so a third party verifies it with an open verifier on a machine that
+has never run SwitchTender and has no network access. Every link recomputes from the claims alone,
+so nobody has to take our word for the history.
+
+The signing key is created on first use and never leaves the install. Publish the fingerprint the
+command prints so a relying party can pin it and know a bundle came from this install rather than
+from someone who merely generated a key.`,
+	Args:         cobra.NoArgs,
+	SilenceUsage: true,
+	RunE:         runAuditBundle,
+}
+
+// init registers the bundle command and its flags.
+func init() {
+	auditBundleCmd.Flags().StringVar(&bundleDB, "db", defaultDBPath,
+		"SQLite file path, or a postgres:// DSN, to read the audit chain from.")
+	auditBundleCmd.Flags().StringVar(&bundleOut, "out", "",
+		"Write the bundle here instead of to standard output.")
+	auditBundleCmd.Flags().IntVar(&bundleLimit, "limit", 0,
+		"Carry only the newest N entries. The default carries the whole chain.")
+	auditBundleCmd.Flags().StringVar(&bundleKeyDir, "key-dir", "",
+		"Directory holding the producer signing key. Defaults to the database's directory.")
+	auditCmd.AddCommand(auditBundleCmd)
+}
+
+// runAuditBundle reads the chain, assembles it into a bundle, signs it, and writes it out.
+func runAuditBundle(cmd *cobra.Command, _ []string) error {
+	store, err := openBundle(bundleDB)
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	// Chain returns the whole chain oldest first, which is the order a bundle's claims must be in.
+	// List is deliberately not used: it returns newest first and clamps a limit below one up to one,
+	// so it would have produced a single claim in the wrong order.
+	entries, err := store.Audits().Chain(cmd.Context())
+	if err != nil {
+		return fmt.Errorf("read audit chain: %w", err)
+	}
+	if bundleLimit > 0 && len(entries) > bundleLimit {
+		entries = entries[len(entries)-bundleLimit:]
+	}
+	if len(entries) == 0 {
+		return fmt.Errorf("the audit chain is empty, there is nothing to bundle")
+	}
+
+	id, err := audit.LoadIdentity(keyDir())
+	if err != nil {
+		return err
+	}
+	doc, err := audit.BuildBundle(entries, id, resolveVersion(), time.Now())
+	if err != nil {
+		return err
+	}
+	signed, err := audit.SignBundleDoc(doc, id.Private())
+	if err != nil {
+		return err
+	}
+	signed = append(signed, '\n')
+
+	if bundleOut == "" {
+		_, err = os.Stdout.Write(signed)
+		return err
+	}
+	if err := os.WriteFile(bundleOut, signed, 0o644); err != nil {
+		return fmt.Errorf("write bundle: %w", err)
+	}
+	// The fingerprint goes to standard error so it never contaminates a bundle written to standard
+	// output, and so a reader is told the one thing they must publish for the bundle to mean anything.
+	fmt.Fprintf(cmd.ErrOrStderr(),
+		"Wrote %s with %d entries.\nPublish this fingerprint so a verifier can pin it:\n  %s\n",
+		bundleOut, len(entries), id.KeyID())
+	return nil
+}
+
+// keyDir returns where the producer identity lives: the override when given, otherwise beside the
+// database, which is already the directory an operator backs up and protects.
+func keyDir() string {
+	if bundleKeyDir != "" {
+		return bundleKeyDir
+	}
+	dir := filepath.Dir(bundleDB)
+	if dir == "" || dir == "." {
+		return "."
+	}
+	return dir
+}

@@ -173,7 +173,8 @@ required.
 
 - A hosted option.
 - Signed desktop packages for macOS and Windows.
-- SSH key passphrase unlock and an OpenStack credential kind.
+- An OpenStack credential kind.
+- Group-driven roles for OIDC sign-in, which LDAP, SAML, and JWT already have.
 
 ## Status
 

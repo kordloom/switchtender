@@ -165,6 +165,11 @@ func requiredRole(r *http.Request) user.Role {
 	if p == "/audit" || strings.HasPrefix(p, "/audit/") {
 		return user.RoleAdmin
 	}
+	// An account carries a profile of personal data, so listing accounts is management data even
+	// to read. Without this a viewer could read every user's name, email, phone, and notes.
+	if p == "/users" || strings.HasPrefix(p, "/users/") {
+		return user.RoleAdmin
+	}
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
 		return user.RoleViewer
 	}
@@ -281,6 +286,11 @@ func (g *authGate) protects(r *http.Request) bool {
 		return false
 	}
 	if r.Method == http.MethodGet && (p == "/" || strings.HasPrefix(p, "/ui/")) {
+		return false
+	}
+	// The trust document is how a third party learns which key signs this install's bundles. They
+	// have no account here, and requiring one would defeat a record meant to be checkable without us.
+	if r.Method == http.MethodGet && p == "/.well-known/loomseal.json" {
 		return false
 	}
 	// Sign in must be reachable while the API is enforced.

@@ -1267,6 +1267,11 @@ func TestAuthGateRoles(t *testing.T) {
 		{http.MethodPost, "/v1/projects", operator, http.StatusForbidden}, // Test 3: Operator cannot manage.
 		{http.MethodPost, "/v1/projects", admin, http.StatusNotFound},     // Test 4: Admin passes the gate; feature off here.
 		{http.MethodGet, "/v1/fleet", operator, http.StatusOK},            // Test 5: Operator reads.
+		// A profile is personal data, so listing accounts takes an admin even though it is a read.
+		{http.MethodGet, "/v1/users", viewer, http.StatusForbidden},   // Test 6: Viewer cannot list accounts.
+		{http.MethodGet, "/v1/users", operator, http.StatusForbidden}, // Test 7: Operator cannot either.
+		{http.MethodGet, "/v1/users", admin, http.StatusOK},           // Test 8: Admin lists accounts.
+		{http.MethodGet, "/v1/audit", viewer, http.StatusForbidden},   // Test 9: The audit trail is admin-only to read.
 	}
 	for i, test := range tests {
 		if got := do(test.Method, test.Path, test.Token); got != test.Want {
@@ -1635,5 +1640,91 @@ func TestDoctor(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("doctor body missing %q in %s", want, body)
 		}
+	}
+}
+
+// dedupeSubmitter saves each submission into a store under whatever idempotency key it carries,
+// the way the dispatcher does, so a handler test sees the dedupe the store's unique key provides.
+type dedupeSubmitter struct {
+	// store receives every accepted submission.
+	store run.Store
+	// calls counts how many submissions reached it.
+	calls int
+}
+
+// Submit records the call and saves the run, returning the run already holding its key when one does.
+func (d *dedupeSubmitter) Submit(ctx context.Context, playbook, inventory string, opts ...run.SubmitOption) (*run.Run, error) {
+	d.calls++
+	r := &run.Run{
+		ID: run.NewID(), Playbook: playbook, Inventory: inventory,
+		Status: run.StatusPending, CreatedAt: time.Now(),
+	}
+	run.ApplyOptions(r, opts)
+	if r.IdempotencyKey != "" {
+		if existing, err := d.store.ByIdempotencyKey(ctx, r.IdempotencyKey); err == nil {
+			return existing, nil
+		}
+	}
+	if err := d.store.Save(ctx, r); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+// SubmitSplit is not exercised by the dedupe test and refuses to run.
+func (d *dedupeSubmitter) SubmitSplit(context.Context, string, string, int, ...run.SubmitOption) (*run.Run, error) {
+	return nil, errors.New("not used")
+}
+
+// SubmitPipeline is not exercised by the dedupe test and refuses to run.
+func (d *dedupeSubmitter) SubmitPipeline(context.Context, string, string, []run.PipelineStep, ...run.SubmitOption) (*run.Run, error) {
+	return nil, errors.New("not used")
+}
+
+// TestRerunRunDedupes proves clicking rerun twice starts one run rather than two: both requests
+// answer with the same run and only one rerun of the original exists afterwards.
+func TestRerunRunDedupes(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	saved := &run.Run{
+		ID: "run_1", Playbook: "site.yml", Inventory: "inv.ini", Status: run.StatusFailed,
+	}
+	if err := store.Save(ctx, saved); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	sub := &dedupeSubmitter{store: store}
+	handler := New(store, sub, zap.NewNop()).Handler()
+
+	ids := make([]string, 2)
+	for i := range ids {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/runs/run_1/rerun", nil))
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("click %d status = %d, want %d, body %s",
+				i, rec.Code, http.StatusAccepted, rec.Body.String())
+		}
+		var got run.Run
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatalf("click %d decode: %v", i, err)
+		}
+		ids[i] = got.ID
+	}
+	if ids[0] != ids[1] {
+		t.Errorf("second click returned %s, want the first click's run %s", ids[1], ids[0])
+	}
+
+	all, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	reruns := 0
+	for _, r := range all {
+		if r.RerunOf == "run_1" {
+			reruns++
+		}
+	}
+	if reruns != 1 {
+		t.Errorf("reruns of run_1 = %d, want 1", reruns)
 	}
 }

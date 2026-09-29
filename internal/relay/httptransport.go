@@ -9,9 +9,23 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/run"
+)
+
+const (
+	// logBatchBytes is how much output the transport buffers for one run before posting it. A batch
+	// that reaches this size posts immediately rather than waiting out logBatchDelay.
+	logBatchBytes = 64 << 10
+	// logBatchDelay is how long a partial batch waits for more output before posting anyway, so a
+	// quiet run's last lines still reach the control node promptly enough to tail.
+	logBatchDelay = 250 * time.Millisecond
+	// logBatchLimit caps the output held for one run while posts are failing, past which the oldest
+	// is dropped rather than grown against a relay that is not coming back.
+	logBatchLimit = 8 * logBatchBytes
 )
 
 // httpTransport carries a worker's execution-path calls to a relay server over authenticated HTTP.
@@ -24,6 +38,25 @@ type httpTransport struct {
 	token string
 	// client issues the HTTP requests.
 	client *http.Client
+	// mu guards batches.
+	mu sync.Mutex
+	// batches holds each running run's buffered output, keyed by run id.
+	batches map[string]*logBatch
+}
+
+// logBatch accumulates one run's output between posts. A tool writes output in small chunks, so
+// posting each one would cost a request per chunk; coalescing bounds that by size and by time.
+type logBatch struct {
+	// send serializes the posts for this run. Taking buf under it makes post order match take
+	// order, so a size-triggered flush cannot overtake a timer-triggered one and scramble the log.
+	send sync.Mutex
+	// buf holds the output written but not yet posted.
+	buf []byte
+	// timer fires the delayed flush of a partial batch, nil when no flush is pending.
+	timer *time.Timer
+	// err is the failure from a flush no caller was waiting on, returned by the next call so a
+	// broken relay still surfaces rather than silently dropping output.
+	err error
 }
 
 // compile-time proof that httpTransport is a Transport.
@@ -46,6 +79,7 @@ func NewHTTPTransport(baseURL, token string, client *http.Client) Transport {
 		baseURL: strings.TrimRight(baseURL, "/"),
 		token:   token,
 		client:  client,
+		batches: make(map[string]*logBatch),
 	}
 }
 
@@ -95,18 +129,117 @@ func (t *httpTransport) Get(ctx context.Context, id string) (*run.Run, error) {
 	}
 }
 
-// Save writes the run's status transitions back to the control node.
+// Save writes the run's status transitions back to the control node. Buffered output is posted
+// first so the log a status change closes off is already complete, and a run reaching a terminal
+// state drops its batch, which is the last point anything could still be buffered for it.
 func (t *httpTransport) Save(ctx context.Context, r *run.Run) error {
+	flushErr := t.flushLog(ctx, r.ID)
+	if r.Status.Terminal() {
+		t.mu.Lock()
+		delete(t.batches, r.ID)
+		t.mu.Unlock()
+	}
 	resp, err := t.sendJSON(ctx, http.MethodPost, runPath(r.ID, "/save"), r)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	return expectNoContent("save", resp)
+	if err := expectNoContent("save", resp); err != nil {
+		return err
+	}
+	return flushErr
 }
 
-// AppendLog streams captured output to the control node, mapping 404 to ErrNotFound.
+// AppendLog buffers captured output and posts it once it reaches logBatchBytes or has waited
+// logBatchDelay, so a run writing many small chunks costs a request per batch rather than one per
+// chunk. Save flushes whatever is left, so nothing is stranded when a run ends.
 func (t *httpTransport) AppendLog(ctx context.Context, id string, p []byte) error {
+	if len(p) == 0 {
+		return nil
+	}
+	t.mu.Lock()
+	b := t.batches[id]
+	if b == nil {
+		b = &logBatch{}
+		t.batches[id] = b
+	}
+	b.buf = append(b.buf, p...)
+	full := len(b.buf) >= logBatchBytes
+	pending := b.err
+	b.err = nil
+	if !full && b.timer == nil {
+		b.timer = time.AfterFunc(logBatchDelay, func() { t.flushLogAsync(id) })
+	}
+	t.mu.Unlock()
+	if full {
+		if err := t.flushLog(ctx, id); err != nil {
+			return err
+		}
+	}
+	return pending
+}
+
+// flushLogAsync flushes a run's batch from its delay timer and parks any failure on the batch, since
+// no caller is waiting on this post. The next AppendLog or Save returns it.
+func (t *httpTransport) flushLogAsync(id string) {
+	if err := t.flushLog(context.Background(), id); err != nil {
+		t.mu.Lock()
+		if b := t.batches[id]; b != nil {
+			b.err = err
+		}
+		t.mu.Unlock()
+	}
+}
+
+// flushLog posts a run's buffered output, mapping 404 to ErrNotFound. It is a no-op when the run
+// has nothing buffered.
+func (t *httpTransport) flushLog(ctx context.Context, id string) error {
+	t.mu.Lock()
+	b := t.batches[id]
+	t.mu.Unlock()
+	if b == nil {
+		return nil
+	}
+
+	// Taking the buffer under send makes the order posts are issued in the order output was taken.
+	b.send.Lock()
+	defer b.send.Unlock()
+	t.mu.Lock()
+	if b.timer != nil {
+		b.timer.Stop()
+		b.timer = nil
+	}
+	out := b.buf
+	b.buf = nil
+	t.mu.Unlock()
+	if len(out) == 0 {
+		return nil
+	}
+	if err := t.postLog(ctx, id, out); err != nil {
+		t.requeue(id, out)
+		return err
+	}
+	return nil
+}
+
+// requeue puts unsent output back at the front of the batch so the next flush carries it, which is
+// what makes a caller's retry of a failed append mean anything. Output past logBatchLimit is dropped
+// oldest first, so a relay that stays down cannot grow the buffer without bound.
+func (t *httpTransport) requeue(id string, out []byte) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	b := t.batches[id]
+	if b == nil {
+		return
+	}
+	b.buf = append(out, b.buf...)
+	if excess := len(b.buf) - logBatchLimit; excess > 0 {
+		b.buf = b.buf[excess:]
+	}
+}
+
+// postLog sends one batch of output to the control node, mapping 404 to ErrNotFound.
+func (t *httpTransport) postLog(ctx context.Context, id string, p []byte) error {
 	resp, err := t.do(ctx, http.MethodPost, runPath(id, "/log"),
 		"application/octet-stream", bytes.NewReader(p))
 	if err != nil {

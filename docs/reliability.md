@@ -148,8 +148,8 @@ exactly once and the loser gets a clear conflict. Treat a submit as create-once 
 Stored events are ordered and written once per batch. A batch replayed after a transient error
 appends rather than deduplicates, so a consumer keys on the event sequence number.
 
-Notifications, on all eleven channels from webhook and Slack to PagerDuty, Twilio SMS, and email,
-are best effort. Each is attempted at least once with one
+Notifications, on all eleven server-wide channels from webhook and Slack to PagerDuty, Twilio SMS,
+and email, and on any per-template targets, are best effort. Each is attempted at least once with one
 retry, then logged and dropped, and the run's extra vars are stripped from the payload so survey and
 template values never leave the system. Notifications do not block a run from finishing, and shutdown
 waits for the deliveries already in flight. Treat a notification as a signal, and the store as the

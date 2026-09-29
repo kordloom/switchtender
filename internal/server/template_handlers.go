@@ -331,7 +331,11 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 		}
 		credIDs := mergeCredentialIDs(t.CredentialIDs, launchReq.CredentialIDs)
 		inventoryID := t.InventoryID
-		if launchReq.InventoryID != nil {
+		// An explicitly empty override means keep the template's inventory, not run without one. It
+		// has to resolve to what the run will actually use, because this is the value authorized
+		// below: treating empty as "no inventory" authorized nothing while the launch still applied
+		// the template's, which is how a caller could reach an inventory they were never granted.
+		if launchReq.InventoryID != nil && *launchReq.InventoryID != "" {
 			inventoryID = *launchReq.InventoryID
 		}
 

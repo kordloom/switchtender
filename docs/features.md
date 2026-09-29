@@ -79,7 +79,8 @@ What SwitchTender does today.
 - Every list exports the filtered rows as CSV or JSON. Runs export events as NDJSON, the full
   log as text, and per-host results as JSON. Credentials are excluded from export on purpose.
 - Per-template notification routing is editable in the template dialog: channel, webhook URL,
-  and failure-only delivery.
+  and failure-only delivery. Seven channels take a per-template target: webhook, Slack, Mattermost,
+  Rocket.Chat, Discord, Teams, and ntfy. The other four server-wide channels fire for every run.
 - The overview charts runs per day, and every outcome tick in fleet health links to its run.
 
 ## Run provenance and search

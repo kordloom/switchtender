@@ -56,22 +56,19 @@ func ParseMap(s string) (map[string]any, error) {
 	return m, nil
 }
 
-// storedTimeLayout is the fixed width UTC layout every stored timestamp uses.
+// FormatTime renders a time as a UTC string for storage.
 //
-// The width is the point. RFC 3339 trims trailing zeros from the fractional second, so a time on an
-// exact second renders shorter than one just after it and compares as the larger string: comparing
-// stored timestamps as text then disagreed with comparing them as times. Columns are text and are
-// compared and ordered as text, so a lease could look older than a cutoff it was actually newer
-// than, and the janitor interrupted healthy runs.
+// The fractional second keeps RFC 3339's trimming rather than being padded to a fixed width. Padding
+// was tried and reverted: it changed the stored form of every timestamp without migrating the rows
+// already written, and ClaimDue compares next_run_at for exact text equality, so on upgrade every
+// existing schedule became unclaimable and stopped firing, silently and permanently.
 //
-// Nine fractional digits, always present, preserves the nanosecond precision callers round-trip
-// through the stores. The PostgreSQL store pads its own stamps to the same width, so a value written
-// by SQL and one written by Go land in a column the same width and sort together.
-const storedTimeLayout = "2006-01-02T15:04:05.000000000Z"
-
-// FormatTime renders a time as a fixed width, lexicographically sortable UTC string.
+// Text comparison of two different widths can disagree with time comparison, but only for instants
+// inside the same second, and every place that relies on the order tolerates a sub-second tie. The
+// one comparison where being wrong mattered, the PostgreSQL lease sweep, casts to a real timestamp
+// and does not depend on the text form at all.
 func FormatTime(t time.Time) string {
-	return t.UTC().Format(storedTimeLayout)
+	return t.UTC().Format(time.RFC3339Nano)
 }
 
 // ParseTime parses a stored time string.

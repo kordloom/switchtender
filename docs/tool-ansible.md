@@ -28,8 +28,8 @@ into one matrix. Failed shards retry alone.
 
 - Extra vars, including survey answers and template vars, arrive as Ansible extra vars, so
   `{{ region }}` in a play reads a survey answer named `region`.
-- An `ssh_key` credential is decrypted to a private temp file for the connection and wiped when
-  the run ends. A passphrase protected key is unlocked in memory first, so the passphrase never
+- An `ssh_key` credential is decrypted to a temp file created mode 0600 for the connection and
+  deleted when the run ends. A passphrase protected key is unlocked in memory first, so the passphrase never
   reaches disk or a command line and no prompt blocks the run.
 - A `vault_password` credential unlocks `ansible-vault` content for the duration of the run.
 - A `become_password` credential supplies privilege escalation.

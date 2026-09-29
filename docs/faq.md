@@ -48,8 +48,8 @@ name a host set once and reuse it across templates.
 ## How are secrets stored?
 
 Sealed with AES-256-GCM, the key derived from an operator passphrase through argon2id. Secrets
-decrypt only at execution, into a temporary file wiped when the run finishes, and never appear in API
-responses. Thirteen kinds cover SSH keys and SSH passwords, vault passwords, become passwords and
+decrypt only at execution, into the run's environment or a temporary file created mode 0600 and
+deleted when the run finishes, and never appear in API responses. Thirteen kinds cover SSH keys and SSH passwords, vault passwords, become passwords and
 full become settings, network device logins, environment bundles, API tokens, container registry
 logins, and typed AWS, Azure, GCP, and VMware credentials. Set
 `SWITCHTENDER_ENCRYPTION_KEY` and `SWITCHTENDER_ENCRYPTION_SALT` to enable them.
