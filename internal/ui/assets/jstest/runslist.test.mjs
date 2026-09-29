@@ -103,6 +103,18 @@ test("toolLabel names what a run executed rather than quoting its source", () =>
 			Want: "import os import sys import json import time im…" },
 		// Test 16: The chosen line is still cut to the row width.
 		{ In: { command: "# " + "x".repeat(60) }, Want: "x".repeat(47) + "…" },
+		// Test 17: Terraform is pointed at a directory, so it is named by that directory rather
+		// than by the whole path, the same way a playbook is named by its file.
+		{ In: { tool: "terraform", command: "/tmp/switchtender-demo-assets/infra/network" },
+			Want: "network" },
+		// Test 18: OpenTofu is the same shape.
+		{ In: { tool: "opentofu", command: "envs/prod" }, Want: "prod" },
+		// Test 19: A directory tool with a bare name keeps it.
+		{ In: { tool: "terraform", command: "infra" }, Want: "infra" },
+		// Test 20: A script tool is unaffected by the directory rule, so a bash command that
+		// happens to contain slashes is still read as a command.
+		{ In: { tool: "bash", command: "cp /etc/hosts /tmp/hosts.bak" },
+			Want: "cp /etc/hosts /tmp/hosts.bak" },
 	];
 	for (const [i, tc] of tests.entries()) {
 		assert.equal(app.toolLabel(tc.In), tc.Want, "test " + i);

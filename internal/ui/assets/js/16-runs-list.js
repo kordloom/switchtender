@@ -165,8 +165,18 @@ function toolLabel(r) {
 		return r.playbook ? clipLabel(r.playbook) + ", " + count : "workflow, " + count;
 	}
 	if (r.playbook) return baseName(r.playbook) || r.playbook;
+	// Terraform and OpenTofu are pointed at a directory rather than handed a script, so their
+	// command is a path and is named the way a playbook's path is named: by its last segment. The
+	// whole path is worse than useless in a column this narrow, and on a demo or a temp checkout it
+	// is a scratch location that reads as debris.
+	if (DIR_TOOLS[r.tool] && r.command) {
+		return clipLabel(baseName(r.command) || r.command);
+	}
 	return clipLabel(scriptLabel(r.command || ""));
 }
+
+// DIR_TOOLS are the tools whose command names a working directory rather than a script to run.
+const DIR_TOOLS = { terraform: true, opentofu: true };
 
 // scriptLabel picks the line of a script that describes it.
 //
