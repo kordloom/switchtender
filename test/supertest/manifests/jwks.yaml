@@ -1,0 +1,57 @@
+# A directory's public keys, served where the install can fetch them.
+#
+# Bearer JWT sign-in is the cheapest of the four directory mechanisms to stand up honestly: the
+# install fetches a JWKS and accepts tokens signed by a key in it. OIDC and SAML add a browser
+# redirect and LDAP adds a directory server, and none of those three would test anything this one
+# does not about whether a deployed install trusts an outside identity provider.
+#
+# The keys themselves are minted by the supertest and handed over in a ConfigMap, so the private
+# half never exists anywhere but the harness's memory for the length of one run.
+apiVersion: v1
+kind: Service
+metadata:
+  name: jwksmint
+  namespace: team
+spec:
+  selector:
+    app: jwksmint
+  ports:
+    - name: http
+      port: 8099
+      targetPort: 8099
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jwksmint
+  namespace: team
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jwksmint
+  template:
+    metadata:
+      labels:
+        app: jwksmint
+    spec:
+      containers:
+        - name: keys
+          image: supertest-fleet:local
+          imagePullPolicy: Never
+          command: ["python3", "-u", "-m", "http.server", "8099", "--directory", "/keys"]
+          ports:
+            - containerPort: 8099
+          volumeMounts:
+            - name: keys
+              mountPath: /keys
+          readinessProbe:
+            httpGet:
+              path: /jwks.json
+              port: 8099
+            initialDelaySeconds: 1
+            periodSeconds: 2
+      volumes:
+        - name: keys
+          configMap:
+            name: jwksmint

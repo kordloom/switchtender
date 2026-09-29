@@ -23,6 +23,36 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
 FROM alpine:3.22
 RUN apk add --no-cache ansible-core bash python3 openssh-client ca-certificates
 
+# Terraform and OpenTofu are advertised alongside Ansible, Bash and Python, and an operator who
+# pulls this image to run one of them met "executable file not found in $PATH" instead. The message
+# is accurate and the documentation states the requirement, but the gap between what the pricing
+# page promises and what a pull delivers is the kind this product exists not to have.
+#
+# Both are single static binaries that run against musl, so they cost their own size and nothing
+# else. PowerShell and the Go toolchain are not here for the opposite reason: pwsh needs .NET on
+# musl and the go engine needs a compiler, and between them they would be several times the weight
+# of everything above. Those two stay operator-provided, which is what their tool pages already say.
+ARG TOFU_VERSION=1.8.7
+ARG TERRAFORM_VERSION=1.9.8
+RUN set -eux; \
+    arch="$(apk --print-arch)"; \
+    case "$arch" in \
+      x86_64) plat=amd64 ;; \
+      aarch64) plat=arm64 ;; \
+      *) echo "no terraform or tofu build for $arch" >&2; exit 1 ;; \
+    esac; \
+    apk add --no-cache --virtual .engines curl unzip; \
+    curl -fsSL -o /tmp/tofu.zip \
+      "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_${plat}.zip"; \
+    unzip -qo /tmp/tofu.zip tofu -d /usr/local/bin; \
+    curl -fsSL -o /tmp/terraform.zip \
+      "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_${plat}.zip"; \
+    unzip -qo /tmp/terraform.zip terraform -d /usr/local/bin; \
+    chmod 0755 /usr/local/bin/tofu /usr/local/bin/terraform; \
+    apk del .engines; \
+    rm -f /tmp/tofu.zip /tmp/terraform.zip; \
+    tofu version; terraform version
+
 # The control plane executes other people's playbooks, so it does not run them as root. The image ran
 # as root because nothing said otherwise, which meant a container escape, a mounted socket, or a tool
 # that writes outside its workdir all started with the highest privilege the container had. /data is

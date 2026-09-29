@@ -138,6 +138,17 @@ func (h *harness) bootstrap(namespace string) error {
 	}, &agent); err != nil {
 		return fmt.Errorf("mint agent token: %w", err)
 	}
+	// A mint that answers 200 and carries no token is the one failure that makes everything after
+	// it meaningless rather than red. The request builders attach Authorization only when the token
+	// is non-empty, so an actor holding an empty string is an anonymous caller wearing a name, and
+	// mustRefuse counts the 401 that follows as a refusal. Every separation-of-duties check in
+	// every phase would then pass by proving that an install refuses strangers, which is a
+	// different and much smaller claim than the one they are written to make.
+	if human.Token == "" || agent.Token == "" {
+		return fmt.Errorf("%w: human=%t agent=%t, so every check made as these actors would be "+
+			"made anonymously and every refusal of them would be a refusal of nobody",
+			ErrNoToken, human.Token != "", agent.Token != "")
+	}
 	h.human = actor{Name: "casey", Type: "user", Token: human.Token}
 	h.agent = actor{Name: "release-agent", Type: "agent", Token: agent.Token}
 	return nil
@@ -431,6 +442,14 @@ func (e *apiError) Error() string {
 // failure means the gate was never tested, and a check that treats either as a pass certifies
 // separation of duties it never exercised.
 func (h *harness) mustRefuse(who *actor, method, path string, body any) (string, error) {
+	// A refusal only says something about this caller's role if this caller had credentials. With
+	// an empty token the request carries no Authorization header at all, the install answers 401
+	// because nobody asked, and that reads here exactly like the gate deciding against a principal
+	// it recognized. Every separation-of-duties property is written about a principal.
+	if who == nil || who.Token == "" {
+		return "", fmt.Errorf("%w: %s %s, so a refusal would say nothing about what this caller "+
+			"may do", ErrNoCredential, method, path)
+	}
 	err := h.apiCall(method, path, who, body, nil)
 	if err == nil {
 		return "", fmt.Errorf("%s %s was allowed", method, path)
@@ -493,23 +512,46 @@ func (h *harness) serviceName(namespace string) (string, error) {
 // its state, and the server's own log tail. An install failure that reports only "not ready" makes
 // somebody re-run the whole thing with their hands on kubectl; this does that first pass for them.
 func (h *harness) installForensics(namespace string) string {
-	pods, _ := h.kubectl("get", "pods", "-n", namespace, "-o", "wide")
-	events, _ := h.kubectl("get", "events", "-n", namespace,
-		"--sort-by=.lastTimestamp")
-	var logs string
-	if pod, err := h.serverPod(namespace); err == nil {
-		logs, _ = h.kubectl("logs", "-n", namespace, pod, "--tail=40")
+	// Why it is missing, never silence. The two run-level forensics beside this one already say
+	// "log unavailable" and "the run produced no log output at all" rather than returning empty,
+	// for the reason written on them: a report that says failed over nothing makes somebody rerun
+	// a thirteen-minute suite to learn what one line already knew. This discarded every error, so
+	// a cluster that had stopped answering kubectl attached the word "pods:" to a failure and
+	// nothing else, which reads as an install that had no pods rather than as a lost cluster.
+	var sections []string
+	pods, err := h.kubectl("get", "pods", "-n", namespace, "-o", "wide")
+	switch {
+	case err != nil:
+		sections = append(sections, "pods unavailable: "+oneLine(err.Error()))
+	case strings.TrimSpace(pods) == "":
+		sections = append(sections, "the namespace holds no pod")
+	default:
+		sections = append(sections, "pods:\n"+pods)
 	}
-	sections := []string{"pods:\n" + pods}
-	if events != "" {
+	events, err := h.kubectl("get", "events", "-n", namespace, "--sort-by=.lastTimestamp")
+	switch {
+	case err != nil:
+		sections = append(sections, "events unavailable: "+oneLine(err.Error()))
+	case strings.TrimSpace(events) != "":
 		lines := strings.Split(strings.TrimRight(events, "\n"), "\n")
 		if len(lines) > 15 {
 			lines = lines[len(lines)-15:]
 		}
 		sections = append(sections, "events:\n"+strings.Join(lines, "\n"))
 	}
-	if logs != "" {
+	pod, err := h.serverPod(namespace)
+	if err != nil {
+		sections = append(sections, "server log unavailable: "+oneLine(err.Error()))
+		return strings.Join(sections, "\n")
+	}
+	logs, err := h.kubectl("logs", "-n", namespace, pod, "--tail=40")
+	switch {
+	case err != nil:
+		sections = append(sections, "server log unavailable: "+oneLine(err.Error()))
+	case strings.TrimSpace(logs) != "":
 		sections = append(sections, "server log tail:\n"+logs)
+	default:
+		sections = append(sections, "the server pod has written no log")
 	}
 	return strings.Join(sections, "\n")
 }

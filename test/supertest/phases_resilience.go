@@ -79,6 +79,15 @@ func (h *harness) phaseUpgrade(prevImage string) error {
 	if err := h.apiCall("GET", "/v1/audit/verify", &oldToken, nil, &before); err != nil {
 		return err
 	}
+	// A chain holding nothing after a run that succeeded is the record having missed the work, and
+	// this claim is the baseline the comparison after the upgrade rests on: zero before and zero
+	// after compares equal and reads as continuity.
+	if before.Count == 0 {
+		h.fail(phase, "the previous release did real, recorded work",
+			fmt.Errorf("%w: run %s succeeded, so there is no baseline to carry across the upgrade",
+				ErrEmptyChain, oldRunID))
+		return nil
+	}
 	h.pass(phase, "the previous release did real, recorded work",
 		fmt.Sprintf("run %s, %d chain entries", oldRunID, before.Count))
 
@@ -123,7 +132,9 @@ func (h *harness) phaseUpgrade(prevImage string) error {
 	if err := h.apiCall("GET", "/v1/audit/verify", &oldToken, nil, &after); err != nil {
 		return err
 	}
-	if !after.OK || after.Count < before.Count {
+	// An empty chain verifies, so ok alone says only that nothing is broken, not that anything
+	// crossed. The count has to be carried as well as checked for loss.
+	if !after.OK || after.Count == 0 || after.Count < before.Count {
 		h.fail(phase, "the audit chain verifies across the version boundary",
 			fmt.Errorf("ok=%v count=%d, was %d before the upgrade", after.OK, after.Count, before.Count))
 	} else {
@@ -207,9 +218,12 @@ func (h *harness) phaseCrash() error {
 	if err != nil {
 		return err
 	}
+	// The longest match, not the last one seen. Two pods whose names prefix the same claimant both
+	// match, and taking whichever the listing happened to end on would kill a worker that was not
+	// holding this run, leaving the phase watching a healthy executor for a crash it never had.
 	var pod string
 	for _, candidate := range strings.Fields(out) {
-		if strings.HasPrefix(victim, candidate) {
+		if strings.HasPrefix(victim, candidate) && len(candidate) > len(pod) {
 			pod = candidate
 		}
 	}
@@ -246,17 +260,27 @@ func (h *harness) phaseCrash() error {
 			"a mid-flight change is never silently re-run; "+reason)
 	}
 
-	// The chain must survive a crash mid-run: a dead executor forges nothing.
+	// The chain must survive a crash mid-run: a dead executor forges nothing. The count is read as
+	// well as the verdict, because an empty chain verifies: this phase killed a worker holding a
+	// run and watched the replacement finish it, so a history with nothing in it is the record
+	// having missed all of that rather than a chain that came through.
 	var verify struct {
-		OK bool `json:"ok"`
+		OK    bool `json:"ok"`
+		Count int  `json:"count"`
 	}
 	if err := h.apiCall("GET", "/v1/audit/verify", &human, nil, &verify); err != nil {
 		return err
 	}
-	if !verify.OK {
+	switch {
+	case !verify.OK:
 		h.fail(phase, "the chain survived the crash intact", fmt.Errorf("audit verify says not ok"))
-	} else {
-		h.pass(phase, "the chain survived the crash intact", "a dead executor forged nothing")
+	case verify.Count == 0:
+		h.fail(phase, "the chain survived the crash intact",
+			fmt.Errorf("%w: after a killed worker and a reclaimed run, so nothing of the crash "+
+				"was recorded", ErrEmptyChain))
+	default:
+		h.pass(phase, "the chain survived the crash intact",
+			fmt.Sprintf("a dead executor forged nothing, %d entries", verify.Count))
 	}
 
 	// And the interrupted run is resumable: a rerun replays its spec and finishes on a live
@@ -423,10 +447,17 @@ func (h *harness) phaseRollback(prevImage string) error {
 		h.fail(phase, "the previous binary reads the state the newer one wrote", err)
 		return nil
 	}
-	if !verify.OK {
+	// The evidence names entries the newer binary appended, so there have to be some. An empty
+	// chain verifies, and accepting one here would have printed that sentence over a count of zero.
+	switch {
+	case !verify.OK:
 		h.fail(phase, "the chain verifies after the rollback",
 			fmt.Errorf("audit verify says not ok on the rolled-back binary"))
-	} else {
+	case verify.Count == 0:
+		h.fail(phase, "the chain verifies after the rollback",
+			fmt.Errorf("%w: the rolled-back binary reads one, so the entries the newer binary "+
+				"appended did not survive the walk back", ErrEmptyChain))
+	default:
 		h.pass(phase, "the chain verifies after the rollback",
 			fmt.Sprintf("%d entries, including the ones the newer binary appended", verify.Count))
 	}
@@ -539,6 +570,14 @@ func (h *harness) phaseUpgradeTeam(prevImage, license string) error {
 	if err := h.apiCall("GET", "/v1/audit/verify", &oldToken, nil, &before); err != nil {
 		return err
 	}
+	// The same baseline the community upgrade needs, for the same reason: zero before and zero
+	// after compares equal and reads as a chain that crossed the boundary intact.
+	if before.Count == 0 {
+		h.fail(phase, "the previous release did real work through its dedicated worker",
+			fmt.Errorf("%w: run %s succeeded through the worker, so there is no baseline to carry "+
+				"across the upgrade", ErrEmptyChain, oldRunID))
+		return nil
+	}
 	h.pass(phase, "the previous release did real work through its dedicated worker",
 		fmt.Sprintf("run %s, %d chain entries", oldRunID, before.Count))
 
@@ -587,7 +626,7 @@ func (h *harness) phaseUpgradeTeam(prevImage, license string) error {
 	if err := h.apiCall("GET", "/v1/audit/verify", &oldToken, nil, &after); err != nil {
 		return err
 	}
-	if !after.OK || after.Count < before.Count {
+	if !after.OK || after.Count == 0 || after.Count < before.Count {
 		h.fail(phase, "the audit chain verifies across the paid-shape version boundary",
 			fmt.Errorf("ok=%v count=%d, was %d before", after.OK, after.Count, before.Count))
 	} else {

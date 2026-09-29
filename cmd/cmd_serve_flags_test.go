@@ -8,8 +8,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/kordloom/switchtender/internal/license"
 )
 
 // quietServeFlags points every serve flag this package reads at a value that starts a plain,
@@ -201,9 +199,11 @@ func TestServeRefusesAMisconfigurationRatherThanRunWithoutTheFeature(t *testing.
 // misconfiguration worth refusing at startup: starting anyway would leave the install with a
 // directory nobody can sign in through and an API whose enforcement was derived from empty tables.
 func TestServeRefusesSingleSignOnWithoutALicense(t *testing.T) {
-	if license.Current() != nil {
-		t.Skip("this process already carries a license, so the Community gate cannot be observed")
-	}
+	// Community is made true here rather than waited for. license.Current is a process global and
+	// two other tests in this package set it, so observing it and standing down meant a refusal on
+	// the paid boundary could stop being checked because of something another test did. Ordering
+	// happens to save it today, which is not the same as it being safe.
+	restoreLicense(t)
 	tests := []struct {
 		Name  string
 		Setup func(t *testing.T)
@@ -250,9 +250,11 @@ func TestServeRefusesSingleSignOnWithoutALicense(t *testing.T) {
 // top of the command, before the logger and before any store is opened, so an unlicensed worker
 // never reaches the point of leasing a run.
 func TestWorkerRefusesWithoutATeamLicense(t *testing.T) {
-	if license.Current() != nil {
-		t.Skip("this process already carries a license, so the Community gate cannot be observed")
-	}
+	// Community is made true here rather than waited for. license.Current is a process global and
+	// two other tests in this package set it, so observing it and standing down meant a refusal on
+	// the paid boundary could stop being checked because of something another test did. Ordering
+	// happens to save it today, which is not the same as it being safe.
+	restoreLicense(t)
 	// Not parallel: the worker reads package-level flag variables and the environment.
 	home := t.TempDir()
 	t.Setenv("SWITCHTENDER_LICENSE", filepath.Join(home, "no-license.json"))

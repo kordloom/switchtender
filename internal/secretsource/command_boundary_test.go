@@ -182,12 +182,11 @@ func TestResolveCommandStopsWhenItsContextEnds(t *testing.T) {
 	}
 }
 
-// TestResolveCommandBoundsItsOutput demonstrates a real bug. Every HTTP resolver caps the response
-// it reads at one mebibyte, with the reason stated on httpMaxBody: a misbehaving endpoint must not
-// exhaust memory. The command source reads its subprocess's stdout into an unbounded buffer, so a
-// fetch command that streams without end, whether misconfigured or pointed at the wrong file, grows
-// the server's heap until it dies. Runs in flight, and the audit trail they were about to write, go
-// down with it.
+// TestResolveCommandBoundsItsOutput holds the command source to the cap every HTTP resolver keeps,
+// stated on httpMaxBody: a misbehaving source must not exhaust memory. This one read its
+// subprocess's stdout into an unbounded buffer, so a fetch command that streamed without end,
+// whether misconfigured or pointed at the wrong file, grew the server's heap until it died, taking
+// the runs in flight and the audit trail they were about to write down with it.
 func TestResolveCommandBoundsItsOutput(t *testing.T) {
 	t.Parallel()
 	skipWithoutSh(t)
@@ -202,12 +201,12 @@ func TestResolveCommandBoundsItsOutput(t *testing.T) {
 	}
 }
 
-// TestResolveCommandReturnsWhenAGrandchildHoldsStdout demonstrates a real bug. The resolver
-// collects stdout through a pipe, and Run waits for that pipe to close rather than for the shell to
-// exit, so a fetch command that leaves any background process behind blocks until the grandchild
-// exits. Killing the shell on context cancellation does not close the pipe the grandchild still
-// holds, so the deadline the caller set is not enforced and the run's worker is held for as long as
-// the grandchild lives, which for a daemonized helper is forever.
+// TestResolveCommandReturnsWhenAGrandchildHoldsStdout holds the resolver to the deadline its
+// caller set. It collects stdout through a pipe, and waiting for that pipe to close rather than for
+// the shell to exit meant a fetch command leaving any background process behind blocked until the
+// grandchild exited. Killing the shell did not close the pipe the grandchild still held, so the
+// deadline went unenforced and the run's worker was held for as long as the grandchild lived, which
+// for a daemonized helper is forever.
 func TestResolveCommandReturnsWhenAGrandchildHoldsStdout(t *testing.T) {
 	t.Parallel()
 	skipWithoutSh(t)

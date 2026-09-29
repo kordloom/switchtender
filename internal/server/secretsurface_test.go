@@ -71,6 +71,25 @@ func TestNoReadSurfaceShowsAViewerASecret(t *testing.T) {
 	if err := runs.Save(ctx, planted); err != nil {
 		t.Fatalf("runs.Save() error = %v", err)
 	}
+	// A baseline, so the comparison read below has something to compare against. Without it the
+	// handler answers 404 for want of an earlier run and the path excused itself from the battery,
+	// which left the one read that renders two runs at once unchecked for disclosure. It carries the
+	// secret in the same places, because a comparison that leaked only the baseline's copy would
+	// have passed on a fixture that planted the secret in just one side.
+	earlier := started.Add(-time.Hour)
+	baseline := &run.Run{
+		ID: "run_baseline", Tool: run.ToolBash, Status: run.StatusSucceeded,
+		Kind:      run.KindPipeline,
+		Command:   "export PGPASSWORD=" + secret + " && ./migrate.sh",
+		ExtraVars: map[string]any{"db_password": secret, "deep": map[string]any{"api_key": secret}},
+		Steps: []run.PipelineStep{
+			{Name: "one", Tool: run.ToolBash, Command: "TOKEN=" + secret + " ./step.sh"},
+		},
+		StartedAt: &earlier, EndedAt: &started, CreatedAt: earlier,
+	}
+	if err := runs.Save(ctx, baseline); err != nil {
+		t.Fatalf("runs.Save() baseline error = %v", err)
+	}
 	if err := templates.Save(ctx, &template.Template{
 		ID: "tpl_secret", Name: "nightly", Tool: run.ToolBash,
 		Command:   "export PGPASSWORD=" + secret + " && ./nightly.sh",
@@ -110,9 +129,15 @@ func TestNoReadSurfaceShowsAViewerASecret(t *testing.T) {
 			req.Header.Set("Authorization", "Bearer "+plain)
 			handler.ServeHTTP(rec, req)
 
-			// A route that is not wired in this fixture says nothing about disclosure.
+			// A path listed here is a read a viewer can reach, so one that cannot be reached is
+			// either a stale entry or a fixture that stopped building what the route needs. Both
+			// are worth knowing. Standing down instead left the comparison read, the one that
+			// renders two runs at once, excused from the battery for want of a baseline run, and
+			// the list said it was covered.
 			if rec.Code == http.StatusNotFound || rec.Code == http.StatusNotImplemented {
-				t.Skipf("%s is not served by this fixture (%d)", path, rec.Code)
+				t.Fatalf("%s answered %d, so this read was never checked for disclosure. Either "+
+					"the path has moved and this list is stale, or the fixture no longer builds "+
+					"what the route needs.", path, rec.Code)
 			}
 			if strings.Contains(rec.Body.String(), secret) {
 				t.Errorf("%s shows a viewer the secret in the clear.\nThe run scrub exists so "+

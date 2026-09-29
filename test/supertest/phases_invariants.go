@@ -98,7 +98,11 @@ func (h *harness) phaseInvariants() error {
 	refusedPaths := map[string][]string{}
 	for _, who := range actors {
 		for _, id := range runs {
-			if !h.canRead(who, "/v1/runs/"+id) {
+			served, rerr := h.canRead(who, "/v1/runs/"+id)
+			if rerr != nil {
+				return fmt.Errorf("read a run as %s: %w", who.Name, rerr)
+			}
+			if !served {
 				refusedPaths[who.Name] = append(refusedPaths[who.Name], "/v1/runs/"+id)
 			}
 		}
@@ -138,7 +142,11 @@ func (h *harness) checkListFetchParity(phase string, actors []*actor, runs []str
 		}
 		mismatch := ""
 		for _, id := range runs {
-			served := h.canRead(who, "/v1/runs/"+id)
+			served, rerr := h.canRead(who, "/v1/runs/"+id)
+			if rerr != nil {
+				mismatch = rerr.Error()
+				break
+			}
 			if served != inList[id] {
 				mismatch = fmt.Sprintf("%s: the fetch says %v and the list says %v",
 					id, served, inList[id])
@@ -171,22 +179,39 @@ func (h *harness) checkDerivedViewsAgree(phase string, actors []*actor, runs []s
 	}
 	for _, who := range actors {
 		refused := map[string]bool{}
+		var unreachable error
 		for _, id := range runs {
-			if !h.canRead(who, "/v1/runs/"+id) {
+			served, rerr := h.canRead(who, "/v1/runs/"+id)
+			if rerr != nil {
+				unreachable = rerr
+				break
+			}
+			if !served {
 				refused[id] = true
 			}
+		}
+		if unreachable != nil {
+			h.fail(phase, "the derived views agree with the run fetch for "+who.Name, unreachable)
+			continue
 		}
 		if len(refused) == 0 {
 			h.pass(phase, "no run is hidden from "+who.Name+", so the derived views may name any",
 				"")
 			continue
 		}
-		leaked := ""
+		leaked, read, unread := "", 0, []string{}
 		for _, path := range paths {
 			status, body := h.rawGet(who, path)
+			// Counted, not passed over. A view that does not answer is a view this property was
+			// never asked of, and stepping past every one of them in silence left the claim that
+			// the derived views agree resting on nothing having been read at all. The count below
+			// used to report the paths offered rather than the views examined, so the evidence
+			// said five views on a run that looked at none.
 			if status != http.StatusOK {
+				unread = append(unread, fmt.Sprintf("%s(%d)", path, status))
 				continue
 			}
+			read++
 			for id := range refused {
 				if strings.Contains(body, `"`+id+`"`) {
 					leaked = fmt.Sprintf("%s names %s, whose by-id fetch refuses %s",
@@ -203,8 +228,18 @@ func (h *harness) checkDerivedViewsAgree(phase string, actors []*actor, runs []s
 				fmt.Errorf("%s", leaked))
 			continue
 		}
-		h.pass(phase, "the derived views agree with the run fetch for "+who.Name,
-			fmt.Sprintf("%d refused run(s), %d view(s)", len(refused), len(paths)))
+		if read == 0 {
+			h.fail(phase, "the derived views agree with the run fetch for "+who.Name,
+				fmt.Errorf("%w: none of the %d views answered: %s",
+					ErrNothingRead, len(paths), strings.Join(unread, ", ")))
+			continue
+		}
+		detail := fmt.Sprintf("%d refused run(s), %d of %d view(s) read",
+			len(refused), read, len(paths))
+		if len(unread) > 0 {
+			detail += ", unread: " + strings.Join(unread, ", ")
+		}
+		h.pass(phase, "the derived views agree with the run fetch for "+who.Name, detail)
 	}
 }
 
@@ -483,9 +518,18 @@ func (h *harness) rawGet(who *actor, path string) (int, string) {
 }
 
 // canRead reports whether this caller may read the object at path.
-func (h *harness) canRead(who *actor, path string) bool {
-	status, _ := h.rawGet(who, path)
-	return status == http.StatusOK
+func (h *harness) canRead(who *actor, path string) (bool, error) {
+	status, body := h.rawGet(who, path)
+	// A request that never arrived is not a refusal. rawGet reports a transport failure as status
+	// zero, and reading that as "not served" meant a dead port-forward made every caller look
+	// properly walled off from everything: the isolation properties would record that a run is
+	// hidden from an operator the install never heard from, which is a pass in the direction that
+	// certifies a boundary nobody tested.
+	if status == 0 {
+		return false, fmt.Errorf("%w: %s as %s, so whether it is served is unknown: %s",
+			ErrUnreachable, path, who.Name, oneLine(body))
+	}
+	return status == http.StatusOK, nil
 }
 
 // objectIDs reads the ids of a listing as the admin.

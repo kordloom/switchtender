@@ -263,7 +263,8 @@ func TestSameLocalMinuteOnlyReportsAZoneRewind(t *testing.T) {
 	t.Parallel()
 	chicago, err := time.LoadLocation("America/Chicago")
 	if err != nil {
-		t.Fatalf("the zone database is embedded in this binary, so a zone that will not load is a real failure: %v", err)
+		t.Fatalf("the zone database is embedded, so a zone that will not load is a "+
+			"real failure: %v", err)
 	}
 	// 2026-11-01 01:30 happens twice in Chicago, an hour apart in absolute time.
 	firstPass := time.Date(2026, 11, 1, 6, 30, 0, 0, time.UTC).In(chicago)
@@ -307,7 +308,8 @@ func TestTransitionInstantFindsTheMomentTheClocksMoved(t *testing.T) {
 	t.Parallel()
 	chicago, err := time.LoadLocation("America/Chicago")
 	if err != nil {
-		t.Fatalf("the zone database is embedded in this binary, so a zone that will not load is a real failure: %v", err)
+		t.Fatalf("the zone database is embedded, so a zone that will not load is a "+
+			"real failure: %v", err)
 	}
 	// Chicago jumps from 01:59:59 CST to 03:00:00 CDT on 2026-03-08.
 	jump := time.Date(2026, 3, 8, 8, 0, 0, 0, time.UTC)
@@ -339,7 +341,8 @@ func TestScheduleFiresInItsOwnZoneThroughEveryDescriptor(t *testing.T) {
 	t.Parallel()
 	tokyo, err := time.LoadLocation("Asia/Tokyo")
 	if err != nil {
-		t.Fatalf("the zone database is embedded in this binary, so a zone that will not load is a real failure: %v", err)
+		t.Fatalf("the zone database is embedded, so a zone that will not load is a "+
+			"real failure: %v", err)
 	}
 	// 21:00 on the ninth in Tokyo, so every case below fires later the same evening or the next day.
 	after := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)

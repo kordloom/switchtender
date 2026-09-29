@@ -134,6 +134,12 @@ func (h *harness) phaseFleet() error {
 func (h *harness) phaseCommunity() error {
 	const phase = "community"
 
+	// The receiver comes up first. The notifier is configured by a flag read at start, and an
+	// operator who sets one expects the first finished run to reach it rather than the second.
+	hookURL, err := h.startHookSink()
+	if err != nil {
+		return err
+	}
 	if out, err := h.run("helm", "install", "community",
 		filepath.Join(h.repo, "deploy/helm/switchtender"),
 		"--namespace", "community", "--create-namespace",
@@ -143,6 +149,7 @@ func (h *harness) phaseCommunity() error {
 		"--set", "image.pullPolicy=Never",
 		"--set", "encryptionKey=supertest-key-not-a-secret",
 		"--set", "encryptionSalt=supertest-salt",
+		"--set", "server.extraArgs={--notify-webhook,"+hookURL+"}",
 		"--wait", "--timeout", "300s"); err != nil {
 		return fmt.Errorf("helm install community: %w\n%s\n%s", err, out,
 			h.installForensics("community"))
@@ -193,6 +200,13 @@ func (h *harness) phaseCommunity() error {
 		h.pass(phase, host.Pod+" carries this run's marker, read via kubectl exec",
 			"the proof owes nothing to the product's own reporting")
 	}
+
+	h.checkTheRunFinishedNotificationArrives(phase, runID)
+	// Run while the fleet still carries the marker the constructive run left, because drift is
+	// the distance between that and what the playbook now says.
+	h.checkDriftIsSeenAndAttributed(phase)
+	h.checkAScheduleFiresOnItsOwn(phase)
+	h.checkEveryAdvertisedEngineAnswers(phase)
 
 	if err := h.verifyReceiptOffline(phase, runID, ""); err != nil {
 		return err
@@ -343,18 +357,49 @@ func (h *harness) phaseTeam(license string) error {
 	}
 
 	var estate struct {
-		Total int              `json:"total"`
-		Hosts []map[string]any `json:"hosts"`
+		Total     int              `json:"total"`
+		Hosts     []map[string]any `json:"hosts"`
+		Truncated bool             `json:"truncated"`
 	}
 	if err := h.apiCall("GET", "/v1/estate", &h.human, nil, &estate); err != nil {
 		return err
 	}
-	if estate.Total < len(fleetHosts) {
+	// Which machines, not how many. The claim names the machines the runs touched and the check
+	// counted them, so an estate holding the right number of the wrong hosts satisfied it. The
+	// count stays as the cheaper failure, since it is what catches an estate that gathered nothing.
+	present := map[string]bool{}
+	for _, entry := range estate.Hosts {
+		name, _ := entry["host"].(string)
+		if name == "" {
+			continue
+		}
+		present[name] = true
+		// The estate names a host as the inventory did, which here is the fully qualified name.
+		// The first label is registered too, so this stays an identity check rather than becoming
+		// a spurious failure if that ever shortens.
+		if label, _, cut := strings.Cut(name, "."); cut {
+			present[label] = true
+		}
+	}
+	var missing []string
+	for _, host := range fleetHosts {
+		if !present[host.FQDN] && !present[host.Pod] {
+			missing = append(missing, host.FQDN)
+		}
+	}
+	switch {
+	case estate.Total < len(fleetHosts):
 		h.fail(phase, "the estate remembers every machine the runs touched",
-			fmt.Errorf("estate holds %d hosts, want at least %d", estate.Total, len(fleetHosts)))
-	} else {
+			fmt.Errorf("%w: estate holds %d hosts, want at least %d",
+				ErrNothingRead, estate.Total, len(fleetHosts)))
+	case len(missing) > 0 && !estate.Truncated:
+		h.fail(phase, "the estate remembers every machine the runs touched",
+			fmt.Errorf("the estate names %d hosts and not %s, so it remembers a fleet that is "+
+				"not the one these runs crossed", estate.Total, strings.Join(missing, ", ")))
+	default:
 		h.pass(phase, "the estate remembers every machine the runs touched",
-			fmt.Sprintf("%d hosts from gathered facts", estate.Total))
+			fmt.Sprintf("%d hosts from gathered facts, each of the %d this run crossed named",
+				estate.Total, len(fleetHosts)))
 	}
 
 	var change map[string]any
@@ -368,7 +413,27 @@ func (h *harness) phaseTeam(license string) error {
 			"a build and its destructive follow-up, one arc, outcome derived rather than typed")
 	}
 
+	// Rendered here rather than later, because the change this asserts on was just proved to read
+	// back as one arc, so a register that cannot name it is failing about a change this phase can
+	// point at rather than about the period being empty.
+	h.checkTheChangeRegisterRenders(phase, "team",
+		"postgres://switchtender:supertest-not-a-secret@postgres:5432/switchtender?sslmode=disable",
+		destroyID)
+
+	// Anchored here, where the chain already holds the whole governed arc this phase built, so the
+	// coordinate it fixes is over history worth fixing rather than over an install that has done
+	// nothing yet.
+	h.checkTheInstallCanAnchorItsOwnChain(phase, "team",
+		"postgres://switchtender:supertest-not-a-secret@postgres:5432/switchtender?sslmode=disable")
+
 	h.phaseRBAC(phase)
+
+	// Directory sign-in is added last, and to a running install rather than at first boot. An
+	// install told about a directory enforces from its first request and deliberately mints no
+	// bootstrap token, which is right of the product and leaves this suite with no way in: the
+	// harness reads that token out of the first boot's log. Adding it afterwards is also the path
+	// an operator actually takes, since nobody buys the tier before they have the install.
+	h.checkDirectorySignInWorks(phase, "team")
 
 	var queued map[string]any
 	err = h.apiCall("POST", "/v1/runs", &h.human, map[string]any{
@@ -399,6 +464,14 @@ func (h *harness) mustID(name string) string {
 	id, ok := h.ids[name]
 	if !ok {
 		panic("no id remembered for " + name)
+	}
+	// Remembered and empty is the case this used to pass through. An id decoded from a response
+	// that carried none is stored under a key that exists, so the absence check says nothing, and
+	// the empty string then travels into a run as the inventory or credential it is supposed to
+	// name. Must means must.
+	if id == "" {
+		panic("the id remembered for " + name + " is empty, so whatever it was read from " +
+			"answered without one")
 	}
 	return id
 }
@@ -434,7 +507,13 @@ func (h *harness) deployAcrossFleet(namespace, nonce string,
 	if err != nil {
 		return "", fmt.Errorf("create ssh credential: %w", err)
 	}
+	// Checked where it is created, so a response that answers 200 and names nothing fails here
+	// rather than three phases later as a run that targeted an empty inventory with an empty
+	// credential and did nothing anybody noticed.
 	credID, _ := cred["id"].(string)
+	if credID == "" {
+		return "", fmt.Errorf("%w: the ssh credential", ErrNoID)
+	}
 	h.ids[namespace+"-credential"] = credID
 
 	var lines []string
@@ -453,6 +532,9 @@ func (h *harness) deployAcrossFleet(namespace, nonce string,
 		return "", fmt.Errorf("create inventory: %w", err)
 	}
 	invID, _ := inv["id"].(string)
+	if invID == "" {
+		return "", fmt.Errorf("%w: the fleet inventory", ErrNoID)
+	}
 	h.ids[namespace+"-inventory"] = invID
 
 	var created map[string]any
@@ -466,11 +548,42 @@ func (h *harness) deployAcrossFleet(namespace, nonce string,
 	if err != nil {
 		return "", fmt.Errorf("submit deploy run: %w", err)
 	}
+	// An empty run id would be waited on at /v1/runs/, which is the listing rather than a run, so
+	// the wait would time out describing a run that was never named instead of the submission that
+	// answered without naming one.
 	runID, _ := created["id"].(string)
+	if runID == "" {
+		return "", fmt.Errorf("%w: the deploy run, which would then be waited on at the listing "+
+			"rather than at a run", ErrNoID)
+	}
 	if _, err := h.awaitRunStatus(runID, "succeeded", 180*time.Second); err != nil {
 		return runID, err
 	}
 	return runID, nil
+}
+
+// awaitRunTerminal polls a run until it settles, whatever it settles as.
+//
+// awaitRunStatus beside this one wants a named status and treats every other terminal state as the
+// failure it usually is. This one is for the checks where the interesting thing is which terminal
+// state a run reached and what it said, rather than whether it reached a chosen one.
+func (h *harness) awaitRunTerminal(id string, limit time.Duration) (map[string]any, error) {
+	var last map[string]any
+	err := h.waitFor(fmt.Sprintf("run %s to settle", id), limit, func() error {
+		var doc map[string]any
+		if err := h.apiCall("GET", "/v1/runs/"+id, &h.human, nil, &doc); err != nil {
+			return err
+		}
+		last = doc
+		status, _ := doc["status"].(string)
+		for _, terminal := range []string{"succeeded", "failed", "canceled", "rejected", "interrupted"} {
+			if status == terminal {
+				return nil
+			}
+		}
+		return fmt.Errorf("run is %s", status)
+	})
+	return last, err
 }
 
 // awaitRunStatus polls a run until it reaches the wanted status, treating any other terminal
@@ -692,14 +805,33 @@ func (h *harness) phaseRBAC(phase string) {
 		h.fail(phase, "the admin can mint the viewer a token", err)
 		return
 	}
+	// A token is what makes this actor a viewer rather than an unauthenticated caller, and every
+	// refusal below is only a refusal of the viewer if one was actually minted. An empty string
+	// here would turn the three checks that follow into checks of an anonymous request.
+	if minted.Token == "" {
+		h.fail(phase, "the admin created a viewer with a token of its own",
+			fmt.Errorf("%w: the viewer, so the reads below would be made by nobody", ErrNoToken))
+		return
+	}
 	viewer := actor{Name: "auditor", Type: "user", Token: minted.Token}
-	h.pass(phase, "the admin created a viewer with a token of its own", "")
+	h.pass(phase, "the admin created a viewer with a token of its own", "token minted for auditor")
 
-	var listed map[string]any
-	if err := h.apiCall("GET", "/v1/runs", &viewer, nil, &listed); err != nil {
+	// Read means read something. This phase has already run several runs, so a viewer answered an
+	// empty list is a viewer who can reach the endpoint and see none of the history, which is what
+	// a scoping regression looks like from outside. Checking only that the call did not error
+	// recorded that an outside auditor can read the history while they were being shown nothing.
+	seen, err := h.objectIDsAs(&viewer, "/v1/runs?limit=200", "runs")
+	switch {
+	case err != nil:
 		h.fail(phase, "the viewer can read the run history", err)
-	} else {
-		h.pass(phase, "the viewer can read the run history", "")
+	case len(seen) == 0:
+		h.fail(phase, "the viewer can read the run history",
+			fmt.Errorf("%w: the list answered and named no run, though this phase has already "+
+				"run several, so the read-only role sees none of the history it exists to read",
+				ErrNothingRead))
+	default:
+		h.pass(phase, "the viewer can read the run history",
+			fmt.Sprintf("%d run(s) visible to the read-only role", len(seen)))
 	}
 	if detail, err := h.mustRefuse(&viewer, "POST", "/v1/runs", map[string]any{
 		"tool": "bash", "command": "id",

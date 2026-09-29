@@ -80,3 +80,7 @@ campaigns/
 site/verify/loomseal.wasm
 site/verify/wasm_exec.js
 /supertest
+
+# Working notes, not product. A triage list of the product's own unfixed defects was
+# published on a public repository from here.
+.fixplan/

@@ -38,11 +38,11 @@ func tempDB(t *testing.T) string {
 
 // TestTokenNewRefusesAnAgentTokenWithNoAccount proves an agent token cannot be minted unbound.
 //
-// The agent identity exists so the chain records which human an agent acted for. An unbound token is
-// also an admin token, so minting one with --agent would produce an administrator acting on behalf
-// of nobody, which is exactly the accountability the flag claims to add. The refusal has to leave
-// nothing behind: a token saved before the check would be an admin credential the operator believes
-// is a capped agent one.
+// The agent identity exists so the chain records which human an agent acted for. An unbound token
+// is also an admin token, so minting one with --agent would produce an administrator acting on
+// behalf of nobody, which is exactly the accountability the flag claims to add. The refusal has to
+// leave nothing behind: a token saved before the check would be an admin credential the operator
+// believes is a capped agent one.
 func TestTokenNewRefusesAnAgentTokenWithNoAccount(t *testing.T) {
 	// Not parallel: the token commands read package-level flag variables.
 	db := tempDB(t)
@@ -157,12 +157,14 @@ func TestChangeRegisterRefusesAnInvertedPeriod(t *testing.T) {
 
 // TestTeamOnlyCommandsRefuseOnCommunity pins the two license gates that live in this package. They
 // are not security boundaries, but they are refusals, and a gate that fails open is a gate that is
-// not there. The error has to name the tier and where to go, since that line is the whole of what an
-// operator sees when they hit one.
+// not there. The error has to name the tier and where to go, since that line is the whole of what
+// an operator sees when they hit one.
 func TestTeamOnlyCommandsRefuseOnCommunity(t *testing.T) {
-	if license.Current() != nil {
-		t.Skip("this process already carries a license, so the Community gate cannot be observed")
-	}
+	// Community is made true here rather than waited for. license.Current is a process global and
+	// two other tests in this package set it, so observing it and standing down meant a refusal on
+	// the paid boundary could stop being checked because of something another test did. Ordering
+	// happens to save it today, which is not the same as it being safe.
+	restoreLicense(t)
 	tests := []struct {
 		Name    string
 		Feature license.Feature
@@ -189,9 +191,11 @@ func TestTeamOnlyCommandsRefuseOnCommunity(t *testing.T) {
 // actually installed, not only in the license package. A gate wired to the wrong feature, or wired
 // after the work, passes every rule-level test and still ships the register for free.
 func TestAuditReportRefusesOnCommunity(t *testing.T) {
-	if license.Current() != nil {
-		t.Skip("this process already carries a license, so the Community gate cannot be observed")
-	}
+	// Community is made true here rather than waited for. license.Current is a process global and
+	// two other tests in this package set it, so observing it and standing down meant a refusal on
+	// the paid boundary could stop being checked because of something another test did. Ordering
+	// happens to save it today, which is not the same as it being safe.
+	restoreLicense(t)
 	// Not parallel: the report command reads package-level flag variables.
 	dir := t.TempDir()
 	setString(t, &auditReportDB, filepath.Join(dir, "switchtender.db"))
@@ -326,8 +330,8 @@ func TestVerifyRefusesAReceiptItCannotRead(t *testing.T) {
 	}
 }
 
-// TestInitRefusesToOverwriteAConfigItWasNotAskedTo pins the guard on the environment file. That file
-// holds the encryption key every stored credential is sealed under, so writing over it without
+// TestInitRefusesToOverwriteAConfigItWasNotAskedTo pins the guard on the environment file. That
+// file holds the encryption key every stored credential is sealed under, so writing over it without
 // --force would orphan every secret in a live install, and the refusal is the only thing standing
 // between an operator rerunning init and losing them.
 func TestInitRefusesToOverwriteAConfigItWasNotAskedTo(t *testing.T) {
@@ -578,9 +582,9 @@ func TestContainerFlagsDefaultToTheBoundedLimits(t *testing.T) {
 	}
 }
 
-// TestBuildEmailerNeedsEveryPartOfAnAddress pins when notification email turns on. A half-configured
-// emailer that constructed itself anyway would fail on every send, and the operator would learn that
-// their failure notifications were never arriving from the absence of them.
+// TestBuildEmailerNeedsEveryPartOfAnAddress pins when notification email turns on. A
+// half-configured emailer that constructed itself anyway would fail on every send, and the operator
+// would learn that their failure notifications were never arriving from the absence of them.
 func TestBuildEmailerNeedsEveryPartOfAnAddress(t *testing.T) {
 	tests := []struct {
 		Name          string
@@ -812,9 +816,9 @@ func TestKeyDirPrefersTheOverrideThenTheInstall(t *testing.T) {
 	}
 }
 
-// TestAuditBeatStoreReportsWhatItAppended pins the adapter between the audit chain and the span beat
-// emitter. The emitter logs and anchors the sequence, hash, and beat number this returns, so an
-// adapter that dropped one of them would anchor a coordinate that names nothing, and the anchor
+// TestAuditBeatStoreReportsWhatItAppended pins the adapter between the audit chain and the span
+// beat emitter. The emitter logs and anchors the sequence, hash, and beat number this returns, so
+// an adapter that dropped one of them would anchor a coordinate that names nothing, and the anchor
 // would then fail every bundle built over the chain.
 func TestAuditBeatStoreReportsWhatItAppended(t *testing.T) {
 	t.Parallel()
@@ -892,8 +896,8 @@ func TestRecordCLIFailsTheCommandItCannotRecord(t *testing.T) {
 	}
 }
 
-// refusingAudits is an audit store whose append always fails, standing in for a chain that cannot be
-// written: a full disk, a revoked grant, or a database in recovery.
+// refusingAudits is an audit store whose append always fails, standing in for a chain that cannot
+// be written: a full disk, a revoked grant, or a database in recovery.
 type refusingAudits struct {
 	// Store answers every method this stub does not override.
 	audit.Store

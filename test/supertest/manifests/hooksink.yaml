@@ -1,0 +1,69 @@
+# A receiver for the run-finished notification, so the claim that one was delivered rests on
+# something outside the product rather than on the product's own report that it sent one.
+#
+# It records whole request bodies to a file and nothing else. The supertest reads that file with
+# kubectl exec, which is the same outside path the fleet markers are read by: what it finds owes
+# nothing to SwitchTender's reporting.
+#
+# It reuses the fleet image because that image already carries python3 and is already loaded into
+# the cluster, so this costs no build and no pull.
+apiVersion: v1
+kind: Service
+metadata:
+  name: hooksink
+  namespace: community
+spec:
+  selector:
+    app: hooksink
+  ports:
+    - name: http
+      port: 8099
+      targetPort: 8099
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hooksink
+  namespace: community
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hooksink
+  template:
+    metadata:
+      labels:
+        app: hooksink
+    spec:
+      containers:
+        - name: sink
+          image: supertest-fleet:local
+          imagePullPolicy: Never
+          command: ["python3", "-u", "-c"]
+          args:
+            - |
+              import http.server
+
+              # Every request body is appended whole. Nothing is parsed here: a receiver that
+              # understood the payload could agree with a malformed one, and the assertion belongs
+              # in the check rather than in the fixture.
+              class Sink(http.server.BaseHTTPRequestHandler):
+                  def do_POST(self):
+                      length = int(self.headers.get("content-length", "0"))
+                      body = self.rfile.read(length)
+                      with open("/tmp/notifications", "ab") as f:
+                          f.write(body + b"\n")
+                      self.send_response(204)
+                      self.end_headers()
+
+                  def log_message(self, *args):
+                      pass
+
+              http.server.HTTPServer(("0.0.0.0", 8099), Sink).serve_forever()
+          ports:
+            - containerPort: 8099
+          readinessProbe:
+            tcpSocket:
+              port: 8099
+            initialDelaySeconds: 1
+            periodSeconds: 2

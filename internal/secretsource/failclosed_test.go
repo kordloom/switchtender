@@ -356,11 +356,11 @@ func TestAnOversizeResponseIsBoundedAndFailsClosed(t *testing.T) {
 	}
 }
 
-// TestConjurTruncatesASecretLargerThanTheResponseCap demonstrates a real bug. Conjur's response
-// body is the secret itself rather than a document wrapping it, so the one mebibyte cap that makes
-// the other resolvers fail closed on a short read makes this one succeed with a truncated value.
-// The run then authenticates with the first mebibyte of a certificate or key and the failure
-// surfaces somewhere far from here, with the audit trail recording a successful resolve.
+// TestConjurTruncatesASecretLargerThanTheResponseCap holds Conjur to failing closed on a short
+// read. Its response body is the secret itself rather than a document wrapping it, so the one
+// mebibyte cap that makes the other resolvers fail closed once made this one succeed with a
+// truncated value: the run authenticated with the first mebibyte of a certificate or key and the
+// failure surfaced somewhere far from here, with the audit trail recording a successful resolve.
 func TestConjurTruncatesASecretLargerThanTheResponseCap(t *testing.T) {
 	t.Parallel()
 
@@ -378,13 +378,13 @@ func TestConjurTruncatesASecretLargerThanTheResponseCap(t *testing.T) {
 	}
 }
 
-// TestNoResolverReturnsAnEmptySecretWithoutAnError demonstrates a real bug. Most resolvers already
-// refuse an empty value: Secrets Manager says the secret has no value, Key Vault and CCP say the
-// same, and Conjur refuses an empty body. Vault, Vault dynamic, Secret Manager, and the command
-// source do not, so a field that exists but is blank, a Secret Manager response with no payload, or
-// a fetch command that prints nothing and exits zero all resolve to an empty credential and the run
-// proceeds with it. An empty password or token is the failure mode a credential exists to prevent,
-// and the audit trail records the resolve as a success.
+// TestNoResolverReturnsAnEmptySecretWithoutAnError holds every resolver to refusing a blank value.
+// Secrets Manager says the secret has no value, Key Vault and CCP say the same, and Conjur refuses
+// an empty body. Vault, Vault dynamic, Secret Manager and the command source once did not, so a
+// field that existed but was blank, a Secret Manager response with no payload, or a fetch command
+// that printed nothing and exited zero all resolved to an empty credential and the run proceeded
+// with it. An empty password or token is the failure mode a credential exists to prevent, and the
+// audit trail recorded the resolve as a success.
 // It does not run in parallel: it points the package-level gsmEndpoint at its own mock, and
 // TestResolveGSM swaps the same variable, so running the two at once makes each read the other's
 // server.

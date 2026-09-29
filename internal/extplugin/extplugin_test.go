@@ -247,13 +247,13 @@ func waitTerminal(t *testing.T, baseURL, id string) string {
 }
 
 // waitFile polls for the notifier's file until it appears or the deadline passes, and returns its
-// contents.
-// TestWaitFileWaitsForContentNotExistence pins the helper above against the race it lost once.
+// contents. TestWaitFileWaitsForContentNotExistence pins the helper above against the race it lost
+// once.
 //
 // The notifier is a subprocess. It creates its file and then writes to it, and a reader that treats
 // the create as the signal gets the zero bytes in between. That empty string then failed an
-// assertion about what the plugin recorded, which pointed at the plugin rather than at the read, and
-// it reproduced on no developer machine because the window only opens under load.
+// assertion about what the plugin recorded, which pointed at the plugin rather than at the read,
+// and it reproduced on no developer machine because the window only opens under load.
 func TestWaitFileWaitsForContentNotExistence(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "notified")

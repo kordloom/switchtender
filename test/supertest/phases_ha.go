@@ -196,10 +196,20 @@ func (h *harness) phaseHA(license string) error {
 	if err := h.apiCall("GET", "/v1/audit/verify", &human, nil, &verify); err != nil {
 		return err
 	}
-	if !verify.OK {
+	// An empty chain verifies. The endpoint answers ok with a count of zero on an install that has
+	// never recorded anything, which is right of the endpoint and wrong to accept here: this phase
+	// ran two servers, a worker, several runs and an approval, so a chain holding nothing means the
+	// history recorded none of it. The evidence line already claimed entries were appended, and
+	// nothing checked that any were.
+	switch {
+	case !verify.OK:
 		h.fail(phase, "the chain is one unforked history after the failover",
 			fmt.Errorf("audit verify says not ok"))
-	} else {
+	case verify.Count == 0:
+		h.fail(phase, "the chain is one unforked history after the failover",
+			fmt.Errorf("%w: this phase ran runs, an approval and a failover, so an empty history "+
+				"is the record having missed all of it", ErrEmptyChain))
+	default:
 		h.pass(phase, "the chain is one unforked history after the failover",
 			fmt.Sprintf("%d entries appended by two servers and a worker, one signing identity", verify.Count))
 	}

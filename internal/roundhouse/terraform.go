@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -39,6 +40,16 @@ func (t *terraformRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Re
 	dir, err := toolWorkDir(spec.Dir, spec.Command)
 	if err != nil {
 		return Result{ExitCode: -1}, err
+	}
+	// Checked here rather than left to exec. A run carrying no project has no checkout to resolve
+	// against, so the working directory comes back as the command string itself, and starting a
+	// process in a directory that does not exist fails with ENOENT reported against the executable.
+	// The reader is then told terraform is missing while terraform is sitting on the PATH, and the
+	// thing actually missing, a project for it to run in, is never mentioned.
+	if info, serr := os.Stat(dir); serr != nil || !info.IsDir() {
+		return Result{ExitCode: -1}, fmt.Errorf("%w: %q, which is where %s would run. A run of "+
+			"this tool needs a project whose checkout holds the directory its command names",
+			ErrNoWorkDir, dir, t.binary)
 	}
 	env := append(append([]string{}, t.baseEnv...), spec.Env...)
 	env = append(env, terraformVars(spec.ExtraVars)...)

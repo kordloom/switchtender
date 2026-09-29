@@ -170,19 +170,38 @@ func (h *harness) phaseDR() error {
 	// receipt downloaded from the ORIGINAL community install still verifies offline, right now,
 	// after this phase destroyed a different install and could have destroyed that one.
 	var verify struct {
-		OK bool `json:"ok"`
+		OK    bool `json:"ok"`
+		Count int  `json:"count"`
 	}
 	if err := h.apiCall("GET", "/v1/audit/verify", &fresh, nil, &verify); err != nil {
 		return err
 	}
+	// The count travels with the verdict. An empty chain verifies, so ok on its own does not say
+	// whether anything was checked, and this install is deliberately one whose history did not
+	// travel: a reader has to be able to see how much of a chain stood on its own.
 	if !verify.OK {
 		h.fail(phase, "the new install's own chain verifies", fmt.Errorf("verify not ok"))
 	} else {
 		h.pass(phase, "the new install's own chain verifies",
-			"history deliberately does not travel; the new chain stands on its own")
+			fmt.Sprintf("history deliberately does not travel; the new chain stands on its own, "+
+				"%d entries", verify.Count))
 	}
-	receipts, _ := filepath.Glob(filepath.Join(h.work, "community-*-receipt.json"))
-	if len(receipts) > 0 {
+	// The receipt the community phase downloaded, verified here with no server in existence. An
+	// absent one is a failure rather than a quiet exit: this claim is the whole evidence story, and
+	// wrapping it in a check for the file meant that when no file was written the claim left the
+	// ledger entirely. A ledger lists what ran, so a claim that never ran reads as a claim nobody
+	// needed. The phase runner above already learned this once and records the phases it never
+	// reached for the same reason.
+	receipts, gerr := filepath.Glob(filepath.Join(h.work, "community-*-receipt.json"))
+	switch {
+	case gerr != nil:
+		h.fail(phase, "evidence outlives the install that produced it",
+			fmt.Errorf("%w: look for the community receipt: %w", ErrNothingRead, gerr))
+	case len(receipts) == 0:
+		h.fail(phase, "evidence outlives the install that produced it",
+			fmt.Errorf("%w: the community phase wrote no receipt to %s, so the one claim that "+
+				"does not depend on any server was never tested", ErrNothingRead, h.work))
+	default:
 		if out, err := h.run(h.bin, "verify", receipts[0]); err != nil {
 			h.fail(phase, "evidence outlives the install that produced it",
 				fmt.Errorf("%w\n%s", err, out))

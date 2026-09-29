@@ -8,9 +8,10 @@ import (
 	"testing"
 )
 
-// gatesRequiringEveryEngine are the workflows that run the suite with SWITCHTENDER_REQUIRE_FULL_SUITE
-// set, which turns an absent engine from a skip into a failure. A workflow that demands an engine it
-// does not install cannot pass, so each of these has to carry every engine in enginesCIMustRun.
+// gatesRequiringEveryEngine are the workflows that run the suite with
+// SWITCHTENDER_REQUIRE_FULL_SUITE set, which turns an absent engine from a skip into a failure. A
+// workflow that demands an engine it does not install cannot pass, so each of these has to carry
+// every engine in enginesCIMustRun.
 var gatesRequiringEveryEngine = []string{
 	".github/workflows/ci.yml",
 	".github/workflows/release.yml",
@@ -58,8 +59,8 @@ func TestEveryRequiredEngineIsInstalledByEveryGate(t *testing.T) {
 	}
 }
 
-// repoRootForTest walks up from the test's directory to the module root, so the test does not depend
-// on where it was invoked from.
+// repoRootForTest walks up from the test's directory to the module root, so the test does not
+// depend on where it was invoked from.
 func repoRootForTest() (string, error) {
 	dir, err := os.Getwd()
 	if err != nil {

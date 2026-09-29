@@ -11,6 +11,12 @@ var (
 	ErrUnknownTool = errors.New("unknown execution tool")
 	// ErrBadWorkDir is returned when a tool's working directory escapes its project checkout.
 	ErrBadWorkDir = errors.New("working directory escapes the project")
+	// ErrNoWorkDir is returned when the directory a tool would run in does not exist. It is its own
+	// error because the operating system reports it against the executable rather than the
+	// directory: a run with no project resolved its working directory to the command string, and
+	// the failure read "fork/exec /usr/local/bin/terraform: no such file or directory", which sends
+	// a reader to check an install that is fine.
+	ErrNoWorkDir = errors.New("working directory does not exist")
 	// ErrNoInventory is returned when host enumeration is requested without an inventory.
 	ErrNoInventory = errors.New("no inventory")
 	// ErrLaunch is returned when the executor could not start or supervise the process.

@@ -10,8 +10,15 @@ import (
 	"time"
 )
 
-// These tests demonstrate defects found while writing the suite. Each one fails against the code as
-// it stands, so each is skipped to keep the suite green until the operator decides what to fix.
+// These tests pin defects found while writing the suite. Each one failed against the code as it
+// stood and each is fixed, so they run with everything else and are what stops any of them coming
+// back. The wording below describes what the code used to do, which is the reason each bound
+// exists.
+
+// The header above once said these were skipped to keep the suite green. They were fixed and
+// unskipped and the note was not, so a file named for known bugs went on announcing live defects in
+// a public repository long after there were none. A comment claiming a vulnerability is a claim
+// like any other and goes stale the same way.
 
 // TestAHostileFeedCannotBecomeAThousandFindings pins the amplification bound the gap walk already
 // keeps and the duplicate walk does not.
