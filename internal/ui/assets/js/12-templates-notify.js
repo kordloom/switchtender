@@ -317,11 +317,15 @@ async function loadTemplates() {
 			history.textContent = "History";
 			history.dataset.tip = "See every run this template has produced";
 			actions.appendChild(history);
-			actions.appendChild(document.createTextNode(" "));
-			actions.appendChild(editButton(() => openTemplateEdit(t), "Click to edit this template's playbook, credentials, and settings"));
-			actions.appendChild(document.createTextNode(" "));
-			const delBtn = deleteCell("/templates/" + t.id, "template " + t.name, tr, "No templates yet.");
-			actions.appendChild(delBtn.firstChild);
+			// Changing or deleting a template is admin work, so the controls only draw for a
+			// session that can use them.
+			if (roleAtLeast("admin")) {
+				actions.appendChild(document.createTextNode(" "));
+				actions.appendChild(editButton(() => openTemplateEdit(t), "Click to edit this template's playbook, credentials, and settings"));
+				actions.appendChild(document.createTextNode(" "));
+				const delBtn = deleteCell("/templates/" + t.id, "template " + t.name, tr, "No templates yet.");
+				actions.appendChild(delBtn.firstChild);
+			}
 			tr.appendChild(actions);
 			tbody.appendChild(tr);
 		}

@@ -455,7 +455,11 @@ async function credentialUsers() {
 				if (!map.get(id).includes(t.name)) map.get(id).push(t.name);
 			}
 		}
-	} catch { /* the column falls back to a dash */ }
+	} catch {
+		// A failed lookup is not an empty one: rendering it as "no template references this"
+		// asserted a fact nobody checked. Null tells the column to say it does not know.
+		return null;
+	}
 	return map;
 }
 
@@ -465,7 +469,7 @@ async function loadCredentials() {
 		const data = await getJSON("/credentials");
 		const creds = data.credentials || [];
 		if (creds.length === 0) {
-			showEmpty("No credentials yet.");
+			showEmpty("No credentials yet. Add one and templates can reach hosts with it, sealed at rest and injected only at execution.");
 			return;
 		}
 		renderNeedsSecret(creds);
@@ -482,6 +486,13 @@ async function loadCredentials() {
 					settingsEntries.map(([k, v]) => k + "=" + v).join(", ");
 			}
 			tr.appendChild(name);
+			// The row opens as a drawer too, so the settings a tooltip carries are reachable on
+			// touch and readable whole rather than clipped into one hover line.
+			inspectable(tr, c.name, [
+				{ label: "Kind", value: c.kind },
+				{ label: "Source", value: c.source || "local" },
+				{ label: "Settings", value: settingsEntries.map(([k, v]) => k + "=" + v).join("\n"), block: true },
+			]);
 			// Kind and source are chips rather than bare text, so the column reads at a glance and the
 			// facet menus can offer them as values to tick.
 			const kind = td("");
@@ -516,6 +527,12 @@ async function loadCredentials() {
 			secret.appendChild(secretChip);
 			tr.appendChild(secret);
 			const usedBy = td("");
+			if (!templateUsers) {
+				usedBy.textContent = "unknown";
+				usedBy.className = "muted";
+				usedBy.dataset.tip = "The template list could not be read, so what uses this credential is unknown";
+				tr.appendChild(usedBy);
+			} else {
 			const users = templateUsers.get(c.id) || [];
 			if (users.length) {
 				const link = document.createElement("a");
@@ -528,6 +545,7 @@ async function loadCredentials() {
 				usedBy.dataset.tip = "No template references this credential";
 			}
 			tr.appendChild(usedBy);
+			}
 			tr.appendChild(tdTime(c.created_at));
 			const actions = document.createElement("td");
 			const del = document.createElement("button");
@@ -539,10 +557,7 @@ async function loadCredentials() {
 				e.preventDefault();
 				if (!window.confirm("Delete credential " + c.name + "?")) return;
 				try {
-					const res = await fetch(API + "/credentials/" + c.id, {
-						method: "DELETE", headers: authHeaders(),
-					});
-					if (!res.ok) throw new Error("HTTP " + res.status);
+					await authedDelete("/credentials/" + c.id);
 					removeRow(tr, "No credentials yet.");
 				} catch (err) {
 					setStatus("Delete failed: " + err.message);

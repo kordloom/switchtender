@@ -47,6 +47,23 @@ function auditChange(method, path) {
 	if (parts[0] === "hooks") {
 		return "Fired a webhook trigger";
 	}
+	// The chain's own entry kinds read as sentences, not as lowercase path fragments: a decision
+	// binding a spec, a schedule firing, and a run's committed outcome are the entries an auditor
+	// reads first.
+	if (method === "DECISION") {
+		const verdict = parts[parts.length - 1];
+		const runID = parts[1] || "";
+		if (verdict === "approved") return "Approved run " + runID + ", binding its spec digest";
+		if (verdict === "rejected") return "Rejected run " + runID;
+		return "Decided run " + runID;
+	}
+	if (method === "SCHEDULE") {
+		return "Schedule " + (parts[1] || "") + " fired";
+	}
+	if (method === "RUN") {
+		return "Run " + (parts[1] || "") + " finished " +
+			String(parts[parts.length - 1] || "").replace(/_/g, " ");
+	}
 	if (parts[0] === "auth") {
 		return parts.includes("acs") || parts.includes("callback") || parts.includes("login")
 			? "Signed in" : "Changed authentication";
@@ -140,7 +157,11 @@ function markTrailTruncated(shown) {
 
 async function loadAudit() {
 	try {
-		const data = await getJSON("/audit?limit=" + AUDIT_PAGE);
+		// A ?q= arrival is a search, usually a run id from the run page's Audit trail button, so
+		// the page asks for the server's maximum window instead of its display default: a run
+		// older than the default page filtered to an empty table with nothing explaining why.
+		const preset = new URLSearchParams(location.search).get("q");
+		const data = await getJSON("/audit?limit=" + (preset ? 1000 : AUDIT_PAGE));
 		const entries = data.entries || [];
 		if (entries.length === 0) {
 			showEmpty("No audit entries yet. Every change is recorded here.");
@@ -152,16 +173,45 @@ async function loadAudit() {
 			tr.appendChild(td(String(e.seq)));
 			tr.appendChild(tdTime(e.at));
 			tr.appendChild(td(e.actor || "-"));
+			tr.appendChild(td(e.actor_type || "-"));
+			tr.appendChild(td(e.on_behalf_of || "-"));
 			tr.appendChild(auditChangeCell(e.method, e.path));
 			tr.appendChild(td(e.method, "mono"));
 			tr.appendChild(auditPathCell(e.path));
-			tr.appendChild(td((e.hash || "").slice(0, 12), "mono"));
+			// The cell shows a prefix a person can compare; the export carries the whole hash,
+			// which is the value a verifier actually needs.
+			const hashCell = td((e.hash || "").slice(0, 12), "mono");
+			hashCell.dataset.export = e.hash || "";
+			tr.appendChild(hashCell);
+			inspectable(tr, "Chain entry " + e.seq, [
+				{ label: "Sequence", value: String(e.seq) },
+				{ label: "At", value: e.at },
+				{ label: "Actor", value: e.actor },
+				{ label: "Actor type", value: e.actor_type },
+				{ label: "On behalf of", value: e.on_behalf_of },
+				{ label: "Change", value: auditChange(e.method, e.path) },
+				{ label: "Method", value: e.method },
+				{ label: "Path", value: e.path, block: true },
+				{ label: "Content digest", value: e.content_digest, block: true },
+				{ label: "Entry hash", value: e.hash, block: true, copy: true },
+				{ label: "Previous hash", value: e.prev_hash, block: true },
+			]);
 			tbody.appendChild(tr);
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
 		showListControls();
-		if (data.has_more) markTrailTruncated(entries.length);
+		if (data.has_more) {
+			markTrailTruncated(entries.length);
+			if (preset) {
+				const notice = document.getElementById("audit-truncated");
+				if (notice) {
+					notice.textContent += " A search only covers this window, so older entries " +
+						"mentioning \"" + preset + "\" may exist beyond it. A run's receipt " +
+						"(switchtender receipt) carries its own chain entries whole.";
+				}
+			}
+		}
 	} catch (e) {
 		setStatus("Failed to load the audit trail: " + e.message);
 	}
@@ -257,6 +307,21 @@ function refreshRelTimes() {
 	for (const el of document.querySelectorAll(".reltime[data-time]")) {
 		el.textContent = relTime(el.dataset.time);
 	}
+}
+
+// wireModalExits gives a dialog the standard three exits, the close button, a backdrop click, and
+// Escape, without requiring an open button, for dialogs the page opens programmatically. The
+// launch-with-overrides and survey dialogs had only their close control, which on a phone is the
+// difference between a dialog and a trap.
+function wireModalExits(name) {
+	const modal = document.getElementById(name + "-modal");
+	if (!modal || modal.dataset.exitsWired) return;
+	modal.dataset.exitsWired = "true";
+	const close = () => { modal.hidden = true; };
+	const closeBtn = document.getElementById(name + "-close");
+	if (closeBtn) closeBtn.addEventListener("click", close);
+	modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
+	document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !modal.hidden) close(); });
 }
 
 // wireModal wires a create dialog: the open button shows it; the close button, a backdrop click, and

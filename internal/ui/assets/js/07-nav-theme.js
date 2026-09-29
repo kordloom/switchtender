@@ -5,8 +5,6 @@ function buildNav() {
 	const topbar = document.querySelector(".topbar");
 	if (!topbar) return;
 
-	const role = localStorage.getItem("st_role");
-	const showAdmin = !role || role === "admin";
 	const activeKey = PAGE_NAV[document.body.dataset.page] || "";
 
 	const burger = '<line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/>' +
@@ -33,7 +31,8 @@ function buildNav() {
 	// docked sidebar so the two never drift apart.
 	const fillGroups = (root) => {
 		for (const group of NAV_GROUPS) {
-			const items = group.items.filter((it) => showAdmin || !it.admin);
+			const items = group.items.filter((it) =>
+			(!it.admin || roleAtLeast("admin")) && (!it.operator || roleAtLeast("operator")));
 			if (!items.length) continue;
 			const g = document.createElement("div");
 			g.className = "nav-group";
@@ -125,7 +124,8 @@ function mountFooter() {
 		links.appendChild(a);
 	};
 	add("Docs", "/ui/docs", "Click to open the documentation");
-	add("Doctor", "/ui/doctor", "Click to run the reference health checks");
+	// The doctor reads management data, so the link only shows where the page would answer.
+	if (roleAtLeast("admin")) add("Doctor", "/ui/doctor", "Click to run the reference health checks");
 	add("Source", "https://github.com/kordloom/switchtender", "Click to open the repository", true);
 	add("License", "https://github.com/kordloom/switchtender/blob/main/LICENSE", "Click to read the license", true);
 	const top = document.createElement("button");
@@ -309,12 +309,11 @@ let paletteState = null;
 // paletteEntries returns everything the palette can jump to: each nav destination the current role
 // can see, then a few direct actions.
 function paletteEntries() {
-	const role = localStorage.getItem("st_role");
-	const showAdmin = !role || role === "admin";
 	const out = [];
 	for (const group of NAV_GROUPS) {
 		for (const it of group.items) {
-			if (it.admin && !showAdmin) continue;
+			if (it.admin && !roleAtLeast("admin")) continue;
+			if (it.operator && !roleAtLeast("operator")) continue;
 			out.push({ label: it.label, desc: it.desc || "", group: group.label, icon: NAV_ICONS[it.key] || "", href: it.href });
 		}
 	}

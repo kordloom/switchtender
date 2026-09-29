@@ -68,17 +68,56 @@ function requireLogin() {
 	location.href = "/ui/login";
 }
 
-// getJSON fetches and decodes a JSON endpoint, redirecting to sign in on a 401.
+// uiRole returns the signed-in role, empty when unknown. An open install and an unscoped admin
+// token both have no role, and both hold full authority, so an empty role gates nothing.
+function uiRole() {
+	return localStorage.getItem("st_role") || "";
+}
+
+// roleAtLeast reports whether this session may act at the given level. The server enforces the
+// real policy; this only decides whether a control is worth drawing, so a button's only future is
+// not a 403.
+function roleAtLeast(need) {
+	const role = uiRole();
+	if (!role) return true;
+	const rank = { viewer: 1, operator: 2, admin: 3 };
+	return (rank[role] || 3) >= (rank[need] || 3);
+}
+
+// getJSON fetches and decodes a JSON endpoint, redirecting to sign in on a 401. A 403 explains
+// itself in role terms instead of surfacing the request path and a bare status code, which read
+// as breakage rather than as policy.
 async function getJSON(url) {
 	const res = await fetch(API + url, { headers: authHeaders() });
 	if (res.status === 401) {
 		requireLogin();
 		throw new Error("authentication required");
 	}
+	if (res.status === 403) {
+		throw new Error("this view needs a higher role than this session holds");
+	}
 	if (!res.ok) {
 		throw new Error(url + " returned " + res.status);
 	}
 	return res.json();
+}
+
+// authedDelete deletes a resource with the session's credentials, translating the failures a
+// person can act on: a 401 walks to sign-in, a 403 explains itself in role terms, and anything
+// else carries the server's own error text instead of a bare HTTP status.
+async function authedDelete(path) {
+	const res = await fetch(API + path, { method: "DELETE", headers: authHeaders() });
+	if (res.status === 401) {
+		requireLogin();
+		throw new Error("authentication required");
+	}
+	if (res.status === 403) {
+		throw new Error("deleting this needs a higher role than this session holds");
+	}
+	if (!res.ok) {
+		const data = await res.json().catch(() => ({}));
+		throw new Error(data.error || ("the server refused with HTTP " + res.status));
+	}
 }
 
 // mountLiveRegions marks every status line as a polite live region so assistive tech announces the

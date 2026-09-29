@@ -90,6 +90,8 @@ async function loadFleet() {
 			tr.appendChild(stability);
 			const sparkCell = document.createElement("td");
 			sparkCell.appendChild(sparkline(h.recent || [], h.recent_runs || []));
+			// The drawing exports as its underlying outcomes, oldest first, not as an empty cell.
+			sparkCell.dataset.export = (h.recent || []).join(" ");
 			tr.appendChild(sparkCell);
 			tr.appendChild(td(String(h.total)));
 			const last = document.createElement("td");
@@ -253,6 +255,7 @@ async function loadTasks() {
 			tr.appendChild(trend);
 			const spark = document.createElement("td");
 			spark.appendChild(durationSpark(t.recent));
+			spark.dataset.export = (t.recent || []).join(" ");
 			tr.appendChild(spark);
 			tr.appendChild(td(String(t.runs)));
 			tr.appendChild(td(fmtSeconds(t.avg_seconds)));
@@ -432,16 +435,19 @@ async function loadSchedules() {
 				e.preventDefault();
 				if (!window.confirm("Delete schedule " + (s.name || s.id) + "?")) return;
 				try {
-					const res = await fetch(API + "/schedules/" + s.id, { method: "DELETE", headers: authHeaders() });
-					if (!res.ok) throw new Error("HTTP " + res.status);
+					await authedDelete("/schedules/" + s.id);
 					removeRow(tr, "No schedules yet. Add one to fire a template on a cadence.");
 				} catch (err) {
 					setStatus("Delete failed: " + err.message);
 				}
 			});
-			actions.appendChild(editButton(() => openScheduleEdit(s), "Click to edit this schedule's cadence and target"));
-			actions.appendChild(document.createTextNode(" "));
-			actions.appendChild(del);
+			// Changing or deleting a schedule is admin work, so the controls only draw for a
+			// session that can use them.
+			if (roleAtLeast("admin")) {
+				actions.appendChild(editButton(() => openScheduleEdit(s), "Click to edit this schedule's cadence and target"));
+				actions.appendChild(document.createTextNode(" "));
+				actions.appendChild(del);
+			}
 			tr.appendChild(actions);
 			tbody.appendChild(tr);
 		}

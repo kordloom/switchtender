@@ -1344,3 +1344,24 @@ td.col-labels .label-wrap { flex-wrap: nowrap; }
 	.docs-layout { grid-template-columns: 1fr; }
 	.app-foot-inner { padding: 0 16px; }
 }
+
+
+/* Phone-width behavior for the pieces the adversarial review caught: list tables scroll inside
+   themselves instead of dragging the whole page sideways, the timeline keeps a visible track, and
+   the topbar sheds its link row into the drawer that already carries every destination. */
+@media (max-width: 700px) {
+	table.runs { display: block; overflow-x: auto; }
+	.tl-row { grid-template-columns: 96px 1fr 56px; gap: 8px; }
+	.topbar { gap: 8px; padding: 11px 12px; }
+	.topbar .topbar-links { display: none; }
+	.notify-row { grid-template-columns: 1fr; }
+	.notify-row .input { width: 100%; }
+}
+
+/* Touch targets: hover cannot carry meaning on a screen nobody hovers, and a control smaller
+   than a fingertip is a control that misfires. */
+@media (pointer: coarse) {
+	.tick { width: 12px; height: 22px; }
+	.copy-btn { width: 34px; height: 34px; }
+	.modal-close, .drill-close { padding: 10px 12px; font-size: 22px; }
+}

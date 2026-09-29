@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -1641,6 +1642,11 @@ func runEventsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.
 // in-process signal arrives, which is how runs executing on other processes stream live.
 const streamPollInterval = time.Second
 
+// streamKeepaliveTicks is how many quiet poll ticks pass between SSE comment lines. A run that
+// prints nothing writes nothing, and an intermediary with a read timeout cuts an idle stream; a
+// comment is invisible to EventSource and keeps the connection warm.
+const streamKeepaliveTicks = 20
+
 // streamBatch caps how many events one drain reads from the store at a time, so a burst of
 // output on a large run is emitted in bounded chunks rather than one unbounded read.
 const streamBatch = 1000
@@ -1790,6 +1796,7 @@ func runStreamHandler(streamer Streamer, store run.Store, authz *authorizer, log
 
 		ticker := time.NewTicker(streamPollInterval)
 		defer ticker.Stop()
+		quietTicks := 0
 		for {
 			select {
 			case <-draining:
@@ -1831,6 +1838,14 @@ func runStreamHandler(streamer Streamer, store run.Store, authz *authorizer, log
 					flusher.Flush()
 				}
 			case <-ticker.C:
+				quietTicks++
+				if quietTicks >= streamKeepaliveTicks {
+					quietTicks = 0
+					if _, err := io.WriteString(w, ": keepalive\n\n"); err != nil {
+						return
+					}
+					flusher.Flush()
+				}
 			}
 		}
 	}

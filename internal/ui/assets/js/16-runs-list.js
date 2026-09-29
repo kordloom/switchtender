@@ -57,11 +57,31 @@ function wireRunsFilters() {
 	}
 }
 
+// wireRunsAutoRefresh keeps the table honest while runs are moving: a run shown running used to
+// stay running on screen forever, because nothing ever re-read the list. The poll only fires when
+// the tab is visible, only while a non-terminal chip is on screen, and never after Load more has
+// grown the table past one page, so it cannot throw away rows someone paged in.
+function wireRunsAutoRefresh() {
+	window.setInterval(() => {
+		if (document.hidden) return;
+		const tbody = document.getElementById("runs");
+		if (!tbody) return;
+		if (tbody.querySelectorAll("tr").length > runsPageSize()) return;
+		if (!tbody.querySelector(".badge.running, .badge.pending, .badge.pending_approval")) return;
+		loadRuns();
+	}, 15000);
+}
+
 // wireRunsSearch reloads the runs table from the server as the search box changes, debounced so a
 // burst of keystrokes issues one request. The server searches every run, not just the loaded page.
 function wireRunsSearch() {
 	const el = document.getElementById("runs-search");
 	if (!el) return;
+	// A link that lands here carrying ?q= promised a filtered view: the held-runs count, a label
+	// chip, a user's fired-runs link. Seeding the box keeps that promise; dropping it showed the
+	// unfiltered list and made every such link a small lie.
+	const preset = new URLSearchParams(location.search).get("q");
+	if (preset && !el.value) el.value = preset;
 	let timer;
 	el.addEventListener("input", () => {
 		clearTimeout(timer);

@@ -661,7 +661,7 @@ carries one is unaffected.</p>
 receives them the way <code>--extra-vars</code> supplies them, and a plugin tool reads them as its input. A
 template carries its own <code>extra_vars</code> and a launch may merge more over them.</p>
 <h2 id="saved-workflows">Saved workflows</h2>
-<p><em>Next release.</em> A template may carry <code>steps</code>, a pipeline graph, instead of a single tool. Such a
+<p>A template may carry <code>steps</code>, a pipeline graph, instead of a single tool. Such a
 template is a saved workflow: every path that fires a template, a launch, a schedule, or a webhook
 trigger, runs the graph as a pipeline, and the template's survey answers and extra vars reach every
 step. A workflow template sets no top-level <code>playbook</code>, <code>command</code>, <code>tool</code>, <code>shards</code>, or Ansible

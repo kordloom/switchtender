@@ -77,7 +77,7 @@ the schedules first, then re-run with `--apply` to create them.
 | AWX inventory | Stored inventory, rendered as INI from its hosts and groups.|
 | AWX job template | Template, with job slicing becoming shard count.|
 | AWX survey | Template survey, field for field, with the field types translated. A password prompt is refused, not downgraded to plain text.|
-| AWX workflow job template | Workflow template carrying the graph, with each node's job template inlined as a step and the success and always edges becoming dependencies. Imported whole or reported and skipped, never partially. *Next release.*|
+| AWX workflow job template | Workflow template carrying the graph, with each node's job template inlined as a step and the success and always edges becoming dependencies. Imported whole or reported and skipped, never partially.|
 | AWX schedule | Schedule, with the recurrence rule converted to cron.|
 | AWX credential | Credential shell with its kind mapped from its type and its configured inputs, secret omitted.|
 | Semaphore repository | Project.|

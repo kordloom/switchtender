@@ -59,8 +59,8 @@ const API = "/v1";
 // OUTCOME_RANK orders outcomes from least to most severe for rollups.
 const OUTCOME_RANK = { skipped: 0, ok: 1, changed: 2, unreachable: 3, failed: 4 };
 
-// NAV_GROUPS defines the drawer navigation, grouped by concern. Items marked admin are hidden from
-// signed in non-admins; the server still enforces the real policy.
+// NAV_GROUPS defines the drawer navigation, grouped by concern. Items marked admin or operator
+// are hidden from roles below that level; the server still enforces the real policy.
 const NAV_GROUPS = [
 	{ label: "Execution", items: [
 		{ key: "overview", href: "/ui/", label: "Overview", desc: "At a glance" },
@@ -73,10 +73,10 @@ const NAV_GROUPS = [
 	{ label: "Automation", items: [
 		{ key: "projects", href: "/ui/projects", label: "Projects", desc: "Git-sourced playbooks", admin: true },
 		{ key: "inventories", href: "/ui/inventories", label: "Inventories", desc: "Stored host inventories", admin: true },
-		{ key: "sources", href: "/ui/sources", label: "Sources", desc: "Dynamic inventory sync", admin: true },
+		{ key: "sources", href: "/ui/sources", label: "Sources", desc: "Dynamic inventory sync", operator: true },
 		{ key: "templates", href: "/ui/templates", label: "Templates", desc: "Saved launch presets" },
 		{ key: "workflows", href: "/ui/workflows", label: "Workflow", desc: "Visual pipeline builder" },
-		{ key: "schedules", href: "/ui/schedules", label: "Schedules", desc: "Cron-driven runs" },
+		{ key: "schedules", href: "/ui/schedules", label: "Schedules", desc: "Cron-driven runs", operator: true },
 		{ key: "migrate", href: "/ui/migrate", label: "Migrate", desc: "Import from AWX, Semaphore, or Rundeck", admin: true },
 	] },
 	{ label: "Access", items: [

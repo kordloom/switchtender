@@ -195,12 +195,17 @@ async function loadHostFacts(host) {
 			}
 		}
 		panel.hidden = false;
-	} catch {
-		// A host with no gather is the ordinary case on a fleet that runs with gather_facts off.
+	} catch (err) {
+		// A host with no gather is the ordinary case on a fleet that runs with gather_facts off,
+		// but a server error is not that, and reading one as "no facts yet" hid real failures.
 		body.innerHTML = "";
 		if (note) {
-			note.textContent = "No facts gathered yet. Run a play against this host with " +
-				"gather_facts enabled and they will appear here.";
+			note.textContent = err && err.message === "authentication required"
+				? "Sign in to see this host's facts."
+				: (err && /returned|role/.test(err.message || "")
+					? "Could not load this host's facts: " + err.message
+					: "No facts gathered yet. Run a play against this host with " +
+						"gather_facts enabled and they will appear here.");
 		}
 		panel.hidden = false;
 	}

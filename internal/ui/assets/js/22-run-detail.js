@@ -50,6 +50,13 @@ function wireActions(runId) {
 			}
 		});
 	}
+	const explainClose = document.getElementById("explain-close");
+	if (explainClose) {
+		explainClose.addEventListener("click", () => {
+			const panel = document.getElementById("explain-panel");
+			if (panel) panel.hidden = true;
+		});
+	}
 	const explain = document.getElementById("explain-run");
 	if (explain) {
 		explain.addEventListener("click", async () => {
@@ -106,14 +113,18 @@ function updateActions(run) {
 	// unclaimed run in pending_approval. Hiding the button left the person who submitted the run with
 	// no way to stop it, because rejecting is an admin decision while canceling your own run is
 	// operator work. They had to ask an approver to reject something nobody wanted decided.
-	cancel.hidden = isTerminal(run.status);
-	if (approve) approve.hidden = !held;
-	if (reject) reject.hidden = !held;
+	// Each control also honors the session's role: the server refuses a viewer's cancel and an
+	// operator's approve anyway, and a button whose only future is a 403 reads as breakage.
+	cancel.hidden = isTerminal(run.status) || !roleAtLeast("operator");
+	if (approve) approve.hidden = !held || !roleAtLeast("admin");
+	if (reject) reject.hidden = !held || !roleAtLeast("admin");
 	const splitParent = (run.kind === "split" || run.shard_count) && !run.parent_id;
-	retry.hidden = !(splitParent && isTerminal(run.status) && run.status !== "succeeded");
+	retry.hidden = !(splitParent && isTerminal(run.status) && run.status !== "succeeded") ||
+		!roleAtLeast("operator");
 	if (explain) {
 		const heldProposal = held && (run.proposed_from || run.intent);
-		explain.hidden = !(run.status === "failed" || run.status === "interrupted" || heldProposal);
+		explain.hidden = !(run.status === "failed" || run.status === "interrupted" || heldProposal) ||
+			!roleAtLeast("operator");
 	}
 }
 
@@ -148,7 +159,9 @@ function renderRiskCallout(run) {
 	const head = document.createElement("div");
 	head.className = "risk-callout-head";
 	const label = document.createElement("strong");
-	label.textContent = "Held for approval";
+	label.textContent = run.held_by_policy
+		? "Held for approval by \"" + run.held_by_policy + "\""
+		: "Held for approval";
 	head.appendChild(label);
 	head.appendChild(riskBadge(risk));
 	host.appendChild(head);
@@ -176,17 +189,45 @@ async function loadPipeline(pipelineId) {
 	}
 }
 
+// headerTimer coalesces live header refreshes, so a burst of events refreshes the status,
+// duration, and action row once every few seconds rather than once per event.
+let headerTimer = null;
+
+// scheduleHeaderRefresh re-reads the run and redraws its header while it executes. Without it the
+// header rendered once at load and then froze: a run that moved from pending to running to failed
+// kept its first badge and its stale action buttons until the end signal, or forever if the end
+// was missed.
+function scheduleHeaderRefresh(runId) {
+	if (headerTimer !== null) return;
+	headerTimer = window.setTimeout(async () => {
+		headerTimer = null;
+		try {
+			const run = await getJSON("/runs/" + runId);
+			if (!detailState || detailState.runId !== runId) return;
+			detailState.run = run;
+			renderHeader(run);
+		} catch (_) { /* keep the last header on a refresh failure */ }
+	}, 3000);
+}
+
 // streamIndicator wires a stream's lifecycle into the live indicator. The browser retries a
 // dropped stream on its own, so an error normally only flips the label to reconnecting. But a
 // stream the browser has given up on, an expired token answered with 401 or a response that is
 // not a stream at all, fires its error with the source already closed and never retries: saying
 // "reconnecting" forever was a promise nothing was keeping. That state now says the live view is
 // gone and offers the reload that actually resumes it.
-function streamIndicator(source) {
+function streamIndicator(source, onReconnect) {
 	const indicator = document.getElementById("live-indicator");
 	if (!indicator) return;
 	indicator.hidden = false;
-	source.onopen = () => { indicator.textContent = "live"; };
+	let dropped = false;
+	source.onopen = () => {
+		indicator.textContent = "live";
+		// A stream that resumes after a drop missed whatever was sent meanwhile. The caller says
+		// how to catch up, since only it knows whether a cursor already covers the gap.
+		if (dropped && onReconnect) onReconnect();
+		dropped = false;
+	};
 	source.onerror = () => {
 		if (source.readyState === 2) {
 			indicator.textContent = "";
@@ -196,6 +237,7 @@ function streamIndicator(source) {
 			indicator.appendChild(link);
 			return;
 		}
+		dropped = true;
 		indicator.textContent = "reconnecting";
 	};
 }
@@ -319,7 +361,8 @@ async function reconcileParent(parentId) {
 // connecting: whatever the live view missed is on the page by the time the run is finished.
 function openParentStream(parentId) {
 	const source = new EventSource(streamURL("/runs/" + parentId + "/stream"));
-	streamIndicator(source);
+	// The parent stream has no resume cursor, so a reconnect re-reads every shard whole.
+	streamIndicator(source, () => { reconcileParent(parentId).catch(() => {}); });
 	const refreshShards = async () => {
 		try {
 			const shardData = await getJSON("/runs/" + parentId + "/shards");
@@ -330,6 +373,7 @@ function openParentStream(parentId) {
 		try {
 			const ev = JSON.parse(e.data);
 			applyLiveEvent(ev);
+			scheduleHeaderRefresh(parentId);
 			if (ev.type === "stats") {
 				refreshShards();
 			}
@@ -378,7 +422,7 @@ function renderShards(shards) {
 // isTerminal reports whether a run status is final.
 function isTerminal(status) {
 	return status === "succeeded" || status === "failed" ||
-		status === "canceled" || status === "interrupted";
+		status === "canceled" || status === "interrupted" || status === "rejected";
 }
 
 // renderDetail redraws the header, matrix, and timeline from the current state. The model is folded
@@ -439,6 +483,7 @@ function openStream(runId, afterSeq) {
 			if (ev.seq && ev.seq <= (detailState.lastSeq || 0)) return;
 			if (ev.seq) detailState.lastSeq = ev.seq;
 			applyLiveEvent(ev);
+			scheduleHeaderRefresh(runId);
 		} catch (_) { /* ignore a malformed event */ }
 	});
 	source.addEventListener("log", (e) => {
@@ -571,6 +616,26 @@ function renderHeader(run) {
 	}
 	renderRiskCallout(run);
 	renderWarningCallout(run);
+	if (run.actor) {
+		const who = field("Requested by",
+			run.actor + (run.actor_type === "agent" ? " (agent)" : ""), null, run.actor);
+		if (run.actor_type === "agent") {
+			who.querySelector(".value").dataset.tip =
+				"An AI agent's token submitted this run, on a named human's behalf. The chain " +
+				"commits that attribution.";
+		}
+		el.appendChild(who);
+	}
+	if (run.approved_spec_digest) {
+		const bound = field("Approved spec", shortId(run.approved_spec_digest), null,
+			run.approved_spec_digest);
+		bound.querySelector(".value").dataset.tip =
+			"The digest of the exact spec the approver released. The decision entry on the chain " +
+			"commits it, and the executor refuses a spec that no longer matches.";
+		bound.querySelector(".value").appendChild(
+			copyButton(run.approved_spec_digest, "Copy the approved spec digest"));
+		el.appendChild(bound);
+	}
 	if (run.source) {
 		const origin = originCellEl(run);
 		origin.className = "";
