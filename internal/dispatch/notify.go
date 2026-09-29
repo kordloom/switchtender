@@ -72,6 +72,17 @@ func redactForExternal(r *run.Run) run.Run {
 	out.Notifications = nil
 	out.Command = ""
 	out.Outputs = nil
+	// A pipeline stores each step's raw script in Steps[].Command, the same place an inline secret
+	// lands as the top-level Command, so blank each step's script too. This copies the slice rather
+	// than editing in place, since out shares the caller's Steps and the caller's run must keep its
+	// scripts; the non-secret step shape (name, tool, dry run) is preserved for the notification.
+	if r.Steps != nil {
+		out.Steps = make([]run.PipelineStep, len(r.Steps))
+		for i, s := range r.Steps {
+			s.Command = ""
+			out.Steps[i] = s
+		}
+	}
 	return out
 }
 

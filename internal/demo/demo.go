@@ -243,7 +243,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 		return err
 	}
 
-	normalizeClaimStamps(ctx, d)
+	normalizeClaimStamps(ctx, d, log)
 
 	log.Info("demo: seeded sample projects, templates, inventories, and runs")
 	return nil
@@ -257,7 +257,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 // the claim is reseated between the run's creation and its start, where a real claim falls, so the
 // timeline reads in order. It runs only for the historical seed: without the seed clock the store's
 // claim stamp already matches the rest of the run, so there is nothing to correct.
-func normalizeClaimStamps(ctx context.Context, d Deps) {
+func normalizeClaimStamps(ctx context.Context, d Deps, log *zap.Logger) {
 	if d.Clock == nil || d.Runs == nil {
 		return
 	}
@@ -268,21 +268,21 @@ func normalizeClaimStamps(ctx context.Context, d Deps) {
 	// List returns only the top-level runs, so a split's shards and a pipeline's steps, which carry
 	// their own claim stamps and show their own timelines, are reached through the parent.
 	for _, r := range tops {
-		normalizeOneClaim(ctx, d, r)
+		normalizeOneClaim(ctx, d, r, log)
 		shards, _ := d.Runs.Shards(ctx, r.ID)
 		for _, s := range shards {
-			normalizeOneClaim(ctx, d, s)
+			normalizeOneClaim(ctx, d, s, log)
 		}
 		steps, _ := d.Runs.Steps(ctx, r.ID)
 		for _, s := range steps {
-			normalizeOneClaim(ctx, d, s)
+			normalizeOneClaim(ctx, d, s, log)
 		}
 	}
 }
 
 // normalizeOneClaim reseats a single run's claim stamp between its creation and its start, where a real
 // claim falls, and persists it. A run never claimed, or already claimed in order, is left untouched.
-func normalizeOneClaim(ctx context.Context, d Deps, r *run.Run) {
+func normalizeOneClaim(ctx context.Context, d Deps, r *run.Run, log *zap.Logger) {
 	if r.ClaimedAt == nil {
 		return
 	}
@@ -296,7 +296,11 @@ func normalizeOneClaim(ctx context.Context, d Deps, r *run.Run) {
 		return
 	}
 	r.ClaimedAt = &target
-	_ = d.Runs.Save(ctx, r)
+	// A failed save leaves the run's claim at the real wall clock while its other stamps sit in the
+	// seed window, the exact contradiction this pass removes, so surface it rather than swallow it.
+	if err := d.Runs.Save(ctx, r); err != nil && log != nil {
+		log.Warn("demo: normalize claim stamp: save failed: " + err.Error())
+	}
 }
 
 // seedMultiTool runs one Bash, Python, Terraform, and Go job plus a mixed-tool pipeline, so the demo
