@@ -18,7 +18,7 @@
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-	<link rel="stylesheet" href="/styles.css?v=34">
+	<link rel="stylesheet" href="/styles.css?v=35">
 	<!-- st:entity -->
 	<script type="application/ld+json">
 {
@@ -113,7 +113,7 @@
 				</article>
 				<article class="card reveal">
 					<h3>Governance stops at the basics</h3>
-					<p>Semaphore ships teams and four fixed project roles in its free build, and reserves custom per-template roles for its enterprise tier and single sign-on for its paid tier. It has no approval gates and no provable audit. SwitchTender ships organizations, teams, per-object grants, single sign-on, policy-enforced approvals, and a tamper-evident hash-chained audit trail in the core.</p>
+					<p>Both of us charge for single sign-on, and at the same price: Semaphore reserves it for Pro, and so do we, at $490 a year flat per organization. That is a fair fight and we are not going to pretend otherwise. What is free here and not there: organizations, teams, per-object grants, a digest-bound approval gate, and a tamper-evident hash-chained audit trail with signed receipts that verify offline. Semaphore ships four fixed project roles in its free build, reserves custom per-template roles for its enterprise tier, and has no approval gates and no provable audit at any tier.</p>
 				</article>
 				<article class="card reveal">
 					<h3>The fleet has no memory</h3>
@@ -191,7 +191,7 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>Common questions</h2>
-				<p>The three asked most often when somebody is comparing this against what they already run.</p>
+				<p>The four asked most often when somebody is comparing this against what they already run.</p>
 			</div>
 			<div class="cards cards-3">
 				<article class="card reveal">
@@ -205,6 +205,10 @@
 				<article class="card reveal">
 					<h3>Can I run a Terraform plan, hold it for approval, then run Ansible?</h3>
 					<p>Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency graph with parallel branches, built on a drag-and-drop canvas. The approval is not a convention somebody can skip: a policy decides which runs are held, the core enforces the hold, and the approval binds to the exact plan reviewed, so a run cannot be approved as one thing and executed as another.</p>
+				</article>
+				<article class="card reveal">
+					<h3>What if Semaphore adds signed receipts too?</h3>
+					<p>Then the market wanted them, which is better news for us than the alternative. Nothing in a hash chain is hard to build and we have never claimed otherwise. But a receipt signed by the same product whose runs it describes is still that system&#39;s word about itself, and at this tier ours is no different. The property neither of us can self-provide is an outside party watching the chain and countersigning what it saw, which is what our Enterprise tier is. Until then, judge us on the seven engines and on whether the receipt verifies with a tool we do not control.</p>
 				</article>
 			</div>
 			<script type="application/ld+json">
@@ -234,6 +238,14 @@
    "acceptedAnswer": {
     "@type": "Answer",
     "text": "Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency graph with parallel branches, built on a drag-and-drop canvas. The approval is not a convention somebody can skip: a policy decides which runs are held, the core enforces the hold, and the approval binds to the exact plan reviewed, so a run cannot be approved as one thing and executed as another."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "What if Semaphore adds signed receipts too?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "Then the market wanted them, which is better news for us than the alternative. Nothing in a hash chain is hard to build and we have never claimed otherwise. But a receipt signed by the same product whose runs it describes is still that system's word about itself, and at this tier ours is no different. The property neither of us can self-provide is an outside party watching the chain and countersigning what it saw, which is what our Enterprise tier is. Until then, judge us on the seven engines and on whether the receipt verifies with a tool we do not control."
    }
   }
  ]

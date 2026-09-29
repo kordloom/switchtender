@@ -428,6 +428,31 @@ var landingFAQ = []landingQA{{
 		"as one thing and executed as another.",
 }}
 
+// landingExtraFAQ holds page-specific questions appended after the shared ones, keyed by the
+// page's file name. A question that only makes sense on one landing page belongs here; editing
+// the generated HTML instead gets clobbered on the next run, which is how one card was lost once.
+var landingExtraFAQ = map[string][]landingQA{
+	"semaphore-alternative.html": {{
+		Question: "What if Semaphore adds signed receipts too?",
+		Answer: "Then the market wanted them, which is better news for us than the alternative. " +
+			"Nothing in a hash chain is hard to build and we have never claimed otherwise. But a " +
+			"receipt signed by the same product whose runs it describes is still that system's " +
+			"word about itself, and at this tier ours is no different. The property neither of us " +
+			"can self-provide is an outside party watching the chain and countersigning what it " +
+			"saw, which is what our Enterprise tier is. Until then, judge us on the seven engines " +
+			"and on whether the receipt verifies with a tool we do not control.",
+	}},
+}
+
+// countWord spells the small counts the section lead names.
+func countWord(n int) string {
+	words := map[int]string{2: "two", 3: "three", 4: "four", 5: "five", 6: "six"}
+	if w, ok := words[n]; ok {
+		return w
+	}
+	return fmt.Sprintf("%d", n)
+}
+
 // faqMarkers bracket the shared landing-page questions, the same way the entity markers work.
 const (
 	faqOpen  = "<!-- st:faq -->"
@@ -438,17 +463,18 @@ const (
 // the structured data describing the same words. The markup and the schema are generated together
 // from one source, which is what keeps the structured data honest: it can only ever describe
 // questions and answers a reader can actually see on the page.
-func landingFAQBlock() string {
+func landingFAQBlock(extra []landingQA) string {
+	all := append(append([]landingQA{}, landingFAQ...), extra...)
 	var b strings.Builder
 	b.WriteString("\n\t\t<section class=\"section wrap\">\n")
 	b.WriteString("\t\t\t<div class=\"section-head reveal\">\n")
 	b.WriteString("\t\t\t\t<h2>Common questions</h2>\n")
-	b.WriteString("\t\t\t\t<p>The three asked most often when somebody is comparing this against " +
-		"what they already run.</p>\n")
+	b.WriteString("\t\t\t\t<p>The " + countWord(len(all)) + " asked most often when somebody " +
+		"is comparing this against what they already run.</p>\n")
 	b.WriteString("\t\t\t</div>\n")
 	b.WriteString("\t\t\t<div class=\"cards cards-3\">\n")
-	questions := make([]faqQuestion, 0, len(landingFAQ))
-	for _, qa := range landingFAQ {
+	questions := make([]faqQuestion, 0, len(all))
+	for _, qa := range all {
 		fmt.Fprintf(&b, "\t\t\t\t<article class=\"card reveal\">\n\t\t\t\t\t<h3>%s</h3>\n"+
 			"\t\t\t\t\t<p>%s</p>\n\t\t\t\t</article>\n",
 			html.EscapeString(qa.Question), html.EscapeString(qa.Answer))
@@ -495,7 +521,8 @@ func writeEntityPages() (int, error) {
 		if err != nil {
 			return 0, err
 		}
-		updated, err = fillMarkers(path, updated, faqOpen, faqClose, landingFAQBlock())
+		updated, err = fillMarkers(path, updated, faqOpen, faqClose,
+			landingFAQBlock(landingExtraFAQ[filepath.Base(path)]))
 		if err != nil {
 			return 0, err
 		}

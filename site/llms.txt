@@ -22,7 +22,7 @@ seeded read-only tour.
 - Live demo, read-only and seeded with real runs, nothing to install: https://demo.switchtender.com
 
 - [Homepage](https://switchtender.com/): what it is and the live matrix
-- [Pricing](https://switchtender.com/pricing): Community free forever, Team from $4,800/year flat per org by fleet band, Enterprise from $50,000/year for independent witnessing and evidence operations
+- [Pricing](https://switchtender.com/pricing): Community free forever, Pro $490/year for SSO and five approval policies, Team from $4,800/year flat per org by fleet band, Enterprise from $50,000/year for independent witnessing and evidence operations
 - [Get started](https://switchtender.com/get-started): install and first run
 - [AI agents](https://switchtender.com/agents): give an agent one operator-bound token, gate every run behind human approval, and prove what it did
 - [Quickstart](https://switchtender.com/docs/quickstart): first job in minutes

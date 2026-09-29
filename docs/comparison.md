@@ -12,7 +12,9 @@ where it is behind, because credibility comes from being straight about all thre
 
 Every claim about another product was checked against that vendor's own documentation on
 2026-08-10, for AWX 24.6.1, Ansible Automation Platform 2.7, Semaphore 2.19.7, Ascender 25.4.0,
-and Rundeck 6.0.1. All of these ship, and a comparison decays the day it is written. Check a row
+and Rundeck 6.0.1. Release state re-verified 2026-09-06: AWX is still 24.6.1 and Semaphore is at
+2.19.12, whose releases since 2.19.7 are bugfix-only and change no row. All of these ship, and a
+comparison decays the day it is written. Check a row
 against the current release before relying on it, and open an issue if one has gone stale.
 
 ## The field, side by side
@@ -88,19 +90,20 @@ than "structured versus scrollback".
 |------------|-------|
 | Multiple runtimes | SwitchTender runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, each with a dry run. AWX is Ansible-only. Semaphore runs Ansible, Terraform, OpenTofu, PowerShell, Bash, and Python, but not Go, and without a uniform dry run across tools. |
 | Container execution environments | SwitchTender pins an image on a template, a run, or a project, most specific wins, with private-registry pulls, opt-in behind a flag. AWX attaches execution environments to job templates. Semaphore favors native runtimes instead. |
-| Access control | SwitchTender has global roles plus organizations, teams, and per-object read, use, and manage grants, all in the source-available core. AWX has mature organization RBAC. Semaphore gates RBAC behind its Enterprise tier. |
-| Credentials | Sealed with AES-256-GCM under a key derived by Argon2id, decrypted only at execution into the run's environment or a temporary file created mode 0600, kept off the command line either way, and deleted when the run ends. Fourteen credential kinds and eleven sources, nine of them external secret managers: HashiCorp Vault static and dynamic, AWS Secrets Manager and STS, Azure Key Vault, GCP Secret Manager, CyberArk Conjur and CCP, and 1Password. Several credentials of different kinds attach to one run. AWX matches this through credential plugins. Semaphore stores an SSH key or a username and password, with no external secret managers. |
+| Access control | SwitchTender has global roles plus organizations, teams, and per-object read, use, and manage grants, all in the source-available core. AWX has mature organization RBAC. Semaphore gates advanced RBAC (custom roles, identity group mapping) behind its Enterprise tier. |
+| Credentials | Sealed with AES-256-GCM under a key derived by Argon2id, decrypted only at execution into the run's environment or a temporary file created mode 0600, kept off the command line either way, and deleted when the run ends. Fourteen credential kinds and eleven sources, nine of them external secret managers: HashiCorp Vault static and dynamic, AWS Secrets Manager and STS, Azure Key Vault, GCP Secret Manager, CyberArk Conjur and CCP, and 1Password. Several credentials of different kinds attach to one run. AWX matches this through credential plugins. Semaphore's built-in key store holds an SSH key or a username and password; HashiCorp Vault support is in its paid Pro tier, and no other external manager is offered. |
 | Scheduling | All three schedule runs. SwitchTender uses cron with highly available claiming so two servers do not double-fire. |
 | Surveys and prompts | All three collect typed values at launch. |
 | Inbound webhooks | All three launch on a git push. |
 | Metrics | SwitchTender exposes Prometheus metrics for scraping. |
-| Directory sign-in | SwitchTender, AWX, and Semaphore all sign in with LDAP and OpenID Connect. |
+| Directory sign-in | SwitchTender, AWX, and Semaphore all sign in with LDAP and OpenID Connect. SwitchTender and Semaphore both price SSO at $490 a year, flat per organization; SwitchTender's Pro tier adds five approval policies to it, and AWX ships it free inside a Kubernetes-sized install. |
+| Paid tiers | SwitchTender: Community free, Pro $490 a year to 250 hosts (SSO and five approval policies), Team $4,800 to $30,000 by fleet band (full policy engine, PostgreSQL active-active HA, distributed workers, drift reconcile, change register), Enterprise from $50,000. AWX: free, no paid tier; the paid product is Ansible Automation Platform. Semaphore: Community free, Pro $490 a year, Enterprise by contract. |
 
 ## Where SwitchTender is behind
 
 | Capability | Status |
 |------------|--------|
-| Maturity | AWX and Semaphore have years of production use and large communities. SwitchTender is young. AWX's years now cut both ways: its last release was July 2024, and its next one removes LDAP, SAML, and OIDC from core. |
+| Maturity | AWX and Semaphore have years of production use and large communities. SwitchTender is young. AWX's years now cut both ways: its last release was July 2024, and [mid-refactor development builds have moved external authentication out of core](https://forum.ansible.com/t/awx-modernization-moving-forward/45134) into a shared library. |
 | Approval steps inside a workflow | A whole run is held for approval. AWX places an approval node at a point in the graph, so the first half runs, waits, and continues. |
 | Recurrence beyond cron | AWX schedules take an RRULE, so "the last Friday of the quarter" is expressible. SwitchTender takes a cron expression with a timezone, and a cadence cron cannot say is reported and skipped on import rather than converted wrongly. |
 | Secret survey answers | AWX offers a password survey field whose answer is stored encrypted. A survey answer here is stored in plain text on the run, so a secret belongs in a credential instead, and both importers refuse to downgrade one rather than accept it quietly. |

@@ -996,7 +996,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		count, _ := filePolicies.List(cmd.Context())
 		// The file is explicit configuration, so a license gap here is a misconfiguration worth
 		// one line at startup, the same treatment SSO gets.
-		needsFull := len(count) > 1
+		needsFull := false
 		for _, fp := range count {
 			if fp.Advanced() {
 				needsFull = true
@@ -1006,6 +1006,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			if aerr := license.Allow(license.FeaturePolicyFull); aerr != nil {
 				return aerr
 			}
+		}
+		if aerr := license.AllowPolicies(len(count)); aerr != nil {
+			return aerr
 		}
 		log.Info("serve: approval policies read from file",
 			zap.String("path", policyFile), zap.Int("policies", len(count)))
