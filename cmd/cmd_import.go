@@ -49,6 +49,39 @@ var importSemaphoreCmd = &cobra.Command{
 	},
 }
 
+// importChefCmd imports a Chef Infra Server node export.
+var importChefCmd = &cobra.Command{
+	Use:   "chef <nodes.json>",
+	Short: "Import a Chef node export into SwitchTender.",
+	Long: "Import a Chef Infra Server node export as an inventory of the fleet it describes.\n\n" +
+		"Nodes become hosts, grouped by their environment and by every role in their run list, " +
+		"carrying the ohai facts that identify a machine. Cookbooks and recipes are not imported: " +
+		"a recipe is a program in another language against another model, and a partial " +
+		"translation would look like the original without doing what it does.\n\n" +
+		"Accepts an array of node documents, a single node, or an object keyed by node name.",
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runImport(cmd, args[0], importer.FromChef)
+	},
+}
+
+// importPuppetCmd imports a Puppet fleet.
+var importPuppetCmd = &cobra.Command{
+	Use:   "puppet <nodes.json>",
+	Short: "Import a Puppet fleet into SwitchTender.",
+	Long: "Import a Puppet fleet as an inventory of the machines it manages.\n\n" +
+		"Nodes become hosts grouped by their environment, carrying the facts that identify a " +
+		"machine. Deactivated and expired nodes are left out, since Puppet itself stopped " +
+		"managing them. Manifests and modules are not imported, for the same reason Chef's " +
+		"recipes are not.\n\n" +
+		"Accepts a PuppetDB nodes query, a PuppetDB facts query, or the plain certname list " +
+		"that `puppet node list` prints.",
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runImport(cmd, args[0], importer.FromPuppet)
+	},
+}
+
 // importCronInventory is the inventory imported crontab schedules target, since a crontab names no
 // host. importCronSystem selects the six-field /etc/crontab form with a user column.
 var (
@@ -157,6 +190,7 @@ Without --apply the import only reports what it would create.`,
 func init() {
 	for _, c := range []*cobra.Command{
 		importAWXCmd, importSemaphoreCmd, importCronCmd, importRundeckCmd, importJenkinsCmd,
+		importChefCmd, importPuppetCmd,
 	} {
 		c.Flags().StringVar(&importDB, "db", defaultDBPath,
 			"SQLite file path, or a postgres:// DSN, to write into with --apply.")

@@ -98,7 +98,7 @@ func TestSubcommandGroupsKeepTheirMembers(t *testing.T) {
 		Name: "license", Parent: licenseCmd, WantNames: []string{"install", "mint", "status"},
 	}, { // Test 5: The importers.
 		Name: "import", Parent: importCmd,
-		WantNames: []string{"awx", "cron", "jenkins", "rundeck", "semaphore"},
+		WantNames: []string{"awx", "chef", "cron", "jenkins", "puppet", "rundeck", "semaphore"},
 	}, { // Test 6: The witness tools.
 		Name: "witness", Parent: witnessCmd, WantNames: []string{"serve", "verify-attestation"},
 	}}
