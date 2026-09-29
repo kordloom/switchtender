@@ -310,6 +310,9 @@ func normalizeOneClaim(ctx context.Context, d Deps, r *run.Run, log *zap.Logger)
 // then configures with Ansible and verifies with Bash, so it is always a real multi-tool graph that
 // finishes cleanly on whatever host serves the demo.
 func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log *zap.Logger) error {
+	// The tools this host cannot run, so the end of seeding can say what the demo will not show
+	// rather than leaving three skips in the log for somebody to notice.
+	var missing []string
 	bash, err := d.Submitter.Submit(ctx, "", "",
 		seedOpts(ctx, d, "schedule", "sch_log_rotate", "deploy-bot", map[string]string{"env": "prod"},
 			run.WithTool(run.ToolBash), run.WithCommand(scriptLogRotate))...)
@@ -339,7 +342,7 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 		}
 		settle(ctx, d, tf.ID)
 	} else {
-		log.Info("demo: terraform not on PATH, skipping the terraform run; install terraform to include it")
+		missing = append(missing, "terraform")
 	}
 
 	if have("go") {
@@ -351,7 +354,7 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 		}
 		settle(ctx, d, gorun.ID)
 	} else {
-		log.Info("demo: go not on PATH, skipping the go run")
+		missing = append(missing, "go")
 	}
 
 	steps := []run.PipelineStep{
@@ -366,13 +369,45 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 		return fmt.Errorf("seed mixed pipeline: %w", err)
 	}
 	settle(ctx, d, pipe.ID)
+
+	// A demo that shows three of the five tools this product advertises is a weak first impression,
+	// and the three skips that produce it were three separate lines nobody reads. Said once, as a
+	// warning, naming what a visitor will not see and how to fix it.
+	if len(missing) > 0 {
+		it, them := "it", "it"
+		if len(missing) > 1 {
+			it, them = "them", "them"
+		}
+		log.Warn("demo: seeded without "+strings.Join(missing, " and ")+
+			", so a visitor sees no run for "+englishList(missing)+
+			" even though this product advertises "+it+": install "+them+" on this host and reseed",
+			zap.Strings("missing", missing))
+	}
 	return nil
+}
+
+// englishList joins names the way a sentence does, so a warning reads as prose rather than as a
+// slice printed into the middle of one.
+func englishList(names []string) string {
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return names[0]
+	case 2:
+		return names[0] + " or " + names[1]
+	default:
+		return strings.Join(names[:len(names)-1], ", ") + ", or " + names[len(names)-1]
+	}
 }
 
 // infraStep returns the mixed pipeline's first step, choosing the best available infrastructure tool.
 // Terraform is preferred, then Python, then Bash, so the pipeline mixes tools and runs to completion
 // on any host: a Terraform machine gets a genuine plan, a machine without it still shows a distinct
 // provisioning tool ahead of the Ansible and Bash steps.
+// infraStep is the pipeline's provisioning step. It prefers Terraform and falls back, so a demo on a
+// host without it still shows a pipeline rather than failing to seed. The substitution is reported
+// by the caller, since a visitor is told this product runs Terraform and would be looking at Bash.
 func infraStep(tfDir string) run.PipelineStep {
 	switch {
 	case have("terraform"):
