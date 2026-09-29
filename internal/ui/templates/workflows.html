@@ -7,7 +7,7 @@
 	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
 	<link rel="stylesheet" href="/ui/assets/app.css">
 </head>
-<body data-page="workflows"{{if .ReadOnly}} data-readonly="true"{{end}}>
+<body data-page="workflows"{{if .ReadOnly}} data-readonly="true"{{end}}{{if .AIOff}} data-ai-off="true"{{end}}>
 	<header class="topbar">
 		<div class="brand"><a href="/ui/"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="SwitchTender"></picture>SwitchTender</a></div>
 	</header>

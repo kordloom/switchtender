@@ -1,0 +1,111 @@
+package audit
+
+// ChainScanner verifies a chain fed one entry at a time in chain order, holding only the previous
+// entry, so a caller can check a trail of any length in constant memory. Feed every entry, then
+// read Result. VerifyRange and Verify are the slice forms of the same walk.
+type ChainScanner struct {
+	// fromGenesis requires the first entry fed to open the chain: sequence one, no previous link.
+	fromGenesis bool
+	// prev is the last sound entry, nil before the first.
+	prev *Entry
+	// count is how many entries were fed.
+	count int
+	// brokeAt is the one-based position of the first entry that did not check out, zero while the
+	// chain holds.
+	brokeAt int
+}
+
+// NewChainScanner returns a scanner. fromGenesis requires the first entry to open the chain,
+// which is Verify's rule; without it the walk accepts any contiguous range, which is VerifyRange's.
+func NewChainScanner(fromGenesis bool) *ChainScanner {
+	return &ChainScanner{fromGenesis: fromGenesis}
+}
+
+// Feed checks the next entry in chain order. Once the chain has broken, further entries are
+// counted but not checked, so Result still names the first break.
+func (v *ChainScanner) Feed(e *Entry) {
+	v.count++
+	if v.brokeAt != 0 {
+		return
+	}
+	// A null entry is a broken chain, not a crash: fed slices are decoded from documents handed
+	// over by whoever is being audited.
+	if e == nil || e.Hash == "" || e.Seq < 1 || e.Hash != EntryHash(e) {
+		v.brokeAt = v.count
+		return
+	}
+	switch {
+	case v.prev == nil && v.fromGenesis:
+		if e.Seq != 1 || e.PrevHash != "" {
+			v.brokeAt = v.count
+			return
+		}
+	case v.prev == nil:
+		// The first entry of a range still constrains: sequence one is the one entry in a chain
+		// with nothing before it, so it must carry no previous link, and any other first entry
+		// must carry one.
+		if (e.Seq == 1) != (e.PrevHash == "") {
+			v.brokeAt = v.count
+			return
+		}
+	default:
+		if e.Seq != v.prev.Seq+1 || e.PrevHash != v.prev.Hash {
+			v.brokeAt = v.count
+			return
+		}
+	}
+	v.prev = e
+}
+
+// Result reports whether every entry fed so far checked out and, when one did not, the one-based
+// position of the first break. Count is how many entries were fed.
+func (v *ChainScanner) Result() (ok bool, brokeAt, count int) {
+	return v.brokeAt == 0, v.brokeAt, v.count
+}
+
+// AnchorScanner holds a chain against its anchors while the chain streams past, keeping only the
+// hashes at anchored positions, so the anchor check needs memory in the number of anchors rather
+// than the length of the chain. CheckAnchors is the slice form of the same walk.
+type AnchorScanner struct {
+	// anchors is the set being checked, in the order results are reported.
+	anchors []*Anchor
+	// wanted marks the anchored sequences still worth capturing.
+	wanted map[int64]struct{}
+	// atSeq is the link found at each anchored sequence.
+	atSeq map[int64]string
+	// highest is the largest sequence seen.
+	highest int64
+}
+
+// NewAnchorScanner returns a scanner over the given anchors.
+func NewAnchorScanner(anchors []*Anchor) *AnchorScanner {
+	s := &AnchorScanner{
+		anchors: anchors,
+		wanted:  make(map[int64]struct{}, len(anchors)),
+		atSeq:   make(map[int64]string, len(anchors)),
+	}
+	for _, a := range anchors {
+		s.wanted[a.Seq] = struct{}{}
+	}
+	return s
+}
+
+// Feed records what the entry proves about the anchors: the link at an anchored position, and how
+// far the chain reaches.
+func (s *AnchorScanner) Feed(e *Entry) {
+	if e == nil {
+		return
+	}
+	if e.Seq > s.highest {
+		s.highest = e.Seq
+	}
+	if _, ok := s.wanted[e.Seq]; ok {
+		s.atSeq[e.Seq] = e.Hash
+	}
+}
+
+// Results reports what each anchor proves against the chain fed so far, with the same verdicts and
+// wording as CheckAnchors.
+func (s *AnchorScanner) Results() (ok bool, results []AnchorCheck) {
+	return anchorVerdicts(s.anchors, s.atSeq, s.highest)
+}

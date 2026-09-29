@@ -201,6 +201,36 @@ function wireRunDownloads(runId) {
 			}
 		});
 	}
+	const exportEvidence = document.getElementById("export-evidence");
+	// The dossier quotes the audit trail, approver identities included, so the control only shows
+	// where the trail itself would: an admin session, or an open instance with no accounts.
+	const evidenceRole = localStorage.getItem("st_role");
+	if (exportEvidence && evidenceRole && evidenceRole !== "admin") {
+		exportEvidence.hidden = true;
+	} else if (exportEvidence) {
+		exportEvidence.dataset.tip =
+			"Click to download this run's evidence dossier, one self-contained document for an auditor";
+		exportEvidence.addEventListener("click", async (e) => {
+			e.preventDefault();
+			try {
+				const text = await (await fetchAuthed("/runs/" + runId + "/evidence")).text();
+				downloadBlob("switchtender-" + runId + "-evidence.html", "text/html", text);
+			} catch (err) {
+				// A token session carries no stored role, so the control cannot know in advance
+				// that the server will refuse. Saying which rule refused, and retiring the button,
+				// beats leaving a control that fails the same way on every click.
+				// fetchAuthed throws "HTTP <status>", so the status is what to match. Matching
+				// the word the server puts in the body instead made this branch unreachable and
+				// left the raw developer string on screen, which is what it was written to replace.
+				if (err.message === "HTTP 403") {
+					exportEvidence.hidden = true;
+					setStatus("Evidence quotes the audit trail, so it is admin only on this server.");
+					return;
+				}
+				setStatus("Could not export the evidence: " + err.message);
+			}
+		});
+	}
 	const exportEvents = document.getElementById("export-events");
 	if (exportEvents) {
 		exportEvents.dataset.tip = "Click to download every event as newline-delimited JSON";

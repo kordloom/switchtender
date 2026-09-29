@@ -414,6 +414,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/audit", auditHandler(s.audits, s.log))
 	mux.Handle("GET /v1/audit/verify", auditVerifyHandler(s.audits, s.log))
 	mux.Handle("GET /v1/audit/export", auditExportHandler(s.audits, s.auditSigner, s.log))
+	mux.Handle("GET /v1/audit/register", auditRegisterHandler(s.store, s.audits, s.log))
 	// Served unauthenticated: the beat feed exists so an outside watcher can see the chain is
 	// alive and whole, and that watcher has no account here.
 	mux.Handle("GET /v1/audit/beats", auditBeatsHandler(s.audits, s.log))
@@ -433,6 +434,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/runs/{id}/steps", runStepsHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/runs/{id}/logs", runLogsHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/runs/{id}/events", runEventsHandler(s.store, authz, s.log))
+	mux.Handle("GET /v1/runs/{id}/evidence", runEvidenceHandler(s.store, s.audits, authz, s.log))
 	mux.Handle("POST /v1/runs/{id}/explain", explainRunHandler(s.store, s.ai, authz, s.log))
 	mux.Handle("POST /v1/ai/draft", draftStepHandler(s.ai, s.log))
 	mux.Handle("POST /v1/ai/ask", askFleetHandler(s.store, s.ai, authz, s.log))

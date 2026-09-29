@@ -172,3 +172,18 @@ func (m *memStore) Chain(_ context.Context) ([]*Entry, error) {
 	}
 	return out, nil
 }
+
+// ChainScan streams every entry in chain order, oldest first. Entries are copied before the scan
+// so fn runs without the lock and may keep what it is handed.
+func (m *memStore) ChainScan(ctx context.Context, fn func(*Entry) error) error {
+	entries, err := m.Chain(ctx)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if err := fn(e); err != nil {
+			return err
+		}
+	}
+	return nil
+}

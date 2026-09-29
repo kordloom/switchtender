@@ -81,7 +81,8 @@ CREATE TABLE IF NOT EXISTS runs (
 	actor TEXT NOT NULL DEFAULT '',
 	rerun_of TEXT NOT NULL DEFAULT '',
 	labels TEXT NOT NULL DEFAULT '',
-	warning TEXT NOT NULL DEFAULT ''
+	warning TEXT NOT NULL DEFAULT '',
+	audit_receipt TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
@@ -198,7 +199,8 @@ CREATE TABLE IF NOT EXISTS templates (
 	org_id         TEXT NOT NULL DEFAULT '',
 	notifications  TEXT NOT NULL DEFAULT '',
 	selectable_credential_ids TEXT NOT NULL DEFAULT '',
-	timeout        INTEGER NOT NULL DEFAULT 0
+	timeout        INTEGER NOT NULL DEFAULT 0,
+	confirm_on_launch INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS inventory_sources (
 	id            TEXT PRIMARY KEY,
@@ -556,7 +558,7 @@ func migrateRuns(db *sql.DB) error {
 		!strings.Contains(err.Error(), "duplicate column name") {
 		return fmt.Errorf("add notifications column: %w", err)
 	}
-	for _, column := range []string{"source", "source_id", "actor", "rerun_of", "labels", "steps", "warning"} {
+	for _, column := range []string{"source", "source_id", "actor", "rerun_of", "labels", "steps", "warning", "audit_receipt"} {
 		if _, err := db.Exec(
 			"ALTER TABLE runs ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''"); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {
@@ -645,6 +647,7 @@ func migrateTemplates(db *sql.DB) error {
 		"ALTER TABLE templates ADD COLUMN notifications TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE templates ADD COLUMN selectable_credential_ids TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE templates ADD COLUMN timeout INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE templates ADD COLUMN confirm_on_launch INTEGER NOT NULL DEFAULT 0",
 	} {
 		if _, err := db.Exec(stmt); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {
@@ -811,7 +814,7 @@ const runColumns = `id, playbook, inventory, status, exit_code, error, created_a
 	retry_of, attempt, steps, extra_vars, outputs, claimed_by, claimed_at, cancel_requested,
 	credential_ids, project_id, commit_sha, inventory_id, queue, tool, command, dry_run,
 	proposed_from, intent, image, pull_credential_id, idempotency_key, timeout, notifications,
-	source, source_id, actor, rerun_of, labels, warning`
+	source, source_id, actor, rerun_of, labels, warning, audit_receipt`
 
 // Save inserts or replaces the run identified by r.ID. The cancel flag merges with MAX so a
 // replace from a stale snapshot cannot erase a cancel another process just requested.
@@ -823,8 +826,8 @@ INSERT INTO runs
 	 attempt, steps, extra_vars, outputs, claimed_by, claimed_at, cancel_requested, credential_ids,
 	 project_id, commit_sha, inventory_id, queue, tool, command, dry_run, proposed_from, intent,
 	 image, pull_credential_id, idempotency_key, timeout, notifications,
-	 source, source_id, actor, rerun_of, labels, warning)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	 source, source_id, actor, rerun_of, labels, warning, audit_receipt)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -844,7 +847,7 @@ ON CONFLICT(id) DO UPDATE SET
 	idempotency_key=excluded.idempotency_key, timeout=excluded.timeout,
 	notifications=excluded.notifications, source=excluded.source, source_id=excluded.source_id,
 	actor=excluded.actor, rerun_of=excluded.rerun_of, labels=excluded.labels,
-	warning=excluded.warning`
+	warning=excluded.warning, audit_receipt=excluded.audit_receipt`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), sqlutil.NullInt(r.ExitCode), r.Error,
 		sqlutil.FormatTime(r.CreatedAt), sqlutil.NullTime(r.StartedAt), sqlutil.NullTime(r.EndedAt),
@@ -854,7 +857,7 @@ ON CONFLICT(id) DO UPDATE SET
 		sqlutil.BoolToInt(r.CancelRequested), sqlutil.JoinIDs(r.CredentialIDs), r.ProjectID, r.CommitSHA,
 		r.InventoryID, r.Queue, r.Tool, r.Command, sqlutil.BoolToInt(r.DryRun), r.ProposedFrom, r.Intent,
 		r.Image, r.PullCredentialID, r.IdempotencyKey, r.Timeout, marshalNotifications(r.Notifications),
-		r.Source, r.SourceID, r.Actor, r.RerunOf, marshalLabels(r.Labels), r.Warning,
+		r.Source, r.SourceID, r.Actor, r.RerunOf, marshalLabels(r.Labels), r.Warning, r.AuditReceipt,
 	)
 	if err != nil {
 		if r.IdempotencyKey != "" && isKeyConflict(err) {
@@ -985,6 +988,12 @@ func runSearchClause(query string) (string, []any) {
 }
 
 // RunStatusCounts tallies top-level runs by status with a single grouped query.
+//
+// It is deliberately not memoized. A process-local cache is only as correct as the claim that this
+// store is the only writer, and that claim is false in the documented split deployment: a worker
+// opened on the same database file transitions runs through its own store, which no cache here can
+// see. The status chips would then disagree with the run list beside them until some unrelated
+// server-side write happened to invalidate, which on a read-mostly install is hours.
 func (s *store) RunStatusCounts(ctx context.Context) (map[run.Status]int, error) {
 	rows, err := s.db.QueryContext(ctx,
 		"SELECT status, COUNT(*) FROM runs WHERE parent_id IS NULL GROUP BY status")
@@ -1773,7 +1782,7 @@ func scanRun(s scanner) (*run.Run, error) {
 		&r.ClaimedBy, &claimed, &cancelI, &credIDs, &r.ProjectID, &r.CommitSHA,
 		&r.InventoryID, &r.Queue, &r.Tool, &r.Command, &dryRun, &r.ProposedFrom, &r.Intent,
 		&r.Image, &r.PullCredentialID, &r.IdempotencyKey, &r.Timeout, &notifs,
-		&r.Source, &r.SourceID, &r.Actor, &r.RerunOf, &labels, &r.Warning); err != nil {
+		&r.Source, &r.SourceID, &r.Actor, &r.RerunOf, &labels, &r.Warning, &r.AuditReceipt); err != nil {
 		return nil, err
 	}
 	r.CancelRequested = cancelI != 0

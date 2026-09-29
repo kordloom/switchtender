@@ -44,8 +44,9 @@ func testUpdate(t *testing.T, store template.Store) {
 		ExtraVars:               map[string]any{"env": "stg"},
 		Survey:                  []template.SurveyField{{Var: "tier", Label: "Tier", Type: template.FieldText}},
 		Tool:                    "python", Command: "print('hi')", DryRun: true,
-		OrgID:     "org_new",
-		CreatedAt: created,
+		ConfirmOnLaunch: true,
+		OrgID:           "org_new",
+		CreatedAt:       created,
 	}
 	if err := store.Update(ctx, want); err != nil {
 		t.Fatalf("Update() error = %v", err)
@@ -76,8 +77,9 @@ func testLifecycle(t *testing.T, store template.Store) {
 		ExtraVars:               map[string]any{"env": "prod", "batch": float64(5)},
 		Survey:                  []template.SurveyField{{Var: "region", Label: "Region", Type: template.FieldChoice, Required: true, Choices: []string{"us", "eu"}}},
 		Tool:                    "bash", Command: "echo hi", DryRun: true,
-		OrgID:     "org_owner",
-		CreatedAt: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+		ConfirmOnLaunch: true,
+		OrgID:           "org_owner",
+		CreatedAt:       time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
 	}
 	if err := store.Save(ctx, want); err != nil {
 		t.Fatalf("Save() error = %v", err)

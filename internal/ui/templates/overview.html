@@ -7,7 +7,7 @@
 	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
 	<link rel="stylesheet" href="/ui/assets/app.css">
 </head>
-<body data-page="overview"{{if .ReadOnly}} data-readonly="true"{{end}}>
+<body data-page="overview"{{if .ReadOnly}} data-readonly="true"{{end}}{{if .AIOff}} data-ai-off="true"{{end}}>
 	<header class="topbar">
 		<div class="brand"><a href="/ui/"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="SwitchTender"></picture>SwitchTender</a></div>
 	</header>
@@ -60,7 +60,7 @@
 						<span class="ov-h ov-h-go"></span>
 					</div>
 					<div id="ov-fleet" class="ov-list"></div>
-					<div class="ask-block ask-panel" id="ask-panel" data-ai-enabled="{{if .AIEnabled}}1{{else}}0{{end}}">
+					<div class="ask-block ask-panel" id="ask-panel">
 						<h3 class="ask-title">Ask about your fleet</h3>
 						<div class="ask-row">
 							<input id="ask-input" class="input" placeholder="Why might web01 be flaky?" aria-label="Ask a question about the fleet">

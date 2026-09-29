@@ -206,6 +206,12 @@ type Run struct {
 	// it was machine proposed and is born held for approval, so a person releases it or it never
 	// executes.
 	ProposedFrom string `json:"proposed_from,omitempty"`
+	// AuditReceipt is the seq:link of the chain entry that recorded the request which created this
+	// run. The entry is written before the handler runs, at a path naming the template or the
+	// collection rather than the run it goes on to create, so this is the only thing that ties a
+	// run to the record of who asked for it. Empty for a run created outside a recorded request,
+	// such as a seeded demo run.
+	AuditReceipt string `json:"audit_receipt,omitempty"`
 	// Intent is the plain-language request an AI turned into this proposed run. A run carrying it
 	// was proposed from a description and is born held for approval, so an approver can judge the
 	// generated run against what was asked before anything executes.
@@ -386,6 +392,13 @@ func (r *Run) Clone() *Run {
 
 // SubmitOption customizes a run at submission.
 type SubmitOption func(*Run)
+
+// WithAuditReceiptOf records that this run was set in motion by the request behind receipt, for a
+// run created after that request returned. It is deliberately not part of ExecutionOptions: rerun,
+// shard retry, and reconcile replay those, and each is a new request with its own authorization.
+func WithAuditReceiptOf(receipt string) SubmitOption {
+	return func(r *Run) { r.AuditReceipt = receipt }
+}
 
 // WithCredentialIDs attaches stored credentials to the run.
 func WithCredentialIDs(ids []string) SubmitOption {

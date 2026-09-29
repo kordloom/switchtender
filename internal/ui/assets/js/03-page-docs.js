@@ -115,7 +115,9 @@ function mountListFilter() {
 	wrap.appendChild(count);
 	table.parentNode.insertBefore(wrap, table);
 	const preset = new URLSearchParams(location.search).get("q");
-	input.addEventListener("input", () => {
+	// Filtering walks every row's text and then repaginates, so a burst of keystrokes is debounced
+	// into one pass, the same way the runs search batches its requests.
+	const filter = () => {
 		const q = input.value.trim().toLowerCase();
 		let shown = 0;
 		for (const row of tbody.rows) {
@@ -127,6 +129,11 @@ function mountListFilter() {
 		}
 		count.textContent = q ? shown + " shown" : "";
 		table.dispatchEvent(new CustomEvent("rowsfiltered"));
+	};
+	let filterTimer;
+	input.addEventListener("input", () => {
+		clearTimeout(filterTimer);
+		filterTimer = setTimeout(filter, 150);
 	});
 	if (preset) {
 		input.value = preset;

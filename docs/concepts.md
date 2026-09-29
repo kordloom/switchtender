@@ -120,6 +120,28 @@ a chain that has quietly lost its tail no longer reaches its anchor and says so.
 schedule. An anchor bounds how much history can vanish unnoticed to whatever happened since the last
 one.
 
+**A run created by a request points at the entry that authorized it.** A run's creation is recorded before the
+handler runs, at a request path that names the template rather than the run it goes on to create,
+so the two cannot be matched by name. The run keeps the receipt instead, the same `seq:link` the
+`Audit-Receipt` header returned, and its dossier redeems that receipt against the live chain. A
+server that dropped the creation entry cannot answer the receipt, and the dossier says so rather
+than showing a run with no origin. A run the scheduler started on its own carries no receipt, since
+no request authorized it, and the document states that rather than leaving it ambiguous.
+
+**Evidence comes out as documents, not screenshots.** `switchtender audit run <id>` emits one
+run's dossier: what ran, its risk grade, who approved it, what happened on each host, and the
+receipts and anchors behind all of it. `switchtender audit report --from --to` renders the period's
+change register, the sample a SOC 2 CC8.1 or ISO/IEC 27001 A.8.32 review asks for. Both are
+self-contained HTML that a reviewer reads without tooling and checks against the live chain.
+
+**A witness remembers what the server can no longer take back.** `switchtender witness`, run on a
+machine the server's operator does not control, polls the public beat feed, keeps a signed
+checkpoint of what it saw, and raises a finding when a beat goes missing, a witnessed beat comes
+back rewritten, or the head regresses. Its memory is first write wins, so a rewrite is reported on
+every watch and never signed into the checkpoint as if it were the truth. The checkpoint's signer is
+pinned to the witness's own key, so a state file replaced by a forger is refused rather than
+believed, and one state file holds one server.
+
 **Receipts make an omission detectable by the party it happened to.** Every mutation returns an
 `Audit-Receipt: seq:link` header naming where it was recorded. Keep them. `switchtender audit
 receipt 41:9f2c...` confirms the chain still holds that exact link at that exact position, and a

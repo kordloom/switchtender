@@ -113,6 +113,13 @@ func (d *Dispatcher) proposeApply(
 	if r.Image != "" {
 		opts = append(opts, run.WithImage(r.Image, r.PullCredentialID))
 	}
+	// The apply is proposed while executing the plan, long after the plan's request returned, so
+	// the executor's context carries no receipt. The plan run's receipt is the truthful one: the
+	// request that submitted the plan is what set this apply in motion, and the apply is the run
+	// that actually destroys things, so its evidence must not read as having no origin.
+	if r.AuditReceipt != "" {
+		opts = append(opts, run.WithAuditReceiptOf(r.AuditReceipt))
+	}
 	proposal, err := d.Submit(ctx, r.Playbook, r.Inventory, opts...)
 	if err != nil {
 		d.log.Error("dispatch: propose apply: "+err.Error(), zap.String("run_id", r.ID))

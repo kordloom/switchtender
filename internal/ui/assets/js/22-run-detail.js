@@ -56,6 +56,16 @@ function wireActions(runId) {
 			const panel = document.getElementById("explain-panel");
 			const bodyEl = document.getElementById("explain-body");
 			if (panel) panel.hidden = false;
+			// With no AI provider the click answers immediately with the standard off notice
+			// instead of a round trip that fails with a line most people miss.
+			if (aiOff()) {
+				if (bodyEl) {
+					bodyEl.textContent = "";
+					bodyEl.appendChild(aiOffNoticeEl(
+						"Advisory AI is off on this server. Turn it on to get a failure diagnosis grounded in this run."));
+				}
+				return;
+			}
 			if (bodyEl) bodyEl.textContent = "Reading the run…";
 			explain.disabled = true;
 			try {

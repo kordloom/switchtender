@@ -359,6 +359,16 @@ class STElement {
 		if (this.parentNode) this.parentNode.removeChild(this);
 	}
 
+	// replaceWith swaps this element for the given nodes in its parent, a no-op when detached.
+	replaceWith(...nodes) {
+		const parent = this.parentNode;
+		if (!parent) return;
+		for (const n of nodes) {
+			parent.insertBefore(typeof n === "string" ? new STText(n, this.ownerDocument) : n, this);
+		}
+		parent.removeChild(this);
+	}
+
 	// clearChildren detaches every child, used by textContent and innerHTML assignment.
 	clearChildren() {
 		for (const n of this.childNodes) n.parentNode = null;

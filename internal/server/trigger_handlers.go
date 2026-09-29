@@ -359,6 +359,12 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 			return
 		}
 		if existing != nil {
+			// A sender redelivers precisely because it lost the first response, so this is the one
+			// delivery that most needs the receipt. The run already holds the receipt of the fire
+			// that created it, so the header answers with that rather than with nothing.
+			if existing.AuditReceipt != "" {
+				w.Header().Set(AuditReceiptHeader, existing.AuditReceipt)
+			}
 			respondJSON(w, log, http.StatusAccepted, existing, wantsPretty(r))
 			return
 		}
@@ -369,26 +375,36 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 		// whenever the audit store was unhealthy, the exact condition the middleware fail-closes on
 		// with 503. The trigger is known here, so the entry says which webhook fired; the run does not
 		// exist yet, and a pre-execution entry needs no run id.
+		// A hook bypasses the gate, so this is the only place its fire is recorded, and the run it
+		// creates has to carry that entry's receipt like any other. Without it an unattended,
+		// webhook-driven change is the one kind of run whose evidence names no authorization, which
+		// is exactly the kind an auditor asks about first.
+		ctx := r.Context()
 		if audits != nil {
 			entry := &audit.Entry{
 				ID: audit.NewID(), At: time.Now(), Actor: "webhook:" + tg.ID,
 				Method: http.MethodPost, Path: "/hooks/" + tg.ID + "/fired",
 			}
-			if aerr := audits.Append(r.Context(), entry); aerr != nil {
+			if aerr := audits.Append(ctx, entry); aerr != nil {
 				log.Error("server: record webhook fire: " + aerr.Error())
 				respondError(w, log, http.StatusServiceUnavailable,
 					"refused: the webhook fire could not be recorded in the audit trail")
 				return
 			}
+			// The fire is a recorded mutation like any other, so the sender gets its receipt
+			// back and can later prove the delivery was recorded.
+			receipt := audit.Receipt(entry)
+			w.Header().Set(AuditReceiptHeader, receipt)
+			ctx = run.WithAuditReceipt(ctx, receipt)
 		}
 
 		opts = append(opts, run.WithIdempotencyKey(key),
 			run.WithSource("trigger", tg.ID), run.WithActor("trigger "+tg.Name))
 		var created *run.Run
 		if t.Shards >= 2 {
-			created, err = submitter.SubmitSplit(r.Context(), t.Playbook, t.Inventory, t.Shards, opts...)
+			created, err = submitter.SubmitSplit(ctx, t.Playbook, t.Inventory, t.Shards, opts...)
 		} else {
-			created, err = submitter.Submit(r.Context(), t.Playbook, t.Inventory, opts...)
+			created, err = submitter.Submit(ctx, t.Playbook, t.Inventory, opts...)
 		}
 		if err != nil {
 			log.Error("server: fire trigger: " + err.Error())

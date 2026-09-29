@@ -408,7 +408,8 @@ func testListPage(t *testing.T, store run.Store) {
 	live := &run.Run{
 		ID: "e", Playbook: "tag.yml", Status: run.StatusRunning, CreatedAt: base.Add(4 * time.Second),
 		Source: "schedule", SourceID: "sch_9", Actor: "night-cron",
-		Labels: map[string]string{"env": "prod"},
+		AuditReceipt: "41:9f2caa",
+		Labels:       map[string]string{"env": "prod"},
 	}
 	if err := store.Save(ctx, live); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -434,6 +435,35 @@ func testListPage(t *testing.T, store run.Store) {
 	}
 	if hit, _ := store.ListPage(ctx, run.ListFilter{Host: "web09"}, 0, 0); len(hit) != 1 || hit[0].ID != "e" {
 		t.Errorf("host filter = %v, want [e]", ids(hit))
+	}
+
+	// The audit receipt ties a run to the chain entry that recorded the request creating it. It is
+	// the only link between the two, since that entry names the request path rather than the run.
+	if got, err := store.Get(ctx, "e"); err != nil {
+		t.Fatalf("Get(e) error = %v", err)
+	} else if got.AuditReceipt != "41:9f2caa" {
+		t.Errorf("audit receipt = %q, want it to survive the round trip", got.AuditReceipt)
+	}
+
+	// The status tally follows a transition immediately: a store may memoize it, but a stale
+	// tally after a write is a wrong number on the runs page. At this point a, d, and e have
+	// succeeded, b has failed, and c still runs.
+	before, err := store.RunStatusCounts(ctx)
+	if err != nil {
+		t.Fatalf("RunStatusCounts() error = %v", err)
+	}
+	// Mutating the returned map must not corrupt what the store serves next.
+	before[run.StatusSucceeded] = 999
+	if ok, err := store.TransitionStatus(ctx, "c", run.StatusRunning, run.StatusFailed); err != nil || !ok {
+		t.Fatalf("TransitionStatus(c) = %v, %v, want true, nil", ok, err)
+	}
+	after, err := store.RunStatusCounts(ctx)
+	if err != nil {
+		t.Fatalf("RunStatusCounts() after transition error = %v", err)
+	}
+	wantAfter := map[run.Status]int{run.StatusSucceeded: 3, run.StatusFailed: 2}
+	if diff := cmp.Diff(wantAfter, after, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("RunStatusCounts() after transition mismatch (-want +got):\n%s", diff)
 	}
 }
 

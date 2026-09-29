@@ -95,6 +95,9 @@ type Template struct {
 	ExtraVars map[string]any `json:"extra_vars,omitempty"`
 	// Survey prompts the launcher for typed values that become extra vars.
 	Survey []SurveyField `json:"survey,omitempty"`
+	// ConfirmOnLaunch routes the plain Launch action through the overrides dialog, so a risky
+	// template is reviewed each time instead of firing on one click.
+	ConfirmOnLaunch bool `json:"confirm_on_launch,omitempty"`
 	// Notifications route every launch's terminal state to specific channels, beyond the server-wide
 	// ones, so a template pages its own team.
 	Notifications []run.NotifyTarget `json:"notifications,omitempty"`

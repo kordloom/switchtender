@@ -7,7 +7,7 @@
 	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
 	<link rel="stylesheet" href="/ui/assets/app.css">
 </head>
-<body data-page="detail" data-run-id="{{.RunID}}" data-matrix-cap="{{.MatrixCap}}"{{if .ReadOnly}} data-readonly="true"{{end}}>
+<body data-page="detail" data-run-id="{{.RunID}}" data-matrix-cap="{{.MatrixCap}}"{{if .ReadOnly}} data-readonly="true"{{end}}{{if .AIOff}} data-ai-off="true"{{end}}>
 	<header class="topbar">
 		<div class="brand"><a href="/ui/"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="SwitchTender"></picture>SwitchTender</a></div>
 	</header>
@@ -65,6 +65,7 @@
 		<div class="actions">
 			<a id="full-log" class="button" href="#" target="_blank" rel="noopener">View full log</a>
 			<a id="export-events" class="button" href="#" download>Export events</a>
+			<a id="export-evidence" class="button" href="#" download>Evidence</a>
 			<button id="export-results" class="button" type="button">Export results</button>
 			<button id="copy-link" class="button" type="button">Copy link</button>
 			<a id="audit-link" class="button" href="#">Audit trail</a>

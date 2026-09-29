@@ -58,6 +58,9 @@ type createTemplateRequest struct {
 	ExtraVars map[string]any `json:"extra_vars,omitempty"`
 	// Survey prompts the launcher for typed values that become extra vars.
 	Survey []template.SurveyField `json:"survey,omitempty"`
+	// ConfirmOnLaunch routes the plain Launch action through the overrides dialog, so a risky
+	// template is reviewed each time instead of firing on one click. Optional.
+	ConfirmOnLaunch bool `json:"confirm_on_launch,omitempty"`
 	// Notifications route every launch's terminal state to specific channels beyond the server-wide
 	// ones. Optional.
 	Notifications []run.NotifyTarget `json:"notifications,omitempty"`
@@ -138,8 +141,9 @@ func createTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 			Shards:        req.Shards,
 			CredentialIDs: req.CredentialIDs, SelectableCredentialIDs: req.SelectableCredentialIDs,
 			ExtraVars: req.ExtraVars, Survey: req.Survey,
-			Notifications: req.Notifications,
-			Queue:         req.Queue, Image: req.Image, PullCredentialID: req.PullCredentialID,
+			ConfirmOnLaunch: req.ConfirmOnLaunch,
+			Notifications:   req.Notifications,
+			Queue:           req.Queue, Image: req.Image, PullCredentialID: req.PullCredentialID,
 			Timeout:   req.Timeout,
 			OrgID:     req.OrgID,
 			CreatedAt: time.Now(),
@@ -217,8 +221,9 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 			Shards:        req.Shards,
 			CredentialIDs: req.CredentialIDs, SelectableCredentialIDs: req.SelectableCredentialIDs,
 			ExtraVars: req.ExtraVars, Survey: req.Survey,
-			Notifications: notifications,
-			Queue:         req.Queue, Image: req.Image, PullCredentialID: req.PullCredentialID,
+			ConfirmOnLaunch: req.ConfirmOnLaunch,
+			Notifications:   notifications,
+			Queue:           req.Queue, Image: req.Image, PullCredentialID: req.PullCredentialID,
 			Timeout: req.Timeout,
 			OrgID:   req.OrgID,
 		}

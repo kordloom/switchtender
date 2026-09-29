@@ -30,20 +30,21 @@ type AnchorCheck struct {
 // Only the first is a pass. The other two are the finding, and an unanchored chain proves neither,
 // which is why an install that never anchors gets no assurance from this rather than a false one.
 func CheckAnchors(entries []*Entry, anchors []*Anchor) (ok bool, results []AnchorCheck) {
-	byPosition := make(map[int64]string, len(entries))
-	var highest int64
+	s := NewAnchorScanner(anchors)
 	for _, e := range entries {
-		byPosition[e.Seq] = e.Hash
-		if e.Seq > highest {
-			highest = e.Seq
-		}
+		s.Feed(e)
 	}
+	return s.Results()
+}
 
+// anchorVerdicts turns the links captured at anchored positions into per-anchor verdicts. atSeq
+// holds the link found at each anchored sequence and highest is the largest sequence seen.
+func anchorVerdicts(anchors []*Anchor, atSeq map[int64]string, highest int64) (ok bool, results []AnchorCheck) {
 	ok = true
 	results = make([]AnchorCheck, 0, len(anchors))
 	for _, a := range anchors {
 		res := AnchorCheck{Anchor: a}
-		switch link, found := byPosition[a.Seq]; {
+		switch link, found := atSeq[a.Seq]; {
 		case !found && a.Seq > highest:
 			res.Problem = fmt.Sprintf("the chain ends at entry %d, and this anchor was taken over "+
 				"entry %d, so %d entries that existed when it was taken are missing",

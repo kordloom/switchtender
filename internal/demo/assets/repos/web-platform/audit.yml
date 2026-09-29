@@ -1,0 +1,15 @@
+---
+- name: Nightly audit
+  hosts: all
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Check disk headroom
+      command: "sleep {{ work | default(1) }}"
+      changed_when: false
+    - name: Check service health
+      debug:
+        msg: "services healthy on {{ inventory_hostname }}"
+    - name: Record audit result
+      debug:
+        msg: "audit clean on {{ inventory_hostname }}"

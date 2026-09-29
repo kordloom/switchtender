@@ -643,6 +643,7 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 		CreatedAt: time.Now(),
 	}
 	run.ApplyOptions(r, opts)
+	stampReceipt(ctx, r)
 	if err := requireToolInput(r); err != nil {
 		return nil, err
 	}
@@ -683,6 +684,7 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 	// Sharding fans a playbook across inventory hosts, which only Ansible does; other tools run once.
 	probe := &run.Run{}
 	run.ApplyOptions(probe, opts)
+	stampReceipt(ctx, probe)
 	// A retried split returns the original parent without re-listing hosts or resharding.
 	if existing, err := d.idempotentLookup(ctx, probe.IdempotencyKey); err != nil {
 		return nil, err
@@ -733,6 +735,7 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		Status: run.StatusPending, CreatedAt: time.Now(), ShardCount: &count,
 	}
 	run.ApplyOptions(parent, opts)
+	stampReceipt(ctx, parent)
 	if err := d.validateRun(ctx, parent); err != nil {
 		return nil, err
 	}
@@ -781,6 +784,10 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		// a chosen few fields meant a split silently dropped the rest: extra vars vanished, shards
 		// ran outside the execution image the parent pinned, and the run timeout did not apply.
 		inheritExecution(child, parent)
+		// A child belongs to its parent's authorization, whether it is built inside the request or
+		// after it returned. Inheriting is the one rule; re-deriving from context would make an
+		// in-request shard and a later step disagree about which receipt is truthful.
+		child.AuditReceipt = parent.AuditReceipt
 		if err := d.store.Save(ctx, child); err != nil {
 			return nil, err
 		}
@@ -797,6 +804,22 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 	go d.coordinate(parent.Clone(), children)
 
 	return parent, nil
+}
+
+// stampReceipt records which chain entry authorized this run's creation, defaulting it to the
+// request in flight.
+//
+// The receipt is not an execution option, so rerun, reconcile, and shard retry do not replay it:
+// each is a new request with its own authorization, and carrying the source run's receipt through
+// them made a rerun's evidence name whoever launched the original, weeks earlier, which is worse
+// than naming nobody. With that inheritance gone, an explicit WithAuditReceiptOf is a deliberate
+// statement about which request set this run in motion, so it wins over the ambient context; the
+// plan gate uses it to attribute a proposed apply to the request that submitted the plan. A run
+// created outside a recorded request, by the scheduler or the seeder, carries none.
+func stampReceipt(ctx context.Context, r *run.Run) {
+	if r.AuditReceipt == "" {
+		r.AuditReceipt = run.AuditReceiptFrom(ctx)
+	}
 }
 
 // inheritExecution copies onto child every field that decides how a run executes, so a shard of a
@@ -882,6 +905,8 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 		ShardCount: &count, RetryOf: &parent.ID, IdempotencyKey: key,
 	}
 	inheritExecution(retry, parent)
+	// A retry is authorized by the retry request, not by whatever authorized the parent weeks ago.
+	stampReceipt(ctx, retry)
 	// A retry is a fourth way to submit a run, and it inherits the parent's entire execution spec,
 	// so it has to face the same gate as the other three. Submit, SubmitSplit, and SubmitPipeline
 	// each consult the policy; this path did not, which made retrying a way to run a spec an
@@ -919,6 +944,7 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 			Limit: shard.Limit,
 		}
 		inheritExecution(child, retry)
+		child.AuditReceipt = retry.AuditReceipt
 		if err := d.store.Save(ctx, child); err != nil {
 			return nil, err
 		}
@@ -1198,6 +1224,7 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 		Status: run.StatusPending, CreatedAt: time.Now(),
 	}
 	run.ApplyOptions(parent, opts)
+	stampReceipt(ctx, parent)
 	// The graph is stored on the parent so a pipeline held for approval can still be executed after
 	// a restart, and so a finished pipeline can show the shape it ran.
 	parent.Steps = steps
@@ -1336,6 +1363,9 @@ func stepRun(parent *run.Run, step run.PipelineStep, idx, attempt int, vars map[
 		Status: run.StatusPending, CreatedAt: time.Now(),
 		ParentID: &parent.ID, StepIndex: &i, StepName: step.Name, Attempt: attempt,
 		ExtraVars: vars,
+		// A step is part of the pipeline its parent was authorized by, not a new request, and it
+		// may be built after that request returned, so the parent's receipt is the truthful one.
+		AuditReceipt: parent.AuditReceipt,
 	}
 	// A step names its own tool, command, playbook, and inventory, so those are not inherited. How
 	// the run is executed still comes from the pipeline: the environment it runs in, the credentials
