@@ -14,8 +14,15 @@
 
 	<main class="content">
 		<a class="back" href="/ui/fleet">Back to fleet</a>
-		<h1 class="mono">{{.Host}}</h1>
-		<p class="muted">This host's outcome in its most recent runs, newest first.</p>
+		<div class="page-head">
+			<div class="page-head-text">
+				<h1 class="mono">{{.Host}}</h1>
+				<p class="muted">Everything this host has done, and what it looks like right now.</p>
+			</div>
+			<div class="head-actions" id="host-actions"></div>
+		</div>
+
+		<div class="summary" id="host-summary" hidden></div>
 		<div id="status" class="muted">Loading host history.</div>
 		<table class="runs" hidden>
 			<thead>

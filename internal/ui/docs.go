@@ -7,19 +7,9 @@ import (
 	"net/http"
 	"path"
 	"regexp"
+	"sort"
 	"strings"
 )
-
-// docOrder is the order documentation pages appear in the sidebar. Files not listed follow, sorted.
-var docOrder = []string{
-	"README", "quickstart", "faq", "switching-from-awx",
-	"tutorials", "tutorial-run-a-job", "tutorial-save-a-template", "tutorial-schedule-a-job",
-	"tutorial-set-a-secret", "tutorial-migrate",
-	"tool-bash", "tool-terraform", "tool-opentofu", "tool-python", "tool-powershell", "tool-go",
-	"sdk",
-	"concepts", "reliability", "benchmarks", "configuration", "backup", "desktop", "features", "secrets", "drift", "ai",
-	"api", "migration", "comparison",
-}
 
 // mdLinkPattern matches links between documentation pages, which are relative markdown file names on
 // disk. In the app they must point at the docs routes instead.
@@ -80,40 +70,27 @@ func (u *UI) docsPage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// docList builds the sidebar, ordered by docOrder with any extra pages appended, marking the active
-// one.
+// docList builds the sidebar in alphabetical order by title, so a reader finds a guide by name
+// without learning a curated sequence. The active page is marked.
 func (u *UI) docList(active string) []docLink {
-	present := map[string]bool{}
-	if entries, err := fs.Glob(u.docs, "*.md"); err == nil {
-		for _, e := range entries {
-			present[strings.TrimSuffix(e, ".md")] = true
-		}
+	entries, err := fs.Glob(u.docs, "*.md")
+	if err != nil {
+		return nil
 	}
-
-	seen := map[string]bool{}
-	var order []string
-	for _, slug := range docOrder {
-		if present[slug] {
-			order = append(order, slug)
-			seen[slug] = true
-		}
-	}
-	for slug := range present {
-		if !seen[slug] {
-			order = append(order, slug)
-		}
-	}
-
-	links := make([]docLink, 0, len(order))
-	for _, slug := range order {
+	links := make([]docLink, 0, len(entries))
+	for _, e := range entries {
+		slug := strings.TrimSuffix(e, ".md")
 		title := slug
-		if data, err := fs.ReadFile(u.docs, slug+".md"); err == nil {
+		if data, readErr := fs.ReadFile(u.docs, e); readErr == nil {
 			title = docTitle(data, slug)
 		}
 		links = append(links, docLink{
 			Slug: slug, Title: title, Href: docHref(slug), Active: slug == active,
 		})
 	}
+	sort.Slice(links, func(i, j int) bool {
+		return strings.ToLower(links[i].Title) < strings.ToLower(links[j].Title)
+	})
 	return links
 }
 

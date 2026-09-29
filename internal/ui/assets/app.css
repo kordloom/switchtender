@@ -114,7 +114,18 @@
 
 /* A read-only demo dims row actions such as Launch, Delete, and Refresh rather than removing them,
    so the pages still convey what the product does. */
-body[data-readonly] table .button { opacity: 0.5; pointer-events: none; }
+/* A control the read-only demo blocks stays visible, so the page still conveys what the product
+   does, but reads as unavailable and stays hoverable so it can explain why. The rule matches on
+   the marker rather than the disabled attribute, since rows are built after the read-only pass. */
+body[data-readonly] [data-mutates], body[data-readonly] .button[disabled] {
+	opacity: 0.45;
+	cursor: not-allowed;
+	filter: saturate(0.35);
+	box-shadow: none;
+}
+body[data-readonly] [data-mutates]:hover { transform: none; background: var(--surface-2); }
+body[data-readonly] .button.primary[data-mutates]:hover { background: var(--primary-bg); }
+body[data-readonly] [data-mutates]::after { display: none; }
 
 /* Read-only demo banner and the inline note that sits beside a disabled form action. */
 .ro-banner { background: var(--surface-2); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius); padding: 9px 14px; margin-bottom: 16px; font-size: 13px; color: var(--text); }
@@ -233,13 +244,16 @@ h1.mono { font-size: 24px; }
 	body:not([data-page="login"]) .side { display: flex; }
 	body:not([data-page="login"]) .topbar .brand, body:not([data-page="login"]) .nav-toggle { display: none; }
 }
-.runs-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+.runs-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+.runs-toolbar .list-filter { flex: 1 1 260px; min-width: 220px; margin: 0; }
+.runs-toolbar .list-filter-input { max-width: none; width: 100%; }
+.runs-toolbar .table-export:first-of-type { margin-left: auto; }
 .toolbar-select { width: auto; padding: 7px 11px; font-size: 13px; }
 th.col-num, td.col-num { width: 1%; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
 .pagesize-label { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 .pagesize-input { width: 84px; }
 .pagesize-hint { font-size: 12px; }
-.list-filter { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
+.list-filter { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; flex-wrap: wrap; }
 .list-filter-input { max-width: 320px; }
 .list-filter-count { font-size: 12px; }
 #migrate-plan { margin-top: 22px; }
@@ -459,8 +473,9 @@ table.matrix tbody th a { color: inherit; }
 table.matrix tbody th a:hover { color: var(--accent); text-decoration: none; }
 table.matrix tbody th { position: sticky; left: 0; z-index: 2; background: var(--surface-2); padding: 7px 14px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; white-space: nowrap; text-align: left; border-right: 1px solid var(--border-muted); border-bottom: 1px solid var(--border-muted); }
 table.matrix thead th.corner { position: sticky; left: 0; z-index: 4; border-right: 1px solid var(--border-muted); }
-table.matrix td { padding: 3px; }
-.cell { width: 32px; height: 24px; border-radius: 4px; cursor: pointer; transition: transform 0.08s ease, box-shadow 0.08s ease; }
+table.matrix td { padding: 3px; text-align: center; }
+.cell { margin: 0 auto; }
+.cell { width: 30px; height: 24px; border-radius: 4px; cursor: pointer; transition: transform 0.08s ease, box-shadow 0.08s ease; }
 .cell.ok { background: var(--ok); }
 .cell.changed { background: var(--changed); }
 .cell.failed { background: var(--failed); }
@@ -699,7 +714,7 @@ body[data-page="login"] .topbar { background: transparent; backdrop-filter: none
 
 /* In-app documentation: a sticky page list beside the rendered guide. The styles live here
    because the content security policy blocks inline style blocks. */
-.docs-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 34px; align-items: start; }
+.docs-layout { display: grid; grid-template-columns: 210px minmax(0, 1fr) 190px; gap: 34px; align-items: start; }
 .docs-nav { position: sticky; top: 76px; max-height: calc(100vh - 100px); overflow-y: auto; padding: 2px 14px 12px 0; border-right: 1px solid var(--border-muted); }
 .docs-nav .nav-group-label { margin-bottom: 6px; }
 .docs-nav ul { list-style: none; padding: 0; margin: 0; }
@@ -727,16 +742,14 @@ body[data-page="login"] .topbar { background: transparent; backdrop-filter: none
 @media (max-width: 980px) { .docs-layout { grid-template-columns: 1fr; } .docs-nav { position: static; max-height: none; } }
 
 /* Theme switcher: a quiet icon row at the bottom of the sidebar and the drawer. */
-.theme-group { margin-top: 10px; }
-.side .theme-group { margin-top: auto; padding-top: 12px; }
-.theme-row { display: flex; align-items: center; gap: 3px; padding: 0 6px; }
-.theme-hint { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-right: 5px; }
-.theme-btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 26px; padding: 0 9px; background: none; border: none; border-radius: 7px; color: var(--muted); font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer; transition: color 0.12s ease, background 0.12s ease; }
-.theme-btn:hover { background: var(--surface-2); color: var(--text); }
-.theme-btn.active { background: var(--accent-soft); color: var(--accent); }
-.theme-btn .theme-name { display: none; }
-.theme-btn.active .theme-name { display: inline; }
-.theme-btn svg { width: 14px; height: 14px; }
+.theme-group { margin-top: 10px; padding: 0 8px; }
+.side .theme-group { margin-top: auto; padding-top: 14px; }
+.theme-hint { display: block; margin-bottom: 6px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+/* A segmented control: three equal cells in one track, the active one lit. */
+.theme-row { display: flex; padding: 3px; gap: 2px; background: var(--surface-2); border: 1px solid var(--border-muted); border-radius: 9px; }
+.theme-btn { flex: 1; min-width: 0; height: 24px; padding: 0 4px; background: none; border: none; border-radius: 6px; color: var(--muted); font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer; transition: color 0.12s ease, background 0.12s ease; }
+.theme-btn:hover { color: var(--text); }
+.theme-btn.active { background: var(--surface); color: var(--accent); box-shadow: var(--shadow); }
 
 /* Flat themes: the family's stark language instead of the signature mesh. Light follows
    kordloom.com's white monochrome; dark follows loomseal.com's warm ink night palette. Both drop
@@ -919,3 +932,241 @@ table.runs td:has(> .origin-chip) { white-space: nowrap; }
 .file-note { margin-bottom: 10px; font-size: 12.5px; }
 .file-body { max-height: 60vh; }
 #file-title { font-size: 14px; word-break: break-all; }
+
+/* ============================================================================
+   Presence layer: the motion, depth, and light that make the interface feel
+   alive. Everything here degrades to a static, fully usable page under
+   prefers-reduced-motion, which is honored in one block at the end.
+   ========================================================================= */
+
+/* Headline numbers carry a metallic gradient in the signature theme, so the
+   figures that matter read as the brightest thing on the page. */
+.stat-value {
+	background: linear-gradient(160deg, var(--text) 0%, color-mix(in srgb, var(--text) 82%, var(--accent)) 100%);
+	-webkit-background-clip: text;
+	background-clip: text;
+	-webkit-text-fill-color: transparent;
+	text-shadow: 0 0 22px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.stat-value.ok, .stat-value.failed, .stat-value.running, .stat-value.changed {
+	-webkit-text-fill-color: currentColor;
+}
+.stat-card { position: relative; overflow: hidden; }
+/* A hairline of colored light along the top edge of a metric that carries state. */
+.stat-card:has(.stat-value.failed)::before,
+.stat-card:has(.stat-value.ok)::before,
+.stat-card:has(.stat-value.running)::before {
+	content: "";
+	position: absolute;
+	inset: 0 0 auto 0;
+	height: 2px;
+}
+.stat-card:has(.stat-value.failed)::before { background: linear-gradient(90deg, transparent, var(--failed), transparent); }
+.stat-card:has(.stat-value.ok)::before { background: linear-gradient(90deg, transparent, var(--ok), transparent); }
+.stat-card:has(.stat-value.running)::before { background: linear-gradient(90deg, transparent, var(--running), transparent); }
+
+/* Panels and the summary strip rise into place, staggered, so a loaded page
+   assembles itself instead of appearing all at once. */
+@keyframes riseIn {
+	from { opacity: 0; transform: translateY(10px); }
+	to { opacity: 1; transform: none; }
+}
+.summary, .panel, .jump-panel, table.runs, .run-header {
+	animation: riseIn 0.42s var(--ease) both;
+}
+.panel:nth-of-type(2) { animation-delay: 0.06s; }
+.panel:nth-of-type(3) { animation-delay: 0.12s; }
+.jump-panel { animation-delay: 0.1s; }
+
+/* Table rows fade up in sequence as a list paints. */
+@keyframes rowIn {
+	from { opacity: 0; transform: translateY(5px); }
+	to { opacity: 1; transform: none; }
+}
+table.runs tbody tr:not(.skeleton-row) { animation: rowIn 0.3s var(--ease) both; }
+table.runs tbody tr:nth-child(1) { animation-delay: 0.01s; }
+table.runs tbody tr:nth-child(2) { animation-delay: 0.03s; }
+table.runs tbody tr:nth-child(3) { animation-delay: 0.05s; }
+table.runs tbody tr:nth-child(4) { animation-delay: 0.07s; }
+table.runs tbody tr:nth-child(5) { animation-delay: 0.09s; }
+table.runs tbody tr:nth-child(6) { animation-delay: 0.11s; }
+table.runs tbody tr:nth-child(7) { animation-delay: 0.13s; }
+table.runs tbody tr:nth-child(8) { animation-delay: 0.15s; }
+.ov-row { animation: rowIn 0.3s var(--ease) both; }
+.ov-row:nth-child(2) { animation-delay: 0.03s; }
+.ov-row:nth-child(3) { animation-delay: 0.06s; }
+.ov-row:nth-child(4) { animation-delay: 0.09s; }
+.ov-row:nth-child(5) { animation-delay: 0.12s; }
+.ov-row:nth-child(6) { animation-delay: 0.15s; }
+.ov-row:nth-child(7) { animation-delay: 0.18s; }
+.ov-row:nth-child(8) { animation-delay: 0.21s; }
+
+/* A running badge breathes, so live work is visible from across the room. */
+@keyframes badgePulse {
+	0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--running) 45%, transparent); }
+	50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--running) 0%, transparent); }
+}
+.badge.running { animation: badgePulse 2s ease-in-out infinite; }
+.badge.running::before { animation: pulse 1.4s infinite; }
+/* Failure carries a faint ember so a red row is felt before it is read. */
+.badge.failed { box-shadow: 0 0 12px -3px color-mix(in srgb, var(--failed) 55%, transparent); }
+
+/* Rows lift on hover with a leading accent edge. */
+table.runs tbody tr.row-nav, table.runs tbody tr.row-inspect { position: relative; }
+table.runs tbody tr.row-nav td:first-child, table.runs tbody tr.row-inspect td:first-child {
+	box-shadow: inset 0 0 0 0 var(--accent);
+	transition: box-shadow 0.16s var(--ease);
+}
+table.runs tbody tr.row-nav:hover td:first-child, table.runs tbody tr.row-inspect:hover td:first-child {
+	box-shadow: inset 2px 0 0 0 var(--accent);
+}
+
+/* The primary action catches a sweep of light on hover. */
+.button.primary { position: relative; overflow: hidden; }
+.button.primary::after {
+	content: "";
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: -60%;
+	width: 40%;
+	background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.28), transparent);
+	transform: skewX(-18deg);
+	transition: left 0.55s var(--ease);
+}
+.button.primary:hover::after { left: 130%; }
+
+/* Matrix cells cascade in, and a hovered cell glows in its own status color. */
+@keyframes cellIn {
+	from { opacity: 0; transform: scale(0.72); }
+	to { opacity: 1; transform: none; }
+}
+.cell { animation: cellIn 0.26s var(--ease) both; }
+.cell.ok:hover { box-shadow: 0 0 0 2px var(--surface), 0 0 14px 1px color-mix(in srgb, var(--ok) 70%, transparent); }
+.cell.failed:hover { box-shadow: 0 0 0 2px var(--surface), 0 0 14px 1px color-mix(in srgb, var(--failed) 70%, transparent); }
+.cell.changed:hover { box-shadow: 0 0 0 2px var(--surface), 0 0 14px 1px color-mix(in srgb, var(--changed) 70%, transparent); }
+
+/* Timeline bars sweep out to their measured width on first paint. */
+@keyframes barGrow { from { transform: scaleX(0); } to { transform: none; } }
+.tl-bar { transform-origin: left center; animation: barGrow 0.5s var(--ease) both; }
+
+/* Activity columns grow up from the axis and light up under the pointer. */
+@keyframes segGrow { from { transform: scaleY(0); } to { transform: none; } }
+.activity-seg { transform-origin: bottom center; animation: segGrow 0.45s var(--ease) both; }
+.activity-col:nth-child(2n) .activity-seg { animation-delay: 0.04s; }
+.activity-col:nth-child(3n) .activity-seg { animation-delay: 0.08s; }
+.activity-col .activity-bar { transition: filter 0.15s ease, transform 0.15s var(--ease); }
+.activity-col:hover .activity-bar { filter: brightness(1.15) saturate(1.1); transform: translateY(-2px); }
+.activity-seg.succeeded { box-shadow: 0 0 10px -2px color-mix(in srgb, var(--ok) 60%, transparent); }
+.activity-seg.failed { box-shadow: 0 0 10px -2px color-mix(in srgb, var(--failed) 60%, transparent); }
+
+/* The live indicator reads as a broadcasting signal, not a static dot. */
+.live-dot::before { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 60%, transparent); animation: liveRipple 1.6s ease-out infinite; }
+@keyframes liveRipple {
+	0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 55%, transparent); opacity: 1; }
+	70% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--ok) 0%, transparent); opacity: 0.85; }
+	100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 0%, transparent); opacity: 1; }
+}
+
+/* Cards and tiles lift into a soft pool of accent light. */
+.jump-row, .tile { transition: background 0.15s ease, transform 0.15s var(--ease); }
+.jump-row:hover { transform: translateX(2px); }
+.jump-icon { transition: transform 0.18s var(--ease), background 0.18s ease; }
+.jump-row:hover .jump-icon { transform: scale(1.08); background: color-mix(in srgb, var(--accent) 22%, transparent); }
+
+/* Sidebar navigation responds to the pointer before it is clicked. */
+.nav-item { transition: background 0.13s ease, color 0.13s ease, padding-left 0.13s var(--ease); }
+.side .nav-item:hover { padding-left: 12px; }
+.side .nav-item svg { transition: transform 0.16s var(--ease); }
+.side .nav-item:hover svg { transform: scale(1.12); }
+
+/* The counted digits of a metric tick over rather than snapping into place. */
+.stat-value.counting { font-variant-numeric: tabular-nums; }
+
+/* Focus rings glow instead of merely outlining. */
+:focus-visible { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent); }
+
+/* Every motion above is decoration. A reader who asks for stillness gets a
+   complete, static interface with no animation and no transitions. */
+@media (prefers-reduced-motion: reduce) {
+	.summary, .panel, .jump-panel, table.runs, .run-header,
+	table.runs tbody tr, .ov-row, .cell, .tl-bar, .activity-seg,
+	.badge.running, .badge.running::before, .live-dot::before {
+		animation: none !important;
+	}
+	.button.primary::after { transition: none; }
+	.jump-row, .tile, .nav-item, .side .nav-item svg, .activity-col .activity-bar,
+	.jump-icon, table.runs tbody tr td:first-child {
+		transition: none;
+	}
+}
+
+/* Project checkout browser: a filterable list of files, each opening the viewer. */
+.tree-list { max-height: 52vh; overflow-y: auto; margin-top: 10px; display: flex; flex-direction: column; gap: 1px; }
+.tree-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; width: 100%; padding: 7px 10px; background: none; border: none; border-radius: var(--radius); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.tree-row:hover { background: var(--surface-2); }
+.tree-row:hover .mono { color: var(--accent); }
+.tree-size { flex: none; font-size: 11.5px; color: var(--muted); }
+
+/* Sortable headers show their affordance and the active direction. */
+th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+th.sortable:hover { color: var(--text); }
+th.sortable::after { content: "\2195"; margin-left: 6px; opacity: 0.3; font-size: 10px; }
+th.sortable[data-dir="asc"]::after { content: "\2191"; opacity: 1; color: var(--accent); }
+th.sortable[data-dir="desc"]::after { content: "\2193"; opacity: 1; color: var(--accent); }
+
+/* Labels sit in their own column so they align down the table instead of trailing text of
+   varying length. Two fit per row; the rest expand in place. */
+td.col-labels { white-space: nowrap; }
+.label-wrap { display: inline-flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.label-wrap .label-chip { margin-left: 0; }
+.label-more { border: 1px dashed var(--border); cursor: pointer; font-family: var(--mono); }
+.label-more:hover { border-style: solid; }
+/* A run's playbook stays on one line, truncated, so every row keeps the same height. The full
+   value is on the cell's title and in the export. */
+td.col-playbook .clamp { display: block; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+td.col-playbook .clamp .linkish { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+/* Two label chips sit side by side; the column holds them without pushing the row taller. */
+td.col-labels .label-wrap { flex-wrap: nowrap; }
+
+/* The migration plan's export controls sit above the grouped result lists. */
+.migrate-export { margin: 0 0 14px; padding-top: 0; border-top: none; }
+
+/* The guide filter sits above the list, so a thirty-guide sidebar stays navigable. */
+.docs-filter { width: 100%; margin-bottom: 10px; padding: 6px 10px; font-size: 12.5px; }
+.docs-empty { padding: 6px 9px; font-size: 12.5px; }
+
+/* On this page: a rail of the current guide's sections, tracking the reader's position. It
+   occupies the space a two-column docs layout wastes. */
+.docs-toc { position: sticky; top: 76px; max-height: calc(100vh - 100px); overflow-y: auto; }
+.docs-toc ul { list-style: none; padding: 0; margin: 0; border-left: 1px solid var(--border-muted); }
+.docs-toc li { margin: 0; }
+.docs-toc a { display: block; padding: 5px 0 5px 12px; margin-left: -1px; border-left: 2px solid transparent; color: var(--muted); font-size: 12.5px; line-height: 1.4; }
+.docs-toc a:hover { text-decoration: none; color: var(--text); }
+.docs-toc a.active { color: var(--accent); border-left-color: var(--accent); }
+
+/* Previous and next close a guide with somewhere to go. */
+.docs-pager { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 40px; padding-top: 22px; border-top: 1px solid var(--border-muted); }
+.docs-pager-link { display: flex; flex-direction: column; gap: 3px; padding: 12px 16px; background-color: var(--surface); background-image: linear-gradient(180deg, var(--card-top), transparent 46%); border: 1px solid var(--border); border-radius: var(--radius-lg); transition: border-color 0.15s var(--ease), transform 0.15s var(--ease); }
+.docs-pager-link:hover { text-decoration: none; border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); transform: translateY(-2px); }
+.docs-pager-link.next { grid-column: 2; text-align: right; }
+.docs-pager-link.prev:only-child { grid-column: 1; }
+.docs-pager-kicker { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.docs-pager-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.docs-pager-link:hover .docs-pager-title { color: var(--accent); }
+
+/* Every page ends on a deliberate edge rather than trailing off. */
+.app-foot { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin: 56px -36px -48px; padding: 20px 36px; border-top: 1px solid var(--border-muted); background: color-mix(in srgb, var(--surface) 45%, transparent); }
+.app-foot-brand { font-family: var(--display); font-size: 12.5px; font-weight: 700; letter-spacing: -0.01em; color: var(--muted); }
+.app-foot-links { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.app-foot-links a, .app-foot-top { color: var(--muted); font-size: 12.5px; font-weight: 500; }
+.app-foot-links a:hover, .app-foot-top:hover { color: var(--accent); text-decoration: none; }
+.app-foot-top { background: none; border: none; padding: 0; font-family: inherit; cursor: pointer; }
+@media (max-width: 1180px) {
+	.docs-layout { grid-template-columns: 200px minmax(0, 1fr); }
+	.docs-toc { display: none; }
+}
+@media (max-width: 980px) {
+	.docs-layout { grid-template-columns: 1fr; }
+	.app-foot { margin: 40px -16px -16px; padding: 18px 16px; }
+}

@@ -707,6 +707,9 @@ func parseFieldedQuery(q string, filter *run.ListFilter) {
 			filter.Source = strings.ToLower(value)
 		case "actor":
 			filter.Actor = value
+		case "from":
+			// The object that fired the run: a template or schedule id.
+			filter.SourceID = value
 		case "host":
 			filter.Host = value
 		case "label":

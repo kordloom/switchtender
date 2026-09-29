@@ -13,8 +13,13 @@
 	</header>
 
 	<main class="content">
-		<h1>Migrate</h1>
-		<p class="muted">Import projects, inventories, templates, and schedules from AWX or Semaphore.</p>
+		<div class="page-head">
+			<div class="page-head-text">
+				<h1>Migrate</h1>
+				<p class="muted">Import projects, inventories, templates, and schedules from AWX or Semaphore. Preview first: nothing is created until you import.</p>
+			</div>
+			<div class="head-actions"></div>
+		</div>
 
 		<form id="migrate-form" class="stack">
 			<label class="field-label">Format
@@ -28,8 +33,9 @@
 					placeholder="Paste your AWX or Semaphore export JSON here"></textarea>
 			</label>
 			<div class="launch-actions">
-				<button id="migrate-preview" type="button" class="button">Preview</button>
-				<button id="migrate-apply" type="button" class="button primary">Import</button>
+				<button id="migrate-sample" type="button" class="button" data-tip="Click to fill the box with a sample AWX export so you can try the import">Load a sample export</button>
+				<button id="migrate-preview" type="button" class="button" data-tip="Click to see exactly what would be created, without creating anything">Preview</button>
+				<button id="migrate-apply" type="button" class="button primary" data-tip="Click to create every object in the plan">Import</button>
 				<span id="migrate-status" class="muted"></span>
 			</div>
 		</form>

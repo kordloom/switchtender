@@ -16,11 +16,14 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/inventory"
+	"github.com/kordloom/switchtender/internal/invsource"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/template"
 	"github.com/kordloom/switchtender/internal/user"
 )
@@ -54,6 +57,14 @@ type Deps struct {
 	// Policies and Users hold sample governance rules and accounts, so those pages show real data.
 	Policies policy.Store
 	Users    user.Store
+	// InvSources holds sample dynamic inventory sources, so that page shows the relationship
+	// between a source and the inventory it refreshes.
+	InvSources invsource.Store
+	// Audit records the sample change history, so the tamper-evident chain has something to
+	// verify rather than an empty page.
+	Audit audit.Store
+	// Schedules holds the sample cron entries, so that page shows real cadences.
+	Schedules schedule.Store
 }
 
 // Seed populates the stores with sample configuration and a set of runs that exercise the matrix,
@@ -76,9 +87,9 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 	failByRun := []string{"", "db01", "", "db01", ""}
 	for i, failHost := range failByRun {
 		// Alternate origins so the runs list shows the full provenance vocabulary.
-		source, sourceID, actor := "schedule", "sch_nightly", "nightly-cron"
+		source, sourceID, actor := "schedule", "sch_nightly", "deploy-bot"
 		if i%2 == 1 {
-			source, sourceID, actor = "template", "tpl_deploy_web", "avery"
+			source, sourceID, actor = "template", "tpl_deploy_web", "admin"
 		}
 		opts := seedOpts(source, sourceID, actor,
 			map[string]string{"env": "prod", "team": "platform"}, failVars(failHost)...)
@@ -91,7 +102,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 
 	// A split where one shard fails, showing the merged matrix and failed-shard isolation.
 	split, err := d.Submitter.SubmitSplit(ctx, playbook, inv, 3,
-		seedOpts("template", "tpl_deploy_web", "avery",
+		seedOpts("template", "tpl_deploy_web", "admin",
 			map[string]string{"env": "prod", "ticket": "OPS-482"}, failVars("db01")...)...)
 	if err != nil {
 		return fmt.Errorf("seed split: %w", err)
@@ -105,7 +116,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 		{Name: "verify", Playbook: playbook},
 	}
 	pipe, err := d.Submitter.SubmitPipeline(ctx, "Release 4.2", inv, steps,
-		seedOpts("api", "", "release-bot", map[string]string{"env": "prod", "ticket": "REL-42"})...)
+		seedOpts("api", "", "deploy-bot", map[string]string{"env": "prod", "ticket": "REL-42"})...)
 	if err != nil {
 		return fmt.Errorf("seed pipeline: %w", err)
 	}
@@ -113,7 +124,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 
 	// One more failure on a different host for variety.
 	last, err := d.Submitter.Submit(ctx, playbook, inv,
-		seedOpts("rerun", "", "avery",
+		seedOpts("rerun", "", "admin",
 			map[string]string{"env": "staging"}, failVars("edge01")...)...)
 	if err != nil {
 		return fmt.Errorf("seed run: %w", err)
@@ -122,7 +133,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 
 	// A dry run of a check playbook surfaces configuration drift per host on the Drift page.
 	driftPlay := filepath.Join(dir, "drift.yml")
-	driftOpts := seedOpts("schedule", "sch_drift_check", "nightly-cron",
+	driftOpts := seedOpts("schedule", "sch_drift_check", "deploy-bot",
 		map[string]string{"env": "prod"}, run.WithDryRun(true))
 	if driftRun, err := d.Submitter.Submit(ctx, driftPlay, inv, driftOpts...); err == nil {
 		waitTerminal(ctx, d.Runs, driftRun.ID)
@@ -146,7 +157,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 // finishes cleanly on whatever host serves the demo.
 func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log *zap.Logger) error {
 	bash, err := d.Submitter.Submit(ctx, "", "",
-		seedOpts("schedule", "sch_log_rotate", "nightly-cron", map[string]string{"env": "prod"},
+		seedOpts("schedule", "sch_log_rotate", "deploy-bot", map[string]string{"env": "prod"},
 			run.WithTool(run.ToolBash), run.WithCommand(scriptLogRotate))...)
 	if err != nil {
 		return fmt.Errorf("seed bash run: %w", err)
@@ -155,7 +166,7 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 
 	if have("python3") {
 		py, err := d.Submitter.Submit(ctx, "", "",
-			seedOpts("template", "tpl_reconcile", "avery", map[string]string{"env": "prod"},
+			seedOpts("template", "tpl_reconcile", "admin", map[string]string{"env": "prod"},
 				run.WithTool(run.ToolPython), run.WithCommand(scriptReconcile))...)
 		if err != nil {
 			return fmt.Errorf("seed python run: %w", err)
@@ -167,7 +178,7 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 
 	if have("terraform") {
 		tf, err := d.Submitter.Submit(ctx, "", "",
-			seedOpts("api", "", "terraform-ci", map[string]string{"env": "staging"},
+			seedOpts("api", "", "deploy-bot", map[string]string{"env": "staging"},
 				run.WithTool(run.ToolTerraform), run.WithCommand(tfDir), run.WithDryRun(true))...)
 		if err != nil {
 			return fmt.Errorf("seed terraform run: %w", err)
@@ -179,7 +190,7 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 
 	if have("go") {
 		gorun, err := d.Submitter.Submit(ctx, "", "",
-			seedOpts("template", "tpl_capacity", "avery", map[string]string{"env": "prod"},
+			seedOpts("template", "tpl_capacity", "admin", map[string]string{"env": "prod"},
 				run.WithTool(run.ToolGo), run.WithCommand(scriptFleetGo))...)
 		if err != nil {
 			return fmt.Errorf("seed go run: %w", err)
@@ -195,7 +206,7 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 		{Name: "smoke-test", Tool: run.ToolBash, Command: scriptSmoke},
 	}
 	pipe, err := d.Submitter.SubmitPipeline(ctx, "Provision and deploy", inv, steps,
-		seedOpts("template", "tpl_provision", "avery",
+		seedOpts("template", "tpl_provision", "admin",
 			map[string]string{"env": "prod", "ticket": "OPS-503"})...)
 	if err != nil {
 		return fmt.Errorf("seed mixed pipeline: %w", err)
@@ -321,6 +332,61 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) {
 		}
 	}
 
+	// A dynamic source paired with the inventory it maintains, so the Sources page shows a real
+	// relationship rather than an empty list. The script is never executed by seeding; it stands
+	// as the configuration a refresh would run.
+	if d.InvSources != nil {
+		dynamic := &inventory.Inventory{
+			ID: inventory.NewID(), Name: "cloud-discovered",
+			Content:   "[all]\n# Refreshed from the cloud-hosts source.\n",
+			CreatedAt: ago(20),
+		}
+		if err := d.Inventories.Save(ctx, dynamic); err != nil {
+			log.Warn("demo: seed dynamic inventory: " + err.Error())
+		} else {
+			synced := ago(1)
+			src := &invsource.Source{
+				ID: invsource.NewID(), Name: "cloud-hosts",
+				Source: "inventory/aws_ec2.yml", InventoryID: dynamic.ID,
+				UpdateOnLaunch: true, SyncIntervalSeconds: 3600,
+				SyncedAt: &synced, CreatedAt: ago(20),
+			}
+			if err := d.InvSources.Save(ctx, src); err != nil {
+				log.Warn("demo: seed inventory source: " + err.Error())
+			}
+		}
+	}
+
+	// A change history, so the audit page shows a real hash chain the Verify button can check.
+	// Each append links to the one before it exactly as a live mutation would.
+	if d.Audit != nil {
+		history := []struct {
+			actor, method, path string
+			hoursAgo            int
+		}{
+			{"admin", "POST", "/v1/projects", 72},
+			{"admin", "POST", "/v1/inventories", 72},
+			{"admin", "POST", "/v1/credentials", 72},
+			{"admin", "POST", "/v1/templates", 72},
+			{"deploy-bot", "PUT", "/v1/templates/tpl_deploy_web", 50},
+			{"admin", "POST", "/v1/inventory-sources", 20},
+			{"deploy-bot", "POST", "/v1/pipelines", 6},
+			{"deploy-bot", "POST", "/v1/policies", 5},
+			{"deploy-bot", "POST", "/v1/schedules", 4},
+			{"admin", "DELETE", "/v1/templates/tpl_retired", 2},
+		}
+		for _, h := range history {
+			entry := &audit.Entry{
+				ID: audit.NewID(), At: ago(h.hoursAgo),
+				Actor: h.actor, Method: h.method, Path: h.path,
+			}
+			if err := d.Audit.Append(ctx, entry); err != nil {
+				log.Warn("demo: seed audit entry: " + err.Error())
+				break
+			}
+		}
+	}
+
 	creds := []*credential.Credential{
 		{ID: credential.NewID(), Name: "prod-ssh", Kind: credential.KindSSHKey, CreatedAt: ago(72)},
 		{ID: credential.NewID(), Name: "ansible-vault", Kind: credential.KindVaultPassword, CreatedAt: ago(72)},
@@ -353,6 +419,34 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) {
 			run.ToolTerraform, "destroy", true, ago(40)
 		anyProd := policy.NewPolicy("any production run")
 		anyProd.InventoryID, anyProd.CreatedAt = inventories[0].ID, ago(22)
+		// Cron entries against the seeded templates, so the schedules page shows real cadences and
+		// the plain-language reading of each expression.
+		if d.Schedules != nil && len(templates) >= 3 {
+			next := func(h int) *time.Time { t := now.Add(time.Duration(h) * time.Hour); return &t }
+			schedules := []*schedule.Schedule{
+				{
+					ID: schedule.NewID(), Name: "Nightly audit", Cron: "0 2 * * *",
+					TemplateID: templates[2].ID, Enabled: true,
+					NextRunAt: next(9), CreatedAt: ago(70),
+				},
+				{
+					ID: schedule.NewID(), Name: "Weekday deploy window", Cron: "30 9 * * 1-5",
+					TemplateID: templates[0].ID, Enabled: true,
+					NextRunAt: next(17), CreatedAt: ago(46),
+				},
+				{
+					ID: schedule.NewID(), Name: "Hourly drift check", Cron: "0 * * * *",
+					TemplateID: templates[1].ID, Enabled: false,
+					CreatedAt: ago(20),
+				},
+			}
+			for _, sc := range schedules {
+				if err := d.Schedules.Save(ctx, sc); err != nil {
+					log.Warn("demo: seed schedule: " + err.Error())
+				}
+			}
+		}
+
 		policies := []*policy.Policy{tfDestroy, anyProd}
 		for _, p := range policies {
 			if err := d.Policies.Save(ctx, p); err != nil {

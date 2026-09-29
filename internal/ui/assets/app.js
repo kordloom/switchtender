@@ -8,7 +8,11 @@
 	try { theme = localStorage.getItem("st_theme"); } catch { /* storage may be unavailable */ }
 	const param = new URLSearchParams(location.search).get("theme");
 	if (param) {
-		const byName = { stitch: "signature", kord: "light", seal: "dark" };
+		const byName = {
+			loom: "signature", linen: "light", ink: "dark",
+			// The first published names still resolve, so links already shared keep working.
+			stitch: "signature", kord: "light", seal: "dark",
+		};
 		const key = byName[param.toLowerCase()];
 		if (key === "light" || key === "dark") theme = key;
 		else if (key === "signature") theme = null;
@@ -171,8 +175,11 @@ function mountTopbar() {
 
 // EXPORT_PAGES are the pages whose main table gets CSV and JSON export of the shown rows.
 // Credentials stays out on purpose, so secret-adjacent data never leaves by accident.
+// Credentials are included on purpose: the API never returns a secret value, so an export lists
+// names, kinds, secret state, and what uses them, which is what an access review needs.
 const EXPORT_PAGES = ["runs", "fleet", "drift", "tasks", "workers", "schedules", "jobtemplates",
-	"users", "audit", "host", "projects", "inventories", "sources", "policies", "doctor"];
+	"users", "audit", "host", "projects", "inventories", "sources", "policies", "doctor",
+	"credentials"];
 
 // tableRowsData reads the rendered table into headers and rows, skipping the actions column and
 // anything hidden, so an export matches exactly what the user sees after filtering.
@@ -198,6 +205,46 @@ function tableRowsData(table) {
 	return { headers, rows };
 }
 
+// yamlScalar renders one value as YAML, quoting whenever the plain form would be ambiguous:
+// empty strings, leading or trailing space, YAML indicators, and anything that would otherwise
+// parse as a number, boolean, or null.
+function yamlScalar(value) {
+	if (value === null || value === undefined) return "null";
+	if (typeof value === "number" || typeof value === "boolean") return String(value);
+	const text = String(value);
+	const risky = text === "" || text !== text.trim() ||
+		/^[-?:,[\]{}#&*!|>'"%@`]/.test(text) || /:\s|\s#/.test(text) ||
+		/^(true|false|null|yes|no|on|off|~)$/i.test(text) ||
+		/^-?\d+(\.\d+)?$/.test(text) || text.includes("\n");
+	if (!risky) return text;
+	return '"' + text.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n") + '"';
+}
+
+// toYAML renders a list of flat records, or a single map, as a YAML document.
+function toYAML(value, indent) {
+	const pad = indent || "";
+	if (Array.isArray(value)) {
+		if (!value.length) return pad + "[]\n";
+		return value.map((item) => {
+			if (item && typeof item === "object") {
+				const keys = Object.keys(item);
+				if (!keys.length) return pad + "- {}\n";
+				return keys.map((k, i) =>
+					pad + (i === 0 ? "- " : "  ") + k + ": " + yamlScalar(item[k]) + "\n").join("");
+			}
+			return pad + "- " + yamlScalar(item) + "\n";
+		}).join("");
+	}
+	if (value && typeof value === "object") {
+		return Object.keys(value).map((k) => {
+			const v = value[k];
+			if (v && typeof v === "object") return pad + k + ":\n" + toYAML(v, pad + "  ");
+			return pad + k + ": " + yamlScalar(v) + "\n";
+		}).join("");
+	}
+	return pad + yamlScalar(value) + "\n";
+}
+
 // downloadBlob hands the browser a generated file.
 function downloadBlob(name, type, content) {
 	const url = URL.createObjectURL(new Blob([content], { type }));
@@ -217,7 +264,9 @@ function mountTableExport() {
 	if (!EXPORT_PAGES.includes(page)) return;
 	const table = document.querySelector("main.content table");
 	if (!table || !table.tHead || !table.tBodies[0]) return;
-	let host = document.querySelector(".list-filter") || document.querySelector(".runs-toolbar");
+	// On the runs page the toolbar holds the filter and the dropdowns, so the export buttons join
+	// the toolbar itself and land after them rather than beside the search box.
+	let host = document.querySelector(".runs-toolbar") || document.querySelector(".list-filter");
 	if (!host) {
 		host = document.createElement("div");
 		host.className = "list-filter";
@@ -234,17 +283,87 @@ function mountTableExport() {
 		btn.addEventListener("click", fn);
 		host.appendChild(btn);
 	};
-	make("CSV", "Export the filtered rows as CSV", () => {
+	make("CSV", "Click to export the filtered rows as a CSV spreadsheet", () => {
 		const { headers, rows } = tableRowsData(table);
 		const esc = (v) => /[",\n]/.test(v) ? '"' + v.replaceAll('"', '""') + '"' : v;
 		const csv = [headers, ...rows].map((r) => r.map(esc).join(",")).join("\n") + "\n";
 		downloadBlob("switchtender-" + page + "-" + stamp() + ".csv", "text/csv", csv);
 	});
-	make("JSON", "Export the filtered rows as JSON", () => {
+	make("JSON", "Click to export the filtered rows as JSON", () => {
 		const { headers, rows } = tableRowsData(table);
 		const objs = rows.map((r) => Object.fromEntries(headers.map((h, i) => [h, r[i] ?? ""])));
 		downloadBlob("switchtender-" + page + "-" + stamp() + ".json", "application/json",
 			JSON.stringify(objs, null, 2) + "\n");
+	});
+	make("YAML", "Click to export the filtered rows as YAML", () => {
+		const { headers, rows } = tableRowsData(table);
+		const objs = rows.map((r) => Object.fromEntries(headers.map((h, i) => [h, r[i] ?? ""])));
+		downloadBlob("switchtender-" + page + "-" + stamp() + ".yaml", "text/yaml", toYAML(objs));
+	});
+}
+
+// SORT_SKIP names headers that hold controls rather than comparable values.
+const SORT_SKIP = new Set(["", "actions", "fix", "recent", "history"]);
+
+// cellSortValue reads a cell for comparison: a timestamp when the cell carries one, a number when
+// the text is numeric, and lowercased text otherwise, so each column sorts the way it reads.
+function cellSortValue(cell) {
+	const timed = cell.querySelector("[data-time]") || (cell.dataset && cell.dataset.time ? cell : null);
+	if (timed) {
+		const t = Date.parse(timed.dataset.time);
+		if (!isNaN(t)) return { n: t };
+	}
+	const text = cell.textContent.trim();
+	// A leading number covers counts, durations, sizes, and ratios such as 1 / 10.
+	const num = text.match(/^-?[\d,]+(\.\d+)?/);
+	if (num && num[0].length >= text.replace(/[^\d.,\-].*$/, "").length && num[0] !== "") {
+		const parsed = parseFloat(num[0].replace(/,/g, ""));
+		if (!isNaN(parsed)) return { n: parsed };
+	}
+	return { s: text.toLowerCase() };
+}
+
+// mountTableSort makes every meaningful column header a sort control. Clicking cycles ascending
+// then descending, and the active column shows its direction.
+function mountTableSort() {
+	const table = document.querySelector("main.content table");
+	if (!table || !table.tHead || !table.tBodies[0]) return;
+	const tbody = table.tBodies[0];
+	Array.from(table.tHead.rows[0].cells).forEach((th, index) => {
+		const label = th.textContent.trim().toLowerCase();
+		if (SORT_SKIP.has(label) || th.classList.contains("col-actions")) return;
+		th.classList.add("sortable");
+		th.tabIndex = 0;
+		th.setAttribute("role", "button");
+		th.dataset.tip = "Click to sort by " + (th.textContent.trim() || "this column");
+		const sort = () => {
+			const desc = th.dataset.dir === "asc";
+			for (const other of table.tHead.rows[0].cells) {
+				if (other !== th) delete other.dataset.dir;
+			}
+			th.dataset.dir = desc ? "desc" : "asc";
+			const rows = Array.from(tbody.rows).filter((r) => !r.classList.contains("skeleton-row"));
+			rows.sort((a, b) => {
+				const av = cellSortValue(a.cells[index]);
+				const bv = cellSortValue(b.cells[index]);
+				let cmp;
+				if (av.n !== undefined && bv.n !== undefined) cmp = av.n - bv.n;
+				else cmp = String(av.s ?? av.n).localeCompare(String(bv.s ?? bv.n));
+				return desc ? -cmp : cmp;
+			});
+			for (const row of rows) tbody.appendChild(row);
+			// Row numbering, where a table has it, follows the new order.
+			let n = 0;
+			for (const row of rows) {
+				const numCell = row.querySelector("td.col-num");
+				if (numCell) numCell.textContent = String(++n);
+			}
+			table.dispatchEvent(new CustomEvent("rowsfiltered"));
+		};
+		th.addEventListener("click", sort);
+		th.addEventListener("keydown", (e) => {
+			if (e.key === "Enter" || e.key === " ") { e.preventDefault(); sort(); }
+		});
 	});
 }
 
@@ -854,6 +973,10 @@ function mountWorkflow() {
 	};
 	document.getElementById("wf-add").addEventListener("click", () => openStepModal(null));
 	document.getElementById("wf-run").addEventListener("click", runWorkflow);
+	const wfJSON = document.getElementById("wf-export-json");
+	if (wfJSON) wfJSON.addEventListener("click", () => exportWorkflow("json"));
+	const wfYAML = document.getElementById("wf-export-yaml");
+	if (wfYAML) wfYAML.addEventListener("click", () => exportWorkflow("yaml"));
 	document.getElementById("wf-step-tool").addEventListener("change", syncStepFields);
 	document.getElementById("wf-step-form").addEventListener("submit", saveStep);
 	document.getElementById("wf-step-delete").addEventListener("click", deleteStepFromModal);
@@ -947,7 +1070,11 @@ function mountWorkflow() {
 		}
 	});
 	window.addEventListener("resize", renderEdges);
-	const hadViewport = wfRestore();
+	let hadViewport = wfRestore();
+	if (!wfState.nodes.length) {
+		wfSeedExample();
+		hadViewport = false;
+	}
 	renderWorkflow();
 	if (hadViewport) {
 		applyViewport();
@@ -1064,6 +1191,32 @@ let wfViewSaveTimer = null;
 function saveViewSoon() {
 	clearTimeout(wfViewSaveTimer);
 	wfViewSaveTimer = setTimeout(wfSave, 250);
+}
+
+// wfSeedExample lays out a small but real pipeline: infrastructure fans out to configuration and
+// database migration, both of which a smoke test waits on. It gives a first visit something to
+// drag, zoom, and read instead of an empty canvas, and it is replaced the moment the reader
+// changes anything, since the draft then saves over it.
+function wfSeedExample() {
+	const step = (id, name, tool, x, y, extra) => Object.assign({
+		id, name, tool, x, y,
+		playbook: tool === "ansible" ? "site.yml" : "",
+		command: tool === "ansible" ? "" : "echo running " + name,
+		inventory: "", dryRun: false, continueOnFailure: false, retries: 0,
+	}, extra || {});
+	wfState.nodes = [
+		step(1, "provision", "terraform", 60, 150, { command: "infra/network", dryRun: true }),
+		step(2, "configure", "ansible", 330, 60),
+		step(3, "migrate-db", "ansible", 330, 250, { playbook: "migrate.yml" }),
+		step(4, "smoke-test", "bash", 600, 150, { command: "curl -fsS https://example.internal/healthz", retries: 2 }),
+	];
+	wfState.edges = [
+		{ from: 1, to: 2 }, { from: 1, to: 3 },
+		{ from: 2, to: 4 }, { from: 3, to: 4 },
+	];
+	wfState.seq = 4;
+	const name = document.getElementById("wf-name");
+	if (name && !name.value) name.value = "Release pipeline";
 }
 
 // wfRestore loads the saved draft into the editor state, ignoring anything malformed. It reports
@@ -1675,10 +1828,10 @@ function wfSetStatus(msg, kind) {
 // runWorkflow serializes the graph into pipeline steps and submits it, then opens the new run. An
 // in-flight guard stops a double click from starting the workflow twice, and a 401 saves the draft
 // and routes through sign-in so the graph survives the round trip.
-async function runWorkflow() {
-	if (wfState.submitting) return;
-	if (wfState.nodes.length === 0) { wfSetStatus("Add at least one step.", "err"); return; }
-	const steps = wfState.nodes.map((n) => {
+// workflowSteps renders the canvas graph into the pipeline steps the API accepts, resolving each
+// edge into a dependency by step name.
+function workflowSteps() {
+	return wfState.nodes.map((n) => {
 		const step = { name: n.name, tool: n.tool };
 		if (n.tool === "ansible") step.playbook = n.playbook;
 		else step.command = n.command;
@@ -1695,6 +1848,38 @@ async function runWorkflow() {
 		if (deps.length) step.depends_on = deps;
 		return step;
 	});
+}
+
+// workflowDocument is the whole pipeline as it would be submitted, for running or exporting.
+function workflowDocument() {
+	return {
+		name: document.getElementById("wf-name").value.trim() || "workflow",
+		inventory: document.getElementById("wf-inventory").value.trim(),
+		steps: workflowSteps(),
+	};
+}
+
+// exportWorkflow downloads the graph as a pipeline definition, so a workflow built visually can
+// be committed to a repository or handed to the API.
+function exportWorkflow(format) {
+	if (!wfState || !wfState.nodes.length) {
+		wfSetStatus("Add at least one step before exporting.", "err");
+		return;
+	}
+	const doc = workflowDocument();
+	const name = (doc.name || "workflow").replace(/\s+/g, "-").toLowerCase();
+	if (format === "yaml") {
+		downloadBlob(name + ".yaml", "text/yaml", toYAML(doc));
+	} else {
+		downloadBlob(name + ".json", "application/json", JSON.stringify(doc, null, 2) + "\n");
+	}
+	wfSetStatus("Exported " + doc.steps.length + " steps.", "");
+}
+
+async function runWorkflow() {
+	if (wfState.submitting) return;
+	if (wfState.nodes.length === 0) { wfSetStatus("Add at least one step.", "err"); return; }
+	const steps = workflowSteps();
 	const body = {
 		name: document.getElementById("wf-name").value.trim() || "workflow",
 		inventory: document.getElementById("wf-inventory").value.trim(),
@@ -1809,11 +1994,14 @@ document.addEventListener("DOMContentLoaded", () => {
 	}
 	if (page === "runs") mountRunsWindowChip();
 	buildNav();
+	mountFooter();
+	if (document.body.dataset.page === "docs") mountDocsChrome();
 	wirePalette();
 	wireHinttips();
 	mountPageDocs();
 	mountTableExport();
 	mountTablePager();
+	mountTableSort();
 	if (isReadOnly()) applyReadOnly();
 	setInterval(refreshRelTimes, 20000);
 	mountTour();
@@ -1846,6 +2034,24 @@ function applyReadOnly() {
 		banner.textContent = "Read-only demo. Browse the data freely. Changes are disabled.";
 		main.insertBefore(banner, main.firstChild);
 	}
+	// Anything that would change state is disabled wherever it lives: rows, panels, drills, and
+	// page headers alike, each explaining itself rather than silently doing nothing.
+	// The page header's primary action creates something, so it is mutating by definition.
+	for (const btn of document.querySelectorAll(".page-head .button.primary, .wf-toolbar .button.primary")) {
+		btn.dataset.mutates = "true";
+		if (!btn.dataset.tip) {
+			btn.dataset.tip = "Click to " + btn.textContent.trim().toLowerCase();
+		}
+	}
+	// Table rows and drill panels are built after this pass runs, so rather than disabling the
+	// controls that exist right now, swallow the click for anything marked as mutating. The
+	// control stays hoverable, which is what lets it explain why it is unavailable.
+	document.addEventListener("click", (e) => {
+		const target = e.target.closest && e.target.closest("[data-mutates]");
+		if (!target) return;
+		e.preventDefault();
+		e.stopImmediatePropagation();
+	}, true);
 	for (const form of document.querySelectorAll("form")) {
 		for (const btn of form.querySelectorAll("button")) btn.disabled = true;
 		const actions = form.querySelector(".launch-actions") || form;
@@ -1856,7 +2062,13 @@ function applyReadOnly() {
 			actions.appendChild(note);
 		}
 	}
-	for (const btn of document.querySelectorAll(".wf-toolbar button")) btn.disabled = true;
+	// Building, dragging, zooming, and exporting a graph never touch the server, so the editor
+	// stays fully usable in the demo. Only running the pipeline is blocked.
+	const wfRun = document.getElementById("wf-run");
+	if (wfRun) {
+		wfRun.dataset.mutates = "true";
+		wfRun.dataset.tip = "Click to run this graph as a pipeline";
+	}
 }
 
 // buildNav injects the menu toggle and the slide-in drawer on every page but sign in, highlighting
@@ -1960,6 +2172,136 @@ function buildNav() {
 	});
 }
 
+// mountFooter closes every page with a slim bar, so scrolling ends on a deliberate edge rather
+// than on the last row of content.
+function mountFooter() {
+	if (document.body.dataset.page === "login" || document.querySelector(".app-foot")) return;
+	const main = document.querySelector("main.content");
+	if (!main) return;
+	const foot = document.createElement("footer");
+	foot.className = "app-foot";
+	const left = document.createElement("span");
+	left.className = "app-foot-brand";
+	left.textContent = "SwitchTender";
+	const links = document.createElement("nav");
+	links.className = "app-foot-links";
+	const add = (label, href, tip, external) => {
+		const a = document.createElement("a");
+		a.href = href;
+		a.textContent = label;
+		a.dataset.tip = tip;
+		if (external) { a.target = "_blank"; a.rel = "noopener"; }
+		links.appendChild(a);
+	};
+	add("Docs", "/ui/docs", "Click to open the documentation");
+	add("Doctor", "/ui/doctor", "Click to run the reference health checks");
+	add("Source", "https://github.com/kordloom/switchtender", "Click to open the repository", true);
+	add("License", "https://github.com/kordloom/switchtender/blob/main/LICENSE", "Click to read the license", true);
+	const top = document.createElement("button");
+	top.type = "button";
+	top.className = "app-foot-top";
+	top.textContent = "Back to top";
+	top.dataset.tip = "Click to return to the top of this page";
+	top.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+	links.appendChild(top);
+	foot.appendChild(left);
+	foot.appendChild(links);
+	main.appendChild(foot);
+}
+
+// mountDocsChrome adds the reading aids a documentation page needs: a filter over the guide list,
+// an on-this-page rail built from the headings, and previous and next links at the end.
+function mountDocsChrome() {
+	const list = document.getElementById("docs-list");
+	const filter = document.getElementById("docs-filter");
+	const empty = document.getElementById("docs-empty");
+	if (filter && list) {
+		filter.addEventListener("input", () => {
+			const q = filter.value.trim().toLowerCase();
+			let shown = 0;
+			for (const li of list.querySelectorAll("li")) {
+				const match = q === "" || li.textContent.toLowerCase().includes(q);
+				li.hidden = !match;
+				if (match) shown++;
+			}
+			if (empty) empty.hidden = shown > 0;
+		});
+		filter.addEventListener("keydown", (e) => {
+			if (e.key !== "Enter") return;
+			const first = list.querySelector("li:not([hidden]) a");
+			if (first) location.href = first.getAttribute("href");
+		});
+	}
+
+	// The on-this-page rail. Headings get ids so each entry can link to its section.
+	const toc = document.getElementById("docs-toc");
+	const article = document.querySelector(".docs-content");
+	if (toc && article) {
+		const heads = Array.from(article.querySelectorAll("h2"));
+		if (heads.length >= 2) {
+			const label = document.createElement("div");
+			label.className = "nav-group-label";
+			label.textContent = "On this page";
+			toc.appendChild(label);
+			const ul = document.createElement("ul");
+			heads.forEach((h, i) => {
+				if (!h.id) {
+					h.id = "section-" + (h.textContent.toLowerCase().replace(/[^a-z0-9]+/g, "-")
+						.replace(/^-|-$/g, "") || i);
+				}
+				const li = document.createElement("li");
+				const a = document.createElement("a");
+				a.href = "#" + h.id;
+				a.textContent = h.textContent;
+				a.dataset.tip = "Click to jump to this section";
+				li.appendChild(a);
+				ul.appendChild(li);
+			});
+			toc.appendChild(ul);
+			// The rail follows the reader: the heading nearest the top of the viewport is current.
+			const marks = Array.from(toc.querySelectorAll("a"));
+			const sync = () => {
+				let active = 0;
+				heads.forEach((h, i) => {
+					if (h.getBoundingClientRect().top <= 120) active = i;
+				});
+				marks.forEach((m, i) => m.classList.toggle("active", i === active));
+			};
+			document.addEventListener("scroll", sync, { passive: true });
+			sync();
+		} else {
+			toc.hidden = true;
+		}
+	}
+
+	// Previous and next, read from the guide list so the order always matches the sidebar.
+	const pager = document.getElementById("docs-pager");
+	if (pager && list) {
+		const links = Array.from(list.querySelectorAll("a"));
+		const at = links.findIndex((a) => a.classList.contains("active"));
+		if (at !== -1) {
+			const add = (link, rel) => {
+				if (!link) return;
+				const a = document.createElement("a");
+				a.className = "docs-pager-link " + rel;
+				a.href = link.getAttribute("href");
+				const kicker = document.createElement("span");
+				kicker.className = "docs-pager-kicker";
+				kicker.textContent = rel === "prev" ? "Previous" : "Next";
+				const title = document.createElement("span");
+				title.className = "docs-pager-title";
+				title.textContent = link.textContent;
+				a.appendChild(kicker);
+				a.appendChild(title);
+				a.dataset.tip = "Click to open " + link.textContent;
+				pager.appendChild(a);
+			};
+			add(links[at - 1], "prev");
+			add(links[at + 1], "next");
+		}
+	}
+}
+
 // svgIcon wraps inner SVG markup in a stroked 24 by 24 icon that inherits the current color.
 function svgIcon(inner) {
 	return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" ' +
@@ -1968,9 +2310,9 @@ function svgIcon(inner) {
 
 // THEMES lists the selectable appearances: the signature look, then the flat family themes.
 const THEMES = [
-	{ key: "signature", label: "Stitch", desc: "The signature glow", tip: "Stitch, the default theme", icon: '<path d="M3 16c3.5-4 9-4 12.5-1" stroke-dasharray="3.2 2.6"/><line x1="14" y1="16.5" x2="21" y2="9.5"/>' },
-	{ key: "light", label: "Kord", desc: "Clean white, the kordloom.com style", tip: "Kord, the white theme", icon: '<circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/><line x1="4.9" y1="4.9" x2="7" y2="7"/><line x1="17" y1="17" x2="19.1" y2="19.1"/><line x1="4.9" y1="19.1" x2="7" y2="17"/><line x1="17" y1="7" x2="19.1" y2="4.9"/>' },
-	{ key: "dark", label: "Seal", desc: "Warm ink black, the loomseal.com style", tip: "Seal, the dark theme", icon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>' },
+	{ key: "signature", label: "Loom", desc: "The signature look, depth and glow", tip: "Loom, the signature theme" },
+	{ key: "light", label: "Linen", desc: "Clean white, the kordloom.com style", tip: "Linen, the white theme" },
+	{ key: "dark", label: "Ink", desc: "Warm black, the loomseal.com style", tip: "Ink, the dark theme" },
 ];
 
 // currentTheme returns the active theme key, defaulting to the signature look.
@@ -2006,12 +2348,12 @@ function syncThemeButtons() {
 function themeGroup() {
 	const g = document.createElement("div");
 	g.className = "theme-group";
-	const row = document.createElement("div");
-	row.className = "theme-row";
 	const hint = document.createElement("span");
 	hint.className = "theme-hint";
 	hint.textContent = "Theme";
-	row.appendChild(hint);
+	g.appendChild(hint);
+	const row = document.createElement("div");
+	row.className = "theme-row";
 	for (const t of THEMES) {
 		const btn = document.createElement("button");
 		btn.type = "button";
@@ -2020,11 +2362,7 @@ function themeGroup() {
 		btn.dataset.tip = t.tip;
 		btn.setAttribute("aria-label", t.tip);
 		btn.setAttribute("aria-pressed", "false");
-		btn.innerHTML = svgIcon(t.icon);
-		const name = document.createElement("span");
-		name.className = "theme-name";
-		name.textContent = t.label;
-		btn.appendChild(name);
+		btn.textContent = t.label;
 		btn.addEventListener("click", () => setTheme(t.key));
 		row.appendChild(btn);
 	}
@@ -2055,7 +2393,11 @@ function paletteEntries() {
 		href: "https://github.com/kordloom/switchtender", external: true,
 	});
 	for (const t of THEMES) {
-		out.push({ label: "Theme: " + t.label, desc: t.desc, group: "Theme", icon: t.icon, action: () => setTheme(t.key) });
+		out.push({
+			label: "Theme: " + t.label, desc: t.desc, group: "Theme",
+			icon: '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/>',
+			action: () => setTheme(t.key),
+		});
 	}
 	return out;
 }
@@ -2194,6 +2536,41 @@ function closePalette() {
 	if (paletteState) paletteState.overlay.hidden = true;
 }
 
+// ROUTE_WORDS names each interface route for the hover tip, so a link says what it opens rather
+// than printing its path. A trailing id is matched by the pattern, not spelled out.
+const ROUTE_WORDS = [
+	[/^\/ui\/runs\/[^/]+$/, "Click to open this run"],
+	[/^\/ui\/runs$/, "Click to open the runs list"],
+	[/^\/ui\/hosts\/[^/]+$/, "Click to open this host's history"],
+	[/^\/ui\/fleet$/, "Click to open fleet health"],
+	[/^\/ui\/drift$/, "Click to open drift"],
+	[/^\/ui\/tasks$/, "Click to open task trends"],
+	[/^\/ui\/workers$/, "Click to open workers"],
+	[/^\/ui\/projects$/, "Click to open projects"],
+	[/^\/ui\/inventories$/, "Click to open inventories"],
+	[/^\/ui\/sources$/, "Click to open inventory sources"],
+	[/^\/ui\/templates$/, "Click to open templates"],
+	[/^\/ui\/workflows$/, "Click to open the workflow editor"],
+	[/^\/ui\/schedules$/, "Click to open schedules"],
+	[/^\/ui\/migrate$/, "Click to open the migration importer"],
+	[/^\/ui\/credentials$/, "Click to open credentials"],
+	[/^\/ui\/users$/, "Click to open users"],
+	[/^\/ui\/audit$/, "Click to open the audit trail"],
+	[/^\/ui\/policies$/, "Click to open approval policies"],
+	[/^\/ui\/doctor$/, "Click to run the reference health checks"],
+	[/^\/ui\/docs\/[^/]+$/, "Click to open this guide"],
+	[/^\/ui\/docs$/, "Click to open the documentation"],
+	[/^\/ui\/?$/, "Click to open the overview"],
+];
+
+// describeRoute returns the sentence for an interface path, empty when nothing matches.
+function describeRoute(path) {
+	for (const [pattern, words] of ROUTE_WORDS) {
+		if (pattern.test(path)) return words;
+	}
+	return "";
+}
+
 // wireHinttips shows a floating tip above any element carrying data-tip, on hover and keyboard
 // focus. One shared element rides document.body, so no scroll container can clip it, and it is
 // clamped to the viewport.
@@ -2215,18 +2592,29 @@ function wireHinttips() {
 		tip.style.left = x + "px";
 		tip.style.top = y + "px";
 	};
-	// linkDest labels external destinations only. Same-origin links stay quiet: the status bar
-	// already names them, and a tip box over the neighboring row reads as broken UI.
+	// linkDest says what a link does in plain words. A raw path tells a reader nothing they
+	// cannot already see in the status bar, so internal destinations are named by what they are.
 	const linkDest = (a) => {
 		const href = a.getAttribute("href");
 		if (!href || href === "#" || href.startsWith("javascript")) return "";
 		try {
 			const u = new URL(href, location.href);
-			return u.origin === location.origin ? "" : "Opens " + u.hostname;
+			if (u.origin !== location.origin) return "Click to open " + u.hostname;
+			if (a.hasAttribute("download")) return "Click to download this file";
+			return describeRoute(u.pathname);
 		} catch { return ""; }
 	};
 	const show = (e) => {
 		if (!e.target.closest) return;
+		// In the read-only demo a mutating control still teaches what it would do, then says why
+		// nothing happens when it is pressed.
+		const blocked = isReadOnly() && e.target.closest("[data-mutates]");
+		if (blocked) {
+			clearTimeout(linkTimer);
+			const what = blocked.dataset.tip || "This changes data";
+			place(blocked, what + ". Disabled in this read-only demo");
+			return;
+		}
 		const target = e.target.closest("[data-tip]");
 		if (target) { clearTimeout(linkTimer); place(target, target.dataset.tip); return; }
 		// Plain links reveal their destination after a beat, so casual mouse travel stays quiet.
@@ -2342,11 +2730,23 @@ function showEmpty(msg) {
 	if (!el) return;
 	el.hidden = false;
 	el.className = "empty-state";
-	el.innerHTML = '<svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" ' +
+	el.innerHTML = '<svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" ' +
 		'stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">' +
-		'<path d="M3 7l1.6 12.2A2 2 0 0 0 6.6 21h10.8a2 2 0 0 0 2-1.8L21 7"/>' +
-		'<path d="M3 7h18M8.5 7V5.5a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2V7"/></svg><p></p>';
+		'<path d="M3 14h4l2 3h6l2-3h4"/>' +
+		'<path d="M5.5 5.5h13l2.5 8.5v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4z"/></svg><p></p>';
 	el.querySelector("p").textContent = msg;
+	// Controls that filter, page, or export an empty list are noise, so they hide with it.
+	for (const sel of [".list-filter", ".runs-toolbar", ".table-foot"]) {
+		for (const node of document.querySelectorAll(sel)) node.hidden = true;
+	}
+}
+
+// showListControls reveals the filter, toolbar, and footer that showEmpty hid, for a list that
+// turned out to have rows after all.
+function showListControls() {
+	for (const sel of [".list-filter", ".runs-toolbar"]) {
+		for (const node of document.querySelectorAll(sel)) node.hidden = false;
+	}
 }
 
 // removeRow deletes a table row and restores the empty-state when the last row is gone, so a list
@@ -2455,6 +2855,7 @@ async function loadAudit() {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load the audit trail: " + e.message);
 	}
@@ -2582,9 +2983,11 @@ function setModalTitle(name, text) {
 
 // editButton builds an inline Edit action for a table row. Its click does not bubble, so the row's
 // inspect drawer stays closed.
-function editButton(onClick) {
+function editButton(onClick, what) {
 	const b = document.createElement("button");
 	b.className = "button";
+	b.dataset.mutates = "true";
+	b.dataset.tip = what || "Click to edit this record";
 	b.textContent = "Edit";
 	b.addEventListener("click", (e) => {
 		e.preventDefault();
@@ -2780,7 +3183,26 @@ function wireCredentialForm() {
 }
 
 // loadCredentials populates the credential table with delete actions.
+// credentialUsers maps a credential id to the names of the templates that reference it, so the
+// list can answer what breaks if one is deleted.
+async function credentialUsers() {
+	const map = new Map();
+	try {
+		const data = await getJSON("/templates");
+		for (const t of data.templates || []) {
+			const ids = [].concat(t.credential_ids || [], t.selectable_credential_ids || [],
+				t.pull_credential_id ? [t.pull_credential_id] : []);
+			for (const id of ids) {
+				if (!map.has(id)) map.set(id, []);
+				if (!map.get(id).includes(t.name)) map.get(id).push(t.name);
+			}
+		}
+	} catch { /* the column falls back to a dash */ }
+	return map;
+}
+
 async function loadCredentials() {
+	const templateUsers = await credentialUsers();
 	try {
 		const data = await getJSON("/credentials");
 		const creds = data.credentials || [];
@@ -2794,10 +3216,34 @@ async function loadCredentials() {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(c.name));
 			tr.appendChild(td(c.kind, "mono"));
+			const secret = td("");
+			const secretChip = document.createElement("span");
+			secretChip.className = c.needs_secret ? "chip flaky" : "chip ok";
+			secretChip.textContent = c.needs_secret ? "needs a secret" : "set";
+			secretChip.dataset.tip = c.needs_secret
+				? "No secret stored yet, so any run using this credential fails"
+				: "A secret is stored, encrypted at rest and never shown again";
+			secret.appendChild(secretChip);
+			tr.appendChild(secret);
+			const usedBy = td("");
+			const users = templateUsers.get(c.id) || [];
+			if (users.length) {
+				const link = document.createElement("a");
+				link.href = "/ui/templates";
+				link.textContent = users.length === 1 ? users[0] : users.length + " templates";
+				link.dataset.tip = "Used by: " + users.join(", ") + ". Click to open templates";
+				usedBy.appendChild(link);
+			} else {
+				usedBy.textContent = "\u2014";
+				usedBy.dataset.tip = "No template references this credential";
+			}
+			tr.appendChild(usedBy);
 			tr.appendChild(tdTime(c.created_at));
 			const actions = document.createElement("td");
 			const del = document.createElement("button");
 			del.className = "button danger";
+	del.dataset.mutates = "true";
+	del.dataset.tip = "Click to delete this permanently";
 			del.textContent = "Delete";
 			del.addEventListener("click", async (e) => {
 				e.preventDefault();
@@ -2812,7 +3258,7 @@ async function loadCredentials() {
 					setStatus("Delete failed: " + err.message);
 				}
 			});
-			actions.appendChild(editButton(() => openCredentialEdit(c)));
+			actions.appendChild(editButton(() => openCredentialEdit(c), "Click to replace this credential's secret"));
 			actions.appendChild(document.createTextNode(" "));
 			actions.appendChild(del);
 			tr.appendChild(actions);
@@ -2820,6 +3266,7 @@ async function loadCredentials() {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load credentials: " + e.message);
 	}
@@ -2882,6 +3329,8 @@ function renderNeedsSecret(creds) {
 		input.disabled = readOnly;
 		const save = document.createElement("button");
 		save.className = "button primary";
+		save.dataset.mutates = "true";
+		save.dataset.tip = "Click to store this secret, encrypted at rest";
 		save.textContent = "Save";
 		save.disabled = readOnly;
 		const status = document.createElement("span");
@@ -3035,7 +3484,13 @@ async function loadProjects() {
 			tr.appendChild(td(p.branch || "default", "mono"));
 			tr.appendChild(tdTime(p.created_at));
 			const actions = deleteCell("/projects/" + p.id, "project " + p.name, tr, "No projects yet.");
-			actions.insertBefore(editButton(() => openProjectEdit(p)), actions.firstChild);
+			const browse = document.createElement("button");
+			browse.className = "button";
+			browse.textContent = "Files";
+			browse.dataset.tip = "Click to browse this project's cached checkout";
+			browse.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); openProjectFiles(p); });
+			actions.insertBefore(browse, actions.firstChild);
+			actions.insertBefore(editButton(() => openProjectEdit(p), "Click to edit this project's repository, branch, and credentials"), actions.firstChild);
 			tr.appendChild(actions);
 			inspectable(tr, p.name, [
 				{ label: "Repository", value: p.repo_url, copy: true },
@@ -3051,6 +3506,7 @@ async function loadProjects() {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load projects: " + e.message);
 	}
@@ -3059,7 +3515,62 @@ async function loadProjects() {
 // wireMigrate hooks the Preview and Import buttons up to the import endpoint. Preview shows the plan;
 // Import writes it. The buttons are wired even in the read-only demo, where applyReadOnly disables
 // them.
+// SAMPLE_AWX_EXPORT is a small but real AWX export in the shape the importer accepts, so the
+// migration can be tried without having an AWX instance to export from. It covers projects,
+// grouped inventories, credentials, templates with a survey and slicing, and a schedule.
+const SAMPLE_AWX_EXPORT = {
+	projects: [
+		{ name: "web-platform", scm_type: "git", scm_url: "https://github.com/acme/web-platform.git", scm_branch: "main" },
+		{ name: "database-ops", scm_type: "git", scm_url: "https://github.com/acme/database-ops.git", scm_branch: "main" },
+	],
+	inventories: [
+		{
+			name: "production",
+			groups: [
+				{ name: "web", hosts: [{ name: "web01" }, { name: "web02" }, { name: "web03" }] },
+				{ name: "db", hosts: [{ name: "db01" }, { name: "db02" }] },
+			],
+		},
+		{ name: "staging", hosts: [{ name: "stage01" }] },
+	],
+	credentials: [
+		{ name: "prod-ssh", credential_type: "Machine" },
+		{ name: "vault-password", credential_type: "Vault" },
+	],
+	job_templates: [
+		{
+			name: "Deploy web", playbook: "site.yml", project: "web-platform",
+			inventory: "production", job_slice_count: 3, credentials: ["prod-ssh"],
+			survey_spec: {
+				spec: [{ variable: "release", question_name: "Release tag", type: "text", required: true }],
+			},
+		},
+		{
+			name: "Migrate database", playbook: "migrate.yml", project: "database-ops",
+			inventory: "production", credentials: ["prod-ssh", "vault-password"],
+		},
+		{
+			name: "Nightly audit", playbook: "audit.yml", project: "web-platform",
+			inventory: "production",
+			related: {
+				schedules: [{ name: "Every night", rrule: "DTSTART:20260101T020000Z RRULE:FREQ=DAILY;INTERVAL=1" }],
+			},
+		},
+	],
+};
+
 function wireMigrate() {
+	const sample = document.getElementById("migrate-sample");
+	if (sample) {
+		sample.addEventListener("click", () => {
+			document.getElementById("migrate-format").value = "awx";
+			document.getElementById("migrate-export").value =
+				JSON.stringify(SAMPLE_AWX_EXPORT, null, 2);
+			const status = document.getElementById("migrate-status");
+			if (status) status.textContent = "Sample loaded. Preview shows what it would create.";
+		});
+	}
+
 	const preview = document.getElementById("migrate-preview");
 	const apply = document.getElementById("migrate-apply");
 	if (preview) preview.addEventListener("click", () => runMigrate(false));
@@ -3103,6 +3614,27 @@ async function runMigrate(apply) {
 function renderMigratePlan(data) {
 	const el = document.getElementById("migrate-plan");
 	el.innerHTML = "";
+	// A migration plan is a record worth keeping: it is what was about to change, or what did.
+	const exportRow = document.createElement("div");
+	exportRow.className = "drill-actions migrate-export";
+	for (const fmt of ["JSON", "YAML"]) {
+		const btn = document.createElement("button");
+		btn.type = "button";
+		btn.className = "button";
+		btn.textContent = fmt;
+		btn.dataset.tip = "Click to download this migration plan as " + fmt;
+		btn.addEventListener("click", () => {
+			const stamp = new Date().toISOString().slice(0, 10);
+			if (fmt === "YAML") {
+				downloadBlob("switchtender-migration-" + stamp + ".yaml", "text/yaml", toYAML(data));
+			} else {
+				downloadBlob("switchtender-migration-" + stamp + ".json", "application/json",
+					JSON.stringify(data, null, 2) + "\n");
+			}
+		});
+		exportRow.appendChild(btn);
+	}
+	el.appendChild(exportRow);
 
 	if (data.applied) {
 		const done = document.createElement("div");
@@ -3374,6 +3906,8 @@ async function loadTemplates() {
 			const actions = document.createElement("td");
 			const launch = document.createElement("button");
 			launch.className = "button primary";
+			launch.dataset.mutates = "true";
+			launch.dataset.tip = "Click to launch this template with its saved settings";
 			launch.textContent = "Launch";
 			launch.addEventListener("click", async (e) => {
 				e.preventDefault();
@@ -3392,6 +3926,13 @@ async function loadTemplates() {
 			});
 			actions.appendChild(launch);
 			actions.appendChild(document.createTextNode(" "));
+			const history = document.createElement("a");
+			history.className = "button";
+			history.href = "/ui/runs?q=" + encodeURIComponent("from:" + t.id);
+			history.textContent = "Runs";
+			history.dataset.tip = "Click to see every run this template produced";
+			actions.appendChild(history);
+			actions.appendChild(document.createTextNode(" "));
 			const withOpts = document.createElement("button");
 			withOpts.className = "button";
 			withOpts.innerHTML = svgIcon('<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>');
@@ -3400,7 +3941,7 @@ async function loadTemplates() {
 			withOpts.addEventListener("click", (e) => { e.preventDefault(); openPromptLaunch(t); });
 			actions.appendChild(withOpts);
 			actions.appendChild(document.createTextNode(" "));
-			actions.appendChild(editButton(() => openTemplateEdit(t)));
+			actions.appendChild(editButton(() => openTemplateEdit(t), "Click to edit this template's playbook, credentials, and settings"));
 			actions.appendChild(document.createTextNode(" "));
 			const delBtn = deleteCell("/templates/" + t.id, "template " + t.name, tr, "No templates yet.");
 			actions.appendChild(delBtn.firstChild);
@@ -3409,6 +3950,7 @@ async function loadTemplates() {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load templates: " + e.message);
 	}
@@ -3540,6 +4082,68 @@ function openSurvey(t) {
 	};
 }
 
+// openProjectFiles lists a project's cached checkout and opens any file in the viewer, so a
+// playbook can be found by browsing rather than by knowing its path.
+async function openProjectFiles(project) {
+	let overlay = document.getElementById("tree-modal");
+	if (!overlay) {
+		overlay = document.createElement("div");
+		overlay.id = "tree-modal";
+		overlay.className = "modal";
+		overlay.hidden = true;
+		overlay.innerHTML = '<div class="modal-card wide"><div class="modal-head">' +
+			'<h2 id="tree-title"></h2>' +
+			'<button type="button" class="modal-close" aria-label="Close">\u00d7</button></div>' +
+			'<input id="tree-filter" class="input" type="search" placeholder="Filter files" aria-label="Filter files">' +
+			'<div id="tree-note" class="muted file-note"></div>' +
+			'<div id="tree-list" class="tree-list"></div></div>';
+		document.body.appendChild(overlay);
+		overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) overlay.hidden = true; });
+		overlay.querySelector(".modal-close").addEventListener("click", () => { overlay.hidden = true; });
+		document.addEventListener("keydown", (e) => { if (e.key === "Escape") overlay.hidden = true; });
+	}
+	document.getElementById("tree-title").textContent = project.name;
+	const note = document.getElementById("tree-note");
+	const list = document.getElementById("tree-list");
+	const filter = document.getElementById("tree-filter");
+	filter.value = "";
+	note.textContent = "Loading the checkout.";
+	list.innerHTML = "";
+	overlay.hidden = false;
+	try {
+		const data = await getJSON("/projects/" + encodeURIComponent(project.id) + "/files");
+		const files = data.files || [];
+		note.textContent = files.length
+			? files.length + " files in the cached checkout. Click one to view it."
+			: "The checkout is empty.";
+		for (const f of files) {
+			const row = document.createElement("button");
+			row.type = "button";
+			row.className = "tree-row";
+			row.dataset.path = f.path;
+			row.dataset.tip = "Click to view this file";
+			const name = document.createElement("span");
+			name.className = "mono";
+			name.textContent = f.path;
+			const size = document.createElement("span");
+			size.className = "tree-size";
+			size.textContent = f.size >= 1024 ? Math.round(f.size / 1024) + " KB" : f.size + " B";
+			row.appendChild(name);
+			row.appendChild(size);
+			row.addEventListener("click", () => { overlay.hidden = true; openFileViewer(project.id, f.path); });
+			list.appendChild(row);
+		}
+		filter.oninput = () => {
+			const q = filter.value.trim().toLowerCase();
+			for (const row of list.querySelectorAll(".tree-row")) {
+				row.hidden = q !== "" && !row.dataset.path.toLowerCase().includes(q);
+			}
+		};
+	} catch (err) {
+		note.textContent = "Could not list this project: " + err.message;
+	}
+}
+
 // openFileViewer shows one file from a project's checkout, read only, with a copy control. It is
 // the destination for playbook names throughout the interface.
 async function openFileViewer(projectID, path) {
@@ -3599,7 +4203,12 @@ async function openFileViewer(projectID, path) {
 // playbookCellEl renders a run or template's playbook as a link into the file viewer when the
 // object came from a project, and as plain text otherwise, since only a project has a checkout.
 function playbookCellEl(r, text) {
-	const cell = td("");
+	const cell = td("", "col-playbook");
+	// An auto-layout table ignores max-width on the cell itself, so the constraint lives on an
+	// inner element and the full value stays on the cell's title.
+	const inner = document.createElement("span");
+	inner.className = "clamp";
+	cell.appendChild(inner);
 	const label = text !== undefined ? text : toolLabel(r);
 	const path = r.playbook || "";
 	if (r.project_id && path && (!r.tool || r.tool === "ansible")) {
@@ -3613,11 +4222,11 @@ function playbookCellEl(r, text) {
 			e.stopPropagation();
 			openFileViewer(r.project_id, path);
 		});
-		cell.appendChild(link);
+		inner.appendChild(link);
 	} else {
-		cell.textContent = label;
-		cell.title = path || r.command || "";
+		inner.textContent = label;
 	}
+	cell.title = path || r.command || "";
 	return cell;
 }
 
@@ -3705,6 +4314,8 @@ function deleteCell(path, label, tr, emptyMsg) {
 	const cell = document.createElement("td");
 	const del = document.createElement("button");
 	del.className = "button danger";
+	del.dataset.mutates = "true";
+	del.dataset.tip = "Click to delete this permanently";
 	del.textContent = "Delete";
 	del.addEventListener("click", async (e) => {
 		e.preventDefault();
@@ -3899,20 +4510,30 @@ function wireInventoryForm() {
 }
 
 // loadInventories populates the inventory table with delete actions.
-// hostCount estimates how many hosts an ini inventory lists. YAML content returns -1, unknown.
-function hostCount(content) {
+// parseInventory reads a stored inventory into its format, host names, and group names. An INI
+// inventory is parsed directly; a YAML one is reported as such rather than guessed at, since its
+// shape needs a real parser and a wrong count is worse than an honest dash.
+function parseInventory(content) {
 	const text = String(content || "");
-	if (!text.trim()) return 0;
-	if (/^(---|all\s*:)/m.test(text)) return -1;
-	let n = 0;
+	if (/^\s*(---|all\s*:)/m.test(text)) return { format: "yaml", hosts: [], groups: [] };
+	const hosts = [];
+	const groups = [];
 	let skip = false;
 	for (const raw of text.split("\n")) {
 		const line = raw.trim();
 		if (!line || line.startsWith("#") || line.startsWith(";")) continue;
-		if (line.startsWith("[")) { skip = /:(vars|children)\]$/.test(line); continue; }
-		if (!skip) n++;
+		if (line.startsWith("[")) {
+			const name = line.replace(/^\[|\]$/g, "");
+			// A vars or children section describes a group rather than listing hosts.
+			skip = /:(vars|children)$/.test(name);
+			if (!skip) groups.push(name);
+			continue;
+		}
+		if (skip) continue;
+		const host = line.split(/\s+/)[0];
+		if (host && !hosts.includes(host)) hosts.push(host);
 	}
-	return n;
+	return { format: "ini", hosts, groups };
 }
 
 async function loadInventories() {
@@ -3927,27 +4548,41 @@ async function loadInventories() {
 		for (const i of inventories) {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(i.name));
-			const count = hostCount(i.content);
-			const hostsCell = td(count < 0 ? "\u2014" : String(count));
-			hostsCell.dataset.tip = count < 0
-				? "YAML inventory: host count not estimated"
-				: "Approximate, counted from the stored content";
+			const parsed = parseInventory(i.content);
+			const fmt = td("");
+			const fmtChip = document.createElement("span");
+			fmtChip.className = "tool-badge";
+			fmtChip.textContent = parsed.format;
+			fmtChip.dataset.tip = parsed.format === "yaml"
+				? "YAML inventory, read by Ansible's YAML plugin"
+				: "INI inventory: groups in brackets, one host per line";
+			fmt.appendChild(fmtChip);
+			tr.appendChild(fmt);
+			const count = parsed.hosts.length;
+			const hostsCell = td(parsed.format === "yaml" ? "\u2014" : String(count));
+			hostsCell.dataset.tip = parsed.format === "yaml"
+				? "Host count is not estimated for YAML inventories"
+				: "Counted from the stored content";
 			tr.appendChild(hostsCell);
+			const groupsCell = td(parsed.format === "yaml" ? "\u2014" : String(parsed.groups.length));
+			groupsCell.dataset.tip = parsed.groups.length
+				? "Groups: " + parsed.groups.join(", ")
+				: "No groups declared, so every host is in the implicit all group";
+			tr.appendChild(groupsCell);
 			tr.appendChild(tdTime(i.created_at));
 			const actions = deleteCell("/inventories/" + i.id, "inventory " + i.name, tr, "No inventories yet.");
-			actions.insertBefore(editButton(() => openInventoryEdit(i)), actions.firstChild);
+			actions.insertBefore(editButton(() => openInventoryEdit(i), "Click to edit this inventory's hosts and groups"), actions.firstChild);
 			tr.appendChild(actions);
-			const groups = (String(i.content || "").match(/^\[[^\]]+\]$/gm) || [])
-				.filter((g) => !/:(vars|children)\]$/.test(g)).length;
 			inspectable(tr, i.name, [
-				{ label: "Hosts", value: count < 0 ? "unknown, YAML" : String(count) },
-				{ label: "Groups", value: groups ? String(groups) : "" },
+				{ label: "Format", value: parsed.format === "yaml" ? "YAML" : "INI" },
+				{ label: "Hosts", value: parsed.format === "yaml" ? "not estimated for YAML" : parsed.hosts.join(", ") },
+				{ label: "Groups", value: parsed.groups.join(", ") },
 				{ label: "Size", value: (String(i.content || "").length) + " bytes" },
 				{ label: "Created", value: fmtTime(i.created_at) },
 				{ label: "ID", value: i.id, copy: true },
 				{ label: "Content", value: i.content, block: true },
 			], [
-				{ label: "Edit", primary: true, tip: "Edit this inventory", onClick: () => { closeDrill(); openInventoryEdit(i); } },
+				{ label: "Edit", primary: true, mutates: true, tip: "Click to edit this inventory", onClick: () => { closeDrill(); openInventoryEdit(i); } },
 				{ label: "Copy content", tip: "Copy the inventory to the clipboard", onClick: async () => {
 					try { await navigator.clipboard.writeText(i.content || ""); } catch { /* denied */ }
 				} },
@@ -3958,6 +4593,7 @@ async function loadInventories() {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load inventories: " + e.message);
 	}
@@ -4033,10 +4669,36 @@ async function loadSources() {
 			return;
 		}
 		const tbody = document.getElementById("sources");
+		// The inventory each source maintains, so a row names its destination rather than an id.
+		let invByID = new Map();
+		try {
+			const inv = await getJSON("/inventories");
+			invByID = new Map((inv.inventories || []).map((i) => [i.id, i]));
+		} catch { /* names fall back to ids */ }
 		for (const src of sources) {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(src.name));
 			tr.appendChild(td(src.source, "mono"));
+			const target = td("");
+			if (src.inventory_id) {
+				const link = document.createElement("a");
+				link.href = "/ui/inventories";
+				link.textContent = (invByID.get(src.inventory_id) || {}).name || shortId(src.inventory_id);
+				link.dataset.tip = "This source refreshes that stored inventory. Open inventories";
+				target.appendChild(link);
+			} else {
+				target.textContent = "\u2014";
+			}
+			tr.appendChild(target);
+			const cadence = td("");
+			const every = src.sync_interval_seconds
+				? "every " + fmtInterval(src.sync_interval_seconds)
+				: "on every launch";
+			cadence.textContent = src.update_on_launch ? "Before launch, " + every : every;
+			cadence.dataset.tip = src.update_on_launch
+				? "Refreshed before a run targeting this inventory, and on the interval"
+				: "Refreshed on the interval only, not before a launch";
+			tr.appendChild(cadence);
 			tr.appendChild(tdTime(src.synced_at, "never"));
 			const state = document.createElement("td");
 			const chip = document.createElement("span");
@@ -4048,6 +4710,8 @@ async function loadSources() {
 			const actions = document.createElement("td");
 			const refresh = document.createElement("button");
 			refresh.className = "button primary";
+			refresh.dataset.mutates = "true";
+			refresh.dataset.tip = "Click to re-run this source and refresh its inventory now";
 			refresh.textContent = "Refresh";
 			refresh.addEventListener("click", async (e) => {
 				e.preventDefault();
@@ -4063,7 +4727,7 @@ async function loadSources() {
 			});
 			actions.appendChild(refresh);
 			actions.appendChild(document.createTextNode(" "));
-			actions.appendChild(editButton(() => openSourceEdit(src)));
+			actions.appendChild(editButton(() => openSourceEdit(src), "Click to edit this source's plugin and credentials"));
 			actions.appendChild(document.createTextNode(" "));
 			const del = deleteCell("/inventory-sources/" + src.id, "source " + src.name, tr,
 				"No inventory sources yet.");
@@ -4073,6 +4737,7 @@ async function loadSources() {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load sources: " + e.message);
 	}
@@ -4117,6 +4782,7 @@ async function loadWorkers() {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load workers: " + e.message);
 	}
@@ -4358,20 +5024,37 @@ function renderActivity(runs) {
 	const panel = document.getElementById("activity-panel");
 	const el = document.getElementById("activity");
 	if (!panel || !el || !runs.length) return;
+	// A fresh install has every run inside an hour, where fourteen day columns would be thirteen
+	// empty ones. Pick the bucket that actually spans the data.
+	const times = runs.map((r) => new Date(r.created_at)).filter((d) => !isNaN(d));
+	if (!times.length) return;
+	const oldest = Math.min(...times.map((d) => d.getTime()));
+	const hourly = Date.now() - oldest < 36 * 3600 * 1000;
 	const days = [];
 	const byDay = {};
-	const today = new Date();
-	for (let i = 13; i >= 0; i--) {
-		const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
-		const key = d.toISOString().slice(0, 10);
-		days.push({ key, label: d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) });
+	const now = new Date();
+	const buckets = hourly ? 12 : 14;
+	for (let i = buckets - 1; i >= 0; i--) {
+		const d = hourly
+			? new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours() - i)
+			: new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+		const key = hourly ? d.toISOString().slice(0, 13) : d.toISOString().slice(0, 10);
+		days.push({
+			key,
+			label: hourly
+				? d.toLocaleTimeString(undefined, { hour: "numeric" })
+				: d.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+		});
 		byDay[key] = { succeeded: 0, failed: 0, other: 0 };
 	}
 	let counted = 0;
 	for (const r of runs) {
 		const at = r.created_at && new Date(r.created_at);
 		if (!at || isNaN(at)) continue;
-		const key = new Date(at.getFullYear(), at.getMonth(), at.getDate()).toISOString().slice(0, 10);
+		const local = hourly
+			? new Date(at.getFullYear(), at.getMonth(), at.getDate(), at.getHours())
+			: new Date(at.getFullYear(), at.getMonth(), at.getDate());
+		const key = hourly ? local.toISOString().slice(0, 13) : local.toISOString().slice(0, 10);
 		if (!byDay[key]) continue;
 		counted++;
 		if (r.status === "succeeded") byDay[key].succeeded++;
@@ -4389,8 +5072,10 @@ function renderActivity(runs) {
 		const total = c.succeeded + c.failed + c.other;
 		const col = document.createElement("a");
 		col.className = "activity-col";
-		const dayStart = new Date(day.key + "T00:00:00");
-		const dayEnd = new Date(dayStart.getFullYear(), dayStart.getMonth(), dayStart.getDate() + 1);
+		const dayStart = hourly ? new Date(day.key + ":00:00") : new Date(day.key + "T00:00:00");
+		const dayEnd = hourly
+			? new Date(dayStart.getTime() + 3600 * 1000)
+			: new Date(dayStart.getFullYear(), dayStart.getMonth(), dayStart.getDate() + 1);
 		col.href = "/ui/runs?after=" + encodeURIComponent(dayStart.toISOString()) +
 			"&before=" + encodeURIComponent(dayEnd.toISOString());
 		col.dataset.tip = day.label + ": " + c.succeeded + " succeeded, " + c.failed + " failed" +
@@ -4412,12 +5097,15 @@ function renderActivity(runs) {
 		col.appendChild(bar);
 		const lab = document.createElement("span");
 		lab.className = "activity-label";
-		lab.textContent = day.label.replace(/\D+$/, "").trim() === "" ? day.label : day.label.split(" ")[1];
+		lab.textContent = hourly ? day.label : (day.label.split(" ")[1] || day.label);
 		col.appendChild(lab);
 		el.appendChild(col);
 	}
 	const note = document.getElementById("activity-note");
-	if (note) note.textContent = runs.length >= 200 ? "From the latest 200 runs" : "Runs per day, last 14 days";
+	if (note) {
+		note.textContent = hourly ? "Runs per hour, last 12 hours" : "Runs per day, last 14 days";
+		if (runs.length >= 200) note.textContent += ", from the latest 200";
+	}
 	panel.hidden = false;
 }
 
@@ -4508,6 +5196,7 @@ async function loadDoctor() {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Doctor failed: " + e.message);
 	}
@@ -4680,7 +5369,7 @@ async function loadRuns() {
 	if (sizeEl) sizeEl.onchange = () => loadRuns();
 	const gen = ++runsLoadGen;
 	setStatus("");
-	showSkeletonRows(tbody, 6, 8);
+	showSkeletonRows(tbody, 6, 9);
 	table.hidden = false;
 	try {
 		const data = await getJSON("/runs?limit=" + runsPageSize() + "&offset=0&q=" + encodeURIComponent(runsQuery()) + runsFilterParams());
@@ -4791,16 +5480,53 @@ function originTip(r) {
 	}
 }
 
-// labelChipsInto appends a run's labels as small key-value chips that filter the list.
+// labelChipsInto appends a run's labels as key-value chips that filter the list.
 function labelChipsInto(cell, labels) {
 	for (const key of Object.keys(labels || {}).sort()) {
-		const chip = document.createElement("a");
-		chip.className = "label-chip";
-		chip.href = "/ui/runs?q=" + encodeURIComponent("label:" + key + "=" + labels[key]);
-		chip.textContent = key + "=" + labels[key];
-		chip.dataset.tip = "Show every run labeled " + key + "=" + labels[key];
-		cell.appendChild(chip);
+		cell.appendChild(labelChip(key, labels[key]));
 	}
+}
+
+// labelChip builds one clickable key=value chip.
+function labelChip(key, value) {
+	const chip = document.createElement("a");
+	chip.className = "label-chip";
+	chip.href = "/ui/runs?q=" + encodeURIComponent("label:" + key + "=" + value);
+	chip.textContent = key + "=" + value;
+	chip.dataset.tip = "Click to show every run labeled " + key + "=" + value;
+	return chip;
+}
+
+// labelCellEl renders a run's labels in their own column, capped at two chips so every row keeps
+// the same height. The rest collapse into a count that expands the row on click.
+function labelCellEl(labels) {
+	const cell = td("", "col-labels");
+	const keys = Object.keys(labels || {}).sort();
+	if (!keys.length) {
+		cell.textContent = "\u2014";
+		return cell;
+	}
+	const wrap = document.createElement("span");
+	wrap.className = "label-wrap";
+	const shown = keys.slice(0, 2);
+	for (const key of shown) wrap.appendChild(labelChip(key, labels[key]));
+	const rest = keys.slice(2);
+	if (rest.length) {
+		const more = document.createElement("button");
+		more.type = "button";
+		more.className = "label-chip label-more";
+		more.textContent = "+" + rest.length;
+		more.dataset.tip = "Click to show " + rest.map((k) => k + "=" + labels[k]).join(", ");
+		more.addEventListener("click", (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			more.remove();
+			for (const key of rest) wrap.appendChild(labelChip(key, labels[key]));
+		});
+		wrap.appendChild(more);
+	}
+	cell.appendChild(wrap);
+	return cell;
 }
 
 // typeCellEl fills a table cell with the run's tool chip and any kind tags, so type lives in one
@@ -4862,9 +5588,8 @@ function appendRunRows(tbody, runs) {
 		tr.appendChild(typeCellEl(r));
 		tr.appendChild(originCellEl(r));
 
-		const pbCell = playbookCellEl(r);
-		labelChipsInto(pbCell, r.labels);
-		tr.appendChild(pbCell);
+		tr.appendChild(playbookCellEl(r));
+		tr.appendChild(labelCellEl(r.labels));
 
 		tr.appendChild(tdTime(r.started_at || r.created_at));
 		tr.appendChild(td(fmtDuration(r.started_at, r.ended_at)));
@@ -4919,12 +5644,126 @@ function statCard(value, label, cls) {
 	const v = document.createElement("div");
 	v.className = "stat-value" + (cls ? " " + cls : "");
 	v.textContent = value;
+	countUp(v, value);
 	const l = document.createElement("div");
 	l.className = "stat-label";
 	l.textContent = label;
 	card.appendChild(v);
 	card.appendChild(l);
 	return card;
+}
+
+// countUp animates a metric from zero to its value, preserving any suffix such as a percent
+// sign. A value that is not a plain number, and a reader who asked for reduced motion, get the
+// final text immediately.
+function countUp(el, value) {
+	const text = String(value);
+	const match = text.match(/^(\d[\d,]*)(\D*)$/);
+	if (!match || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+	const target = parseInt(match[1].replace(/,/g, ""), 10);
+	const suffix = match[2] || "";
+	if (!Number.isFinite(target) || target === 0) return;
+	const duration = 620;
+	const start = performance.now();
+	el.classList.add("counting");
+	const step = (now) => {
+		const t = Math.min(1, (now - start) / duration);
+		// Ease out cubic, so the count decelerates into its final figure.
+		const eased = 1 - Math.pow(1 - t, 3);
+		el.textContent = Math.round(target * eased).toLocaleString() + suffix;
+		if (t < 1) requestAnimationFrame(step);
+		else el.textContent = text;
+	};
+	requestAnimationFrame(step);
+}
+
+// describeCron renders the common cron shapes in words. An expression it does not recognize is
+// reported as a custom schedule rather than guessed at.
+function describeCron(spec) {
+	const parts = String(spec || "").trim().split(/\s+/);
+	if (parts.length !== 5) return "Custom schedule";
+	const [min, hour, dom, mon, dow] = parts;
+	const days = { "0": "Sunday", "1": "Monday", "2": "Tuesday", "3": "Wednesday", "4": "Thursday", "5": "Friday", "6": "Saturday", "7": "Sunday" };
+	const at = (h, m) => {
+		const hh = parseInt(h, 10);
+		const mm = String(parseInt(m, 10)).padStart(2, "0");
+		if (isNaN(hh)) return "";
+		const suffix = hh < 12 ? "am" : "pm";
+		const h12 = hh % 12 === 0 ? 12 : hh % 12;
+		return h12 + ":" + mm + suffix;
+	};
+	if (min === "*" && hour === "*") return "Every minute";
+	if (hour === "*" && /^\*\/\d+$/.test(min)) return "Every " + min.slice(2) + " minutes";
+	if (hour === "*" && /^\d+$/.test(min) && dom === "*" && mon === "*" && dow === "*") {
+		return parseInt(min, 10) === 0 ? "Hourly, on the hour" : "Hourly at :" + String(min).padStart(2, "0");
+	}
+	if (/^\*\/\d+$/.test(hour) && /^\d+$/.test(min)) return "Every " + hour.slice(2) + " hours";
+	if (dom === "*" && mon === "*" && dow === "*" && /^\d+$/.test(hour)) return "Daily at " + at(hour, min);
+	if (dom === "*" && mon === "*" && days[dow] && /^\d+$/.test(hour)) return days[dow] + "s at " + at(hour, min);
+	if (dow === "*" && mon === "*" && /^\d+$/.test(dom) && /^\d+$/.test(hour)) return "Monthly on day " + dom + " at " + at(hour, min);
+	if (dow === "1-5" && /^\d+$/.test(hour)) return "Weekdays at " + at(hour, min);
+	return "Custom schedule";
+}
+
+// mountHostActions fills the host page's action bar: the things an operator wants to do to one
+// host, rather than leaving the page a dead-end table.
+function mountHostActions(host) {
+	const bar = document.getElementById("host-actions");
+	if (!bar) return;
+	const add = (label, href, tip) => {
+		const a = document.createElement("a");
+		a.className = "button";
+		a.href = href;
+		a.textContent = label;
+		a.dataset.tip = tip;
+		bar.appendChild(a);
+	};
+	add("Runs on this host", "/ui/runs?q=" + encodeURIComponent("host:" + host),
+		"Click to see every run that touched this host");
+	add("Drift", "/ui/drift?q=" + encodeURIComponent(host),
+		"Click to see this host's divergence from the desired state");
+	add("Fleet health", "/ui/fleet?q=" + encodeURIComponent(host),
+		"Click to see this host beside the rest of the fleet");
+	const copy = copyButton(host, "Copy this host name");
+	copy.className = "button";
+	copy.appendChild(document.createTextNode("Copy name"));
+	bar.appendChild(copy);
+}
+
+// renderHostSummary turns the host's run history into headline metrics, so its condition reads
+// before the table does.
+function renderHostSummary(host, runs) {
+	const el = document.getElementById("host-summary");
+	if (!el) return;
+	let failed = 0;
+	let changed = 0;
+	let busy = 0;
+	for (const r of runs) {
+		if (r.outcome === "failed" || r.outcome === "unreachable") failed++;
+		if (r.changed) changed += r.changed;
+		busy += r.duration_seconds || 0;
+	}
+	const rate = runs.length ? Math.round(((runs.length - failed) / runs.length) * 100) + "%" : "-";
+	el.innerHTML = "";
+	el.appendChild(statCard(String(runs.length), "Runs recorded", ""));
+	el.appendChild(statCard(rate, "Success rate", failed ? "" : "ok"));
+	el.appendChild(statCard(String(failed), "Failures", failed ? "failed" : ""));
+	el.appendChild(statCard(String(changed), "Tasks changed", changed ? "changed" : ""));
+	el.appendChild(statCard(fmtSeconds(busy), "Total busy time", ""));
+	el.hidden = false;
+}
+
+// fmtInterval renders a sync interval in the largest whole unit that fits.
+function fmtInterval(seconds) {
+	if (seconds % 3600 === 0) {
+		const h = seconds / 3600;
+		return h === 1 ? "hour" : h + " hours";
+	}
+	if (seconds % 60 === 0) {
+		const m = seconds / 60;
+		return m === 1 ? "minute" : m + " minutes";
+	}
+	return seconds + " seconds";
 }
 
 // td builds a table cell.
@@ -4993,6 +5832,7 @@ async function loadFleet() {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load fleet health: " + e.message);
 	}
@@ -5055,6 +5895,7 @@ async function loadDrift() {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load drift status: " + e.message);
 	}
@@ -5087,9 +5928,11 @@ async function proposeReconcile(host, btn) {
 
 // loadHost populates one host's run history table, newest first.
 async function loadHost(host) {
+	mountHostActions(host);
 	try {
 		const data = await getJSON("/hosts/" + encodeURIComponent(host) + "/runs");
 		const runs = data.runs || [];
+		renderHostSummary(host, runs);
 		if (runs.length === 0) {
 			showEmpty("No history for this host yet.");
 			return;
@@ -5116,6 +5959,7 @@ async function loadHost(host) {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load host history: " + e.message);
 	}
@@ -5145,10 +5989,19 @@ async function loadTasks() {
 			tr.appendChild(td(fmtSeconds(t.avg_seconds)));
 			tr.appendChild(td(fmtSeconds(t.last_seconds)));
 			tr.appendChild(tdTime(t.last_run));
+			const taskActions = document.createElement("td");
+			const runsLink = document.createElement("a");
+			runsLink.className = "button";
+			runsLink.href = "/ui/runs?q=" + encodeURIComponent(t.task);
+			runsLink.textContent = "Runs";
+			runsLink.dataset.tip = "Click to search runs mentioning this task";
+			taskActions.appendChild(runsLink);
+			tr.appendChild(taskActions);
 			tbody.appendChild(tr);
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load task trends: " + e.message);
 	}
@@ -5263,6 +6116,9 @@ async function loadSchedules() {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(s.name || "(unnamed)"));
 			tr.appendChild(td(s.cron, "mono"));
+			const cadence = td(describeCron(s.cron));
+			cadence.dataset.tip = "Plain reading of the cron expression " + s.cron;
+			tr.appendChild(cadence);
 			const target = document.createElement("td");
 			if (s.template_id) {
 				const tpl = document.createElement("a");
@@ -5296,6 +6152,8 @@ async function loadSchedules() {
 			const actions = document.createElement("td");
 			const del = document.createElement("button");
 			del.className = "button danger";
+	del.dataset.mutates = "true";
+	del.dataset.tip = "Click to delete this permanently";
 			del.textContent = "Delete";
 			del.addEventListener("click", async (e) => {
 				e.preventDefault();
@@ -5308,7 +6166,7 @@ async function loadSchedules() {
 					setStatus("Delete failed: " + err.message);
 				}
 			});
-			actions.appendChild(editButton(() => openScheduleEdit(s)));
+			actions.appendChild(editButton(() => openScheduleEdit(s), "Click to edit this schedule's cadence and target"));
 			actions.appendChild(document.createTextNode(" "));
 			actions.appendChild(del);
 			tr.appendChild(actions);
@@ -5316,6 +6174,7 @@ async function loadSchedules() {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load schedules: " + e.message);
 	}
@@ -5533,7 +6392,19 @@ function wirePolicyForm() {
 
 // loadPolicies populates the policy table with edit and delete actions. Each empty criterion shows
 // as "any", so a reader sees exactly how wide a rule is.
+// heldRunCount returns how many runs are waiting for approval right now, so the policies list
+// shows live consequence rather than only configuration.
+async function heldRunCount() {
+	try {
+		const data = await getJSON("/runs?status=pending_approval&limit=200");
+		return (data.runs || []).length;
+	} catch {
+		return 0;
+	}
+}
+
 async function loadPolicies() {
+	const heldCount = await heldRunCount();
 	try {
 		const invByID = await fillInventorySelect(null);
 		const data = await getJSON("/policies");
@@ -5574,10 +6445,25 @@ async function loadPolicies() {
 				dry.appendChild(span);
 			}
 			tr.appendChild(dry);
+			const holding = document.createElement("td");
+			if (heldCount > 0) {
+				const link = document.createElement("a");
+				link.href = "/ui/runs?q=" + encodeURIComponent("status:pending_approval");
+				link.textContent = heldCount === 1 ? "1 run waiting" : heldCount + " runs waiting";
+				link.dataset.tip = "Click to see the runs held for approval";
+				holding.appendChild(link);
+			} else {
+				holding.textContent = "nothing waiting";
+				holding.className = "muted";
+				holding.dataset.tip = "No run is currently held for approval";
+			}
+			tr.appendChild(holding);
 			tr.appendChild(tdTime(p.created_at));
 			const actions = document.createElement("td");
 			const del = document.createElement("button");
 			del.className = "button danger";
+	del.dataset.mutates = "true";
+	del.dataset.tip = "Click to delete this permanently";
 			del.textContent = "Delete";
 			del.addEventListener("click", async (e) => {
 				e.preventDefault();
@@ -5598,6 +6484,7 @@ async function loadPolicies() {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load policies: " + e.message);
 	}
@@ -5666,17 +6553,23 @@ let detailState = null;
 // loadDetail loads one run and dispatches to the split or single render path.
 async function loadDetail(runId) {
 	const fullLog = document.getElementById("full-log");
-	if (fullLog) fullLog.href = streamURL("/runs/" + runId + "/logs");
+	if (fullLog) {
+		fullLog.href = streamURL("/runs/" + runId + "/logs");
+		fullLog.dataset.tip = "Click to open the full log in a new tab";
+	}
 	const exportEvents = document.getElementById("export-events");
-	if (exportEvents) exportEvents.href = streamURL("/runs/" + runId + "/events?download=1");
+	if (exportEvents) {
+		exportEvents.href = streamURL("/runs/" + runId + "/events?download=1");
+		exportEvents.dataset.tip = "Click to download every event as newline-delimited JSON";
+	}
 	const auditLink = document.getElementById("audit-link");
 	if (auditLink) {
 		auditLink.href = "/ui/audit?q=" + encodeURIComponent(runId);
-		auditLink.dataset.tip = "Every audited change that mentions this run";
+		auditLink.dataset.tip = "Click to see every audited change that mentions this run";
 	}
 	const copyLink = document.getElementById("copy-link");
 	if (copyLink) {
-		copyLink.dataset.tip = "Copy a link to this run";
+		copyLink.dataset.tip = "Click to copy a link to this run";
 		copyLink.addEventListener("click", async () => {
 			try { await navigator.clipboard.writeText(location.href); } catch { return; }
 			copyLink.textContent = "Copied";
@@ -5685,7 +6578,7 @@ async function loadDetail(runId) {
 	}
 	const exportResults = document.getElementById("export-results");
 	if (exportResults) {
-		exportResults.dataset.tip = "Download this run and its per-host results as JSON";
+		exportResults.dataset.tip = "Click to download this run and its per-host results as JSON";
 		exportResults.addEventListener("click", () => {
 			if (!detailState || !detailState.run) return;
 			const results = {};
@@ -5714,7 +6607,7 @@ async function loadDetail(runId) {
 		const rerun = document.getElementById("rerun-run");
 		if (rerun && !run.parent_id && run.kind !== "pipeline") {
 			rerun.hidden = false;
-			rerun.dataset.tip = "Start a fresh run with this exact spec";
+			rerun.dataset.tip = "Click to start a fresh run with this exact spec";
 			if (isReadOnly()) {
 				rerun.disabled = true;
 				rerun.dataset.tip = "Disabled in the demo";
@@ -5916,7 +6809,26 @@ function wireUserForm() {
 }
 
 // loadUsers populates the user table with delete actions.
+// userActivity counts each account's runs and finds when it last acted, so the users list shows
+// who is actually driving the fleet rather than only who exists.
+async function userActivity() {
+	const map = new Map();
+	try {
+		const data = await getJSON("/runs?limit=500");
+		for (const r of data.runs || []) {
+			if (!r.actor) continue;
+			const at = r.created_at;
+			const cur = map.get(r.actor) || { runs: 0, last: null };
+			cur.runs++;
+			if (!cur.last || (at && at > cur.last)) cur.last = at;
+			map.set(r.actor, cur);
+		}
+	} catch { /* the columns fall back to zero and never */ }
+	return map;
+}
+
 async function loadUsers() {
+	const activity = await userActivity();
 	try {
 		const data = await getJSON("/users");
 		const users = data.users || [];
@@ -5928,15 +6840,37 @@ async function loadUsers() {
 		for (const u of users) {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(u.username));
-			tr.appendChild(td(u.role, "mono"));
+			const role = td("");
+			const roleChip = document.createElement("span");
+			roleChip.className = "run-kind" + (u.role === "admin" ? " split" : "");
+			roleChip.textContent = u.role;
+			roleChip.dataset.tip = u.role === "admin"
+				? "Full access, including credentials, users, and policies"
+				: "Can run and read what they are granted";
+			role.appendChild(roleChip);
+			tr.appendChild(role);
+			const act = activity.get(u.username) || { runs: 0, last: null };
+			const fired = td("");
+			if (act.runs) {
+				const link = document.createElement("a");
+				link.href = "/ui/runs?q=" + encodeURIComponent("actor:" + u.username);
+				link.textContent = String(act.runs);
+				link.dataset.tip = "Click to see every run this account fired";
+				fired.appendChild(link);
+			} else {
+				fired.textContent = "0";
+			}
+			tr.appendChild(fired);
+			tr.appendChild(act.last ? tdTime(act.last) : td("never"));
 			tr.appendChild(tdTime(u.created_at));
 			const actions = deleteCell("/users/" + u.id, "user " + u.username, tr, "No users yet.");
-			actions.insertBefore(editButton(() => openUserEdit(u)), actions.firstChild);
+			actions.insertBefore(editButton(() => openUserEdit(u), "Click to change this account's role or password"), actions.firstChild);
 			tr.appendChild(actions);
 			tbody.appendChild(tr);
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load users: " + e.message);
 	}
@@ -6922,6 +7856,7 @@ function inspectDrawer(title, fields, actions) {
 			btn.className = "button" + (a.primary ? " primary" : "");
 			btn.textContent = a.label;
 			if (a.tip) btn.dataset.tip = a.tip;
+			if (a.mutates) btn.dataset.mutates = "true";
 			btn.addEventListener("click", a.onClick);
 			row.appendChild(btn);
 		}

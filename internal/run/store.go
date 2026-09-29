@@ -152,6 +152,8 @@ type ListFilter struct {
 	Source string
 	// Actor keeps only runs fired by this authenticated user when set.
 	Actor string
+	// SourceID keeps only runs fired by that specific template, schedule, or origin run.
+	SourceID string
 	// Host keeps only runs that touched this host, resolved through the stored host summaries.
 	Host string
 	// LabelKey with LabelValue keeps only runs carrying that label pair.
@@ -294,6 +296,9 @@ func (m *memStore) ListPage(ctx context.Context, filter ListFilter, limit, offse
 			continue
 		}
 		if filter.Actor != "" && r.Actor != filter.Actor {
+			continue
+		}
+		if filter.SourceID != "" && r.SourceID != filter.SourceID {
 			continue
 		}
 		if filter.LabelKey != "" && r.Labels[filter.LabelKey] != filter.LabelValue {

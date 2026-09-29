@@ -16,15 +16,19 @@
 		<div class="docs-layout">
 			<nav class="docs-nav" aria-label="Documentation pages">
 				<div class="nav-group-label">Guides</div>
-				<ul>
+				<input id="docs-filter" class="input docs-filter" type="search" placeholder="Filter guides" aria-label="Filter guides">
+				<ul id="docs-list">
 					{{range .Pages}}
 					<li><a href="{{.Href}}"{{if .Active}} class="active" aria-current="page"{{end}}>{{.Title}}</a></li>
 					{{end}}
 				</ul>
+				<p id="docs-empty" class="muted docs-empty" hidden>No guide matches.</p>
 			</nav>
 			<article class="docs-content">
 				{{.Content}}
+				<nav class="docs-pager" id="docs-pager" aria-label="Guide navigation"></nav>
 			</article>
+			<aside class="docs-toc" id="docs-toc" aria-label="On this page"></aside>
 		</div>
 	</main>
 

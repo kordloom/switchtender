@@ -16,7 +16,7 @@
 		<div class="page-head">
 			<div class="page-head-text">
 				<h1>Inventories</h1>
-				<p class="muted">Stored inventories travel with the run to whichever executor picks it up.</p>
+				<p class="muted">An inventory is the list of hosts a run targets, grouped into sets such as web and db. Stored here, it travels with the run to whichever executor picks it up, so no file has to exist on the worker.</p>
 			</div>
 			<button id="inventory-open" class="button primary">
 				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -137,7 +137,9 @@
 			<thead>
 				<tr>
 					<th>Name</th>
+					<th>Format</th>
 					<th>Hosts</th>
+					<th>Groups</th>
 					<th>Created</th>
 					<th class="col-actions">Actions</th>
 				</tr>
