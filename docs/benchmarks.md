@@ -4,21 +4,25 @@ Measured numbers for the questions people actually ask: how fast does it start, 
 it hold at idle, and how big is the binary. Every number below was measured on a release-flag build,
 the method is shown so you can reproduce it on your own hardware, and nothing here is a projection.
 
-Measured on 2026-07-30 against the development tree after v1.33.0, on a ten-core Apple Silicon
-laptop and inside a Debian container on the same machine. Memory and binary sizes are mebibytes,
-the unit `ps` and `free` report. Your hardware will differ; the method will not.
+Re-measured on 2026-08-02 at v1.53.0, on a ten-core Apple Silicon laptop and inside an Alpine Linux
+container on the same machine. Memory and binary sizes are mebibytes, the unit `ps` and `/proc`
+report. Your hardware will differ; the method will not.
+
+The point of re-measuring: between v1.33.0 and v1.53.0 the product gained twenty releases, a full
+security-hardening pass, and custom credential types, and its footprint did not move. That is the
+number worth watching over time, not any single reading.
 
 ## Boot and memory
 
 | Measurement | Value |
 |-------------|-------|
-| Cold boot to serving, no encryption key | 55 ms |
-| Cold boot to serving, credential encryption on | 90 ms |
-| Resident memory at idle, Linux, no encryption key | 35 MiB |
-| Resident memory at idle, Linux, credential encryption on | 32 MiB |
+| Cold boot to serving, no encryption key | 42 ms |
+| Cold boot to serving, credential encryption on | 85 ms |
+| Resident memory at idle, Linux, credential encryption on | 33 MiB |
+| Stripped binary, arm64 | 29 MiB |
 
-Boot times are the median of five trials after a warm-up run, timed from process start to a served
-`/healthz` on the laptop. Memory is resident size three seconds after serving begins, read from
+Boot times are the median of six trials after a warm-up run, timed in process from launch to a served
+`/healthz`, so no shell or subprocess overhead is counted. Memory is resident size three seconds after serving begins, read from
 `/proc` inside the container, because Linux is where servers actually run.
 
 The gap between the two boot rows is credential key derivation: argon2id at 64 MiB memory cost, a
@@ -46,7 +50,8 @@ That single file is the whole control plane: server, workers, UI, importers, and
 
 ## Reproduce it
 
-The repository carries the harness the boot and laptop memory rows came from:
+The repository carries the harness the boot and memory rows came from, and the 2026-08-02 figures
+above are its output:
 
     go run ./cmd/bench
 

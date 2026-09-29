@@ -2,6 +2,7 @@ package credential
 
 import (
 	"context"
+	"sort"
 	"sync"
 
 	"github.com/kordloom/switchtender/internal/idgen"
@@ -26,8 +27,6 @@ type memTypeStore struct {
 	mu sync.RWMutex
 	// types maps type id to the stored type.
 	types map[string]*CredentialType
-	// order records insertion order so List is stable.
-	order []string
 }
 
 // NewMemTypeStore returns an empty in-memory TypeStore.
@@ -58,9 +57,6 @@ func cloneType(t *CredentialType) *CredentialType {
 func (m *memTypeStore) Save(_ context.Context, t *CredentialType) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.types[t.ID]; !ok {
-		m.order = append(m.order, t.ID)
-	}
 	m.types[t.ID] = cloneType(t)
 	return nil
 }
@@ -76,14 +72,20 @@ func (m *memTypeStore) Get(_ context.Context, id string) (*CredentialType, error
 	return cloneType(t), nil
 }
 
-// List returns every type in insertion order.
+// List returns every type oldest first, tie-broken by id, so it matches the SQL backends exactly.
 func (m *memTypeStore) List(_ context.Context) ([]*CredentialType, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	out := make([]*CredentialType, 0, len(m.order))
-	for _, id := range m.order {
-		out = append(out, cloneType(m.types[id]))
+	out := make([]*CredentialType, 0, len(m.types))
+	for _, t := range m.types {
+		out = append(out, cloneType(t))
 	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out, nil
 }
 
@@ -95,12 +97,6 @@ func (m *memTypeStore) Delete(_ context.Context, id string) error {
 		return ErrNotFound
 	}
 	delete(m.types, id)
-	for i, existing := range m.order {
-		if existing == id {
-			m.order = append(m.order[:i], m.order[i+1:]...)
-			break
-		}
-	}
 	return nil
 }
 

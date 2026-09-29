@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // ErrBadType is returned when a custom credential type is malformed.
@@ -55,6 +56,9 @@ type CredentialType struct {
 	EnvInjectors map[string]string `json:"env,omitempty"`
 	// ExtraVarInjectors maps an Ansible extra-var name to a template, the same way.
 	ExtraVarInjectors map[string]string `json:"extra_vars,omitempty"`
+	// CreatedAt is when the type was defined, so a list can be ordered oldest first the same way on
+	// every backend.
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // fieldSet returns the declared field names as a set, for reference checking.
@@ -113,8 +117,16 @@ func (t *CredentialType) Validate() error {
 	return nil
 }
 
-// checkTemplateRefs confirms every {{field}} in tmpl names a declared field.
+// checkTemplateRefs confirms every {{field}} in tmpl names a declared field, and that the template
+// itself spans one line.
+//
+// A newline in the template body is refused as well as one in a field value. An environment file
+// writes one entry per line, so a template carrying a line break would emit a second variable even
+// before any field is spliced in.
 func checkTemplateRefs(tmpl string, fields map[string]bool) error {
+	if strings.ContainsAny(tmpl, "\n\r") {
+		return fmt.Errorf("the template spans more than one line")
+	}
 	for _, m := range tokenPattern.FindAllStringSubmatch(tmpl, -1) {
 		if !fields[m[1]] {
 			return fmt.Errorf("references field %q, which the type does not declare", m[1])

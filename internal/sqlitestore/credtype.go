@@ -6,12 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/kordloom/switchtender/internal/credential"
 )
 
 // credTypeColumns is the shared select list for credential-type reads.
-const credTypeColumns = `id, name, fields, env, extra_vars`
+const credTypeColumns = `id, name, fields, env, extra_vars, created_at`
 
 // credTypeStore is a credential.TypeStore backed by the shared SQLite database. A type holds no
 // secret, so its fields and injectors are stored as plain JSON columns.
@@ -28,10 +29,10 @@ func (s *credTypeStore) Save(ctx context.Context, t *credential.CredentialType) 
 	}
 	const q = `
 INSERT INTO credential_types (id, name, fields, env, extra_vars, created_at)
-VALUES (?, ?, ?, ?, ?, 0)
+VALUES (?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	name=excluded.name, fields=excluded.fields, env=excluded.env, extra_vars=excluded.extra_vars`
-	if _, err := s.db.ExecContext(ctx, q, t.ID, t.Name, fields, env, extra); err != nil {
+	if _, err := s.db.ExecContext(ctx, q, t.ID, t.Name, fields, env, extra, t.CreatedAt.UnixNano()); err != nil {
 		return fmt.Errorf("save credential type: %w", err)
 	}
 	return nil
@@ -52,7 +53,7 @@ func (s *credTypeStore) Get(ctx context.Context, id string) (*credential.Credent
 
 // List returns every credential type ordered by id, oldest first.
 func (s *credTypeStore) List(ctx context.Context) ([]*credential.CredentialType, error) {
-	const q = "SELECT " + credTypeColumns + " FROM credential_types ORDER BY id"
+	const q = "SELECT " + credTypeColumns + " FROM credential_types ORDER BY created_at, id"
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("list credential types: %w", err)
@@ -118,18 +119,26 @@ func scanCredType(sc scanner) (*credential.CredentialType, error) {
 	var (
 		t                  credential.CredentialType
 		fields, env, extra string
+		createdNanos       int64
 	)
-	if err := sc.Scan(&t.ID, &t.Name, &fields, &env, &extra); err != nil {
+	if err := sc.Scan(&t.ID, &t.Name, &fields, &env, &extra, &createdNanos); err != nil {
 		return nil, err
 	}
+	t.CreatedAt = time.Unix(0, createdNanos).UTC()
 	if err := json.Unmarshal([]byte(fields), &t.Fields); err != nil {
 		return nil, fmt.Errorf("decode credential type fields: %w", err)
 	}
 	if err := json.Unmarshal([]byte(env), &t.EnvInjectors); err != nil {
 		return nil, fmt.Errorf("decode credential type env: %w", err)
 	}
+	if len(t.EnvInjectors) == 0 {
+		t.EnvInjectors = nil
+	}
 	if err := json.Unmarshal([]byte(extra), &t.ExtraVarInjectors); err != nil {
 		return nil, fmt.Errorf("decode credential type extra vars: %w", err)
+	}
+	if len(t.ExtraVarInjectors) == 0 {
+		t.ExtraVarInjectors = nil
 	}
 	return &t, nil
 }

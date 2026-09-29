@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 
@@ -23,13 +24,61 @@ func TypeContract(t *testing.T, newStore func() credential.TypeStore) {
 	t.Run("missing type reports not found", func(t *testing.T) {
 		testTypeMissing(t, newStore())
 	})
+	t.Run("list is oldest first on every backend", func(t *testing.T) {
+		testTypeListOrder(t, newStore())
+	})
+}
+
+// testTypeListOrder pins that List returns types oldest first identically on every backend.
+//
+// The ids are random, so a backend that ordered by id returned effectively random order while the
+// in-memory one returned insertion order, and the "oldest first" the interface documents held on
+// neither. The types here are created in an order that disagrees with their id sort, so a backend
+// ordering by id fails this and a backend ordering by creation time passes.
+func testTypeListOrder(t *testing.T, store credential.TypeStore) {
+	ctx := context.Background()
+	base := time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC)
+	// Created third-to-first in time, with ids that sort the opposite way.
+	created := []struct {
+		id string
+		at time.Time
+	}{
+		{"ctype_zzz", base},
+		{"ctype_mmm", base.Add(time.Minute)},
+		{"ctype_aaa", base.Add(2 * time.Minute)},
+	}
+	for _, c := range created {
+		typ := sampleType(c.id, c.id)
+		typ.CreatedAt = c.at
+		if err := store.Save(ctx, typ); err != nil {
+			t.Fatalf("Save(%s) error = %v", c.id, err)
+		}
+	}
+	got, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	want := []string{"ctype_zzz", "ctype_mmm", "ctype_aaa"}
+	if len(got) != len(want) {
+		t.Fatalf("List() returned %d types, want %d", len(got), len(want))
+	}
+	for i, w := range want {
+		if got[i].ID != w {
+			var order []string
+			for _, g := range got {
+				order = append(order, g.ID)
+			}
+			t.Fatalf("List() order = %v, want oldest first %v: a backend ordering by id rather "+
+				"than creation time gives a different answer here", order, want)
+		}
+	}
 }
 
 // sampleType is a representative custom type: two fields, one secret, both an env and an extra-var
 // injector, including a template that splices a field into literal text.
 func sampleType(id, name string) *credential.CredentialType {
 	return &credential.CredentialType{
-		ID: id, Name: name,
+		ID: id, Name: name, CreatedAt: time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC),
 		Fields: []credential.Field{
 			{Name: "host", Label: "API host"},
 			{Name: "token", Label: "API token", Secret: true},
