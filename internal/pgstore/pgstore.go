@@ -74,7 +74,12 @@ CREATE TABLE IF NOT EXISTS runs (
 	pull_credential_id TEXT NOT NULL DEFAULT '',
 	idempotency_key TEXT NOT NULL DEFAULT '',
 	timeout       INTEGER NOT NULL DEFAULT 0,
-	notifications TEXT NOT NULL DEFAULT ''
+	notifications TEXT NOT NULL DEFAULT '',
+	source        TEXT NOT NULL DEFAULT '',
+	source_id     TEXT NOT NULL DEFAULT '',
+	actor         TEXT NOT NULL DEFAULT '',
+	rerun_of      TEXT NOT NULL DEFAULT '',
+	labels        TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
@@ -84,6 +89,11 @@ CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS idempotency_key TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS timeout INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS notifications TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS source_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS actor TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS rerun_of TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS labels TEXT NOT NULL DEFAULT '';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_idempotency_key ON runs(idempotency_key) WHERE idempotency_key <> '';
 CREATE TABLE IF NOT EXISTS run_logs (
 	seq    BIGSERIAL PRIMARY KEY,
@@ -490,7 +500,8 @@ const runColumns = `id, playbook, inventory, status, exit_code, error, created_a
 	ended_at, parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index,
 	retry_of, attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested,
 	credential_ids, project_id, commit_sha, inventory_id, queue, tool, command, dry_run,
-	proposed_from, intent, image, pull_credential_id, idempotency_key, timeout, notifications`
+	proposed_from, intent, image, pull_credential_id, idempotency_key, timeout, notifications,
+	source, source_id, actor, rerun_of, labels`
 
 // Save inserts or replaces the run identified by r.ID. The cancel flag merges with GREATEST so a
 // replace from a stale snapshot cannot erase a cancel another process just requested.
@@ -501,9 +512,11 @@ INSERT INTO runs
 	 parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index, retry_of,
 	 attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested, credential_ids,
 	 project_id, commit_sha, inventory_id, queue, tool, command, dry_run, proposed_from, intent,
-	 image, pull_credential_id, idempotency_key, timeout, notifications)
+	 image, pull_credential_id, idempotency_key, timeout, notifications,
+	 source, source_id, actor, rerun_of, labels)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-	$21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38)
+	$21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38,
+	$39, $40, $41, $42, $43)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -520,7 +533,8 @@ ON CONFLICT(id) DO UPDATE SET
 	command=excluded.command, dry_run=excluded.dry_run, proposed_from=excluded.proposed_from,
 	intent=excluded.intent, image=excluded.image, pull_credential_id=excluded.pull_credential_id,
 	idempotency_key=excluded.idempotency_key, timeout=excluded.timeout,
-	notifications=excluded.notifications`
+	notifications=excluded.notifications, source=excluded.source, source_id=excluded.source_id,
+	actor=excluded.actor, rerun_of=excluded.rerun_of, labels=excluded.labels`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), sqlutil.NullInt(r.ExitCode), r.Error,
 		sqlutil.FormatTime(r.CreatedAt), sqlutil.NullTime(r.StartedAt), sqlutil.NullTime(r.EndedAt),
@@ -530,6 +544,7 @@ ON CONFLICT(id) DO UPDATE SET
 		sqlutil.BoolToInt(r.CancelRequested), sqlutil.JoinIDs(r.CredentialIDs), r.ProjectID, r.CommitSHA,
 		r.InventoryID, r.Queue, r.Tool, r.Command, sqlutil.BoolToInt(r.DryRun), r.ProposedFrom, r.Intent,
 		r.Image, r.PullCredentialID, r.IdempotencyKey, r.Timeout, marshalNotifications(r.Notifications),
+		r.Source, r.SourceID, r.Actor, r.RerunOf, marshalLabels(r.Labels),
 	)
 	if err != nil {
 		if r.IdempotencyKey != "" && isKeyConflict(err) {
@@ -602,6 +617,22 @@ func (s *store) ListPage(ctx context.Context, filter run.ListFilter, limit, offs
 	if !filter.Before.IsZero() {
 		args = append(args, sqlutil.FormatTime(filter.Before))
 		q += fmt.Sprintf(" AND created_at < $%d", len(args))
+	}
+	if filter.Source != "" {
+		args = append(args, filter.Source)
+		q += fmt.Sprintf(" AND source = $%d", len(args))
+	}
+	if filter.Actor != "" {
+		args = append(args, filter.Actor)
+		q += fmt.Sprintf(" AND actor = $%d", len(args))
+	}
+	if filter.LabelKey != "" {
+		args = append(args, filter.LabelKey, filter.LabelValue)
+		q += fmt.Sprintf(" AND NULLIF(labels, '')::jsonb ->> $%d = $%d", len(args)-1, len(args))
+	}
+	if filter.Host != "" {
+		args = append(args, filter.Host)
+		q += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM run_host_summary hs WHERE hs.run_id = runs.id AND hs.host = $%d)", len(args))
 	}
 	order := "DESC"
 	if filter.OldestFirst {
@@ -1353,13 +1384,15 @@ func scanRun(s scanner) (*run.Run, error) {
 		credIDs  string
 		dryRun   int
 		notifs   string
+		labels   string
 	)
 	if err := s.Scan(&r.ID, &r.Playbook, &r.Inventory, &status, &exit, &r.Error,
 		&created, &started, &ended, &parent, &shardIdx, &shardCnt, &r.Limit,
 		&r.Kind, &r.StepName, &stepIdx, &retryOf, &r.Attempt, &extra, &outputs,
 		&r.ClaimedBy, &claimed, &cancelI, &credIDs, &r.ProjectID, &r.CommitSHA,
 		&r.InventoryID, &r.Queue, &r.Tool, &r.Command, &dryRun, &r.ProposedFrom, &r.Intent,
-		&r.Image, &r.PullCredentialID, &r.IdempotencyKey, &r.Timeout, &notifs); err != nil {
+		&r.Image, &r.PullCredentialID, &r.IdempotencyKey, &r.Timeout, &notifs,
+		&r.Source, &r.SourceID, &r.Actor, &r.RerunOf, &labels); err != nil {
 		return nil, err
 	}
 	r.CancelRequested = cancelI != 0
@@ -1407,11 +1440,38 @@ func scanRun(s scanner) (*run.Run, error) {
 	if r.Outputs, err = sqlutil.ParseMap(outputs); err != nil {
 		return nil, err
 	}
+	if r.Labels, err = parseLabels(labels); err != nil {
+		return nil, err
+	}
 	if r.ClaimedAt, err = sqlutil.ParseNullTime(claimed); err != nil {
 		return nil, err
 	}
 	r.Notifications = parseNotifications(notifs)
 	return &r, nil
+}
+
+// marshalLabels renders run labels as JSON for storage, empty for none.
+func marshalLabels(labels map[string]string) string {
+	if len(labels) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(labels)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+// parseLabels decodes stored run labels, tolerating the empty legacy form.
+func parseLabels(s string) (map[string]string, error) {
+	if s == "" {
+		return nil, nil
+	}
+	var out map[string]string
+	if err := json.Unmarshal([]byte(s), &out); err != nil {
+		return nil, fmt.Errorf("parse labels: %w", err)
+	}
+	return out, nil
 }
 
 // marshalNotifications encodes per-run notification targets for storage, empty for none.

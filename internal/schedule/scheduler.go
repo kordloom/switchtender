@@ -158,11 +158,14 @@ func (s *Scheduler) fire(ctx context.Context, sc *Schedule) (string, error) {
 	case sc.TemplateID != "":
 		created, err = s.fireTemplate(ctx, sc)
 	case len(sc.Steps) > 0:
-		created, err = s.submitter.SubmitPipeline(ctx, sc.Name, sc.Inventory, sc.Steps)
+		created, err = s.submitter.SubmitPipeline(ctx, sc.Name, sc.Inventory, sc.Steps,
+			run.WithSource("schedule", sc.ID))
 	case sc.Shards >= 2:
-		created, err = s.submitter.SubmitSplit(ctx, sc.Playbook, sc.Inventory, sc.Shards)
+		created, err = s.submitter.SubmitSplit(ctx, sc.Playbook, sc.Inventory, sc.Shards,
+			run.WithSource("schedule", sc.ID))
 	default:
-		created, err = s.submitter.Submit(ctx, sc.Playbook, sc.Inventory)
+		created, err = s.submitter.Submit(ctx, sc.Playbook, sc.Inventory,
+			run.WithSource("schedule", sc.ID))
 	}
 	if err != nil {
 		return "", err
@@ -185,6 +188,7 @@ func (s *Scheduler) fireTemplate(ctx context.Context, sc *Schedule) (*run.Run, e
 	opts := []run.SubmitOption{
 		run.WithCredentialIDs(t.CredentialIDs),
 		run.WithExtraVars(t.ExtraVars),
+		run.WithSource("schedule", sc.ID),
 	}
 	if t.ProjectID != "" {
 		opts = append(opts, run.WithProject(t.ProjectID))

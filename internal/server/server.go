@@ -219,6 +219,12 @@ func WithTemplates(store template.Store) Option {
 	return func(srv *Server) { srv.templates = store }
 }
 
+// WithProjectFiles enables read-only browsing of project checkouts through the given syncer.
+// Without it the file endpoints report that browsing is not enabled.
+func WithProjectFiles(syncer *project.Syncer) Option {
+	return func(srv *Server) { srv.syncer = syncer }
+}
+
 // WithProjects enables the project endpoints backed by the given store.
 func WithProjects(store project.Store) Option {
 	return func(srv *Server) { srv.projects = store }
@@ -266,6 +272,8 @@ type Server struct {
 	credentials credential.Store
 	// sealer encrypts credential secrets.
 	sealer *credential.Sealer
+	// syncer browses project checkouts for the file endpoints when configured.
+	syncer *project.Syncer
 	// projects backs the project endpoints when configured.
 	projects project.Store
 	// templates backs the template endpoints when configured.
@@ -409,6 +417,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /v1/projects/{id}", updateProjectHandler(s.projects, s.log))
 	mux.Handle("GET /v1/projects", listProjectsHandler(s.projects, authz, s.log))
 	mux.Handle("DELETE /v1/projects/{id}", deleteProjectHandler(s.projects, refs, s.log))
+	mux.Handle("GET /v1/projects/{id}/files", projectTreeHandler(s.projects, s.syncer, authz, s.log))
+	mux.Handle("GET /v1/projects/{id}/file", projectFileHandler(s.projects, s.syncer, authz, s.log))
 	mux.Handle("POST /v1/inventories", createInventoryHandler(s.inventories, authz, s.sealer, s.log))
 	mux.Handle("PUT /v1/inventories/{id}", updateInventoryHandler(s.inventories, authz, s.sealer, s.log))
 	mux.Handle("GET /v1/inventories", listInventoriesHandler(s.inventories, authz, s.log))

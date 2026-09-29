@@ -81,3 +81,16 @@ What SwitchTender does today.
 - Per-template notification routing is editable in the template dialog: channel, webhook URL,
   and failure-only delivery.
 - The overview charts runs per day, and every outcome tick in fleet health links to its run.
+
+## Run provenance and search
+
+- Every run records what fired it: the API, a template, a schedule, a rerun, a drift fix, or a
+  proposal, along with the authenticated actor and the object behind it. The runs list shows an
+  Origin column that links back to the template, schedule, or earlier run.
+- A rerun records the run it replayed, so lineage survives across repeated executions.
+- Runs carry labels, arbitrary key values such as env=prod or ticket=OPS-123, set at launch and
+  clickable in the list to filter by that pair.
+- The runs search box accepts fielded terms alongside free text: status:failed, tool:bash,
+  source:schedule, actor:alice, host:web01, and label:env=prod, all resolved by the server across
+  the whole history rather than the loaded page.
+- Playbook names open the file itself, read only, from the project's cached checkout.

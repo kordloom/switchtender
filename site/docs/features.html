@@ -281,6 +281,19 @@ log as text, and per-host results as JSON. Credentials are excluded from export 
 and failure-only delivery.</li>
 <li>The overview charts runs per day, and every outcome tick in fleet health links to its run.</li>
 </ul>
+<h2 id="run-provenance-and-search">Run provenance and search</h2>
+<ul>
+<li>Every run records what fired it: the API, a template, a schedule, a rerun, a drift fix, or a
+proposal, along with the authenticated actor and the object behind it. The runs list shows an
+Origin column that links back to the template, schedule, or earlier run.</li>
+<li>A rerun records the run it replayed, so lineage survives across repeated executions.</li>
+<li>Runs carry labels, arbitrary key values such as env=prod or ticket=OPS-123, set at launch and
+clickable in the list to filter by that pair.</li>
+<li>The runs search box accepts fielded terms alongside free text: status:failed, tool:bash,
+source:schedule, actor:alice, host:web01, and label:env=prod, all resolved by the server across
+the whole history rather than the loaded page.</li>
+<li>Playbook names open the file itself, read only, from the project's cached checkout.</li>
+</ul>
 
 		</main>
 	</div>
