@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Features · SwitchTender docs</title>
+	<meta name="description" content="What SwitchTender does today.">
+	<link rel="canonical" href="https://switchtender.com/docs/features">
+	<meta property="og:title" content="Features · SwitchTender docs">
+	<meta property="og:description" content="What SwitchTender does today.">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="https://switchtender.com/docs/features">
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/kordloom/switchtender">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features" class="active">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to AWX and Semaphore</a><a href="/docs/ai">Advisory AI</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="features">Features</h1>
+<p>What SwitchTender does today.</p>
+<table>
+<thead>
+<tr>
+<th>Capability</th>
+<th>What you get</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Runs</td>
+<td>Submit over HTTP, real ansible-playbook underneath, human log plus a structured event stream, per-task drill-down with stdout, stderr, rc, and diff.</td>
+</tr>
+<tr>
+<td>Multi-tool</td>
+<td>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go through one engine, one UI, and one audit trail, each with a dry-run mode.</td>
+</tr>
+<tr>
+<td>Live view</td>
+<td>Server-Sent Events paint the host matrix and log as the run executes.</td>
+</tr>
+<tr>
+<td>Splits</td>
+<td>Shard an inventory across parallel slices, merged back into one matrix. Hosts packed by measured duration from past runs.</td>
+</tr>
+<tr>
+<td>Shard retry</td>
+<td>Retry a finished split and only its failed shards run again, lineage recorded.</td>
+</tr>
+<tr>
+<td>Pipelines</td>
+<td>Ordered steps or a dependency graph with parallel branches. Failures skip exactly their dependents, per-step retry budgets, set_stats outputs flow to dependent steps as extra vars.</td>
+</tr>
+<tr>
+<td>Workflow editor</td>
+<td>A drag-and-drop canvas at Workflows builds the dependency graph in the browser: draft persistence, undo and redo, full keyboard editing, cycle refusal, and a pan, zoom, and fit-to-view viewport that stays smooth on a large graph, submitted as a pipeline.</td>
+</tr>
+<tr>
+<td>Workers</td>
+<td>Point <code>switchtender worker</code> at the same database and it competes for queued runs. Leases, heartbeats, and a janitor make dead workers safe.</td>
+</tr>
+<tr>
+<td>Scheduling</td>
+<td>Cron schedules fire runs, splits, or pipelines with full history per fire.</td>
+</tr>
+<tr>
+<td>Fleet memory</td>
+<td>Failure rankings, flaky-host detection, outcome sparklines, per-host history, task duration trends, all from persisted structured events.</td>
+</tr>
+<tr>
+<td>Recovery</td>
+<td>Cancellation across processes recorded as canceled, orphaned runs interrupted by lease expiry, terminal saves retried.</td>
+</tr>
+<tr>
+<td>Storage</td>
+<td>SQLite by default. The same flag takes a PostgreSQL DSN for multi-instance.</td>
+</tr>
+<tr>
+<td>Projects</td>
+<td>Playbooks sourced from git with clone-or-fetch sync. Every run records the exact commit it executed.</td>
+</tr>
+<tr>
+<td>Templates</td>
+<td>Saved launch presets bundling project, playbook, credentials, shards, and extra vars. One click or one POST launches.</td>
+</tr>
+<tr>
+<td>Auth</td>
+<td>User accounts with admin, operator, and viewer roles enforced per route. Bearer tokens hashed at rest. The API locks down the moment the first token exists.</td>
+</tr>
+<tr>
+<td>Approvals</td>
+<td>Mark a run to require sign-off, or require it automatically by policy on tool, command, or target. A held run never executes until an admin approves or rejects it, and the request and decision land in the tamper-evident audit trail.</td>
+</tr>
+<tr>
+<td>Observability</td>
+<td>A Prometheus metrics endpoint, webhook notifications when runs finish, and an audit trail of every mutation.</td>
+</tr>
+<tr>
+<td>Tamper-evident audit</td>
+<td>Every mutation is linked into a SHA-256 hash chain. <code>GET /audit/verify</code> flags the first altered or deleted entry, and a signed export verified with <code>switchtender audit verify</code> proves the whole chain offline.</td>
+</tr>
+<tr>
+<td>Inventories</td>
+<td>Stored inventories referenced by id, materialized on whichever executor runs the play.</td>
+</tr>
+<tr>
+<td>Dynamic sources</td>
+<td>Inventory plugins and scripts refreshed into stored inventories, with cloud auth from an env credential.</td>
+</tr>
+<tr>
+<td>Sourced inventories</td>
+<td>An inventory's content can come from a command, Vault, or Google Secret Manager, resolved at launch, so the host list need not live in SwitchTender.</td>
+</tr>
+<tr>
+<td>Credentials</td>
+<td>SSH keys, vault passwords, env bundles for cloud SDKs, API tokens and JWTs, become passwords, and registry logins, all encrypted at rest.</td>
+</tr>
+<tr>
+<td>Secret masking</td>
+<td>Credential values are redacted from run logs, live streams, and events, so a tool that echoes a secret shows <code>***</code> instead of the value.</td>
+</tr>
+<tr>
+<td>High availability</td>
+<td>Two servers on one database share the schedule without double-firing. Tokens can carry a lifetime.</td>
+</tr>
+<tr>
+<td>Git triggers</td>
+<td>A webhook URL launches a template on push. The project syncs fresh, so it deploys the commit just pushed.</td>
+</tr>
+<tr>
+<td>Surveys</td>
+<td>Templates declare typed launch prompts, validated and injected as extra vars.</td>
+</tr>
+<tr>
+<td>Worker queues</td>
+<td>Target a run at a named queue. A worker serving that queue runs it and default workers leave it alone. Pin a queue on a run, a template, or an inventory, most specific wins, so queues work like AWX instance groups.</td>
+</tr>
+<tr>
+<td>Dependency sync</td>
+<td>A project's requirements.yml roles and collections install on each sync, so playbooks that need them just run.</td>
+</tr>
+<tr>
+<td>Execution environments</td>
+<td>A template, run, or project pins a container image and its runs execute inside it, with their own ansible and system dependencies. The most specific wins: run, then template, then project. Private registries pull with a stored credential.</td>
+</tr>
+<tr>
+<td>Teams and grants</td>
+<td>Group users into teams and grant use or manage on a specific project, template, inventory, or credential. A manage grant delegates editing and deleting that object without the global admin role. Grants layer on the global role and default open.</td>
+</tr>
+<tr>
+<td>Retention</td>
+<td>A sweeper drops old run events and deletes terminal runs past a configurable age, keeping the summaries the cross-run views need.</td>
+</tr>
+<tr>
+<td>Email</td>
+<td>An SMTP notification on every finished run or on failures only, alongside the finish webhooks.</td>
+</tr>
+<tr>
+<td>Slack</td>
+<td>A formatted message posts to a Slack incoming webhook when a run finishes, with the run label, status, and elapsed time.</td>
+</tr>
+<tr>
+<td>Mattermost and Rocket.Chat</td>
+<td>The same message posts to a Mattermost or Rocket.Chat incoming webhook, which both accept the Slack-compatible payload.</td>
+</tr>
+<tr>
+<td>Discord</td>
+<td>A formatted message posts to a Discord incoming webhook when a run finishes, the same summary as Slack in Discord markdown.</td>
+</tr>
+<tr>
+<td>Microsoft Teams</td>
+<td>An Adaptive Card posts to a Teams incoming webhook when a run finishes, colored by outcome with the status, elapsed time, and any error.</td>
+</tr>
+<tr>
+<td>ntfy</td>
+<td>A notification publishes to an ntfy topic when a run finishes, at raised priority for a failure, with optional token auth for a protected topic.</td>
+</tr>
+<tr>
+<td>PagerDuty</td>
+<td>A failed or interrupted run triggers a PagerDuty incident through the Events API, deduplicated per run, so an on-call responder is paged. A succeeded run pages no one.</td>
+</tr>
+<tr>
+<td>Grafana</td>
+<td>A finished run posts an annotation to the Grafana annotations API, tagged with switchtender and the run status, so runs show as markers on dashboards.</td>
+</tr>
+<tr>
+<td>Twilio SMS</td>
+<td>A failed or interrupted run texts each configured phone number through the Twilio API. A succeeded run texts no one.</td>
+</tr>
+<tr>
+<td>AI triage</td>
+<td>An optional AI provider, local Ollama or a cloud API, explains a failed run on demand from its masked log and failed task events. Advisory only: it never runs anything, so every action still goes through the same policy and audit gates.</td>
+</tr>
+<tr>
+<td>AI drafting</td>
+<td>Describe a bash, python, powershell, or go step in the workflow editor and the provider drafts the script into the command field for you to review, edit, and save. The draft never executes on its own.</td>
+</tr>
+<tr>
+<td>Drift reconcile</td>
+<td>One click on a drifted target builds the fix, run for real and born held for approval: an Ansible host reruns its playbook limited to that host, a Terraform directory applies. A machine proposes, a person releases, and the audit trail records both.</td>
+</tr>
+<tr>
+<td>Fleet questions</td>
+<td>Ask the overview a plain-language question and the provider answers from a bounded snapshot of run counts, recent runs, host health, and drift. Metadata only, rate limited, and it can start nothing.</td>
+</tr>
+<tr>
+<td>Run proposals</td>
+<td>Describe a run on the runs page and the provider turns it into a validated run the server builds. It is born held for approval, stamped with your exact words, and runs nothing until an admin reviews the generated command and releases it. The audit trail records the request and the decision.</td>
+</tr>
+<tr>
+<td>Go SDK</td>
+<td>One public package registers new execution tools, AI providers, secret engines, and notification channels, compiled into the binary. A registered tool validates, executes, masks, and audits like a built-in. See <a href="/docs/sdk">Extend in Go</a>.</td>
+</tr>
+<tr>
+<td>Drop-in plugins</td>
+<td>The same extension builds as its own binary and loads from <code>--plugins-dir</code> on a stock release, no recompile. Plugins speak gRPC over a local socket with mutual TLS, supervised by the server, on the server and on workers.</td>
+</tr>
+<tr>
+<td>Guided tours</td>
+<td>A tour launcher in the top bar walks the product, the pitch, and the migration path step by step in the live UI, fully keyboard accessible.</td>
+</tr>
+<tr>
+<td>Desktop mode</td>
+<td><code>switchtender desktop</code> serves on a stable loopback port, keeps its data in a private per-user directory, and opens the UI. Packaging recipes cover a macOS app bundle and a Windows installer.</td>
+</tr>
+<tr>
+<td>Migration</td>
+<td><code>switchtender import awx</code> and <code>import semaphore</code> read an export and create the equivalent projects, inventories, templates, surveys, schedules, and credential shells, with a dry-run report first.</td>
+</tr>
+</tbody>
+</table>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

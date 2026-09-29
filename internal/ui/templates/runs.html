@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Runs - SwitchTender</title>
+	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="runs"{{if .ReadOnly}} data-readonly="true"{{end}}>
+	<header class="topbar">
+		<div class="brand"><a href="/ui/"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="SwitchTender"></picture>SwitchTender</a></div>
+	</header>
+
+	<main class="content">
+		<div class="page-head">
+			<div class="page-head-text">
+				<h1>Runs</h1>
+				<p class="muted">Every playbook execution across the fleet, newest first.</p>
+			</div>
+			<button id="launch-open" class="button primary">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+				Launch run
+			</button>
+		</div>
+
+		<div class="summary" id="summary" hidden></div>
+
+		<section class="panel propose-panel" id="propose-panel" hidden>
+			<div class="panel-head">
+				<h2>Propose a run from a description</h2>
+				<span class="muted propose-note">Advisory. The proposal is held for approval and runs nothing until an admin releases it.</span>
+			</div>
+			<div class="propose-row">
+				<input id="propose-input" class="input" placeholder="Restart nginx on the web hosts, in check mode first" aria-label="Describe a run to propose">
+				<button id="propose-go" class="button" type="button">Propose</button>
+			</div>
+			<div id="propose-status" class="muted" hidden></div>
+		</section>
+
+		<div id="status" class="muted">Loading runs.</div>
+		<div class="runs-toolbar">
+			<div class="list-filter">
+				<input id="runs-search" class="input list-filter-input" type="search" placeholder="Search all runs…" aria-label="Search runs">
+			</div>
+			<label class="pagesize-label">Show
+				<input id="runs-pagesize" class="input pagesize-input" type="number" min="0" list="runs-pagesizes" value="20" aria-label="Runs per page">
+				<datalist id="runs-pagesizes"><option value="20"></option><option value="50"></option><option value="100"></option></datalist>
+				per page
+			</label>
+			<span class="muted pagesize-hint">0 = no limit</span>
+		</div>
+		<table class="runs" hidden>
+			<thead>
+				<tr>
+					<th>Status</th>
+					<th>Run</th>
+					<th>Playbook</th>
+					<th>Started</th>
+					<th>Duration</th>
+				</tr>
+			</thead>
+			<tbody id="runs"></tbody>
+		</table>
+	</main>
+
+	<div id="launch-modal" class="modal" hidden>
+		<div class="modal-card wide">
+			<div class="modal-head">
+				<h2>Launch a run</h2>
+				<button type="button" class="modal-close" id="launch-close" aria-label="Close">&times;</button>
+			</div>
+			<form id="launch-form" class="launch-grid">
+				<label class="field-label">Tool
+					<select id="launch-tool" class="input">
+						<option value="ansible">Ansible</option>
+						<option value="bash">Bash</option>
+						<option value="terraform">Terraform</option>
+						<option value="opentofu">OpenTofu</option>
+						<option value="python">Python</option>
+						<option value="powershell">PowerShell</option>
+						<option value="go">Go</option>
+						{{range .ExtraTools}}<option value="{{.}}">{{.}}</option>{{end}}
+					</select>
+				</label>
+				<label class="field-label">Project
+					<select id="launch-project" class="input"><option value="">None, local paths</option></select>
+				</label>
+				<label class="field-label" id="launch-field-playbook">Playbook
+					<input id="launch-playbook" class="input mono" placeholder="plays/site.yml">
+				</label>
+				<label class="field-label" id="launch-field-command" hidden>Command
+					<textarea id="launch-command" class="input mono" rows="4" placeholder="echo hello"></textarea>
+				</label>
+				<label class="field-label" id="launch-field-inventory">Inventory
+					<input id="launch-inventory" class="input mono" placeholder="/srv/ansible/hosts.ini">
+				</label>
+				<label class="field-label" id="launch-field-inventory-id">Stored inventory
+					<select id="launch-inventory-id" class="input"><option value="">None, use the path</option></select>
+				</label>
+				<label class="field-label" id="launch-field-shards">Shards
+					<input id="launch-shards" class="input" type="number" min="0" max="64" placeholder="0">
+				</label>
+				<label class="field-label">Queue
+					<input id="launch-queue" class="input mono" placeholder="default">
+				</label>
+				<label class="field-label">Credentials
+					<select id="launch-credentials" class="input" multiple size="3"></select>
+				</label>
+				<label class="field-label check-label">
+					<input type="checkbox" id="launch-dry-run"> Dry run, no changes
+				</label>
+				<label class="field-label check-label">
+					<input type="checkbox" id="launch-require-approval"> Require approval before running
+				</label>
+				<div class="launch-actions">
+					<button type="submit" class="button primary">Launch</button>
+					<span id="launch-status" class="muted"></span>
+				</div>
+			</form>
+		</div>
+	</div>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>

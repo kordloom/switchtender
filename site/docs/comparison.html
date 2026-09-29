@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>SwitchTender compared to AWX and Semaphore · SwitchTender docs</title>
+	<meta name="description" content="This page is an honest side-by-side. It states where SwitchTender is ahead, where it is even, and where it is behind, because credibility comes from being straight about all three.">
+	<link rel="canonical" href="https://switchtender.com/docs/comparison">
+	<meta property="og:title" content="SwitchTender compared to AWX and Semaphore · SwitchTender docs">
+	<meta property="og:description" content="This page is an honest side-by-side. It states where SwitchTender is ahead, where it is even, and where it is behind, because credibility comes from being straight about all three.">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="https://switchtender.com/docs/comparison">
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/kordloom/switchtender">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison" class="active">SwitchTender compared to AWX and Semaphore</a><a href="/docs/ai">Advisory AI</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="switchtender-compared-to-awx-and-semaphore">SwitchTender compared to AWX and Semaphore</h1>
+<p>This page is an honest side-by-side. It states where SwitchTender is ahead, where it is even, and
+where it is behind, because credibility comes from being straight about all three. Details of AWX
+and Semaphore were current as of mid-2026. Verify them against their latest releases before relying
+on them.</p>
+<h2 id="where-switchtender-is-ahead">Where SwitchTender is ahead</h2>
+<table>
+<thead>
+<tr>
+<th>Capability</th>
+<th>SwitchTender</th>
+<th>AWX</th>
+<th>Semaphore</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Deployment</td>
+<td>One binary, SQLite by default and PostgreSQL optional.</td>
+<td>Kubernetes plus PostgreSQL, Redis, and Receptor.</td>
+<td>One binary.</td>
+</tr>
+<tr>
+<td>Run view</td>
+<td>A structured host-by-task matrix with per-task drill-down, painted live over Server-Sent Events.</td>
+<td>A text log stream.</td>
+<td>A text log stream.</td>
+</tr>
+<tr>
+<td>Job splitting</td>
+<td>Shards balanced by each host's measured past duration, with only the failed shards retried.</td>
+<td>Job slicing, round-robin.</td>
+<td>Not available.</td>
+</tr>
+<tr>
+<td>Pipelines</td>
+<td>A dependency graph with parallel branches, per-step retries, and typed set_stats outputs passed to dependents.</td>
+<td>Visual workflows.</td>
+<td>Limited task chaining.</td>
+</tr>
+<tr>
+<td>Visual workflow editor</td>
+<td>A drag-and-drop canvas at Workflows builds the dependency graph in the browser: draft persistence, undo, keyboard editing, cycle refusal, and a pan, zoom, and fit-to-view viewport, on the same DAG engine the API uses.</td>
+<td>A drag-and-drop editor.</td>
+<td>On the roadmap.</td>
+</tr>
+<tr>
+<td>Fleet memory</td>
+<td>Flaky-host detection, outcome sparklines, per-host history, and task duration trends across runs.</td>
+<td>Not available.</td>
+<td>Not available.</td>
+</tr>
+<tr>
+<td>Distributed workers</td>
+<td>Store leasing, where the same single binary adds capacity, held together by leases and a janitor that requeues a crashed worker's runs.</td>
+<td>A Receptor mesh.</td>
+<td>Runners, in a paid tier.</td>
+</tr>
+<tr>
+<td>Instance groups</td>
+<td>A queue pins work at the run, template, or inventory level, most specific wins, so jobs land on the right worker group.</td>
+<td>Instance groups.</td>
+<td>Not available.</td>
+</tr>
+<tr>
+<td>High availability</td>
+<td>Active-active replicas on PostgreSQL behind any load balancer: store-claimed work, compare-and-set schedules and approvals, automatic failover through stale-lease reclaim, proven by a two-replica integration suite.</td>
+<td>Via Kubernetes replicas.</td>
+<td>Not documented.</td>
+</tr>
+<tr>
+<td>Per-run provenance</td>
+<td>Every run records the exact commit it executed.</td>
+<td>Partial.</td>
+<td>Partial.</td>
+</tr>
+<tr>
+<td>Provable audit</td>
+<td>A tamper-evident SHA-256 hash chain, verified offline, with an optional ed25519-signed export.</td>
+<td>An activity stream.</td>
+<td>An activity log.</td>
+</tr>
+<tr>
+<td>Migration in</td>
+<td>One command imports an AWX or Semaphore export.</td>
+<td>Not applicable.</td>
+<td>Not applicable.</td>
+</tr>
+<tr>
+<td>Drift detection</td>
+<td>A dry run reports what has diverged from the desired state, across Ansible hosts and Terraform working directories, with a one-click approval-gated reconcile to fix it.</td>
+<td>No.</td>
+<td>No.</td>
+</tr>
+<tr>
+<td>Directory-driven roles</td>
+<td>A directory or token group sets a user's role on every sign-in, over LDAP, SAML, OIDC, or a bearer JWT.</td>
+<td>Organization mapping, complex.</td>
+<td>No. Every user is assigned a role by hand.</td>
+</tr>
+<tr>
+<td>Notification channels</td>
+<td>Eleven built in: webhook, email, Slack, Mattermost, Rocket.Chat, Discord, Teams, ntfy, PagerDuty, Grafana, and Twilio.</td>
+<td>A similar set plus IRC, without Discord or ntfy.</td>
+<td>Fewer, some in a paid tier.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="where-they-are-even">Where they are even</h2>
+<table>
+<thead>
+<tr>
+<th>Capability</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Multiple runtimes</td>
+<td>SwitchTender runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, each with a dry run. AWX is Ansible-only. Semaphore runs Ansible, Terraform, OpenTofu, and shell, but not Python, PowerShell, or Go.</td>
+</tr>
+<tr>
+<td>Container execution environments</td>
+<td>SwitchTender pins an image on a template, a run, or a project, most specific wins, with private-registry pulls, opt-in behind a flag. AWX attaches execution environments to job templates. Semaphore favors native runtimes instead.</td>
+</tr>
+<tr>
+<td>Access control</td>
+<td>SwitchTender has global roles plus per-object grants and teams. AWX has mature organization RBAC. Semaphore gates RBAC behind its Enterprise tier.</td>
+</tr>
+<tr>
+<td>Credentials</td>
+<td>All three store secrets encrypted. SwitchTender decrypts only at execution into a temporary file and wipes it after.</td>
+</tr>
+<tr>
+<td>Scheduling</td>
+<td>All three schedule runs. SwitchTender uses cron with highly available claiming so two servers do not double-fire.</td>
+</tr>
+<tr>
+<td>Surveys and prompts</td>
+<td>All three collect typed values at launch.</td>
+</tr>
+<tr>
+<td>Inbound webhooks</td>
+<td>All three launch on a git push.</td>
+</tr>
+<tr>
+<td>Metrics</td>
+<td>SwitchTender exposes Prometheus metrics for scraping.</td>
+</tr>
+<tr>
+<td>Directory sign-in</td>
+<td>SwitchTender, AWX, and Semaphore all sign in with LDAP and OpenID Connect.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="where-switchtender-is-behind">Where SwitchTender is behind</h2>
+<table>
+<thead>
+<tr>
+<th>Capability</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Maturity</td>
+<td>AWX and Semaphore have years of production use and large communities. SwitchTender is young. AWX's years now cut both ways: its last release was July 2024, and its next one removes LDAP, SAML, and OIDC from core.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="the-short-version">The short version</h2>
+<p>SwitchTender wins on the axes that make AWX painful and Semaphore ordinary: no heavy control plane to
+deploy, runs you can read as structure instead of scrollback, job splitting that actually balances,
+a memory of how every host behaves over time, a visual workflow editor on a provable DAG engine,
+and a one-command path off either incumbent. It is younger, and its integration catalog is smaller.
+Both gaps are being closed on purpose.</p>
+<p>The <a href="/docs/reliability">reliability</a> page details how runs execute under load: bounded workers, splits
+balanced by measured duration, coordinated pipeline failure, crash recovery through leases, and a
+store that stays consistent while a fleet writes to it.</p>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

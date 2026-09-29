@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>AWX alternative without Kubernetes · SwitchTender</title>
+	<meta name="description" content="SwitchTender is an open source AWX alternative that runs from one Go binary with no Kubernetes, no Postgres, and no Redis. Live host-by-task matrix, seven tools, provable audit, and a one-command AWX import.">
+	<link rel="canonical" href="https://switchtender.com/awx-alternative">
+	<meta property="og:title" content="AWX alternative without Kubernetes · SwitchTender">
+	<meta property="og:description" content="Everything AWX does from one binary, plus the things it never did: a live host-by-task matrix, seven tools, tamper-evident audit, and a one-command import of your AWX export.">
+	<meta property="og:type" content="website">
+	<meta property="og:url" content="https://switchtender.com/awx-alternative">
+	<meta property="og:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=7">
+	<meta name="twitter:card" content="summary_large_image">
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/styles.css?v=13">
+</head>
+<body>
+	<div class="bg-mesh" aria-hidden="true"></div>
+	<div class="bg-grid" aria-hidden="true"></div>
+
+	<header class="nav" id="nav">
+		<div class="wrap nav-inner">
+			<a class="brand" href="/" aria-label="SwitchTender"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+			<nav class="nav-links">
+				<a href="/#features">Features</a>
+				<a href="/#compare">Compare</a>
+				<a href="/docs/">Docs</a>
+			</nav>
+			<div class="nav-cta">
+				<a class="ghost" href="https://github.com/kordloom/switchtender">GitHub</a>
+				<a class="btn" href="/get-started">Get started</a>
+			</div>
+			<button class="nav-toggle" id="nav-toggle" aria-label="Menu">
+				<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="7" x2="21" y2="7"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="17" x2="21" y2="17"/></svg>
+			</button>
+		</div>
+	</header>
+
+	<main>
+		<section class="wrap gs-hero reveal">
+			<span class="eyebrow">AWX alternative</span>
+			<h1>Everything AWX does.<br><span class="grad">Without the Kubernetes bill.</span></h1>
+			<p class="lede">AWX needs a Kubernetes cluster, an operator, Postgres, Redis, and Receptor before it runs a single playbook, and it has not shipped a release since July 2024. SwitchTender is one Go binary. Download it, run it, and you have job templates, schedules, RBAC, surveys, SSO, workflows, and approvals, plus a live host-by-task matrix AWX never had. Your AWX export imports in one command.</p>
+			<div class="hero-cta">
+				<a class="btn big" href="/get-started">Get started</a>
+				<a class="ghost big" href="/docs/switching-from-awx">Read the migration guide</a>
+			</div>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>Why teams look for an AWX alternative</h2>
+				<p>Three complaints come up every time, and 2024 added a fourth: whether AWX ships at all. SwitchTender was built around them.</p>
+			</div>
+			<div class="cards">
+				<article class="card reveal">
+					<h3>The platform tax</h3>
+					<p>Running AWX means running Kubernetes, the AWX Operator, Postgres, and Redis, then keeping all of it patched. That is a platform team's week, every month, to run playbooks. SwitchTender is one process and one file. Upgrading is replacing a binary.</p>
+				</article>
+				<article class="card reveal">
+					<h3>Ansible-only</h3>
+					<p>Real fleets also run Terraform, scripts, and one-off tooling. AWX runs Ansible. SwitchTender runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go through one engine, one UI, and one audit trail, each with a dry-run mode.</p>
+				</article>
+				<article class="card reveal">
+					<h3>Scrollback runs</h3>
+					<p>AWX shows a text stream. SwitchTender paints every run as a live host-by-task matrix, one cell per host and task, with the failed host highlighted and per-task drill-down. You read a run like a dashboard, not a log.</p>
+				</article>
+			</div>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>The state of AWX, in dated facts</h2>
+				<p>None of this is spin. Every line links to its source, and AWX still works where it already runs. The question is what you stand up next.</p>
+			</div>
+			<div class="cards">
+				<article class="card reveal">
+					<h3>Frozen since July 2024</h3>
+					<p>AWX 24.6.1, released July 2, 2024, is still the latest release. Red Hat <a href="https://forum.ansible.com/t/streamlining-awx-releases/6894">paused releases</a> for a refactor that has shipped no release and no date since.</p>
+				</article>
+				<article class="card reveal">
+					<h3>Fresh installs break</h3>
+					<p>The last released operator depends on a <a href="https://github.com/ansible/awx-operator/issues/2107">retired container image</a>, so a new install fails to pull until you patch it by hand.</p>
+				</article>
+				<article class="card reveal">
+					<h3>Security fixes stopped</h3>
+					<p>The 24.6.1 images are two years of CVEs old, and teams report them <a href="https://forum.ansible.com/t/any-news-on-awx-development/45639">failing security audits</a> with no patched release to move to.</p>
+				</article>
+				<article class="card reveal">
+					<h3>SSO is leaving the free tier</h3>
+					<p>On AWX's development branch, LDAP, SAML, and OIDC are <a href="https://forum.ansible.com/t/transitioning-authentication-and-authorization-rbac-to-the-new-awx-architecture/8602">removed from core</a>. The replacement lives in the paid platform. SwitchTender ships all three in the binary.</p>
+				</article>
+				<article class="card reveal">
+					<h3>In Red Hat's words</h3>
+					<p>"Our goal isn't to offer an exact replica of our commercial product for free," <a href="https://forum.ansible.com/t/awx-modernization-moving-forward/45134">from the AWX modernization update</a>. The direction is a subscription.</p>
+				</article>
+				<article class="card reveal">
+					<h3>Even the collection was pulled</h3>
+					<p>The awx.awx collection was <a href="https://docs.ansible.com/projects/ansible/latest/porting_guides/porting_guide_14.html">removed from the Ansible 14 community package</a> mid-refactor.</p>
+				</article>
+			</div>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>Feature for feature</h2>
+				<p>The enterprise checklist, side by side. The full three-way table including Semaphore is on the <a href="/docs/comparison">comparison page</a>.</p>
+			</div>
+			<div class="table-wrap reveal">
+				<table class="compare">
+					<thead>
+						<tr><th>Capability</th><th class="us">SwitchTender</th><th>AWX</th></tr>
+					</thead>
+					<tbody>
+						<tr><td>Deploy</td><td class="us">One binary, SQLite or Postgres</td><td><span class="muted">Kubernetes + operator + Postgres + Redis</span></td></tr>
+						<tr><td>Release cadence</td><td class="us">Actively released</td><td><span class="muted">Frozen since July 2024</span></td></tr>
+						<tr><td>Live host-by-task matrix</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Tools</td><td class="us">Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</td><td><span class="muted">Ansible only</span></td></tr>
+						<tr><td>Job templates, surveys, schedules</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
+						<tr><td>Drag-and-drop workflow editor</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
+						<tr><td>RBAC, teams, per-object grants</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
+						<tr><td>LDAP, SAML, OIDC sign-in</td><td class="us"><i class="y"></i></td><td><span class="muted">Today, yes. Removed on the development branch</span></td></tr>
+						<tr><td>Execution environments</td><td class="us">All seven tools, Docker or Podman</td><td><span class="muted">Ansible only, Podman</span></td></tr>
+						<tr><td>Instance groups</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
+						<tr><td>High availability</td><td class="us">Active-active on Postgres</td><td><span class="muted">Via Kubernetes</span></td></tr>
+						<tr><td>Duration-balanced job splitting</td><td class="us"><i class="y"></i></td><td><span class="muted">Round-robin slicing</span></td></tr>
+						<tr><td>Fleet memory: flaky hosts, trends</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Tamper-evident, signed audit</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Drift detection and reconcile, Ansible and Terraform</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Notification channels</td><td class="us">Eleven built in</td><td><span class="muted">About ten</span></td></tr>
+						<tr><td>Advisory AI triage and fleet answers</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Drop-in Go plugins: tools, secrets, AI, notifiers</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Import from the other side</td><td class="us">One command</td><td><i class="n"></i></td></tr>
+					</tbody>
+				</table>
+			</div>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>Where AWX is still ahead</h2>
+				<p>An honest page beats a loud one. AWX has years in production at large organizations, a deep ecosystem of credential types and inventory plugins, and a large community. SwitchTender is new: every claim on this page is backed by a test you can run, and what it does not have yet is that decade of production miles. It earns them the same way AWX did, one fleet at a time, starting with teams who want the capability without the platform. And the ecosystem gap closes differently here: any team can add a tool, a secret engine, an AI provider, or a channel as a drop-in Go plugin binary, no fork and no rebuild of the server.</p>
+			</div>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>The other exits, honestly</h2>
+				<p><a href="/ascender-alternative">Ascender</a> is a support-backed fork of the same frozen codebase, with the same Kubernetes-shaped footprint. Oracle Linux Automation Manager repackages AWX 24.6.1 for Oracle Linux hosts. Semaphore is genuinely light, but a run is a text log, RBAC sits in its paid tier, and there are no workflows; the <a href="/semaphore-alternative">full comparison is here</a>. Moving to CI pipelines works until you need RBAC, schedules, approvals, and an audit trail, at which point you have rebuilt a worse control plane. SwitchTender is the exit that keeps AWX's capabilities without inheriting its architecture.</p>
+			</div>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>Move in one command</h2>
+				<p>Export from AWX, import into SwitchTender. Projects, inventories, templates, surveys, and schedules come across, with a dry run first so you see the plan before anything is written.</p>
+			</div>
+			<div class="gs-steps">
+				<ol>
+					<li class="gs-step reveal">
+						<div class="gs-num">1</div>
+						<div class="gs-body">
+							<h3>Preview the import</h3>
+							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>switchtender import awx awx-export.json --db switchtender.db</code></pre></div>
+						</div>
+					</li>
+					<li class="gs-step reveal">
+						<div class="gs-num">2</div>
+						<div class="gs-body">
+							<h3>Apply it</h3>
+							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>switchtender import awx awx-export.json --db switchtender.db --apply</code></pre></div>
+						</div>
+					</li>
+				</ol>
+			</div>
+			<p class="reveal" style="margin-top: 18px;">The <a href="/docs/switching-from-awx">switching guide</a> maps every AWX concept to its SwitchTender equivalent, and the <a href="/docs/migration">migration reference</a> covers the details.</p>
+		</section>
+
+		<section class="cta wrap reveal">
+			<h2>Try it before your coffee brews.</h2>
+			<div class="hero-cta">
+				<a class="btn big" href="/get-started">Get started</a>
+				<a class="ghost big" href="https://github.com/kordloom/switchtender">View on GitHub</a>
+			</div>
+		</section>
+	</main>
+
+	<footer class="footer">
+		<div class="wrap footer-inner">
+			<img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="foot-logo">
+			<nav>
+				<a href="https://github.com/kordloom/switchtender">GitHub</a>
+				<a href="/docs/">Docs</a>
+				<a href="/docs/comparison">Compare</a>
+				<a href="/ascender-alternative">vs Ascender</a>
+				<a href="/aap-alternative">vs AAP</a>
+				<a href="/semaphore-alternative">vs Semaphore</a>
+				<a href="https://github.com/kordloom/switchtender/blob/main/LICENSE">License</a>
+			</nav>
+			<span class="foot-note">Open source · BSL 1.1 · self-host free</span>
+		</div>
+	</footer>
+	<script src="/app.js?v=6"></script>
+</body>
+</html>

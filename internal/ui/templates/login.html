@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Sign in - SwitchTender</title>
+	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="login">
+	<header class="topbar">
+		<div class="brand"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="SwitchTender"></picture>SwitchTender</div>
+	</header>
+
+	<main class="content narrow">
+		<h1>Sign in</h1>
+		{{if .OIDCEnabled}}
+		<a class="button primary sso" href="/auth/oidc/login">Sign in with SSO</a>
+		{{end}}
+		{{if .SAMLEnabled}}
+		<a class="button primary sso" href="/auth/saml/login">Sign in with SAML</a>
+		{{end}}
+		{{if or .OIDCEnabled .SAMLEnabled}}
+		<div class="sso-divider muted">or</div>
+		{{end}}
+		<form id="account-form" class="stack">
+			<label class="field-label">Username
+				<input id="username-input" class="input" autocomplete="username" autofocus>
+			</label>
+			<label class="field-label">Password
+				<input id="password-input" class="input" type="password" autocomplete="current-password">
+			</label>
+			<button type="submit" class="button primary">Sign in</button>
+		</form>
+		<details class="alt-auth">
+			<summary class="muted">Use an API token instead</summary>
+			<form id="login-form" class="stack">
+				<input id="token-input" class="input mono" type="password"
+					placeholder="ymt_..." autocomplete="off">
+				<button type="submit" class="button">Sign in with token</button>
+			</form>
+		</details>
+		<div id="status" class="muted" hidden></div>
+	</main>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>

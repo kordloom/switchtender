@@ -1,0 +1,8 @@
+.git
+.github
+*.db
+*.db-shm
+*.db-wal
+deploy
+README.md
+assets

@@ -1,0 +1,36 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - copyloopvar
+    - misspell
+    - whitespace
+  settings:
+    misspell:
+      locale: US
+  exclusions:
+    generated: lax
+    paths:
+      - '.*\.pb\.go$'
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - path: (.+)_test\.go
+        linters:
+          - bodyclose
+
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    generated: lax
+    paths:
+      - '.*\.pb\.go$'

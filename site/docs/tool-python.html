@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Python runs · SwitchTender docs</title>
+	<meta name="description" content="A Python run executes a script with python3. The script is the run&#39;s command. It suits a task that is more comfortable in Python than a shell: calling an API, reconciling state, or shaping data.">
+	<link rel="canonical" href="https://switchtender.com/docs/tool-python">
+	<meta property="og:title" content="Python runs · SwitchTender docs">
+	<meta property="og:description" content="A Python run executes a script with python3. The script is the run&#39;s command. It suits a task that is more comfortable in Python than a shell: calling an API, reconciling state, or shaping data.">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="https://switchtender.com/docs/tool-python">
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/kordloom/switchtender">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python" class="active">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to AWX and Semaphore</a><a href="/docs/ai">Advisory AI</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="python-runs">Python runs</h1>
+<p>A Python run executes a script with <code>python3</code>. The script is the run's command. It suits a task that
+is more comfortable in Python than a shell: calling an API, reconciling state, or shaping data.</p>
+<h2 id="what-runs">What runs</h2>
+<p>The script is written to a temporary file and run with <code>python3</code>, so multi-line scripts work
+unchanged. The working directory is the project checkout when the run sources a project. A dry run
+runs <code>python3 -m py_compile</code>, which checks syntax without executing the script.</p>
+<h2 id="how-values-reach-the-script">How values reach the script</h2>
+<ul>
+<li>
+<p>Extra vars, including survey answers and template vars, arrive as <code>SWITCHTENDER_VARS</code>, a JSON object:</p>
+<pre><code>  import json, os
+  vars = json.loads(os.environ.get(&quot;SWITCHTENDER_VARS&quot;, &quot;{}&quot;))
+  region = vars.get(&quot;region&quot;, &quot;us-east-1&quot;)
+</code></pre>
+</li>
+<li>
+<p>An <code>env</code> credential's <code>KEY=VALUE</code> lines are set in the environment, read with <code>os.environ</code>.</p>
+</li>
+<li>
+<p>A <code>token</code> credential is set as <code>SWITCHTENDER_TOKEN</code>, ready to send as a bearer token.</p>
+</li>
+<li>
+<p>Credentials attached to the run's inventory arrive the same way.</p>
+</li>
+</ul>
+<h2 id="example">Example</h2>
+<pre><code>import json, os, urllib.request
+vars = json.loads(os.environ.get(&quot;SWITCHTENDER_VARS&quot;, &quot;{}&quot;))
+token = os.environ[&quot;SWITCHTENDER_TOKEN&quot;]
+req = urllib.request.Request(
+    f&quot;https://api.example.com/deploy/{vars['service']}&quot;,
+    headers={&quot;Authorization&quot;: f&quot;Bearer {token}&quot;}, method=&quot;POST&quot;)
+print(urllib.request.urlopen(req).status)
+</code></pre>
+<p>See also <a href="/docs/tool-bash">Bash runs</a>, <a href="/docs/tool-terraform">Terraform runs</a>,
+<a href="/docs/tool-go">Go runs</a>, and the <a href="/docs/tutorials">tutorials</a>.</p>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

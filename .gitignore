@@ -1,0 +1,47 @@
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/bin/
+/dist/
+/build/
+vendor/
+go.work
+go.work.sum
+
+# SQLite database files
+*.db
+*.db-shm
+*.db-wal
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Env
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Local config
+.claude/
+
+# Wrangler (Cloudflare Pages CLI) local cache
+.wrangler/
+
+# Built binaries
+/switchtender
+/sitegen

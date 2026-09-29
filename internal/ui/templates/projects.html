@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Projects - SwitchTender</title>
+	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="projects"{{if .ReadOnly}} data-readonly="true"{{end}}>
+	<header class="topbar">
+		<div class="brand"><a href="/ui/"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="SwitchTender"></picture>SwitchTender</a></div>
+	</header>
+
+	<main class="content">
+		<div class="page-head">
+			<div class="page-head-text">
+				<h1>Projects</h1>
+				<p class="muted">Playbooks sourced from git. Every run records the commit it executed.</p>
+			</div>
+			<button id="project-open" class="button primary">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+				New project
+			</button>
+		</div>
+
+		<div id="project-modal" class="modal" hidden>
+			<div class="modal-card wide">
+				<div class="modal-head">
+					<h2>Add a project</h2>
+					<button type="button" class="modal-close" id="project-close" aria-label="Close">&times;</button>
+				</div>
+			<form id="project-form" class="launch-grid">
+				<label class="field-label">Name
+					<input id="project-name" class="input" placeholder="site" required>
+				</label>
+				<label class="field-label">Repository URL
+					<input id="project-repo" class="input mono" placeholder="git@github.com:org/site.git" required>
+				</label>
+				<label class="field-label">Branch
+					<input id="project-branch" class="input mono" placeholder="main">
+				</label>
+				<label class="field-label">SSH credential
+					<select id="project-credential" class="input"><option value="">None</option></select>
+				</label>
+				<label class="field-label">Install requirements
+					<input id="project-deps" type="checkbox" checked>
+				</label>
+				<label class="field-label">Execution image
+					<input id="project-image" class="input mono" placeholder="quay.io/ansible/creator-ee:latest">
+				</label>
+				<label class="field-label">Registry credential
+					<select id="project-pull-credential" class="input"><option value="">None</option></select>
+				</label>
+				<div class="launch-actions">
+					<button type="submit" class="button primary">Save</button>
+					<span id="project-status" class="muted"></span>
+				</div>
+			</form>
+			</div>
+		</div>
+
+		<div id="status" class="muted">Loading projects.</div>
+		<table class="runs" hidden>
+			<thead>
+				<tr>
+					<th>Name</th>
+					<th>Repository</th>
+					<th>Branch</th>
+					<th>Created</th>
+					<th></th>
+				</tr>
+			</thead>
+			<tbody id="projects"></tbody>
+		</table>
+	</main>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>

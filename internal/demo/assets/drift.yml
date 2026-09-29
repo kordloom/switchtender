@@ -1,0 +1,14 @@
+---
+- name: Configuration drift check
+  hosts: all
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Ensure app config present
+      file:
+        path: "/tmp/ym-demo-config-{{ inventory_hostname }}"
+        state: touch
+    - name: Ensure service marker present
+      file:
+        path: "/tmp/ym-demo-service-{{ inventory_hostname }}"
+        state: touch

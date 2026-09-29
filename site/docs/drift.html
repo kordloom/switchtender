@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Drift detection · SwitchTender docs</title>
+	<meta name="description" content="Drift is when your infrastructure no longer matches the state your automation asserts.">
+	<link rel="canonical" href="https://switchtender.com/docs/drift">
+	<meta property="og:title" content="Drift detection · SwitchTender docs">
+	<meta property="og:description" content="Drift is when your infrastructure no longer matches the state your automation asserts.">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="https://switchtender.com/docs/drift">
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/kordloom/switchtender">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift" class="active">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to AWX and Semaphore</a><a href="/docs/ai">Advisory AI</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="drift-detection">Drift detection</h1>
+<p>Drift is when your infrastructure no longer matches the state your automation asserts. SwitchTender
+detects it from a dry run and shows it on the Drift page, so divergence surfaces before the next real
+run.</p>
+<h2 id="how-it-works">How it works</h2>
+<p>A dry run reports what would change without changing anything. For Ansible that is check mode, which
+reports task by task, per host, what would change. For Terraform and OpenTofu it is a plan, which
+reports the resources that would change in a working directory. Either way, a dry run that would
+change something means the target has diverged from the desired state. The Drift page shows each
+target's most recent check: how much would change now, when it was checked, and the run that observed
+it. A target whose latest check would change nothing is in sync.</p>
+<p>Because drift comes straight from the run, it needs no separate agent and no extra setup. Schedule a
+dry run on a cadence and the Drift page stays current.</p>
+<h2 id="what-counts">What counts</h2>
+<p>Drift comes from a dry run that has a no-change check. Ansible's <code>--check</code> reports, host by host, which
+tasks would change, and each host's changed count feeds the Drift page. Terraform and OpenTofu run
+<code>plan</code> with a detailed exit code, which distinguishes a clean plan from one with pending changes; a dry
+run that finds changes is recorded as drift keyed on its working directory rather than a host, with the
+plan's changed-resource count. Bash, Python, PowerShell, and Go have no desired-state check, so they do
+not report drift.</p>
+<h2 id="from-the-api">From the API</h2>
+<pre><code>curl -s localhost:8080/v1/drift
+</code></pre>
+<p>Each target carries its changed count, the check run id, and when it was checked, worst drift first. A
+target is an Ansible host or a Terraform working directory.</p>
+<h2 id="reconcile-a-drifted-target">Reconcile a drifted target</h2>
+<p>A drifted row on the Drift page carries a Propose reconcile button. It builds the fix for you from the
+check that observed the drift, run for real instead of as a check: an Ansible check reruns its playbook
+limited to the drifted host, applying exactly the divergent tasks, and a Terraform or OpenTofu check
+applies its working directory. The construction is deterministic. No model builds it.</p>
+<p>The proposal never starts on its own. It is created held for approval, so an approver reviews it and
+releases or rejects it, and the audit trail records that a machine proposed it and who decided. When
+an AI provider is configured, the Explain button on the held proposal summarizes what drifted and
+what approving will change, from the check run's masked events.</p>
+<p>The same action is one request, for an operator token:</p>
+<pre><code>curl -s -X POST localhost:8080/v1/drift/reconcile -d '{&quot;host&quot;: &quot;web01&quot;}'
+</code></pre>
+<p>The <code>host</code> field names the drifted target, an Ansible host or a Terraform working directory.</p>
+<p>See also the <a href="/docs/faq">FAQ</a> and the <a href="/docs/tutorials">tutorials</a>.</p>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

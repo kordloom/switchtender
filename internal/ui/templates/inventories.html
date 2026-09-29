@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Inventories - SwitchTender</title>
+	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="inventories"{{if .ReadOnly}} data-readonly="true"{{end}}>
+	<header class="topbar">
+		<div class="brand"><a href="/ui/"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="SwitchTender"></picture>SwitchTender</a></div>
+	</header>
+
+	<main class="content">
+		<div class="page-head">
+			<div class="page-head-text">
+				<h1>Inventories</h1>
+				<p class="muted">Stored inventories travel with the run to whichever executor picks it up.</p>
+			</div>
+			<button id="inventory-open" class="button primary">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+				New inventory
+			</button>
+		</div>
+
+		<div id="inventory-modal" class="modal" hidden>
+			<div class="modal-card wide">
+				<div class="modal-head">
+					<h2>Add an inventory</h2>
+					<button type="button" class="modal-close" id="inventory-close" aria-label="Close">&times;</button>
+				</div>
+			<form id="inventory-form" class="stack">
+				<label class="field-label">Name
+					<input id="inv-name" class="input" placeholder="production fleet" required>
+				</label>
+				<label class="field-label">Content source
+					<select id="inv-content-source" class="input">
+						<option value="local">Stored (paste the inventory)</option>
+						<option value="command">Command (fetch at run time)</option>
+						<option value="vault">Vault (fetch at run time)</option>
+						<option value="gsm">Google Secret Manager (fetch at run time)</option>
+						<option value="aws">AWS Secrets Manager (fetch at run time)</option>
+						<option value="azure">Azure Key Vault (fetch at run time)</option>
+					</select>
+				</label>
+				<div id="inv-source-local" class="stack" data-source-group>
+					<label class="field-label">Content
+						<textarea id="inv-content" class="input mono" rows="8"
+							placeholder="[web]&#10;web01 ansible_host=10.0.0.5"></textarea>
+					</label>
+				</div>
+				<div id="inv-source-command" class="stack" data-source-group hidden>
+					<label class="field-label">Command
+						<input id="inv-command" class="input mono" placeholder="vault kv get -field=inventory secret/prod-fleet">
+						<span class="field-hint">Runs at launch; its standard output is the inventory.</span>
+					</label>
+				</div>
+				<div id="inv-source-vault" class="stack" data-source-group hidden>
+					<label class="field-label">Vault address
+						<input id="inv-vault-addr" class="input" placeholder="https://vault:8200">
+					</label>
+					<label class="field-label">Path
+						<input id="inv-vault-path" class="input" placeholder="secret/data/fleet">
+					</label>
+					<label class="field-label">Field
+						<input id="inv-vault-field" class="input" placeholder="inventory">
+					</label>
+					<label class="field-label">Token
+						<input id="inv-vault-token" class="input" placeholder="optional, else VAULT_TOKEN">
+					</label>
+				</div>
+				<div id="inv-source-gsm" class="stack" data-source-group hidden>
+					<label class="field-label">Project
+						<input id="inv-gsm-project" class="input" placeholder="my-project">
+					</label>
+					<label class="field-label">Secret
+						<input id="inv-gsm-secret" class="input" placeholder="fleet-inventory">
+					</label>
+					<label class="field-label">Version
+						<input id="inv-gsm-version" class="input" placeholder="latest">
+					</label>
+					<label class="field-label">Access token
+						<input id="inv-gsm-token" class="input" placeholder="optional, else GCP metadata server">
+					</label>
+				</div>
+				<div id="inv-source-aws" class="stack" data-source-group hidden>
+					<label class="field-label">Secret id
+						<input id="inv-aws-secret-id" class="input" placeholder="prod/fleet-inventory">
+					</label>
+					<label class="field-label">Region
+						<input id="inv-aws-region" class="input" placeholder="optional, else AWS_REGION">
+					</label>
+					<label class="field-label">Access key id
+						<input id="inv-aws-access-key" class="input" placeholder="optional, else AWS environment">
+					</label>
+					<label class="field-label">Secret access key
+						<input id="inv-aws-secret-key" class="input" placeholder="optional, else AWS environment">
+					</label>
+				</div>
+				<div id="inv-source-azure" class="stack" data-source-group hidden>
+					<label class="field-label">Vault
+						<input id="inv-azure-vault" class="input" placeholder="prod-kv">
+					</label>
+					<label class="field-label">Secret
+						<input id="inv-azure-secret" class="input" placeholder="fleet-inventory">
+					</label>
+					<label class="field-label">Tenant id
+						<input id="inv-azure-tenant" class="input" placeholder="optional, else managed identity">
+					</label>
+					<label class="field-label">Client id
+						<input id="inv-azure-client" class="input" placeholder="optional service principal">
+					</label>
+					<label class="field-label">Client secret
+						<input id="inv-azure-client-secret" class="input" placeholder="optional service principal">
+					</label>
+				</div>
+				<span id="inv-source-hint" class="field-hint" hidden>Editing keeps the stored source configuration unless you fill these in.</span>
+				<label class="field-label">Credentials
+					<select id="inv-credentials" class="input" multiple size="3"></select>
+					<span class="field-hint">Secret variables every run against this inventory receives.</span>
+				</label>
+				<label class="field-label">Queue
+					<input id="inv-queue" class="input" placeholder="optional, for example dmz-workers">
+					<span class="field-hint">Pins runs against this inventory to workers serving the queue. A run or template queue overrides it.</span>
+				</label>
+				<div class="launch-actions">
+					<button type="submit" class="button primary">Save</button>
+					<span id="inv-status" class="muted"></span>
+				</div>
+			</form>
+			</div>
+		</div>
+
+		<div id="status" class="muted">Loading inventories.</div>
+		<table class="runs" hidden>
+			<thead>
+				<tr>
+					<th>Name</th>
+					<th>Created</th>
+					<th></th>
+				</tr>
+			</thead>
+			<tbody id="inventories"></tbody>
+		</table>
+	</main>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>

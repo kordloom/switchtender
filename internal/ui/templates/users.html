@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Users - SwitchTender</title>
+	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="users"{{if .ReadOnly}} data-readonly="true"{{end}}>
+	<header class="topbar">
+		<div class="brand"><a href="/ui/"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="SwitchTender"></picture>SwitchTender</a></div>
+	</header>
+
+	<main class="content">
+		<div class="page-head">
+			<div class="page-head-text">
+				<h1>Users</h1>
+				<p class="muted">Viewers read, operators launch and stop work, admins manage everything.</p>
+			</div>
+			<button id="user-open" class="button primary">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+				New user
+			</button>
+		</div>
+
+		<div id="user-modal" class="modal" hidden>
+			<div class="modal-card wide">
+				<div class="modal-head">
+					<h2>Add a user</h2>
+					<button type="button" class="modal-close" id="user-close" aria-label="Close">&times;</button>
+				</div>
+			<form id="user-form" class="launch-grid">
+				<label class="field-label">Username
+					<input id="user-name" class="input" autocomplete="off" required>
+				</label>
+				<label class="field-label">Password
+					<input id="user-password" class="input" type="password" autocomplete="new-password" required>
+				</label>
+				<label class="field-label">Role
+					<select id="user-role" class="input">
+						<option value="viewer">Viewer</option>
+						<option value="operator" selected>Operator</option>
+						<option value="admin">Admin</option>
+					</select>
+				</label>
+				<div class="launch-actions">
+					<button type="submit" class="button primary">Save</button>
+					<span id="user-status" class="muted"></span>
+				</div>
+			</form>
+			</div>
+		</div>
+
+		<div id="status" class="muted">Loading users.</div>
+		<table class="runs" hidden>
+			<thead>
+				<tr>
+					<th>Username</th>
+					<th>Role</th>
+					<th>Created</th>
+					<th></th>
+				</tr>
+			</thead>
+			<tbody id="users"></tbody>
+		</table>
+	</main>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>

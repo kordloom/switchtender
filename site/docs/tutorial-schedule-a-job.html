@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Schedule a job · SwitchTender docs</title>
+	<meta name="description" content="A schedule uses a cron expression, and it can fire a stored template, a single run, a split, or a whole pipeline.">
+	<link rel="canonical" href="https://switchtender.com/docs/tutorial-schedule-a-job">
+	<meta property="og:title" content="Schedule a job · SwitchTender docs">
+	<meta property="og:description" content="A schedule uses a cron expression, and it can fire a stored template, a single run, a split, or a whole pipeline.">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="https://switchtender.com/docs/tutorial-schedule-a-job">
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/kordloom/switchtender">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job" class="active">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to AWX and Semaphore</a><a href="/docs/ai">Advisory AI</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="schedule-a-job">Schedule a job</h1>
+<p>A schedule uses a cron expression, and it can fire a stored template, a single run, a split, or a
+whole pipeline.</p>
+<h2 id="schedule-a-template">Schedule a template</h2>
+<ol>
+<li>Save the work first as a <a href="/docs/tutorial-save-a-template">template</a>, so the schedule stays a one-line
+reference instead of a copy of every field.</li>
+<li>Open Schedules and add a schedule.</li>
+<li>Give it a cron expression for the cadence, for example <code>0 2 * * *</code> for 02:00 every day, and point
+it at the template.</li>
+<li>Save. It fires on the schedule and each firing shows up in Runs like any other.</li>
+</ol>
+<h2 id="from-the-api">From the API</h2>
+<pre><code>curl -s -X POST localhost:8080/v1/schedules \
+  -H 'content-type: application/json' \
+  -d '{&quot;cron&quot;:&quot;0 2 * * *&quot;,&quot;template_id&quot;:&quot;tpl_abc123&quot;}'
+</code></pre>
+<p>To schedule without a template, send <code>playbook</code> and <code>inventory</code> inline, add <code>shards</code> for a split, or
+<code>steps</code> for a pipeline. A worker or the server must be running for a schedule to fire. Add capacity
+with <code>switchtender worker</code>.</p>
+<p>Next: give the job its secrets with <a href="/docs/tutorial-set-a-secret">set a secret</a>.</p>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

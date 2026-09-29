@@ -1,0 +1,32 @@
+{
+  "projects": [
+    {
+      "name": "Infra",
+      "repositories": [
+        {"name": "main", "git_url": "git@github.com:acme/infra.git", "git_branch": "master"}
+      ],
+      "inventories": [
+        {"name": "staging", "type": "static", "inventory": "[all]\nstage1 ansible_connection=local\n"}
+      ],
+      "keys": [
+        {"name": "deploy", "type": "ssh"},
+        {"name": "registry", "type": "login_password"}
+      ],
+      "templates": [
+        {
+          "name": "Provision",
+          "playbook": "provision.yml",
+          "repository": "main",
+          "inventory": "staging",
+          "survey_vars": [
+            {"name": "env", "title": "Environment", "type": "enum", "required": true, "values": ["stage", "prod"]},
+            {"name": "batch", "title": "Batch size", "type": "int", "required": false}
+          ]
+        }
+      ],
+      "schedules": [
+        {"name": "hourly", "cron_format": "0 * * * *", "template": "Provision"}
+      ]
+    }
+  ]
+}

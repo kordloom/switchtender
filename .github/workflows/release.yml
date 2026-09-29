@@ -1,0 +1,148 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    env:
+      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+      MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: sigstore/cosign-installer@v3
+      - uses: anchore/sbom-action/download-syft@v0
+
+      # Import the Apple Developer ID certificate only when it is configured, so releases keep
+      # working before notarization is set up and gain it automatically once the secret exists.
+      - name: Import the Apple Developer ID certificate
+        if: env.MACOS_CERTIFICATE != ''
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.MACOS_CERTIFICATE }}
+          p12-password: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+
+      # Standard artifacts: cross-compiled binaries, a universal macOS binary, archives, SHA256SUMS,
+      # a keyless cosign signature, SBOMs, the Homebrew cask, and deb/rpm/apk packages.
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+      # The desktop app is the one bespoke artifact: a double-clickable macOS bundle whose launcher
+      # runs `switchtender desktop`. It is ad-hoc signed unless MACOS_SIGN_IDENTITY is set, in which
+      # case it is Developer ID signed and, when notary credentials are present, notarized and stapled.
+      - name: Build and attach the desktop app and dmg
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          VERSION=${GITHUB_REF_NAME#v}
+
+          for arch in arm64 amd64; do
+            CGO_ENABLED=0 GOOS=darwin GOARCH=$arch go build -trimpath \
+              -ldflags "-s -w -X github.com/kordloom/switchtender/cmd.Version=$VERSION" \
+              -o "dist/desktop_$arch" .
+          done
+          lipo -create -output dist/desktop_universal dist/desktop_arm64 dist/desktop_amd64
+
+          mkdir dist/switchtender.iconset
+          for size in 16 32 128 256 512; do
+            sips -z $size $size site/assets/favicon.png \
+              --out "dist/switchtender.iconset/icon_${size}x${size}.png" >/dev/null
+          done
+          for size in 16 32 128 256; do
+            double=$((size * 2))
+            sips -z $double $double site/assets/favicon.png \
+              --out "dist/switchtender.iconset/icon_${size}x${size}@2x.png" >/dev/null
+          done
+          iconutil -c icns dist/switchtender.iconset -o dist/switchtender.icns
+
+          APP=dist/SwitchTender.app
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          cp dist/desktop_universal "$APP/Contents/MacOS/switchtender"
+          cp dist/switchtender.icns "$APP/Contents/Resources/switchtender.icns"
+          printf '#!/bin/sh\nexec "$(dirname "$0")/switchtender" desktop\n' > "$APP/Contents/MacOS/launch"
+          chmod +x "$APP/Contents/MacOS/launch" "$APP/Contents/MacOS/switchtender"
+          cat > "$APP/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleName</key><string>SwitchTender</string>
+            <key>CFBundleDisplayName</key><string>SwitchTender</string>
+            <key>CFBundleIdentifier</key><string>dev.switchtender.desktop</string>
+            <key>CFBundleExecutable</key><string>launch</string>
+            <key>CFBundleIconFile</key><string>switchtender</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>$VERSION</string>
+            <key>CFBundleVersion</key><string>$VERSION</string>
+            <key>LSUIElement</key><true/>
+          </dict></plist>
+          PLIST
+
+          if [ -n "${MACOS_SIGN_IDENTITY:-}" ]; then
+            codesign --force --deep --options runtime --timestamp \
+              --sign "$MACOS_SIGN_IDENTITY" "$APP"
+          else
+            codesign --force --deep --sign - "$APP"
+          fi
+          codesign --verify --verbose=1 "$APP"
+
+          mkdir dist/dmg
+          cp -R "$APP" dist/dmg/
+          ln -s /Applications dist/dmg/Applications
+          hdiutil create -volname SwitchTender -srcfolder dist/dmg -ov -format UDZO \
+            "dist/SwitchTender_${VERSION}.dmg"
+
+          if [ -n "${MACOS_SIGN_IDENTITY:-}" ] && [ -n "${NOTARY_KEY_P8:-}" ]; then
+            printf '%s' "$NOTARY_KEY_P8" | base64 --decode > dist/notary_key.p8
+            xcrun notarytool submit "dist/SwitchTender_${VERSION}.dmg" \
+              --key dist/notary_key.p8 --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" --wait
+            xcrun stapler staple "dist/SwitchTender_${VERSION}.dmg"
+            rm -f dist/notary_key.p8
+          fi
+
+          shasum -a 256 "dist/SwitchTender_${VERSION}.dmg" >> dist/SHA256SUMS
+          cosign sign-blob --yes dist/SHA256SUMS \
+            --output-signature dist/SHA256SUMS.sig \
+            --output-certificate dist/SHA256SUMS.pem
+          gh release upload "$GITHUB_REF_NAME" \
+            "dist/SwitchTender_${VERSION}.dmg" dist/SHA256SUMS dist/SHA256SUMS.sig dist/SHA256SUMS.pem \
+            --clobber
+
+      # SLSA build provenance for every published artifact, verifiable with `gh attestation verify`.
+      - name: Attest build provenance
+        if: github.ref_type == 'tag'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.deb
+            dist/*.rpm
+            dist/*.apk
+            dist/SwitchTender_*.dmg

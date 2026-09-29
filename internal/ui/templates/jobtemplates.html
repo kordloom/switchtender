@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Templates - SwitchTender</title>
+	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="jobtemplates"{{if .ReadOnly}} data-readonly="true"{{end}}>
+	<header class="topbar">
+		<div class="brand"><a href="/ui/"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="SwitchTender"></picture>SwitchTender</a></div>
+	</header>
+
+	<main class="content">
+		<div class="page-head">
+			<div class="page-head-text">
+				<h1>Templates</h1>
+				<p class="muted">Saved launch presets. One click runs the whole thing.</p>
+			</div>
+			<button id="template-open" class="button primary">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+				New template
+			</button>
+		</div>
+
+		<div id="template-modal" class="modal" hidden>
+			<div class="modal-card wide">
+				<div class="modal-head">
+					<h2>Add a template</h2>
+					<button type="button" class="modal-close" id="template-close" aria-label="Close">&times;</button>
+				</div>
+			<form id="template-form" class="launch-grid">
+				<label class="field-label">Name
+					<input id="tpl-name" class="input" placeholder="deploy production" required>
+				</label>
+				<label class="field-label">Project
+					<select id="tpl-project" class="input"><option value="">None, local paths</option></select>
+				</label>
+				<label class="field-label">Tool
+					<select id="tpl-tool" class="input">
+						<option value="ansible">Ansible</option>
+						<option value="bash">Bash</option>
+						<option value="terraform">Terraform</option>
+						<option value="opentofu">OpenTofu</option>
+						<option value="python">Python</option>
+						<option value="powershell">PowerShell</option>
+						<option value="go">Go</option>
+						{{range .ExtraTools}}<option value="{{.}}">{{.}}</option>{{end}}
+					</select>
+				</label>
+				<label class="field-label" id="tpl-field-playbook">Playbook
+					<input id="tpl-playbook" class="input mono" placeholder="plays/site.yml">
+				</label>
+				<label class="field-label" id="tpl-field-command" hidden>Command
+					<textarea id="tpl-command" class="input mono" rows="4" placeholder="echo hello"></textarea>
+				</label>
+				<label class="field-label" id="tpl-field-inventory">Inventory
+					<input id="tpl-inventory" class="input mono" placeholder="inventory.ini">
+				</label>
+				<label class="field-label" id="tpl-field-shards">Shards
+					<input id="tpl-shards" class="input" type="number" min="0" max="64" placeholder="0">
+				</label>
+				<label class="field-label">Queue
+					<input id="tpl-queue" class="input mono" placeholder="default">
+				</label>
+				<label class="field-label" id="tpl-field-image">Execution image
+					<input id="tpl-image" class="input mono" placeholder="optional, for example ghcr.io/acme/ee:9">
+					<span class="field-hint">Launches run inside this container image. Ansible only.</span>
+				</label>
+				<label class="field-label" id="tpl-field-pull-credential">Pull credential
+					<select id="tpl-pull-credential" class="input"><option value="">None (public image)</option></select>
+				</label>
+				<label class="field-label">Credentials
+					<select id="tpl-credentials" class="input" multiple size="3"></select>
+				</label>
+				<label class="field-label">Extra vars, JSON
+					<textarea id="tpl-vars" class="input mono" rows="2" placeholder='{"env": "prod"}'></textarea>
+				</label>
+				<label class="field-label">Survey, JSON array
+					<textarea id="tpl-survey" class="input mono" rows="2" placeholder='[{"var":"env","label":"Environment","type":"choice","required":true,"choices":["prod","stage"]}]'></textarea>
+				</label>
+				<label class="field-label check-label">
+					<input type="checkbox" id="tpl-dry-run"> Dry run, no changes
+				</label>
+				<div class="launch-actions">
+					<button type="submit" class="button primary">Save</button>
+					<span id="tpl-status" class="muted"></span>
+				</div>
+			</form>
+			</div>
+		</div>
+
+		<div id="status" class="muted">Loading templates.</div>
+		<table class="runs" hidden>
+			<thead>
+				<tr>
+					<th>Name</th>
+					<th>Playbook</th>
+					<th>Shards</th>
+					<th>Created</th>
+					<th></th>
+				</tr>
+			</thead>
+			<tbody id="templates"></tbody>
+		</table>
+	</main>
+
+	<div id="survey-modal" class="modal" hidden>
+		<div class="modal-card">
+			<h2 id="survey-title">Launch</h2>
+			<form id="survey-form" class="stack"></form>
+			<div class="launch-actions">
+				<button id="survey-go" class="button primary" type="button">Launch</button>
+				<button id="survey-cancel" class="button" type="button">Cancel</button>
+				<span id="survey-status" class="muted"></span>
+			</div>
+		</div>
+	</div>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>

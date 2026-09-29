@@ -1,0 +1,314 @@
+package sqlitestore_test
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/audittest"
+	"github.com/kordloom/switchtender/internal/auth"
+	"github.com/kordloom/switchtender/internal/authtest"
+	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/credtest"
+	"github.com/kordloom/switchtender/internal/grant"
+	"github.com/kordloom/switchtender/internal/granttest"
+	"github.com/kordloom/switchtender/internal/inventory"
+	"github.com/kordloom/switchtender/internal/inventorytest"
+	"github.com/kordloom/switchtender/internal/invsource"
+	"github.com/kordloom/switchtender/internal/invsourcetest"
+	"github.com/kordloom/switchtender/internal/org"
+	"github.com/kordloom/switchtender/internal/orgtest"
+	"github.com/kordloom/switchtender/internal/policy"
+	"github.com/kordloom/switchtender/internal/policytest"
+	"github.com/kordloom/switchtender/internal/project"
+	"github.com/kordloom/switchtender/internal/projecttest"
+	"github.com/kordloom/switchtender/internal/team"
+	"github.com/kordloom/switchtender/internal/teamtest"
+	"github.com/kordloom/switchtender/internal/template"
+	"github.com/kordloom/switchtender/internal/templatetest"
+	"github.com/kordloom/switchtender/internal/trigger"
+	"github.com/kordloom/switchtender/internal/triggertest"
+	"github.com/kordloom/switchtender/internal/user"
+	"github.com/kordloom/switchtender/internal/usertest"
+	"path/filepath"
+	"testing"
+	"time"
+
+	_ "modernc.org/sqlite"
+
+	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/schedule"
+	"github.com/kordloom/switchtender/internal/scheduletest"
+	"github.com/kordloom/switchtender/internal/sqlitestore"
+	"github.com/kordloom/switchtender/internal/storetest"
+)
+
+func TestStoreContract(t *testing.T) {
+	t.Parallel()
+	storetest.Contract(t, func() run.Store {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.Runs()
+	})
+}
+
+// TestStoreMigratesIdempotencyKey proves the on-open migration recovers a database created before
+// the idempotency key existed. CREATE TABLE IF NOT EXISTS is a no-op on such a database, so the
+// column and its unique index must be added on open or submission dedup silently would not work.
+func TestStoreMigratesIdempotencyKey(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "switchtender.db")
+
+	// Open once to build the current schema, then strip the column and index to mimic an older
+	// database, the exact state an upgrade must heal.
+	db, err := sqlitestore.Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw db: %v", err)
+	}
+	for _, stmt := range []string{
+		"DROP INDEX IF EXISTS idx_runs_idempotency_key",
+		"ALTER TABLE runs DROP COLUMN idempotency_key",
+	} {
+		if _, err := raw.Exec(stmt); err != nil {
+			t.Fatalf("simulate old schema %q: %v", stmt, err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw db: %v", err)
+	}
+
+	// Reopening runs the migration, which must re-add the column and its unique index so dedup works.
+	migrated, err := sqlitestore.Open(path)
+	if err != nil {
+		t.Fatalf("reopen after downgrade error = %v", err)
+	}
+	t.Cleanup(func() { _ = migrated.Close() })
+	store := migrated.Runs()
+
+	first := &run.Run{
+		ID: "run_1", Playbook: "p", Status: run.StatusPending,
+		CreatedAt: time.Now(), IdempotencyKey: "idem",
+	}
+	if err := store.Save(ctx, first); err != nil {
+		t.Fatalf("Save() after migration error = %v", err)
+	}
+	if got, err := store.ByIdempotencyKey(ctx, "idem"); err != nil || got.ID != "run_1" {
+		t.Fatalf("ByIdempotencyKey() after migration = (%v, %v), want run_1", got, err)
+	}
+	second := &run.Run{
+		ID: "run_2", Playbook: "p", Status: run.StatusPending,
+		CreatedAt: time.Now(), IdempotencyKey: "idem",
+	}
+	if err := store.Save(ctx, second); !errors.Is(err, run.ErrDuplicateKey) {
+		t.Errorf("Save(second) after migration = %v, want ErrDuplicateKey, the unique index must be rebuilt", err)
+	}
+}
+
+func TestScheduleStoreContract(t *testing.T) {
+	t.Parallel()
+	scheduletest.Contract(t, func() schedule.Store {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.Schedules()
+	})
+}
+
+func TestTokenStoreContract(t *testing.T) {
+	t.Parallel()
+	authtest.Contract(t, func() auth.Store {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.Tokens()
+	})
+}
+
+func TestCredentialStoreContract(t *testing.T) {
+	t.Parallel()
+	credtest.Contract(t, func() credential.Store {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.Credentials()
+	})
+}
+
+func TestProjectStoreContract(t *testing.T) {
+	t.Parallel()
+	projecttest.Contract(t, func() project.Store {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.Projects()
+	})
+}
+
+func TestTemplateStoreContract(t *testing.T) {
+	t.Parallel()
+	templatetest.Contract(t, func() template.Store {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.Templates()
+	})
+}
+
+func TestUserStoreContract(t *testing.T) {
+	t.Parallel()
+	usertest.Contract(t, func() user.Store {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.Users()
+	})
+}
+
+func TestInventoryStoreContract(t *testing.T) {
+	t.Parallel()
+	inventorytest.Contract(t, func() inventory.Store {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.Inventories()
+	})
+}
+
+func TestPolicyStoreContract(t *testing.T) {
+	t.Parallel()
+	policytest.Contract(t, func() policy.Store {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.Policies()
+	})
+}
+
+func TestAuditStoreContract(t *testing.T) {
+	t.Parallel()
+	audittest.Contract(t, func() audit.Store {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.Audits()
+	})
+}
+
+func TestInvSourceStoreContract(t *testing.T) {
+	t.Parallel()
+	invsourcetest.Contract(t, func() invsource.Store {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.InventorySources()
+	})
+}
+
+func TestTriggerStoreContract(t *testing.T) {
+	t.Parallel()
+	triggertest.Contract(t, func() trigger.Store {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.Triggers()
+	})
+}
+
+func TestTeamStoreContract(t *testing.T) {
+	t.Parallel()
+	teamtest.Contract(t, func() team.Store {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.Teams()
+	})
+}
+
+func TestOrgStoreContract(t *testing.T) {
+	t.Parallel()
+	orgtest.Contract(t, func() org.Store {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.Orgs()
+	})
+}
+
+func TestTeamForeignKeyEnforced(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	teams := db.Teams()
+
+	// With foreign keys enforced, a membership cannot reference a team that does not exist.
+	if err := teams.AddMember(ctx, "team_ghost", "user_1"); err == nil {
+		t.Error("AddMember to a nonexistent team succeeded, want a foreign key error")
+	}
+
+	// A member of a real team is dropped when the team is deleted, leaving no orphan row.
+	if err := teams.Save(ctx, &team.Team{ID: "team_1", Name: "ops", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := teams.AddMember(ctx, "team_1", "user_1"); err != nil {
+		t.Fatalf("AddMember() error = %v", err)
+	}
+	if err := teams.Delete(ctx, "team_1"); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if got, _ := teams.TeamsForUser(ctx, "user_1"); len(got) != 0 {
+		t.Errorf("TeamsForUser after delete = %v, want none", got)
+	}
+}
+
+func TestGrantStoreContract(t *testing.T) {
+	t.Parallel()
+	granttest.Contract(t, func() grant.Store {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.Grants()
+	})
+}

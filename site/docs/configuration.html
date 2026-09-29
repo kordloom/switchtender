@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Configuration · SwitchTender docs</title>
+	<meta name="description" content="SwitchTender is one binary with subcommands. This page lists every command, flag, and environment variable.">
+	<link rel="canonical" href="https://switchtender.com/docs/configuration">
+	<meta property="og:title" content="Configuration · SwitchTender docs">
+	<meta property="og:description" content="SwitchTender is one binary with subcommands. This page lists every command, flag, and environment variable.">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="https://switchtender.com/docs/configuration">
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/kordloom/switchtender">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration" class="active">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to AWX and Semaphore</a><a href="/docs/ai">Advisory AI</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="configuration">Configuration</h1>
+<p>SwitchTender is one binary with subcommands. This page lists every command, flag, and environment
+variable.</p>
+<h2 id="environment-variables">Environment variables</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Used by</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SWITCHTENDER_ENCRYPTION_KEY</code></td>
+<td>serve, worker</td>
+<td>Passphrase that seals stored credentials with AES-256-GCM. Credentials are disabled when unset.</td>
+</tr>
+<tr>
+<td><code>SWITCHTENDER_ENCRYPTION_SALT</code></td>
+<td>serve, worker</td>
+<td>Per-deployment salt for argon2id key derivation. Must be set alongside the key and stay stable across restarts, or stored credentials cannot be decrypted. Credentials are disabled when unset.</td>
+</tr>
+<tr>
+<td><code>SWITCHTENDER_AUDIT_KEY</code></td>
+<td>serve</td>
+<td>Hex-encoded ed25519 seed that signs audit exports so the trail can be verified offline. Signing is off when unset. A malformed value stops startup. Generate one with <code>switchtender audit keygen</code>.</td>
+</tr>
+<tr>
+<td><code>SWITCHTENDER_PASSWORD</code></td>
+<td>user new</td>
+<td>Initial account password, read instead of prompting so it never lands on the command line.</td>
+</tr>
+<tr>
+<td><code>SWITCHTENDER_SMTP_PASSWORD</code></td>
+<td>serve</td>
+<td>Password for SMTP authentication when <code>--smtp-username</code> is set.</td>
+</tr>
+<tr>
+<td><code>SWITCHTENDER_AI_KEY</code></td>
+<td>serve</td>
+<td>API key for a cloud AI provider such as Anthropic or an OpenAI-compatible endpoint. A local Ollama needs none.</td>
+</tr>
+<tr>
+<td><code>SWITCHTENDER_OIDC_CLIENT_SECRET</code></td>
+<td>serve</td>
+<td>OpenID Connect client secret, paired with <code>--oidc-client-id</code>. Read from the environment so it stays off the command line.</td>
+</tr>
+<tr>
+<td><code>SWITCHTENDER_LDAP_PASSWORD</code></td>
+<td>serve</td>
+<td>Password for the <code>--ldap-bind-dn</code> service account.</td>
+</tr>
+<tr>
+<td><code>SWITCHTENDER_ADMIN_PASSWORD</code></td>
+<td>init</td>
+<td>Password for the first admin account. When unset, init generates one and prints it once.</td>
+</tr>
+<tr>
+<td><code>SWITCHTENDER_DESKTOP_NO_BROWSER</code></td>
+<td>desktop</td>
+<td>Set to any value to skip opening the browser, for a headless or remote run.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="init">init</h2>
+<p>Bootstraps a new deployment: it creates the database and the first admin account, writes an
+environment file, and optionally a systemd unit. Run it once, then start <code>serve</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--db</code></td>
+<td><code>switchtender.db</code></td>
+<td>SQLite database path.</td>
+</tr>
+<tr>
+<td><code>--config</code></td>
+<td><code>switchtender.env</code></td>
+<td>Environment file to write.</td>
+</tr>
+<tr>
+<td><code>--addr</code></td>
+<td><code>:8080</code></td>
+<td>Address the server listens on.</td>
+</tr>
+<tr>
+<td><code>--admin</code></td>
+<td><code>admin</code></td>
+<td>Username for the first admin account.</td>
+</tr>
+<tr>
+<td><code>--systemd</code></td>
+<td>none</td>
+<td>Path to write a systemd unit to, empty to skip.</td>
+</tr>
+<tr>
+<td><code>--force</code></td>
+<td><code>false</code></td>
+<td>Overwrite an existing config file.</td>
+</tr>
+</tbody>
+</table>
+<p>The admin password comes from <code>SWITCHTENDER_ADMIN_PASSWORD</code>, or is generated and printed once when
+that variable is unset.</p>
+<h2 id="serve">serve</h2>
+<p>Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper, and the web UI.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--addr</code></td>
+<td><code>:8080</code></td>
+<td>Address the server listens on.</td>
+</tr>
+<tr>
+<td><code>--db</code></td>
+<td><code>switchtender.db</code></td>
+<td>SQLite file path, or a <code>postgres://</code> DSN for the PostgreSQL backend.</td>
+</tr>
+<tr>
+<td><code>--tls-cert</code></td>
+<td>none</td>
+<td>TLS certificate file, to serve HTTPS directly with no reverse proxy. Requires <code>--tls-key</code>.</td>
+</tr>
+<tr>
+<td><code>--tls-key</code></td>
+<td>none</td>
+<td>TLS private key file. Requires <code>--tls-cert</code>.</td>
+</tr>
+<tr>
+<td><code>--oidc-issuer</code></td>
+<td>none</td>
+<td>OpenID Connect issuer URL to enable single sign-on. Empty leaves SSO off.</td>
+</tr>
+<tr>
+<td><code>--oidc-client-id</code></td>
+<td>none</td>
+<td>OIDC client id.</td>
+</tr>
+<tr>
+<td><code>--oidc-redirect-url</code></td>
+<td>none</td>
+<td>OIDC redirect URL, for example <code>https://host/auth/oidc/callback</code>.</td>
+</tr>
+<tr>
+<td><code>--oidc-default-role</code></td>
+<td><code>viewer</code></td>
+<td>Role granted to an account created on first SSO sign-in: admin, operator, or viewer.</td>
+</tr>
+<tr>
+<td><code>--ldap-url</code></td>
+<td>none</td>
+<td>LDAP directory URL to enable directory sign-in, for example <code>ldaps://ldap.example.com:636</code>.</td>
+</tr>
+<tr>
+<td><code>--ldap-bind-dn</code></td>
+<td>none</td>
+<td>Service account DN used to search for a user, empty for an anonymous search.</td>
+</tr>
+<tr>
+<td><code>--ldap-base-dn</code></td>
+<td>none</td>
+<td>Search base for finding a user.</td>
+</tr>
+<tr>
+<td><code>--ldap-user-filter</code></td>
+<td><code>(uid=%s)</code></td>
+<td>Search filter with one <code>%s</code> for the username.</td>
+</tr>
+<tr>
+<td><code>--ldap-default-role</code></td>
+<td><code>viewer</code></td>
+<td>Role for an account created on first directory sign-in.</td>
+</tr>
+<tr>
+<td><code>--ldap-role-map</code></td>
+<td>none</td>
+<td>Map a directory group to a role as <code>groupDN=role</code>. A matched group sets the role on every sign-in. Repeatable.</td>
+</tr>
+<tr>
+<td><code>--saml-idp-metadata-url</code></td>
+<td>none</td>
+<td>SAML IdP metadata URL to enable SAML sign-in. Empty leaves SAML off.</td>
+</tr>
+<tr>
+<td><code>--saml-base-url</code></td>
+<td>none</td>
+<td>Public base URL of this server, used to build the SAML entity id and ACS endpoint.</td>
+</tr>
+<tr>
+<td><code>--saml-cert</code></td>
+<td>none</td>
+<td>Path to the service provider certificate, PEM.</td>
+</tr>
+<tr>
+<td><code>--saml-key</code></td>
+<td>none</td>
+<td>Path to the service provider RSA private key, PEM.</td>
+</tr>
+<tr>
+<td><code>--saml-username-attr</code></td>
+<td>NameID</td>
+<td>Assertion attribute used as the username. Empty uses the subject NameID.</td>
+</tr>
+<tr>
+<td><code>--saml-groups-attr</code></td>
+<td><code>groups</code></td>
+<td>Assertion attribute holding the user's groups, used with <code>--saml-role-map</code>.</td>
+</tr>
+<tr>
+<td><code>--saml-default-role</code></td>
+<td><code>viewer</code></td>
+<td>Role granted to an account created on first SAML sign-in.</td>
+</tr>
+<tr>
+<td><code>--saml-role-map</code></td>
+<td>none</td>
+<td>Map an asserted group to a role as <code>group=role</code>. A matched group sets the role on every sign-in. Repeatable.</td>
+</tr>
+<tr>
+<td><code>--jwt-jwks-url</code></td>
+<td>none</td>
+<td>JWKS URL to enable bearer JWT sign-in, so a service can present a JWT minted elsewhere.</td>
+</tr>
+<tr>
+<td><code>--jwt-issuer</code></td>
+<td>none</td>
+<td>Expected token issuer, the <code>iss</code> claim.</td>
+</tr>
+<tr>
+<td><code>--jwt-audience</code></td>
+<td>none</td>
+<td>Expected token audience, empty to skip the audience check.</td>
+</tr>
+<tr>
+<td><code>--jwt-username-claim</code></td>
+<td><code>sub</code></td>
+<td>Claim naming the account.</td>
+</tr>
+<tr>
+<td><code>--jwt-groups-claim</code></td>
+<td>none</td>
+<td>Claim holding the user's groups, used with <code>--jwt-role-map</code>.</td>
+</tr>
+<tr>
+<td><code>--jwt-role-map</code></td>
+<td>none</td>
+<td>Map a token group to a role as <code>group=role</code>. Repeatable.</td>
+</tr>
+<tr>
+<td><code>--jwt-default-role</code></td>
+<td><code>viewer</code></td>
+<td>Role granted to an account created on first JWT sign-in.</td>
+</tr>
+<tr>
+<td><code>--ai-provider</code></td>
+<td>none</td>
+<td>Enable advisory AI features with a provider: <code>ollama</code>, <code>anthropic</code>, or <code>openai</code>. Empty leaves AI off.</td>
+</tr>
+<tr>
+<td><code>--ai-model</code></td>
+<td>provider default</td>
+<td>Model name for the AI provider. Required for <code>openai</code>, which has no universal default.</td>
+</tr>
+<tr>
+<td><code>--ai-url</code></td>
+<td>provider default</td>
+<td>Base URL for the AI provider, for a self-hosted Ollama, an OpenAI-compatible server, or a proxy.</td>
+</tr>
+<tr>
+<td><code>--schedule-interval</code></td>
+<td><code>15s</code></td>
+<td>How often the scheduler checks for due schedules.</td>
+</tr>
+<tr>
+<td><code>--notify-webhook</code></td>
+<td>none</td>
+<td>URL that receives a JSON notification when a run finishes. Repeatable.</td>
+</tr>
+<tr>
+<td><code>--notify-slack</code></td>
+<td>none</td>
+<td>Slack incoming webhook URL that receives a message when a run finishes. Repeatable.</td>
+</tr>
+<tr>
+<td><code>--notify-mattermost</code></td>
+<td>none</td>
+<td>Mattermost incoming webhook URL that receives a message when a run finishes. Repeatable.</td>
+</tr>
+<tr>
+<td><code>--notify-rocketchat</code></td>
+<td>none</td>
+<td>Rocket.Chat incoming webhook URL that receives a message when a run finishes. Repeatable.</td>
+</tr>
+<tr>
+<td><code>--notify-discord</code></td>
+<td>none</td>
+<td>Discord incoming webhook URL that receives a message when a run finishes. Repeatable.</td>
+</tr>
+<tr>
+<td><code>--notify-teams</code></td>
+<td>none</td>
+<td>Microsoft Teams incoming webhook URL that receives an Adaptive Card when a run finishes. Repeatable.</td>
+</tr>
+<tr>
+<td><code>--notify-ntfy</code></td>
+<td>none</td>
+<td>ntfy topic URL that receives a notification when a run finishes, such as <a href="https://ntfy.sh/my-topic">https://ntfy.sh/my-topic</a>. Repeatable.</td>
+</tr>
+<tr>
+<td><code>--notify-ntfy-token</code></td>
+<td>none</td>
+<td>Optional bearer token for a protected ntfy topic, applied to every <code>--notify-ntfy</code> URL.</td>
+</tr>
+<tr>
+<td><code>--notify-pagerduty</code></td>
+<td>none</td>
+<td>PagerDuty Events API routing key that triggers an incident when a run fails. Repeatable.</td>
+</tr>
+<tr>
+<td><code>--notify-grafana</code></td>
+<td>none</td>
+<td>Grafana base URL that receives an annotation when a run finishes. Repeatable.</td>
+</tr>
+<tr>
+<td><code>--notify-grafana-token</code></td>
+<td>none</td>
+<td>Bearer token for the Grafana annotations API, applied to every <code>--notify-grafana</code> URL.</td>
+</tr>
+<tr>
+<td><code>--notify-twilio-sid</code></td>
+<td>none</td>
+<td>Twilio Account SID for SMS notifications on a failed run.</td>
+</tr>
+<tr>
+<td><code>--notify-twilio-token</code></td>
+<td>none</td>
+<td>Twilio Auth Token, paired with <code>--notify-twilio-sid</code>.</td>
+</tr>
+<tr>
+<td><code>--notify-twilio-from</code></td>
+<td>none</td>
+<td>Twilio sender phone number that texts run failures.</td>
+</tr>
+<tr>
+<td><code>--notify-twilio-to</code></td>
+<td>none</td>
+<td>Phone number that receives an SMS when a run fails. Repeatable.</td>
+</tr>
+<tr>
+<td><code>--allow-container-ee</code></td>
+<td><code>false</code></td>
+<td>Allow runs whose project pins a container image to execute inside it. Needs Docker on the executor.</td>
+</tr>
+<tr>
+<td><code>--container-memory</code></td>
+<td><code>2g</code></td>
+<td>Memory cap for containerized runs, as docker <code>--memory</code>. Empty removes the cap.</td>
+</tr>
+<tr>
+<td><code>--container-cpus</code></td>
+<td><code>2</code></td>
+<td>CPU cap for containerized runs, as docker <code>--cpus</code>. Empty removes the cap.</td>
+</tr>
+<tr>
+<td><code>--container-pids-limit</code></td>
+<td><code>2048</code></td>
+<td>Process cap for containerized runs, as docker <code>--pids-limit</code>. Zero removes the cap.</td>
+</tr>
+<tr>
+<td><code>--container-network</code></td>
+<td><code>bridge</code></td>
+<td>Network mode for containerized runs, as docker <code>--network</code>, for example bridge or none.</td>
+</tr>
+<tr>
+<td><code>--strict-grants</code></td>
+<td><code>false</code></td>
+<td>Deny non-admins access to an object that has no grants, instead of deferring to the global role.</td>
+</tr>
+<tr>
+<td><code>--read-only</code></td>
+<td><code>false</code></td>
+<td>Reject every mutating request, for a safely exposable instance.</td>
+</tr>
+<tr>
+<td><code>--matrix-cap</code></td>
+<td><code>50000</code></td>
+<td>Largest host matrix, in cells, the UI draws before showing a notice. 0 means no limit.</td>
+</tr>
+<tr>
+<td><code>--plugins-dir</code></td>
+<td>none</td>
+<td>Directory of extension plugin binaries loaded at startup. Also <code>SWITCHTENDER_PLUGINS_DIR</code>. See <a href="/docs/sdk">Extend in Go</a>.</td>
+</tr>
+<tr>
+<td><code>--retain-runs</code></td>
+<td>none</td>
+<td>Delete terminal runs older than this, for example <code>90d</code>. Empty keeps them forever.</td>
+</tr>
+<tr>
+<td><code>--retain-events</code></td>
+<td>none</td>
+<td>Drop run events and logs older than this, for example <code>30d</code>. Empty keeps them forever.</td>
+</tr>
+<tr>
+<td><code>--retention-interval</code></td>
+<td><code>1h</code></td>
+<td>How often the retention sweeper runs.</td>
+</tr>
+<tr>
+<td><code>--smtp-addr</code></td>
+<td>none</td>
+<td>SMTP server host:port for run notification emails. Empty disables email.</td>
+</tr>
+<tr>
+<td><code>--smtp-from</code></td>
+<td>none</td>
+<td>Sender address for notification emails.</td>
+</tr>
+<tr>
+<td><code>--smtp-to</code></td>
+<td>none</td>
+<td>Recipient address for notification emails. Repeatable.</td>
+</tr>
+<tr>
+<td><code>--smtp-username</code></td>
+<td>none</td>
+<td>SMTP username. The password comes from <code>SWITCHTENDER_SMTP_PASSWORD</code>.</td>
+</tr>
+<tr>
+<td><code>--notify-on</code></td>
+<td><code>failure</code></td>
+<td>When to email: <code>failure</code> for failed runs only, or <code>finish</code> for every terminal run.</td>
+</tr>
+</tbody>
+</table>
+<p>Retention windows accept a whole number of days with a <code>d</code> suffix, such as <code>30d</code>, or Go duration
+syntax such as <code>720h</code>.</p>
+<h3 id="ai-providers">AI providers</h3>
+<p>The advisory AI features run against one provider, chosen with <code>--ai-provider</code>: <code>ollama</code> for a local
+model, or <code>anthropic</code> and <code>openai</code> for a cloud model with <code>SWITCHTENDER_AI_KEY</code>. The provider is off
+until set, and no feature ever executes anything the provider suggests.</p>
+<p>Cloud models see automation content: commands, playbook names, failed-run logs, and host drift.
+Because that content is security-adjacent, a model with strict safety classifiers can decline a
+benign request as a false positive. When the Anthropic model is a Fable or Mythos model, SwitchTender
+opts into server-side fallbacks, so a declined request is retried on <code>claude-opus-4-8</code> in the same
+call and the feature keeps working. A Fable model also requires that the account keep 30-day data
+retention, or the API rejects every request.</p>
+<h2 id="desktop">desktop</h2>
+<p>Runs SwitchTender as a local desktop application: it serves on a private loopback port, stores its
+data in a per-user directory, and opens the web UI in the default browser. It takes no flags. Set
+<code>SWITCHTENDER_DESKTOP_NO_BROWSER</code> to skip opening a browser. See <a href="/docs/desktop">Desktop</a> for packaging a
+macOS app or a Windows installer.</p>
+<h2 id="worker">worker</h2>
+<p>Leases pending runs from the shared store and executes them. Point it and a server at the same
+database and they compete for work.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--db</code></td>
+<td><code>switchtender.db</code></td>
+<td>SQLite file path, or a <code>postgres://</code> DSN.</td>
+</tr>
+<tr>
+<td><code>--name</code></td>
+<td>host and pid</td>
+<td>Worker name stamped on the runs it executes.</td>
+</tr>
+<tr>
+<td><code>--queue</code></td>
+<td>none</td>
+<td>Queue this worker serves. Repeatable. Without any, it serves the default pool.</td>
+</tr>
+<tr>
+<td><code>--allow-container-ee</code></td>
+<td><code>false</code></td>
+<td>Allow container execution environments on this worker. Needs Docker.</td>
+</tr>
+<tr>
+<td><code>--plugins-dir</code></td>
+<td>none</td>
+<td>Directory of extension plugin binaries loaded at startup. Also <code>SWITCHTENDER_PLUGINS_DIR</code>.</td>
+</tr>
+<tr>
+<td><code>--container-memory</code></td>
+<td><code>2g</code></td>
+<td>Memory cap for containerized runs, as docker <code>--memory</code>. Empty removes the cap.</td>
+</tr>
+<tr>
+<td><code>--container-cpus</code></td>
+<td><code>2</code></td>
+<td>CPU cap for containerized runs, as docker <code>--cpus</code>. Empty removes the cap.</td>
+</tr>
+<tr>
+<td><code>--container-pids-limit</code></td>
+<td><code>2048</code></td>
+<td>Process cap for containerized runs, as docker <code>--pids-limit</code>. Zero removes the cap.</td>
+</tr>
+<tr>
+<td><code>--container-network</code></td>
+<td><code>bridge</code></td>
+<td>Network mode for containerized runs, as docker <code>--network</code>.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="token">token</h2>
+<p>Manages API tokens. Creating the first token turns on authentication.</p>
+<ul>
+<li><code>token new --name &lt;label&gt; [--ttl &lt;duration&gt;]</code> mints a token, printed once. A zero TTL never
+expires.</li>
+<li><code>token list</code> lists tokens without their secrets.</li>
+<li><code>token revoke &lt;id&gt;</code> deletes a token.</li>
+</ul>
+<p>All token subcommands take <code>--db</code> and the global <code>--pretty</code> flag for indented JSON.</p>
+<h2 id="user">user</h2>
+<p>Manages accounts with roles: admin, operator, and viewer.</p>
+<ul>
+<li><code>user new &lt;username&gt; --role &lt;role&gt;</code> creates an account. The password comes from
+<code>SWITCHTENDER_PASSWORD</code> or a prompt, never an argument.</li>
+<li><code>user list</code> lists accounts.</li>
+<li><code>user delete &lt;id&gt;</code> deletes an account. Its tokens stop working.</li>
+</ul>
+<p>All user subcommands take <code>--db</code>.</p>
+<h2 id="import">import</h2>
+<p>Migrates from AWX or Semaphore. See <a href="/docs/migration">Migration</a>.</p>
+<ul>
+<li><code>import awx &lt;export.json&gt; [--apply]</code>.</li>
+<li><code>import semaphore &lt;export.json&gt; [--apply]</code>.</li>
+</ul>
+<p>Both take <code>--db</code> for the target database. Without <code>--apply</code> the command only reports what it would
+create.</p>
+<h2 id="demo">demo</h2>
+<p>Seeds a fresh database with sample data and real runs, then serves it read-only, so a public
+instance is safe to expose. It needs ansible on the PATH to run the sample playbooks.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--addr</code></td>
+<td><code>:8080</code></td>
+<td>Address the demo listens on.</td>
+</tr>
+<tr>
+<td><code>--db</code></td>
+<td>temporary file</td>
+<td>Database to seed and serve. Empty uses a fresh temporary SQLite file.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="global-flags">Global flags</h2>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--pretty</code></td>
+<td>Indent JSON output instead of the compact default.</td>
+</tr>
+</tbody>
+</table>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

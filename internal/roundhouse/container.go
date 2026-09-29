@@ -1,0 +1,336 @@
+package roundhouse
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strings"
+)
+
+// containerRunner executes a tool inside a container image so each project can pin its own tool
+// binaries, Python, and system dependencies independent of the host.
+type containerRunner struct {
+	// runtime is the container CLI, docker or podman.
+	runtime string
+	// pullPolicy is the container --pull policy: always, missing, or never.
+	pullPolicy string
+	// requireDigest rejects an image reference that is not pinned to an @sha256: digest.
+	requireDigest bool
+	// baseEnv is the environment the host CLI inherits when pulling images and logging in.
+	baseEnv []string
+	// plugin materializes the callback plugin on first use, shared into the container read-only.
+	plugin *pluginCache
+	// limits caps the memory, CPU, process count, and network of every container run.
+	limits ContainerLimits
+}
+
+// newContainerRunner builds a container runner for the given container CLI (docker or podman),
+// sharing the host runner's plugin cache and base environment, bounded by limits. The pull policy
+// sets the image --pull behavior and requireDigest rejects an image not pinned to a digest. An empty
+// runtime defaults to docker and an empty pull policy defaults to missing.
+func newContainerRunner(runtime, pullPolicy string, requireDigest bool, baseEnv []string,
+	plugin *pluginCache, limits ContainerLimits) *containerRunner {
+	if runtime == "" {
+		runtime = "docker"
+	}
+	if pullPolicy == "" {
+		pullPolicy = "missing"
+	}
+	return &containerRunner{
+		runtime:       runtime,
+		pullPolicy:    pullPolicy,
+		requireDigest: requireDigest,
+		baseEnv:       baseEnv,
+		plugin:        plugin,
+		limits:        limits,
+	}
+}
+
+// Run executes spec's tool inside spec.Image, mounting the paths the tool references and, for
+// Ansible, the events sidecar, so the run behaves like a host run while staying isolated. A canceled
+// context kills the container by name so a stopped run does not leak a container.
+func (c *containerRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Result, error) {
+	if err := c.validateRunImage(spec.Image); err != nil {
+		return Result{ExitCode: -1}, err
+	}
+	plan, cleanup, err := buildContainerPlan(spec)
+	if err != nil {
+		return Result{ExitCode: -1}, err
+	}
+	defer cleanup()
+
+	if spec.RegistryUsername != "" {
+		if err := c.login(ctx, spec, out); err != nil {
+			return Result{ExitCode: -1}, fmt.Errorf("%w: registry login: %w", ErrLaunch, err)
+		}
+	}
+
+	envFile, cleanupEnv, err := c.writeEnvFile(spec, plan.extraEnv)
+	if err != nil {
+		return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
+	}
+	defer cleanupEnv()
+
+	name := containerName()
+	args, err := c.runArgs(spec, plan, name, envFile)
+	if err != nil {
+		return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
+	}
+
+	cmd := exec.CommandContext(ctx, c.runtime, args...)
+	cmd.Stdout = out
+	cmd.Stderr = out
+	cmd.Env = c.baseEnv
+
+	// A canceled run must stop the container itself: killing the client leaves the container running
+	// under the daemon, so kill it by name.
+	killed := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			kill := exec.Command(c.runtime, "kill", name)
+			_ = kill.Run()
+		case <-killed:
+		}
+	}()
+	defer close(killed)
+
+	runErr := cmd.Run()
+	if runErr == nil {
+		return Result{ExitCode: 0}, nil
+	}
+	if ctx.Err() != nil {
+		return Result{ExitCode: -1}, ctx.Err()
+	}
+	var exitErr *exec.ExitError
+	if errors.As(runErr, &exitErr) {
+		code := exitErr.ExitCode()
+		// A Terraform or OpenTofu dry run uses plan -detailed-exitcode: exit 2 is a clean plan with
+		// pending changes, which is drift, not a failure.
+		if spec.DryRun && code == 2 && isTerraformTool(spec.Tool) {
+			return Result{ExitCode: 0, Drift: true}, nil
+		}
+		return Result{ExitCode: code}, nil
+	}
+	return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, runErr)
+}
+
+// runArgs builds the container run argument list from the plan: resource caps, the working
+// directory, an env file for variables and secrets, a bind mount for every host path the plan
+// references plus the events sidecar for Ansible, the image, and the tool command to run inside it.
+func (c *containerRunner) runArgs(spec Spec, plan containerPlan, name, envFile string) ([]string, error) {
+	args := []string{"run", "--rm", "--name", name, "--pull", c.pullPolicy}
+	args = append(args, c.limits.args()...)
+	if plan.workdir != "" {
+		args = append(args, "-w", plan.workdir)
+	}
+	args = append(args, "--env-file", envFile)
+
+	mounts := newMountSet()
+	var addErr error
+	addMount := func(path string, ro bool) {
+		if addErr == nil {
+			addErr = mounts.add(path, ro)
+		}
+	}
+	for _, m := range plan.mounts {
+		addMount(m.path, !m.writable)
+	}
+	if spec.EventsPath != "" {
+		dir, err := c.plugin.ensure()
+		if err != nil {
+			return nil, err
+		}
+		addMount(dir, true)
+		// The plugin writes NDJSON into the sidecar, which the host tails, so it mounts writable.
+		addMount(spec.EventsPath, false)
+	}
+	if addErr != nil {
+		return nil, addErr
+	}
+	args = append(args, mounts.args()...)
+
+	args = append(args, spec.Image)
+	return append(args, plan.argv...), nil
+}
+
+// writeEnvFile writes the run's environment, the tool's extra environment, and, for Ansible, the
+// callback variables to a temp file passed as --env-file so secret values never appear on the
+// command line. It returns the path and a cleanup.
+func (c *containerRunner) writeEnvFile(spec Spec, extraEnv []string) (string, func(), error) {
+	lines := append([]string{}, spec.Env...)
+	lines = append(lines, extraEnv...)
+	if spec.EventsPath != "" {
+		dir, err := c.plugin.ensure()
+		if err != nil {
+			return "", func() {}, err
+		}
+		lines = append(lines, callbackEnv(dir, spec.EventsPath)...)
+	}
+
+	f, err := os.CreateTemp("", "switchtender-env-*")
+	if err != nil {
+		return "", func() {}, err
+	}
+	path := f.Name()
+	cleanup := func() { _ = os.Remove(path) }
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		return "", cleanup, err
+	}
+	if len(lines) > 0 {
+		if _, err := f.WriteString(strings.Join(lines, "\n") + "\n"); err != nil {
+			_ = f.Close()
+			return "", cleanup, err
+		}
+	}
+	if err := f.Close(); err != nil {
+		return "", cleanup, err
+	}
+	return path, cleanup, nil
+}
+
+// login authenticates to the image's registry so a private execution environment can be pulled. The
+// password is fed on stdin, never as an argument.
+func (c *containerRunner) login(ctx context.Context, spec Spec, out io.Writer) error {
+	args := []string{"login"}
+	if host := registryHost(spec.Image); host != "" {
+		args = append(args, host)
+	}
+	args = append(args, "-u", spec.RegistryUsername, "--password-stdin")
+	cmd := exec.CommandContext(ctx, c.runtime, args...)
+	cmd.Stdin = strings.NewReader(spec.RegistryPassword)
+	cmd.Stdout = out
+	cmd.Stderr = out
+	cmd.Env = c.baseEnv
+	return cmd.Run()
+}
+
+// mountSet collects unique host paths to bind mount into the container at the same path.
+type mountSet struct {
+	// seen tracks paths already added so overlapping references mount once.
+	seen map[string]bool
+	// specs holds the ordered docker -v arguments.
+	specs []string
+}
+
+// newMountSet returns an empty mount set.
+func newMountSet() *mountSet {
+	return &mountSet{seen: make(map[string]bool)}
+}
+
+// add records a bind mount for path at the same path inside the container, read-only when ro is
+// set. Empty and duplicate paths are ignored. It returns ErrForbiddenMount when the path would
+// expose a sensitive host location.
+func (m *mountSet) add(path string, ro bool) error {
+	if path == "" || m.seen[path] {
+		return nil
+	}
+	if err := checkMountPath(path); err != nil {
+		return err
+	}
+	m.seen[path] = true
+	spec := path + ":" + path
+	if ro {
+		spec += ":ro"
+	}
+	m.specs = append(m.specs, "-v", spec)
+	return nil
+}
+
+// sensitiveMountRoots are host directories that must never be bind mounted whole into a container.
+// Subpaths stay allowed, since project checkouts and temp files legitimately live under some of
+// these, but mounting the directory itself would hand the container the host's configuration,
+// secrets, or entire filesystem.
+var sensitiveMountRoots = map[string]bool{
+	"/": true, "/etc": true, "/var": true, "/usr": true, "/bin": true,
+	"/sbin": true, "/lib": true, "/lib64": true, "/boot": true, "/proc": true,
+	"/sys": true, "/dev": true, "/root": true, "/home": true, "/Users": true,
+}
+
+// checkMountPath rejects a host path that would expose a sensitive root directory or the docker
+// socket to the container. An empty path is not a mount and passes.
+func checkMountPath(path string) error {
+	if path == "" {
+		return nil
+	}
+	clean := filepath.Clean(path)
+	if sensitiveMountRoots[clean] {
+		return fmt.Errorf("%w: %s", ErrForbiddenMount, clean)
+	}
+	if filepath.Base(clean) == "docker.sock" {
+		return fmt.Errorf("%w: %s", ErrForbiddenMount, clean)
+	}
+	return nil
+}
+
+// imageRefPattern matches a conservative container image reference: it must start with an
+// alphanumeric character, so the container CLI cannot read it as a flag, and hold only characters
+// that appear in registries, repositories, tags, and digests.
+var imageRefPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/@-]*$`)
+
+// validateImage reports whether image is a well-formed, safe container reference. It returns
+// ErrNoImage when empty and ErrBadImage when malformed.
+func validateImage(image string) error {
+	if image == "" {
+		return ErrNoImage
+	}
+	if len(image) > 512 || strings.Contains(image, "..") || !imageRefPattern.MatchString(image) {
+		return fmt.Errorf("%w: %q", ErrBadImage, image)
+	}
+	return nil
+}
+
+// validateRunImage confirms image is a well-formed reference and, when the runner requires digest
+// pinning, that it names an immutable @sha256: digest rather than a mutable tag. It returns
+// ErrUnpinnedImage when pinning is required and the reference is tag-only or unpinned.
+func (c *containerRunner) validateRunImage(image string) error {
+	if err := validateImage(image); err != nil {
+		return err
+	}
+	if c.requireDigest && !isDigestPinned(image) {
+		return fmt.Errorf("%w: %q", ErrUnpinnedImage, image)
+	}
+	return nil
+}
+
+// isDigestPinned reports whether image is pinned to an immutable content digest, meaning it carries
+// an @sha256: segment, rather than a mutable tag.
+func isDigestPinned(image string) bool {
+	return strings.Contains(image, "@sha256:")
+}
+
+// args returns the accumulated docker -v arguments.
+func (m *mountSet) args() []string {
+	return m.specs
+}
+
+// registryHost returns the registry portion of a container image reference, or empty for Docker
+// Hub. A first path segment containing a dot, a colon, or the localhost name is a registry host.
+func registryHost(image string) string {
+	before, _, ok := strings.Cut(image, "/")
+	if !ok {
+		return ""
+	}
+	first := before
+	if strings.ContainsAny(first, ".:") || first == "localhost" {
+		return first
+	}
+	return ""
+}
+
+// containerName returns a unique container name so a run's container can be killed on cancel.
+func containerName() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "ym-container"
+	}
+	return "ym-" + hex.EncodeToString(b[:])
+}

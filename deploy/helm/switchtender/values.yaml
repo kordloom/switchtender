@@ -1,0 +1,42 @@
+# Default values for the SwitchTender chart.
+
+image:
+  # repository is the SwitchTender image, built from the repository Dockerfile.
+  repository: switchtender
+  # tag defaults to the chart appVersion when empty.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+server:
+  # replicas runs this many servers; they share the database and coordinate through it.
+  replicas: 1
+  # addr is the listen address inside the container.
+  addr: ":8080"
+  # extraArgs are appended to the serve command, for example ["--strict-grants"].
+  extraArgs: []
+
+worker:
+  # enabled deploys dedicated workers alongside the server.
+  enabled: true
+  # replicas runs this many workers.
+  replicas: 1
+  # extraArgs are appended to the worker command, for example ["--queue", "dmz"].
+  extraArgs: []
+
+database:
+  # dsn is the PostgreSQL connection string every server and worker shares.
+  dsn: "postgres://switchtender:switchtender@postgres:5432/switchtender?sslmode=disable"
+
+# encryptionKey and encryptionSalt seal credentials at rest with argon2id and AES-256-GCM. Both are
+# required; set them with --set encryptionKey=... --set encryptionSalt=... or point existingSecret
+# at a Secret that holds SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT keys. The salt
+# must stay stable across restarts or existing credentials cannot be decrypted.
+encryptionKey: ""
+encryptionSalt: ""
+existingSecret: ""
+
+service:
+  type: ClusterIP
+  port: 8080
+
+resources: {}
