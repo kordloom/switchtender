@@ -19,6 +19,7 @@ import (
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	cron "github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
@@ -93,51 +94,64 @@ const (
 	seedHistoryBackshiftHours = 12
 )
 
-// SeedClock is the demo's stand-in for the wall clock. It reads the real clock shifted into the
-// past, so elapsed time between two readings is real elapsed time: a run whose tasks took six
-// seconds shows a six-second duration beside its timeline. The old design advanced a fixed
-// millisecond per reading, which collapsed every run's start-to-end span to a couple of
-// milliseconds while its task events plainly took seconds, and a stranger who noticed the numbers
-// disagreeing on one screen concluded the records were fabricated. The seeder steps the shift
-// forward between runs so successive runs land further apart, and the shift never shrinks past
-// seedRunMargin, so no seeded time is ever near or past now. It is safe for the dispatcher's worker
-// goroutines and the seeder to read and step at once.
+// SeedClock is the demo's stand-in for the wall clock. Its cursor opens in the past and advances by
+// the real time that elapses between readings, so a run whose tasks took six seconds shows a
+// six-second duration, and the cursor is strictly monotonic, so a run's created, claimed, started,
+// and ended stamps can never invert however the seeder and the dispatcher's worker goroutines
+// interleave their reads. An earlier design advanced a fixed millisecond per read, which collapsed
+// every run's span to a couple of milliseconds; a later one read a fixed shift off the real clock,
+// which restored real durations but let a between-run step race the workers and stamp a claim hours
+// after the run it belonged to had ended. This design keeps both properties: real elapsed durations
+// and an order that can never go backward. It never passes its ceiling, so no seeded time is near or
+// past now.
 type SeedClock struct {
 	// mu serializes reads and steps so concurrent shard executions and the seeder never race.
 	mu sync.Mutex
-	// shift is how far into the past this clock reads, always at least seedRunMargin.
-	shift time.Duration
-	// last is the previous reading, so stamps strictly advance even if two reads land on the same
-	// wall nanosecond.
-	last time.Time
+	// cursor is the last time handed out; every read advances it by real elapsed time.
+	cursor time.Time
+	// realAt is the real wall time at the last read, so the next read advances the cursor by however
+	// much real time has passed since.
+	realAt time.Time
+	// ceiling is the latest time the clock will ever return, holding every stamp safely before now.
+	ceiling time.Time
 }
 
-// NewSeedClock returns a clock reading seedRunWindow in the past.
+// NewSeedClock returns a clock whose cursor opens seedRunWindow before now.
 func NewSeedClock() *SeedClock {
-	return &SeedClock{shift: seedRunWindow}
+	now := time.Now()
+	return &SeedClock{
+		cursor:  now.Add(-seedRunWindow),
+		realAt:  now,
+		ceiling: now.Add(-seedRunMargin),
+	}
 }
 
-// Now returns the shifted reading, strictly after the previous one. It is the function handed to
-// dispatch.WithClock.
+// Now advances the cursor by the real time elapsed since the last read and returns it, strictly after
+// the previous reading and never past the ceiling. It is the function handed to dispatch.WithClock.
 func (c *SeedClock) Now() time.Time {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	t := time.Now().Add(-c.shift)
-	if !t.After(c.last) {
-		t = c.last.Add(time.Millisecond)
+	real := time.Now()
+	step := real.Sub(c.realAt)
+	if step < time.Millisecond {
+		step = time.Millisecond
 	}
-	c.last = t
-	return t
+	c.realAt = real
+	c.cursor = c.cursor.Add(step)
+	if c.cursor.After(c.ceiling) {
+		c.cursor = c.ceiling
+	}
+	return c.cursor
 }
 
-// advance shrinks the shift by gap so the next seeded run lands that much later, never closer to now
-// than seedRunMargin.
+// advance steps the cursor forward by gap so the next seeded run lands that much later, without
+// passing the ceiling. It does not touch realAt, so the next real-elapsed step is unaffected.
 func (c *SeedClock) advance(gap time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.shift -= gap
-	if c.shift < seedRunMargin {
-		c.shift = seedRunMargin
+	c.cursor = c.cursor.Add(gap)
+	if c.cursor.After(c.ceiling) {
+		c.cursor = c.ceiling
 	}
 }
 
@@ -229,8 +243,60 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 		return err
 	}
 
+	normalizeClaimStamps(ctx, d)
+
 	log.Info("demo: seeded sample projects, templates, inventories, and runs")
 	return nil
+}
+
+// normalizeClaimStamps pulls each seeded run's claimed_at back into its own window. The dispatcher's
+// worker claims a run through the store, and the store stamps claimed_at from the real wall clock, not
+// the demo's seed clock, so a run whose record sits hours in the past was otherwise marked claimed at
+// the seed instant, moments before now. That left the run timeline reading created and ended hours ago
+// but claimed just now, a contradiction against the audit trail that a careful reader would catch. Here
+// the claim is reseated between the run's creation and its start, where a real claim falls, so the
+// timeline reads in order. It runs only for the historical seed: without the seed clock the store's
+// claim stamp already matches the rest of the run, so there is nothing to correct.
+func normalizeClaimStamps(ctx context.Context, d Deps) {
+	if d.Clock == nil || d.Runs == nil {
+		return
+	}
+	tops, err := d.Runs.List(ctx)
+	if err != nil {
+		return
+	}
+	// List returns only the top-level runs, so a split's shards and a pipeline's steps, which carry
+	// their own claim stamps and show their own timelines, are reached through the parent.
+	for _, r := range tops {
+		normalizeOneClaim(ctx, d, r)
+		shards, _ := d.Runs.Shards(ctx, r.ID)
+		for _, s := range shards {
+			normalizeOneClaim(ctx, d, s)
+		}
+		steps, _ := d.Runs.Steps(ctx, r.ID)
+		for _, s := range steps {
+			normalizeOneClaim(ctx, d, s)
+		}
+	}
+}
+
+// normalizeOneClaim reseats a single run's claim stamp between its creation and its start, where a real
+// claim falls, and persists it. A run never claimed, or already claimed in order, is left untouched.
+func normalizeOneClaim(ctx context.Context, d Deps, r *run.Run) {
+	if r.ClaimedAt == nil {
+		return
+	}
+	target := r.CreatedAt
+	if r.StartedAt != nil && r.StartedAt.After(r.CreatedAt) {
+		// Sit the claim midway between creation and start, so created, claimed, started reads as
+		// three ordered instants rather than collapsing the claim onto the start.
+		target = r.CreatedAt.Add(r.StartedAt.Sub(r.CreatedAt) / 2)
+	}
+	if !r.ClaimedAt.After(target) {
+		return
+	}
+	r.ClaimedAt = &target
+	_ = d.Runs.Save(ctx, r)
 }
 
 // seedMultiTool runs one Bash, Python, Terraform, and Go job plus a mixed-tool pipeline, so the demo
@@ -625,17 +691,27 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger, assetDir string) {
 		// Cron entries against the seeded templates, so the schedules page shows real cadences and
 		// the plain-language reading of each expression.
 		if d.Schedules != nil && len(templates) >= 3 {
-			next := func(h int) *time.Time { t := now.Add(time.Duration(h) * time.Hour); return &t }
+			// The next run is the actual next fire of each cron from now, so the time on the page
+			// matches the cadence beside it. Seeding it as a fixed offset showed "daily at 2am" firing
+			// next at 3:18, which on an audit-and-scheduling product reads as the schedule being wrong.
+			next := func(expr string) *time.Time {
+				parsed, err := cron.ParseStandard(expr)
+				if err != nil {
+					return nil
+				}
+				t := parsed.Next(now)
+				return &t
+			}
 			schedules := []*schedule.Schedule{
 				{
 					ID: schedule.NewID(), Name: "Nightly audit", Cron: "0 2 * * *",
 					TemplateID: templates[2].ID, Enabled: true,
-					NextRunAt: next(9), CreatedAt: ago(70),
+					NextRunAt: next("0 2 * * *"), CreatedAt: ago(70),
 				},
 				{
 					ID: schedule.NewID(), Name: "Weekday deploy window", Cron: "30 9 * * 1-5",
 					TemplateID: templates[0].ID, Enabled: true,
-					NextRunAt: next(17), CreatedAt: ago(46),
+					NextRunAt: next("30 9 * * 1-5"), CreatedAt: ago(46),
 				},
 				{
 					ID: schedule.NewID(), Name: "Hourly drift check", Cron: "0 * * * *",

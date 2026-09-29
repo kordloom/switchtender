@@ -336,7 +336,10 @@ h1 {
 .gs-body > p { color: var(--muted); font-size: 15px; margin-bottom: 14px; }
 .gs-body code { color: var(--accent); background: rgba(52, 211, 153, 0.1); padding: 1px 6px; border-radius: 5px; font-size: 13px; }
 .gs-body .code { margin: 0; }
-.gs-body .code pre { margin: 0; }
+/* Wrap the get-started commands at spaces instead of scrolling them under the Copy button. The 84px
+   right padding on .code pre reserves the button's corner, so a wrapped first line never runs beneath
+   it, and the whole command stays readable in the narrow step column rather than truncating. */
+.gs-body .code pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .gs-callout { max-width: 780px; margin: 8px auto 0; padding: 18px 22px; border-radius: var(--radius); border: 1px solid rgba(52, 211, 153, 0.3); background: rgba(52, 211, 153, 0.07); display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .gs-callout p { margin: 0; color: var(--text); font-size: 15px; }
 .gs-next { max-width: 900px; padding: 44px 24px 20px; }
