@@ -2068,8 +2068,14 @@ func TestWebhookSecretNeverReachesTheAuditChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Chain() error = %v", err)
 	}
-	if len(chain) == 0 {
-		t.Fatal("a webhook trigger left no audit entry, so a run can start with no record")
+	// A probe of a guessed token records nothing. The path is the credential, so anybody on the
+	// network can present a guess, and each one used to write a permanent hash-linked entry. Fifty
+	// probes made fifty entries, and since the append is fail-closed, filling the store that way
+	// refuses every real mutation in the install. A hook that resolves to a trigger is recorded by
+	// the handler instead, where the trigger is known.
+	if len(chain) != 0 {
+		t.Errorf("a guessed webhook token appended %d entries, so a stranger can fill the chain",
+			len(chain))
 	}
 	for _, e := range chain {
 		if strings.Contains(e.Path, secret) {
@@ -2078,8 +2084,17 @@ func TestWebhookSecretNeverReachesTheAuditChain(t *testing.T) {
 				"bundle handed to a third party", e.Seq, e.Path)
 		}
 	}
-	if got := chain[0].Actor; got != "webhook" {
-		t.Errorf("actor = %q, want webhook", got)
+
+	// Redaction keys on the path, not the method, so a mistyped verb cannot write the token either.
+	for _, method := range []string{http.MethodPut, http.MethodDelete, http.MethodPatch} {
+		probe := httptest.NewRequest(method, "/hooks/"+secret, nil)
+		if got := auditPath(probe); strings.Contains(got, secret) {
+			t.Errorf("%s on a hook path records %q, embedding a live webhook token in the chain",
+				method, got)
+		}
+	}
+	if got := auditPath(httptest.NewRequest(http.MethodPost, "//HOOKS/"+secret, nil)); strings.Contains(got, secret) {
+		t.Errorf("an oddly spelled hook path records %q", got)
 	}
 }
 

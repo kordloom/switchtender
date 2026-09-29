@@ -1,6 +1,8 @@
 package server
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -9,7 +11,9 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/template"
 	"github.com/kordloom/switchtender/internal/trigger"
@@ -53,7 +57,8 @@ type listTriggersResponse struct {
 // createTriggerHandler mints a trigger and returns its webhook path once. When the server has an
 // encryption key it also mints a sealed HMAC signing secret and returns the plaintext once, so the
 // operator can configure the git host and later enforce signatures.
-func createTriggerHandler(triggers trigger.Store, templates template.Store, sealer *credential.Sealer, log *zap.Logger) http.HandlerFunc {
+func createTriggerHandler(triggers trigger.Store, templates template.Store, sealer *credential.Sealer,
+	authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if triggers == nil || templates == nil {
 			respondError(w, log, http.StatusNotFound, "triggers not enabled")
@@ -71,6 +76,15 @@ func createTriggerHandler(triggers trigger.Store, templates template.Store, seal
 		if req.RequireSignature && (sealer == nil || !sealer.Enabled()) {
 			respondError(w, log, http.StatusConflict,
 				"require_signature needs an encryption key: set SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT on the server")
+			return
+		}
+		// A webhook fires a template with nobody present, so writing one has to authorize the
+		// template it will fire. Schedules already check this for the same reason; triggers did not,
+		// so an operator refused a template could wrap it in a webhook and run it anyway. The hook
+		// itself carries no identity at fire time, which makes the trigger a durable re-entry point
+		// into that template: it survives its author's demotion, and there is nothing to revoke.
+		if denyOnAuthzError(w, log,
+			authz.authorizeAll(r.Context(), grant.AccessUse, req.TemplateID)) {
 			return
 		}
 		if _, err := templates.Get(r.Context(), req.TemplateID); errors.Is(err, template.ErrNotFound) {
@@ -130,7 +144,8 @@ type updateTriggerRequest struct {
 }
 
 // updateTriggerHandler renames a trigger and toggles signature enforcement.
-func updateTriggerHandler(triggers trigger.Store, log *zap.Logger) http.HandlerFunc {
+func updateTriggerHandler(triggers trigger.Store, templates template.Store, authz *authorizer,
+	log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if triggers == nil {
 			respondError(w, log, http.StatusNotFound, "triggers not enabled")
@@ -153,6 +168,14 @@ func updateTriggerHandler(triggers trigger.Store, log *zap.Logger) http.HandlerF
 		if err != nil {
 			log.Error("server: get trigger: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not read trigger")
+			return
+		}
+		// Changing a trigger is changing what a webhook fires and how it is checked, so the caller
+		// has to be somebody who may use the template behind it. Without this any operator could
+		// turn signature enforcement off on somebody else's trigger, rotate its secret out from
+		// under the git host, or delete it.
+		if denyOnAuthzError(w, log,
+			authz.authorizeAll(r.Context(), grant.AccessUse, tg.TemplateID)) {
 			return
 		}
 		if req.RequireSignature && tg.SigningSecret == "" {
@@ -181,7 +204,8 @@ type rotateTriggerSecretResponse struct {
 
 // rotateTriggerSecretHandler mints and seals a new signing secret for a trigger, returning the
 // plaintext once. It needs the server encryption key.
-func rotateTriggerSecretHandler(triggers trigger.Store, sealer *credential.Sealer, log *zap.Logger) http.HandlerFunc {
+func rotateTriggerSecretHandler(triggers trigger.Store, sealer *credential.Sealer,
+	authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if triggers == nil {
 			respondError(w, log, http.StatusNotFound, "triggers not enabled")
@@ -200,6 +224,12 @@ func rotateTriggerSecretHandler(triggers trigger.Store, sealer *credential.Seale
 		if err != nil {
 			log.Error("server: get trigger: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not read trigger")
+			return
+		}
+		// The same rule as writing one: rotating a secret breaks every delivery the git host is
+		// configured for, and deleting one silently stops a deployment path.
+		if denyOnAuthzError(w, log,
+			authz.authorizeAll(r.Context(), grant.AccessUse, tg.TemplateID)) {
 			return
 		}
 		secret, err := sealNewSigningSecret(sealer, tg)
@@ -237,10 +267,26 @@ func listTriggersHandler(triggers trigger.Store, log *zap.Logger) http.HandlerFu
 }
 
 // deleteTriggerHandler removes a trigger, revoking its webhook.
-func deleteTriggerHandler(triggers trigger.Store, log *zap.Logger) http.HandlerFunc {
+func deleteTriggerHandler(triggers trigger.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if triggers == nil {
 			respondError(w, log, http.StatusNotFound, "triggers not enabled")
+			return
+		}
+		// Read first so the template behind it can be authorized. Deleting a trigger silently stops
+		// a deployment path, so it is not something any operator may do to anybody's webhook.
+		tg, gerr := triggers.Get(r.Context(), r.PathValue("id"))
+		if errors.Is(gerr, trigger.ErrNotFound) {
+			respondError(w, log, http.StatusNotFound, "trigger not found")
+			return
+		}
+		if gerr != nil {
+			log.Error("server: get trigger: " + gerr.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read trigger")
+			return
+		}
+		if denyOnAuthzError(w, log,
+			authz.authorizeAll(r.Context(), grant.AccessUse, tg.TemplateID)) {
 			return
 		}
 		err := triggers.Delete(r.Context(), r.PathValue("id"))
@@ -263,7 +309,7 @@ func deleteTriggerHandler(triggers trigger.Store, log *zap.Logger) http.HandlerF
 // secret before anything launches. The launched template syncs its project fresh, so the run
 // executes the commit that was just pushed.
 func hookHandler(triggers trigger.Store, templates template.Store, submitter Submitter,
-	store run.Store, sealer *credential.Sealer, log *zap.Logger) http.HandlerFunc {
+	store run.Store, sealer *credential.Sealer, audits audit.Store, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if triggers == nil || templates == nil {
 			respondError(w, log, http.StatusNotFound, "triggers not enabled")
@@ -285,9 +331,16 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 
 		opts := t.LaunchOptions()
 		// A webhook is delivered at least once. GitHub and its peers redeliver on a timeout or a
-		// non-2xx, and without a key a redelivery of the same event fires a second real run. The
-		// trigger is the thing being repeated, so it names the action.
-		existing, key, err := run.ResolveDedupe(r.Context(), store, "trigger", tg.ID, time.Now())
+		// non-2xx, and without a key a redelivery of the same event fires a second real run.
+		//
+		// The delivery identifies the event, not the trigger. Keying on the trigger alone was wrong
+		// in both directions: two different pushes seconds apart collapsed into one run, so the
+		// second commit silently never deployed and the git host was told it had, while a captured
+		// delivery replayed byte for byte produced a fresh run every time because the bucket had
+		// moved on. A sender that supplies no delivery id falls back to the trigger, which is the
+		// old behavior and the best that can be done without one.
+		existing, key, err := run.ResolveDedupe(r.Context(), store, "trigger",
+			tg.ID+hookDelivery(r), time.Now())
 		if err != nil {
 			log.Error("server: resolve trigger dedupe: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not fire the trigger")
@@ -311,6 +364,21 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 			return
 		}
 
+		// Recorded here rather than in the middleware, where a probe of a guessed token would have
+		// been written down just as permanently and every entry read identically. By this point the
+		// trigger is known, so the record says which webhook fired and what it launched, which is
+		// what somebody reading the trail actually needs.
+		if audits != nil {
+			entry := &audit.Entry{
+				ID: audit.NewID(), At: time.Now(), Actor: "webhook:" + tg.ID,
+				Method: http.MethodPost, Path: "/hooks/" + tg.ID + "/fired/" + created.ID,
+			}
+			if aerr := audits.Append(r.Context(), entry); aerr != nil {
+				// Logged rather than surfaced. The run has already started, so refusing here would
+				// report a failure for work that is under way.
+				log.Error("server: record webhook fire: " + aerr.Error())
+			}
+		}
 		now := time.Now()
 		tg.LastFiredAt = &now
 		if err := triggers.Save(r.Context(), tg); err != nil {
@@ -319,6 +387,21 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 		respondJSON(w, log, http.StatusAccepted,
 			map[string]string{"trigger": tg.ID, "run": created.ID}, wantsPretty(r))
 	}
+}
+
+// hookDelivery returns a suffix identifying this delivery, or empty when the sender supplies none.
+//
+// The headers are the ones the common forges send: GitHub and Gitea use X-GitHub-Delivery, GitLab
+// uses X-Gitlab-Event-UUID, and Bitbucket uses X-Request-UUID. A value is hashed rather than used
+// directly, so a sender cannot steer the key into another trigger's bucket by choosing what to send.
+func hookDelivery(r *http.Request) string {
+	for _, h := range []string{"X-GitHub-Delivery", "X-Gitlab-Event-UUID", "X-Request-UUID"} {
+		if v := r.Header.Get(h); v != "" {
+			sum := sha256.Sum256([]byte(v))
+			return ":" + hex.EncodeToString(sum[:8])
+		}
+	}
+	return ""
 }
 
 // verifyHookSignature reads the request body and checks its X-Hub-Signature-256 against the

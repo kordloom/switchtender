@@ -175,13 +175,16 @@ h1 {
 .section-head a { color: var(--accent); }
 
 /* Feature cards */
-.cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+/* Laid out with flex rather than a fixed grid so a row that does not fill centers instead of
+   stranding its cards on the left. A four-column grid with seventeen cards left one alone. */
+.cards { display: flex; flex-wrap: wrap; justify-content: center; gap: 18px; }
+.cards .card { flex: 0 1 calc(25% - 13.5px); }
 .cards-3 { display: flex; flex-wrap: wrap; justify-content: center; gap: 18px; }
 .cards-3 .card { flex: 0 1 calc(33.333% - 12px); }
 @media (max-width: 860px) { .cards-3 .card { flex-basis: calc(50% - 9px); } }
 @media (max-width: 560px) { .cards-3 .card { flex-basis: 100%; } }
 .card {
-	grid-column: span 1; padding: 26px 22px; border-radius: var(--radius);
+	padding: 26px 22px; border-radius: var(--radius);
 	background: var(--surface); border: 1px solid var(--border);
 	transition: transform 0.2s var(--ease), border-color 0.2s, background 0.2s;
 }
@@ -335,11 +338,11 @@ h1 {
 	.hero-shot { order: 2; }
 	.window { transform: none; }
 	.governance { grid-template-columns: 1fr; }
-	.cards { grid-template-columns: repeat(2, 1fr); }
+	.cards .card { flex-basis: calc(50% - 9px); }
 }
 @media (max-width: 560px) {
 	.strip { grid-template-columns: repeat(2, 1fr); gap: 26px; }
-	.cards { grid-template-columns: 1fr; }
+	.cards .card { flex-basis: 100%; }
 	.section { padding: 68px 24px; }
 }
 @media (prefers-reduced-motion: reduce) {
