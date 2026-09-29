@@ -31,14 +31,33 @@ func DedupeKey(action, id string, at time.Time) string {
 	return fmt.Sprintf("%s%s:%s:%d", internalKeyPrefix, action, id, at.UnixNano()/int64(DedupeWindow))
 }
 
-// ClientKey returns the key a caller-supplied Idempotency-Key header is stored under, or an error
-// when the caller tried to claim the server's reserved namespace.
-func ClientKey(supplied string) (string, error) {
+// orgKeySeparator joins an organization to a caller's idempotency key. It is a byte a key cannot
+// contain, so one organization cannot spell another's stored key.
+const orgKeySeparator = "\x00"
+
+// ClientKey returns the key a caller-supplied Idempotency-Key header is stored under, or an error when
+// the caller tried to claim the server's reserved namespace or sent a key it may not spell.
+//
+// The key is scoped to the submitting organization. Callers choose ordinary words for these, "nightly",
+// "deploy-2026-08-17", "1", so two organizations on one install collide as a matter of course, and the
+// stored key used to be global: the second organization's submission found the first one's run and
+// returned it, handing over that run's id, command, actor, and status, while the change they asked for
+// never ran. Neither side saw an error, which is what made it a leak rather than a bug report.
+//
+// An install with no organizations stores the key exactly as sent, so a single-tenant deployment's keys
+// keep the shape they always had.
+func ClientKey(supplied, orgID string) (string, error) {
 	if strings.HasPrefix(supplied, internalKeyPrefix) {
 		return "", fmt.Errorf("%w: an idempotency key may not begin with %q", ErrReservedKey,
 			internalKeyPrefix)
 	}
-	return supplied, nil
+	if strings.Contains(supplied, orgKeySeparator) {
+		return "", fmt.Errorf("%w: an idempotency key may not contain a null byte", ErrReservedKey)
+	}
+	if orgID == "" {
+		return supplied, nil
+	}
+	return orgID + orgKeySeparator + supplied, nil
 }
 
 // ResolveDedupe returns the run that a repeat of action on id already created inside the dedupe

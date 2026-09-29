@@ -535,6 +535,56 @@ func (s *relayServer) appendLog(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// continuesReport reports whether this report continues one the worker already sent for the same run.
+//
+// The report endpoints replace what a run has stored, which is right for a whole report: the run's
+// summary as it now stands is the truth, and a later report supersedes an earlier one. It is wrong for
+// one report split across calls, which is what a run wider than the per-call element cap needs. Without
+// the distinction each batch deleted the batch before it and a 1500-host run stored 500 hosts, in the
+// record the run's committed outcome and its receipt are both built from.
+func continuesReport(r *http.Request) bool {
+	return r.URL.Query().Get("part") == "continue"
+}
+
+// mergeHostSummaries returns stored with incoming layered over it, one entry per host, so a continuation
+// batch adds to what the run already reported and a repeated host takes its newest outcome.
+func mergeHostSummaries(stored, incoming []run.HostSummary) []run.HostSummary {
+	byHost := make(map[string]run.HostSummary, len(stored)+len(incoming))
+	order := make([]string, 0, len(stored)+len(incoming))
+	for _, list := range [][]run.HostSummary{stored, incoming} {
+		for _, s := range list {
+			if _, seen := byHost[s.Host]; !seen {
+				order = append(order, s.Host)
+			}
+			byHost[s.Host] = s
+		}
+	}
+	out := make([]run.HostSummary, 0, len(order))
+	for _, host := range order {
+		out = append(out, byHost[host])
+	}
+	return out
+}
+
+// mergeTaskSummaries is mergeHostSummaries for per-task timings, keyed by task.
+func mergeTaskSummaries(stored, incoming []run.TaskSummary) []run.TaskSummary {
+	byTask := make(map[string]run.TaskSummary, len(stored)+len(incoming))
+	order := make([]string, 0, len(stored)+len(incoming))
+	for _, list := range [][]run.TaskSummary{stored, incoming} {
+		for _, s := range list {
+			if _, seen := byTask[s.Task]; !seen {
+				order = append(order, s.Task)
+			}
+			byTask[s.Task] = s
+		}
+	}
+	out := make([]run.TaskSummary, 0, len(order))
+	for _, task := range order {
+		out = append(out, byTask[task])
+	}
+	return out
+}
+
 // maxRelayElements bounds how many items one relay call may carry.
 //
 // A count cap is not a work cap on its own: "[{},{},{}...]" fits a million empty structs into a
@@ -617,7 +667,16 @@ func (s *relayServer) saveHostSummary(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid host summary body")
 		return
 	}
-	if err := s.store.SaveHostSummary(r.Context(), r.PathValue("id"), summaries); err != nil {
+	id := r.PathValue("id")
+	if continuesReport(r) {
+		stored, err := s.store.RunHostSummaries(r.Context(), id)
+		if err != nil {
+			s.internal(w, "read host summary", err)
+			return
+		}
+		summaries = mergeHostSummaries(stored, summaries)
+	}
+	if err := s.store.SaveHostSummary(r.Context(), id, summaries); err != nil {
 		s.internal(w, "save host summary", err)
 		return
 	}
@@ -700,6 +759,38 @@ func (s *relayServer) unrecordedHost(ctx context.Context, runID string, want []s
 	return ""
 }
 
+// proposableFrom reports why a run cannot have an apply proposed from it, or nil when it can.
+//
+// The apply is a clone of the run with the dry-run flag forced off, so the run has to be the thing that
+// clone is meant to be: a plan of infrastructure, still executing, that is not itself a proposal. Any
+// other run reaching here means a worker is asking the control node to build a real execution of
+// something nobody gated.
+func proposableFrom(plan *run.Run) error {
+	switch tool := run.NormalizeTool(plan.Tool); tool {
+	case run.ToolTerraform, run.ToolOpenTofu:
+	default:
+		return fmt.Errorf("an apply is proposed from a terraform or opentofu plan, not from %s", tool)
+	}
+	if !plan.DryRun {
+		return errors.New("an apply is proposed from a plan, and this run is not one")
+	}
+	// A plan proposes its apply while it is still the run in hand. A finished one does not: the lease
+	// secret outlives the run, so without this a worker could return to any plan it ever executed.
+	if plan.Status.Terminal() {
+		return fmt.Errorf("this plan already finished as %q, so its apply cannot be proposed now",
+			plan.Status)
+	}
+	// A run waiting on a person is not planning anything, and building an apply from it would put a
+	// second real change behind the decision they were asked to make.
+	if plan.Status == run.StatusPendingApproval {
+		return errors.New("this run is held for approval, so it is not a plan proposing an apply")
+	}
+	if plan.ProposedFrom != "" {
+		return errors.New("this run is itself a proposed apply, so it does not propose another")
+	}
+	return nil
+}
+
 // proposeApply creates the apply a worker's plan gated, from the plan run the control node holds.
 //
 // A worker has no path to create a run, on purpose, so the plan-content gate could not complete on one:
@@ -723,8 +814,20 @@ func (s *relayServer) proposeApply(w http.ResponseWriter, r *http.Request) {
 	if plan == nil {
 		return
 	}
-	if !leaseHeld(plan, r) {
+	// This is the only endpoint that causes a run to exist, so it demands the per-claim capability
+	// itself rather than accepting the empty-secret fallback the report paths allow for runs claimed
+	// before the capability existed. A worker holding no secret has no business minting an apply.
+	if plan.ClaimSecret == "" || !leaseHeld(plan, r) {
 		writeErr(w, http.StatusForbidden, "the run's lease was not presented or did not match")
+		return
+	}
+	// And it must be the live plan this is for. The check was the queue and the lease alone, and a
+	// lease secret is never cleared when a run finishes, so a worker that had once claimed anything
+	// could come back later and have its apply built from it: a finished check-mode run became a real
+	// change against the same hosts with the same credentials, since every field is copied from the
+	// named run with the dry-run flag forced off.
+	if err := proposableFrom(plan); err != nil {
+		writeErr(w, http.StatusConflict, err.Error())
 		return
 	}
 	// The policies are read here rather than taken from the worker, so the rule that decides the hold is
@@ -744,6 +847,12 @@ func (s *relayServer) proposeApply(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	proposal, err := dispatch.ProposeApplyFor(r.Context(), s.store, policies, plan, body.Destroys, read)
+	if errors.Is(err, dispatch.ErrPolicyDenied) {
+		// A rule refused the apply. That is an answer, not a fault, and the worker records it on the
+		// plan run, so the reason travels rather than becoming "propose apply failed".
+		writeErr(w, http.StatusConflict, err.Error())
+		return
+	}
 	if err != nil {
 		s.internal(w, "propose apply", err)
 		return
@@ -767,7 +876,16 @@ func (s *relayServer) saveTaskSummary(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid task summary body")
 		return
 	}
-	if err := s.store.SaveTaskSummary(r.Context(), r.PathValue("id"), summaries); err != nil {
+	id := r.PathValue("id")
+	if continuesReport(r) {
+		stored, err := s.store.RunTaskSummaries(r.Context(), id)
+		if err != nil {
+			s.internal(w, "read task summary", err)
+			return
+		}
+		summaries = mergeTaskSummaries(stored, summaries)
+	}
+	if err := s.store.SaveTaskSummary(r.Context(), id, summaries); err != nil {
 		s.internal(w, "save task summary", err)
 		return
 	}

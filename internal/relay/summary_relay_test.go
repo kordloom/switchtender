@@ -185,16 +185,27 @@ func waitTerminal(t *testing.T, store run.Store, id string) *run.Run {
 // outcomeEntry returns the run outcome entry the control node committed for the run.
 func outcomeEntry(t *testing.T, audits audit.Store, id string) *audit.Entry {
 	t.Helper()
-	chain, err := audits.Chain(context.Background())
-	if err != nil {
-		t.Fatalf("Chain() error = %v", err)
-	}
+	// Waited for rather than read once. The run reaching a terminal state and its outcome reaching the
+	// chain are two writes, and over the relay the second is the control node's, so a single read taken
+	// the moment the status settles can arrive in the window between them. That window is nothing on an
+	// idle machine and real when the whole suite is running under the race detector, which is exactly
+	// when a gate must not report a problem the product does not have.
 	prefix := fmt.Sprintf("/runs/%s/outcome/", id)
-	for _, e := range chain {
-		if e.Method == audit.MethodRun && strings.HasPrefix(e.Path, prefix) {
-			return e
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		chain, err := audits.Chain(context.Background())
+		if err != nil {
+			t.Fatalf("Chain() error = %v", err)
 		}
+		for _, e := range chain {
+			if e.Method == audit.MethodRun && strings.HasPrefix(e.Path, prefix) {
+				return e
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no outcome entry committed for run %s", id)
+			return nil
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("no outcome entry committed for run %s", id)
-	return nil
 }

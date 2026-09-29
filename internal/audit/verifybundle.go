@@ -232,11 +232,16 @@ func verifySpecConsistency(claims []BundleClaim, rep *BundleReport) {
 		if !has {
 			continue
 		}
-		body, err := json.Marshal(specVal)
-		if err != nil {
+		// The spec is disclosed as the exact canonical bytes its digest was taken over. Reading it as
+		// a tree and marshaling it again would have to reproduce those bytes exactly, which it cannot
+		// for a number wider than a float, so a run with such a value in its extra vars read as
+		// tampered when nothing had been touched.
+		text, ok := specVal.(string)
+		if !ok {
 			rep.SpecConsistent = false
 			return
 		}
+		body := []byte(text)
 		rep.SpecPresent = true
 		rep.SpecBody = body
 		disclosed = UnkeyedDigestOf(body)

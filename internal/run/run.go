@@ -361,6 +361,30 @@ func notifyNeedsURL(k string) bool {
 	return false
 }
 
+// MaxNotifyTargets bounds how many notification targets one run or template may carry.
+//
+// Each target becomes its own delivery when the run ends, with its own goroutine and its own outbound
+// connection, so the list is a multiplier on work the server does unprompted. Unbounded, one modest
+// request could name tens of thousands of them and every run it produced fanned out that wide at once,
+// on a schedule's timer if it was a schedule. The limit is far above any real routing, which pages a
+// team and posts to a channel or two, and far below a number that costs anything.
+const MaxNotifyTargets = 32
+
+// ValidateNotifyTargets reports why a run's notification list cannot be stored, or nil when it can. It
+// bounds the list and checks each target, so both are answered where the list is written.
+func ValidateNotifyTargets(targets []NotifyTarget) error {
+	if len(targets) > MaxNotifyTargets {
+		return fmt.Errorf("a run may carry at most %d notification targets, not %d",
+			MaxNotifyTargets, len(targets))
+	}
+	for _, t := range targets {
+		if err := ValidateNotifyTarget(t); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ValidateNotifyTarget reports why a target is not deliverable, or nil when it is. It checks that
 // each kind carries the field it needs, so a target that would silently reach no one is refused when
 // it is saved rather than dropped at run time.

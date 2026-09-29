@@ -259,3 +259,56 @@ func TestTeamMembersGainsItsPromisedForeignKey(t *testing.T) {
 			"no cascade", left)
 	}
 }
+
+// TestSweepNamesWhatItSettled covers the store half of the janitor's evidence pass: a sweep must
+// report the top-level runs it drove terminal, or their outcomes never reach the chain. A child is
+// left out because its outcome rolls up into its parent, the same rule the terminal save follows.
+func TestSweepNamesWhatItSettled(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	store := db.Runs()
+
+	stale := time.Now().Add(-10 * time.Minute)
+	parent := "run_parent"
+	runs := []*run.Run{
+		// A top-level run a dead worker was holding: this one must be named.
+		{ID: "run_orphan", Status: run.StatusRunning, CreatedAt: stale, ClaimedBy: "dead",
+			ClaimedAt: &stale, Tool: "bash", Command: "deploy"},
+		// A child of a split, whose outcome rolls into its parent: not named.
+		{ID: "run_child", Status: run.StatusRunning, CreatedAt: stale, ClaimedBy: "dead",
+			ClaimedAt: &stale, Tool: "bash", Command: "shard", ParentID: &parent, Kind: run.KindSplit},
+		// A healthy run with a fresh lease: not swept, not named.
+		{ID: "run_healthy", Status: run.StatusRunning, CreatedAt: time.Now(), ClaimedBy: "alive",
+			ClaimedAt: ptrTime(time.Now()), Tool: "bash", Command: "fine"},
+	}
+	for _, r := range runs {
+		if err := store.Save(ctx, r); err != nil {
+			t.Fatalf("Save %s: %v", r.ID, err)
+		}
+	}
+
+	reporter, ok := store.(interface {
+		ReclaimStaleSettled(context.Context, time.Duration) (int, []string, error)
+	})
+	if !ok {
+		t.Fatal("the store cannot name what its sweep settled, so swept runs leave no evidence")
+	}
+	_, settled, err := reporter.ReclaimStaleSettled(ctx, 30*time.Second)
+	if err != nil {
+		t.Fatalf("ReclaimStaleSettled: %v", err)
+	}
+	if len(settled) != 1 || settled[0] != "run_orphan" {
+		t.Errorf("settled = %v, want just the top-level run whose lease expired", settled)
+	}
+	if got, err := store.Get(ctx, "run_healthy"); err != nil || got.Status != run.StatusRunning {
+		t.Errorf("the healthy run was swept: %+v (%v)", got, err)
+	}
+}
+
+// ptrTime returns a pointer to t, for the store fields that take one.
+func ptrTime(t time.Time) *time.Time { return &t }

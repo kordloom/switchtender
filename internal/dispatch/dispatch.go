@@ -102,7 +102,7 @@ type Dispatcher struct {
 	// ctx is canceled by Close to stop in-flight and pending runs.
 	ctx context.Context
 	// cancel cancels ctx.
-	cancel context.CancelFunc
+	cancel context.CancelCauseFunc
 	// publisher receives live output for streaming.
 	publisher Publisher
 	// hostLister enumerates inventory hosts for split runs, nil when the runner cannot list hosts.
@@ -190,6 +190,12 @@ type Dispatcher struct {
 // errRunTimeout is the cancellation cause when a run is stopped for exceeding runTimeout, so the
 // outcome can record a timeout rather than a user cancel.
 var errRunTimeout = errors.New("run exceeded its timeout")
+
+// errShuttingDown is the cancellation cause when the dispatcher itself is stopping, so a run in flight
+// during a restart is recorded as interrupted rather than canceled. Without the cause every graceful
+// restart left the same record a person clicking cancel leaves, and a partial retry, which accepts the
+// interrupted state an unclean kill produces, refused the tidy shutdown.
+var errShuttingDown = errors.New("the server stopped while this run was executing")
 
 // Option configures a Dispatcher.
 type Option func(*config)
@@ -362,7 +368,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 
 	lister, _ := runner.(roundhouse.HostLister)
 	dumper, _ := runner.(roundhouse.InventoryDumper)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancelCause(context.Background())
 	d := &Dispatcher{
 		store:              store,
 		audits:             cfg.audits,
@@ -514,12 +520,56 @@ func (d *Dispatcher) idleWait(idle int) time.Duration {
 	return wait/2 + time.Duration(rand.Int64N(int64(wait)))
 }
 
+// settledReporter is a store whose sweep can name the top-level runs it settled, so their outcomes
+// reach the chain. A store that cannot, such as the relay client, leaves the reporting to whichever
+// process owns the sweep.
+type settledReporter interface {
+	// ReclaimStaleSettled sweeps like ReclaimStale and also returns the ids of the top-level runs the
+	// sweep drove to a terminal state.
+	ReclaimStaleSettled(ctx context.Context, ttl time.Duration) (int, []string, error)
+}
+
+// commitSettled records the outcome of every run the sweep drove to a terminal state.
+//
+// The sweep is a bulk update in the store rather than a pass through finalize, so these runs used to
+// end with no chain entry at all: not receiptable, and absent from their own dossiers. A run whose
+// worker died mid-change is precisely the incident somebody asks about afterward, so it is the last
+// run that should have no record. The commit is best effort, as it is on the relay's terminal save
+// and for the same reason: the run has already happened, and refusing to record it would not unhappen
+// it. A failure is logged where an operator can find it.
+func (d *Dispatcher) commitSettled(ids []string) {
+	if d.audits == nil || len(ids) == 0 {
+		return
+	}
+	for _, id := range ids {
+		r, err := d.store.Get(d.ctx, id)
+		if err != nil {
+			if d.ctx.Err() == nil {
+				d.log.Error("dispatch: read settled run: "+err.Error(), zap.String("run_id", id))
+			}
+			continue
+		}
+		if err := outcome.Commit(d.ctx, d.audits, d.store, r, "system:janitor"); err != nil {
+			if d.ctx.Err() == nil {
+				d.log.Error("dispatch: commit settled outcome: "+err.Error(), zap.String("run_id", id))
+			}
+		}
+	}
+}
+
 // janitor sweeps stale leases so runs owned by dead processes requeue or resolve. It runs once
 // immediately, covering restarts, then on an interval.
 func (d *Dispatcher) janitor() {
 	defer d.wg.Done()
 	sweep := func() {
-		n, err := d.store.ReclaimStale(d.ctx, leaseTTL)
+		var n int
+		var settled []string
+		var err error
+		if reporter, ok := d.store.(settledReporter); ok {
+			n, settled, err = reporter.ReclaimStaleSettled(d.ctx, leaseTTL)
+		} else {
+			n, err = d.store.ReclaimStale(d.ctx, leaseTTL)
+		}
 		if err != nil {
 			if d.ctx.Err() == nil {
 				d.log.Error("dispatch: reclaim stale: " + err.Error())
@@ -529,6 +579,7 @@ func (d *Dispatcher) janitor() {
 		if n > 0 {
 			d.log.Info("dispatch: reclaimed stale runs", zap.Int("count", n))
 		}
+		d.commitSettled(settled)
 	}
 	sweep()
 	ticker := time.NewTicker(janitorInterval)
@@ -1145,7 +1196,7 @@ func (d *Dispatcher) coordinate(parent *run.Run, children []*run.Run) {
 	parent.Status = run.StatusRunning
 	parent.StartedAt = &started
 	parent.ClaimedBy = d.owner
-	parent.ClaimedAt = &started
+	// The lease time is left to the store, for the reason streamSpec states.
 	_ = d.save(parent)
 
 	watchCtx, stopWatch := context.WithCancel(parentCtx)
@@ -1160,18 +1211,27 @@ func (d *Dispatcher) coordinate(parent *run.Run, children []*run.Run) {
 
 	allSucceeded := true
 	anyCanceled := false
+	anyInterrupted := false
 	for _, status := range statuses {
 		if status != run.StatusSucceeded {
 			allSucceeded = false
 		}
-		if status == run.StatusCanceled {
+		switch status {
+		case run.StatusCanceled:
 			anyCanceled = true
+		case run.StatusInterrupted:
+			anyInterrupted = true
 		}
 	}
 	switch {
 	case allSucceeded:
 		code := 0
 		d.finalize(parent, run.StatusSucceeded, &code, "")
+	// A shard the server stopped explains the whole split, and it takes precedence over a failure:
+	// nothing was learned about the shards that never finished, so calling the split failed would
+	// state an outcome the run never reached. It is also the state a partial retry accepts.
+	case anyInterrupted:
+		d.finalize(parent, run.StatusInterrupted, nil, errShuttingDown.Error())
 	case anyCanceled:
 		d.finalize(parent, run.StatusCanceled, nil, "")
 	default:
@@ -1225,13 +1285,14 @@ func (d *Dispatcher) waitChildren(ctx context.Context, ids []string) []run.Statu
 		case <-ctx.Done():
 			// Shutting down or the parent was canceled: request cancellation once, then stop waiting
 			// instead of polling a store that may be closing. Children still running are reported
-			// canceled so the parent finalizes as canceled.
+			// stopped, so the parent finalizes the same way they did.
 			if !canceled {
 				d.cancelChildren(ids)
 			}
+			stopped := d.stoppedStatus()
 			for i := range statuses {
 				if !statuses[i].Terminal() {
-					statuses[i] = run.StatusCanceled
+					statuses[i] = stopped
 				}
 			}
 			return statuses
@@ -1275,8 +1336,28 @@ func (d *Dispatcher) childStatuses(ctx context.Context, ids []string, parent *st
 	return out
 }
 
+// stoppedStatus reports the terminal status to record for a run this dispatcher is stopping: canceled
+// when somebody asked for it, interrupted when the server itself is going down. The two read the same
+// from inside a stop, and telling them apart is what keeps a restart from writing the record a person
+// clicking cancel leaves, and what lets a partial retry recover afterward.
+func (d *Dispatcher) stoppedStatus() run.Status {
+	if errors.Is(context.Cause(d.ctx), errShuttingDown) {
+		return run.StatusInterrupted
+	}
+	return run.StatusCanceled
+}
+
+// stoppedReason is the error text to store beside stoppedStatus, empty for a cancel because a cancel
+// speaks for itself.
+func (d *Dispatcher) stoppedReason() string {
+	if errors.Is(context.Cause(d.ctx), errShuttingDown) {
+		return errShuttingDown.Error()
+	}
+	return ""
+}
+
 // cancelChildren asks every non-terminal child to stop: claimed children through their executor's
-// cancel watch, unclaimed ones finalized canceled directly since no executor will ever run them.
+// cancel watch, unclaimed ones finalized directly since no executor will ever run them.
 func (d *Dispatcher) cancelChildren(ids []string) {
 	for _, id := range ids {
 		r, err := d.store.Get(context.Background(), id)
@@ -1293,7 +1374,7 @@ func (d *Dispatcher) cancelChildren(ids []string) {
 		// in the approval queue forever, and approving it ran it under a parent that is gone.
 		if r.ClaimedBy == "" &&
 			(r.Status == run.StatusPending || r.Status == run.StatusPendingApproval) {
-			d.finalize(r, run.StatusCanceled, nil, "")
+			d.finalize(r, d.stoppedStatus(), nil, d.stoppedReason())
 		}
 	}
 }
@@ -1379,7 +1460,7 @@ func (d *Dispatcher) runPipeline(parent *run.Run, steps []run.PipelineStep) {
 	parent.Status = run.StatusRunning
 	parent.StartedAt = &started
 	parent.ClaimedBy = d.owner
-	parent.ClaimedAt = &started
+	// The lease time is left to the store, for the reason streamSpec states.
 	_ = d.save(parent)
 
 	watchCtx, stopWatch := context.WithCancel(pipeCtx)
@@ -1395,7 +1476,7 @@ func (d *Dispatcher) runPipeline(parent *run.Run, steps []run.PipelineStep) {
 
 	switch {
 	case canceled:
-		d.finalize(parent, run.StatusCanceled, nil, "")
+		d.finalize(parent, d.stoppedStatus(), nil, d.stoppedReason())
 	case failed:
 		code := 1
 		d.finalize(parent, run.StatusFailed, &code, "")
@@ -1417,7 +1498,9 @@ func (d *Dispatcher) runStepsLinear(ctx context.Context, parent *run.Run, steps 
 		}
 
 		status, outputs := d.runStepAttempts(ctx, parent, step, i, cloneVars(vars))
-		if status == run.StatusCanceled {
+		// A step the server stopped ends the pipeline the same way a canceled one does. The parent
+		// records which of the two it was from the dispatcher's own state.
+		if status == run.StatusCanceled || status == run.StatusInterrupted {
 			return failed, true
 		}
 		if status != run.StatusSucceeded {
@@ -1620,9 +1703,11 @@ func hostWeights(hosts []string, costs map[string]float64) map[string]float64 {
 	return out
 }
 
-// Close stops accepting new work, cancels in-flight runs, and waits for workers to drain.
+// Close stops accepting new work, cancels in-flight runs, and waits for workers to drain. The
+// cancellation carries its cause, so a run stopped by the shutdown is recorded as interrupted, which is
+// what happened, rather than as the cancel a person asks for.
 func (d *Dispatcher) Close() {
-	d.cancel()
+	d.cancel(errShuttingDown)
 	d.wg.Wait()
 	d.notifyWG.Wait()
 }
@@ -1723,7 +1808,10 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	r.Status = run.StatusRunning
 	r.StartedAt = &started
 	r.ClaimedBy = d.owner
-	r.ClaimedAt = &started
+	// The lease time is not written from here. The store stamps it when it grants the claim and again on
+	// every renewal, and Postgres ages leases against that same clock, so writing this process's time
+	// over it recorded a lease already expired on any worker whose clock trails the database and the next
+	// sweep interrupted a run that had just started.
 	_ = d.save(r)
 
 	watchCtx, stopWatch := context.WithCancel(ctx)
@@ -1865,33 +1953,59 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	return status
 }
 
-// leaseMissLimit is how many consecutive heartbeat failures mean the lease is really gone. A
-// single miss can be a transient store error or a first save that has not landed yet, so one
-// failure never kills a run.
-const leaseMissLimit = 3
-
 // watch renews the executing run's lease and cancels it when another process requests a stop or
 // the lease is convincingly lost. It exits when the run's context ends.
+//
+// An unreachable store is not a lost lease. The lease in the store lives leaseTTL from its last
+// renewal, and no sweep can reclaim a lease that has not expired, so while it is still valid nothing
+// else can touch this run and stopping early only kills a tool partway through its changes for
+// nothing. Counting a fixed three failures instead gave up after about nine seconds of a thirty second
+// lease, and a refused connection comes back in microseconds, so every control node restart and every
+// brief store outage killed the runs on every healthy worker mid-change and recorded each as canceled
+// with no error, indistinguishable from a cancel somebody asked for. The executor now works on while
+// the lease could still be its own and stops when it has actually expired, which is the first moment
+// another process could claim the run.
+//
+// A store that reports the run is not this owner's is different: somebody else holds it, and carrying
+// on would mean two executors changing the same hosts. That stops at once.
 func (d *Dispatcher) watch(ctx context.Context, id string) {
 	ticker := time.NewTicker(watchInterval)
 	defer ticker.Stop()
-	misses := 0
+	// The lease was stamped by the claim that led here, so it is live as of now.
+	lastRenewed := time.Now()
+	// Renewed once before the first tick, which is what makes the store's clock the one that owns this
+	// lease.
+	//
+	// The save that set the run running rewrites the whole row, lease time included, from this process's
+	// clock. Postgres stamps a lease from the database clock and ages leases against that same clock, so
+	// on a worker whose clock trails the database by more than the lease lifetime that save recorded a
+	// lease already expired, and the next sweep interrupted a run that had just started. Renewing here
+	// puts the database's own time back on the row immediately rather than up to a tick later, so the
+	// window in which a sweep could read a fresh lease as an old one closes at once.
+	_ = d.store.Heartbeat(context.Background(), id, d.owner)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 		}
-		if err := d.store.Heartbeat(context.Background(), id, d.owner); err != nil {
-			misses++
-			if misses < leaseMissLimit {
+		switch err := d.store.Heartbeat(context.Background(), id, d.owner); {
+		case err == nil:
+			lastRenewed = time.Now()
+		case errors.Is(err, run.ErrNotFound):
+			d.log.Warn("dispatch: lease is no longer ours: "+err.Error(), zap.String("run_id", id))
+			d.Cancel(id)
+			return
+		default:
+			if expired := time.Since(lastRenewed); expired < leaseTTL {
+				d.log.Warn("dispatch: heartbeat failed, lease still valid: "+err.Error(),
+					zap.String("run_id", id), zap.Duration("unrenewed_for", expired))
 				continue
 			}
-			d.log.Warn("dispatch: lease lost: "+err.Error(), zap.String("run_id", id))
+			d.log.Warn("dispatch: lease expired unrenewed: "+err.Error(), zap.String("run_id", id))
 			d.Cancel(id)
 			return
 		}
-		misses = 0
 		r, err := d.store.Get(context.Background(), id)
 		if err != nil {
 			continue
@@ -1974,6 +2088,11 @@ func (d *Dispatcher) outcome(
 	case err != nil && errors.Is(context.Cause(ctx), errRunTimeout):
 		d.finalize(r, run.StatusFailed, nil, "run canceled: exceeded its timeout")
 		return run.StatusFailed
+	case err != nil && errors.Is(context.Cause(ctx), errShuttingDown):
+		// The server stopped mid-run. That is interrupted, the status whose meaning is exactly this and
+		// which a partial retry accepts, not the cancel a person asks for.
+		d.finalize(r, run.StatusInterrupted, nil, errShuttingDown.Error())
+		return run.StatusInterrupted
 	case err != nil && ctx.Err() != nil:
 		d.finalize(r, run.StatusCanceled, nil, "")
 		return run.StatusCanceled
@@ -2129,6 +2248,12 @@ func withRetries(f func() error) error {
 	for attempt := 0; attempt < 4; attempt++ {
 		if err = f(); err == nil {
 			return nil
+		}
+		// A write that landed in part is not retried as a whole: what already arrived is recorded, and
+		// sending it again would record it twice. The store that reports this has retried the part that
+		// actually failed.
+		if errors.Is(err, run.ErrPartlyDelivered) {
+			return err
 		}
 		time.Sleep(time.Duration(attempt+1) * 75 * time.Millisecond)
 	}

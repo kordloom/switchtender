@@ -185,6 +185,13 @@ func workerStore(log *zap.Logger) (run.Store, []dispatch.Option, func(), error) 
 		dispatch.WithProjects(bundle.Projects(), syncer),
 		dispatch.WithInventories(bundle.Inventories()),
 		dispatch.WithInventorySources(bundle.InventorySources()),
+		// The chain is written by whichever process finishes the run. Without this a worker executed
+		// runs and committed no outcome for any of them: not receiptable, absent from their own
+		// dossiers, invisible to the offline verification the product rests on, and silent about it,
+		// so a scaled deployment looked healthy while most of its evidence simply did not exist.
+		// PostgreSQL serializes the append with an advisory lock, which is the backend a fleet runs
+		// on; SQLite is a single-process deployment by design.
+		dispatch.WithAudits(bundle.Audits()),
 		// The plan-content gate is enforced by whichever process claims the run, so a worker needs
 		// the policies as much as the control node does.
 		dispatch.WithPolicies(bundle.Policies()),

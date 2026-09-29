@@ -18,7 +18,17 @@ func (d *Dispatcher) notifyRunTargets(r *run.Run) {
 	}
 	byKind := map[string][]string{}
 	var richer []run.NotifyTarget
-	for _, t := range r.Notifications {
+	// The list is bounded where it is written, and bounded again here so a run stored before that limit
+	// existed cannot still fan out into a goroutine and a socket per target. What is dropped is named,
+	// because silently delivering to some of a list reads as delivering to all of it.
+	targets := r.Notifications
+	if len(targets) > run.MaxNotifyTargets {
+		d.log.Warn("dispatch: notification targets truncated to the limit",
+			zap.String("run_id", r.ID), zap.Int("carried", len(targets)),
+			zap.Int("delivered", run.MaxNotifyTargets))
+		targets = targets[:run.MaxNotifyTargets]
+	}
+	for _, t := range targets {
 		if !run.ValidNotifyKind(t.Kind) {
 			continue
 		}
@@ -67,11 +77,10 @@ func (d *Dispatcher) notifyRunTargets(r *run.Run) {
 		d.deliverSlackFormat(urls, "rocketchat", r)
 	}
 	if urls := byKind[run.NotifyWebhook]; len(urls) > 0 {
-		// Redact extra vars: survey answers and template vars can carry secrets and a webhook is
-		// external, exactly as the server-wide webhook channel does.
-		redacted := *r
-		redacted.ExtraVars = nil
-		redacted.Notifications = nil
+		// Redacted through the one helper the server-wide webhook uses, so the two paths cannot disagree
+		// about what a webhook may see. Listing the fields here instead let this one keep the command,
+		// which is the run's raw script body, while the server-wide webhook for the same run stripped it.
+		redacted := redactForExternal(r)
 		if body := encode("webhook", notification{Event: "run.finished", Run: &redacted}); body != nil {
 			postJSON(urls, body)
 		}

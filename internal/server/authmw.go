@@ -371,6 +371,17 @@ func denyUnlessAdminOrActor(w http.ResponseWriter, r *http.Request, log *zap.Log
 	return true
 }
 
+// actorIsAdmin reports whether the request's caller holds the admin role. No actor in context means
+// the API is serving unauthenticated, with no tokens and no SSO, where every caller is the local admin,
+// the same way denyUnlessAdminOrActor and the manage checks read it.
+func actorIsAdmin(r *http.Request) bool {
+	actor, ok := actorFrom(r.Context())
+	if !ok {
+		return true
+	}
+	return roleAllows(actor.Role, user.RoleAdmin)
+}
+
 // sameActor reports whether the caller is the actor recorded on the run. The account is compared first
 // and the credential's name only when one side has no account: a person's token and their browser
 // session record different names, so a name comparison alone answers "same person" wrongly in the

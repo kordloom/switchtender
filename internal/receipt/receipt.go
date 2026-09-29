@@ -107,16 +107,19 @@ func Build(ctx context.Context, runs run.Store, audits audit.Store, id audit.Ide
 	}
 	res.Claims = len(doc.Claims)
 
+	// Only the contiguous shape carries these. A tree leaf's hash covers its claim's whole payload, so
+	// anything added to a disclosed claim would make the leaf recompute to a different hash than the
+	// one the published root was folded from, and the receipt would read as broken. The sparse shape
+	// therefore proves its own entries belong to the log, and names the outcome entry and the digest it
+	// committed, without reproducing the body.
 	if !opts.Sparse {
 		if body, berr := outcome.Body(ctx, runs, r); berr == nil {
 			var bodyObj any
 			if json.Unmarshal(body, &bodyObj) == nil {
-				for i := range doc.Claims {
-					if doc.Claims[i].Chain.Seq == outcomeSeq {
-						doc.Claims[i].Payload["outcome_body"] = bodyObj
-						doc.Claims[i].Payload["outcome_nonce"] = outcomeEntry.Nonce
-						discloseSpec(&doc.Claims[i], r)
-					}
+				if claim := outcomeClaim(doc); claim != nil {
+					claim.Payload["outcome_body"] = bodyObj
+					claim.Payload["outcome_nonce"] = outcomeEntry.Nonce
+					discloseSpec(claim, r)
 				}
 			}
 		} else {
@@ -202,15 +205,20 @@ func sparseBundle(entries []*audit.Entry, runID string, creationSeq, outcomeSeq 
 // discloseSpec attaches the run's redacted spec to the outcome claim, so a verifier can read what
 // the digests commit to and recompute them. The spec is redacted before it leaves the outcome
 // package, so this never hands out bytes the redaction did not pass over.
+//
+// It is attached as the exact bytes the digest was taken over rather than as a parsed tree. A tree
+// has to survive the signature's canonicalization, whose numbers are integers only, so a single
+// fractional extra var made the receipt impossible to sign and therefore impossible to issue for that
+// run, ever. A tree also has to survive being marshaled again on the verifier's side, and an integer
+// too wide for a float came back a different number, so the disclosed spec stopped matching the digest
+// the chain committed and the receipt read as tampered. The bytes have neither problem: a string is
+// representable whatever it holds, and it is what the digest already covers.
 func discloseSpec(claim *audit.BundleClaim, r *run.Run) {
 	spec, err := outcome.Spec(r)
 	if err != nil {
 		return
 	}
-	var specObj any
-	if json.Unmarshal(spec, &specObj) == nil {
-		claim.Payload["spec_body"] = specObj
-	}
+	claim.Payload["spec_body"] = string(spec)
 }
 
 // discloseDecisions attaches each approval decision's body and nonce to its claim, the same way the
@@ -232,13 +240,39 @@ func discloseDecisions(doc *audit.Bundle, entries []*audit.Entry, r *run.Run) {
 		if json.Unmarshal(body, &bodyObj) != nil {
 			continue
 		}
-		for i := range doc.Claims {
-			if doc.Claims[i].Chain.Seq == e.Seq {
-				doc.Claims[i].Payload["decision_body"] = bodyObj
-				doc.Claims[i].Payload["decision_nonce"] = e.Nonce
-			}
+		if claim := claimFor(doc, audit.MethodDecision, e.Path); claim != nil {
+			claim.Payload["decision_body"] = bodyObj
+			claim.Payload["decision_nonce"] = e.Nonce
 		}
 	}
+}
+
+// outcomeClaim returns the claim carrying the run's outcome entry, or nil when the bundle discloses
+// none.
+func outcomeClaim(doc *audit.Bundle) *audit.BundleClaim {
+	for i := range doc.Claims {
+		method, _ := doc.Claims[i].Payload["method"].(string)
+		path, _ := doc.Claims[i].Payload["path"].(string)
+		if method == audit.MethodRun && strings.Contains(path, "/outcome/") {
+			return &doc.Claims[i]
+		}
+	}
+	return nil
+}
+
+// claimFor returns the disclosed claim for one entry, matched on what the claim says rather than on a
+// coordinate. The two bundle shapes number their claims differently, a chain claim by its sequence and
+// a tree claim by its leaf index, so matching on the coordinate attached a disclosure to whichever
+// claim happened to share the number. It returns nil when the entry is withheld.
+func claimFor(doc *audit.Bundle, method, path string) *audit.BundleClaim {
+	for i := range doc.Claims {
+		gotMethod, _ := doc.Claims[i].Payload["method"].(string)
+		gotPath, _ := doc.Claims[i].Payload["path"].(string)
+		if gotMethod == method && gotPath == path {
+			return &doc.Claims[i]
+		}
+	}
+	return nil
 }
 
 // parseReceipt splits a seq:link audit receipt into its parts.

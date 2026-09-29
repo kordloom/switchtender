@@ -66,14 +66,21 @@ func slackMessage(r *run.Run) string {
 	return msg
 }
 
-// runLabel returns a human label for a run in a notification: its playbook, else its command, else
-// its id, so a channel message always names the run by whatever identifies it best.
+// runLabel returns a human label for a run in a notification: its playbook, else its tool and id, so a
+// channel message always names the run by whatever identifies it best.
+//
+// It never returns the command. A playbook is a path, and naming it tells a reader which change ran. A
+// command is the run's whole script body, and this label is embedded in the message every external
+// channel sends, so returning it put inline passwords and tokens into Slack, Discord, Teams, PagerDuty,
+// ntfy, Grafana, and Twilio, against the rule the rest of the notification code keeps: the run store,
+// the live stream, and the run page hold the command, and only what leaves the host loses it. A shell
+// run is named by its tool and its id, which is what a reader needs to go and open it.
 func runLabel(r *run.Run) string {
 	if r.Playbook != "" {
 		return r.Playbook
 	}
-	if r.Command != "" {
-		return r.Command
+	if tool := run.NormalizeTool(r.Tool); tool != "" && tool != run.ToolAnsible {
+		return string(tool) + " " + r.ID
 	}
 	return r.ID
 }

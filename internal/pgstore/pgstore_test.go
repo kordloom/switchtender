@@ -524,4 +524,30 @@ func TestLeaseUsesDatabaseClock(t *testing.T) {
 	if _, err := time.Parse(time.RFC3339Nano, stamp); err != nil {
 		t.Errorf("claimed_at = %q, want an RFC 3339 timestamp: %v", stamp, err)
 	}
+
+	// A stale claim on a run somebody asked to cancel is settled by the sweep rather than requeued.
+	// Requeuing it cleared the lease and kept the flag, and a claim will not take a cancel-flagged run,
+	// so it sat pending and unclaimable with nothing that sweeps a pending run to end it. Asserted here
+	// because the sweep is hand-written SQL per backend, and this is the backend a customer runs.
+	stale := time.Now().Add(-time.Hour)
+	if err := runs.Save(ctx, &run.Run{
+		ID: "run_swept_cancel", Playbook: "site.yml", Status: run.StatusPending, CreatedAt: stale,
+		ClaimedBy: "worker-that-died", ClaimedAt: &stale, CancelRequested: true,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if _, err := runs.ReclaimStale(ctx, 30*time.Second); err != nil {
+		t.Fatalf("ReclaimStale() error = %v", err)
+	}
+	swept, err := runs.Get(ctx, "run_swept_cancel")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if swept.Status != run.StatusCanceled {
+		t.Errorf("a swept cancel is %q, want canceled: a cancel-flagged pending run can never be "+
+			"claimed and no sweep settles a pending one, so it would never finish", swept.Status)
+	}
+	if swept.EndedAt == nil {
+		t.Error("the settled run records no end")
+	}
 }

@@ -35,6 +35,23 @@ type createScheduleRequest struct {
 	// edit dialog that cannot express a graph must not erase one, while an empty array explicitly
 	// replaces the pipeline with whatever the other fields name.
 	Steps *[]run.PipelineStep `json:"steps,omitempty"`
+	// Enabled reports whether the schedule fires. A pointer on the same rule as Shards and Steps: a
+	// create that omits it means a live schedule, and an update that omits it keeps the schedule as it
+	// is, so an edit dialog with no such control cannot pause or resume one by accident.
+	//
+	// Without this field the flag the tick loop honors could not be reached at all: pausing a nightly
+	// deployment meant deleting it and losing its cadence and history, and an imported schedule that
+	// arrived disabled could never be started.
+	Enabled *bool `json:"enabled,omitempty"`
+}
+
+// scheduleEnabled resolves the fire flag for a write: what the request says, or what is stored when the
+// request says nothing.
+func scheduleEnabled(requested *bool, stored bool) bool {
+	if requested == nil {
+		return stored
+	}
+	return *requested
 }
 
 // scheduleShards resolves the shard count for a write: what the request says, or what is stored when
@@ -93,7 +110,7 @@ func createScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 			Inventory: req.Inventory, Shards: scheduleShards(req.Shards, 0),
 			Steps:      scheduleSteps(req.Steps, nil),
 			TemplateID: req.TemplateID, OrgID: run.SubmitterOrgFrom(r.Context()),
-			Enabled: true, CreatedAt: time.Now(),
+			Enabled: scheduleEnabled(req.Enabled, true), CreatedAt: time.Now(),
 		}
 		if err := sc.Validate(); err != nil {
 			msg := "invalid schedule"
@@ -123,8 +140,9 @@ func createScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 	}
 }
 
-// updateScheduleHandler replaces a schedule, keeping its enabled state, creation time, and last-run
-// record, and recomputes the next fire from the new cron.
+// updateScheduleHandler replaces a schedule, keeping its creation time and last-run record, and
+// recomputes the next fire from the new cron. A request that names the enabled flag pauses or resumes
+// the schedule; one that omits it leaves the flag as it stands.
 func updateScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
@@ -179,7 +197,7 @@ func updateScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 			Inventory: req.Inventory, Shards: scheduleShards(req.Shards, existing.Shards),
 			Steps:      scheduleSteps(req.Steps, existing.Steps),
 			TemplateID: req.TemplateID, OrgID: existing.OrgID,
-			Enabled: existing.Enabled, CreatedAt: existing.CreatedAt,
+			Enabled: scheduleEnabled(req.Enabled, existing.Enabled), CreatedAt: existing.CreatedAt,
 			LastRunAt: existing.LastRunAt, LastRunID: existing.LastRunID,
 		}
 		if err := sc.Validate(); err != nil {

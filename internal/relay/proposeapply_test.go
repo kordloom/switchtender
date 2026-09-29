@@ -12,23 +12,14 @@ import (
 	"github.com/kordloom/switchtender/internal/run"
 )
 
-// TestAWorkerCanProposeTheApplyItsPlanGated covers a gate that could not complete anywhere but the
-// control node. A terraform run a plan-content policy scopes is planned first, and the apply it would
-// perform is proposed as a second run for a person to release. A relay worker has no path to create a
-// run: the save endpoint refuses an unknown id on purpose, since a worker only reports on what it
-// claimed. So on a worker the proposal failed with a 404, the plan run failed with it, and the gated
-// apply was never held for anybody. The most careful thing in the product did nothing in the topology
-// it is most needed in.
-//
-// The worker now reports what its plan found, a destroy count and whether the summary was readable, and
-// the control node builds the proposal itself from the plan run it already holds. That is narrower than
-// letting a worker submit a run: the apply's command, target, credentials, and commit come from the
-// stored plan rather than from the worker's request, so a worker cannot propose an apply of something
-// else.
-func TestAWorkerCanProposeTheApplyItsPlanGated(t *testing.T) {
-	t.Parallel()
+// planFixture stands up a control node holding one live terraform plan a destroy policy scopes, with a
+// worker that has claimed it. Each case builds its own, because a plan proposes exactly one apply: the
+// call is idempotent so a worker whose response was lost cannot mint a second real change, which means
+// two outcomes cannot be exercised against one plan.
+func planFixture(t *testing.T) (client *Client, store run.Store, baseURL string) {
+	t.Helper()
 	ctx := context.Background()
-	store := run.NewMemStore()
+	store = run.NewMemStore()
 	policies := policy.NewMemStore()
 	if err := policies.Save(ctx, &policy.Policy{
 		ID: "pol_1", Name: "tf-destroy-guard", Tool: run.ToolTerraform, MaxDestroy: 1,
@@ -54,7 +45,26 @@ func TestAWorkerCanProposeTheApplyItsPlanGated(t *testing.T) {
 	if _, err := tr.Claim(ctx, "worker-1", []string{"default"}); err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
-	client := NewClient(tr)
+	return NewClient(tr), store, srv.URL
+}
+
+// TestAWorkerCanProposeTheApplyItsPlanGated covers a gate that could not complete anywhere but the
+// control node. A terraform run a plan-content policy scopes is planned first, and the apply it would
+// perform is proposed as a second run for a person to release. A relay worker has no path to create a
+// run: the save endpoint refuses an unknown id on purpose, since a worker only reports on what it
+// claimed. So on a worker the proposal failed with a 404, the plan run failed with it, and the gated
+// apply was never held for anybody. The most careful thing in the product did nothing in the topology
+// it is most needed in.
+//
+// The worker now reports what its plan found, a destroy count and whether the summary was readable, and
+// the control node builds the proposal itself from the plan run it already holds. That is narrower than
+// letting a worker submit a run: the apply's command, target, credentials, and commit come from the
+// stored plan rather than from the worker's request, so a worker cannot propose an apply of something
+// else.
+func TestAWorkerCanProposeTheApplyItsPlanGated(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	client, store, _ := planFixture(t)
 
 	// Test 0: A plan over the threshold produces a held apply, built from the plan the control node has.
 	proposal, err := client.ProposeApply(ctx, "run_plan", 3, true)
@@ -86,7 +96,8 @@ func TestAWorkerCanProposeTheApplyItsPlanGated(t *testing.T) {
 	}
 
 	// Test 1: A plan under the threshold proposes an apply that runs without waiting.
-	queued, err := client.ProposeApply(ctx, "run_plan", 0, true)
+	under, _, _ := planFixture(t)
+	queued, err := under.ProposeApply(ctx, "run_plan", 0, true)
 	if err != nil {
 		t.Fatalf("ProposeApply under the threshold = %v", err)
 	}
@@ -96,7 +107,8 @@ func TestAWorkerCanProposeTheApplyItsPlanGated(t *testing.T) {
 
 	// Test 2: A plan whose summary could not be read is held, never queued, because a plan nobody could
 	// weigh against the limit has not passed it.
-	unread, err := client.ProposeApply(ctx, "run_plan", 0, false)
+	unreadable, _, _ := planFixture(t)
+	unread, err := unreadable.ProposeApply(ctx, "run_plan", 0, false)
 	if err != nil {
 		t.Fatalf("ProposeApply of an unreadable plan = %v", err)
 	}
@@ -108,7 +120,8 @@ func TestAWorkerCanProposeTheApplyItsPlanGated(t *testing.T) {
 	}
 
 	// Test 3: A worker without the run's lease cannot propose anything for it.
-	bare := NewClient(NewHTTPTransport(srv.URL, "ymt_worker", nil))
+	_, _, bareURL := planFixture(t)
+	bare := NewClient(NewHTTPTransport(bareURL, "ymt_worker", nil))
 	if _, err := bare.ProposeApply(ctx, "run_plan", 3, true); err == nil {
 		t.Error("a worker with no lease proposed an apply for somebody else's run")
 	}

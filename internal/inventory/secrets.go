@@ -16,24 +16,6 @@ import (
 // RedactedValue stands in for a secret value removed from inventory content.
 const RedactedValue = "***"
 
-// iniAssignment matches one name=value assignment in INI inventory text. The name is captured so a
-// single classifier decides whether it is secret, and the value is either a quoted run (spaces
-// allowed, up to the closing quote) or an unquoted run up to the next whitespace, which is exactly
-// what the INI form permits: several host variables share one line, so an unquoted value cannot
-// contain a space.
-var iniAssignment = regexp.MustCompile(
-	`(?i)([a-z0-9_][a-z0-9_.\-]*)\s*=\s*("[^"\n]*"|'[^'\n]*'|[^\s]+)`)
-
-// yamlAssignment matches one name: value line in text that did not parse as a document. The value
-// runs to the end of the line rather than to the next space, because a YAML scalar needs no quotes
-// to contain spaces and stopping at the first space left the rest of a passphrase in the clear.
-var yamlAssignment = regexp.MustCompile(
-	`(?i)([a-z0-9_][a-z0-9_.\-]*)\s*:[ \t]*("[^"\n]*"|'[^'\n]*'|[^\r\n]+)`)
-
-// assignmentPatterns are the textual fallbacks, applied in order to content no parser accepted and
-// to the string leaves of content one did.
-var assignmentPatterns = []*regexp.Regexp{iniAssignment, yamlAssignment}
-
 // Secrets returns the values of secret-looking variables in inventory content, so a host list that
 // carries an ansible_password or an API token does not leak it into a run's log or events. A quoted
 // value is unwrapped so a masker holds the bare secret and matches it literally in output;
@@ -294,48 +276,18 @@ func collectNode(key string, node *yaml.Node, secrets *[]string) {
 //
 // A non-secret name does not consume the rest of the match: scanning resumes at the start of its
 // value, so a secret written after an ordinary assignment on the same line is still found.
+// The scan itself lives in util, because a run's variables carry these same assignments inside
+// ordinary string values and the audit redactor needs the identical reading of them. What stays here is
+// which of the values found belong in the masker's list: a key file's location is redacted from the
+// content like anything else, and is not a secret to hunt for in a run's output.
 func scanText(text string, secrets *[]string) string {
-	for _, pattern := range assignmentPatterns {
-		text = scanPattern(pattern, text, secrets)
-	}
-	return text
-}
-
-// scanPattern applies one assignment pattern across text, redacting the values whose names the
-// classifier calls secret.
-func scanPattern(pattern *regexp.Regexp, text string, secrets *[]string) string {
-	var out strings.Builder
-	pos := 0
-	for pos < len(text) {
-		loc := pattern.FindStringSubmatchIndex(text[pos:])
-		if loc == nil {
-			break
+	out, found := util.RedactAssignments(text, RedactedValue)
+	for _, a := range found {
+		if !pathReference(a.Name, a.Value) {
+			addSecret(a.Value, secrets)
 		}
-		name := text[pos+loc[2] : pos+loc[3]]
-		valueStart, valueEnd := pos+loc[4], pos+loc[5]
-		out.WriteString(text[pos:valueStart])
-		if !util.SecretKey(name) {
-			pos = valueStart
-			continue
-		}
-		out.WriteString(RedactedValue)
-		if value := unquote(text[valueStart:valueEnd]); !pathReference(name, value) {
-			addSecret(value, secrets)
-		}
-		pos = valueEnd
 	}
-	out.WriteString(text[pos:])
-	return out.String()
-}
-
-// unquote strips one matching pair of surrounding quotes, so the masker holds the bare secret and
-// matches it literally in output. Masking a value with its quotes would mask a string the output
-// never contains.
-func unquote(value string) string {
-	if len(value) >= 2 && (value[0] == '"' || value[0] == '\'') && value[len(value)-1] == value[0] {
-		return value[1 : len(value)-1]
-	}
-	return value
+	return out
 }
 
 // addSecret appends value to secrets unless it is empty or already there, keeping the masker's list

@@ -260,22 +260,35 @@ func (a *authorizer) manages(ctx context.Context, actor Actor, object string) (b
 	return false, nil
 }
 
-// readableObjectsFor returns the set of object ids the given subjects may read through a grant, so a
-// list can be filtered to what the actor is allowed to see. Any grant satisfies read, since use and
-// manage rank above it. The caller passes the actor's subjects so the org membership they carry is
-// computed once and reused for the org-ownership check.
-func (a *authorizer) readableObjectsFor(ctx context.Context, subjects map[string]bool) (map[string]bool, error) {
+// objectsFor returns the set of object ids the given subjects hold want on through a grant, so a list
+// can be filtered to what the actor is allowed to see. The caller passes the actor's subjects so the org
+// membership they carry is computed once and reused for the org-ownership check.
+//
+// The level is a parameter because a list of objects and a list of runs ask different questions: any
+// grant satisfies read, which is right for seeing that a project exists, and wrong for reading the
+// record of a change made through it.
+func (a *authorizer) objectsFor(ctx context.Context, subjects map[string]bool,
+	want grant.Access) (map[string]bool, error) {
 	grants, err := a.grants.List(ctx)
 	if err != nil {
 		return nil, err
 	}
 	out := make(map[string]bool)
 	for _, g := range grants {
-		if subjects[g.Subject] && grant.Satisfies(g.Access, grant.AccessRead) {
+		if subjects[g.Subject] && grant.Satisfies(g.Access, want) {
 			out[g.Object] = true
 		}
 	}
 	return out, nil
+}
+
+// runReadFilter is readFilter at use rather than read, for the views built out of runs.
+//
+// A run is not an object somebody was granted; it is a record of what was done to hosts through the
+// objects it names. Fetching one by id asks for use on each of them, so a list of runs has to ask the
+// same question or the list discloses what the fetch withholds.
+func (a *authorizer) runReadFilter(ctx context.Context) (func(id, orgID string) bool, error) {
+	return a.objectFilter(ctx, grant.AccessUse)
 }
 
 // readFilter returns a predicate reporting whether the request actor may see an object, given its id
@@ -286,6 +299,13 @@ func (a *authorizer) readableObjectsFor(ctx context.Context, subjects map[string
 // still sees all. A nil authorizer or grant store keeps everything. The error surfaces a grant-store
 // failure so the caller can fail closed.
 func (a *authorizer) readFilter(ctx context.Context) (func(id, orgID string) bool, error) {
+	return a.objectFilter(ctx, grant.AccessRead)
+}
+
+// objectFilter is the shared body of readFilter and runReadFilter, deciding visibility at the given
+// access level so the two cannot drift apart in anything but that level.
+func (a *authorizer) objectFilter(ctx context.Context,
+	want grant.Access) (func(id, orgID string) bool, error) {
 	keepAll := func(_, _ string) bool { return true }
 	if a == nil || a.grants == nil || !a.strict {
 		return keepAll, nil
@@ -298,7 +318,7 @@ func (a *authorizer) readFilter(ctx context.Context) (func(id, orgID string) boo
 	if err != nil {
 		return nil, err
 	}
-	readable, err := a.readableObjectsFor(ctx, subjects)
+	readable, err := a.objectsFor(ctx, subjects, want)
 	if err != nil {
 		return nil, err
 	}
@@ -422,7 +442,12 @@ func grantsEnforced(ctx context.Context, authz *authorizer) (bool, error) {
 }
 
 func readableRuns(ctx context.Context, authz *authorizer, runs []*run.Run) ([]*run.Run, error) {
-	keep, err := authz.readFilter(ctx)
+	// Filtered at use, which is what fetching a run by id requires, rather than at read. Any grant
+	// satisfies read, so filtering there put a run in the list whose by-id fetch answered 403: an
+	// explicit read grant on one of its objects disclosed the whole run, its command, its extra vars
+	// and the credentials it named, and a run's extra vars carry whatever a survey filled in. Reading a
+	// run means reading what it did on hosts, so it takes the same access as using those objects.
+	keep, err := authz.runReadFilter(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -94,12 +94,12 @@ func Collect(ctx context.Context, runs run.Store, audits audit.Store, installID,
 	// failed read would assert by omission that nothing ran, which is the one thing an evidence
 	// document must not do quietly.
 	var groups [][]run.HostSummary
-	events, err := runs.Events(ctx, id)
+	own, err := hostSummaries(ctx, runs, id, at)
 	if err != nil {
-		return nil, fmt.Errorf("read run events: %w", err)
+		return nil, err
 	}
-	if len(events) > 0 {
-		groups = append(groups, run.HostSummariesFromStats(events, at))
+	if len(own) > 0 {
+		groups = append(groups, own)
 	} else {
 		for _, read := range []func(context.Context, string) ([]*run.Run, error){runs.Shards, runs.Steps} {
 			children, cerr := read(ctx, id)
@@ -107,12 +107,12 @@ func Collect(ctx context.Context, runs run.Store, audits audit.Store, installID,
 				return nil, fmt.Errorf("read run children: %w", cerr)
 			}
 			for _, c := range children {
-				ce, ceErr := runs.Events(ctx, c.ID)
+				ce, ceErr := hostSummaries(ctx, runs, c.ID, at)
 				if ceErr != nil {
-					return nil, fmt.Errorf("read run events: %w", ceErr)
+					return nil, ceErr
 				}
 				if len(ce) > 0 {
-					groups = append(groups, run.HostSummariesFromStats(ce, at))
+					groups = append(groups, ce)
 				}
 			}
 			if len(groups) > 0 {
@@ -226,6 +226,55 @@ var worstRank = map[string]int{"skipped": 0, "ok": 1, "changed": 2, "unreachable
 // mergeHosts combines per-child host summaries into one view: a host appearing in several children,
 // as it does across pipeline steps, sums its tallies and keeps its most severe outcome. Hosts come
 // back sorted by name so the table reads the same on every generation.
+// eventPage is how many events are folded at a time when a run's per-host outcomes have to be rebuilt
+// from its event stream. It matches the window the run export pages by.
+const eventPage = 20_000
+
+// hostSummaries returns one run's per-host outcomes.
+//
+// The stored summaries are the answer whenever there are any: whichever process executed the run folded
+// them as its events streamed past and recorded them before the run went terminal, so reading them back
+// is both cheaper and closer to what the run actually reported than recomputing from events.
+//
+// Only a run with none, an old one or one whose summaries never landed, is rebuilt, and then by paging
+// the events through a fold rather than holding them all. Reading the whole stream at once is what this
+// avoided: a run across thousands of hosts carries hundreds of thousands of events, the codebase measures
+// that at hundreds of megabytes, and the export path was already paged for exactly that reason while the
+// evidence document still loaded everything. A few concurrent requests could take the control node down,
+// and the runs it was recording with it.
+func hostSummaries(ctx context.Context, runs run.Store, id string,
+	at time.Time) ([]run.HostSummary, error) {
+	stored, err := runs.RunHostSummaries(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("read run host summaries: %w", err)
+	}
+	if len(stored) > 0 {
+		return stored, nil
+	}
+	fold := run.NewSummaryFold(at)
+	var after int64
+	folded := false
+	for {
+		page, perr := runs.EventsAfter(ctx, id, after, eventPage)
+		if perr != nil {
+			return nil, fmt.Errorf("read run events: %w", perr)
+		}
+		if len(page) == 0 {
+			break
+		}
+		fold.Add(page)
+		folded = true
+		after += int64(len(page))
+		if len(page) < eventPage {
+			break
+		}
+	}
+	if !folded {
+		return nil, nil
+	}
+	return fold.HostSummaries(), nil
+}
+
 func mergeHosts(groups [][]run.HostSummary) []run.HostSummary {
 	if len(groups) == 0 {
 		return nil

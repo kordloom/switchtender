@@ -69,6 +69,28 @@ func inventorySource(req createInventoryRequest, existing string, sealer *creden
 	return source, s, "", 0
 }
 
+// denyNonAdminInventoryCommand refuses a non-admin request to point an inventory at a command, or to
+// rewrite the command one already runs, and reports true when it has answered the request.
+//
+// An inventory's command source runs a shell command on the executor to produce the host list, so it
+// is code execution on the run host, the same capability the credential handlers reserve to an admin.
+// The route's role floor is admin, but a manage grant on the inventory walks around it, so without
+// this an operator holding an ordinary manage grant on one inventory could store a shell payload and
+// then launch a run against that inventory to execute it.
+//
+// Re-saving an inventory that already runs this command, to rename it or move it between
+// organizations, supplies no new command and stays delegable, which is what a manage grant is for.
+func denyNonAdminInventoryCommand(w http.ResponseWriter, r *http.Request, log *zap.Logger,
+	source, newConfig, existingSource string) bool {
+	if credential.NormalizeSource(source) != credential.SourceCommand {
+		return false
+	}
+	if newConfig == "" && credential.NormalizeSource(existingSource) == credential.SourceCommand {
+		return false
+	}
+	return denyNonAdminCommandSource(w, r, log, source, "an inventory")
+}
+
 // listInventoriesResponse wraps the inventory list.
 type listInventoriesResponse struct {
 	// Inventories is the ordered list.
@@ -95,6 +117,9 @@ func createInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 		source, sealed, msg, status := inventorySource(req, "", sealer)
 		if msg != "" {
 			respondError(w, log, status, msg)
+			return
+		}
+		if denyNonAdminInventoryCommand(w, r, log, source, req.ContentConfig, "") {
 			return
 		}
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, req.CredentialIDs...)) {
@@ -153,17 +178,24 @@ func updateInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 			respondError(w, log, status, msg)
 			return
 		}
+		if denyNonAdminInventoryCommand(w, r, log, source, req.ContentConfig, existing.ContentSource) {
+			return
+		}
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, req.CredentialIDs...)) {
 			return
 		}
 		// Both directions of an organization change are checked: entering one gives every member
 		// use of this inventory, and leaving one takes it away from the members it had.
+		// Only a change of organization is a placement. Asking on every edit refused a manage-delegated
+		// caller who is not a member even a rename, while delete asked nothing and succeeded.
 		orgID := orgForUpdate(req.OrgID, existing.OrgID)
-		if authz.denyForeignOrg(w, r, log, orgID) {
-			return
-		}
-		if existing.OrgID != orgID && authz.denyForeignOrg(w, r, log, existing.OrgID) {
-			return
+		if existing.OrgID != orgID {
+			if authz.denyForeignOrg(w, r, log, orgID) {
+				return
+			}
+			if authz.denyForeignOrg(w, r, log, existing.OrgID) {
+				return
+			}
 		}
 		inv := &inventory.Inventory{
 			ID: id, Name: req.Name, Content: req.Content, CredentialIDs: req.CredentialIDs,

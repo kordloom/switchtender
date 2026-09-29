@@ -6,6 +6,7 @@ package schedule
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -95,11 +96,38 @@ func (s *Schedule) Clone() *Schedule {
 
 // Validate reports whether the schedule has a parseable cron, a valid timezone, and a target to run.
 func (s *Schedule) Validate() error {
+	if err := s.validTimezone(); err != nil {
+		return err
+	}
 	if _, err := s.NextFire(time.Now()); err != nil {
 		return err
 	}
 	if s.Playbook == "" && len(s.Steps) == 0 && s.TemplateID == "" {
 		return ErrNoTarget
+	}
+	return nil
+}
+
+// validTimezone reports whether the timezone is a bare zone name this system can resolve.
+//
+// The zone is spliced in front of the cron expression as a CRON_TZ descriptor, and the parser splits that
+// descriptor at the first space, so anything after a zone name becomes cron fields. Unchecked, a schedule
+// could be stored with a blank cron and a timezone of "UTC * * * * *": it validated, computed a next fire
+// a minute out, and fired every minute, while every view of it showed no cadence at all. A schedule whose
+// displayed cadence is not the one it runs is the opposite of what recording unattended work is for.
+//
+// An unresolvable zone is refused here rather than at fire time, so it is reported to whoever wrote it
+// instead of quietly running in the server's own time.
+func (s *Schedule) validTimezone() error {
+	if s.Timezone == "" {
+		return nil
+	}
+	if strings.ContainsAny(s.Timezone, " \t\r\n=") {
+		return fmt.Errorf("%w: a timezone is a zone name such as America/New_York, not %q",
+			ErrBadCron, s.Timezone)
+	}
+	if _, err := time.LoadLocation(s.Timezone); err != nil {
+		return fmt.Errorf("%w: timezone %q cannot be resolved on this system", ErrBadCron, s.Timezone)
 	}
 	return nil
 }

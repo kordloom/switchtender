@@ -3,6 +3,7 @@ package dispatch
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -129,6 +130,10 @@ func (d *Dispatcher) proposeApply(
 // found and the control node builds the proposal from the plan run it already holds, which is narrower
 // than letting a worker submit a run: the apply's command, target, credentials, image, and commit come
 // from the stored plan rather than from the worker's request.
+// One apply per plan, always the same one. A worker whose 201 never arrived retries, which is
+// legitimate, so the second call has to return the proposal the first one made rather than mint a
+// second real apply. The key is derived from the plan and carries the server's reserved prefix, which
+// no caller may supply, so the store's unique index settles it whichever process asks.
 func ProposeApplyFor(ctx context.Context, store run.Store, policies []*policy.Policy, plan *run.Run,
 	destroys int, read bool) (*run.Run, error) {
 	if plan == nil {
@@ -137,12 +142,43 @@ func ProposeApplyFor(ctx context.Context, store run.Store, policies []*policy.Po
 	proposal := &run.Run{
 		ID: run.NewID(), Playbook: plan.Playbook, Inventory: plan.Inventory,
 		Status: run.StatusPending, CreatedAt: time.Now(),
+		IdempotencyKey: applyKeyFor(plan.ID),
 	}
 	run.ApplyOptions(proposal, applyOptions(plan, policies, destroys, read))
-	if err := store.Save(ctx, proposal); err != nil {
+
+	// The apply faces the rules every other submission faces. This path wrote straight to the store, so
+	// a deny rule never refused it, a blanket approval rule never held it, and the rule set in force was
+	// never recorded: the same install refused the apply when the control node claimed the plan and ran
+	// it when a worker did. The plan-content threshold applyOptions weighs is one rule among them, not
+	// the only one.
+	stampPolicySet(proposal, policies)
+	if p := policy.Denying(policies, proposal); p != nil {
+		return nil, fmt.Errorf("%w: policy %q refuses this apply", ErrPolicyDenied, p.Label())
+	}
+	if p := policy.Requiring(policies, proposal); p != nil {
+		proposal.Status = run.StatusPendingApproval
+		proposal.HeldByPolicy = p.Label()
+		proposal.RequireDistinctApprover = p.RequireDistinctApprover
+	}
+
+	err := store.Save(ctx, proposal)
+	if errors.Is(err, run.ErrDuplicateKey) {
+		existing, ferr := store.ByIdempotencyKey(ctx, proposal.IdempotencyKey)
+		if ferr != nil {
+			return nil, fmt.Errorf("propose apply: %w", ferr)
+		}
+		return existing, nil
+	}
+	if err != nil {
 		return nil, fmt.Errorf("propose apply: %w", err)
 	}
 	return proposal, nil
+}
+
+// applyKeyFor is the idempotency key the apply proposed from one plan holds, so a plan can only ever
+// have the one apply.
+func applyKeyFor(planID string) string {
+	return "st:apply:" + planID
 }
 
 // applyProposer is a store that can create the apply a plan proposes on its behalf. A relay-backed

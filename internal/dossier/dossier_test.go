@@ -285,7 +285,7 @@ func TestDossierFailsLoudlyWhenAStoreRead2Fails(t *testing.T) {
 	}
 }
 
-// eventsFail is a run store whose event reads fail.
+// eventsFail is a run store whose per-host outcome reads all fail, whichever one the dossier uses.
 type eventsFail struct {
 	run.Store
 }
@@ -293,6 +293,17 @@ type eventsFail struct {
 // Events always fails.
 func (e *eventsFail) Events(context.Context, string) ([]event.Event, error) {
 	return nil, errors.New("event store is unavailable")
+}
+
+// EventsAfter always fails, which is the paged read the dossier folds when a run has no stored
+// summaries.
+func (e *eventsFail) EventsAfter(context.Context, string, int64, int) ([]event.Event, error) {
+	return nil, errors.New("event store is unavailable")
+}
+
+// RunHostSummaries always fails, which is the read the dossier prefers.
+func (e *eventsFail) RunHostSummaries(context.Context, string) ([]run.HostSummary, error) {
+	return nil, errors.New("summary store is unavailable")
 }
 
 func TestDossierRedeemsTheRunReceiptForWhoAsked(t *testing.T) {

@@ -323,7 +323,14 @@ func redactSecrets(value any) any {
 		}
 		return v
 	case string:
-		return urlUserinfo.ReplaceAllString(v, "$1"+redactedMarker+"@")
+		// A string leaf is scanned for an assignment of its own, not only for credentials in a URL. A
+		// run's variables are strings, and a variable holding a command line holds whatever that command
+		// line holds: an extra var named deploy_cmd whose value ran psql with an inline password kept the
+		// password, and this record is what the signed receipt discloses to an outside auditor. The
+		// inventory redactor already read these assignments, so the same string was masked in an
+		// inventory and shipped verbatim in a receipt. Both go through the one reading of them now.
+		out, _ := util.RedactAssignments(v, redactedMarker)
+		return urlUserinfo.ReplaceAllString(out, "$1"+redactedMarker+"@")
 	default:
 		return v
 	}

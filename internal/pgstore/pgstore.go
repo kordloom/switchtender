@@ -2040,6 +2040,70 @@ func (s *store) Heartbeat(ctx context.Context, id, owner string) error {
 // are written in RFC 3339, which trims trailing zeros from the fractional second, so their text
 // widths vary and lexicographic order does not always match chronological order. Comparing as text
 // would let the sweep interrupt a run whose lease is in fact fresh.
+// terminalCandidateQuery selects the top-level runs a sweep of this age would drive terminal.
+const terminalCandidateQuery = `
+SELECT id FROM runs
+WHERE parent_id IS NULL AND (
+  (status='running' AND claimed_by!='' AND claimed_at::timestamptz < now() - make_interval(secs => $1))
+  OR (status IN ('pending','running') AND claimed_by='' AND kind IN ('split','pipeline')
+      AND created_at::timestamptz < now() - make_interval(secs => $1)))`
+
+// ReclaimStaleSettled sweeps like ReclaimStale and names the top-level runs the sweep drove to a
+// terminal state, so the caller can commit their outcomes to the chain. The sweep is a bulk update
+// rather than a pass through the dispatcher's finalize, so without this those runs, the ones whose
+// worker died mid-change, ended with no evidence at all. A child's outcome rolls up into its parent,
+// so children are left out here exactly as the terminal save leaves them out.
+func (s *store) ReclaimStaleSettled(ctx context.Context, ttl time.Duration) (int, []string, error) {
+	settled, err := s.terminalCandidates(ctx, ttl)
+	if err != nil {
+		return 0, nil, err
+	}
+	n, err := s.ReclaimStale(ctx, ttl)
+	if err != nil {
+		return n, nil, err
+	}
+	// The candidates were read before the sweep; only the ones it actually settled are reported, so a
+	// run another process finished first is not recorded twice.
+	return n, s.confirmSettled(ctx, settled), nil
+}
+
+// terminalCandidates lists the top-level runs this sweep would drive terminal: a running run whose
+// lease has expired, and an abandoned split or pipeline parent.
+func (s *store) terminalCandidates(ctx context.Context, ttl time.Duration) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, terminalCandidateQuery, ttl.Seconds())
+	if err != nil {
+		return nil, fmt.Errorf("reclaim stale: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("reclaim stale: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("reclaim stale: %w", err)
+	}
+	return out, nil
+}
+
+// confirmSettled keeps the candidates that are terminal now, after the sweep ran. A read failure
+// drops the id rather than failing the sweep: the reclaim itself has already succeeded, and the
+// caller's commit is best effort by design.
+func (s *store) confirmSettled(ctx context.Context, candidates []string) []string {
+	var out []string
+	for _, id := range candidates {
+		r, err := s.Get(ctx, id)
+		if err != nil || r == nil || !r.Status.Terminal() {
+			continue
+		}
+		out = append(out, id)
+	}
+	return out
+}
+
 func (s *store) ReclaimStale(ctx context.Context, ttl time.Duration) (int, error) {
 	age := ttl.Seconds()
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -2048,9 +2112,28 @@ func (s *store) ReclaimStale(ctx context.Context, ttl time.Duration) (int, error
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// A stale claim on a run somebody asked to cancel is settled, not requeued. Canceling a claimed run
+	// is cooperative: the flag is set for its holder to read. If that holder died before starting the
+	// run, requeuing it cleared the lease and kept the flag, and a claim will not take a cancel-flagged
+	// run, so the run sat pending and unclaimable with nothing that sweeps a pending run to end it,
+	// reported as canceling forever. The person already asked for this outcome and the run never began,
+	// so it ends canceled. This runs before the requeue so the requeue cannot pick the row up first.
 	res, err := tx.ExecContext(ctx, `
+UPDATE runs SET status='canceled', claimed_by='', claimed_at=NULL, claim_secret='',
+ended_at=`+pgNowText+`
+WHERE status='pending' AND claimed_by!='' AND cancel_requested=1
+  AND claimed_at::timestamptz < now() - make_interval(secs => $1)`, age)
+	if err != nil {
+		return 0, fmt.Errorf("reclaim stale: %w", err)
+	}
+	canceled, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("reclaim stale: %w", err)
+	}
+
+	res, err = tx.ExecContext(ctx, `
 UPDATE runs SET claimed_by='', claimed_at=NULL, claim_secret=''
-WHERE status='pending' AND claimed_by!=''
+WHERE status='pending' AND claimed_by!='' AND cancel_requested=0
   AND claimed_at::timestamptz < now() - make_interval(secs => $1)`, age)
 	if err != nil {
 		return 0, fmt.Errorf("reclaim stale: %w", err)
@@ -2059,6 +2142,7 @@ WHERE status='pending' AND claimed_by!=''
 	if err != nil {
 		return 0, fmt.Errorf("reclaim stale: %w", err)
 	}
+	requeued += canceled
 	res, err = tx.ExecContext(ctx, `
 UPDATE runs SET status='interrupted', claimed_by='', claimed_at=NULL, claim_secret='',
 ended_at=`+pgNowText+`, error='interrupted: executor lease expired'

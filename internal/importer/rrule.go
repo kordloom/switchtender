@@ -234,29 +234,45 @@ func cronDays(byday string) (string, bool) {
 	return strings.Join(days, ","), true
 }
 
-// dtstartZone returns the IANA zone named by a DTSTART's TZID parameter, or empty when the rule
-// carries none.
+// dtstartZone returns the IANA zone a DTSTART is written in: the zone its TZID parameter names, UTC
+// when it is in the Zulu form, or empty for a floating local time that names no zone at all.
 //
 // An AWX schedule records its zone here, and dropping it moved every imported maintenance window by
 // the offset between that zone and the server's. A 2am America/New_York window became 2am UTC, which
 // is nine the previous evening in New York, silently and with the same cron expression to look at.
+//
+// The Zulu form, a trailing Z and no parameter, is the same defect in the shape that arrives most
+// often: it is what AWX wrote before it recorded zones and what it still writes for a UTC schedule.
+// Reading no zone from it left the schedule in the server's local time while the hour lifted into the
+// cron expression was the UTC one, so a 09:00 UTC nightly job imported onto a Chicago server fired at
+// 09:00 Central. A floating time is left alone, because naming a zone it does not have would move the
+// window in the other direction.
 func dtstartZone(rrule string) string {
 	for field := range strings.FieldsSeq(strings.ReplaceAll(rrule, "\n", " ")) {
 		upper := strings.ToUpper(field)
 		if !strings.HasPrefix(upper, "DTSTART") {
 			continue
 		}
-		idx := strings.Index(upper, "TZID=")
-		if idx < 0 {
+		if idx := strings.Index(upper, "TZID="); idx >= 0 {
+			zone := field[idx+len("TZID="):]
+			// The parameter ends at the value separator: DTSTART;TZID=America/New_York:20260101T020000.
+			if colon := strings.Index(zone, ":"); colon >= 0 {
+				zone = zone[:colon]
+			}
+			if zone = strings.TrimSpace(zone); zone != "" {
+				return zone
+			}
 			continue
 		}
-		zone := field[idx+len("TZID="):]
-		// The parameter ends at the value separator: DTSTART;TZID=America/New_York:20260101T020000.
-		if colon := strings.Index(zone, ":"); colon >= 0 {
-			zone = zone[:colon]
+		// No parameter: the value itself says whether it is UTC. The Z belongs to the timestamp, so it
+		// is read from the value after the separator rather than from the whole field, which a zone name
+		// ending in Z would otherwise satisfy.
+		value := upper
+		if colon := strings.Index(value, ":"); colon >= 0 {
+			value = value[colon+1:]
 		}
-		if zone = strings.TrimSpace(zone); zone != "" {
-			return zone
+		if strings.HasSuffix(strings.TrimSpace(value), "Z") {
+			return "UTC"
 		}
 	}
 	return ""

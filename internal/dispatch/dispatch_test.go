@@ -403,7 +403,11 @@ func TestDispatcherSubmitNoPlaybook(t *testing.T) {
 	}
 }
 
-func TestDispatcherCloseCancelsRun(t *testing.T) {
+// TestDispatcherCloseStopsRun checks that Close stops an executing run and drives it terminal. The
+// status it records is interrupted, not canceled: the server stopped, which is what interrupted means,
+// and a partial retry accepts it. See TestAShutdownLeavesRunsInterruptedNotCanceled for why the two
+// have to stay distinguishable.
+func TestDispatcherCloseStopsRun(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
 	started := make(chan struct{})
@@ -427,8 +431,8 @@ func TestDispatcherCloseCancelsRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
-	if got.Status != run.StatusCanceled {
-		t.Errorf("Status = %q, want %q", got.Status, run.StatusCanceled)
+	if got.Status != run.StatusInterrupted {
+		t.Errorf("Status = %q, want %q", got.Status, run.StatusInterrupted)
 	}
 }
 

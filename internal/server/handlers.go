@@ -287,7 +287,7 @@ func driftHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Hand
 		panic("server: driftHandler: Store required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		_, anyReadable, ferr := derivedReadFilter(r.Context(), authz, store)
+		keep, _, ferr := derivedReadFilter(r.Context(), authz, store)
 		if ferr != nil {
 			log.Error("server: read filter: " + ferr.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not read runs")
@@ -299,12 +299,15 @@ func driftHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Hand
 			respondError(w, log, http.StatusInternalServerError, "could not compute drift status")
 			return
 		}
-		// Drift rows name a host and the tasks that keep changing on it, with no run id to check
-		// against, so the whole view is withheld from a caller who can read no runs at all. Showing
-		// it would be a summary of work they are not allowed to know happened.
-		visible := hosts
-		if !anyReadable {
-			visible = nil
+		// Each drift row names the check run that observed it, so it is kept only when that run is
+		// readable, the same rule the run list applies. Deciding it once for the whole view instead
+		// showed every host on the install, and their names and drifting task counts, to any caller
+		// who could read a single run of their own.
+		visible := make([]run.HostDrift, 0, len(hosts))
+		for _, h := range hosts {
+			if keep(h.RunID) {
+				visible = append(visible, h)
+			}
 		}
 		respondJSON(w, log, http.StatusOK,
 			driftResponse{Hosts: visible, Count: len(visible)}, wantsPretty(r))
@@ -371,12 +374,14 @@ func reconcileDriftHandler(store run.Store, submitter Submitter, authz *authoriz
 			return
 		}
 
-		// Authorize every object the proposal will touch, so a reconcile cannot borrow a project,
-		// inventory, or credentials the actor was never granted. The registry credential that pulls
-		// the execution image is one of them, since the reconcile runs inside the check's pinned image.
-		objects := append([]string{check.ProjectID, check.InventoryID, check.PullCredentialID},
-			check.CredentialIDs...)
-		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
+		// Authorize the check the way every other run operation authorizes a run, so a reconcile
+		// cannot borrow a project, inventory, or credentials the actor was never granted, and a check
+		// that names none of them is still scoped by the organization that ran it. Authorizing the
+		// object list alone allowed the one case that matters most here: an inline playbook against an
+		// inline inventory presents no objects, and authorizing no objects authorizes nothing, so any
+		// operator on the install could turn another organization's drift check into a real change on
+		// that organization's hosts.
+		if denyOnAuthzError(w, log, authz.authorizeRun(r.Context(), grant.AccessUse, check)) {
 			return
 		}
 
@@ -538,14 +543,12 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 		panic("server: createRunHandler: Submitter required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Not decodeStrict yet, and the exemption in TestEveryHandlerDecodesStrictly says why:
-		// createRunRequest declares no extra_vars, so a submission that carries them, which the
-		// plugin tool contract expects, would be refused outright instead of merely having them
-		// dropped. The field lands with the run submission DTOs, and this decode turns strict with
-		// it. Until then a misspelled control here is still accepted and silently ignored.
+		// Strict, like every other mutating endpoint. The controls here are the safety controls, so a
+		// key this endpoint does not recognize is refused rather than dropped: a submission asking for
+		// dry_run, require_approval, or limit by a name one character off was accepted, executed
+		// without it, and answered with a body indistinguishable from the run that was asked for.
 		var req createRunRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, badBodyMessage)
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		if !run.ValidTool(req.Tool) {
@@ -581,7 +584,7 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 			run.WithExtraVars(req.ExtraVars),
 		}
 		if supplied := strings.TrimSpace(r.Header.Get(idempotencyKeyHeader)); supplied != "" {
-			key, err := run.ClientKey(supplied)
+			key, err := run.ClientKey(supplied, run.SubmitterOrgFrom(r.Context()))
 			if err != nil {
 				respondError(w, log, http.StatusBadRequest, err.Error())
 				return
@@ -606,11 +609,9 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 		if req.Timeout > 0 {
 			opts = append(opts, run.WithTimeout(req.Timeout))
 		}
-		for _, t := range req.Notifications {
-			if err := run.ValidateNotifyTarget(t); err != nil {
-				respondError(w, log, http.StatusBadRequest, err.Error())
-				return
-			}
+		if err := run.ValidateNotifyTargets(req.Notifications); err != nil {
+			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
 		}
 		if len(req.Notifications) > 0 {
 			opts = append(opts, run.WithNotifications(req.Notifications))
@@ -704,7 +705,7 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 		// run and never execute. The git host is answered 202 and the deployment silently does not
 		// happen, which is the worst shape a failure can take.
 		if supplied := strings.TrimSpace(r.Header.Get(idempotencyKeyHeader)); supplied != "" {
-			key, err := run.ClientKey(supplied)
+			key, err := run.ClientKey(supplied, run.SubmitterOrgFrom(r.Context()))
 			if err != nil {
 				respondError(w, log, http.StatusBadRequest, err.Error())
 				return
@@ -1738,12 +1739,27 @@ func runStreamHandler(streamer Streamer, store run.Store, authz *authorizer, log
 	if shutdown != nil {
 		draining = shutdown.Done()
 	}
+	openStreams := &streamCount{}
 	return func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
 		if !ok {
 			respondError(w, log, http.StatusInternalServerError, "streaming unsupported")
 			return
 		}
+
+		// A stream is held open for as long as its run lasts, and each one keeps a goroutine, a
+		// subscription, and a poll of the store every second. Nothing bounded how many one caller could
+		// open, so a viewer, the lowest role that can read a run, could hold thousands open against
+		// still-executing runs and drive the store at thousands of reads a second for as long as they
+		// liked. The interface opens one per run page, so a real reader never approaches either limit.
+		release, admitted := openStreams.admit(actorKeyFor(r))
+		if !admitted {
+			w.Header().Set("Retry-After", "5")
+			respondError(w, log, http.StatusTooManyRequests,
+				"too many live streams are open; close one before opening another")
+			return
+		}
+		defer release()
 
 		id := r.PathValue("id")
 		rn, gerr := store.Get(r.Context(), id)

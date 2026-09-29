@@ -174,7 +174,9 @@ func (d *Dispatcher) runStepsDAG(ctx context.Context, parent *run.Run, steps []r
 		results[res.idx] = res.status
 		outputs[res.idx] = res.outputs
 		switch res.status {
-		case run.StatusCanceled:
+		// A step the server stopped ends the graph the same way a canceled one does, rather than
+		// counting as a failure the run never actually reached.
+		case run.StatusCanceled, run.StatusInterrupted:
 			canceled = true
 		case run.StatusSucceeded:
 		default:

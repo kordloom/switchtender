@@ -50,6 +50,12 @@ func runEvidenceHandler(store run.Store, audits audit.Store, installID string, a
 			respondError(w, log, http.StatusInternalServerError, "could not collect the evidence")
 			return
 		}
+		// The collected run is masked here, before either shape of this response is built, so the
+		// endpoint cannot hand back the notification targets every other run route redacts. A webhook URL
+		// is a bearer secret by itself and a target's key is a routing key or API token, and this route
+		// admits the non-admin who fired the run, which is exactly who the masking is for. Masking only
+		// the JSON would leave the next thing rendered from this record to rediscover it.
+		in.Run = maskRun(in.Run)
 		// The dossier is an HTML page for a person. A caller that asks for JSON gets the same collected
 		// record as data, which is what a program, and an AI agent above all, can actually read: the
 		// tool that reads a run's evidence used to hand a model a page of markup.
