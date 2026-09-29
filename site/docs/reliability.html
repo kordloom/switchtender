@@ -49,8 +49,9 @@ fleet adds capacity by adding workers, each keeping its own limit rather than a 
 across a mixed fleet. A GPU job waits for a GPU worker, and a default job runs anywhere.</p>
 <p>Claiming is exact on PostgreSQL. A worker takes the oldest pending run with <code>FOR UPDATE SKIP LOCKED</code>,
 so two workers never claim the same run even when they poll at the same instant. SQLite serializes
-every read and write through a single connection, which is why SQLite fits one process and PostgreSQL
-backs a fleet. Run multiple workers against PostgreSQL.</p>
+every write through a single connection while reads run on a separate read-only pool under WAL, so a
+long listing or log read never blocks a claim or a finalize. That is why SQLite fits one process and
+PostgreSQL backs a fleet. Run multiple workers against PostgreSQL.</p>
 <h2 id="recovery-when-a-worker-dies">Recovery when a worker dies</h2>
 <p>A running run carries a lease that its holder renews every few seconds. If a worker crashes or loses
 the network, the lease goes stale, and a janitor sweeps it after thirty seconds. Work that was still

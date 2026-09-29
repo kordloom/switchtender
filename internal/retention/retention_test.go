@@ -27,12 +27,17 @@ func TestSweepTrimsThenDeletes(t *testing.T) {
 		"fresh":   time.Hour,
 	}
 	for id, age := range ages {
-		if err := store.Save(ctx, &run.Run{ID: id, Status: run.StatusSucceeded, CreatedAt: now.Add(-age)}); err != nil {
+		// Events land while the run is running, then it finalizes, since the store fences event writes
+		// to a terminal run.
+		if err := store.Save(ctx, &run.Run{ID: id, Status: run.StatusRunning, CreatedAt: now.Add(-age)}); err != nil {
 			t.Fatalf("Save(%s) error = %v", id, err)
 		}
 		if err := store.AppendEvents(ctx, id,
 			[]event.Event{{Type: event.TypePlayStart, Time: now.Add(-age)}}); err != nil {
 			t.Fatalf("AppendEvents(%s) error = %v", id, err)
+		}
+		if err := store.Save(ctx, &run.Run{ID: id, Status: run.StatusSucceeded, CreatedAt: now.Add(-age)}); err != nil {
+			t.Fatalf("Save(%s) finalize error = %v", id, err)
 		}
 	}
 

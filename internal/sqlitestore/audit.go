@@ -20,7 +20,7 @@ type rowQuerier interface {
 // auditStore is an audit.Store backed by the shared SQLite database.
 type auditStore struct {
 	// db is the open database handle shared with the run store.
-	db *sql.DB
+	db *splitDB
 	// mu serializes appends within this process so the hash chain reads its head and inserts
 	// atomically. A UNIQUE index on seq is the cross-process backstop.
 	mu sync.Mutex

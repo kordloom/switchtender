@@ -15,7 +15,7 @@ const tokenColumns = `id, name, hash, user_id, created_at, last_used_at, expires
 // tokenStore is an auth.Store backed by the shared SQLite database.
 type tokenStore struct {
 	// db is the open database handle shared with the run store.
-	db *sql.DB
+	db *splitDB
 }
 
 // Save inserts or replaces the token.

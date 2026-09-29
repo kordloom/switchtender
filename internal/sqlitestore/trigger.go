@@ -15,7 +15,7 @@ const triggerColumns = `id, name, template_id, token_hash, signing_secret, requi
 // triggerStore is a trigger.Store backed by the shared SQLite database.
 type triggerStore struct {
 	// db is the open database handle shared with the run store.
-	db *sql.DB
+	db *splitDB
 }
 
 // Save inserts or replaces the trigger.

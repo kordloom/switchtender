@@ -18,7 +18,7 @@ const templateColumns = `id, name, project_id, playbook, inventory, inventory_id
 // templateStore is a template.Store backed by the shared SQLite database.
 type templateStore struct {
 	// db is the open database handle shared with the run store.
-	db *sql.DB
+	db *splitDB
 }
 
 // Save inserts or replaces the template.

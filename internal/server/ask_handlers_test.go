@@ -23,8 +23,10 @@ func TestAskFleet(t *testing.T) {
 	ctx := context.Background()
 	store := run.NewMemStore()
 	at := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	// The summary lands while the run is still running, then it finalizes, since the store fences
+	// summary writes to a terminal run.
 	if err := store.Save(ctx, &run.Run{
-		ID: "run_a", Playbook: "site.yml", Status: run.StatusFailed, CreatedAt: at,
+		ID: "run_a", Playbook: "site.yml", Status: run.StatusRunning, CreatedAt: at,
 	}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
@@ -32,6 +34,11 @@ func TestAskFleet(t *testing.T) {
 		{Host: "web01", Failures: 1, Worst: "failed", RanAt: at},
 	}); err != nil {
 		t.Fatalf("SaveHostSummary() error = %v", err)
+	}
+	if err := store.Save(ctx, &run.Run{
+		ID: "run_a", Playbook: "site.yml", Status: run.StatusFailed, CreatedAt: at,
+	}); err != nil {
+		t.Fatalf("Save() finalize error = %v", err)
 	}
 	seedDrift(t, store, "chk_w", "", "web02", 4)
 

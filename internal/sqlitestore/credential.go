@@ -15,7 +15,7 @@ const credentialColumns = `id, name, kind, secret, created_at, source, org_id`
 // credentialStore is a credential.Store backed by the shared SQLite database.
 type credentialStore struct {
 	// db is the open database handle shared with the run store.
-	db *sql.DB
+	db *splitDB
 }
 
 // Save inserts or replaces the credential.

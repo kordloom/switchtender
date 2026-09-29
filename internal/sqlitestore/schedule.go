@@ -18,7 +18,7 @@ const scheduleColumns = `id, name, cron, playbook, inventory, shards, steps, ena
 // scheduleStore is a schedule.Store backed by the shared SQLite database.
 type scheduleStore struct {
 	// db is the open database handle shared with the run store.
-	db *sql.DB
+	db *splitDB
 }
 
 // Save inserts or replaces the schedule.

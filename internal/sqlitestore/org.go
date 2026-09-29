@@ -12,7 +12,7 @@ import (
 // orgStore is an org.Store backed by the shared SQLite database.
 type orgStore struct {
 	// db is the open database handle shared with the run store.
-	db *sql.DB
+	db *splitDB
 }
 
 // Save inserts or replaces the organization.

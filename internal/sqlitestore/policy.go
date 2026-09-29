@@ -12,7 +12,7 @@ import (
 // policyStore is a policy.Store backed by the shared SQLite database.
 type policyStore struct {
 	// db is the open database handle shared with the run store.
-	db *sql.DB
+	db *splitDB
 }
 
 // policyColumns lists the policy columns in a stable order for reads and writes.

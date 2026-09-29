@@ -578,7 +578,9 @@ func TestRunEventsPaging(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	if err := store.Save(ctx, &run.Run{ID: "r", Status: run.StatusSucceeded, CreatedAt: time.Now()}); err != nil {
+	// Events are appended while the run is running, as a real run does, then it finalizes, since the
+	// store fences event writes to a terminal run.
+	if err := store.Save(ctx, &run.Run{ID: "r", Status: run.StatusRunning, CreatedAt: time.Now()}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 	at := time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC)
@@ -587,6 +589,9 @@ func TestRunEventsPaging(t *testing.T) {
 			[]event.Event{{Type: event.TypeTaskStart, Time: at, Task: fmt.Sprintf("t%d", i)}}); err != nil {
 			t.Fatalf("AppendEvents() error = %v", err)
 		}
+	}
+	if err := store.Save(ctx, &run.Run{ID: "r", Status: run.StatusSucceeded, CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Save() finalize error = %v", err)
 	}
 	handler := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
 
@@ -626,7 +631,9 @@ func TestRunStreamResumesAfterCursor(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	if err := store.Save(ctx, &run.Run{ID: "r", Status: run.StatusSucceeded, CreatedAt: time.Now()}); err != nil {
+	// Events land while the run is running, then it finalizes, since the store fences event writes to
+	// a terminal run.
+	if err := store.Save(ctx, &run.Run{ID: "r", Status: run.StatusRunning, CreatedAt: time.Now()}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 	at := time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC)
@@ -635,6 +642,9 @@ func TestRunStreamResumesAfterCursor(t *testing.T) {
 			[]event.Event{{Type: event.TypeTaskStart, Time: at, Task: fmt.Sprintf("t%d", i)}}); err != nil {
 			t.Fatalf("AppendEvents() error = %v", err)
 		}
+	}
+	if err := store.Save(ctx, &run.Run{ID: "r", Status: run.StatusSucceeded, CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Save() finalize error = %v", err)
 	}
 	handler := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
 

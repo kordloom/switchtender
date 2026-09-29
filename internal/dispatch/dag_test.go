@@ -498,7 +498,13 @@ func TestStepOutputsDoesNotResurrectRun(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 
-	// An executor claimed the step, ran it, published outputs, and finalized it succeeded.
+	// An executor claimed the step, ran it, published its outputs while running, then finalized it
+	// succeeded. Outputs are appended before finalize because the store fences writes to a terminal run.
+	if err := store.AppendEvents(ctx, "run_step", []event.Event{
+		{Type: event.TypeStats, Outputs: map[string]any{"version": "1.2.3"}},
+	}); err != nil {
+		t.Fatalf("AppendEvents() error = %v", err)
+	}
 	now := time.Now()
 	done := stale.Clone()
 	done.Status = run.StatusSucceeded
@@ -506,11 +512,6 @@ func TestStepOutputsDoesNotResurrectRun(t *testing.T) {
 	done.ClaimedAt, done.StartedAt, done.EndedAt = &now, &now, &now
 	if err := store.Save(ctx, done); err != nil {
 		t.Fatalf("Save(done) error = %v", err)
-	}
-	if err := store.AppendEvents(ctx, "run_step", []event.Event{
-		{Type: event.TypeStats, Outputs: map[string]any{"version": "1.2.3"}},
-	}); err != nil {
-		t.Fatalf("AppendEvents() error = %v", err)
 	}
 
 	outputs := d.stepOutputs(stale)

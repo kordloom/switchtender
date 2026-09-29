@@ -15,7 +15,7 @@ const inventoryColumns = `id, name, content, credential_ids, content_source, con
 // inventoryStore is an inventory.Store backed by the shared SQLite database.
 type inventoryStore struct {
 	// db is the open database handle shared with the run store.
-	db *sql.DB
+	db *splitDB
 }
 
 // Save inserts or replaces the inventory.

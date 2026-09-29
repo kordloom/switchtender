@@ -12,7 +12,7 @@ import (
 // teamStore is a team.Store backed by the shared SQLite database.
 type teamStore struct {
 	// db is the open database handle shared with the run store.
-	db *sql.DB
+	db *splitDB
 }
 
 // Save inserts or replaces the team.
