@@ -100,3 +100,41 @@ func TestHookProbeDoesNotAppendToTheChain(t *testing.T) {
 		}
 	}
 }
+
+// TestHookEndpointIsRateLimited checks that an endpoint reachable without a credential cannot be
+// probed without bound.
+//
+// A wrong token answers 404 and a right token with a bad signature answers 401, so a caller can
+// confirm a live webhook token without the signing secret. That is a usable oracle, and it ran at
+// unlimited rate: two thousand probes completed in under six milliseconds. The window is per client
+// address so one noisy sender cannot stop another's deliveries.
+func TestHookEndpointIsRateLimited(t *testing.T) {
+	t.Parallel()
+	handler := hookHandler(trigger.NewMemStore(), template.NewMemStore(), &fakeSubmitter{},
+		nil, nil, nil, zap.NewNop())
+
+	limited := false
+	for i := 0; i < hookWindowMax+20; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/hooks/whk_guess", nil)
+		req.RemoteAddr = "203.0.113.9:5000"
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code == http.StatusTooManyRequests {
+			limited = true
+			break
+		}
+	}
+	if !limited {
+		t.Errorf("%d probes from one address were all answered, so a live webhook token can be "+
+			"confirmed by sweeping at full speed", hookWindowMax+20)
+	}
+
+	// A different sender is unaffected, so one noisy client cannot stop another's deliveries.
+	req := httptest.NewRequest(http.MethodPost, "/hooks/whk_guess", nil)
+	req.RemoteAddr = "198.51.100.4:5000"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code == http.StatusTooManyRequests {
+		t.Error("a second sender was refused because the first was noisy")
+	}
+}

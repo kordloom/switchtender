@@ -310,7 +310,17 @@ func deleteTriggerHandler(triggers trigger.Store, authz *authorizer, log *zap.Lo
 // executes the commit that was just pushed.
 func hookHandler(triggers trigger.Store, templates template.Store, submitter Submitter,
 	store run.Store, sealer *credential.Sealer, audits audit.Store, log *zap.Logger) http.HandlerFunc {
+	// The hook endpoint carries no credential but the path, so anybody who can reach the port can
+	// present a guess, and a wrong token answers differently from a right token with a bad
+	// signature. That is a usable oracle at unlimited rate. The window is generous, because a busy
+	// forge legitimately delivers in bursts, and it is per address so one noisy sender cannot stop
+	// another's deliveries.
+	limiter := &loginLimiter{windows: make(map[string]*loginWindow), max: hookWindowMax}
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !limiter.allow("hook:" + clientAddr(r)) {
+			respondError(w, log, http.StatusTooManyRequests, "too many webhook deliveries, slow down")
+			return
+		}
 		if triggers == nil || templates == nil {
 			respondError(w, log, http.StatusNotFound, "triggers not enabled")
 			return
@@ -388,6 +398,11 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 			map[string]string{"trigger": tg.ID, "run": created.ID}, wantsPretty(r))
 	}
 }
+
+// hookWindowMax bounds webhook deliveries per client address per minute. It is far looser than the
+// sign-in limit because a forge legitimately delivers in bursts, and far tighter than unbounded,
+// which is what an endpoint reachable without a credential had.
+const hookWindowMax = 120
 
 // hookDelivery returns a suffix identifying this delivery, or empty when the sender supplies none.
 //

@@ -74,7 +74,8 @@ type askRequest struct {
 // askFleetHandler answers a plain-language question about the fleet. The data is assembled
 // deterministically from the store, metadata only, and the model answers from that snapshot
 // alone. It is advisory and read-only: asking changes nothing and starts nothing.
-func askFleetHandler(store run.Store, provider ai.Provider, log *zap.Logger) http.HandlerFunc {
+func askFleetHandler(store run.Store, provider ai.Provider, authz *authorizer,
+	log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: askFleetHandler: Store required")
 	}
@@ -99,7 +100,17 @@ func askFleetHandler(store run.Store, provider ai.Provider, log *zap.Logger) htt
 			respondError(w, log, http.StatusTooManyRequests, "too many questions, wait a minute")
 			return
 		}
-		snapshot := buildFleetSnapshot(r.Context(), store)
+		// The snapshot is built from what this caller may read, not from the whole install. It was
+		// assembled with an empty filter and no authorization, so a viewer in one organization got
+		// an answer drawn from every organization's runs: playbook names, the first line of shell
+		// and Terraform commands, host names, and which hosts have drifted. The model then repeats
+		// it in prose, which is a comfortable way for a boundary to leak.
+		snapshot, serr := buildFleetSnapshot(r.Context(), store, authz)
+		if serr != nil {
+			log.Error("server: build fleet snapshot: " + serr.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read the fleet")
+			return
+		}
 		answer, err := provider.Complete(r.Context(), askSystemPrompt,
 			snapshot+"\n\nQuestion: "+question)
 		if err != nil {
@@ -114,7 +125,8 @@ func askFleetHandler(store run.Store, provider ai.Provider, log *zap.Logger) htt
 // buildFleetSnapshot assembles the metadata the model may answer from: run status counts, recent
 // runs, the worst hosts by failures, and drifted hosts. Every section is bounded and carries no
 // log content, variables, or credential material.
-func buildFleetSnapshot(ctx context.Context, store run.Store) string {
+func buildFleetSnapshot(ctx context.Context, store run.Store,
+	authz *authorizer) (string, error) {
 	var b strings.Builder
 	b.WriteString("Fleet snapshot.\n")
 
@@ -131,7 +143,20 @@ func buildFleetSnapshot(ctx context.Context, store run.Store) string {
 		}
 	}
 
-	if runs, err := store.ListPage(ctx, run.ListFilter{}, askSnapshotRuns, 0); err == nil && len(runs) > 0 {
+	// Read a wider page than is shown, because filtering removes rows and a caller granted a few
+	// runs should still see their most recent ones rather than whatever survived the first page.
+	page, err := store.ListPage(ctx, run.ListFilter{}, askSnapshotRuns*8, 0)
+	if err != nil {
+		return "", err
+	}
+	runs, err := readableRuns(ctx, authz, page)
+	if err != nil {
+		return "", err
+	}
+	if len(runs) > askSnapshotRuns {
+		runs = runs[:askSnapshotRuns]
+	}
+	if len(runs) > 0 {
 		b.WriteString("\nRecent runs, newest first:\n")
 		for _, r := range runs {
 			target := r.Playbook
@@ -189,5 +214,5 @@ func buildFleetSnapshot(ctx context.Context, store run.Store) string {
 			}
 		}
 	}
-	return b.String()
+	return b.String(), nil
 }

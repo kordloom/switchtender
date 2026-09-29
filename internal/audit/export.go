@@ -99,6 +99,19 @@ var (
 // carried a valid signature and an error describing the first failure. A caller establishes trust by
 // comparing the embedded public key against one it pins out of band.
 func VerifyExport(exp *Export) (signed bool, err error) {
+	// An export holding nothing is not an intact chain, it is an absent one. Verify accepts an
+	// empty slice, the head hash is empty, and a signature over that shape is valid, so wholesale
+	// deletion of the trail came back as "chain intact" and exited zero.
+	if len(exp.Entries) == 0 {
+		return false, fmt.Errorf("%w: this export holds no entries, so there is no chain in it",
+			ErrChainBroken)
+	}
+	// The count is checked against what the file actually holds, so the number an operator reads
+	// is the number of entries that are there.
+	if exp.Count != len(exp.Entries) {
+		return false, fmt.Errorf("%w: this export says it holds %d entries and holds %d",
+			ErrChainBroken, exp.Count, len(exp.Entries))
+	}
 	if ok, at := Verify(exp.Entries); !ok {
 		return false, fmt.Errorf("%w at entry %d", ErrChainBroken, at)
 	}

@@ -412,7 +412,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/runs/{id}/events", runEventsHandler(s.store, authz, s.log))
 	mux.Handle("POST /v1/runs/{id}/explain", explainRunHandler(s.store, s.ai, authz, s.log))
 	mux.Handle("POST /v1/ai/draft", draftStepHandler(s.ai, s.log))
-	mux.Handle("POST /v1/ai/ask", askFleetHandler(s.store, s.ai, s.log))
+	mux.Handle("POST /v1/ai/ask", askFleetHandler(s.store, s.ai, authz, s.log))
 	mux.Handle("POST /v1/ai/propose-run", proposeRunHandler(s.submitter, s.ai, s.log))
 	mux.Handle("GET /v1/runs/{id}/stream",
 		runStreamHandler(s.streamer, s.store, authz, s.log, s.shutdown))

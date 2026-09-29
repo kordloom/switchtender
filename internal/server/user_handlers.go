@@ -97,6 +97,9 @@ type loginLimiter struct {
 	mu sync.Mutex
 	// windows tracks the open window per key.
 	windows map[string]*loginWindow
+	// max is how many attempts a window allows. Zero means loginWindowMax, so a sign-in limiter
+	// needs no configuration and a caller with a different shape of traffic can state its own.
+	max int
 }
 
 // loginWindow is one key's open window.
@@ -126,7 +129,11 @@ func (l *loginLimiter) allow(key string) bool {
 		return true
 	}
 	w.count++
-	return w.count <= loginWindowMax
+	limit := l.max
+	if limit <= 0 {
+		limit = loginWindowMax
+	}
+	return w.count <= limit
 }
 
 // clientAddr returns the request's client host without the port, the stable half of the limiter

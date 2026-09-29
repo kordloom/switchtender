@@ -7885,9 +7885,12 @@ async function loadUsers() {
 			} else {
 				contact.textContent = "—";
 			}
-			// Links open in a new tab and never carry a referrer. The server accepts only http and
-			// https, so a stored link cannot be a script URL.
+			// Links open in a new tab and never carry a referrer, and the scheme is checked before
+			// the value becomes an href. The server validates every write path and is the
+			// authority, but a value that predates a validator, or arrives through one nobody
+			// thought of, should not become a script URL because this line trusted it.
 			for (const link of u.links || []) {
+				if (!/^https?:\/\//i.test(link)) continue;
 				const chip = document.createElement("a");
 				chip.className = "user-link";
 				chip.href = link;
