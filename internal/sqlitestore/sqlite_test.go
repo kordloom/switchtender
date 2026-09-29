@@ -612,3 +612,23 @@ func TestPinnedCommitSurvivesTheStore(t *testing.T) {
 		t.Errorf("stored actor = %q/%q, want casey/session", got.Actor, got.ActorType)
 	}
 }
+
+// TestStreamTicketCrossesReplicas opens two handles on one database file, the way two server
+// replicas open one shared store, and proves a ticket minted through one redeems exactly once
+// through the other. Held in process memory the ticket was invisible across replicas, so live run
+// tailing 401ed at random behind the active-active shape the Team tier sells.
+func TestStreamTicketCrossesReplicas(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "switchtender.db")
+	a, err := sqlitestore.Open(path)
+	if err != nil {
+		t.Fatalf("open handle a: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	b, err := sqlitestore.Open(path)
+	if err != nil {
+		t.Fatalf("open handle b: %v", err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+	storetest.StreamTicketCrossesReplicas(t, a.Runs(), b.Runs())
+}

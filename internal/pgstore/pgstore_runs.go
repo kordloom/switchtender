@@ -615,8 +615,9 @@ func (s *store) Heartbeat(ctx context.Context, id, owner string) error {
 	// perfectly healthy run. Heartbeating made it worse than not heartbeating, because a run that
 	// never renewed kept the database-clock stamp Claim gave it and survived.
 	res, err := s.db.ExecContext(ctx,
-		"UPDATE runs SET claimed_at="+pgNowText+" WHERE id=$1 AND claimed_by=$2",
-		id, owner)
+		"UPDATE runs SET claimed_at="+pgNowText+
+			" WHERE id=$1 AND claimed_by=$2 AND status IN ($3,$4)",
+		id, owner, string(run.StatusPending), string(run.StatusRunning))
 	if err != nil {
 		return fmt.Errorf("heartbeat: %w", err)
 	}
@@ -836,12 +837,16 @@ WHERE id=$2 AND claimed_by='' AND status IN ('pending', 'pending_approval')`,
 // the compare-and-swap, and executed on real hosts. Checking the flag first and swapping second
 // leaves the same gap one scheduling delay wide, so it belongs in the predicate.
 func (s *store) TransitionStatusAndClaim(ctx context.Context, id string, from, to run.Status,
-	owner string) (bool, error) {
+	owner string, startedAt time.Time) (bool, error) {
+	started := ""
+	if !startedAt.IsZero() {
+		started = sqlutil.FormatTime(startedAt)
+	}
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE runs SET status=$1, claimed_by=$2, claimed_at=`+pgNowText+`,
-started_at=COALESCE(NULLIF(started_at,''), `+pgNowText+`)
+started_at=COALESCE(NULLIF(started_at,''), NULLIF($5,''))
 WHERE id=$3 AND status=$4 AND cancel_requested=0`,
-		string(to), owner, id, string(from))
+		string(to), owner, id, string(from), started)
 	if err != nil {
 		return false, fmt.Errorf("transition status and claim: %w", err)
 	}
@@ -891,7 +896,7 @@ func (s *store) FinalizeRunning(ctx context.Context, id string, fin run.Finaliza
 	fin.SanitizeText()
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE runs SET status=$1, exit_code=$2, error=$3, image=$4, commit_sha=$5,
-pull_credential_id=$6, outputs=$7, warning=$8, ended_at=$9
+pull_credential_id=$6, outputs=$7, warning=$8, ended_at=$9, claim_secret=''
 WHERE id=$10 AND status=$11 AND ($12='' OR claimed_by=$12)`,
 		string(fin.Status), sqlutil.NullInt(fin.ExitCode), fin.Error, fin.Image,
 		fin.CommitSHA, fin.PullCredentialID, sqlutil.JSONMap(fin.Outputs), fin.Warning,

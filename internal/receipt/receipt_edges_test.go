@@ -649,11 +649,11 @@ func TestReceiptBuildsConcurrentlyForTheSameRun(t *testing.T) {
 // is the ordinary case for a fleet control plane: any second run that completes between this run's
 // request and its outcome puts another RUN entry inside the segment the contiguous receipt covers.
 //
-// It is skipped because it currently fails. The builder picks the first claim whose path merely
-// contains "/outcome/", so this run's outcome body, nonce, and redacted spec are attached to the
-// other run's entry. The verifier then checks this run's body against that entry's committed digest
-// and reports the disclosure as not matching the chain, which is the flagship evidence artifact
-// accusing itself of tampering.
+// It failed when it was written: the builder picked the first claim whose path merely contained
+// "/outcome/", so this run's outcome body was attached to the other run's entry and the flagship
+// evidence artifact accused itself of tampering. The claim is now matched by chain sequence, and
+// this test is the regression guard for that fix; the sentence above about skipping described the
+// broken era and was left behind after the fix, claiming a skip that no longer happens.
 func TestReceiptOnABusyInstallAttachesTheOutcomeToItsOwnEntry(t *testing.T) {
 	ctx := context.Background()
 	runs, audits, id, subject, other := busyInstall(t)
@@ -688,10 +688,11 @@ func TestReceiptOnABusyInstallAttachesTheOutcomeToItsOwnEntry(t *testing.T) {
 // the path, so a second run whose identifier contains this one's is disclosed too, and the whole
 // point of the sparse shape is that nothing about other runs travels.
 //
-// It is skipped because it currently fails. Minted run identifiers are a fixed width today, so no
-// real identifier can contain another, which is what keeps this latent rather than live. Nothing in
-// the builder relies on that, and an identifier arriving from an import, a migration, or a future
-// format is enough to turn it live.
+// It failed when it was written and passes now: entry selection no longer matches by substring,
+// and this is the regression guard holding that. The stakes are unchanged from the broken era:
+// minted identifiers are a fixed width today, so a substring collision needs an identifier from an
+// import, a migration, or a future format, which is exactly the kind of latent defect that turns
+// live the day nobody remembers it.
 func TestSparseReceiptDoesNotDiscloseARunWhoseIDMerelyContainsThisOne(t *testing.T) {
 	ctx := context.Background()
 	runs, audits, id, r := held(t, "approved")

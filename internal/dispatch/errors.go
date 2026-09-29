@@ -69,3 +69,8 @@ var ErrSelfApproval = errors.New("the requester cannot approve their own run")
 // ErrChildNotApprovable is returned when a shard or pipeline step is approved on its own. The
 // parent carries the decision; a child released by itself would run outside it.
 var ErrChildNotApprovable = errors.New("a shard or step is approved through its parent")
+
+// errLeaseLost is the cause carried when an executor's own heartbeats discover its lease is gone:
+// the run was requeued or settled elsewhere, and this process's job is to stop its tool and stand
+// down. It maps to interrupted, never canceled, because nobody decided anything.
+var errLeaseLost = errors.New("this executor lost its lease while the run executed")

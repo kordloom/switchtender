@@ -166,7 +166,7 @@ func TestClientRefusesEveryControlNodeCall(t *testing.T) {
 		Name: "TransitionStatusAndClaim",
 		Call: func() error {
 			ok, err := c.TransitionStatusAndClaim(ctx, "run_1", run.StatusPendingApproval,
-				run.StatusPending, "w")
+				run.StatusPending, "w", time.Now())
 			return zeroOr(err, ok, false)
 		},
 	}, { // Test 1: The idempotency lookup is a control-node query.

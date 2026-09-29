@@ -178,6 +178,13 @@ func TestDriftCheckReportsDriftWithoutErasingIt(t *testing.T) {
 	t.Parallel()
 	bin, err := exec.LookPath("ansible-playbook")
 	if err != nil {
+		// Under the full-suite ratchet a missing toolchain is a failure, not a skip: the runner
+		// image dropping ansible would otherwise silently remove this coverage while every gate
+		// stayed green.
+		if os.Getenv("SWITCHTENDER_REQUIRE_FULL_SUITE") == "1" {
+			t.Fatal("SWITCHTENDER_REQUIRE_FULL_SUITE is set and ansible-playbook is not " +
+				"installed: the full suite was demanded and the drift check cannot run")
+		}
 		t.Skip("no ansible-playbook to run the drift check")
 	}
 	dir := t.TempDir()
@@ -224,6 +231,13 @@ func TestDriftCheckAgreesUnderCheckMode(t *testing.T) {
 	t.Parallel()
 	bin, err := exec.LookPath("ansible-playbook")
 	if err != nil {
+		// Under the full-suite ratchet a missing toolchain is a failure, not a skip: the runner
+		// image dropping ansible would otherwise silently remove this coverage while every gate
+		// stayed green.
+		if os.Getenv("SWITCHTENDER_REQUIRE_FULL_SUITE") == "1" {
+			t.Fatal("SWITCHTENDER_REQUIRE_FULL_SUITE is set and ansible-playbook is not " +
+				"installed: the full suite was demanded and the drift check cannot run")
+		}
 		t.Skip("no ansible-playbook to run the drift check")
 	}
 	dir := t.TempDir()

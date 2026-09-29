@@ -1,6 +1,7 @@
 package server
 
 import (
+	"github.com/kordloom/switchtender/internal/run"
 	"testing"
 	"time"
 
@@ -21,7 +22,7 @@ func TestStreamTicketIsNarrowShortLivedAndSingleUse(t *testing.T) {
 
 	t.Run("it opens the run it was minted for", func(t *testing.T) {
 		t.Parallel()
-		s := newStreamTickets()
+		s := newStreamTickets(run.NewMemStore())
 		v, err := s.mint(actor, "run_a")
 		if err != nil {
 			t.Fatalf("mint: %v", err)
@@ -37,7 +38,7 @@ func TestStreamTicketIsNarrowShortLivedAndSingleUse(t *testing.T) {
 
 	t.Run("it opens no other run", func(t *testing.T) {
 		t.Parallel()
-		s := newStreamTickets()
+		s := newStreamTickets(run.NewMemStore())
 		v, err := s.mint(actor, "run_a")
 		if err != nil {
 			t.Fatalf("mint: %v", err)
@@ -49,7 +50,7 @@ func TestStreamTicketIsNarrowShortLivedAndSingleUse(t *testing.T) {
 
 	t.Run("it works once", func(t *testing.T) {
 		t.Parallel()
-		s := newStreamTickets()
+		s := newStreamTickets(run.NewMemStore())
 		v, err := s.mint(actor, "run_a")
 		if err != nil {
 			t.Fatalf("mint: %v", err)
@@ -65,7 +66,7 @@ func TestStreamTicketIsNarrowShortLivedAndSingleUse(t *testing.T) {
 	t.Run("it expires", func(t *testing.T) {
 		t.Parallel()
 		now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
-		s := newStreamTickets()
+		s := newStreamTickets(run.NewMemStore())
 		s.now = func() time.Time { return now }
 		v, err := s.mint(actor, "run_a")
 		if err != nil {
@@ -79,7 +80,7 @@ func TestStreamTicketIsNarrowShortLivedAndSingleUse(t *testing.T) {
 
 	t.Run("nothing opens a stream by guessing", func(t *testing.T) {
 		t.Parallel()
-		s := newStreamTickets()
+		s := newStreamTickets(run.NewMemStore())
 		for _, guess := range []string{"", "deadbeef", "0000000000000000"} {
 			if _, ok := s.redeem(guess, "run_a"); ok {
 				t.Errorf("the guess %q opened a stream", guess)

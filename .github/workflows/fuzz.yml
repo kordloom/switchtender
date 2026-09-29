@@ -11,19 +11,42 @@ permissions:
 jobs:
   fuzz:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         include:
+          # Every Fuzz function in the module. TestFuzzMatrixCoversEveryTarget holds this list to
+          # the source, so a new fuzz target cannot be written and then quietly never fuzzed.
           - { pkg: ./internal/importer, fn: FuzzFromAWX }
           - { pkg: ./internal/importer, fn: FuzzFromSemaphore }
+          - { pkg: ./internal/importer, fn: FuzzFromJenkins }
+          - { pkg: ./internal/importer, fn: FuzzFromRundeck }
           - { pkg: ./internal/importer, fn: FuzzRRULEToCron }
           - { pkg: ./internal/event, fn: FuzzParse }
           - { pkg: ./internal/server, fn: FuzzParseProposedRun }
+          - { pkg: ./internal/audit, fn: FuzzContentDigestOf }
+          - { pkg: ./internal/audit, fn: FuzzParseSpanPath }
+          - { pkg: ./internal/credential, fn: FuzzInject }
+          - { pkg: ./internal/mcp, fn: FuzzServe }
+          - { pkg: ./witness, fn: FuzzCheck }
+          - { pkg: ./witness, fn: FuzzLoad }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
       - name: Fuzz ${{ matrix.fn }}
         run: go test ${{ matrix.pkg }} -run '^$' -fuzz '^${{ matrix.fn }}$' -fuzztime 3m
+
+      # A crash found on a runner died with the runner: the reproducer is written to the package's
+      # testdata/fuzz corpus, which nothing preserved, so a weekly find was a weekly loss.
+      - name: Preserve the crashing input
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fuzz-crash-${{ matrix.fn }}
+          path: |
+            ${{ matrix.pkg }}/testdata/fuzz/**
+          retention-days: 30
+          if-no-files-found: ignore

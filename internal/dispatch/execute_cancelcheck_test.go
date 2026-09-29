@@ -35,10 +35,20 @@ func TestExecuteLeavesRunOpenWhenCancelCheckErrors(t *testing.T) {
 	backing := run.NewMemStore()
 	store := &getFailStore{Store: backing, err: errStoreDown}
 	pub := newCapturingPublisher()
-	d := New(store, okRunner(), nil, WithPublisher(pub), WithNoJanitor())
+	d := New(store, okRunner(), nil, WithPublisher(pub), WithNoJanitor(), WithOwner("w-cancelcheck"))
 	defer d.Close()
 
-	r := &run.Run{ID: "run_leavealone", Playbook: "p.yml", Status: run.StatusPending, CreatedAt: time.Now()}
+	// Claimed by this test's own owner, so the dispatcher's claim loop cannot race the direct
+	// execute call for it: the loop takes only unclaimed pending runs, and pre-fence that race was
+	// masked by both paths ending in the same blind save.
+	r := &run.Run{ID: "run_leavealone", Playbook: "p.yml", Status: run.StatusPending,
+		ClaimedBy: "w-cancelcheck", CreatedAt: time.Now()}
+
+	// Saved first: the fenced start transitions the stored row, and a run the store never held is
+	// abandoned at the fence, a different and correct refusal than the one under test.
+	if err := backing.Save(ctx, r.Clone()); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
 
 	status := d.execute(ctx, r)
 	if status != run.StatusRunning {

@@ -450,7 +450,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	// tickets are the short-lived permissions the event stream is opened with, minted over the
 	// ordinary header-authenticated route because EventSource cannot set a header.
-	tickets := newStreamTickets()
+	tickets := newStreamTickets(s.store)
 	authz := &authorizer{
 		grants: s.grants, teams: s.teams, orgs: s.orgs,
 		orgOwners: s.orgResolver(), strict: s.strictGrants,

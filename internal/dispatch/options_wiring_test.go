@@ -427,13 +427,13 @@ func TestIdleWaitJitterSpreadsPolls(t *testing.T) {
 // hosts, and a missing one would report nothing to cancel while the run carries on.
 func TestCancelReportsWhetherARunWasCancelable(t *testing.T) {
 	t.Parallel()
-	d := &Dispatcher{cancels: make(map[string]context.CancelFunc)}
+	d := &Dispatcher{cancels: make(map[string]context.CancelCauseFunc)}
 
 	if d.Cancel("run_absent") {
 		t.Error("Cancel reported it stopped a run that was never registered")
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancelCause(context.Background())
 	d.register("run_live", cancel)
 	if !d.Cancel("run_live") {
 		t.Fatal("Cancel reported nothing to stop for a registered run")
@@ -459,7 +459,7 @@ func TestCancelReportsWhetherARunWasCancelable(t *testing.T) {
 // detector, since the map is guarded by one mutex shared by every executing run.
 func TestCancelRegisterIsSafeUnderConcurrentUse(t *testing.T) {
 	t.Parallel()
-	d := &Dispatcher{cancels: make(map[string]context.CancelFunc)}
+	d := &Dispatcher{cancels: make(map[string]context.CancelCauseFunc)}
 
 	const workers = 16
 	var wg sync.WaitGroup
@@ -469,7 +469,7 @@ func TestCancelRegisterIsSafeUnderConcurrentUse(t *testing.T) {
 			defer wg.Done()
 			for j := range 200 {
 				id := fmt.Sprintf("run_%d_%d", i, j)
-				_, cancel := context.WithCancel(context.Background())
+				_, cancel := context.WithCancelCause(context.Background())
 				d.register(id, cancel)
 				d.Cancel(id)
 				d.unregister(id)

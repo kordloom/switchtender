@@ -80,13 +80,15 @@ func canonicalRule(p *Policy) string {
 		ActorKind       string `json:"actor_kind,omitempty"`
 		Actor           string `json:"actor,omitempty"`
 		MinRisk         string `json:"min_risk,omitempty"`
+		Reversibility   string `json:"reversibility,omitempty"`
 		Effect          string `json:"effect,omitempty"`
 		ExcludeDryRun   bool   `json:"exclude_dry_run,omitempty"`
 		MaxDestroy      int    `json:"max_destroy"`
 		DistinctApprove bool   `json:"require_distinct_approver,omitempty"`
 	}{
 		Tool: p.Tool, CommandContains: p.CommandContains, InventoryID: p.InventoryID,
-		Queue: p.Queue, ActorKind: p.ActorKind, Actor: p.Actor, MinRisk: p.MinRisk, Effect: p.Effect,
+		Queue: p.Queue, ActorKind: p.ActorKind, Actor: p.Actor, MinRisk: p.MinRisk,
+		Reversibility: p.Reversibility, Effect: p.Effect,
 		ExcludeDryRun: p.ExcludeDryRun, MaxDestroy: p.MaxDestroy,
 		DistinctApprove: p.RequireDistinctApprover,
 	}

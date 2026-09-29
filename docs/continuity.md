@@ -39,5 +39,7 @@ right now. Continuity does not wait for the conversion date.
 
 Honesty requires the other column. Vendor-operated services stop: hosted witness
 countersignatures, scheduled delivery of paid evidence packs, and support. Each has a
-self-service fallback in the free binary (run your own witness, the change-register emitter, the
-community), but the operated versions are what a subscription buys, and they end with the vendor.
+self-service equivalent in the free binary for two of the three (run your own witness, and
+lean on the community), while the scheduled evidence packs have only their raw material free: the
+per-run dossiers, receipts, and signed bundles the free binary always emits (the change register
+that assembles them on a cadence is itself Team), but the operated versions are what a subscription buys, and they end with the vendor.

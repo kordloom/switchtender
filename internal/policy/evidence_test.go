@@ -3,6 +3,7 @@ package policy_test
 import (
 	"encoding/hex"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -60,6 +61,11 @@ func TestInForceDigestCoversEveryEnforcingField(t *testing.T) {
 	}, { // Test 10: Dropping separation of duties is a change, and it is the one an operator would
 		// most want back afterwards.
 		Change: func(p *policy.Policy) { p.RequireDistinctApprover = false }, WantDifferent: true,
+	}, { // Test 10b: Adding or moving a reversibility floor is a change. This was the second field
+		// to drift out of the digest after the queue, so the reflection ratchet below now walks
+		// every field rather than trusting this table to stay complete.
+		Change:        func(p *policy.Policy) { p.Reversibility = run.Irreversible },
+		WantDifferent: true,
 	}, { // Test 11: Renaming a rule is not a change to what it enforces, so the digest holds still.
 		Change: func(p *policy.Policy) { p.Name = "renamed" }, WantDifferent: false,
 	}, { // Test 12: Nor is a new id, which is what a rule moved between stores gets.
@@ -231,5 +237,67 @@ func TestInForceCountsDuplicateRules(t *testing.T) {
 	if doubled.Digest == single.Digest {
 		t.Error("duplicating a rule left the digest unchanged, so deleting one of a duplicated pair " +
 			"would leave no trace either")
+	}
+}
+
+// TestEveryPolicyFieldMovesTheDigestOrIsExemptByName is the ratchet the hand-kept table above
+// cannot be: it walks every field of Policy by reflection, edits each one generically, and demands
+// the InForce digest move, unless the field is named below with the reason it must not.
+//
+// The queue drifted out of the canonical shape first, then the reversibility floor did, and each
+// time a test claiming to cover every enforcing field passed while a criterion was invisible to
+// the record. A hand-kept table can only ever assert the fields somebody remembered; this walk
+// asserts the fields that exist.
+func TestEveryPolicyFieldMovesTheDigestOrIsExemptByName(t *testing.T) {
+	t.Parallel()
+	// Fields that must NOT move the digest, each with the reason.
+	exempt := map[string]string{
+		"ID":        "renaming or re-minting a rule is not a change to what it enforces",
+		"Name":      "the label is for people; the digest covers behavior",
+		"CreatedAt": "when a rule was written does not change what it does",
+	}
+	base := policy.Policy{
+		ID: "pol_r", Name: "ratchet", Tool: run.ToolTerraform, CommandContains: "destroy",
+		InventoryID: "inv_prod", Queue: "prod", ActorKind: policy.ActorKindAgent, Actor: "bot",
+		MinRisk: run.RiskMedium, Reversibility: run.Irreversible,
+		Effect: policy.EffectRequireApproval, ExcludeDryRun: true, MaxDestroy: 5,
+		RequireDistinctApprover: true,
+		CreatedAt:               time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC),
+	}
+	before := policy.InForce([]*policy.Policy{&base}).Digest
+
+	typ := reflect.TypeOf(base)
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		edited := base
+		v := reflect.ValueOf(&edited).Elem().Field(i)
+		switch field.Type.Kind() {
+		case reflect.String:
+			v.SetString(v.String() + "-edited")
+		case reflect.Bool:
+			v.SetBool(!v.Bool())
+		case reflect.Int:
+			v.SetInt(v.Int() + 7)
+		default:
+			if field.Type == reflect.TypeOf(time.Time{}) {
+				v.Set(reflect.ValueOf(base.CreatedAt.Add(time.Hour)))
+			} else {
+				t.Fatalf("Policy.%s has kind %s this walk cannot edit; teach it that kind",
+					field.Name, field.Type.Kind())
+			}
+		}
+		after := policy.InForce([]*policy.Policy{&edited}).Digest
+		moved := after != before
+		if reason, ok := exempt[field.Name]; ok {
+			if moved {
+				t.Errorf("editing exempt field Policy.%s moved the digest, but %s", field.Name, reason)
+			}
+			continue
+		}
+		if !moved {
+			t.Errorf("editing Policy.%s does not move the InForce digest: the field is invisible "+
+				"to the record, so an operator can change what the rule does and the evidence "+
+				"reports the same rule set on both sides", field.Name)
+		}
 	}
 }

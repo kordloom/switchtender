@@ -64,6 +64,7 @@ func run() int {
 		ids:        map[string]string{},
 		httpc:      &http.Client{Timeout: 60 * time.Second},
 		keep:       *keep,
+		skipTeam:   *skipTeam,
 	}
 	defer h.teardown()
 
@@ -90,6 +91,8 @@ func run() int {
 		{"fleet", h.phaseFleet},
 		{"community", h.phaseCommunity},
 		{"upgrade", func() error { return h.phaseUpgrade(previous) }},
+		{"rollback", func() error { return h.phaseRollback(previous) }},
+		{"dr", h.phaseDR},
 	}
 	if !*skipTeam {
 		phases = append(phases, struct {
@@ -100,6 +103,14 @@ func run() int {
 			Name string
 			Run  func() error
 		}{"crash", h.phaseCrash})
+		phases = append(phases, struct {
+			Name string
+			Run  func() error
+		}{"upgrade-team", func() error { return h.phaseUpgradeTeam(previous, *license) }})
+		phases = append(phases, struct {
+			Name string
+			Run  func() error
+		}{"ha", func() error { return h.phaseHA(*license) }})
 	}
 	if *shots != "" {
 		phases = append(phases, struct {
@@ -108,10 +119,17 @@ func run() int {
 		}{"screenshots", func() error { return h.phaseShots(*shots) }})
 	}
 
-	for _, phase := range phases {
+	for i, phase := range phases {
 		fmt.Printf("\n== %s\n", phase.Name)
 		if err := phase.Run(); err != nil {
 			h.fail(phase.Name, "the phase itself completed", err)
+			// The phases behind this one are recorded as not reached, never silently absent: a
+			// ledger listing only what ran reads as though everything ran, and the crash
+			// coverage once vanished exactly that way.
+			for _, skipped := range phases[i+1:] {
+				h.fail(skipped.Name, "the phase ran",
+					fmt.Errorf("not reached: %s failed before it", phase.Name))
+			}
 			break
 		}
 	}
@@ -180,7 +198,13 @@ func (h *harness) teardown() {
 func (h *harness) renderReport() string {
 	var b strings.Builder
 	b.WriteString("## Supertest report\n\n")
-	b.WriteString("A fresh Kind cluster, both install tiers, three real SSH machines, and no ")
+	// The header states what ran, not what usually runs: a -skip-team report claiming both tiers
+	// would be the harness doing the one thing it exists to forbid, asserting more than it saw.
+	tiers := "both install tiers"
+	if h.skipTeam {
+		tiers = "the Community tier only (-skip-team: the Team tier was NOT exercised)"
+	}
+	b.WriteString("A fresh Kind cluster, " + tiers + ", three real SSH machines, and no ")
 	b.WriteString("assertion that trusts the product's own word for what happened.\n\n")
 	b.WriteString("| | Phase | Claim | Evidence |\n|---|---|---|---|\n")
 	for _, c := range h.checks {
@@ -192,5 +216,17 @@ func (h *harness) renderReport() string {
 			verdict, c.Phase, c.Name, strings.ReplaceAll(detail, "|", "\\|"))
 	}
 	fmt.Fprintf(&b, "\n**%d checks, %d failed.**\n", len(h.checks), h.failed())
+	// The table squeezes every failure to one line; the forensics a failure carries, an event
+	// tail or a log tail, live below it in full. A summary whose details were amputated made
+	// somebody rerun a thirteen-minute suite to read a sentence the run had already captured.
+	if h.failed() > 0 {
+		b.WriteString("\n### Failures in full\n")
+		for _, c := range h.checks {
+			if c.Err == nil {
+				continue
+			}
+			fmt.Fprintf(&b, "\n**%s: %s**\n\n```\n%s\n```\n", c.Phase, c.Name, c.Err.Error())
+		}
+	}
 	return b.String()
 }

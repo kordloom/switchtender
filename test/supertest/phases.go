@@ -4,6 +4,8 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -166,7 +168,7 @@ func (h *harness) phaseCommunity() error {
 	if err != nil {
 		return err
 	}
-	if err := h.forwardTo("community", service, 18901); err != nil {
+	if err := h.forwardTo("community", service); err != nil {
 		return err
 	}
 	if err := h.bootstrap("community"); err != nil {
@@ -249,7 +251,7 @@ func (h *harness) phaseTeam(license string) error {
 	if err != nil {
 		return err
 	}
-	if err := h.forwardTo("team", service, 18902); err != nil {
+	if err := h.forwardTo("team", service); err != nil {
 		return err
 	}
 	if err := h.bootstrap("team"); err != nil {
@@ -415,9 +417,8 @@ func (h *harness) deployAcrossFleet(namespace, nonce string,
 		"deploy.yml":  mustManifest("deploy.yml"),
 		"destroy.yml": mustManifest("destroy.yml"),
 	} {
-		if _, err := h.runIn(content, "kubectl", "exec", "-i", "-n", namespace, pod, "--",
-			"sh", "-c", "cat > /data/"+name); err != nil {
-			return "", fmt.Errorf("write %s into the server pod: %w", name, err)
+		if err := h.writePodFile(namespace, pod, "/data/"+name, content); err != nil {
+			return "", err
 		}
 	}
 
@@ -488,13 +489,47 @@ func (h *harness) awaitRunStatus(id, want string, limit time.Duration) (map[stri
 		}
 		for _, terminal := range []string{"succeeded", "failed", "canceled", "rejected"} {
 			if status == terminal {
+				forensics := h.runEventTail(id)
+				if strings.TrimSpace(forensics) == "" {
+					forensics = h.runLogTail(id)
+				}
 				return fmt.Errorf("run reached %s instead: %s\n%s",
-					status, dig(doc, "error"), h.runEventTail(id))
+					status, dig(doc, "error"), forensics)
 			}
 		}
 		return fmt.Errorf("run is %s", status)
 	})
 	return last, err
+}
+
+// runLogTail returns the end of a run's raw output, the forensic well below the event stream: a
+// process that died before emitting a single structured event still usually wrote SOMETHING, and
+// a report that says "failed" over an empty error and an empty event list made somebody rerun a
+// thirteen-minute suite just to learn what a log line already knew.
+func (h *harness) runLogTail(id string) string {
+	// The endpoint answers plain text, so this reads it raw with the same bearer apiCall carries.
+	req, err := http.NewRequest("GET", h.api+"/v1/runs/"+id+"/logs?tail=4096", nil)
+	if err != nil {
+		return "log unavailable: " + err.Error()
+	}
+	req.Header.Set("Authorization", "Bearer "+h.human.Token)
+	resp, err := h.httpc.Do(req)
+	if err != nil {
+		return "log unavailable: " + err.Error()
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "log unavailable: " + err.Error()
+	}
+	if strings.TrimSpace(string(raw)) == "" {
+		return "the run produced no log output at all"
+	}
+	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	if len(lines) > 12 {
+		lines = lines[len(lines)-12:]
+	}
+	return "log tail:\n" + strings.Join(lines, "\n")
 }
 
 // runEventTail returns the last stretch of a run's own event stream, so a run that fails inside

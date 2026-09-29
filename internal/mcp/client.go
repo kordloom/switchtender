@@ -78,7 +78,16 @@ func NewClient(base, token string, timeout time.Duration) (*Client, error) {
 	if strings.TrimSpace(token) == "" {
 		return nil, errors.New("an API token is required")
 	}
-	return &Client{base: base, token: token, http: &http.Client{Timeout: timeout}}, nil
+	// The client owns its connection pool rather than borrowing the process-wide default
+	// transport. The default pool is shared mutable state: anything in the process that sweeps it,
+	// which httptest.Server.Close does on every close, kills this client's idle connections
+	// mid-flight, and an embedder's ambient transport settings would silently become ours.
+	transport := http.RoundTripper(nil)
+	if def, ok := http.DefaultTransport.(*http.Transport); ok {
+		transport = def.Clone()
+	}
+	return &Client{base: base, token: token,
+		http: &http.Client{Timeout: timeout, Transport: transport}}, nil
 }
 
 // doRaw performs one API call and returns the raw response body. A non-2xx reply becomes an error

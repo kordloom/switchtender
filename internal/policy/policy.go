@@ -345,6 +345,20 @@ func Exceeding(policies []*Policy, r *run.Run, destroys int) *Policy {
 	return nil
 }
 
+// ExceedingDistinct reports whether any rule the destroy count exceeds demands a distinct
+// approver. The plan gate holds an apply on the first exceeding rule, but the release is governed
+// by the strictest rule the count exceeded, however the list is ordered: copied from the first
+// match, a loose rule listed ahead of a strict one silently dropped the second person, which is
+// the same ordering drop RequireDistinct exists to prevent on the submission pass.
+func ExceedingDistinct(policies []*Policy, r *run.Run, destroys int) bool {
+	for _, p := range policies {
+		if p.MaxDestroy >= 0 && p.RequireDistinctApprover && p.Matches(r) && destroys > p.MaxDestroy {
+			return true
+		}
+	}
+	return false
+}
+
 // Store persists approval policies. Implementations must be safe for concurrent use.
 type Store interface {
 	// Save stores a policy, inserting or replacing by id.

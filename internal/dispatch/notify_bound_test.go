@@ -2,12 +2,14 @@ package dispatch
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -388,7 +390,12 @@ func TestNotifySkipsChildrenAndUnfinishedRuns(t *testing.T) {
 // target can outlive the configuration that made it sendable.
 func TestNotifyRicherTargetsSkipsUnconfiguredTransports(t *testing.T) {
 	t.Parallel()
-	d := notifyDispatcher(http.DefaultClient)
+	// The witness client fails any request and counts it. Skipped must mean nothing was sent:
+	// the old shape asserted only that nothing panicked, so a blank Twilio account posting to the
+	// real API would have passed as a skip.
+	var sent atomic.Int32
+	witness := &http.Client{Transport: refusingTransport{&sent}}
+	d := notifyDispatcher(witness)
 
 	r := &run.Run{
 		ID: "run_unconfigured", Playbook: "site.yml", Status: run.StatusFailed, CreatedAt: time.Now(),
@@ -399,6 +406,19 @@ func TestNotifyRicherTargetsSkipsUnconfiguredTransports(t *testing.T) {
 		{Kind: run.NotifyEmail, To: "   ,  , "},
 	})
 	d.notifyWG.Wait()
+	if n := sent.Load(); n != 0 {
+		t.Fatalf("%d request(s) left the process for transports the server does not have "+
+			"configured", n)
+	}
+}
+
+// refusingTransport counts and refuses every request, so a test can prove no request was made.
+type refusingTransport struct{ n *atomic.Int32 }
+
+// RoundTrip counts the attempt and refuses it.
+func (r refusingTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	r.n.Add(1)
+	return nil, errors.New("refusingTransport: no request may leave this test")
 }
 
 // TestNotifyRicherTargetsHoldsPagerDutyToFailures pins the one channel that must stay quiet on a green

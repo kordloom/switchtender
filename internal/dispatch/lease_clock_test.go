@@ -43,6 +43,26 @@ func (s *skewedClockStore) Claim(ctx context.Context, owner string, queues []str
 	return r, nil
 }
 
+// TransitionStatusAndClaim stamps the lease from the store's clock, the way the real stores do
+// inside the fenced start. Modeling it matters because the fence made this a lease-stamping path:
+// without the override the embedded memstore stamps claimed_at from this process's clock, which is
+// the very skew the surrounding test exists to catch, so the fake would manufacture the defect the
+// production stores do not have.
+func (s *skewedClockStore) TransitionStatusAndClaim(ctx context.Context, id string,
+	from, to run.Status, owner string, startedAt time.Time) (bool, error) {
+	moved, err := s.Store.TransitionStatusAndClaim(ctx, id, from, to, owner, startedAt)
+	if err != nil || !moved {
+		return moved, err
+	}
+	got, err := s.Get(ctx, id)
+	if err != nil {
+		return true, err
+	}
+	at := s.now()
+	got.ClaimedAt = &at
+	return true, s.Save(ctx, got)
+}
+
 // Heartbeat renews the lease from the store's clock.
 func (s *skewedClockStore) Heartbeat(ctx context.Context, id, owner string) error {
 	got, err := s.Get(ctx, id)

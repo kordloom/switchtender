@@ -234,3 +234,55 @@ func TestCappedBufferHoldsALimitAndSaysWhenItStopped(t *testing.T) {
 		t.Errorf("held %d bytes past a 1024 limit: the plan is not actually bounded", got)
 	}
 }
+
+// TestPlanGateDistinctApproverComesFromAnyExceededRule pins the plan gate's separation-of-duties
+// answer against rule order, the same property the dispatcher's pipeline pass and the policy
+// package's rule-list pass both hold.
+//
+// The gate used to copy the flag from the first rule the destroy count exceeded, so a list holding
+// a loose rule without the requirement ahead of a strict rule with it produced a held apply the
+// requester could release alone: the stricter rule's second person was dropped by ordering, which
+// is never a decision anybody made.
+func TestPlanGateDistinctApproverComesFromAnyExceededRule(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	policies := policy.NewMemStore()
+	// The loose rule first: exceeded, and it asks nothing about who approves.
+	if err := policies.Save(ctx, &policy.Policy{
+		ID: policy.NewID(), Name: "loose", Tool: run.ToolTerraform, MaxDestroy: 3,
+	}); err != nil {
+		t.Fatalf("Save(loose) error = %v", err)
+	}
+	// The strict rule second: also exceeded, and it demands a second person.
+	if err := policies.Save(ctx, &policy.Policy{
+		ID: policy.NewID(), Name: "strict", Tool: run.ToolTerraform, MaxDestroy: 0,
+		RequireDistinctApprover: true,
+	}); err != nil {
+		t.Fatalf("Save(strict) error = %v", err)
+	}
+	runner := &planGateRunner{summary: "Plan: 0 to add, 0 to change, 5 to destroy.\n"}
+	d := New(store, runner, nil, WithPolicies(policies))
+	defer d.Close()
+
+	created, err := d.Submit(ctx, "", "",
+		run.WithTool(run.ToolTerraform), run.WithCommand("infra/prod"), run.WithActor("requester"))
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if plan := waitTerminal(t, store, created.ID); plan.Status != run.StatusSucceeded {
+		t.Fatalf("plan run status = %q, want succeeded", plan.Status)
+	}
+	proposal := waitProposal(t, store, created.ID)
+	stored, err := store.Get(ctx, proposal.ID)
+	if err != nil {
+		t.Fatalf("Get(proposal) error = %v", err)
+	}
+	if stored.Status != run.StatusPendingApproval {
+		t.Fatalf("proposed apply status = %q, want pending_approval", stored.Status)
+	}
+	if !stored.RequireDistinctApprover {
+		t.Fatal("the held apply does not carry the strict rule's distinct-approver requirement: " +
+			"rule order dropped the second person")
+	}
+}

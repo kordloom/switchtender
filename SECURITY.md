@@ -11,8 +11,16 @@ Include as much as you can:
 - Steps to reproduce, or a proof of concept.
 - The affected version, commit, or configuration.
 
-You will get an acknowledgment within a few business days. Once a fix is ready, a patched release
-goes out, and the report is credited unless you prefer to stay anonymous.
+You will get an acknowledgment within two business days, and that window is a commitment made
+in the SwitchTender terms, not a goal. Once a fix is ready, a patched release goes out and the
+release notes describe it plainly: fixes are not held back to be batched, because a
+known-vulnerable install that believes it is current is the worst state a security tool can put
+a customer in. The report is credited unless you prefer to stay anonymous.
+
+Severity is judged by what the flaw lets an attacker do in a real deployment: reaching
+credentials, bypassing an approval, forging or hiding audit evidence, and crossing tenant
+boundaries sit at the top. Hardening suggestions without a concrete bypass are welcome and
+handled as ordinary issues.
 
 ## Supported versions
 
@@ -20,8 +28,10 @@ Security fixes land on the latest 1.x release. Older versions are not patched.
 
 ## Scope
 
-The server, the CLI, the SDK, the Docker Compose build, and the Helm chart are in scope. Report
-issues in third-party dependencies upstream, though a heads-up here is welcome.
+The server, the CLI, the SDK, the Docker Compose build, and the Helm chart are in scope, and so
+is the public demo environment. Other people's installs are not: testing against an install you
+do not own is not authorized by this policy. Report issues in third-party dependencies upstream,
+though a heads-up here is welcome.
 
 ## Verifying a release
 

@@ -31,7 +31,7 @@ func (d *Dispatcher) parentMayStart(parent *run.Run, childIDs []string) bool {
 	err := withRetries(func() error {
 		var terr error
 		ok, terr = d.store.TransitionStatusAndClaim(ctx, parent.ID, parent.Status,
-			run.StatusRunning, d.owner)
+			run.StatusRunning, d.owner, d.now())
 		return terr
 	})
 	if err != nil {
@@ -103,10 +103,10 @@ func (d *Dispatcher) startParentRow(parent *run.Run) {
 func (d *Dispatcher) coordinate(parent *run.Run, children []*run.Run) {
 	defer d.wg.Done()
 
-	parentCtx, cancelParent := context.WithCancel(d.ctx)
+	parentCtx, cancelParent := context.WithCancelCause(d.ctx)
 	d.register(parent.ID, cancelParent)
 	defer d.unregister(parent.ID)
-	defer cancelParent()
+	defer cancelParent(nil)
 
 	if !d.parentMayStart(parent, idsOf(children)) {
 		return
@@ -363,10 +363,10 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 func (d *Dispatcher) runPipeline(parent *run.Run, steps []run.PipelineStep) {
 	defer d.wg.Done()
 
-	pipeCtx, cancelPipe := context.WithCancel(d.ctx)
+	pipeCtx, cancelPipe := context.WithCancelCause(d.ctx)
 	d.register(parent.ID, cancelPipe)
 	defer d.unregister(parent.ID)
-	defer cancelPipe()
+	defer cancelPipe(nil)
 
 	// A pipeline's steps do not exist yet, so there are no children to settle here.
 	if !d.parentMayStart(parent, nil) {

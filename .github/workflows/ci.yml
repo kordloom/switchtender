@@ -1,5 +1,10 @@
 name: ci
 
+# Every job reads the repository and writes nothing; ui-e2e's failure artifact rides on the same
+# read token. Any job needing more must say so itself.
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -9,6 +14,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:16
@@ -28,13 +34,13 @@ jobs:
     steps:
       # Full depth: the secret scan below reads every commit, and a shallow clone
       # would report a clean history it never looked at.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
       - name: Build
@@ -45,6 +51,15 @@ jobs:
         run: go test -race ./...
       - name: JS unit tests
         run: node --test internal/ui/assets/jstest/*.test.mjs
+
+      # The public dare on the site tells a stranger to run this script. A dare nobody re-runs
+      # drifts, and this one did once: the gate is that the dare holds on every commit, not that
+      # it held the day it was written.
+      - name: prove.sh still proves
+        run: |
+          set -euo pipefail
+          go build -o /tmp/switchtender .
+          ./scripts/prove.sh /tmp/switchtender
 
       # site/ is partly generated: sitegen renders docs/*.md into site/docs/ and refreshes shared
       # regions inside the hand-written landing pages. Nothing checked that the committed output
@@ -86,20 +101,27 @@ jobs:
           test "$(grep -c 'SWITCHTENDER_LICENSE' /tmp/team.yaml)" = "2"
           test "$(grep -c 'SWITCHTENDER_AUDIT_KEY' /tmp/team.yaml)" = "5"
           # A Community install must carry none of that plumbing, and no claim belongs to Team.
-          ! grep -q 'SWITCHTENDER_LICENSE' /tmp/community.yaml
-          ! grep -q 'PersistentVolumeClaim' /tmp/team.yaml
+          # Spelled as if-then rather than !, because errexit ignores an inverted command: the
+          # bare ! form could never fail the job, which made these controls decorative.
+          if grep -q 'SWITCHTENDER_LICENSE' /tmp/community.yaml; then
+            echo '::error::Community render carries a license'; exit 1
+          fi
+          if grep -q 'PersistentVolumeClaim' /tmp/team.yaml; then
+            echo '::error::Team render carries the SQLite claim'; exit 1
+          fi
           # The shapes that cannot work refuse at render time, each with its sentence: two SQLite
           # writers, a worker with no shared database, and a PostgreSQL install with no signing
           # identity.
-          ! "$helm" template t deploy/helm/switchtender --set encryptionKey=k --set encryptionSalt=s \
-            --set server.replicas=2 >/dev/null 2>&1
-          ! "$helm" template t deploy/helm/switchtender --set encryptionKey=k --set encryptionSalt=s \
-            --set worker.enabled=true >/dev/null 2>&1
-          ! "$helm" template t deploy/helm/switchtender --set encryptionKey=k --set encryptionSalt=s \
-            --set database.dsn=postgres://u:p@postgres/db >/dev/null 2>&1
-          ! "$helm" template t deploy/helm/switchtender --set encryptionKey=k --set encryptionSalt=s \
-            --set database.dsn=postgres://u:p@postgres/db --set auditKey=aa \
-            --set worker.enabled=true >/dev/null 2>&1
+          refuse() {
+            if "$helm" template t deploy/helm/switchtender --set encryptionKey=k \
+                --set encryptionSalt=s "$@" >/dev/null 2>&1; then
+              echo "::error::chart rendered a shape it must refuse: $*"; exit 1
+            fi
+          }
+          refuse --set server.replicas=2
+          refuse --set worker.enabled=true
+          refuse --set database.dsn=postgres://u:p@postgres/db
+          refuse --set database.dsn=postgres://u:p@postgres/db --set auditKey=aa --set worker.enabled=true
           # SQLite mode's Recreate must null the rolling parameters, or an upgrade from a
           # RollingUpdate deployment is refused by the API server.
           grep -q 'rollingUpdate: null' /tmp/community.yaml
@@ -147,11 +169,12 @@ jobs:
   # out the exact version this module depends on is what makes the check run.
   crossverify:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           path: switchtender
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: switchtender/go.mod
       - name: Check out the loomseal version this module depends on
@@ -162,38 +185,75 @@ jobs:
           echo "cross-checking against loomseal $version"
           git clone --quiet https://github.com/kordloom/loomseal.git ../loomseal
           git -C ../loomseal checkout --quiet "$version"
+      # The ratchet turns a silent skip into a failure: if the checkout detection ever breaks,
+      # this job must go red, not green over a suite that quietly did not run. The outcome
+      # package's receipt-reason cross-check runs here too, because it needs the same checkout and
+      # otherwise ran nowhere at all before release day.
       - name: Cross-verify every bundle shape
         working-directory: switchtender
-        run: go test -count=1 ./internal/audit/...
+        env:
+          SWITCHTENDER_REQUIRE_FULL_SUITE: "1"
+        run: go test -count=1 ./internal/audit/... ./internal/outcome/...
+
+  # The same verifier build and conformance check deploy-site gates on, run here so a change that
+  # breaks the browser verifier fails the pull request rather than the deploy after merge. The
+  # deploy keeps its own copy of the check as the last line; this is the first.
+  verifier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Build the browser verifier and check it against the conformance vectors
+        run: |
+          set -euo pipefail
+          go mod download github.com/kordloom/loomseal
+          MOD="$(go list -m -f '{{.Dir}}' github.com/kordloom/loomseal)"
+          test -n "$MOD" || { echo "loomseal module directory did not resolve"; exit 1; }
+          out="$(mktemp -d)"
+          GOOS=js GOARCH=wasm go build -ldflags="-s -w" -o "$out/loomseal.wasm" github.com/kordloom/loomseal/wasm
+          cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" "$out/wasm_exec.js"
+          cd "$MOD"
+          node wasm/selftest.mjs "$out"
 
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
-      - uses: golangci/golangci-lint-action@v8
+      - uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9 # v8
         with:
           version: v2.12.2
 
   integration:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
+      # Pinned for the same reason every tool here is: a gate whose toolchain floats changes
+      # behavior without a commit.
       - name: Install ansible
-        run: pipx install ansible-core
+        run: pipx install ansible-core==2.18.1
       - name: Run the real SSH fleet suite
         run: go test -tags integration -v -timeout 10m ./internal/integration/...
 
   vuln:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
       # A finding fails the job. It was downgraded to a warning, which meant the check could never
@@ -201,8 +261,10 @@ jobs:
       # annotation nobody opens. The scan reports only vulnerabilities actually reachable from this
       # code, so a hit is worth stopping for, and an unfixable one is silenced by name in the config
       # rather than by ignoring every result.
+      # Pinned: a gate whose scanner floats changes behavior without a commit. Bump the version
+      # deliberately, with the diff in review, like every other tool here.
       - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
 
   # Real-browser tests. The js unit job above drives the same production JavaScript against a simulated
   # DOM, which proves the logic but not that a page renders, clicks through, and mutates in a real
@@ -211,15 +273,16 @@ jobs:
   # the change persisted. It catches layout, CSS, and browser-only breakage the simulated DOM cannot see.
   ui-e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: internal/ui/e2e
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
       - name: Install dependencies
@@ -230,7 +293,7 @@ jobs:
         run: npm run build:bin
       - name: Run the smoke tests
         run: npm run test:ci
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
           name: playwright-report

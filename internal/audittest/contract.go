@@ -37,6 +37,9 @@ func Contract(t *testing.T, rawStore func() audit.Store) {
 		testAnchorDelete(t, newStore())
 	})
 	t.Run("concurrent appends do not fork", func(t *testing.T) { testConcurrentAppend(t, newStore()) })
+	t.Run("a chosen time behind the head is pinned forward", func(t *testing.T) {
+		testAppendPinsBehindClock(t, newStore())
+	})
 	t.Run("span beats increment with counts", func(t *testing.T) { testSpanBeats(t, newStore()) })
 	t.Run("span beat one adopts prior history", func(t *testing.T) { testSpanAdoption(t, newStore()) })
 	t.Run("concurrent span beats never collide", func(t *testing.T) {
@@ -910,5 +913,60 @@ func testInstallBinding(t *testing.T, store audit.Store) {
 		t.Fatalf("a chain written by a bound install does not verify, broke at %d. The install id "+
 			"is hashed into every link, so a read path that cannot return it breaks the chain.",
 			brokeAt)
+	}
+}
+
+// testAppendPinsBehindClock proves the store never records a chain whose times invert, even when
+// the caller chose the time. Two servers on one chain stamp their own wall clocks: a decision
+// committed on a fast replica followed by an outcome committed on a slow one arrived with the
+// outcome's chosen time BEHIND the decision's, and a verifier reading recorded times then reports
+// the approval as postdating the run it released, a bypassed gate, permanently, over an honest
+// approval. The append pins a behind-the-head time forward to the head's; an ahead time is kept.
+func testAppendPinsBehindClock(t *testing.T, store audit.Store) {
+	ctx := context.Background()
+	base := time.Now().Add(-time.Hour).Truncate(time.Second)
+
+	decision := &audit.Entry{ID: audit.NewID(), At: base.Add(2 * time.Second),
+		Actor: "approver", ActorType: "user", Method: audit.MethodDecision,
+		Path: "/runs/run_skew/decision/approved"}
+	if err := store.Append(ctx, decision); err != nil {
+		t.Fatalf("append decision: %v", err)
+	}
+	outcome := &audit.Entry{ID: audit.NewID(), At: base,
+		Actor: "system:dispatcher", ActorType: "system", Method: audit.MethodRun,
+		Path: "/runs/run_skew/outcome/succeeded"}
+	if err := store.Append(ctx, outcome); err != nil {
+		t.Fatalf("append outcome: %v", err)
+	}
+
+	entries, err := store.Chain(ctx)
+	if err != nil {
+		t.Fatalf("Chain: %v", err)
+	}
+	if len(entries) < 2 {
+		t.Fatalf("chain holds %d entries, want 2", len(entries))
+	}
+	got := entries[len(entries)-1]
+	dec := entries[len(entries)-2]
+	if got.At.Before(dec.At) {
+		t.Fatalf("outcome recorded at %s, before the decision at %s: replica skew inverted the "+
+			"chain and every receipt over this pair reports the gate as bypassed", got.At, dec.At)
+	}
+	if ok, at := audit.Verify(entries); !ok {
+		t.Fatalf("chain does not verify after the pin (position %d)", at)
+	}
+
+	ahead := &audit.Entry{ID: audit.NewID(), At: base.Add(time.Minute),
+		Actor: "approver", ActorType: "user", Method: audit.MethodDecision,
+		Path: "/runs/run_skew2/decision/approved"}
+	if err := store.Append(ctx, ahead); err != nil {
+		t.Fatalf("append ahead: %v", err)
+	}
+	entries, err = store.Chain(ctx)
+	if err != nil {
+		t.Fatalf("Chain: %v", err)
+	}
+	if last := entries[len(entries)-1]; !last.At.Equal(base.Add(time.Minute)) {
+		t.Fatalf("a chosen time ahead of the head was altered to %s", last.At)
 	}
 }

@@ -439,7 +439,7 @@ func TestTransitionAndClaimRefusesACanceledRun(t *testing.T) {
 				CreatedAt: time.Now(), CancelRequested: test.Cancel,
 			})
 			changed, err := store.TransitionStatusAndClaim(ctx, "run_1", test.From,
-				StatusRunning, "coordinator-1")
+				StatusRunning, "coordinator-1", time.Now())
 			if err != nil {
 				t.Fatalf("TransitionStatusAndClaim() error = %v", err)
 			}
@@ -480,7 +480,7 @@ func TestTransitionAndClaimKeepsTheFirstStartTime(t *testing.T) {
 		CreatedAt: first, StartedAt: &first,
 	})
 	if _, err := store.TransitionStatusAndClaim(ctx, "run_1", StatusPending,
-		StatusRunning, "coordinator-1"); err != nil {
+		StatusRunning, "coordinator-1", time.Now()); err != nil {
 		t.Fatalf("TransitionStatusAndClaim() error = %v", err)
 	}
 	if got := getRun(t, store, "run_1"); got.StartedAt == nil || !got.StartedAt.Equal(first) {

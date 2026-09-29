@@ -24,10 +24,10 @@ func watchDispatcher(t *testing.T, store run.Store, owner, id string) (*Dispatch
 		store:   store,
 		log:     zap.NewNop(),
 		owner:   owner,
-		cancels: make(map[string]context.CancelFunc),
+		cancels: make(map[string]context.CancelCauseFunc),
 	}
-	runCtx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
+	runCtx, cancel := context.WithCancelCause(context.Background())
+	t.Cleanup(func() { cancel(nil) })
 	d.register(id, cancel)
 	return d, runCtx
 }
@@ -198,7 +198,7 @@ type unreachableClaimStore struct {
 
 // TransitionStatusAndClaim refuses every claim.
 func (s *unreachableClaimStore) TransitionStatusAndClaim(
-	context.Context, string, run.Status, run.Status, string,
+	context.Context, string, run.Status, run.Status, string, time.Time,
 ) (bool, error) {
 	s.attempts.Add(1)
 	return false, errors.New("dial tcp 10.0.0.5:5432: connect: connection refused")

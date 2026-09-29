@@ -92,7 +92,7 @@ var (
 
 // mintBands are the fleet bands the pricing page publishes. Minting anything else would sign a
 // license naming a band the product does not sell.
-var mintBands = []string{"250", "1000", "unlimited"}
+var mintBands = []string{"250", "500", "1000", "unlimited"}
 
 // licenseMintCmd signs a license. Hidden: it is the issuer's tool, useless without the private key,
 // which never ships in a release.
@@ -190,7 +190,7 @@ func mintID(pub ed25519.PublicKey) (string, error) {
 
 // confirmMint shows what is about to be signed and waits for a yes, unless --yes was passed. The
 // tier and the band are the two fields worth a second look, since one is the difference between a
-// $490 license and a $30,000 one.
+// $490 license and a $54,000 one.
 func confirmMint(c license.Claims) error {
 	if mintYes {
 		return nil
@@ -231,7 +231,7 @@ func init() {
 	licenseMintCmd.Flags().StringVar(&mintKey, "key", "", "Issuer private key file, hex seed.")
 	licenseMintCmd.Flags().StringVar(&mintOrg, "org", "", "Organization the license names.")
 	licenseMintCmd.Flags().StringVar(&mintTier, "tier", "", "pro, team, or enterprise.")
-	licenseMintCmd.Flags().StringVar(&mintHosts, "hosts", "", "Host band: 250, 1000, unlimited.")
+	licenseMintCmd.Flags().StringVar(&mintHosts, "hosts", "", "Host band: 250, 500, 1000, unlimited.")
 	licenseMintCmd.Flags().IntVar(&mintDays, "days", 0, "Term length in days.")
 	licenseMintCmd.Flags().BoolVar(&mintYes, "yes", false, "Skip the confirmation prompt.")
 	licenseMintCmd.Flags().StringVar(&mintOut, "out", "license.json", "Where to write the license.")

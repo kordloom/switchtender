@@ -12,6 +12,7 @@ A backup holds the configuration and secrets a deployment needs to stand back up
 - Projects, templates, inventories, and inventory sources.
 - Schedules and webhook triggers.
 - Users, teams, organizations, their memberships, and access grants.
+- API tokens, stored and restored by their hashes, so existing tokens keep working after a restore.
 - Approval policies, unless the install pins them from a file with `--policy-file`, in which case
   that file is the source of truth and is backed up alongside your other configuration.
 - Custom credential types, which every typed credential injects through.

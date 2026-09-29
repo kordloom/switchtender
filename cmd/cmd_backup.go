@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -106,6 +107,19 @@ func backupStores(bundle storeBundle) backup.Stores {
 	return stores
 }
 
+// warnUnpinned says out loud what an unpinned gather means, once, beside the counts. The envelope
+// is healthy either way; what differs is whether the fourteen tables were read at one instant or
+// across a window a live server may have written through, and a restore report that presents a
+// torn copy as healthy is the quiet failure this line exists to prevent.
+func warnUnpinned(s backup.Stores) {
+	if s.Snapshot != nil {
+		return
+	}
+	fmt.Fprintln(os.Stderr, "note: this backend cannot pin a single read snapshot, so the backup "+
+		"was gathered table by table; if the server was writing during the backup, objects created "+
+		"mid-gather may appear in some tables and not others. Quiesce writes for a point-in-time copy.")
+}
+
 // runBackup opens the store, writes the sealed snapshot to the output, and reports the counts. When
 // no output path is given the backup goes to stdout and the counts go to stderr, so a piped backup
 // stays clean.
@@ -118,7 +132,9 @@ func runBackup(cmd *cobra.Command, _ []string) error {
 	sealer := newSealerFromEnv(zap.NewNop())
 
 	if backupOut == "" {
-		sum, err := backup.Write(cmd.Context(), backupStores(bundle), sealer, os.Stdout)
+		stores := backupStores(bundle)
+		warnUnpinned(stores)
+		sum, err := backup.Write(cmd.Context(), stores, sealer, os.Stdout)
 		if err != nil {
 			return err
 		}
@@ -138,7 +154,9 @@ func runBackup(cmd *cobra.Command, _ []string) error {
 		_ = tmp.Close()
 		return fmt.Errorf("secure backup file: %w", err)
 	}
-	sum, err := backup.Write(cmd.Context(), backupStores(bundle), sealer, tmp)
+	stores := backupStores(bundle)
+	warnUnpinned(stores)
+	sum, err := backup.Write(cmd.Context(), stores, sealer, tmp)
 	if err != nil {
 		_ = tmp.Close()
 		return err
@@ -178,6 +196,19 @@ func runRestore(cmd *cobra.Command, _ []string) error {
 	// deliberately outside the backup, and a restore is a merge into a live install that keeps its
 	// existing chain. So an account could be flipped to admin and a grant added while the chain
 	// stayed byte-identical and went on verifying.
+	// Bound to this install the same way serve binds, and for the same reason: these are the most
+	// security-relevant entries the CLI writes, and unbound they do not commit to who produced
+	// them, which is the property that stops a receipt being lifted onto another install. An
+	// identity that cannot be loaded is a warning, not a refusal: an install that never minted one
+	// still deserves its restore recorded.
+	if id, ierr := loadProducerIdentity(restoreDB); ierr == nil {
+		if binder, ok := bundle.Audits().(audit.InstallBinder); ok {
+			binder.BindInstall(id.InstallID)
+		}
+	} else {
+		fmt.Fprintln(os.Stderr, "note: producer identity unavailable, so this restore's audit "+
+			"entries are not bound to the install: "+ierr.Error())
+	}
 	if err := recordCLI(cmd.Context(), bundle.Audits(), "/cli/restore"); err != nil {
 		return err
 	}
@@ -189,6 +220,14 @@ func runRestore(cmd *cobra.Command, _ []string) error {
 	// returned even when the restore itself succeeded.
 	if !sum.CreatedAt.IsZero() {
 		if perr := recordRestoreProvenance(cmd.Context(), bundle.Audits(), sum); perr != nil {
+			// A provenance fault must not swallow a restore fault, and neither may swallow the
+			// partial counts: an operator holding a half-restored install and a single provenance
+			// error was told nothing about either of the two things that actually went wrong.
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "Restore failed partway. What it had already written:")
+				reportBackup(sum)
+				return errors.Join(err, perr)
+			}
 			return perr
 		}
 	}

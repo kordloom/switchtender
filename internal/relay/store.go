@@ -87,11 +87,33 @@ func (c *Client) SaveTaskSummary(ctx context.Context, runID string, summaries []
 // The remaining run.Store methods are control-node queries and analytics a worker never calls, so a
 // relay Client refuses them rather than pretending to serve them across the wire.
 
-// TransitionStatusAndClaim is a control-node operation. Approving a held run happens where the
-// policy and the approver are, never on a worker.
-func (c *Client) TransitionStatusAndClaim(context.Context, string, run.Status, run.Status,
-	string) (bool, error) {
+// TransitionStatusAndClaim serves exactly one shape to a worker: the fenced pending-to-running
+// move that begins execution, which rides the relay as Start. Every other transition is a
+// control-node operation: approving a held run happens where the policy and the approver are,
+// never on a worker.
+func (c *Client) TransitionStatusAndClaim(ctx context.Context, id string, from, to run.Status,
+	owner string, startedAt time.Time) (bool, error) {
+	if from == run.StatusPending && to == run.StatusRunning {
+		return c.t.Start(ctx, id, owner, startedAt)
+	}
 	return false, ErrUnsupported
+}
+
+// SaveStreamTicket is a control-node write: tickets gate browser streams on the control node,
+// and a worker neither mints nor redeems one.
+func (c *Client) SaveStreamTicket(context.Context, run.StreamTicket, int, int) error {
+	return ErrUnsupported
+}
+
+// RedeemStreamTicket is a control-node read for the same reason.
+func (c *Client) RedeemStreamTicket(context.Context, string, string, time.Time) ([]byte, bool, error) {
+	return nil, false, ErrUnsupported
+}
+
+// Now is a control-node clock. A relay worker never runs the sweeps that age rows, so it has no
+// business asking; its own leases are stamped and aged on the control node.
+func (c *Client) Now(context.Context) (time.Time, error) {
+	return time.Time{}, ErrUnsupported
 }
 
 // ByIdempotencyKey is a control-node query and is not served to workers.

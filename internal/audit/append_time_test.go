@@ -33,11 +33,22 @@ func TestStampAppendTimeCannotInvertAgainstThePriorEntry(t *testing.T) {
 		t.Errorf("stamped %s, want the append instant 1100: a forward time must be kept", ahead.At)
 	}
 
-	// A caller that chose its own time keeps it, whatever it is: the demo backdates a whole seeded
-	// history on purpose, and a span beat's time is a signed claim about when the clock was read.
-	chosen := &Entry{At: time.Unix(500, 0)}
-	StampAppendTime(prev, chosen, time.Unix(2000, 0))
-	if !chosen.At.Equal(time.Unix(500, 0)) {
-		t.Errorf("a chosen time was overwritten to %s, want it kept at 500", chosen.At)
+	// A caller-chosen time is kept only while it does not invert the chain. Two servers on one
+	// chain stamp their own wall clocks, and a decision from a fast replica followed by an
+	// outcome from a slow one recorded an approval postdating the run it released, which
+	// verification reports as a bypassed gate, permanently. So a chosen time behind the head is
+	// pinned forward; a chosen time ahead is kept, which is all the demo's ascending backdated
+	// seed ever needs, and the span beat, whose time is a signed claim that must never be
+	// adjusted, refuses behind-clock appends before this function is reached.
+	chosenBehind := &Entry{At: time.Unix(500, 0)}
+	StampAppendTime(prev, chosenBehind, time.Unix(2000, 0))
+	if !chosenBehind.At.Equal(prev.At) {
+		t.Errorf("a chosen time behind the head stayed %s, want it pinned to the head's %s so "+
+			"replica skew cannot record an approval after the run it released", chosenBehind.At, prev.At)
+	}
+	chosenAhead := &Entry{At: time.Unix(1500, 0)}
+	StampAppendTime(prev, chosenAhead, time.Unix(2000, 0))
+	if !chosenAhead.At.Equal(time.Unix(1500, 0)) {
+		t.Errorf("a chosen time ahead of the head was overwritten to %s, want it kept", chosenAhead.At)
 	}
 }

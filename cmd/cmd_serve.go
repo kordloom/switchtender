@@ -1104,6 +1104,15 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		if lerr != nil {
 			return fmt.Errorf("read --policy-file %s: %w", policyFile, lerr)
 		}
+		// The in-force digest of what this replica loaded, said at startup on purpose: file-pinned
+		// policies are loaded per replica with nothing comparing them, so during a rollout two
+		// servers can gate differently and every run stamps whichever set its server held. The
+		// digest makes replica drift a one-line diff between two startup logs instead of a
+		// forensic exercise, and it matches the policy_set digest stamped on runs.
+		log.Info("policy file loaded",
+			zap.String("path", policyFile),
+			zap.Int("rules", len(count)),
+			zap.String("in_force_digest", policy.InForce(count).Digest))
 		// The file is explicit configuration, so a license gap here is a misconfiguration worth
 		// one line at startup, the same treatment SSO gets.
 		needsFull := false

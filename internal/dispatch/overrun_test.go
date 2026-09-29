@@ -47,7 +47,7 @@ func TestControlNodeEndsARunPastItsTimeout(t *testing.T) {
 		}
 	}
 
-	d := &Dispatcher{store: store, log: zap.NewNop(), ctx: ctx, now: func() time.Time { return now }}
+	d := &Dispatcher{store: clockedStore{store, now}, log: zap.NewNop(), ctx: ctx, now: func() time.Time { return now }}
 	d.settleOverrunning()
 
 	got, err := store.Get(ctx, "run_overrun")
@@ -92,7 +92,7 @@ func TestOverrunGraceLetsTheExecutorFinishFirst(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	d := &Dispatcher{store: store, log: zap.NewNop(), ctx: ctx, now: func() time.Time { return now }}
+	d := &Dispatcher{store: clockedStore{store, now}, log: zap.NewNop(), ctx: ctx, now: func() time.Time { return now }}
 	d.settleOverrunning()
 
 	got, err := store.Get(ctx, "run_recent")
@@ -145,7 +145,7 @@ func TestOverrunSweepLeavesSplitAndPipelineParents(t *testing.T) {
 		}
 	}
 
-	d := &Dispatcher{store: store, log: zap.NewNop(), ctx: ctx, now: func() time.Time { return now }}
+	d := &Dispatcher{store: clockedStore{store, now}, log: zap.NewNop(), ctx: ctx, now: func() time.Time { return now }}
 	d.settleOverrunning()
 
 	for _, id := range []string{"run_split", "run_pipeline"} {
@@ -168,3 +168,15 @@ func TestOverrunSweepLeavesSplitAndPipelineParents(t *testing.T) {
 			"real overruns", plainGot.Status)
 	}
 }
+
+// clockedStore fixes the store's clock, so overrun tests age rows against the same instant they
+// seeded them with: the sweep measures with the store's clock now, never the process's, and a
+// fixture that only bent the dispatcher's clock was bending a clock the sweep stopped reading.
+type clockedStore struct {
+	run.Store
+	// at is the instant Now answers with.
+	at time.Time
+}
+
+// Now returns the fixed instant.
+func (c clockedStore) Now(context.Context) (time.Time, error) { return c.at, nil }

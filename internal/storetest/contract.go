@@ -17,6 +17,9 @@ import (
 func Contract(t *testing.T, newStore func() run.Store) {
 	t.Helper()
 	t.Run("save and get", func(t *testing.T) { testSaveGet(t, newStore()) })
+	t.Run("stream ticket refuses a wrong run and an expiry", func(t *testing.T) {
+		testStreamTicketRefusesWrongRunAndExpiry(t, newStore())
+	})
 	t.Run("provenance round trip", func(t *testing.T) { testProvenance(t, newStore()) })
 	t.Run("warning round trip", func(t *testing.T) { testWarning(t, newStore()) })
 	t.Run("host facts", func(t *testing.T) { testHostFacts(t, newStore()) })
@@ -95,6 +98,9 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	})
 	t.Run("transition status", func(t *testing.T) { testTransitionStatus(t, newStore()) })
 	t.Run("finalize running is one write", func(t *testing.T) { testFinalizeRunning(t, newStore()) })
+	t.Run("finalize revokes the lease and keeps attribution", func(t *testing.T) {
+		testFinalizeRevokesTheLease(t, newStore())
+	})
 	t.Run("running progress is fenced", func(t *testing.T) { testApplyRunningProgress(t, newStore()) })
 	t.Run("unrepresentable text is stored", func(t *testing.T) { testUnrepresentableText(t, newStore()) })
 	t.Run("backends agree on edges", func(t *testing.T) { testBackendEdgeParity(t, newStore()) })

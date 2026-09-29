@@ -46,7 +46,7 @@ func TestValidateMintRefusesWhatIsNotSold(t *testing.T) {
 		Name: "bad band", Org: "Acme", Tier: license.TierTeam, Hosts: "banana", Days: 30,
 		WantErr: "is not a published band",
 	}, { // Test 7: A plausible but unsold band. 500 sits between two real ones.
-		Name: "unsold band", Org: "Acme", Tier: license.TierTeam, Hosts: "500", Days: 30,
+		Name: "unsold band", Org: "Acme", Tier: license.TierTeam, Hosts: "2500", Days: 30,
 		WantErr: "is not a published band",
 	}, { // Test 8: A negative term signs a license that expired before it was issued.
 		Name: "negative days", Org: "Acme", Tier: license.TierPro, Hosts: "250", Days: -30,

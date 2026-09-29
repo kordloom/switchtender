@@ -589,3 +589,22 @@ func TestLeaseUsesDatabaseClock(t *testing.T) {
 		t.Error("the settled run records no end")
 	}
 }
+
+// TestStreamTicketCrossesReplicas opens two pool handles on one database, the way two server
+// replicas open one shared PostgreSQL, and proves a ticket minted through one redeems exactly once
+// through the other: the property tickets moved into the store to get.
+func TestStreamTicketCrossesReplicas(t *testing.T) {
+	dsn := testDSN(t)
+	truncateAll(t, dsn)
+	a, err := pgstore.Open(dsn)
+	if err != nil {
+		t.Fatalf("open handle a: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	b, err := pgstore.Open(dsn)
+	if err != nil {
+		t.Fatalf("open handle b: %v", err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+	storetest.StreamTicketCrossesReplicas(t, a.Runs(), b.Runs())
+}

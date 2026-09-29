@@ -55,7 +55,9 @@ outside your install, such as the hosted witness and evidence custody.
 Seven commitments, held for every user from day one. What is free today stays free, and the
 Community tier never shrinks. A lapsed license takes nothing: data, evidence, receipts, and every
 Community feature keep working, and only paid features stop. No phone-home, no seat counting, no
-audits, ever. Every receipt verifies without us, forever, with the open verifier. Your price is
+audits, ever. Every receipt verifies without us, forever, with the open verifier. Each release converts
+to Apache 2.0 two years after it ships, and the terms accelerate that to immediate if
+KordLoom ceases business or ships nothing for 120 consecutive days during a paid term. Your price is
 fixed for the term, with 60 days notice before any renewal change. Every release converts to
 Apache 2.0 two years after it ships. And pricing is flat per organization within a band, never per
 seat and never per run.

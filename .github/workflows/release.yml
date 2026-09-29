@@ -10,6 +10,13 @@ permissions:
   id-token: write
   attestations: write
 
+# One release at a time per ref, and never cancel one mid-flight: a canceled release job can leave
+# a half-assembled draft holding the tag hostage, and the documented recovery is re-dispatching the
+# tag, which must queue behind the running attempt rather than race it.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   # A tag published whatever it pointed at. CI runs on pushes to main and on pull requests, so a tag
   # placed on an unmerged commit, or on main while it was red, went straight to a signed release with
@@ -27,8 +34,10 @@ jobs:
   # identical to a genuine release signature, no persisted contents token in .git/config.
   gate:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: read
+      actions: read
     services:
       postgres:
         image: postgres:16
@@ -60,6 +69,11 @@ jobs:
           git clone --quiet https://github.com/kordloom/loomseal.git "$RUNNER_TEMP/loomseal"
           git -C "$RUNNER_TEMP/loomseal" checkout --quiet "$version"
           echo "SWITCHTENDER_LOOMSEAL_REPO=$RUNNER_TEMP/loomseal" >> "$GITHUB_ENV"
+      # Pinned, because the drift contract executes real ansible and a floating version would let
+      # the gate's behavior change without a commit. The full-suite ratchet turns a missing
+      # toolchain into a failure, so this install is load-bearing, not a convenience.
+      - name: Install ansible for the drift contract
+        run: pipx install ansible-core==2.18.1
       - name: Build
         run: go build ./...
       - name: Vet
@@ -68,6 +82,45 @@ jobs:
         env:
           SWITCHTENDER_REQUIRE_FULL_SUITE: "1"
         run: go test -race ./...
+
+      # A release waits for the ci and supertest workflows to have finished green on the exact
+      # commit being released. v1.93.0 shipped while its supertest sat cancelled, superseded by a
+      # later push, and nothing noticed: the procurement page says upgrades are proven before we
+      # publish, and this step is what makes that sentence true rather than aspirational. When a
+      # run is missing or was cancelled, this fails with the exact re-run to click instead of
+      # publishing around it.
+      - name: Require green ci and supertest on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          for wf in ci.yml supertest.yml; do
+            echo "waiting on $wf for $sha"
+            deadline=$((SECONDS + 2400))
+            while :; do
+              line="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${wf}/runs?head_sha=${sha}&per_page=1" --jq '.workflow_runs[0] | "\(.status) \(.conclusion)"' 2>/dev/null || echo "none none")"
+              status="${line%% *}"
+              conclusion="${line##* }"
+              if [ "$status" = "completed" ]; then
+                if [ "$conclusion" = "success" ]; then
+                  echo "$wf: success"
+                  break
+                fi
+                echo "$wf finished '$conclusion' on $sha. Re-run that workflow for this commit, then re-dispatch this tag." >&2
+                exit 1
+              fi
+              if [ "$status" = "none" ]; then
+                echo "no $wf run exists for $sha. Trigger one for this commit, then re-dispatch this tag." >&2
+                exit 1
+              fi
+              if [ "$SECONDS" -ge "$deadline" ]; then
+                echo "$wf is still '$status' on $sha after 40 minutes." >&2
+                exit 1
+              fi
+              sleep 20
+            done
+          done
 
   # The release job assembles everything as a draft and publishes at the very end. It used to
   # publish in the middle: GoReleaser flipped the release public the moment its own uploads
@@ -273,6 +326,15 @@ jobs:
             rm -f dist/notary_key.p8
           fi
 
+      # A dmg whose step failed is a dmg that must not ship. The step above creates the file
+      # before it signs, notarizes, and staples, so on a failure partway the artifact exists in
+      # exactly the state the step was built to prevent: present, plausible, and unnotarized. The
+      # later steps decide by file existence, which is correct once this guard makes existence
+      # mean success.
+      - name: Discard the dmg if its step failed
+        if: ${{ steps.dmg.outcome != 'success' }}
+        run: rm -f dist/SwitchTender_*.dmg
+
       # The one signature over the finished checksums. BINARY_SHA256SUMS and the dmg are folded
       # into SHA256SUMS before signing, so the signature covers them: the manifest was once
       # uploaded outside the signature while `switchtender version --verify` treated it as
@@ -333,13 +395,13 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" $assets --clobber
 
       # SLSA build provenance for every published artifact, verifiable with `gh attestation
-      # verify`. GitHub only persists attestations for public or paid repositories, so these steps
-      # are allowed to fail without failing the release. The dmg is attested separately because its
-      # glob matches nothing when the dmg step failed, which would have taken the archives'
-      # provenance down with it.
+      # verify`. These fail the job on failure: the repository is public, so the old reason to
+      # tolerate a missing attestation is gone, the procurement page points buyers at provenance,
+      # and a failure here leaves an unpublished draft, which is the designed recovery. The dmg is
+      # attested separately because its glob matches nothing when the dmg step failed, which would
+      # have taken the archives' provenance down with it.
       - name: Attest build provenance
         if: ${{ !cancelled() }}
-        continue-on-error: true
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
           subject-path: |
@@ -351,7 +413,6 @@ jobs:
 
       - name: Attest the desktop dmg
         if: ${{ !cancelled() && steps.dmg.outcome == 'success' }}
-        continue-on-error: true
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
           subject-path: dist/SwitchTender_*.dmg

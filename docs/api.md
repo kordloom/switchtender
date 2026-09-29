@@ -458,6 +458,7 @@ presents the worker bearer token.
 | GET    | `/relay/v1/policies`               | Read the approval policies in force.          |
 | POST   | `/relay/v1/claim`                  | Lease the oldest pending run for the caller.  |
 | POST   | `/relay/v1/heartbeat`              | Renew the lease on a run.                     |
+| POST   | `/relay/v1/runs/{id}/start`        | Fence the run from pending to running as it begins.           |
 | GET    | `/relay/v1/runs/{id}`              | Fetch one run.                                |
 | POST   | `/relay/v1/runs/{id}/save`         | Save the run's state.                         |
 | POST   | `/relay/v1/runs/{id}/log`          | Append captured output.                       |
