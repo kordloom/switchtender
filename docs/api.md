@@ -167,6 +167,7 @@ presents the worker bearer token.
 
 | Method | Path                               | What                                          |
 |--------|------------------------------------|-----------------------------------------------|
+| GET    | `/relay/v1/policies`               | Read the approval policies in force.          |
 | POST   | `/relay/v1/claim`                  | Lease the oldest pending run for the caller.  |
 | POST   | `/relay/v1/heartbeat`              | Renew the lease on a run.                     |
 | GET    | `/relay/v1/runs/{id}`              | Fetch one run.                                |

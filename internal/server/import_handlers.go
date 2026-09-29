@@ -28,8 +28,17 @@ type importResponse struct {
 	Templates []string `json:"templates"`
 	// Schedules names the schedules the import creates.
 	Schedules []string `json:"schedules"`
+	// InventoryContent maps an inventory's name to the content the import would write.
+	//
+	// A preview that lists only names cannot be reviewed. An inventory is the list of machines a
+	// play reaches and the variables it reaches them with, and those come out of somebody else's
+	// export: the dry run has to show what apply will actually store, or the review step is a
+	// formality performed on a name.
+	InventoryContent map[string]string `json:"inventory_content,omitempty"`
 	// Warnings names what could not be mapped cleanly or needs follow up.
 	Warnings []string `json:"warnings"`
+	// SuppressedWarnings counts warnings past the reporting cap, zero when none were dropped.
+	SuppressedWarnings int `json:"suppressed_warnings,omitempty"`
 	// Applied reports whether the plan was written, not just previewed.
 	Applied bool `json:"applied"`
 	// Created is how many objects were written when applied.
@@ -66,12 +75,18 @@ func importHandler(stores importStoresFunc, log *zap.Logger) http.HandlerFunc {
 			return
 		}
 
-		resp := importResponse{Warnings: plan.Warnings}
+		resp := importResponse{Warnings: plan.Warnings, SuppressedWarnings: plan.Suppressed()}
 		for _, p := range plan.Projects {
 			resp.Projects = append(resp.Projects, p.Name)
 		}
 		for _, inv := range plan.Inventories {
 			resp.Inventories = append(resp.Inventories, inv.Name)
+			if inv.Content != "" {
+				if resp.InventoryContent == nil {
+					resp.InventoryContent = map[string]string{}
+				}
+				resp.InventoryContent[inv.Name] = inv.Content
+			}
 		}
 		for _, s := range plan.Sources {
 			resp.Sources = append(resp.Sources, s.Name)

@@ -18,6 +18,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/oauth2"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/user"
 	"github.com/kordloom/switchtender/internal/util"
@@ -41,6 +42,8 @@ type OIDCAuth struct {
 	users user.Store
 	// tokens persists the minted session token.
 	tokens auth.Store
+	// audits records a successful sign-in, nil when the install keeps no audit trail.
+	audits audit.Store
 	// defaultRole is granted to an account created on first sign-in.
 	defaultRole user.Role
 	// signKey signs the handshake cookie. It is derived from the client secret so every server
@@ -163,6 +166,7 @@ func (o *OIDCAuth) callback(w http.ResponseWriter, r *http.Request) {
 		o.fail(w, r, "could not sign in")
 		return
 	}
+	recordSignIn(r.Context(), o.audits, o.log, "oidc", u.Username, "/auth/oidc/callback")
 	frag := url.Values{"access_token": {plain}, "role": {string(u.Role)}, "user": {u.Username}}
 	http.Redirect(w, r, "/ui/#"+frag.Encode(), http.StatusFound)
 }
@@ -268,4 +272,11 @@ func randToken() (string, error) {
 		return "", fmt.Errorf("random token: %w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(b[:]), nil
+}
+
+// WithAudits sets the audit store a successful sign-in is recorded in. It is set after construction
+// because the audit trail is optional and configured separately from the identity provider.
+func (o *OIDCAuth) WithAudits(a audit.Store) *OIDCAuth {
+	o.audits = a
+	return o
 }

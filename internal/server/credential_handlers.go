@@ -65,7 +65,8 @@ type credentialView struct {
 }
 
 // createCredentialHandler seals and stores a new credential.
-func createCredentialHandler(store credential.Store, sealer *credential.Sealer, log *zap.Logger) http.HandlerFunc {
+func createCredentialHandler(store credential.Store, sealer *credential.Sealer, authz *authorizer,
+	log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil || sealer == nil {
 			respondError(w, log, http.StatusNotFound, "credentials not enabled")
@@ -109,6 +110,12 @@ func createCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 			respondError(w, log, http.StatusInternalServerError, "could not store credential")
 			return
 		}
+		// Putting a credential in an organization grants every member of it use of that credential,
+		// so entering one is checked by membership. It is checked here rather than as an object,
+		// because an organization is not one.
+		if authz.denyForeignOrg(w, r, log, req.OrgID) {
+			return
+		}
 		c := &credential.Credential{
 			ID: credential.NewID(), Name: req.Name, Kind: req.Kind,
 			Source: credential.NormalizeSource(req.Source), Secret: sealed, OrgID: req.OrgID,
@@ -145,7 +152,8 @@ type updateCredentialRequest struct {
 
 // updateCredentialHandler renames a credential and, only when a new secret is supplied, reseals it
 // with the new material and kind. Renaming never requires re-sending the secret.
-func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, log *zap.Logger) http.HandlerFunc {
+func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, authz *authorizer,
+	log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil || sealer == nil {
 			respondError(w, log, http.StatusNotFound, "credentials not enabled")
@@ -181,6 +189,15 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 			return
 		}
 
+		// Moving a credential into an organization grants every member use of it, and moving it out
+		// takes that away from the members it had. Both directions change who may use a secret, so
+		// both are checked.
+		if authz.denyForeignOrg(w, r, log, req.OrgID) {
+			return
+		}
+		if c.OrgID != req.OrgID && authz.denyForeignOrg(w, r, log, c.OrgID) {
+			return
+		}
 		c.Name = req.Name
 		c.OrgID = req.OrgID
 		if secret != "" {

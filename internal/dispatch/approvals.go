@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/kordloom/switchtender/internal/run"
@@ -13,6 +14,19 @@ func (d *Dispatcher) Approve(ctx context.Context, id string) (*run.Run, error) {
 	r, err := d.store.Get(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	// A child is not approvable on its own. Its parent is what an approver decided on, and a child
+	// released by itself runs under a parent that may be canceled, with no coordinator and nothing
+	// to roll it up.
+	if r.ParentID != nil {
+		return nil, ErrChildNotApprovable
+	}
+	// A cancel already requested outranks the approval. Releasing the run anyway moved it to
+	// pending, where the claim predicate then skipped it for carrying the flag: it never executed
+	// and never reached a terminal state, so it sat in the queue as a run nobody could finish.
+	if r.CancelRequested {
+		return nil, fmt.Errorf("%w: this run was canceled while it waited for a decision",
+			ErrNotPendingApproval)
 	}
 	// A parent goes straight to running, never through pending.
 	//
@@ -51,6 +65,16 @@ func (d *Dispatcher) Approve(ctx context.Context, id string) (*run.Run, error) {
 		return nil, ErrNotPendingApproval
 	}
 	r.Status = target
+	if target == run.StatusRunning {
+		// The store stamped the lease and the start time in the same statement, so the answer the
+		// caller gets carries them too rather than describing a run that no longer exists.
+		claimed := time.Now()
+		r.ClaimedBy = d.owner
+		r.ClaimedAt = &claimed
+		if r.StartedAt == nil {
+			r.StartedAt = &claimed
+		}
+	}
 	// No claim loop picks up a parent run of either kind, so an approved one starts here or never
 	// runs at all.
 	switch r.Kind {
@@ -116,6 +140,11 @@ func (d *Dispatcher) Reject(ctx context.Context, id, reason string) (*run.Run, e
 	r, err := d.store.Get(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	// A shard or step is decided through its parent, the same way it is approved. Rejecting one
+	// alone leaves the rest of the fan-out to run without it, which is not a decision anyone made.
+	if r.ParentID != nil {
+		return nil, ErrChildNotApprovable
 	}
 	ok, err := d.store.TransitionStatus(ctx, id, run.StatusPendingApproval, run.StatusRejected)
 	if err != nil {

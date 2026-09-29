@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"time"
@@ -50,6 +51,25 @@ type auditVerifyResponse struct {
 	Count int `json:"count"`
 	// BrokeAt is the one-based position of the first tampered entry, zero when the chain is intact.
 	BrokeAt int `json:"broke_at,omitempty"`
+	// Anchored is the number of anchors the chain was held against.
+	Anchored int `json:"anchored"`
+	// AnchorProblems describes each anchor the chain no longer satisfies, empty when it satisfies
+	// all of them. A chain can hash-verify perfectly and still have lost its tail, because a prefix
+	// of a valid chain is itself a valid chain. This is the part that catches that.
+	AnchorProblems []string `json:"anchor_problems,omitempty"`
+}
+
+// anchorsFor returns every anchor the store keeps, or none when the store keeps no anchors.
+//
+// An install with no anchors is not a failure. It has simply never fixed a link anywhere this
+// install cannot rewrite, so nothing here can tell it whether its tail is intact, and saying so is
+// more honest than passing it silently.
+func anchorsFor(ctx context.Context, store audit.Store) ([]*audit.Anchor, error) {
+	anchors, ok := store.(audit.AnchorStore)
+	if !ok {
+		return nil, nil
+	}
+	return anchors.Anchors(ctx, 0)
 }
 
 // auditVerifyHandler recomputes the audit hash chain and reports whether it is intact, so an
@@ -67,8 +87,28 @@ func auditVerifyHandler(store audit.Store, log *zap.Logger) http.HandlerFunc {
 			return
 		}
 		ok, brokeAt := audit.Verify(entries)
-		respondJSON(w, log, http.StatusOK,
-			auditVerifyResponse{OK: ok, Count: len(entries), BrokeAt: brokeAt}, wantsPretty(r))
+		// The hash chain answers "was anything altered". It cannot answer "is anything missing from
+		// the end", because dropping the last entries leaves a chain that still verifies. Anchors
+		// are what answer that, and reporting a healthy chain without consulting them was reporting
+		// on half the question while the other half sat unread in the same database.
+		resp := auditVerifyResponse{OK: ok, Count: len(entries), BrokeAt: brokeAt}
+		if anchors, aerr := anchorsFor(r.Context(), store); aerr != nil {
+			log.Error("server: read audit anchors: " + aerr.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read the audit anchors")
+			return
+		} else if len(anchors) > 0 {
+			resp.Anchored = len(anchors)
+			anchorsOK, results := audit.CheckAnchors(entries, anchors)
+			if !anchorsOK {
+				resp.OK = false
+				for _, res := range results {
+					if !res.Reached {
+						resp.AnchorProblems = append(resp.AnchorProblems, res.Problem)
+					}
+				}
+			}
+		}
+		respondJSON(w, log, http.StatusOK, resp, wantsPretty(r))
 	}
 }
 

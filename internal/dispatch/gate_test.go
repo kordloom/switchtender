@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -210,3 +211,155 @@ func (f *failingLister) Run(context.Context, roundhouse.Spec, io.Writer) (roundh
 
 // Hosts returns the fixed host set.
 func (f *failingLister) Hosts(context.Context, string) ([]string, error) { return f.hosts, nil }
+
+// TestCancelBeforeStartIsNotUndone pins that a parent canceled between its submit and its
+// coordinator's first write stays canceled.
+//
+// The coordinator's start was an unconditional upsert, so a cancel landing in that window was
+// silently overwritten and the whole fan-out executed after the API had already answered that the
+// run was canceled. CancelPending terminalizes an unclaimed parent without setting the cancel
+// flag, so the watcher had nothing to notice either.
+//
+// What this pins is that the start is fenced at all: it fails when the fence is removed. It does
+// not distinguish a compare-and-swap start from a read-then-write one, because the interleaving
+// that separates those two is narrower than a test harness can hold open from outside. The swap is
+// still the right construction, and this is the guard that survives.
+func TestCancelBeforeStartIsNotUndone(t *testing.T) {
+	t.Parallel()
+	store := &pausedStore{Store: run.NewMemStore(), gate: make(chan struct{})}
+	runner := &countingRunnerLister{hosts: []string{"web01", "web02", "web03", "web04"}}
+	d := New(store, runner, nil, WithNoJanitor())
+	defer d.Close()
+	ctx := context.Background()
+
+	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2)
+	if err != nil {
+		t.Fatalf("SubmitSplit() error = %v", err)
+	}
+	// The coordinator is now blocked on its claim. Cancel the parent the way the API does.
+	canceled, err := store.CancelPending(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("CancelPending() error = %v", err)
+	}
+	if !canceled {
+		t.Fatal("the parent could not be canceled before it started")
+	}
+	close(store.gate)
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		got, gerr := store.Get(ctx, parent.ID)
+		if gerr == nil && got.Status != run.StatusCanceled {
+			t.Fatalf("a canceled parent came back as %q, so the fan-out proceeds after the API "+
+				"reported it canceled", got.Status)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if n := runner.executions.Load(); n != 0 {
+		t.Errorf("%d shards executed on a canceled split", n)
+	}
+}
+
+// pausedStore holds the coordinator at its claim so a cancel can land in the window the claim is
+// meant to close.
+type pausedStore struct {
+	run.Store
+	// gate releases the first claim attempt once closed.
+	gate chan struct{}
+	// once ensures only the first claim waits.
+	once sync.Once
+}
+
+// TransitionStatusAndClaim waits for the gate the first time, then behaves normally.
+func (p *pausedStore) TransitionStatusAndClaim(ctx context.Context, id string, from, to run.Status,
+	owner string) (bool, error) {
+	p.once.Do(func() { <-p.gate })
+	return p.Store.TransitionStatusAndClaim(ctx, id, from, to, owner)
+}
+
+// TestPlanGateFailsClosedWhereItCannotBeChecked pins that a process which cannot read the policies
+// refuses a plan-gated apply rather than applying it.
+//
+// The plan-content gate is enforced where the run executes, not where it was submitted. A relay
+// worker leases runs across a segment boundary and never sees the control node's database, and it
+// was given no policy store at all, so the gate silently did not exist there. A terraform apply
+// scoped by a destroy threshold was planned and held when the control node won the claim, and
+// applied straight to production when a worker did, decided by a race between claim loops.
+func TestPlanGateFailsClosedWhereItCannotBeChecked(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	runner := &countingRunnerLister{hosts: []string{"web01"}}
+	d := New(store, runner, nil, WithPolicies(policy.Unreachable{}))
+	defer d.Close()
+	ctx := context.Background()
+
+	// Submit is refused too, which is the same fail-closed rule one step earlier.
+	if _, err := d.Submit(ctx, "", "inv",
+		run.WithTool("terraform"), run.WithCommand("/infra")); err == nil {
+		t.Error("a run was accepted by a process that cannot read the approval policies")
+	}
+	if n := runner.executions.Load(); n != 0 {
+		t.Errorf("%d runs executed where the policies could not be read", n)
+	}
+}
+
+// TestPlanGateRunsUngatedWorkWhereThePoliciesAreReadable pins the other half of the rule: a process
+// that CAN read the policies runs what none of them gate.
+//
+// Failing closed on an unreadable store is right. Handing a worker a store that refuses every read
+// made every terraform run in the install fail, including the ones no policy would ever have
+// matched, and which outcome a run got still depended on which claim loop won it. Fail closed on not
+// knowing, not on having nothing to enforce.
+func TestPlanGateRunsUngatedWorkWhereThePoliciesAreReadable(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	runner := &countingRunnerLister{hosts: []string{"web01"}}
+	d := New(store, runner, nil, WithPolicies(policy.NewMemStore()))
+	defer d.Close()
+	ctx := context.Background()
+
+	r, err := d.Submit(ctx, "", "inv", run.WithTool("terraform"), run.WithCommand("/infra"))
+	if err != nil {
+		t.Fatalf("Submit() error = %v: an install with no policies refused an ungated apply", err)
+	}
+	waitForStatus(t, store, r.ID, run.StatusSucceeded)
+	if n := runner.executions.Load(); n != 1 {
+		t.Errorf("executions = %d, want 1: an ungated apply did not run", n)
+	}
+}
+
+// TestCancelingAHeldSplitSettlesItsShards pins that canceling a split before it starts leaves no
+// shard behind.
+//
+// A split stores its shards alongside the parent. Rejecting one settled them; canceling did not,
+// and the store sweep could not, because orphan resolution only fires for an interrupted parent and
+// a canceled one is terminal. The shards sat awaiting an approval that would never come.
+func TestCancelingAHeldSplitSettlesItsShards(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	runner := &countingRunnerLister{hosts: []string{"web01", "web02", "web03", "web04"}}
+	d := New(store, runner, nil, WithPolicies(ansibleWidePolicy(t)))
+	defer d.Close()
+	ctx := context.Background()
+
+	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2)
+	if err != nil {
+		t.Fatalf("SubmitSplit() error = %v", err)
+	}
+	shards, err := store.Shards(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("Shards() error = %v", err)
+	}
+	if len(shards) == 0 {
+		t.Fatal("the held split stored no shards")
+	}
+	// A shard is never approvable on its own, because the parent carries the decision.
+	if _, err := d.Approve(ctx, shards[0].ID); !errors.Is(err, ErrChildNotApprovable) {
+		t.Errorf("Approve(shard) error = %v, want ErrChildNotApprovable: releasing a shard alone "+
+			"runs it outside the parent an approver decided on", err)
+	}
+	time.Sleep(150 * time.Millisecond)
+	if n := runner.executions.Load(); n != 0 {
+		t.Errorf("%d shards executed after a shard was approved on its own", n)
+	}
+}

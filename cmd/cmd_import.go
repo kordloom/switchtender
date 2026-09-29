@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -70,48 +71,59 @@ func runImport(cmd *cobra.Command, path string, mapper mapFunc) error {
 
 	reportPlan(plan)
 	if !importApply {
-		fmt.Println("\nRun again with --apply to create these objects.")
+		fmt.Fprintln(os.Stderr, "\nRun again with --apply to create these objects.")
 		return nil
 	}
 	created, err := applyPlan(cmd.Context(), plan)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("\nCreated %d objects. Re-enter credential secrets before running templates that need them.\n", created)
+	fmt.Fprintf(os.Stderr,
+		"\nCreated %d objects. Re-enter credential secrets before running templates that need them.\n",
+		created)
 	return nil
 }
 
 // reportPlan writes a human-readable summary of what an import will create to stdout.
 func reportPlan(plan *importer.Plan) {
-	fmt.Println("Import plan:")
-	fmt.Printf("  Projects:    %d\n", len(plan.Projects))
+	fmt.Fprintln(os.Stderr, "Import plan:")
+	fmt.Fprintf(os.Stderr, "  Projects:    %d\n", len(plan.Projects))
 	for _, p := range plan.Projects {
-		fmt.Printf("    - %s (%s @ %s)\n", p.Name, p.RepoURL, branchOrDefault(p.Branch))
+		fmt.Fprintf(os.Stderr, "    - %s (%s @ %s)\n", p.Name, p.RepoURL, branchOrDefault(p.Branch))
 	}
-	fmt.Printf("  Inventories: %d\n", len(plan.Inventories))
+	fmt.Fprintf(os.Stderr, "  Inventories: %d\n", len(plan.Inventories))
 	for _, inv := range plan.Inventories {
-		fmt.Printf("    - %s\n", inv.Name)
+		fmt.Fprintf(os.Stderr, "    - %s\n", inv.Name)
+		// The content is shown, not just the name. An inventory is the list of machines a play
+		// reaches and the variables it reaches them with, assembled from somebody else's export, so
+		// a review that sees only a name is a review of nothing.
+		for _, line := range strings.Split(strings.TrimRight(inv.Content, "\n"), "\n") {
+			fmt.Fprintf(os.Stderr, "        %s\n", line)
+		}
 	}
-	fmt.Printf("  Sources:     %d\n", len(plan.Sources))
+	fmt.Fprintf(os.Stderr, "  Sources:     %d\n", len(plan.Sources))
 	for _, s := range plan.Sources {
-		fmt.Printf("    - %s (%s)\n", s.Name, s.Source)
+		fmt.Fprintf(os.Stderr, "    - %s (%s)\n", s.Name, s.Source)
 	}
-	fmt.Printf("  Credentials: %d (secrets must be re-entered)\n", len(plan.Credentials))
+	fmt.Fprintf(os.Stderr, "  Credentials: %d (secrets must be re-entered)\n", len(plan.Credentials))
 	for _, c := range plan.Credentials {
-		fmt.Printf("    - %s (%s)\n", c.Name, c.Kind)
+		fmt.Fprintf(os.Stderr, "    - %s (%s)\n", c.Name, c.Kind)
 	}
-	fmt.Printf("  Templates:   %d\n", len(plan.Templates))
+	fmt.Fprintf(os.Stderr, "  Templates:   %d\n", len(plan.Templates))
 	for _, t := range plan.Templates {
-		fmt.Printf("    - %s\n", t.Name)
+		fmt.Fprintf(os.Stderr, "    - %s\n", t.Name)
 	}
-	fmt.Printf("  Schedules:   %d\n", len(plan.Schedules))
+	fmt.Fprintf(os.Stderr, "  Schedules:   %d\n", len(plan.Schedules))
 	for _, s := range plan.Schedules {
-		fmt.Printf("    - %s (%s)\n", s.Name, s.Cron)
+		fmt.Fprintf(os.Stderr, "    - %s (%s)\n", s.Name, s.Cron)
 	}
 	if len(plan.Warnings) > 0 {
-		fmt.Printf("  Warnings (%d):\n", len(plan.Warnings))
+		fmt.Fprintf(os.Stderr, "  Warnings (%d):\n", len(plan.Warnings))
 		for _, w := range plan.Warnings {
-			fmt.Printf("    - %s\n", w)
+			fmt.Fprintf(os.Stderr, "    - %s\n", w)
+		}
+		if n := plan.Suppressed(); n > 0 {
+			fmt.Fprintf(os.Stderr, "    (%d more not listed)\n", n)
 		}
 	}
 }

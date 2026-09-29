@@ -133,6 +133,12 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 			if err != nil {
 				return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
 			}
+			// The decrypted key is masked as well as the passphrase. Only the stored form was
+			// registered, and for a passphrase-protected key that form is JSON whose PEM line
+			// breaks are escaped, so the masker never saw a line it could match. Unlocking also
+			// re-encodes the key, so the bytes written to disk are not the bytes anyone registered.
+			// A playbook that reads the key file back wrote it verbatim into the stored log.
+			secrets = append(secrets, unlocked)
 			if err := os.WriteFile(f.Name(), []byte(unlocked), 0o600); err != nil {
 				return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
 			}

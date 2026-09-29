@@ -57,6 +57,60 @@ func (m *memStore) Update(_ context.Context, u *User) error {
 	return nil
 }
 
+// lastAdminLocked reports whether id is the only administrator. The caller holds the write lock, so
+// nothing can add or remove an admin between this and the change it guards.
+func (m *memStore) lastAdminLocked(id string) bool {
+	target, others := false, 0
+	for _, u := range m.users {
+		if u.Role != RoleAdmin {
+			continue
+		}
+		if u.ID == id {
+			target = true
+		} else {
+			others++
+		}
+	}
+	return target && others == 0
+}
+
+// DeleteUnlessLastAdmin removes the user unless doing so would leave no administrator.
+func (m *memStore) DeleteUnlessLastAdmin(_ context.Context, id string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.users[id]; !ok {
+		return false, ErrNotFound
+	}
+	if m.lastAdminLocked(id) {
+		return false, nil
+	}
+	delete(m.users, id)
+	return true, nil
+}
+
+// UpdateUnlessLastAdmin applies the update unless it would demote the only administrator.
+func (m *memStore) UpdateUnlessLastAdmin(_ context.Context, u *User) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	existing, ok := m.users[u.ID]
+	if !ok {
+		return false, ErrNotFound
+	}
+	if u.Role != RoleAdmin && m.lastAdminLocked(u.ID) {
+		return false, nil
+	}
+	existing.Username = u.Username
+	existing.Role = u.Role
+	existing.PasswordHash = u.PasswordHash
+	existing.FullName = u.FullName
+	existing.Email = u.Email
+	existing.Phone = u.Phone
+	existing.Title = u.Title
+	existing.Links = slices.Clone(u.Links)
+	existing.Notes = u.Notes
+	return true, nil
+}
+
 // Get returns the user with the given id, or ErrNotFound.
 func (m *memStore) Get(_ context.Context, id string) (*User, error) {
 	m.mu.RLock()

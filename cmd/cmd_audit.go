@@ -102,6 +102,13 @@ func runAuditVerify(_ *cobra.Command, args []string) error {
 	if auditExpectKey != "" && exp.PublicKey != auditExpectKey {
 		return fmt.Errorf("public key mismatch: export signed by %q, expected %q", exp.PublicKey, auditExpectKey)
 	}
+	// The printed count comes from the file, so it is checked against what the file actually holds.
+	// On a signed export the signature pins it; on an unsigned one nothing did, and the number an
+	// operator reads is the one thing they use to notice entries are missing.
+	if exp.Count != len(exp.Entries) {
+		return fmt.Errorf("this export says it holds %d entries and holds %d, so it is not the "+
+			"chain it claims to be", exp.Count, len(exp.Entries))
+	}
 	signed, err := audit.VerifyExport(&exp)
 	if err != nil {
 		return fmt.Errorf("verification failed: %w", err)

@@ -59,6 +59,9 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("cancel pending", func(t *testing.T) { testCancelPending(t, newStore()) })
 	t.Run("save keeps cancel sticky", func(t *testing.T) { testSaveKeepsCancel(t, newStore()) })
 	t.Run("claim skips cancel requested", func(t *testing.T) { testClaimSkipsCancel(t, newStore()) })
+	t.Run("claim skips children of settled parents", func(t *testing.T) {
+		testClaimSkipsChildrenOfSettledParents(t, newStore())
+	})
 	t.Run("transition status", func(t *testing.T) { testTransitionStatus(t, newStore()) })
 	t.Run("workers", func(t *testing.T) { testWorkers(t, newStore()) })
 	t.Run("retention purge", func(t *testing.T) { testPurge(t, newStore()) })
@@ -956,16 +959,27 @@ func testClaim(t *testing.T, store run.Store) {
 	ctx := context.Background()
 	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	parentID := "run_split"
+	unstartedID := "run_unstarted"
 	idx, count := 0, 1
 	for _, r := range []*run.Run{
 		{ID: "run_new", Playbook: "p", Status: run.StatusPending, CreatedAt: base.Add(time.Minute)},
 		{ID: "run_old", Playbook: "p", Status: run.StatusPending, CreatedAt: base},
 		{ID: "run_done", Playbook: "p", Status: run.StatusSucceeded, CreatedAt: base},
-		{ID: parentID, Playbook: "p", Kind: run.KindSplit, Status: run.StatusPending, CreatedAt: base},
+		// The parent is running, which is what says a coordinator took it and means to run it. A
+		// shard under a parent that has not reached that state is not claimable, because shards are
+		// stored before the coordinator fences the parent.
+		{ID: parentID, Playbook: "p", Kind: run.KindSplit, Status: run.StatusRunning, CreatedAt: base},
 		{
 			ID: "run_shard", Playbook: "p", Status: run.StatusPending,
 			CreatedAt: base.Add(30 * time.Minute),
 			ParentID:  &parentID, ShardIndex: &idx, ShardCount: &count,
+		},
+		{ID: "run_unstarted", Playbook: "p", Kind: run.KindSplit, Status: run.StatusPending,
+			CreatedAt: base},
+		{
+			ID: "run_unstarted_c0", Playbook: "p", Status: run.StatusPending,
+			CreatedAt: base.Add(time.Minute), ParentID: &unstartedID,
+			ShardIndex: &idx, ShardCount: &count,
 		},
 	} {
 		if err := store.Save(ctx, r); err != nil {
@@ -994,11 +1008,15 @@ func testClaim(t *testing.T, store run.Store) {
 		t.Fatalf("Claim() error = %v", err)
 	}
 	if third.ID != "run_shard" {
-		t.Errorf("third claim = %s, want run_shard, children are executable", third.ID)
+		t.Errorf("third claim = %s, want run_shard, a child of a running parent is executable",
+			third.ID)
 	}
 
-	if _, err := store.Claim(ctx, "worker-d", []string{""}); !errors.Is(err, run.ErrNonePending) {
-		t.Errorf("fourth claim error = %v, want ErrNonePending", err)
+	// The fourth claim finds nothing: the only run left is a shard whose parent has not started, and
+	// claiming that is what let a split canceled before its coordinator ran execute anyway.
+	if got, err := store.Claim(ctx, "worker-d", []string{""}); !errors.Is(err, run.ErrNonePending) {
+		t.Errorf("fourth claim = (%v, %v), want ErrNonePending: a shard whose parent has not "+
+			"started is claimable, so a split canceled in that window still runs", got, err)
 	}
 }
 
@@ -1922,6 +1940,35 @@ func testReclaimLeavesACoordinatedParentAlone(t *testing.T, store run.Store) {
 	}
 }
 
+// testClaimSkipsChildrenOfSettledParents checks that a shard is not claimable under a parent that is
+// already settled or being canceled.
+func testClaimSkipsChildrenOfSettledParents(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	parent := &run.Run{
+		ID: "run_dead_parent", Playbook: "site.yml", Kind: run.KindSplit,
+		Status: run.StatusCanceled, CreatedAt: time.Now().Add(-time.Hour),
+	}
+	if err := store.Save(ctx, parent); err != nil {
+		t.Fatalf("Save() parent error = %v", err)
+	}
+	idx, count := 0, 2
+	child := &run.Run{
+		ID: "run_dead_parent_c0", Playbook: "site.yml", Status: run.StatusPending,
+		CreatedAt: time.Now().Add(-time.Hour), ParentID: &parent.ID,
+		ShardIndex: &idx, ShardCount: &count,
+	}
+	if err := store.Save(ctx, child); err != nil {
+		t.Fatalf("Save() child error = %v", err)
+	}
+	got, err := store.Claim(ctx, "worker-a", []string{""})
+	if err == nil {
+		t.Fatalf("claimed %q, a shard of a canceled split, so it executes on real hosts", got.ID)
+	}
+	if !errors.Is(err, run.ErrNonePending) {
+		t.Fatalf("Claim() error = %v, want ErrNonePending", err)
+	}
+}
+
 // testTransitionStatusAndClaim verifies a run moves status and gains an owner in one step.
 //
 // Two separate writes leave a window either way. Transition first and a parent is running with no
@@ -1985,5 +2032,31 @@ func testTransitionStatusAndClaim(t *testing.T, store run.Store) {
 	if missing, err := store.TransitionStatusAndClaim(ctx, "run_nope",
 		run.StatusPendingApproval, run.StatusRunning, "x"); err != nil || missing {
 		t.Errorf("transition on a missing run = (%v, %v), want (false, nil)", missing, err)
+	}
+
+	// A requested cancel refuses the claim. Cancel is a flag rather than a status, so a run canceled
+	// after approval and before a coordinator picked it up still reads as holding the status the
+	// caller swaps from. Without this the swap succeeds and the run executes on real hosts.
+	canceled := &run.Run{
+		ID: "run_atomic_canceled", Playbook: "site.yml", Kind: run.KindPipeline,
+		Status: run.StatusPendingApproval, CreatedAt: time.Now().Add(-time.Hour),
+		CancelRequested: true,
+	}
+	if err := store.Save(ctx, canceled); err != nil {
+		t.Fatalf("Save() canceled error = %v", err)
+	}
+	started, err := store.TransitionStatusAndClaim(ctx, canceled.ID,
+		run.StatusPendingApproval, run.StatusRunning, "coordinator-c")
+	if err != nil {
+		t.Fatalf("TransitionStatusAndClaim() canceled error = %v", err)
+	}
+	if started {
+		t.Error("a run whose cancel was already requested was claimed and started")
+	}
+	if after, err := store.Get(ctx, canceled.ID); err != nil {
+		t.Fatalf("Get() canceled error = %v", err)
+	} else if after.Status == run.StatusRunning || after.ClaimedBy != "" {
+		t.Errorf("canceled run is %q claimed by %q, want it left unclaimed",
+			after.Status, after.ClaimedBy)
 	}
 }

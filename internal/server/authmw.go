@@ -156,9 +156,16 @@ func isHook(r *http.Request) bool {
 // the integrity story rests on, and the fail-closed append then locked everyone out whenever the
 // audit store was unhealthy. Every other unauthenticated mutation is recorded, including the ones
 // that provision an account, which an earlier narrowing dropped by mistake.
+//
+// SAML belongs here for the same reason as the rest, and its omission was worse than the others.
+// The OIDC callback is a GET and never reached the chain anyway, so the SAML assertion consumer was
+// the only sign-in that did: an unhealthy audit store answered it 503, which in a SAML deployment
+// is the login itself and locks every user out, and it was reachable without a credential and
+// without a rate limiter, so a stranger could append to the chain without bound.
 func isSignIn(r *http.Request) bool {
 	p := strings.TrimPrefix(r.URL.Path, "/v1")
-	return p == "/auth/login" || p == "/auth/logout" || strings.HasPrefix(p, "/auth/oidc/")
+	return p == "/auth/login" || p == "/auth/logout" ||
+		strings.HasPrefix(p, "/auth/oidc/") || strings.HasPrefix(p, "/auth/saml/")
 }
 
 // unauthenticatedActor names the kind of caller on a path that carries no token.
@@ -259,6 +266,23 @@ func requiredRole(r *http.Request) user.Role {
 	// to read. Without this a viewer could read every user's name, email, phone, and notes.
 	if p == "/users" || strings.HasPrefix(p, "/users/") {
 		return user.RoleAdmin
+	}
+	// Grants and approval policies decide who may do what, so they are management data even to
+	// read, the same as the audit trail and the account list above. A viewer in any organization
+	// could read the whole access map and every approval gate in the install, which is both a map
+	// of what is worth attacking and a list of which changes nobody is watching.
+	if p == "/grants" || strings.HasPrefix(p, "/grants/") ||
+		p == "/policies" || strings.HasPrefix(p, "/policies/") {
+		return user.RoleAdmin
+	}
+	// Schedules, webhook triggers, and inventory sources are the configuration that makes things
+	// run without a person, and they name the credentials and projects they run with. That is
+	// operator ground rather than something every viewer needs, and listing them was unfiltered:
+	// there is no organization on these objects to filter by, so the role is what bounds them.
+	if p == "/schedules" || strings.HasPrefix(p, "/schedules/") ||
+		p == "/triggers" || strings.HasPrefix(p, "/triggers/") ||
+		p == "/inventory-sources" || strings.HasPrefix(p, "/inventory-sources/") {
+		return user.RoleOperator
 	}
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
 		return user.RoleViewer

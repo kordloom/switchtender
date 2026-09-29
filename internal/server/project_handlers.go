@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/project"
 )
 
@@ -41,7 +42,7 @@ type listProjectsResponse struct {
 }
 
 // createProjectHandler stores a new project.
-func createProjectHandler(store project.Store, log *zap.Logger) http.HandlerFunc {
+func createProjectHandler(store project.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "projects not enabled")
@@ -58,6 +59,19 @@ func createProjectHandler(store project.Store, log *zap.Logger) http.HandlerFunc
 		}
 		if err := project.ValidateRepoURL(req.RepoURL); err != nil {
 			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		}
+		// A project names the credential its clone authenticates with, so writing one has to
+		// authorize that credential the same way a template does. Checking only at launch is the
+		// wrong order and, for a project, there was no check at either point: a caller who may
+		// manage a project could point it at a repository of their choosing and clone it with a
+		// credential they were never granted, then read the result back through the file browser.
+		// The organization is checked by membership rather than as an object, because it is not one.
+		if authz.denyForeignOrg(w, r, log, req.OrgID) {
+			return
+		}
+		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse,
+			req.CredentialID, req.PullCredentialID)) {
 			return
 		}
 		p := &project.Project{
@@ -77,7 +91,7 @@ func createProjectHandler(store project.Store, log *zap.Logger) http.HandlerFunc
 }
 
 // updateProjectHandler changes an existing project's fields, keeping its id and creation time.
-func updateProjectHandler(store project.Store, log *zap.Logger) http.HandlerFunc {
+func updateProjectHandler(store project.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "projects not enabled")
@@ -96,7 +110,27 @@ func updateProjectHandler(store project.Store, log *zap.Logger) http.HandlerFunc
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
 		}
+		// A project names the credential its clone authenticates with, so writing one has to
+		// authorize that credential the same way a template does. Checking only at launch is the
+		// wrong order and, for a project, there was no check at either point: a caller who may
+		// manage a project could point it at a repository of their choosing and clone it with a
+		// credential they were never granted, then read the result back through the file browser.
+		// The organization is checked by membership rather than as an object, because it is not one.
+		if authz.denyForeignOrg(w, r, log, req.OrgID) {
+			return
+		}
+		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse,
+			req.CredentialID, req.PullCredentialID)) {
+			return
+		}
 		id := r.PathValue("id")
+		// Moving a project out of an organization is as much a change of who controls it as moving
+		// one in, so the organization it leaves is checked too.
+		if existing, gerr := store.Get(r.Context(), id); gerr == nil && existing.OrgID != req.OrgID {
+			if authz.denyForeignOrg(w, r, log, existing.OrgID) {
+				return
+			}
+		}
 		p := &project.Project{
 			ID: id, Name: req.Name, RepoURL: req.RepoURL,
 			Branch: req.Branch, CredentialID: req.CredentialID,

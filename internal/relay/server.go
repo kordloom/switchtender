@@ -12,6 +12,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/event"
+	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -41,6 +42,10 @@ type errorBody struct {
 // node side of the phase-1 mesh: a worker's httpTransport dials it over one outbound connection to
 // lease and execute runs without a path to the shared database.
 type relayServer struct {
+	// policies is the approval policy store a worker reads across the relay, nil when the install
+	// has none configured. The plan-content gate runs where the run executes, so a worker that
+	// cannot read the policies cannot tell whether the run it claimed needs one.
+	policies policy.Store
 	// store is the shared run store the worker's calls read and write.
 	store run.Store
 	// token is the worker bearer token every call must present.
@@ -53,7 +58,8 @@ type relayServer struct {
 // by the worker bearer token. Mount it on the control node so relay workers have a path to the
 // shared store. It panics on a nil store or an empty token, both wiring errors; a nil logger becomes
 // a no-op.
-func NewHandler(store run.Store, token string, log *zap.Logger) http.Handler {
+func NewHandler(store run.Store, token string, log *zap.Logger,
+	policies policy.Store) http.Handler {
 	if store == nil {
 		panic("relay: Store required")
 	}
@@ -63,8 +69,9 @@ func NewHandler(store run.Store, token string, log *zap.Logger) http.Handler {
 	if log == nil {
 		log = zap.NewNop()
 	}
-	s := &relayServer{store: store, token: token, log: log}
+	s := &relayServer{store: store, token: token, log: log, policies: policies}
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /relay/v1/policies", s.listPolicies)
 	mux.HandleFunc("POST /relay/v1/claim", s.claim)
 	mux.HandleFunc("POST /relay/v1/heartbeat", s.heartbeat)
 	mux.HandleFunc("GET /relay/v1/runs/{id}", s.get)
@@ -249,8 +256,70 @@ func applyWorkerReport(stored, reported *run.Run) {
 	}
 }
 
+// heldForReport reports whether the run named in the request is one a worker may write a record
+// for, answering the caller and returning false when it is not.
+//
+// The holder boundary covers the record, not only the status. A worker token refused a status
+// report on a run awaiting a decision could still append "PLAY RECAP ok=12 failed=0" to that run's
+// captured output, and could append to a run held by a different executor. What an approver reads
+// while deciding is exactly the thing worth forging, so the same question that gates a status
+// report gates the writes that build the record: which runs may be reported on at all.
+func (s *relayServer) heldForReport(w http.ResponseWriter, r *http.Request) bool {
+	stored, err := s.store.Get(r.Context(), r.PathValue("id"))
+	switch {
+	case errors.Is(err, run.ErrNotFound):
+		writeErr(w, http.StatusNotFound, "run not found")
+		return false
+	case err != nil:
+		s.internal(w, "read run", err)
+		return false
+	}
+	// A finished run is not an error, it is a no-op. The store already drops these writes silently,
+	// so answering with a conflict changed nothing about what is recorded and started a retry storm
+	// instead: the transport retries the post, re-posts the whole batch on a timer, and keeps at it
+	// for the abandon window while logging an error nobody can act on.
+	if stored.Status.Terminal() {
+		w.WriteHeader(http.StatusNoContent)
+		return false
+	}
+	if stored.Status == run.StatusPendingApproval || stored.Status == run.StatusRejected {
+		writeErr(w, http.StatusConflict, "run is awaiting a decision and is not a worker's to add to")
+		return false
+	}
+	if stored.ClaimedBy == "" {
+		writeErr(w, http.StatusConflict, "run is not claimed, so there is nothing to report on")
+		return false
+	}
+	return true
+}
+
+// listPolicies serves the approval policies in force, so a worker across the relay can evaluate the
+// plan-content gate the same way the control node would.
+//
+// An install with no policy store configured answers with an empty list rather than an error. That
+// is the honest answer: there are no policies, so nothing is gated, and it is different from being
+// unable to tell.
+func (s *relayServer) listPolicies(w http.ResponseWriter, r *http.Request) {
+	if s.policies == nil {
+		s.writeJSON(w, []*policy.Policy{})
+		return
+	}
+	all, err := s.policies.List(r.Context())
+	if err != nil {
+		s.internal(w, "list policies", err)
+		return
+	}
+	if all == nil {
+		all = []*policy.Policy{}
+	}
+	s.writeJSON(w, all)
+}
+
 // appendLog appends the raw request body to the run's captured output, or 404 when the run is gone.
 func (s *relayServer) appendLog(w http.ResponseWriter, r *http.Request) {
+	if !s.heldForReport(w, r) {
+		return
+	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "read log body")
@@ -269,6 +338,9 @@ func (s *relayServer) appendLog(w http.ResponseWriter, r *http.Request) {
 
 // appendEvents appends the structured events in the body to the run, or 404 when the run is gone.
 func (s *relayServer) appendEvents(w http.ResponseWriter, r *http.Request) {
+	if !s.heldForReport(w, r) {
+		return
+	}
 	var events []event.Event
 	if err := json.NewDecoder(r.Body).Decode(&events); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid events body")
@@ -287,6 +359,9 @@ func (s *relayServer) appendEvents(w http.ResponseWriter, r *http.Request) {
 
 // saveHostSummary replaces the run's per-host summaries with those in the body.
 func (s *relayServer) saveHostSummary(w http.ResponseWriter, r *http.Request) {
+	if !s.heldForReport(w, r) {
+		return
+	}
 	var summaries []run.HostSummary
 	if err := json.NewDecoder(r.Body).Decode(&summaries); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid host summary body")
@@ -301,6 +376,9 @@ func (s *relayServer) saveHostSummary(w http.ResponseWriter, r *http.Request) {
 
 // saveTaskSummary replaces the run's per-task summaries with those in the body.
 func (s *relayServer) saveTaskSummary(w http.ResponseWriter, r *http.Request) {
+	if !s.heldForReport(w, r) {
+		return
+	}
 	var summaries []run.TaskSummary
 	if err := json.NewDecoder(r.Body).Decode(&summaries); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid task summary body")

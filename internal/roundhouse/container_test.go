@@ -61,7 +61,7 @@ func TestRunArgs(t *testing.T) {
 		"--env-file /tmp/env",
 		"-v /checkout:/checkout:ro",
 		"quay.io/ansible/creator-ee:latest ansible-playbook",
-		"-i /checkout/hosts.ini --limit web01 /checkout/site.yml",
+		"-i /checkout/hosts.ini --limit web01 -- /checkout/site.yml",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("runArgs() = %q, missing %q", joined, want)

@@ -1642,6 +1642,16 @@ func parseNotifications(s string) []run.NotifyTarget {
 // Claim leases the oldest unclaimed pending top-level plain run to owner and returns it. The row
 // is locked with SKIP LOCKED so concurrent workers never claim the same run. A run whose cancel
 // was requested while it waited is skipped; the cancel handler terminalizes it.
+// A child is claimable only while its parent is running. Shards are stored before the coordinator
+// fences the parent, so for as long as that parent is merely pending its shards are already sitting
+// claimable: a split canceled in that window had the fence correctly refuse to start the parent
+// while a claim loop had already taken shards and executed them on real hosts. Allowing a pending
+// parent narrowed that window rather than closing it, and under load the loop still won.
+//
+// Running is the state that says a coordinator took the parent and means to run it, and every path
+// that creates a claimable child reaches it: a split and a shard retry both transition the parent
+// through the start fence, and pipeline steps are created only after it. A parent whose coordinator
+// dies before the fence leaves its children unclaimable, which the abandoned-parent sweep settles.
 func (s *store) Claim(ctx context.Context, owner string, queues []string) (*run.Run, error) {
 	placeholders, args := sqlutil.QueuePlaceholders(queues, "$", 2)
 	// The lease is stamped from the database clock, not this worker's, so the janitor on another node
@@ -1652,6 +1662,8 @@ WHERE id = (
 	SELECT id FROM runs
 	WHERE status='pending' AND claimed_by='' AND kind='' AND cancel_requested=0
 		AND queue IN (` + placeholders + `)
+		AND (COALESCE(parent_id,'')='' OR parent_id IN (
+			SELECT id FROM runs WHERE status='running' AND cancel_requested=0))
 	ORDER BY created_at, id LIMIT 1
 	FOR UPDATE SKIP LOCKED
 )
@@ -1824,12 +1836,17 @@ WHERE id=$2 AND claimed_by='' AND status IN ('pending', 'pending_approval')`,
 
 // TransitionStatusAndClaim moves the run between statuses and stamps owner's lease in the same
 // statement, so the run is never visible in the new status without an owner.
+// A requested cancel blocks the claim in the same statement that makes it. Cancel is recorded as a
+// flag rather than a status, so a fence that compares only the status cannot see one: a pipeline
+// canceled after it was approved and before its coordinator picked it up still read as running, won
+// the compare-and-swap, and executed on real hosts. Checking the flag first and swapping second
+// leaves the same gap one scheduling delay wide, so it belongs in the predicate.
 func (s *store) TransitionStatusAndClaim(ctx context.Context, id string, from, to run.Status,
 	owner string) (bool, error) {
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE runs SET status=$1, claimed_by=$2, claimed_at=`+pgNowText+`,
 started_at=COALESCE(NULLIF(started_at,''), `+pgNowText+`)
-WHERE id=$3 AND status=$4`,
+WHERE id=$3 AND status=$4 AND cancel_requested=0`,
 		string(to), owner, id, string(from))
 	if err != nil {
 		return false, fmt.Errorf("transition status and claim: %w", err)

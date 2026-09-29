@@ -923,14 +923,26 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 // instead of starting them.
 func (d *Dispatcher) parentMayStart(parent *run.Run, childIDs []string) bool {
 	ctx := context.Background()
-	ok, err := d.store.TransitionStatusAndClaim(ctx, parent.ID, parent.Status,
-		run.StatusRunning, d.owner)
+	// Retried like every other store write in this file. It is the one write that decides whether a
+	// whole fan-out lives, and under SQLite a single writer with a busy timeout means contention is
+	// expected rather than exceptional, so one busy moment must not hard-fail a healthy split.
+	var ok bool
+	err := withRetries(func() error {
+		var terr error
+		ok, terr = d.store.TransitionStatusAndClaim(ctx, parent.ID, parent.Status,
+			run.StatusRunning, d.owner)
+		return terr
+	})
 	if err != nil {
 		// The store is unreachable. Starting on an unknown state risks resurrecting a canceled
 		// run, and the fence exists precisely for that uncertainty.
 		d.log.Error("dispatch: could not claim parent to start it: "+err.Error(),
 			zap.String("run_id", parent.ID))
 		d.cancelChildren(childIDs)
+		// The parent is settled too, not just its children. Leaving it running while its children
+		// are canceled and its stream is closed is a half-state that only the lease sweep would
+		// eventually resolve, and only for a parent that happened to hold a lease.
+		d.finalize(parent, run.StatusFailed, nil, "could not start coordination: "+err.Error())
 		d.publisher.CloseRun(parent.ID)
 		return false
 	}
@@ -1125,7 +1137,12 @@ func (d *Dispatcher) cancelChildren(ids []string) {
 			d.log.Warn("dispatch: request child cancel: "+err.Error(), zap.String("run_id", id))
 		}
 		d.Cancel(id)
-		if r.Status == run.StatusPending && r.ClaimedBy == "" {
+		// A held shard is settled here too. Finalizing only an unclaimed pending child left a shard
+		// in pending_approval carrying a cancel flag that nothing acts on: no executor holds it, so
+		// nothing reads the flag, and orphan resolution covers only an interrupted parent. It sat
+		// in the approval queue forever, and approving it ran it under a parent that is gone.
+		if r.ClaimedBy == "" &&
+			(r.Status == run.StatusPending || r.Status == run.StatusPendingApproval) {
 			d.finalize(r, run.StatusCanceled, nil, "")
 		}
 	}
@@ -1569,7 +1586,30 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 
 	// A cancel requested between the claim and the running save is honored here, before any tool
 	// starts. The store keeps the cancel flag sticky across saves, so this read observes it.
-	if cur, err := d.store.Get(ctx, r.ID); err == nil && cur.CancelRequested {
+	//
+	// A read that fails is not a run with no cancel on it. Treating an error as "carry on" started
+	// the tool on the strength of a question nobody answered, which is the same fail-open shape
+	// every other gate in this file was written to avoid.
+	//
+	// Refusing is not the same as failing it, though, and failing it was too blunt. This read sits
+	// on the start path of every run on every executor, and a relay worker asking a control node
+	// that is restarting gets a refused connection back in microseconds, so the whole retry budget
+	// burns in well under a second. A rolling upgrade then terminally failed every run that
+	// happened to start during it, and each one had to be found and replayed by hand.
+	//
+	// So the run is left alone instead: no tool starts, and the lease is simply not renewed. The
+	// sweep that already exists for an executor that stopped without finishing takes it back and
+	// marks it interrupted, which is retryable, and that is exactly what happened here.
+	cur, cerr := d.storeGetWithRetries(ctx, r.ID)
+	switch {
+	case cerr != nil:
+		d.log.Error("dispatch: could not check for a cancel before starting: "+cerr.Error(),
+			zap.String("run_id", r.ID))
+		close(stop)
+		<-tailed
+		d.publisher.CloseRun(r.ID)
+		return run.StatusRunning
+	case cur.CancelRequested:
 		close(stop)
 		<-tailed
 		d.finalize(r, run.StatusCanceled, nil, "")
@@ -1827,6 +1867,18 @@ func (d *Dispatcher) save(r *run.Run) {
 
 // withRetries runs a store write, retrying transient failures with a short backoff. Concurrent
 // executors contend on a single writer under SQLite, so one busy moment must not lose state.
+// storeGetWithRetries reads a run, retrying the way every other store call on this path does, so a
+// single busy moment under a contended writer is not mistaken for an answer.
+func (d *Dispatcher) storeGetWithRetries(ctx context.Context, id string) (*run.Run, error) {
+	var out *run.Run
+	err := withRetries(func() error {
+		var gerr error
+		out, gerr = d.store.Get(ctx, id)
+		return gerr
+	})
+	return out, err
+}
+
 func withRetries(f func() error) error {
 	var err error
 	for attempt := 0; attempt < 4; attempt++ {

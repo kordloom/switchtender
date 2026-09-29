@@ -21,6 +21,7 @@ import (
 	"github.com/crewjam/saml/samlsp"
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/user"
 )
@@ -43,6 +44,8 @@ type SAMLAuth struct {
 	users user.Store
 	// tokens persists the minted session token.
 	tokens auth.Store
+	// audits records a successful sign-in, nil when the install keeps no audit trail.
+	audits audit.Store
 	// defaultRole is granted when no asserted group maps to a role.
 	defaultRole user.Role
 	// roleMap maps a lowercased group attribute value to a role, so the IdP drives a user's role on
@@ -178,6 +181,7 @@ func (s *SAMLAuth) acs(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, "could not sign in")
 		return
 	}
+	recordSignIn(r.Context(), s.audits, s.log, "saml", u.Username, "/auth/saml/acs")
 	frag := url.Values{"access_token": {plain}, "role": {string(u.Role)}, "user": {u.Username}}
 	http.Redirect(w, r, "/ui/#"+frag.Encode(), http.StatusFound)
 }
@@ -291,4 +295,11 @@ func (s *SAMLAuth) sign(payload []byte) string {
 	mac := hmac.New(sha256.New, s.signKey)
 	mac.Write(payload)
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// WithAudits sets the audit store a successful sign-in is recorded in. It is set after construction
+// because the audit trail is optional and configured separately from the identity provider.
+func (s *SAMLAuth) WithAudits(a audit.Store) *SAMLAuth {
+	s.audits = a
+	return s
 }

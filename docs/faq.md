@@ -33,6 +33,10 @@ From the command line:
 It maps projects, inventories, job templates with their surveys and schedules and job slicing, and
 credentials. See [switching from AWX](switching-from-awx.md) for the full mapping.
 
+The preview prints the inventory content it would write, not just the names, because an export is a
+document somebody else produced and the inventory decides which machines a play reaches. Read it
+before you pass `--apply`. Anything the import refuses is listed as a warning with the reason.
+
 Two things to know. These exports omit secret values for security, so credentials import without
 their secrets and you set those once after importing. Dynamic inventory sources import too, as
 sources that run their plugin and refresh the hosts into a stored inventory on a schedule or before a

@@ -362,6 +362,15 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 	for _, opt := range opts {
 		opt(srv)
 	}
+	// The identity providers record a successful sign-in themselves. Sign-in is exempt from the
+	// fail-closed append that covers every other mutation, so without this an SSO login left no
+	// trace in the chain at all.
+	if srv.saml != nil {
+		srv.saml.WithAudits(srv.audits)
+	}
+	if srv.oidc != nil {
+		srv.oidc.WithAudits(srv.audits)
+	}
 	srv.web = ui.New(srv.log, srv.docs, srv.readOnly, srv.matrixCap, srv.oidc != nil, srv.saml != nil)
 	return srv
 }
@@ -393,8 +402,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/runs/{id}/cancel", cancelRunHandler(s.store, s.canceler, authz, s.log))
 	mux.Handle("POST /v1/runs/{id}/retry", retryRunHandler(s.store, s.retrier, authz, s.log))
 	mux.Handle("POST /v1/runs/{id}/rerun", rerunRunHandler(s.store, s.submitter, authz, s.log))
-	mux.Handle("POST /v1/runs/{id}/approve", approveRunHandler(s.approver, s.log))
-	mux.Handle("POST /v1/runs/{id}/reject", rejectRunHandler(s.approver, s.log))
+	mux.Handle("POST /v1/runs/{id}/approve", approveRunHandler(s.approver, s.store, authz, s.log))
+	mux.Handle("POST /v1/runs/{id}/reject", rejectRunHandler(s.approver, s.store, authz, s.log))
 	mux.Handle("GET /v1/runs", listRunsHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/runs/{id}", getRunHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/runs/{id}/shards", runShardsHandler(s.store, authz, s.log))
@@ -409,10 +418,10 @@ func (s *Server) Handler() http.Handler {
 		runStreamHandler(s.streamer, s.store, authz, s.log, s.shutdown))
 	mux.Handle("GET /v1/schedules/preview", previewScheduleHandler(s.log))
 	mux.Handle("GET /v1/doctor", doctorHandler(s.templates, s.schedules, s.credentials, s.inventories, s.projects, s.log))
-	mux.Handle("POST /v1/schedules", createScheduleHandler(s.schedules, s.log))
+	mux.Handle("POST /v1/schedules", createScheduleHandler(s.schedules, authz, s.log))
 	mux.Handle("GET /v1/schedules", listSchedulesHandler(s.schedules, s.log))
 	mux.Handle("GET /v1/schedules/{id}", getScheduleHandler(s.schedules, s.log))
-	mux.Handle("PUT /v1/schedules/{id}", updateScheduleHandler(s.schedules, s.log))
+	mux.Handle("PUT /v1/schedules/{id}", updateScheduleHandler(s.schedules, authz, s.log))
 	mux.Handle("DELETE /v1/schedules/{id}", deleteScheduleHandler(s.schedules, s.log))
 	mux.Handle("/ui/", s.web.Handler())
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
@@ -433,8 +442,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /v1/users/{id}", updateUserHandler(s.users, s.log))
 	mux.Handle("GET /v1/users", listUsersHandler(s.users, s.log))
 	mux.Handle("DELETE /v1/users/{id}", deleteUserHandler(s.users, s.log))
-	mux.Handle("POST /v1/credentials", createCredentialHandler(s.credentials, s.sealer, s.log))
-	mux.Handle("PUT /v1/credentials/{id}", updateCredentialHandler(s.credentials, s.sealer, s.log))
+	mux.Handle("POST /v1/credentials", createCredentialHandler(s.credentials, s.sealer, authz, s.log))
+	mux.Handle("PUT /v1/credentials/{id}", updateCredentialHandler(s.credentials, s.sealer, authz, s.log))
 	mux.Handle("GET /v1/credentials", listCredentialsHandler(s.credentials, authz, s.log))
 	// refs lets a credential or project delete refuse to orphan an object that still uses it.
 	refs := &refChecker{
@@ -442,8 +451,8 @@ func (s *Server) Handler() http.Handler {
 		projects: s.projects, invSources: s.invSources,
 	}
 	mux.Handle("DELETE /v1/credentials/{id}", deleteCredentialHandler(s.credentials, refs, s.log))
-	mux.Handle("POST /v1/projects", createProjectHandler(s.projects, s.log))
-	mux.Handle("PUT /v1/projects/{id}", updateProjectHandler(s.projects, s.log))
+	mux.Handle("POST /v1/projects", createProjectHandler(s.projects, authz, s.log))
+	mux.Handle("PUT /v1/projects/{id}", updateProjectHandler(s.projects, authz, s.log))
 	mux.Handle("GET /v1/projects", listProjectsHandler(s.projects, authz, s.log))
 	mux.Handle("DELETE /v1/projects/{id}", deleteProjectHandler(s.projects, refs, s.log))
 	mux.Handle("GET /v1/projects/{id}/files", projectTreeHandler(s.projects, s.syncer, authz, s.log))
@@ -506,7 +515,7 @@ func (s *Server) Handler() http.Handler {
 		handler = readOnlyGate(handler)
 	}
 	if s.relayStore != nil && s.workerToken != "" {
-		handler = relayGate(relay.NewHandler(s.relayStore, s.workerToken, s.log), handler)
+		handler = relayGate(relay.NewHandler(s.relayStore, s.workerToken, s.log, s.policies), handler)
 	}
 	return securityHeaders(bodyLimit(handler))
 }

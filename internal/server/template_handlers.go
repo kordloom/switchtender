@@ -189,7 +189,19 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 		// Notification URLs are read back masked, so a row the editor left untouched arrives
 		// redacted. Restore those from the stored template rather than storing the mask.
 		notifications := req.Notifications
-		if existing, err := store.Get(r.Context(), id); err == nil {
+		// A lookup that fails for any reason other than the template being absent must not skip the
+		// leaving-organization check below. Treating every error as "carry on" made this the one
+		// place where a store problem turned a denial into an allow.
+		existing, gerr := store.Get(r.Context(), id)
+		switch {
+		case errors.Is(gerr, template.ErrNotFound):
+			existing = nil
+		case gerr != nil:
+			log.Error("server: read template: " + gerr.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read template")
+			return
+		}
+		if existing != nil {
 			notifications = restoreMaskedNotifications(req.Notifications, existing.Notifications)
 			// Moving a template out of an organization is as much a change of who controls it as
 			// moving one in, and it is the direction a caller with a manage grant would take: clear

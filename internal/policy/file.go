@@ -207,3 +207,34 @@ func (s *FileStore) Delete(context.Context, string) error {
 	return fmt.Errorf("%w: policies are read from %s, so remove it there and let review and "+
 		"deployment apply it", ErrReadOnly, s.path)
 }
+
+// Unreachable is a policy Store that cannot answer, for a process that has no way to read the
+// policies at all.
+//
+// A relay worker leases runs across a segment boundary and never sees the control node's database.
+// Handing it a nil store made the plan-content gate silently vanish, because that gate runs where
+// the run executes: a terraform apply scoped by a destroy threshold was planned and held when the
+// control node claimed it, and applied straight to production when a worker did, decided by a race
+// between claim loops. Erroring instead makes the gate fail closed, so the run is refused with a
+// reason rather than applied past a check nobody performed.
+type Unreachable struct{}
+
+// compile-time proof that Unreachable is a Store.
+var _ Store = Unreachable{}
+
+// List reports that the policies cannot be read from here.
+func (Unreachable) List(context.Context) ([]*Policy, error) {
+	return nil, fmt.Errorf("%w: this process leases runs across a relay and cannot read the "+
+		"approval policies, so it cannot tell whether this run needs one", ErrUnreachable)
+}
+
+// Get reports that the policies cannot be read from here.
+func (Unreachable) Get(context.Context, string) (*Policy, error) {
+	return nil, ErrUnreachable
+}
+
+// Save refuses, since there is nothing here to write to.
+func (Unreachable) Save(context.Context, *Policy) error { return ErrUnreachable }
+
+// Delete refuses, since there is nothing here to write to.
+func (Unreachable) Delete(context.Context, string) error { return ErrUnreachable }

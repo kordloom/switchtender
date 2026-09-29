@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/template"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // Plan is the set of objects an import will create, cross-referenced by generated id, along with
@@ -37,11 +39,61 @@ type Plan struct {
 	Credentials []*credential.Credential
 	// Warnings names what could not be mapped cleanly or needs human follow up.
 	Warnings []string
+	// suppressed counts the warnings past the cap, so the total is still knowable.
+	suppressed int
 }
 
-// warn appends a formatted warning to the plan.
+// maxWarnings bounds how many warnings one plan reports.
+//
+// Two warnings are emitted per unmapped credential, and an export is a file somebody else wrote. A
+// document at the upload limit produced millions of them: one preview request cost gigabytes of
+// allocation and answered with a response many times the size of the request, on a path that needs
+// no stores configured at all. A report nobody could read was the least of it.
+const maxWarnings = 1000
+
+// warn appends a formatted warning to the plan, up to maxWarnings.
+//
+// The cap is announced rather than silent. A truncated report that looks complete is how somebody
+// concludes an import was clean when it was only long.
 func (p *Plan) warn(format string, args ...any) {
-	p.Warnings = append(p.Warnings, fmt.Sprintf(format, args...))
+	switch {
+	case len(p.Warnings) < maxWarnings:
+		p.Warnings = append(p.Warnings, fmt.Sprintf(format, args...))
+	case len(p.Warnings) == maxWarnings:
+		p.Warnings = append(p.Warnings, fmt.Sprintf(
+			"more than %d warnings, so the rest are not listed: this export needs review before "+
+				"it is applied", maxWarnings))
+		p.suppressed++
+	default:
+		p.suppressed++
+	}
+}
+
+// Suppressed returns how many warnings were not listed because the plan hit its cap.
+func (p *Plan) Suppressed() int { return p.suppressed }
+
+// addSchedule validates a schedule before it joins the plan and stamps its first fire time.
+//
+// Two things were wrong with appending one directly. The cron string never went through
+// Schedule.Validate, which the API applies on every other path, so an unparseable expression from an
+// export became a stored row the scheduler logged an error over on every tick, forever. And
+// NextRunAt was left nil, which the scheduler reads as "not due yet" and skips, so every imported
+// schedule was reported as created and then never fired. A migrated nightly job that silently does
+// not run is the worst shape this could take: nothing looks broken until the thing it was supposed
+// to do has not happened for a month.
+func (p *Plan) addSchedule(sc *schedule.Schedule, source string, now time.Time) {
+	if err := sc.Validate(); err != nil {
+		p.warn("schedule %q from %s was not imported: %v", sc.Name, source, err)
+		return
+	}
+	next, err := schedule.NextFire(sc.Cron, now)
+	if err != nil {
+		p.warn("schedule %q from %s was not imported: its schedule never comes due: %v",
+			sc.Name, source, err)
+		return
+	}
+	sc.NextRunAt = &next
+	p.Schedules = append(p.Schedules, sc)
 }
 
 // parseExtraVars decodes AWX or Semaphore extra vars, which arrive as a YAML or JSON string, into a
@@ -61,20 +113,44 @@ func parseExtraVars(raw string) (map[string]any, error) {
 	return out, nil
 }
 
+// safeINIValue reports whether v can be written into an INI inventory as itself.
+//
+// A line break is the whole attack. An inventory is assembled from names and variable values that
+// came out of somebody else's export, and a value carrying a newline does not land as a strange host
+// name: it closes the line and starts a new directive. A host named "web1\n[all:vars]\nansible_python_interpreter=/tmp/x"
+// produces a syntactically clean inventory that points Ansible at an arbitrary interpreter on the
+// executor for every play, and "ansible_connection=local" redirects the whole run onto the executor
+// itself. Neither has a command-line counterpart, so an inventory setting them wins.
+//
+// Values are refused rather than escaped. INI quoting rules differ between the parsers that read
+// these files, so a value that is safe by one reading is not by another, and a migration that
+// silently rewrote somebody's host names would be its own kind of wrong.
+func safeINIValue(v string) bool {
+	return !strings.ContainsAny(v, "\n\r")
+}
+
 // buildInventoryINI renders hosts and groups into an INI inventory the file plugins accept. Every
 // host lands in the implicit all group; named groups list their own members below.
-func buildInventoryINI(hosts []importHost, groups []importGroup) string {
+//
+// Anything that cannot be written as itself is dropped and reported, because an inventory is the
+// list of machines a play will reach and a silently altered one is worse than a refused import.
+func buildInventoryINI(plan *Plan, name string, hosts []importHost, groups []importGroup) string {
 	var b strings.Builder
 	if len(hosts) > 0 {
 		for _, h := range hosts {
-			b.WriteString(hostLine(h))
+			b.WriteString(hostLine(plan, name, h))
 		}
 		b.WriteString("\n")
 	}
 	for _, g := range groups {
+		if !safeINIValue(g.Name) {
+			plan.warn("inventory %q: group %q was dropped because its name spans more than one "+
+				"line, which would have written new inventory directives", name, oneLine(g.Name))
+			continue
+		}
 		fmt.Fprintf(&b, "[%s]\n", g.Name)
 		for _, h := range g.Hosts {
-			b.WriteString(hostLine(h))
+			b.WriteString(hostLine(plan, name, h))
 		}
 		b.WriteString("\n")
 	}
@@ -82,7 +158,12 @@ func buildInventoryINI(hosts []importHost, groups []importGroup) string {
 }
 
 // hostLine renders one inventory host with any host variables as inline key=value pairs.
-func hostLine(h importHost) string {
+func hostLine(plan *Plan, inv string, h importHost) string {
+	if !safeINIValue(h.Name) {
+		plan.warn("inventory %q: host %q was dropped because its name spans more than one line, "+
+			"which would have written new inventory directives", inv, oneLine(h.Name))
+		return ""
+	}
 	var line strings.Builder
 	line.WriteString(h.Name)
 	keys := make([]string, 0, len(h.Variables))
@@ -91,9 +172,23 @@ func hostLine(h importHost) string {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		fmt.Fprintf(&line, " %s=%v", k, h.Variables[k])
+		value := fmt.Sprintf("%v", h.Variables[k])
+		if !safeINIValue(k) || !safeINIValue(value) {
+			plan.warn("inventory %q: variable %q on host %q was dropped because it spans more "+
+				"than one line, which would have written new inventory directives",
+				inv, oneLine(k), h.Name)
+			continue
+		}
+		fmt.Fprintf(&line, " %s=%s", k, value)
 	}
 	return line.String() + "\n"
+}
+
+// oneLine collapses a value to a single line for a warning, so a report cannot be made to look like
+// several messages by the thing it is reporting on.
+func oneLine(v string) string {
+	r := strings.NewReplacer("\n", "\\n", "\r", "\\r")
+	return util.Clip(r.Replace(v), 80)
 }
 
 // importHost is a host with optional variables, shared by the export parsers.
@@ -132,7 +227,7 @@ func mapSurveyType(awxType string) (template.FieldType, bool) {
 // awxPublicInputs lists the AWX credential inputs that are never secret, so their values can be
 // reported back to the operator. AWX replaces secrets with "$encrypted$" on export, but this
 // allowlist decides rather than that marker alone: a custom credential type whose secret field AWX
-// does not mask would otherwise leak into a warning that is displayed and stored.
+// does not mask would otherwise leak into a warning that is displayed.
 var awxPublicInputs = []string{
 	"authorize", "become_method", "become_username", "client", "cloud_environment", "domain",
 	"host", "organization", "project", "region", "resource_group", "subscription", "tenant",

@@ -157,10 +157,17 @@ func workerStore(log *zap.Logger) (run.Store, []dispatch.Option, func(), error) 
 			return nil, nil, nil, errors.New("open store: relay worker needs SWITCHTENDER_WORKER_TOKEN")
 		}
 		client := &http.Client{Timeout: relayClientTimeout}
-		store := relay.NewClient(relay.NewHTTPTransport(workerServer, token, client))
+		transport := relay.NewHTTPTransport(workerServer, token, client)
+		store := relay.NewClient(transport)
 		// The relay Client cannot reclaim stale leases; that stays the control node's job, so the
 		// janitor would only log ErrUnsupported on every sweep. Turn it off for the relay worker.
-		opts = append(opts, dispatch.WithNoJanitor())
+		//
+		// The plan-content gate runs where the run executes, so a worker reads the approval policies
+		// across the relay rather than from a database it has no route to. Without them it would
+		// apply a gated terraform change with no plan and no approver whenever it won the claim
+		// ahead of the control node.
+		opts = append(opts, dispatch.WithNoJanitor(),
+			dispatch.WithPolicies(relay.NewPolicyClient(transport)))
 		return store, opts, func() {}, nil
 	}
 
@@ -179,6 +186,9 @@ func workerStore(log *zap.Logger) (run.Store, []dispatch.Option, func(), error) 
 		dispatch.WithProjects(bundle.Projects(), syncer),
 		dispatch.WithInventories(bundle.Inventories()),
 		dispatch.WithInventorySources(bundle.InventorySources()),
+		// The plan-content gate is enforced by whichever process claims the run, so a worker needs
+		// the policies as much as the control node does.
+		dispatch.WithPolicies(bundle.Policies()),
 	)
 	return bundle.Runs(), opts, func() { _ = bundle.Close() }, nil
 }

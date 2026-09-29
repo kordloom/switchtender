@@ -159,5 +159,8 @@ Add a schedule in Schedules with a cron expression to fire a template on a caden
   and email are configured once on the server and fire for every run, so a single template cannot
   page its own PagerDuty service the way an AWX notification template can.
 - Execution environments are a single pinned container image behind a flag, not a managed catalog.
+- Import creates objects that belong to no organization. Under the default access model that leaves
+  them usable by every operator, which matches how a single-team install already works. If you run
+  with strict grants, imported objects have no grants yet, so assign them after importing.
 
 If something you rely on is missing, open an issue. Import coverage is widened on purpose.

@@ -495,6 +495,17 @@ func (m *memStore) NonTerminal(_ context.Context) ([]*Run, error) {
 }
 
 // Claim leases the oldest unclaimed pending top-level plain run to owner and returns it.
+//
+// A child is claimable only while its parent is running. Shards are stored before the coordinator
+// fences the parent, so for as long as that parent is merely pending its shards are already sitting
+// claimable: a split canceled in that window had the fence correctly refuse to start the parent
+// while a claim loop had already taken shards and executed them on real hosts. Allowing a pending
+// parent narrowed that window rather than closing it, and under load the loop still won.
+//
+// Running is the state that says a coordinator took the parent and means to run it, and every path
+// that creates a claimable child reaches it: a split and a shard retry both transition the parent
+// through the start fence, and pipeline steps are created only after it. A parent whose coordinator
+// dies before the fence leaves its children unclaimable, which the abandoned-parent sweep settles.
 func (m *memStore) Claim(_ context.Context, owner string, queues []string) (*Run, error) {
 	serves := make(map[string]bool, len(queues))
 	for _, q := range queues {
@@ -509,6 +520,12 @@ func (m *memStore) Claim(_ context.Context, owner string, queues []string) (*Run
 		}
 		if !serves[r.Queue] {
 			continue
+		}
+		if r.ParentID != nil {
+			p, ok := m.runs[*r.ParentID]
+			if !ok || p.CancelRequested || p.Status != StatusRunning {
+				continue
+			}
 		}
 		if oldest == nil || r.CreatedAt.Before(oldest.CreatedAt) ||
 			(r.CreatedAt.Equal(oldest.CreatedAt) && r.ID < oldest.ID) {
@@ -652,12 +669,17 @@ func (m *memStore) CancelPending(_ context.Context, id string) (bool, error) {
 }
 
 // TransitionStatusAndClaim moves the run between statuses and takes owner's lease in one step.
+// A requested cancel blocks the claim in the same statement that makes it. Cancel is recorded as a
+// flag rather than a status, so a fence that compares only the status cannot see one: a pipeline
+// canceled after it was approved and before its coordinator picked it up still read as running, won
+// the compare-and-swap, and executed on real hosts. Checking the flag first and swapping second
+// leaves the same gap one scheduling delay wide, so it belongs in the predicate.
 func (m *memStore) TransitionStatusAndClaim(_ context.Context, id string, from, to Status,
 	owner string) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.runs[id]
-	if !ok || r.Status != from {
+	if !ok || r.Status != from || r.CancelRequested {
 		return false, nil
 	}
 	now := time.Now()

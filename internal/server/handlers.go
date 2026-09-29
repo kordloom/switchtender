@@ -499,13 +499,17 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 		if len(req.Notifications) > 0 {
 			opts = append(opts, run.WithNotifications(req.Notifications))
 		}
+		// The hold applies to a split too. Dropping it here meant asking for approval and asking for
+		// shards in the same request silently got neither: the API answered 202 and the fan-out ran
+		// on every host at once. A split stores its shards held alongside a held parent, so the
+		// option needs nothing more than to be passed along.
+		if req.RequireApproval {
+			opts = append(opts, run.WithRequireApproval(true))
+		}
 		if req.Shards >= 2 {
 			created, err = submitter.SubmitSplit(r.Context(), req.Playbook, req.Inventory,
 				req.Shards, opts...)
 		} else {
-			if req.RequireApproval {
-				opts = append(opts, run.WithRequireApproval(true))
-			}
 			created, err = submitter.Submit(r.Context(), req.Playbook, req.Inventory, opts...)
 		}
 		switch {
@@ -631,6 +635,13 @@ func cancelRunHandler(store run.Store, canceler Canceler, authz *authorizer, log
 		if existing.ClaimedBy == "" &&
 			(existing.Status == run.StatusPending || existing.Status == run.StatusPendingApproval) {
 			if done, err := store.CancelPending(r.Context(), id); err == nil && done {
+				// A split stores its shards alongside the parent, so canceling the parent has to
+				// settle them too. Rejecting a split already did this; canceling did not, and the
+				// store sweep cannot cover it either, because orphan resolution only fires for an
+				// interrupted parent and a canceled one is terminal. The shards sat awaiting an
+				// approval that would never come, and approving one ran it under a canceled
+				// parent with nothing to roll it up.
+				cancelChildrenOf(r.Context(), store, log, existing)
 				respondJSON(w, log, http.StatusAccepted,
 					map[string]string{"status": "canceled"}, wantsPretty(r))
 				return
@@ -768,6 +779,34 @@ func actorName(r *http.Request) string {
 	return ""
 }
 
+// cancelChildrenOf settles the children stored with a parent that was canceled before it started.
+//
+// A child that cannot be settled is logged rather than failing the cancel: the parent is what the
+// caller asked to stop, and it is already stopped.
+func cancelChildrenOf(ctx context.Context, store run.Store, log *zap.Logger, parent *run.Run) {
+	if parent.Kind != run.KindSplit && parent.Kind != run.KindPipeline {
+		return
+	}
+	children, err := store.Shards(ctx, parent.ID)
+	if err != nil {
+		log.Error("server: list shards of a canceled run: " + err.Error())
+		return
+	}
+	for _, c := range children {
+		if c.Status.Terminal() {
+			continue
+		}
+		if done, cerr := store.CancelPending(ctx, c.ID); cerr != nil {
+			log.Error("server: cancel shard " + c.ID + ": " + cerr.Error())
+		} else if !done {
+			// Already claimed by an executor, so it stops cooperatively instead.
+			if rerr := store.RequestCancel(ctx, c.ID); rerr != nil {
+				log.Error("server: request cancel of shard " + c.ID + ": " + rerr.Error())
+			}
+		}
+	}
+}
+
 // rerunOptions rebuilds the submit options a stored run was created with, so a rerun replays the
 // full spec: everything in the run's execution options, plus its host limit, labels, and
 // notification targets.
@@ -790,6 +829,25 @@ func rerunOptions(rn *run.Run) []run.SubmitOption {
 		opts = append(opts, run.WithNotifications(rn.Notifications))
 	}
 	return opts
+}
+
+// rerunRefusal reports why a finished run must not be replayed, or an empty string when it may be.
+//
+// The two cases are decisions rather than outcomes. A rejected run was denied by an approver, which
+// the retry path has always refused to replay. A run canceled before it started was withdrawn
+// before anyone let it run. Rerunning either turns a recorded decision into a fresh, ungated run,
+// because the replay carries the execution spec and not the hold that was on it.
+func rerunRefusal(rn *run.Run) string {
+	switch {
+	case rn.Status == run.StatusRejected:
+		return "this run was rejected, so it cannot be run again from here: submit a new run if " +
+			"it should be reconsidered"
+	case rn.Status == run.StatusCanceled && rn.StartedAt == nil:
+		return "this run was canceled before it started, so it cannot be run again from here: " +
+			"submit a new run if it should be reconsidered"
+	default:
+		return ""
+	}
 }
 
 // rerunRunHandler starts a fresh run with the same spec as a finished one. A split parent reruns
@@ -827,6 +885,16 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 		}
 		if !rn.Status.Terminal() {
 			respondError(w, log, http.StatusConflict, "run has not finished")
+			return
+		}
+		// A rerun replays a spec, and it must not replay past a decision that the spec should not
+		// run. A rejected run is one an approver denied. A run canceled before it ever started is
+		// one somebody withdrew. Neither ever executed, and the replay drops the hold that was on
+		// them: the fresh run is gated only by a stored policy, so a hold that came from
+		// require_approval, a drift reconcile, or a generated proposal was silently discarded and
+		// the denied command ran from a one-click button on the denied run's own page.
+		if reason := rerunRefusal(rn); reason != "" {
+			respondError(w, log, http.StatusConflict, reason)
 			return
 		}
 		// Access to the run is not enough to fire its spec again. Authorize every object the new
@@ -868,11 +936,30 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 }
 
 // approveRunHandler releases a run held for approval so it can execute.
-func approveRunHandler(approver Approver, log *zap.Logger) http.HandlerFunc {
+func approveRunHandler(approver Approver, store run.Store, authz *authorizer,
+	log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if approver == nil {
 			respondError(w, log, http.StatusNotFound, "approvals not enabled")
 			return
+		}
+		// A decision on a run is a decision about the objects it will touch, so the approver has to
+		// be someone who may use them. Every other run mutation checks; these two did not, and they
+		// are the two that release a held run onto real hosts.
+		if store != nil {
+			rn, gerr := store.Get(r.Context(), r.PathValue("id"))
+			if errors.Is(gerr, run.ErrNotFound) {
+				respondError(w, log, http.StatusNotFound, "run not found")
+				return
+			}
+			if gerr != nil {
+				log.Error("server: read run: " + gerr.Error())
+				respondError(w, log, http.StatusInternalServerError, "could not read run")
+				return
+			}
+			if authorizeRunAccess(w, r, authz, log, rn) {
+				return
+			}
 		}
 		created, err := approver.Approve(r.Context(), r.PathValue("id"))
 		switch {
@@ -881,6 +968,10 @@ func approveRunHandler(approver Approver, log *zap.Logger) http.HandlerFunc {
 			return
 		case errors.Is(err, dispatch.ErrNotPendingApproval):
 			respondError(w, log, http.StatusConflict, "run is not awaiting approval")
+			return
+		case errors.Is(err, dispatch.ErrChildNotApprovable):
+			respondError(w, log, http.StatusConflict,
+				"a shard or step is decided through its parent, not on its own")
 			return
 		case err != nil:
 			log.Error("server: approve run: " + err.Error())
@@ -892,7 +983,8 @@ func approveRunHandler(approver Approver, log *zap.Logger) http.HandlerFunc {
 }
 
 // rejectRunHandler denies a run held for approval, recording an optional reason as its error.
-func rejectRunHandler(approver Approver, log *zap.Logger) http.HandlerFunc {
+func rejectRunHandler(approver Approver, store run.Store, authz *authorizer,
+	log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if approver == nil {
 			respondError(w, log, http.StatusNotFound, "approvals not enabled")
@@ -902,6 +994,24 @@ func rejectRunHandler(approver Approver, log *zap.Logger) http.HandlerFunc {
 			Reason string `json:"reason"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
+		// A decision on a run is a decision about the objects it will touch, so the approver has to
+		// be someone who may use them. Every other run mutation checks; these two did not, and they
+		// are the two that release a held run onto real hosts.
+		if store != nil {
+			rn, gerr := store.Get(r.Context(), r.PathValue("id"))
+			if errors.Is(gerr, run.ErrNotFound) {
+				respondError(w, log, http.StatusNotFound, "run not found")
+				return
+			}
+			if gerr != nil {
+				log.Error("server: read run: " + gerr.Error())
+				respondError(w, log, http.StatusInternalServerError, "could not read run")
+				return
+			}
+			if authorizeRunAccess(w, r, authz, log, rn) {
+				return
+			}
+		}
 		created, err := approver.Reject(r.Context(), r.PathValue("id"), req.Reason)
 		switch {
 		case errors.Is(err, run.ErrNotFound):
@@ -909,6 +1019,10 @@ func rejectRunHandler(approver Approver, log *zap.Logger) http.HandlerFunc {
 			return
 		case errors.Is(err, dispatch.ErrNotPendingApproval):
 			respondError(w, log, http.StatusConflict, "run is not awaiting approval")
+			return
+		case errors.Is(err, dispatch.ErrChildNotApprovable):
+			respondError(w, log, http.StatusConflict,
+				"a shard or step is decided through its parent, not on its own")
 			return
 		case err != nil:
 			log.Error("server: reject run: " + err.Error())

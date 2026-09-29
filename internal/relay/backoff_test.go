@@ -121,7 +121,7 @@ func TestWorkerCannotInjectOrRewriteARun(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	backing := run.NewMemStore()
-	srv := httptest.NewServer(relay.NewHandler(backing, "worker-token", zap.NewNop()))
+	srv := httptest.NewServer(relay.NewHandler(backing, "worker-token", zap.NewNop(), nil))
 	defer srv.Close()
 	client := relay.NewClient(relay.NewHTTPTransport(srv.URL, "worker-token", srv.Client()))
 
@@ -183,7 +183,7 @@ func TestWorkerCannotSetAStatusItHasNoBusinessSetting(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	backing := run.NewMemStore()
-	srv := httptest.NewServer(relay.NewHandler(backing, "worker-token", zap.NewNop()))
+	srv := httptest.NewServer(relay.NewHandler(backing, "worker-token", zap.NewNop(), nil))
 	defer srv.Close()
 	client := relay.NewClient(relay.NewHTTPTransport(srv.URL, "worker-token", srv.Client()))
 
@@ -252,7 +252,7 @@ func TestWorkerCannotStripALeaseOrReportOnAnothersRun(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	backing := run.NewMemStore()
-	srv := httptest.NewServer(relay.NewHandler(backing, "worker-token", zap.NewNop()))
+	srv := httptest.NewServer(relay.NewHandler(backing, "worker-token", zap.NewNop(), nil))
 	defer srv.Close()
 	client := relay.NewClient(relay.NewHTTPTransport(srv.URL, "worker-token", srv.Client()))
 	held := time.Now()

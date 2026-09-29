@@ -39,3 +39,7 @@ var (
 // cannot tell whether a run needs sign-off. The submission is refused rather than run: a gate that
 // cannot be evaluated has not been passed.
 var ErrPolicyUnavailable = errors.New("approval policies unavailable")
+
+// ErrChildNotApprovable is returned when a shard or pipeline step is approved on its own. The
+// parent carries the decision; a child released by itself would run outside it.
+var ErrChildNotApprovable = errors.New("a shard or step is approved through its parent")

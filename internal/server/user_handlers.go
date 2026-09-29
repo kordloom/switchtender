@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net"
@@ -287,19 +286,6 @@ func updateUserHandler(users user.Store, log *zap.Logger) http.HandlerFunc {
 			return
 		}
 
-		if u.Role == user.RoleAdmin && req.Role != user.RoleAdmin {
-			last, err := isLastAdmin(r.Context(), users, id)
-			if err != nil {
-				log.Error("server: count admins: " + err.Error())
-				respondError(w, log, http.StatusInternalServerError, "could not update user")
-				return
-			}
-			if last {
-				respondError(w, log, http.StatusConflict, "cannot demote the last admin")
-				return
-			}
-		}
-
 		u.Username = req.Username
 		u.Role = req.Role
 		if err := req.applyTo(u); err != nil {
@@ -313,9 +299,16 @@ func updateUserHandler(users user.Store, log *zap.Logger) http.HandlerFunc {
 				return
 			}
 		}
-		if err := users.Update(r.Context(), u); err != nil {
+		// Demoting is the other way to reach zero administrators, so the write carries the same
+		// guard the delete does and in the same statement.
+		applied, err := users.UpdateUnlessLastAdmin(r.Context(), u)
+		if err != nil {
 			log.Error("server: update user: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not update user")
+			return
+		}
+		if !applied {
+			respondError(w, log, http.StatusConflict, "cannot demote the last admin")
 			return
 		}
 		respondJSON(w, log, http.StatusOK, u, wantsPretty(r))
@@ -340,27 +333,6 @@ func listUsersHandler(users user.Store, log *zap.Logger) http.HandlerFunc {
 	}
 }
 
-// isLastAdmin reports whether the account with id is the only admin, so demoting or deleting it would
-// leave the install with no administrator and lock everyone out of the admin-gated endpoints.
-func isLastAdmin(ctx context.Context, users user.Store, id string) (bool, error) {
-	list, err := users.List(ctx)
-	if err != nil {
-		return false, err
-	}
-	target, others := false, 0
-	for _, u := range list {
-		if u.Role != user.RoleAdmin {
-			continue
-		}
-		if u.ID == id {
-			target = true
-		} else {
-			others++
-		}
-	}
-	return target && others == 0, nil
-}
-
 // deleteUserHandler removes an account. Its tokens stop working on their next use.
 func deleteUserHandler(users user.Store, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -369,17 +341,13 @@ func deleteUserHandler(users user.Store, log *zap.Logger) http.HandlerFunc {
 			return
 		}
 		id := r.PathValue("id")
-		last, err := isLastAdmin(r.Context(), users, id)
-		if err != nil {
-			log.Error("server: count admins: " + err.Error())
-			respondError(w, log, http.StatusInternalServerError, "could not delete user")
-			return
-		}
-		if last {
+		// The count and the delete are one statement in the store. Asking first and deleting after
+		// let two concurrent deletes of the last two admins both see a survivor and both proceed.
+		deleted, err := users.DeleteUnlessLastAdmin(r.Context(), id)
+		if err == nil && !deleted {
 			respondError(w, log, http.StatusConflict, "cannot delete the last admin")
 			return
 		}
-		err = users.Delete(r.Context(), id)
 		if errors.Is(err, user.ErrNotFound) {
 			respondError(w, log, http.StatusNotFound, "user not found")
 			return
