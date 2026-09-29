@@ -77,6 +77,7 @@ func (u *UI) Handler() http.Handler {
 	mux.HandleFunc("GET /ui/runs/{id}", u.detail)
 	mux.HandleFunc("GET /ui/runs", u.runs)
 	mux.HandleFunc("GET /ui/fleet", u.fleet)
+	mux.HandleFunc("GET /ui/doctor", u.doctor)
 	mux.HandleFunc("GET /ui/drift", u.drift)
 	mux.HandleFunc("GET /ui/hosts/{host}", u.host)
 	mux.HandleFunc("GET /ui/tasks", u.tasks)
@@ -121,6 +122,11 @@ func (u *UI) detail(w http.ResponseWriter, r *http.Request) {
 // fleet renders the fleet health page.
 func (u *UI) fleet(w http.ResponseWriter, _ *http.Request) {
 	u.render(w, "fleet.html", map[string]any{"ReadOnly": u.readOnly})
+}
+
+// doctor renders the reference health page.
+func (u *UI) doctor(w http.ResponseWriter, _ *http.Request) {
+	u.render(w, "doctor.html", map[string]any{"ReadOnly": u.readOnly})
 }
 
 // drift renders the fleet drift page.

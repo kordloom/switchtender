@@ -201,3 +201,27 @@ func deleteScheduleHandler(store schedule.Store, log *zap.Logger) http.HandlerFu
 		respondJSON(w, log, http.StatusOK, map[string]string{"deleted": id}, wantsPretty(r))
 	}
 }
+
+// previewScheduleHandler returns the next five firings for a cron spec, so a form can show what a
+// schedule will do before saving it.
+func previewScheduleHandler(log *zap.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		spec := r.URL.Query().Get("cron")
+		if spec == "" {
+			respondError(w, log, http.StatusBadRequest, "cron is required")
+			return
+		}
+		next := make([]time.Time, 0, 5)
+		after := time.Now()
+		for range 5 {
+			fire, err := schedule.NextFire(spec, after)
+			if err != nil {
+				respondError(w, log, http.StatusBadRequest, "invalid cron expression")
+				return
+			}
+			next = append(next, fire)
+			after = fire
+		}
+		respondJSON(w, log, http.StatusOK, map[string]any{"next": next}, wantsPretty(r))
+	}
+}

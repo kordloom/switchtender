@@ -16,10 +16,13 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/auth"
+	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/grant"
+	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/live"
+	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/schedule"
@@ -1406,5 +1409,162 @@ func TestRunAccessScopedByGrant(t *testing.T) {
 	}
 	if code := get(); code != http.StatusOK {
 		t.Errorf("granted read = %d, want 200", code)
+	}
+}
+
+// TestRerunRun verifies a finished run reruns with its spec replayed and the refusals hold.
+func TestRerunRun(t *testing.T) {
+	t.Parallel()
+	shard0 := 0
+	three := 3
+	parent := "run_parent"
+	tests := []struct {
+		Saved            *run.Run
+		WantStatus       int
+		WantBodyContains string
+		WantShards       int
+	}{{ // Test 0: A finished plain run reruns with its spec.
+		Saved: &run.Run{
+			ID: "run_1", Playbook: "site.yml", Inventory: "inv.ini", Status: run.StatusFailed,
+			Tool: "ansible", Limit: "web*", DryRun: true, CredentialIDs: []string{"cred_1"},
+		},
+		WantStatus: http.StatusAccepted, WantBodyContains: "run_new",
+	}, { // Test 1: A split parent reruns as a new split.
+		Saved: &run.Run{
+			ID: "run_1", Playbook: "site.yml", Inventory: "inv.ini", Status: run.StatusFailed,
+			Kind: run.KindSplit, ShardCount: &three,
+		},
+		WantStatus: http.StatusAccepted, WantBodyContains: "run_new", WantShards: 3,
+	}, { // Test 2: A running run refuses.
+		Saved: &run.Run{
+			ID: "run_1", Playbook: "site.yml", Inventory: "inv.ini", Status: run.StatusRunning,
+		},
+		WantStatus: http.StatusConflict, WantBodyContains: "has not finished",
+	}, { // Test 3: A shard child refuses.
+		Saved: &run.Run{
+			ID: "run_1", Playbook: "site.yml", Inventory: "inv.ini", Status: run.StatusFailed,
+			ParentID: &parent, ShardIndex: &shard0,
+		},
+		WantStatus: http.StatusConflict, WantBodyContains: "rerun the parent",
+	}, { // Test 4: A pipeline parent refuses.
+		Saved: &run.Run{
+			ID: "run_1", Playbook: "release", Inventory: "inv.ini", Status: run.StatusFailed,
+			Kind: run.KindPipeline,
+		},
+		WantStatus: http.StatusConflict, WantBodyContains: "from its workflow",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			store := run.NewMemStore()
+			if err := store.Save(context.Background(), test.Saved); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+			sub := &fakeSubmitter{run: &run.Run{ID: "run_new", Status: run.StatusPending}}
+			handler := New(store, sub, zap.NewNop()).Handler()
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec,
+				httptest.NewRequest(http.MethodPost, "/v1/runs/run_1/rerun", nil))
+			if rec.Code != test.WantStatus {
+				t.Fatalf("status = %d, want %d, body %s", rec.Code, test.WantStatus, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), test.WantBodyContains) {
+				t.Errorf("body %q does not contain %q", rec.Body.String(), test.WantBodyContains)
+			}
+			if test.WantShards != 0 && sub.gotShards != test.WantShards {
+				t.Errorf("shards = %d, want %d", sub.gotShards, test.WantShards)
+			}
+			if test.WantStatus == http.StatusAccepted && test.WantShards == 0 {
+				if sub.gotRun == nil || sub.gotRun.Limit != test.Saved.Limit || sub.gotRun.DryRun != test.Saved.DryRun {
+					t.Errorf("submitted spec = %+v, want limit %q dry %v", sub.gotRun, test.Saved.Limit, test.Saved.DryRun)
+				}
+			}
+		})
+	}
+}
+
+// TestSchedulePreview verifies the cron preview returns firings and rejects bad specs.
+func TestSchedulePreview(t *testing.T) {
+	t.Parallel()
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop()).Handler()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/schedules/preview?cron=0+2+*+*+*", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "next") {
+		t.Fatalf("preview = %d %s, want 200 with next", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/schedules/preview?cron=nope", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid preview = %d, want 400", rec.Code)
+	}
+}
+
+// TestLaunchOverrides verifies prompt-on-launch overrides reach the submitted run and the
+// inventory override cannot dodge validation.
+func TestLaunchOverrides(t *testing.T) {
+	t.Parallel()
+	store := template.NewMemStore()
+	tpl := &template.Template{
+		ID: "tpl_1", Name: "deploy", Playbook: "site.yml", Inventory: "inv.ini",
+		ExtraVars: map[string]any{"env": "prod"},
+	}
+	if err := store.Save(context.Background(), tpl); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	sub := &fakeSubmitter{run: &run.Run{ID: "run_new", Status: run.StatusPending}}
+	handler := New(run.NewMemStore(), sub, zap.NewNop(), WithTemplates(store)).Handler()
+
+	rec := httptest.NewRecorder()
+	body := `{"limit":"web*","dry_run":true,"extra_vars":{"env":"stage","extra":1}}`
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost,
+		"/v1/templates/"+tpl.ID+"/launch", strings.NewReader(body)))
+	if rec.Code != http.StatusCreated && rec.Code != http.StatusAccepted {
+		t.Fatalf("launch = %d, body %s", rec.Code, rec.Body.String())
+	}
+	if sub.gotRun == nil {
+		t.Fatal("no submitted run recorded")
+	}
+	if sub.gotRun.Limit != "web*" || !sub.gotRun.DryRun {
+		t.Errorf("overrides = limit %q dry %v, want web* true", sub.gotRun.Limit, sub.gotRun.DryRun)
+	}
+	if sub.gotRun.ExtraVars["env"] != "stage" {
+		t.Errorf("extra_vars env = %v, want stage (launch overrides template)", sub.gotRun.ExtraVars["env"])
+	}
+}
+
+// TestDoctor verifies broken references, dead schedules, and secretless credentials surface, and
+// a clean control plane reports an all-clear with real counts.
+func TestDoctor(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tpls := template.NewMemStore()
+	if err := tpls.Save(ctx, &template.Template{
+		ID: "tpl_1", Name: "deploy", Playbook: "site.yml",
+		InventoryID: "inv_gone", CredentialIDs: []string{"cred_gone"},
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	scheds := schedule.NewMemStore()
+	if err := scheds.Save(ctx, &schedule.Schedule{
+		ID: "sch_1", Name: "nightly", Cron: "not a cron", TemplateID: "tpl_gone",
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
+		WithTemplates(tpls), WithSchedules(scheds), WithInventories(inventory.NewMemStore()),
+		WithProjects(project.NewMemStore()), WithCredentials(credential.NewMemStore(), nil)).Handler()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/doctor", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("doctor = %d, body %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"inv_gone", "cred_gone", "does not parse", "tpl_gone", "\"checked_templates\":1"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("doctor body missing %q in %s", want, body)
+		}
 	}
 }

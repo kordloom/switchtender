@@ -1,10 +1,24 @@
 "use strict";
 
 // A stored flat theme is stamped before anything renders, so a forced theme never flashes the
-// signature default. The script sits at the end of body, so document.body exists.
+// signature default. A ?theme= query parameter, named by theme, picks and persists one, so a
+// themed link is shareable. The script sits at the end of body, so document.body exists.
 (function () {
 	let theme = null;
 	try { theme = localStorage.getItem("st_theme"); } catch { /* storage may be unavailable */ }
+	const param = new URLSearchParams(location.search).get("theme");
+	if (param) {
+		const byName = { stitch: "signature", kord: "light", seal: "dark" };
+		const key = byName[param.toLowerCase()];
+		if (key === "light" || key === "dark") theme = key;
+		else if (key === "signature") theme = null;
+		if (key) {
+			try {
+				if (theme) localStorage.setItem("st_theme", theme);
+				else localStorage.removeItem("st_theme");
+			} catch { /* storage may be unavailable */ }
+		}
+	}
 	if (theme === "light" || theme === "dark") document.body.dataset.theme = theme;
 	syncBrandLogos();
 })();
@@ -66,6 +80,7 @@ const NAV_GROUPS = [
 		{ key: "users", href: "/ui/users", label: "Users", desc: "Accounts and roles", admin: true },
 		{ key: "audit", href: "/ui/audit", label: "Audit", desc: "Tamper-evident change log", admin: true },
 		{ key: "policies", href: "/ui/policies", label: "Policies", desc: "Approval rules", admin: true },
+		{ key: "doctor", href: "/ui/doctor", label: "Doctor", desc: "Reference health checks", admin: true },
 	] },
 	{ label: "Help", items: [
 		{ key: "docs", href: "/ui/docs", label: "Docs", desc: "Guides and reference" },
@@ -78,7 +93,7 @@ const PAGE_NAV = {
 	tasks: "tasks", workers: "workers", drift: "drift", projects: "projects", inventories: "inventories",
 	sources: "sources", jobtemplates: "templates", schedules: "schedules", workflows: "workflows",
 	migrate: "migrate", credentials: "credentials", users: "users", audit: "audit",
-	policies: "policies", docs: "docs",
+	policies: "policies", doctor: "doctor", docs: "docs",
 };
 
 // NAV_ICONS holds the inline SVG body for each nav key, stroked in the current color.
@@ -100,6 +115,7 @@ const NAV_ICONS = {
 	users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
 	audit: '<path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="m9 14 2 2 4-4"/>',
 	policies: '<path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><polyline points="9 12 11 14 15 10"/>',
+	doctor: '<path d="M14.7 6.3a4.8 4.8 0 0 0-6.4 6.4L3 18l3 3 5.3-5.3a4.8 4.8 0 0 0 6.4-6.4l-3.1 3.1-3-3z"/>',
 	docs: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
 };
 
@@ -153,6 +169,150 @@ function mountTopbar() {
 	bar.appendChild(nav);
 }
 
+// EXPORT_PAGES are the pages whose main table gets CSV and JSON export of the shown rows.
+// Credentials stays out on purpose, so secret-adjacent data never leaves by accident.
+const EXPORT_PAGES = ["runs", "fleet", "drift", "tasks", "workers", "schedules", "jobtemplates",
+	"users", "audit", "host", "projects", "inventories", "sources", "policies", "doctor"];
+
+// tableRowsData reads the rendered table into headers and rows, skipping the actions column and
+// anything hidden, so an export matches exactly what the user sees after filtering.
+function tableRowsData(table) {
+	const ths = Array.from(table.tHead.rows[0].cells);
+	const skip = new Set();
+	const headers = [];
+	ths.forEach((th, i) => {
+		const label = th.textContent.trim();
+		if (th.classList.contains("col-actions") || label === "Actions" || label === "") skip.add(i);
+		else headers.push(label);
+	});
+	const rows = [];
+	for (const tr of table.tBodies[0].rows) {
+		if (tr.dataset.fhide === "1" || tr.classList.contains("skeleton-row")) continue;
+		const row = [];
+		Array.from(tr.cells).forEach((cell, i) => {
+			if (skip.has(i)) return;
+			row.push(cell.textContent.replace(/\s+/g, " ").trim());
+		});
+		rows.push(row);
+	}
+	return { headers, rows };
+}
+
+// downloadBlob hands the browser a generated file.
+function downloadBlob(name, type, content) {
+	const url = URL.createObjectURL(new Blob([content], { type }));
+	const a = document.createElement("a");
+	a.href = url;
+	a.download = name;
+	document.body.appendChild(a);
+	a.click();
+	a.remove();
+	URL.revokeObjectURL(url);
+}
+
+// mountTableExport adds CSV and JSON export buttons beside the list filter, so any table can
+// leave the app for an audit, a spreadsheet, or a colleague.
+function mountTableExport() {
+	const page = document.body.dataset.page;
+	if (!EXPORT_PAGES.includes(page)) return;
+	const table = document.querySelector("main.content table");
+	if (!table || !table.tHead || !table.tBodies[0]) return;
+	let host = document.querySelector(".list-filter") || document.querySelector(".runs-toolbar");
+	if (!host) {
+		host = document.createElement("div");
+		host.className = "list-filter";
+		table.parentNode.insertBefore(host, table);
+	}
+	const stamp = () => new Date().toISOString().slice(0, 10);
+	const make = (label, tip, fn) => {
+		const btn = document.createElement("button");
+		btn.type = "button";
+		btn.className = "button table-export";
+		btn.innerHTML = svgIcon('<path d="M12 3v12"/><polyline points="7 10 12 15 17 10"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>');
+		btn.appendChild(document.createTextNode(label));
+		btn.dataset.tip = tip;
+		btn.addEventListener("click", fn);
+		host.appendChild(btn);
+	};
+	make("CSV", "Export the filtered rows as CSV", () => {
+		const { headers, rows } = tableRowsData(table);
+		const esc = (v) => /[",\n]/.test(v) ? '"' + v.replaceAll('"', '""') + '"' : v;
+		const csv = [headers, ...rows].map((r) => r.map(esc).join(",")).join("\n") + "\n";
+		downloadBlob("switchtender-" + page + "-" + stamp() + ".csv", "text/csv", csv);
+	});
+	make("JSON", "Export the filtered rows as JSON", () => {
+		const { headers, rows } = tableRowsData(table);
+		const objs = rows.map((r) => Object.fromEntries(headers.map((h, i) => [h, r[i] ?? ""])));
+		downloadBlob("switchtender-" + page + "-" + stamp() + ".json", "application/json",
+			JSON.stringify(objs, null, 2) + "\n");
+	});
+}
+
+// applyRowVisibility shows a row only when neither the filter nor the pager hides it.
+function applyRowVisibility(row) {
+	row.hidden = row.dataset.fhide === "1" || row.dataset.phide === "1";
+}
+
+// mountTablePager caps how many rows a list shows at once, with a footer for paging: a count, a
+// rows-per-page choice, and Show all. Long fleets and logs stay wieldy, and the filter composes,
+// since it marks rows and the pager only pages the ones that match. The runs page pages on the
+// server and is left alone.
+function mountTablePager() {
+	const page = document.body.dataset.page;
+	if (page === "runs" || !EXPORT_PAGES.includes(page)) return;
+	const table = document.querySelector("main.content table");
+	if (!table || !table.tBodies[0]) return;
+	const tbody = table.tBodies[0];
+	const foot = document.createElement("div");
+	foot.className = "table-foot";
+	foot.hidden = true;
+	table.parentNode.insertBefore(foot, table.nextSibling);
+	const count = document.createElement("span");
+	const spacer = document.createElement("span");
+	spacer.className = "spacer";
+	const label = document.createElement("label");
+	label.className = "pagesize-label";
+	label.textContent = "Rows";
+	const sel = document.createElement("select");
+	sel.className = "input toolbar-select";
+	for (const n of [25, 50, 100, 0]) {
+		const opt = document.createElement("option");
+		opt.value = String(n);
+		opt.textContent = n === 0 ? "All" : String(n);
+		sel.appendChild(opt);
+	}
+	label.appendChild(sel);
+	const all = document.createElement("button");
+	all.type = "button";
+	all.className = "button";
+	all.textContent = "Show all";
+	foot.appendChild(count);
+	foot.appendChild(spacer);
+	foot.appendChild(label);
+	foot.appendChild(all);
+	let size = 25;
+	const apply = () => {
+		let shown = 0;
+		let matched = 0;
+		for (const row of tbody.rows) {
+			if (row.classList.contains("skeleton-row")) continue;
+			if (row.dataset.fhide === "1") { row.dataset.phide = ""; applyRowVisibility(row); continue; }
+			matched++;
+			row.dataset.phide = size && matched > size ? "1" : "";
+			applyRowVisibility(row);
+			if (!row.hidden) shown++;
+		}
+		foot.hidden = matched <= 25 && size >= 25;
+		count.textContent = "Showing " + shown + " of " + matched;
+		all.hidden = shown >= matched;
+	};
+	sel.addEventListener("change", () => { size = parseInt(sel.value, 10) || 0; apply(); });
+	all.addEventListener("click", () => { size = 0; sel.value = "0"; apply(); });
+	table.addEventListener("rowsfiltered", apply);
+	new MutationObserver(apply).observe(tbody, { childList: true });
+	apply();
+}
+
 // PAGE_DOCS maps each page to its most relevant guide, linked from the page header.
 const PAGE_DOCS = {
 	overview: { slug: "quickstart", label: "Quickstart" },
@@ -172,6 +332,7 @@ const PAGE_DOCS = {
 	users: { slug: "configuration", label: "Configuration" },
 	audit: { slug: "features", label: "Features" },
 	policies: { slug: "features", label: "Features" },
+	doctor: { slug: "concepts", label: "Concepts" },
 };
 
 // mountPageDocs adds a small guide link to the page header, so every page points at its docs.
@@ -185,16 +346,23 @@ function mountPageDocs() {
 	a.dataset.tip = "Open the " + ref.label + " guide";
 	a.innerHTML = svgIcon(NAV_ICONS.docs);
 	a.appendChild(document.createTextNode(ref.label));
-	const actions = head.querySelector(".head-actions");
-	if (actions) actions.appendChild(a);
-	else head.appendChild(a);
+	let actions = head.querySelector(".head-actions");
+	if (!actions) {
+		actions = document.createElement("div");
+		actions.className = "head-actions";
+		for (const child of Array.from(head.children)) {
+			if (!child.classList.contains("page-head-text")) actions.appendChild(child);
+		}
+		head.appendChild(actions);
+	}
+	actions.appendChild(a);
 }
 
 // LIST_PAGES are the pages whose main table is a searchable list.
 // LIST_PAGES get the client-side row filter. The runs page is excluded because it searches on the
 // server, across every run rather than only the loaded page.
-const LIST_PAGES = ["jobtemplates", "credentials", "projects", "inventories",
-	"sources", "schedules", "users", "workers", "fleet", "tasks", "host", "policies", "drift"];
+const LIST_PAGES = ["jobtemplates", "credentials", "projects", "inventories", "sources",
+	"schedules", "users", "workers", "fleet", "tasks", "host", "policies", "drift", "audit", "doctor"];
 
 // mountListFilter adds a search box above the main list table and filters its rows by text as you
 // type, so every list is searchable. It reads the rows live, so it works no matter when they load.
@@ -214,16 +382,27 @@ function mountListFilter() {
 	wrap.appendChild(input);
 	wrap.appendChild(count);
 	table.parentNode.insertBefore(wrap, table);
+	const preset = new URLSearchParams(location.search).get("q");
 	input.addEventListener("input", () => {
 		const q = input.value.trim().toLowerCase();
 		let shown = 0;
 		for (const row of tbody.rows) {
 			const match = q === "" || row.textContent.toLowerCase().includes(q);
-			row.hidden = !match;
+			if (match) row.dataset.fhide = "";
+			else row.dataset.fhide = "1";
+			applyRowVisibility(row);
 			if (match) shown++;
 		}
 		count.textContent = q ? shown + " shown" : "";
+		table.dispatchEvent(new CustomEvent("rowsfiltered"));
 	});
+	if (preset) {
+		input.value = preset;
+		// Rows may not be loaded yet, so the preset re-applies as they arrive.
+		new MutationObserver(() => input.dispatchEvent(new Event("input")))
+			.observe(tbody, { childList: true });
+		input.dispatchEvent(new Event("input"));
+	}
 }
 
 // TOURS is the guided-tour registry. Each tour runs on one page and walks a sequence of steps; a
@@ -1582,6 +1761,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	} else if (page === "tasks") {
 		loadTasks();
 	} else if (page === "schedules") {
+		wireCronPreview();
 		wireModal("schedule");
 		wireScheduleForm();
 		loadSchedules();
@@ -1624,11 +1804,16 @@ document.addEventListener("DOMContentLoaded", () => {
 		loadSources();
 	} else if (page === "migrate") {
 		wireMigrate();
+	} else if (page === "doctor") {
+		loadDoctor();
 	}
+	if (page === "runs") mountRunsWindowChip();
 	buildNav();
 	wirePalette();
 	wireHinttips();
 	mountPageDocs();
+	mountTableExport();
+	mountTablePager();
 	if (isReadOnly()) applyReadOnly();
 	setInterval(refreshRelTimes, 20000);
 	mountTour();
@@ -1836,7 +2021,10 @@ function themeGroup() {
 		btn.setAttribute("aria-label", t.tip);
 		btn.setAttribute("aria-pressed", "false");
 		btn.innerHTML = svgIcon(t.icon);
-		btn.appendChild(document.createTextNode(t.label));
+		const name = document.createElement("span");
+		name.className = "theme-name";
+		name.textContent = t.label;
+		btn.appendChild(name);
 		btn.addEventListener("click", () => setTheme(t.key));
 		row.appendChild(btn);
 	}
@@ -2027,14 +2215,14 @@ function wireHinttips() {
 		tip.style.left = x + "px";
 		tip.style.top = y + "px";
 	};
-	// linkDest turns a link's destination into a short readable label.
+	// linkDest labels external destinations only. Same-origin links stay quiet: the status bar
+	// already names them, and a tip box over the neighboring row reads as broken UI.
 	const linkDest = (a) => {
 		const href = a.getAttribute("href");
 		if (!href || href === "#" || href.startsWith("javascript")) return "";
 		try {
 			const u = new URL(href, location.href);
-			const path = u.pathname + (u.search || "") + (u.hash || "");
-			return u.origin === location.origin ? "Go to " + path : "Opens " + u.hostname + u.pathname;
+			return u.origin === location.origin ? "" : "Opens " + u.hostname;
 		} catch { return ""; }
 	};
 	const show = (e) => {
@@ -2061,6 +2249,8 @@ function wireHinttips() {
 	document.addEventListener("focusin", show);
 	document.addEventListener("focusout", hide);
 	document.addEventListener("scroll", () => { clearTimeout(linkTimer); tip.hidden = true; }, true);
+	document.addEventListener("click", () => { clearTimeout(linkTimer); tip.hidden = true; }, true);
+	document.documentElement.addEventListener("mouseleave", () => { clearTimeout(linkTimer); tip.hidden = true; });
 }
 
 // wirePalette registers the platform search shortcut that toggles the palette, on every page but
@@ -2228,6 +2418,22 @@ function isReadOnly() {
 }
 
 // loadAudit fills the audit table with the trail, newest first, showing each entry's chain hash.
+// auditPathCell renders an audit path with any run reference linked to its run page.
+function auditPathCell(path) {
+	const cell = td("", "mono");
+	for (const part of String(path || "").split(/(run_[a-z0-9]+)/)) {
+		if (/^run_[a-z0-9]+$/.test(part)) {
+			const a = document.createElement("a");
+			a.href = "/ui/runs/" + part;
+			a.textContent = part;
+			cell.appendChild(a);
+		} else if (part) {
+			cell.appendChild(document.createTextNode(part));
+		}
+	}
+	return cell;
+}
+
 async function loadAudit() {
 	try {
 		const data = await getJSON("/audit?limit=500");
@@ -2243,7 +2449,7 @@ async function loadAudit() {
 			tr.appendChild(tdTime(e.at));
 			tr.appendChild(td(e.actor || "-"));
 			tr.appendChild(td(e.method, "mono"));
-			tr.appendChild(td(e.path, "mono"));
+			tr.appendChild(auditPathCell(e.path));
 			tr.appendChild(td((e.hash || "").slice(0, 12), "mono"));
 			tbody.appendChild(tr);
 		}
@@ -2832,14 +3038,14 @@ async function loadProjects() {
 			actions.insertBefore(editButton(() => openProjectEdit(p)), actions.firstChild);
 			tr.appendChild(actions);
 			inspectable(tr, p.name, [
-				{ label: "Repository", value: p.repo_url },
+				{ label: "Repository", value: p.repo_url, copy: true },
 				{ label: "Branch", value: p.branch || "default" },
 				{ label: "Credential", value: p.credential_id },
 				{ label: "Image", value: p.image },
 				{ label: "Install deps", value: p.install_deps ? "yes" : "no" },
 				{ label: "Pull credential", value: p.pull_credential_id },
 				{ label: "Created", value: fmtTime(p.created_at) },
-				{ label: "ID", value: p.id },
+				{ label: "ID", value: p.id, copy: true },
 			]);
 			tbody.appendChild(tr);
 		}
@@ -2962,6 +3168,58 @@ function syncTemplateTool() {
 // openTemplateEdit fills the template dialog with an existing record and switches it to edit mode.
 // The dialog does not expose inventory_id, so it is carried through the form dataset to avoid
 // dropping a stored inventory reference on save.
+// notifyRow appends one notification target row to the template dialog.
+function notifyRow(target) {
+	const rows = document.getElementById("tpl-notify-rows");
+	if (!rows) return;
+	const row = document.createElement("div");
+	row.className = "notify-row";
+	const kind = document.createElement("select");
+	kind.className = "input";
+	for (const k of ["webhook", "slack", "mattermost", "rocketchat", "discord", "teams", "ntfy"]) {
+		const opt = document.createElement("option");
+		opt.value = k;
+		opt.textContent = k;
+		kind.appendChild(opt);
+	}
+	kind.value = (target && target.kind) || "slack";
+	const url = document.createElement("input");
+	url.className = "input mono";
+	url.placeholder = "https://hooks.example/...";
+	url.value = (target && target.url) || "";
+	const fail = document.createElement("label");
+	fail.className = "check-label notify-fail";
+	const cb = document.createElement("input");
+	cb.type = "checkbox";
+	cb.checked = !!(target && target.on_failure);
+	fail.appendChild(cb);
+	fail.appendChild(document.createTextNode(" Failure only"));
+	const del = document.createElement("button");
+	del.type = "button";
+	del.className = "modal-close";
+	del.setAttribute("aria-label", "Remove notification");
+	del.textContent = "\u00d7";
+	del.addEventListener("click", () => row.remove());
+	row.appendChild(kind);
+	row.appendChild(url);
+	row.appendChild(fail);
+	row.appendChild(del);
+	rows.appendChild(row);
+}
+
+// collectNotifyTargets reads the dialog's notification rows, skipping rows without a URL.
+function collectNotifyTargets() {
+	const out = [];
+	for (const row of document.querySelectorAll("#tpl-notify-rows .notify-row")) {
+		const url = row.querySelector("input.mono").value.trim();
+		if (!url) continue;
+		const target = { kind: row.querySelector("select").value, url };
+		if (row.querySelector("input[type=checkbox]").checked) target.on_failure = true;
+		out.push(target);
+	}
+	return out;
+}
+
 function openTemplateEdit(t) {
 	const form = document.getElementById("template-form");
 	form.dataset.editId = t.id;
@@ -2984,6 +3242,11 @@ function openTemplateEdit(t) {
 	document.getElementById("tpl-tool").value = t.tool || "ansible";
 	document.getElementById("tpl-command").value = t.command || "";
 	document.getElementById("tpl-dry-run").checked = !!t.dry_run;
+	const notifyRows = document.getElementById("tpl-notify-rows");
+	if (notifyRows) {
+		notifyRows.innerHTML = "";
+		for (const target of t.notifications || []) notifyRow(target);
+	}
 	syncTemplateTool();
 	document.getElementById("tpl-status").textContent = "";
 	setModalTitle("template", "Edit template");
@@ -2993,6 +3256,8 @@ function openTemplateEdit(t) {
 // wireTemplateForm hooks the template dialog up to POST /templates for a new record and PUT
 // /templates/{id} when editing. The New button resets the dialog to add mode.
 function wireTemplateForm() {
+	const notifyAdd = document.getElementById("tpl-notify-add");
+	if (notifyAdd) notifyAdd.addEventListener("click", () => notifyRow());
 	fillSelect(document.getElementById("tpl-project"), "/projects", "projects", (p) => p.name);
 	fillSelect(document.getElementById("tpl-credentials"), "/credentials", "credentials",
 		(c) => c.name + " (" + c.kind + ")");
@@ -3060,6 +3325,7 @@ function wireTemplateForm() {
 				return;
 			}
 		}
+		payload.notifications = collectNotifyTargets();
 		const editId = form.dataset.editId;
 		if (editId && form.dataset.inventoryId) payload.inventory_id = form.dataset.inventoryId;
 		try {
@@ -3126,6 +3392,14 @@ async function loadTemplates() {
 			});
 			actions.appendChild(launch);
 			actions.appendChild(document.createTextNode(" "));
+			const withOpts = document.createElement("button");
+			withOpts.className = "button";
+			withOpts.innerHTML = svgIcon('<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>');
+			withOpts.dataset.tip = "Launch with overrides: limit, inventory, credentials, vars";
+			withOpts.setAttribute("aria-label", "Launch with overrides");
+			withOpts.addEventListener("click", (e) => { e.preventDefault(); openPromptLaunch(t); });
+			actions.appendChild(withOpts);
+			actions.appendChild(document.createTextNode(" "));
 			actions.appendChild(editButton(() => openTemplateEdit(t)));
 			actions.appendChild(document.createTextNode(" "));
 			const delBtn = deleteCell("/templates/" + t.id, "template " + t.name, tr, "No templates yet.");
@@ -3184,13 +3458,10 @@ function openTemplateView(t) {
 }
 
 // openSurvey renders a template's survey as a form and launches with the collected answers.
-function openSurvey(t) {
-	const modal = document.getElementById("survey-modal");
-	const form = document.getElementById("survey-form");
-	document.getElementById("survey-title").textContent = "Launch " + t.name;
-	document.getElementById("survey-status").textContent = "";
-	form.innerHTML = "";
-	for (const f of t.survey) {
+// surveyFieldsInto renders a template's survey fields into a container.
+function surveyFieldsInto(container, survey) {
+	container.innerHTML = "";
+	for (const f of survey || []) {
 		const label = document.createElement("label");
 		label.className = "field-label";
 		label.textContent = (f.label || f.var) + (f.required ? " *" : "");
@@ -3220,25 +3491,111 @@ function openSurvey(t) {
 		input.dataset.type = f.type || "text";
 		if (f.default !== undefined && f.default !== null) input.value = f.default;
 		label.appendChild(input);
-		form.appendChild(label);
+		container.appendChild(label);
 	}
+}
+
+// collectSurveyAnswers reads typed answers back out of a survey container.
+function collectSurveyAnswers(container) {
+	const answers = {};
+	for (const el of container.querySelectorAll("[data-var]")) {
+		const raw = el.value;
+		if (raw === "") continue;
+		if (el.dataset.type === "int") answers[el.dataset.var] = parseInt(raw, 10);
+		else if (el.dataset.type === "bool") answers[el.dataset.var] = raw === "true";
+		else answers[el.dataset.var] = raw;
+	}
+	return answers;
+}
+
+function openSurvey(t) {
+	const modal = document.getElementById("survey-modal");
+	const form = document.getElementById("survey-form");
+	document.getElementById("survey-title").textContent = "Launch " + t.name;
+	document.getElementById("survey-status").textContent = "";
+	surveyFieldsInto(form, t.survey);
 	modal.hidden = false;
 
 	document.getElementById("survey-cancel").onclick = () => { modal.hidden = true; };
 	document.getElementById("survey-go").onclick = async () => {
-		const answers = {};
-		for (const el of form.querySelectorAll("[data-var]")) {
-			const raw = el.value;
-			if (raw === "") continue;
-			if (el.dataset.type === "int") answers[el.dataset.var] = parseInt(raw, 10);
-			else if (el.dataset.type === "bool") answers[el.dataset.var] = raw === "true";
-			else answers[el.dataset.var] = raw;
-		}
 		try {
-			const created = await postAction("/templates/" + t.id + "/launch", { answers });
+			const created = await postAction("/templates/" + t.id + "/launch",
+				{ answers: collectSurveyAnswers(form) });
 			location.href = "/ui/runs/" + created.id;
 		} catch (err) {
 			document.getElementById("survey-status").textContent = "Launch failed: " + err.message;
+		}
+	};
+}
+
+// openPromptLaunch opens the launch-with-overrides dialog: survey answers when the template has
+// one, then limit, stored inventory, selectable credentials, extra vars, and mode.
+async function openPromptLaunch(t) {
+	const modal = document.getElementById("prompt-modal");
+	if (!modal) return;
+	document.getElementById("prompt-title").textContent = "Launch " + t.name + " with overrides";
+	document.getElementById("prompt-status").textContent = "";
+	document.getElementById("prompt-limit").value = "";
+	document.getElementById("prompt-vars").value = "";
+	document.getElementById("prompt-dry-run").checked = !!t.dry_run;
+	surveyFieldsInto(document.getElementById("prompt-survey"), t.survey);
+
+	const invSel = document.getElementById("prompt-inventory");
+	invSel.innerHTML = '<option value="">Template default</option>';
+	try {
+		const data = await getJSON("/inventories");
+		for (const inv of data.inventories || []) {
+			const opt = document.createElement("option");
+			opt.value = inv.id;
+			opt.textContent = inv.name;
+			invSel.appendChild(opt);
+		}
+	} catch { /* stored inventories are optional */ }
+
+	const credField = document.getElementById("prompt-field-credentials");
+	const credSel = document.getElementById("prompt-credentials");
+	credSel.innerHTML = "";
+	const selectable = t.selectable_credential_ids || [];
+	credField.hidden = !selectable.length;
+	if (selectable.length) {
+		try {
+			const data = await getJSON("/credentials");
+			const byID = new Map((data.credentials || []).map((c) => [c.id, c]));
+			for (const cid of selectable) {
+				const c = byID.get(cid);
+				const opt = document.createElement("option");
+				opt.value = cid;
+				opt.textContent = c ? c.name + " (" + c.kind + ")" : cid;
+				credSel.appendChild(opt);
+			}
+		} catch { credField.hidden = true; }
+	}
+
+	modal.hidden = false;
+	document.getElementById("prompt-close").onclick = () => { modal.hidden = true; };
+	document.getElementById("prompt-go").onclick = async () => {
+		const status = document.getElementById("prompt-status");
+		const payload = { answers: collectSurveyAnswers(document.getElementById("prompt-survey")) };
+		const limit = document.getElementById("prompt-limit").value.trim();
+		if (limit) payload.limit = limit;
+		if (invSel.value) payload.inventory_id = invSel.value;
+		const picked = Array.from(credSel.selectedOptions).map((o) => o.value);
+		if (picked.length) payload.credential_ids = picked;
+		const varsText = document.getElementById("prompt-vars").value.trim();
+		if (varsText) {
+			try {
+				payload.extra_vars = JSON.parse(varsText);
+			} catch (_) {
+				status.textContent = "Extra vars must be valid JSON.";
+				return;
+			}
+		}
+		payload.dry_run = document.getElementById("prompt-dry-run").checked;
+		try {
+			const created = await postAction("/templates/" + t.id + "/launch", payload);
+			location.href = "/ui/runs/" + created.id;
+		} catch (err) {
+			status.textContent = "Launch failed: " + err.message;
 		}
 	};
 }
@@ -3442,6 +3799,22 @@ function wireInventoryForm() {
 }
 
 // loadInventories populates the inventory table with delete actions.
+// hostCount estimates how many hosts an ini inventory lists. YAML content returns -1, unknown.
+function hostCount(content) {
+	const text = String(content || "");
+	if (!text.trim()) return 0;
+	if (/^(---|all\s*:)/m.test(text)) return -1;
+	let n = 0;
+	let skip = false;
+	for (const raw of text.split("\n")) {
+		const line = raw.trim();
+		if (!line || line.startsWith("#") || line.startsWith(";")) continue;
+		if (line.startsWith("[")) { skip = /:(vars|children)\]$/.test(line); continue; }
+		if (!skip) n++;
+	}
+	return n;
+}
+
 async function loadInventories() {
 	try {
 		const data = await getJSON("/inventories");
@@ -3454,14 +3827,32 @@ async function loadInventories() {
 		for (const i of inventories) {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(i.name));
+			const count = hostCount(i.content);
+			const hostsCell = td(count < 0 ? "\u2014" : String(count));
+			hostsCell.dataset.tip = count < 0
+				? "YAML inventory: host count not estimated"
+				: "Approximate, counted from the stored content";
+			tr.appendChild(hostsCell);
 			tr.appendChild(tdTime(i.created_at));
 			const actions = deleteCell("/inventories/" + i.id, "inventory " + i.name, tr, "No inventories yet.");
 			actions.insertBefore(editButton(() => openInventoryEdit(i)), actions.firstChild);
 			tr.appendChild(actions);
+			const groups = (String(i.content || "").match(/^\[[^\]]+\]$/gm) || [])
+				.filter((g) => !/:(vars|children)\]$/.test(g)).length;
 			inspectable(tr, i.name, [
+				{ label: "Hosts", value: count < 0 ? "unknown, YAML" : String(count) },
+				{ label: "Groups", value: groups ? String(groups) : "" },
+				{ label: "Size", value: (String(i.content || "").length) + " bytes" },
 				{ label: "Created", value: fmtTime(i.created_at) },
-				{ label: "ID", value: i.id },
+				{ label: "ID", value: i.id, copy: true },
 				{ label: "Content", value: i.content, block: true },
+			], [
+				{ label: "Edit", primary: true, tip: "Edit this inventory", onClick: () => { closeDrill(); openInventoryEdit(i); } },
+				{ label: "Copy content", tip: "Copy the inventory to the clipboard", onClick: async () => {
+					try { await navigator.clipboard.writeText(i.content || ""); } catch { /* denied */ }
+				} },
+				{ label: "Download", tip: "Download the inventory as a file", onClick: () =>
+					downloadBlob(i.name.replace(/\s+/g, "-") + ".ini", "text/plain", i.content || "") },
 			]);
 			tbody.appendChild(tr);
 		}
@@ -3647,13 +4038,25 @@ function wireAsk() {
 	const go = document.getElementById("ask-go");
 	const input = document.getElementById("ask-input");
 	if (!go || !input) return;
+	// Without a usable provider the input is theater. The read-only demo swaps the whole block
+	// for one teaser line pointing at the guide.
 	if (isReadOnly()) {
-		go.disabled = true;
-		input.disabled = true;
-		const status = document.getElementById("ask-status");
-		if (status) {
-			status.textContent = "Asking is off in this read-only demo. Self-host with your own AI provider, local Ollama included, and this box answers from your fleet's run, health, and drift data.";
-			status.hidden = false;
+		const block = document.getElementById("ask-panel");
+		if (block) {
+			block.innerHTML = "";
+			const title = document.createElement("h3");
+			title.className = "ask-title";
+			title.textContent = "Ask about your fleet";
+			block.appendChild(title);
+			const teaser = document.createElement("p");
+			teaser.className = "ask-teaser muted";
+			teaser.textContent = "Ask questions about your fleet and get advisory answers grounded in run, health, and drift data. Available when you self-host with an AI provider, including local Ollama. ";
+			const link = document.createElement("a");
+			link.href = "/ui/docs/ai";
+			link.className = "link-arrow";
+			link.textContent = "How Advisory AI works";
+			teaser.appendChild(link);
+			block.appendChild(teaser);
 		}
 		return;
 	}
@@ -3786,7 +4189,9 @@ async function loadOverview() {
 		const runs = runsRes.runs || [];
 		const hosts = fleetRes.hosts || [];
 		renderOverviewMetrics(runs, hosts);
-		renderRecentRuns(runs.slice(0, 10));
+		renderActivity(runs);
+		renderRecentRuns(runs.slice(0, 8));
+		renderFleetSnapshot(hosts);
 		setStatus("");
 	} catch (e) {
 		setStatus("Failed to load the overview: " + e.message);
@@ -3844,6 +4249,167 @@ function renderRecentRuns(runs) {
 		go.innerHTML = svgIcon('<polyline points="9 18 15 12 9 6"/>');
 		row.appendChild(go);
 		el.appendChild(row);
+	}
+}
+
+// renderActivity draws a stacked daily bar chart of run outcomes over the last two weeks, from
+// the runs the overview already fetched. Bars carry tips; statuses use the reserved colors.
+function renderActivity(runs) {
+	const panel = document.getElementById("activity-panel");
+	const el = document.getElementById("activity");
+	if (!panel || !el || !runs.length) return;
+	const days = [];
+	const byDay = {};
+	const today = new Date();
+	for (let i = 13; i >= 0; i--) {
+		const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+		const key = d.toISOString().slice(0, 10);
+		days.push({ key, label: d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) });
+		byDay[key] = { succeeded: 0, failed: 0, other: 0 };
+	}
+	let counted = 0;
+	for (const r of runs) {
+		const at = r.created_at && new Date(r.created_at);
+		if (!at || isNaN(at)) continue;
+		const key = new Date(at.getFullYear(), at.getMonth(), at.getDate()).toISOString().slice(0, 10);
+		if (!byDay[key]) continue;
+		counted++;
+		if (r.status === "succeeded") byDay[key].succeeded++;
+		else if (r.status === "failed") byDay[key].failed++;
+		else byDay[key].other++;
+	}
+	if (!counted) return;
+	const max = Math.max(1, ...days.map((d) => {
+		const c = byDay[d.key];
+		return c.succeeded + c.failed + c.other;
+	}));
+	el.innerHTML = "";
+	for (const day of days) {
+		const c = byDay[day.key];
+		const total = c.succeeded + c.failed + c.other;
+		const col = document.createElement("a");
+		col.className = "activity-col";
+		const dayStart = new Date(day.key + "T00:00:00");
+		const dayEnd = new Date(dayStart.getFullYear(), dayStart.getMonth(), dayStart.getDate() + 1);
+		col.href = "/ui/runs?after=" + encodeURIComponent(dayStart.toISOString()) +
+			"&before=" + encodeURIComponent(dayEnd.toISOString());
+		col.dataset.tip = day.label + ": " + c.succeeded + " succeeded, " + c.failed + " failed" +
+			(c.other ? ", " + c.other + " other" : "") + ". Open these runs";
+		const bar = document.createElement("div");
+		bar.className = "activity-bar";
+		for (const part of [
+			{ n: c.other, cls: "other" },
+			{ n: c.failed, cls: "failed" },
+			{ n: c.succeeded, cls: "succeeded" },
+		]) {
+			if (!part.n) continue;
+			const seg = document.createElement("div");
+			seg.className = "activity-seg " + part.cls;
+			seg.style.height = Math.max(3, Math.round((part.n / max) * 64)) + "px";
+			bar.appendChild(seg);
+		}
+		if (!total) bar.appendChild(Object.assign(document.createElement("div"), { className: "activity-seg empty" }));
+		col.appendChild(bar);
+		const lab = document.createElement("span");
+		lab.className = "activity-label";
+		lab.textContent = day.label.replace(/\D+$/, "").trim() === "" ? day.label : day.label.split(" ")[1];
+		col.appendChild(lab);
+		el.appendChild(col);
+	}
+	const note = document.getElementById("activity-note");
+	if (note) note.textContent = runs.length >= 200 ? "From the latest 200 runs" : "Runs per day, last 14 days";
+	panel.hidden = false;
+}
+
+// renderFleetSnapshot fills the overview side card with the hosts most worth a look: flaky
+// first, then by failure count.
+function renderFleetSnapshot(hosts) {
+	const el = document.getElementById("ov-fleet");
+	if (!el) return;
+	const head = document.getElementById("ov-fleet-head");
+	el.innerHTML = "";
+	const ranked = hosts.slice().sort((a, b) =>
+		((b.flaky ? 1 : 0) - (a.flaky ? 1 : 0)) || (b.failures - a.failures) || a.host.localeCompare(b.host)).slice(0, 6);
+	if (head) head.hidden = !ranked.length;
+	if (!ranked.length) { el.appendChild(emptyLine("No host history yet.")); return; }
+	for (const h of ranked) {
+		const row = document.createElement("a");
+		row.className = "ov-row";
+		row.href = "/ui/hosts/" + encodeURIComponent(h.host);
+		const name = document.createElement("span");
+		name.className = "ov-row-name mono";
+		name.textContent = h.host;
+		row.appendChild(name);
+		const meta = document.createElement("span");
+		meta.className = "ov-row-meta" + (h.failures ? " fail-count" : "");
+		meta.textContent = h.failures + " / " + h.total + " failed";
+		row.appendChild(meta);
+		const chip = document.createElement("span");
+		chip.className = h.flaky ? "chip flaky" : "chip none";
+		chip.textContent = h.flaky ? "flaky" : "steady";
+		chip.dataset.tip = h.flaky
+			? "Recent outcomes alternate between pass and fail: worth a look"
+			: "Recent outcomes are stable";
+		row.appendChild(chip);
+		const go = document.createElement("span");
+		go.className = "ov-row-go";
+		go.innerHTML = svgIcon('<polyline points="9 18 15 12 9 6"/>');
+		row.appendChild(go);
+		el.appendChild(row);
+	}
+}
+
+// loadDoctor runs the reference checks and lists every finding with a fix link.
+async function loadDoctor() {
+	try {
+		const data = await getJSON("/doctor");
+		const findings = data.findings || [];
+		const sum = document.getElementById("doctor-summary");
+		sum.innerHTML = "";
+		sum.appendChild(statCard(String(data.checked_templates), "Templates checked", ""));
+		sum.appendChild(statCard(String(data.checked_schedules), "Schedules checked", ""));
+		sum.appendChild(statCard(String(data.checked_credentials), "Credentials checked", ""));
+		sum.appendChild(statCard(String(findings.length), "Findings", findings.length ? "failed" : "ok"));
+		sum.hidden = false;
+		if (!findings.length) {
+			showEmpty("Everything checks out. Every reference resolves and every schedule can fire.");
+			return;
+		}
+		const tbody = document.getElementById("doctor");
+		for (const f of findings) {
+			const tr = document.createElement("tr");
+			const sev = document.createElement("td");
+			const chip = document.createElement("span");
+			chip.className = "chip " + (f.severity === "broken" ? "failed" : "flaky");
+			chip.textContent = f.severity;
+			sev.appendChild(chip);
+			tr.appendChild(sev);
+			const obj = td("");
+			const name = document.createElement("strong");
+			name.textContent = f.object_name || f.object_id;
+			obj.appendChild(name);
+			obj.appendChild(document.createTextNode(" "));
+			const kind = document.createElement("span");
+			kind.className = "run-kind";
+			kind.textContent = f.object_type;
+			obj.appendChild(kind);
+			obj.title = f.object_id;
+			tr.appendChild(obj);
+			tr.appendChild(td(f.problem));
+			const fix = td("");
+			const link = document.createElement("a");
+			link.className = "button";
+			link.href = f.fix_path;
+			link.textContent = "Open";
+			link.dataset.tip = "Open the page where this is repaired";
+			fix.appendChild(link);
+			tr.appendChild(fix);
+			tbody.appendChild(tr);
+		}
+		setStatus("");
+		document.querySelector("table.runs").hidden = false;
+	} catch (e) {
+		setStatus("Doctor failed: " + e.message);
 	}
 }
 
@@ -3945,15 +4511,41 @@ function runsQuery() {
 	return el ? el.value.trim() : "";
 }
 
-// runsFilterParams reads the status, tool, and order dropdowns into query parameters, so the server
-// filters the whole run history, not just the loaded page.
+// runsFilterParams reads the status, tool, and order dropdowns plus any date window from the URL
+// into query parameters, so the server filters the whole run history, not just the loaded page.
 function runsFilterParams() {
 	let params = "";
 	for (const id of ["runs-status", "runs-tool", "runs-order"]) {
 		const el = document.getElementById(id);
 		if (el && el.value) params += "&" + id.replace("runs-", "") + "=" + encodeURIComponent(el.value);
 	}
+	const url = new URLSearchParams(location.search);
+	for (const key of ["after", "before"]) {
+		const v = url.get(key);
+		if (v) params += "&" + key + "=" + encodeURIComponent(v);
+	}
 	return params;
+}
+
+// mountRunsWindowChip shows which day the runs list is scoped to, with one click to clear it.
+function mountRunsWindowChip() {
+	const url = new URLSearchParams(location.search);
+	const after = url.get("after");
+	if (!after) return;
+	const bar = document.querySelector(".runs-toolbar");
+	if (!bar || bar.querySelector(".window-chip")) return;
+	const chip = document.createElement("span");
+	chip.className = "window-chip";
+	const when = new Date(after);
+	chip.appendChild(document.createTextNode(
+		isNaN(when) ? "Filtered window" : when.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })));
+	const clear = document.createElement("a");
+	clear.href = "/ui/runs";
+	clear.textContent = "\u00d7";
+	clear.setAttribute("aria-label", "Clear the date filter");
+	clear.dataset.tip = "Show every run again";
+	chip.appendChild(clear);
+	bar.appendChild(chip);
 }
 
 // wireRunsFilters reloads the table when a filter or order dropdown changes.
@@ -4210,7 +4802,7 @@ async function loadFleet() {
 			stability.appendChild(chip);
 			tr.appendChild(stability);
 			const sparkCell = document.createElement("td");
-			sparkCell.appendChild(sparkline(h.recent || []));
+			sparkCell.appendChild(sparkline(h.recent || [], h.recent_runs || []));
 			tr.appendChild(sparkCell);
 			tr.appendChild(td(String(h.total)));
 			const last = document.createElement("td");
@@ -4491,7 +5083,17 @@ async function loadSchedules() {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(s.name || "(unnamed)"));
 			tr.appendChild(td(s.cron, "mono"));
-			tr.appendChild(td(s.template_id ? (tplByID[s.template_id] || "template") : scheduleTarget(s)));
+			const target = document.createElement("td");
+			if (s.template_id) {
+				const tpl = document.createElement("a");
+				tpl.href = "/ui/templates";
+				tpl.textContent = tplByID[s.template_id] || "template";
+				tpl.dataset.tip = "Open templates";
+				target.appendChild(tpl);
+			} else {
+				target.textContent = scheduleTarget(s);
+			}
+			tr.appendChild(target);
 
 			const enabled = document.createElement("td");
 			const chip = document.createElement("span");
@@ -4560,6 +5162,34 @@ async function fillTemplateSelect(select) {
 }
 
 // openScheduleEdit fills the schedule dialog with an existing record and switches it to edit mode.
+// wireCronPreview shows the next firings for the cron spec as it is typed, so a schedule is
+// verifiable before saving.
+function wireCronPreview() {
+	const input = document.getElementById("schedule-cron");
+	const out = document.getElementById("cron-preview");
+	if (!input || !out) return;
+	let timer = 0;
+	const update = async () => {
+		const spec = input.value.trim();
+		if (!spec) { out.textContent = ""; return; }
+		try {
+			const data = await getJSON("/schedules/preview?cron=" + encodeURIComponent(spec));
+			const times = (data.next || []).slice(0, 3).map((t) =>
+				new Date(t).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }));
+			out.textContent = times.length ? "Next: " + times.join("  ·  ") : "";
+			out.classList.remove("error-text");
+		} catch {
+			out.textContent = "Invalid cron expression";
+			out.classList.add("error-text");
+		}
+	};
+	input.addEventListener("input", () => {
+		window.clearTimeout(timer);
+		timer = window.setTimeout(update, 350);
+	});
+	update();
+}
+
 function openScheduleEdit(s) {
 	const form = document.getElementById("schedule-form");
 	form.dataset.editId = s.id;
@@ -4793,14 +5423,21 @@ async function loadPolicies() {
 	}
 }
 
-// sparkline builds a row of outcome ticks, oldest on the left, newest on the right.
-function sparkline(recent) {
+// sparkline builds a row of outcome ticks, oldest on the left, newest on the right. When run ids
+// ride along, each tick links to its run, so no outcome is a dead end.
+function sparkline(recent, runIDs) {
 	const wrap = document.createElement("span");
 	wrap.className = "spark";
 	for (let i = recent.length - 1; i >= 0; i--) {
-		const tick = document.createElement("span");
+		const id = runIDs && runIDs[i];
+		const tick = document.createElement(id ? "a" : "span");
 		tick.className = "tick " + (recent[i] || "none");
-		tick.title = recent[i];
+		if (id) {
+			tick.href = "/ui/runs/" + id;
+			tick.dataset.tip = (recent[i] || "run") + ": open this run";
+		} else {
+			tick.title = recent[i];
+		}
 		wrap.appendChild(tick);
 	}
 	return wrap;
@@ -4823,6 +5460,27 @@ function outcomeChip(outcome) {
 }
 
 // detailState holds the current run and its accumulated events for incremental rendering.
+// copyButton returns a small clipboard control that copies text and confirms with a checkmark.
+function copyButton(text, tip) {
+	const btn = document.createElement("button");
+	btn.type = "button";
+	btn.className = "copy-btn";
+	btn.dataset.tip = tip;
+	btn.setAttribute("aria-label", tip);
+	const glyph = '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>';
+	btn.innerHTML = svgIcon(glyph);
+	btn.addEventListener("click", async () => {
+		try { await navigator.clipboard.writeText(text); } catch { return; }
+		btn.innerHTML = svgIcon('<polyline points="20 6 9 17 4 12"/>');
+		btn.classList.add("copied");
+		window.setTimeout(() => {
+			btn.innerHTML = svgIcon(glyph);
+			btn.classList.remove("copied");
+		}, 1200);
+	});
+	return btn;
+}
+
 let detailState = null;
 
 // loadDetail loads one run and dispatches to the split or single render path.
@@ -4831,9 +5489,68 @@ async function loadDetail(runId) {
 	if (fullLog) fullLog.href = streamURL("/runs/" + runId + "/logs");
 	const exportEvents = document.getElementById("export-events");
 	if (exportEvents) exportEvents.href = streamURL("/runs/" + runId + "/events?download=1");
+	const auditLink = document.getElementById("audit-link");
+	if (auditLink) {
+		auditLink.href = "/ui/audit?q=" + encodeURIComponent(runId);
+		auditLink.dataset.tip = "Every audited change that mentions this run";
+	}
+	const copyLink = document.getElementById("copy-link");
+	if (copyLink) {
+		copyLink.dataset.tip = "Copy a link to this run";
+		copyLink.addEventListener("click", async () => {
+			try { await navigator.clipboard.writeText(location.href); } catch { return; }
+			copyLink.textContent = "Copied";
+			window.setTimeout(() => { copyLink.textContent = "Copy link"; }, 1200);
+		});
+	}
+	const exportResults = document.getElementById("export-results");
+	if (exportResults) {
+		exportResults.dataset.tip = "Download this run and its per-host results as JSON";
+		exportResults.addEventListener("click", () => {
+			if (!detailState || !detailState.run) return;
+			const results = {};
+			for (const e of detailState.events || []) {
+				if (!e.host || !e.task || !e.type || e.type.indexOf("runner_") !== 0) continue;
+				const outcome = e.type === "runner_ok"
+					? (e.changed ? "changed" : "ok")
+					: e.type.slice("runner_".length);
+				if (!results[e.host]) results[e.host] = {};
+				results[e.host][e.task] = { outcome, rc: e.rc ?? undefined };
+			}
+			const payload = { run: detailState.run, results, exported_at: new Date().toISOString() };
+			downloadBlob("switchtender-" + detailState.runId + ".json", "application/json",
+				JSON.stringify(payload, null, 2) + "\n");
+		});
+	}
 	wireActions(runId);
+	wireLogFilter();
+	window.setInterval(() => {
+		for (const el of document.querySelectorAll(".value.ticking")) {
+			el.textContent = fmtDuration(el.dataset.started, new Date().toISOString());
+		}
+	}, 1000);
 	try {
 		const run = await getJSON("/runs/" + runId);
+		const rerun = document.getElementById("rerun-run");
+		if (rerun && !run.parent_id && run.kind !== "pipeline") {
+			rerun.hidden = false;
+			rerun.dataset.tip = "Start a fresh run with this exact spec";
+			if (isReadOnly()) {
+				rerun.disabled = true;
+				rerun.dataset.tip = "Disabled in the demo";
+			} else {
+				rerun.addEventListener("click", async () => {
+					rerun.disabled = true;
+					try {
+						const created = await postAction("/runs/" + runId + "/rerun");
+						location.href = "/ui/runs/" + created.id;
+					} catch (err) {
+						setStatus("Rerun failed: " + err.message);
+						rerun.disabled = false;
+					}
+				});
+			}
+		}
 		// A split or pipeline parent has no output of its own; each shard or step carries its log
 		// and events. Hiding the links beats serving blanks.
 		const isParent = !run.parent_id && (run.kind === "pipeline" || run.kind === "split" || run.shard_count);
@@ -5373,6 +6090,12 @@ const logCap = 262144;
 // trims the pane back to the cap when it grows past it.
 function appendLog(chunk) {
 	const pre = document.getElementById("log");
+	detailState.logRaw = ((detailState.logRaw || "") + chunk).slice(-logCap * 2);
+	if (detailState.logFilter) {
+		renderLogView();
+		document.getElementById("log-panel").hidden = false;
+		return;
+	}
 	const nearBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
 	pre.appendChild(document.createTextNode(chunk));
 	detailState.logLen = (detailState.logLen || 0) + chunk.length;
@@ -5384,14 +6107,46 @@ function appendLog(chunk) {
 	if (nearBottom) pre.scrollTop = pre.scrollHeight;
 }
 
+// renderLogView draws the log pane from the raw buffer, filtered when a query is set.
+function renderLogView() {
+	const pre = document.getElementById("log");
+	const q = (detailState.logFilter || "").toLowerCase();
+	if (!q) {
+		pre.textContent = detailState.logRaw || "";
+		detailState.logLen = pre.textContent.length;
+		pre.scrollTop = pre.scrollHeight;
+		return;
+	}
+	const lines = (detailState.logRaw || "").split("\n").filter((l) => l.toLowerCase().includes(q));
+	pre.textContent = lines.length ? lines.join("\n") : "No log lines match.";
+}
+
+// wireLogFilter filters the live log pane by substring as you type.
+function wireLogFilter() {
+	const input = document.getElementById("log-filter");
+	if (!input) return;
+	input.addEventListener("input", () => {
+		if (!detailState) return;
+		if (detailState.logRaw === undefined) {
+			detailState.logRaw = document.getElementById("log").textContent;
+		}
+		detailState.logFilter = input.value.trim();
+		renderLogView();
+	});
+}
+
 // renderHeader fills the run header fields.
 function renderHeader(run) {
 	const el = document.getElementById("run-header");
 	el.innerHTML = "";
 	el.appendChild(field("Status", null, badge(run.status)));
-	el.appendChild(field("Run", shortId(run.id), null, run.id));
+	const runField = field("Run", shortId(run.id), null, run.id);
+	runField.querySelector(".value").appendChild(copyButton(run.id, "Copy the full run id"));
+	el.appendChild(runField);
 	if (!run.tool || run.tool === "ansible") {
-		el.appendChild(field("Playbook", baseName(run.playbook) || (run.playbook || ""), null, run.playbook || ""));
+		const pb = field("Playbook", baseName(run.playbook) || (run.playbook || ""), null, run.playbook || "");
+		if (run.playbook) pb.querySelector(".value").appendChild(copyButton(run.playbook, "Copy the playbook path"));
+		el.appendChild(pb);
 	} else {
 		el.appendChild(field("Tool", null, toolBadgeEl(run)));
 		el.appendChild(field(run.tool === "terraform" || run.tool === "opentofu" ? "Directory" : "Command",
@@ -5417,7 +6172,9 @@ function renderHeader(run) {
 		}
 	}
 	if (run.inventory) {
-		el.appendChild(field("Inventory", baseName(run.inventory), null, run.inventory));
+		const inv = field("Inventory", baseName(run.inventory), null, run.inventory);
+		inv.querySelector(".value").appendChild(copyButton(run.inventory, "Copy the inventory path"));
+		el.appendChild(inv);
 	}
 	if (run.shard_count) {
 		el.appendChild(field("Shards", String(run.shard_count)));
@@ -5425,7 +6182,15 @@ function renderHeader(run) {
 	if (run.exit_code !== undefined && run.exit_code !== null) {
 		el.appendChild(field("Exit", String(run.exit_code)));
 	}
-	el.appendChild(field("Duration", fmtDuration(run.started_at, run.ended_at)));
+	if (run.status === "running" && run.started_at) {
+		const dur = field("Duration", fmtDuration(run.started_at, new Date().toISOString()));
+		const val = dur.querySelector(".value");
+		val.classList.add("ticking");
+		val.dataset.started = run.started_at;
+		el.appendChild(dur);
+	} else {
+		el.appendChild(field("Duration", fmtDuration(run.started_at, run.ended_at)));
+	}
 	el.hidden = false;
 	updateActions(run);
 }
@@ -5607,7 +6372,11 @@ function renderMatrix(model) {
 	hosts.forEach((host, ri) => {
 		const tr = document.createElement("tr");
 		const rowTh = document.createElement("th");
-		rowTh.textContent = host;
+		const hostLink = document.createElement("a");
+		hostLink.href = "/ui/hosts/" + encodeURIComponent(host);
+		hostLink.textContent = host;
+		hostLink.dataset.tip = "Open this host's history";
+		rowTh.appendChild(hostLink);
 		rowTh.dataset.ri = ri;
 		tr.appendChild(rowTh);
 		tasks.forEach((task, ci) => {
@@ -5847,8 +6616,8 @@ function drillBlock(label, value) {
 	return f;
 }
 
-// drillField builds a labeled value in the drill panel.
-function drillField(label, value) {
+// drillField builds a labeled value in the drill panel, with an optional inline copy control.
+function drillField(label, value, copy) {
 	const f = document.createElement("div");
 	f.className = "field";
 	const l = document.createElement("div");
@@ -5857,6 +6626,7 @@ function drillField(label, value) {
 	const v = document.createElement("div");
 	v.className = "value";
 	v.textContent = value;
+	if (copy) v.appendChild(copyButton(String(value), "Copy " + label.toLowerCase()));
 	f.appendChild(l);
 	f.appendChild(v);
 	return f;
@@ -5867,6 +6637,12 @@ function drillField(label, value) {
 function ensureDrill() {
 	let drill = document.getElementById("drill");
 	if (!drill) {
+		const backdrop = document.createElement("div");
+		backdrop.id = "drill-backdrop";
+		backdrop.className = "drill-backdrop";
+		backdrop.hidden = true;
+		backdrop.addEventListener("click", closeDrill);
+		document.body.appendChild(backdrop);
 		drill = document.createElement("aside");
 		drill.id = "drill";
 		drill.className = "drill";
@@ -5876,20 +6652,31 @@ function ensureDrill() {
 		close.id = "drill-close";
 		close.setAttribute("aria-label", "Close");
 		close.innerHTML = "&times;";
-		close.addEventListener("click", () => { drill.hidden = true; });
+		close.addEventListener("click", closeDrill);
 		const body = document.createElement("div");
 		body.id = "drill-body";
 		drill.appendChild(close);
 		drill.appendChild(body);
 		document.body.appendChild(drill);
+		document.addEventListener("keydown", (e) => {
+			if (e.key === "Escape" && !drill.hidden) closeDrill();
+		});
 	}
 	return document.getElementById("drill-body");
+}
+
+// closeDrill hides the inspect panel and its backdrop.
+function closeDrill() {
+	const drill = document.getElementById("drill");
+	const backdrop = document.getElementById("drill-backdrop");
+	if (drill) drill.hidden = true;
+	if (backdrop) backdrop.hidden = true;
 }
 
 // inspectDrawer opens the shared panel with a title and a list of fields. A field marked block
 // renders as a monospace block, for multi line values such as inventory content. Empty fields are
 // skipped so the panel stays terse.
-function inspectDrawer(title, fields) {
+function inspectDrawer(title, fields, actions) {
 	const body = ensureDrill();
 	body.innerHTML = "";
 	const h = document.createElement("h3");
@@ -5897,19 +6684,48 @@ function inspectDrawer(title, fields) {
 	body.appendChild(h);
 	for (const f of fields) {
 		if (f.value === undefined || f.value === null || f.value === "") continue;
-		body.appendChild(f.block ? drillBlock(f.label, f.value) : drillField(f.label, f.value));
+		body.appendChild(f.block ? drillBlock(f.label, f.value) : drillField(f.label, f.value, f.copy));
+	}
+	if (actions && actions.length) {
+		const row = document.createElement("div");
+		row.className = "drill-actions";
+		for (const a of actions) {
+			if (a.href) {
+				const link = document.createElement("a");
+				link.className = "button";
+				link.href = a.href;
+				if (a.external) { link.target = "_blank"; link.rel = "noopener"; }
+				link.textContent = a.label;
+				if (a.tip) link.dataset.tip = a.tip;
+				row.appendChild(link);
+				continue;
+			}
+			const btn = document.createElement("button");
+			btn.type = "button";
+			btn.className = "button" + (a.primary ? " primary" : "");
+			btn.textContent = a.label;
+			if (a.tip) btn.dataset.tip = a.tip;
+			btn.addEventListener("click", a.onClick);
+			row.appendChild(btn);
+		}
+		body.appendChild(row);
 	}
 	document.getElementById("drill").hidden = false;
+	document.getElementById("drill-backdrop").hidden = false;
 }
 
 // inspectable marks a table row as clickable and opens the inspect drawer for it on click.
-function inspectable(tr, title, fields) {
+function inspectable(tr, title, fields, actions) {
 	tr.classList.add("row-inspect");
 	tr.tabIndex = 0;
 	tr.setAttribute("role", "button");
-	const open = () => inspectDrawer(title, fields);
+	const open = (e) => {
+		// A click on a row action such as Edit or Delete is not a request to inspect.
+		if (e && e.target && e.target.closest && e.target.closest("button, a")) return;
+		inspectDrawer(title, fields, actions);
+	};
 	tr.addEventListener("click", open);
 	tr.addEventListener("keydown", (e) => {
-		if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+		if ((e.key === "Enter" || e.key === " ") && e.target === tr) { e.preventDefault(); open(); }
 	});
 }

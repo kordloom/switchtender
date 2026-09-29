@@ -56,6 +56,7 @@
 	--t-go: #007d9c;
 	--t-dry: #9a6700;
 	--active-bar: linear-gradient(180deg, var(--accent), var(--ok));
+	--heading: #047857;
 	--display: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 	--mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 	--ease: cubic-bezier(0.2, 0.7, 0.2, 1);
@@ -102,6 +103,7 @@
 		--t-python: #58a6ff;
 		--t-go: #22c7e6;
 		--t-dry: #e3b341;
+		--heading: #34d399;
 	}
 }
 
@@ -269,7 +271,7 @@ body.nav-open { overflow: hidden; }
 
 /* Layout */
 .content { max-width: 1280px; margin: 0 auto; padding: 28px 36px 48px; }
-h1 { font-family: var(--display); font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 4px; }
+h1 { font-family: var(--display); font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 4px; color: var(--heading); }
 h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .muted { color: var(--muted); font-size: 13px; }
 .back { display: inline-block; margin-bottom: 14px; font-size: 13px; color: var(--muted); }
@@ -326,8 +328,10 @@ input.tile-filter { width: 240px; max-width: 46vw; padding: 7px 11px 7px 31px; f
 /* Navigation tiles: fixed even columns so rows never go ragged, each a card with an icon chip. */
 /* Jump-to: titled group cards of compact rows. A handful of group cards cannot strand an
    orphan the way a flat tile wall does. */
-.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 14px; align-items: start; }
-.jump-group { background-color: var(--surface); background-image: linear-gradient(180deg, var(--card-top), transparent 46%); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow); padding: 14px 12px 10px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0; align-items: stretch; }
+.jump-group { display: flex; flex-direction: column; padding: 0 16px; border-left: 1px solid var(--border-muted); }
+.jump-group:first-child { padding-left: 0; border-left: none; }
+.jump-group:last-child { padding-right: 0; }
 .jump-group-title { margin: 0 0 8px; padding: 0 8px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
 .jump-row { display: flex; align-items: center; gap: 11px; padding: 8px; border-radius: var(--radius); color: var(--text); }
 .jump-row:hover { text-decoration: none; background: var(--surface-2); }
@@ -381,7 +385,8 @@ table.runs td.mono { max-width: 380px; overflow: hidden; text-overflow: ellipsis
 
 /* Panels */
 .panel { background-color: var(--surface); background-image: linear-gradient(180deg, var(--card-top), transparent 46%); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px 20px; margin-bottom: 18px; box-shadow: var(--shadow); }
-.panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; gap: 16px; flex-wrap: wrap; }
+.panel-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin: -16px -20px 14px; padding: 12px 20px; border-bottom: 1px solid var(--border-muted); background: color-mix(in srgb, var(--surface-2) 60%, transparent); border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+.panel-head h2, .jump-title { font-family: var(--display); font-size: 15.5px; font-weight: 700; letter-spacing: -0.01em; color: var(--heading); }
 .legend { display: flex; gap: 6px; flex-wrap: wrap; }
 .chip { font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 999px; color: #fff; line-height: 1.6; }
 .chip.ok { background: var(--ok); }
@@ -392,7 +397,9 @@ table.runs td.mono { max-width: 380px; overflow: hidden; text-overflow: ellipsis
 .chip.none { background: var(--surface-3); color: var(--muted); }
 .chip.flaky { background: var(--changed); }
 .spark { display: inline-flex; gap: 2px; align-items: center; }
-.tick { width: 6px; height: 16px; border-radius: 3px; background: var(--surface-3); }
+.tick { display: inline-block; width: 7px; height: 17px; border-radius: 3px; background: var(--surface-3); }
+a.tick { cursor: pointer; transition: transform 0.1s ease, box-shadow 0.1s ease; }
+a.tick:hover { transform: scaleY(1.18); box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--accent); }
 .tick.ok { background: var(--ok); }
 .tick.changed { background: var(--changed); }
 .tick.failed { background: var(--failed); }
@@ -448,6 +455,8 @@ table.matrix th.hi { color: var(--text); background: var(--surface-3); }
 .matrix-scroll { overflow: auto; max-height: 72vh; border: 1px solid var(--border); border-radius: var(--radius); }
 table.matrix { border-collapse: separate; border-spacing: 0; }
 table.matrix thead th { position: sticky; top: 0; z-index: 3; background: var(--surface-2); padding: 9px 12px; font-size: 12px; font-weight: 600; white-space: nowrap; text-align: left; color: var(--muted); border-bottom: 1px solid var(--border-muted); }
+table.matrix tbody th a { color: inherit; }
+table.matrix tbody th a:hover { color: var(--accent); text-decoration: none; }
 table.matrix tbody th { position: sticky; left: 0; z-index: 2; background: var(--surface-2); padding: 7px 14px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; white-space: nowrap; text-align: left; border-right: 1px solid var(--border-muted); border-bottom: 1px solid var(--border-muted); }
 table.matrix thead th.corner { position: sticky; left: 0; z-index: 4; border-right: 1px solid var(--border-muted); }
 table.matrix td { padding: 3px; }
@@ -682,9 +691,11 @@ body[data-page="login"] .topbar { background: transparent; backdrop-filter: none
 @media (prefers-reduced-motion: reduce) { .cmdk-card { animation: none; } }
 
 /* Overview columns: recent runs beside the fleet question box, stacked on narrow viewports. */
-.ov-cols { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; align-items: start; margin-bottom: 4px; }
-.ask-note { margin: -4px 0 12px; font-size: 12px; }
-@media (max-width: 980px) { .ov-cols { grid-template-columns: 1fr; } }
+.ov-h-go { width: 14px; }
+.ask-note { margin: 8px 0 0; font-size: 12px; }
+.ask-teaser { margin: 0; font-size: 12.5px; line-height: 1.6; }
+.ask-block { margin: 14px -20px 0; padding: 14px 20px 0; border-top: 1px solid var(--border-muted); }
+.ask-title { margin: 0 0 10px; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
 
 /* In-app documentation: a sticky page list beside the rendered guide. The styles live here
    because the content security policy blocks inline style blocks. */
@@ -723,12 +734,15 @@ body[data-page="login"] .topbar { background: transparent; backdrop-filter: none
 .theme-btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 26px; padding: 0 9px; background: none; border: none; border-radius: 7px; color: var(--muted); font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer; transition: color 0.12s ease, background 0.12s ease; }
 .theme-btn:hover { background: var(--surface-2); color: var(--text); }
 .theme-btn.active { background: var(--accent-soft); color: var(--accent); }
+.theme-btn .theme-name { display: none; }
+.theme-btn.active .theme-name { display: inline; }
 .theme-btn svg { width: 14px; height: 14px; }
 
 /* Flat themes: the family's stark language instead of the signature mesh. Light follows
    kordloom.com's white monochrome; dark follows loomseal.com's warm ink night palette. Both drop
    the mesh and every gradient for flat color and hard edges; status colors stay semantic. */
 body[data-theme="light"] {
+	--heading: #111111;
 	--bg: #ffffff;
 	--surface: #ffffff;
 	--surface-2: #f5f5f5;
@@ -769,6 +783,7 @@ body[data-theme="light"] {
 	--active-bar: #111111;
 }
 body[data-theme="dark"] {
+	--heading: #ece8dc;
 	--bg: #0d0c0b;
 	--surface: #161412;
 	--surface-2: #1c1916;
@@ -828,3 +843,61 @@ body[data-theme="dark"] {
 .view-k { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); padding-top: 1px; }
 .view-v { font-size: 13.5px; font-family: var(--mono); word-break: break-word; }
 .view-code { max-height: 300px; }
+
+/* Compact export buttons beside the list filter. */
+.table-export { padding: 6px 11px; font-size: 12.5px; }
+.table-export svg { width: 13px; height: 13px; }
+.list-filter .table-export:first-of-type { margin-left: auto; }
+
+/* List footer: the row count and paging controls under long tables. */
+.table-foot { display: flex; align-items: center; gap: 12px; padding: 10px 4px; font-size: 12.5px; color: var(--muted); }
+.table-foot .spacer { flex: 1; }
+.table-foot .button { padding: 5px 12px; font-size: 12.5px; }
+
+/* Arrowed inline links read as links even inside prose. */
+.link-arrow::after { content: " \2192"; }
+
+/* Narrow viewports stack the jump columns with top dividers instead of left ones. */
+@media (max-width: 980px) {
+	.jump-group { border-left: none; border-top: 1px solid var(--border-muted); padding: 12px 0 0; margin-top: 12px; }
+	.jump-group:first-child { border-top: none; margin-top: 0; padding-top: 0; }
+}
+
+/* Inline clipboard control beside copyable values. */
+.copy-btn { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin-left: 6px; padding: 0; background: none; border: none; border-radius: 6px; color: var(--muted); cursor: pointer; vertical-align: middle; }
+.copy-btn:hover { background: var(--surface-2); color: var(--text); }
+.copy-btn.copied { color: var(--ok); }
+.copy-btn svg { width: 13px; height: 13px; }
+
+/* Live log filter input inside the panel band. */
+.log-filter { margin-left: auto; width: 220px; padding: 5px 10px; font-size: 12.5px; }
+
+/* Activity chart: one stacked column per day. */
+.activity { display: flex; align-items: flex-end; gap: 6px; padding: 4px 2px 0; }
+.activity-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; }
+.activity-bar { display: flex; flex-direction: column-reverse; justify-content: flex-start; width: 100%; max-width: 34px; min-height: 66px; }
+.activity-seg { width: 100%; border-radius: 3px; margin-top: 2px; }
+.activity-seg.succeeded { background: var(--ok); }
+.activity-seg.failed { background: var(--failed); }
+.activity-seg.other { background: var(--skipped); }
+.activity-seg.empty { height: 3px; background: var(--surface-3); }
+.activity-label { font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+
+/* Notification target rows in the template dialog. */
+.notify-block { grid-column: 1 / -1; }
+.notify-rows { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 8px; }
+.notify-row { display: grid; grid-template-columns: 130px 1fr auto auto; gap: 8px; align-items: center; }
+.notify-row .input { font-weight: 400; text-transform: none; letter-spacing: normal; }
+.notify-fail { flex-direction: row; gap: 6px; white-space: nowrap; }
+#tpl-notify-add { justify-self: start; align-self: start; }
+
+/* Drill backdrop and action row: the inspect panel is escapable and actionable. */
+.drill-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.35); z-index: 39; }
+.drill-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border-muted); }
+
+/* The runs page's active date-window chip. */
+.window-chip { display: inline-flex; align-items: center; gap: 8px; padding: 5px 6px 5px 12px; background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); border-radius: 999px; color: var(--accent); font-size: 12.5px; font-weight: 600; }
+.window-chip a { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; color: var(--accent); font-size: 13px; }
+.window-chip a:hover { background: var(--accent-soft); text-decoration: none; }
+.activity-col:hover { text-decoration: none; }
+.activity-col:hover .activity-label { color: var(--accent); }

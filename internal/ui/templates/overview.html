@@ -25,10 +25,17 @@
 		</div>
 
 		<div class="summary" id="ov-metrics" hidden></div>
+
+		<section class="panel" id="activity-panel" hidden>
+			<div class="panel-head">
+				<h2>Activity</h2>
+				<span id="activity-note" class="muted"></span>
+			</div>
+			<div id="activity" class="activity"></div>
+		</section>
 		<div id="status" class="muted">Loading overview.</div>
 
-		<div class="ov-cols">
-			<section class="panel panel-runs">
+		<section class="panel panel-runs">
 				<div class="panel-head">
 					<h2>Recent runs</h2>
 					<a class="panel-link" href="/ui/runs">View all runs</a>
@@ -39,30 +46,42 @@
 					<span class="ov-h">Started</span>
 				</div>
 				<div id="recent" class="ov-list"></div>
-			</section>
+		</section>
 
-			<section class="panel ask-panel" id="ask-panel">
-				<div class="panel-head">
-					<h2>Ask about your fleet</h2>
+		<section class="panel">
+					<div class="panel-head">
+						<h2>Fleet snapshot</h2>
+						<a class="panel-link" href="/ui/fleet">Fleet health</a>
+					</div>
+					<div class="ov-head" id="ov-fleet-head" hidden aria-hidden="true">
+						<span class="ov-h ov-h-name">Host</span>
+						<span class="ov-h">Failures</span>
+						<span class="ov-h">State</span>
+						<span class="ov-h ov-h-go"></span>
+					</div>
+					<div id="ov-fleet" class="ov-list"></div>
+					<div class="ask-block ask-panel" id="ask-panel">
+						<h3 class="ask-title">Ask about your fleet</h3>
+						<div class="ask-row">
+							<input id="ask-input" class="input" placeholder="Why might web01 be flaky?" aria-label="Ask a question about the fleet">
+							<button id="ask-go" class="button" type="button">Ask</button>
+						</div>
+						<p class="muted ask-note">Advisory. Answers come from run, health, and drift data only.</p>
+						<div id="ask-status" class="muted" hidden></div>
+						<p id="ask-answer" class="ask-answer" hidden></p>
 				</div>
-				<p class="muted ask-note">Advisory. Answers come from run, health, and drift data only.</p>
-				<div class="ask-row">
-					<input id="ask-input" class="input" placeholder="Why might web01 be flaky?" aria-label="Ask a question about the fleet">
-					<button id="ask-go" class="button" type="button">Ask</button>
-				</div>
-				<div id="ask-status" class="muted" hidden></div>
-				<p id="ask-answer" class="ask-answer" hidden></p>
-			</section>
-		</div>
+		</section>
 
-		<div class="jump-head">
-			<h2 class="jump-title">Jump to</h2>
-			<div class="tile-search">
-				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-				<input id="tile-filter" class="input tile-filter" type="search" placeholder="Filter sections" aria-label="Filter sections">
+		<section class="panel jump-panel">
+			<div class="panel-head">
+				<h2>Jump to</h2>
+				<div class="tile-search">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+					<input id="tile-filter" class="input tile-filter" type="search" placeholder="Filter sections" aria-label="Filter sections">
+				</div>
 			</div>
-		</div>
-		<div id="tiles" class="tiles"></div>
+			<div id="tiles" class="tiles"></div>
+		</section>
 	</main>
 
 	<script src="/ui/assets/app.js"></script>

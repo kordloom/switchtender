@@ -53,6 +53,9 @@ type HostHealth struct {
 	// Recent lists the host's worst outcome per run across the window, newest first, for
 	// sparkline style displays.
 	Recent []string `json:"recent,omitempty"`
+	// RecentRuns lists the run behind each Recent entry, index for index, so a display can link
+	// every outcome to its run.
+	RecentRuns []string `json:"recent_runs,omitempty"`
 }
 
 // HostDrift is a host's most recent drift check. A drift check is a dry run: in check mode a changed

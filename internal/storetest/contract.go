@@ -354,6 +354,14 @@ func testListPage(t *testing.T, store run.Store) {
 		t.Errorf("ListPage status plus query = %v, want [d a]", ids(hit))
 	}
 
+	// A created-at window keeps only runs inside it: half-open, after inclusive, before exclusive.
+	if got, _ := store.ListPage(ctx, run.ListFilter{
+		After:  base.Add(1 * time.Second),
+		Before: base.Add(3 * time.Second),
+	}, 0, 0); len(got) != 2 {
+		t.Errorf("date window = %d runs, want 2", len(got))
+	}
+
 	// OldestFirst flips the default ordering.
 	if all, _ := store.ListPage(ctx, run.ListFilter{OldestFirst: true}, 0, 0); cmp.Diff([]string{"a", "b", "c", "d"}, ids(all)) != "" {
 		t.Errorf("ListPage oldest first = %v, want [a b c d]", ids(all))
@@ -786,6 +794,10 @@ func testFlaky(t *testing.T, store run.Store) {
 	wantRecent := []string{"ok", "failed", "ok", "failed"}
 	if diff := cmp.Diff(wantRecent, byHost["flappy"].Recent); diff != "" {
 		t.Errorf("flappy recent mismatch (-want +got):\n%s", diff)
+	}
+	wantRecentRuns := []string{"r4", "r3", "r2", "r1"}
+	if diff := cmp.Diff(wantRecentRuns, byHost["flappy"].RecentRuns); diff != "" {
+		t.Errorf("flappy recent runs mismatch (-want +got):\n%s", diff)
 	}
 	if h := byHost["fixed"]; h.Flips != 1 || h.Flaky {
 		t.Errorf("fixed = flips %d flaky %v, want 1 false", h.Flips, h.Flaky)
