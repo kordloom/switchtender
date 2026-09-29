@@ -243,6 +243,12 @@ jobs:
           hash="$(shasum -a 256 "$APP/Contents/MacOS/switchtender" | cut -d' ' -f1)"
           printf '%s  switchtender_%s_darwin_app\n' "$hash" "$VERSION" >> dist/BINARY_SHA256SUMS
 
+          # hdiutil hit ENOSPC on a stock runner while the Go build and module caches from
+          # everything above still held gigabytes. Nothing after this point compiles, so the
+          # caches are ballast; the df line records what the dmg actually had to work with.
+          go clean -cache -modcache
+          df -h /
+
           mkdir dist/dmg
           cp -R "$APP" dist/dmg/
           ln -s /Applications dist/dmg/Applications

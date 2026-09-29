@@ -1,0 +1,38 @@
+# Upgrades demo.switchtender.com to the latest tagged release and reseeds it, from CI where the
+# deploy key lives. Dispatch-only: nothing here runs on push or on a schedule. The droplet must
+# already be provisioned; this only swaps the binary and reseeds, mirroring the on-box contract
+# (BIN_DIR and reseed.sh) the demo service was set up with.
+name: demo-refresh
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse without the deploy key
+        env:
+          DEMO_SSH_KEY: ${{ secrets.DEMO_SSH_KEY }}
+        run: |
+          if [ -z "${DEMO_SSH_KEY:-}" ]; then
+            echo "DEMO_SSH_KEY is not set on this repository, so there is nothing to deploy with" >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Upgrade the droplet to the latest release
+        env:
+          DEMO_SSH_KEY: ${{ secrets.DEMO_SSH_KEY }}
+          DEMO_SSH_HOST: ${{ secrets.DEMO_SSH_HOST || 'root@167.99.157.117' }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEMO_SSH_KEY" > ~/.ssh/demo_key
+          chmod 600 ~/.ssh/demo_key
+          ssh -i ~/.ssh/demo_key -o StrictHostKeyChecking=accept-new "$DEMO_SSH_HOST" \
+            bash -s < deploy/demo-upgrade.sh
