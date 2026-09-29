@@ -36,7 +36,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX or Semaphore</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents" class="active">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX, Semaphore, or Rundeck</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents" class="active">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -74,12 +74,17 @@ held run is admin-only, so an operator-bound agent can never approve its own wor
 </code></pre>
 </li>
 <li>
-<p>Mint a token bound to that account:</p>
-<pre><code>switchtender token new --user agent-bot --name agent-bot --ttl 720h
+<p>Mint a token bound to that account, marked as an agent:</p>
+<pre><code>switchtender token new --user agent-bot --name agent-bot --agent --ttl 720h
 </code></pre>
-<p>The token carries the account's operator role, and its label is the actor on everything the
-agent does. A token minted without <code>--user</code> is unscoped and acts as admin; never hand one to an
-agent. The TTL forces rotation, here monthly.</p>
+<p>The <code>--agent</code> flag is what makes the record precise. It marks the token as held by an agent, so
+every chain entry it produces carries <code>actor_type: agent</code> alongside its label and the human it
+acts for, set when the token is minted rather than guessed from how a request looks. It also caps
+the token at the operator role no matter what account it is bound to, so an agent can launch and
+propose work but can never manage identity, access, or secrets, and can never approve its own held
+run. That cap is enforced at the door, so it holds however the agent reaches the API, not only
+through the client below. <code>--agent</code> requires <code>--user</code>, because an agent acting on behalf of nobody
+is exactly the accountability gap the identity closes. The TTL forces rotation, here monthly.</p>
 <p>Creating the first token turns authentication on for the whole install, so make sure an admin
 account exists before the agent holds the only credential.</p>
 </li>
@@ -95,6 +100,26 @@ empty policy is a gate-everything switch:</p>
     tool: terraform
     command_contains: destroy
 </code></pre>
+<p>Policies also see who is asking, how risky the operation grades, and can refuse outright rather
+than hold. That is what turns a policy file into an agent's authorization scope: what it may do
+freely, what needs a person first, and what it may never do at all:</p>
+<pre><code>policies:
+  - name: agents-never-drop-databases
+    actor_kind: agent
+    command_contains: &quot;drop database&quot;
+    effect: deny
+  - name: agent-destructive-needs-a-person
+    actor_kind: agent
+    min_risk: high
+  - name: agent-terraform-needs-a-person
+    actor_kind: agent
+    tool: terraform
+</code></pre>
+<p><code>actor_kind: agent</code> scopes a rule to runs an agent submitted, identified by its minted token,
+never guessed from traffic. <code>actor: prod-remediator</code> pins a rule to one named principal.
+<code>min_risk</code> matches on the run's assessed risk grade, so &quot;destructive operations need a person&quot;
+is one line. <code>effect: deny</code> refuses the submission outright; the refused request is still on the
+chain, because the gate records every mutation before anything acts on it.</p>
 </li>
 <li>
 <p>Pin the policies by starting the server with <code>serve --policy-file policies.yml</code>. The file is the
@@ -105,21 +130,77 @@ them. An agent cannot loosen its own gate, and neither can a leaked admin token.
 <p>Hand the agent its token and the API base URL, and nothing else.</p>
 </li>
 </ol>
+<h2 id="connecting-the-agent-over-mcp">Connecting the agent over MCP</h2>
+<p>There are two ways an agent reaches the gate. The direct one is the HTTP API above: the agent holds
+the token and the base URL and makes ordinary authenticated calls. The second is the Model Context
+Protocol, which many agent runtimes speak natively. Put the operator-bound token in
+<code>SWITCHTENDER_MCP_TOKEN</code> and run:</p>
+<pre><code>switchtender mcp --server https://switchtender.internal
+</code></pre>
+<p>The agent gets a small, deliberate set of tools: list job templates, propose a run, read a run and
+its log, pull a run's evidence dossier, and list recent runs. Every tool call is an ordinary
+authenticated API request under that same token, so it passes the same authorization, the same
+approval policy, and the same fail-closed audit append as a call from a person. A proposed run lands
+in the chain under the agent's account before it executes, and a policy-covered run waits for a human
+to release it.</p>
+<p>The tool set is narrow on purpose. There is no approve tool, so an agent cannot release its own work
+however it is prompted, and no credential, account, token, grant, or policy tool, so it cannot widen
+its own reach. The command refuses to start on an admin token. Ad-hoc runs, where the agent composes
+a command instead of launching a template a person defined, stay off unless you pass <code>--allow-adhoc</code>,
+and the approval policy still covers them when they are on.</p>
 <h2 id="what-the-record-shows">What the record shows</h2>
-<p>The actor on every chain entry the agent produces is its token's label, <code>agent-bot</code> above. The
-chain hash commits to that actor along with the method, path, time, and sequence, so attribution is
-part of what the chain proves, not a field someone could rewrite later.</p>
+<p>The actor on every chain entry the agent produces is its token's label, <code>agent-bot</code> above, and, for
+a token minted with <code>--agent</code>, the entry also carries <code>actor_type: agent</code> and <code>on_behalf_of</code> naming
+the human account behind it. The chain hash commits to all three along with the method, path, time,
+and sequence, so who acted, what kind of actor it was, and whose authority it used are part of what
+the chain proves, not fields someone could rewrite later. That is the difference between a log, which
+is the operator's word for what happened, and a signed chain, which a third party recomputes and
+checks without trusting the operator or the agent.</p>
 <p>Every mutation response carries an <code>Audit-Receipt: seq:hash</code> header. The agent, or the system
 driving it, can retain receipts and later check each one against the chain, so the party an entry
 belongs to can detect an omission.</p>
 <p>Runs record their source, one of api, template, schedule, rerun, reconcile, propose, or trigger,
 along with the actor. <code>actor:agent-bot</code> in run search pulls everything the agent ran, and
 <code>source:api</code> separates direct API submissions from scheduled or triggered work.</p>
-<h2 id="handing-evidence-to-someone-else">Handing evidence to someone else</h2>
-<p><code>switchtender audit bundle</code> exports a signed LoomSeal bundle. A third party verifies it offline
-with the open loomseal verifier, with no trust in the server that produced it. The install
-publishes its signing key at <code>/.well-known/loomseal.json</code>, so a verifier pins the key from a
-channel independent of the bundle it was handed.</p>
+<p>An approval is a chain entry of its own. When a person releases a held run, the chain gains a
+DECISION entry naming the approver and committing a digest of the exact spec released, and the
+executor refuses a spec that changed after the decision. So the record does not say &quot;someone
+approved run 123&quot;; it says this person approved exactly this change, and exactly this change ran.</p>
+<h2 id="the-whole-path-end-to-end">The whole path, end to end</h2>
+<p>This is the golden path a governed agent change takes, with the commands to watch it happen.</p>
+<ol>
+<li>
+<p>The agent proposes a change through MCP or the API. The request lands on the chain before
+anything acts, attributed <code>actor_type: agent</code>, on behalf of its human.</p>
+</li>
+<li>
+<p>Policy sees an agent asking. A deny rule refuses it outright, with the rule named. A matching
+approval rule holds it: the run is born <code>pending_approval</code> and no executor can claim it.</p>
+</li>
+<li>
+<p>A person reviews the held run, its assessed risk, and its parameters, and approves. The DECISION
+entry commits who approved and the digest of exactly what.</p>
+</li>
+<li>
+<p>The run executes, on whichever worker claims it, after re-checking the approved digest. The
+outcome lands on the chain: status, exit code, per-host results, the log digest, and the same
+spec digest.</p>
+</li>
+<li>
+<p>Seal it and verify it anywhere:</p>
+<pre><code>switchtender receipt run_abc123 --out run.receipt
+switchtender verify run.receipt --pubkey sha256:&lt;the fingerprint the install published&gt;
+</code></pre>
+<p>Verify reads one file, touches no database and no network, and prints who asked, who approved
+exactly what, and what happened, with every claim recomputed from the chain. <code>--sparse</code> produces
+a receipt that proves the same chain facts while disclosing nothing about the entries around the
+run, for handing to an outside auditor on a shared install.</p>
+</li>
+</ol>
+<p><code>switchtender audit bundle</code> exports the whole chain the same way, and a third party can verify
+either artifact with the open loomseal verifier, with no trust in the server that produced it. The
+install publishes its signing key at <code>/.well-known/loomseal.json</code>, so a verifier pins the key from
+a channel independent of the bundle it was handed.</p>
 <p>That is the shape an auditor accepts: here is what the agent did, here is the math showing the
 record was not altered, check it yourself.</p>
 <h2 id="the-boundary">The boundary</h2>

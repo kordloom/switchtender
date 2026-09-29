@@ -112,9 +112,35 @@ function auditPathCell(path) {
 	return cell;
 }
 
+// AUDIT_PAGE is how many entries the audit table asks the server for. The answer carries has_more
+// when the trail runs past it, which is the only thing that tells this page it is holding a page
+// rather than the whole trail.
+const AUDIT_PAGE = 500;
+
+// markTrailTruncated says on the page that the table is one page of the trail, and turns off the
+// table exports. A CSV or JSON taken from a cut table is an audit artifact that looks complete and
+// says nothing about the changes it left out, so the button is refused rather than answered with a
+// partial file. The signed export beside it still covers the whole chain.
+function markTrailTruncated(shown) {
+	const table = document.querySelector("main.content table.runs");
+	if (table && !document.getElementById("audit-truncated")) {
+		const notice = document.createElement("div");
+		notice.id = "audit-truncated";
+		notice.className = "trail-notice";
+		notice.textContent = "Showing the " + shown + " most recent entries. The trail holds more "
+			+ "than this, so the table exports are off. Use Export signed for the whole chain.";
+		table.parentNode.insertBefore(notice, table);
+	}
+	for (const btn of document.querySelectorAll("button.table-export")) {
+		btn.disabled = true;
+		btn.dataset.tip = "Off: this table shows only the newest " + shown
+			+ " entries, so the export would leave the rest out. Use Export signed.";
+	}
+}
+
 async function loadAudit() {
 	try {
-		const data = await getJSON("/audit?limit=500");
+		const data = await getJSON("/audit?limit=" + AUDIT_PAGE);
 		const entries = data.entries || [];
 		if (entries.length === 0) {
 			showEmpty("No audit entries yet. Every change is recorded here.");
@@ -135,13 +161,15 @@ async function loadAudit() {
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
 		showListControls();
+		if (data.has_more) markTrailTruncated(entries.length);
 	} catch (e) {
 		setStatus("Failed to load the audit trail: " + e.message);
 	}
 }
 
-// wireAudit hooks the verify and export buttons. Verify recomputes the chain and shows a badge;
-// export downloads the signed snapshot for offline verification.
+// wireAudit hooks the audit page's three buttons. Verify recomputes the chain and shows a badge,
+// the evidence pack renders the period's change register, and bundle downloads a signed LoomSeal
+// bundle anyone can verify offline with an open verifier.
 function wireAudit() {
 	const badge = document.getElementById("audit-badge");
 	const verify = document.getElementById("audit-verify");
@@ -180,20 +208,33 @@ function wireAudit() {
 			}
 		});
 	}
-	const exp = document.getElementById("audit-export");
-	if (exp) {
-		exp.addEventListener("click", async () => {
+	const bundle = document.getElementById("audit-bundle");
+	if (bundle) {
+		bundle.dataset.tip = "Download the signed LoomSeal bundle: the whole chain and its anchors in one file, verifiable offline with an open tool and no trust in this server";
+		bundle.addEventListener("click", async () => {
+			bundle.disabled = true;
 			try {
-				const data = await getJSON("/audit/export");
-				const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-				const url = URL.createObjectURL(blob);
-				const a = document.createElement("a");
-				a.href = url;
-				a.download = "audit-export.json";
-				a.click();
-				URL.revokeObjectURL(url);
+				// The bundle is signed bytes served as-is. It is fetched as raw text and downloaded
+				// unchanged, never parsed and re-encoded, because re-encoding would change the bytes the
+				// signature covers and a verifier would then reject a bundle this install really signed.
+				const res = await fetch(API + "/audit/bundle", { headers: authHeaders() });
+				if (res.status === 401) {
+					requireLogin();
+					return;
+				}
+				if (!res.ok) {
+					let msg = "HTTP " + res.status;
+					try {
+						const e = await res.json();
+						if (e && e.error) msg = e.error;
+					} catch (_) { /* a non-JSON error body leaves the status message. */ }
+					throw new Error(msg);
+				}
+				downloadBlob("switchtender-audit.loomseal.json", "application/json", await res.text());
 			} catch (err) {
-				setStatus("Export failed: " + err.message);
+				setStatus("Could not build the bundle: " + err.message);
+			} finally {
+				bundle.disabled = false;
 			}
 		});
 	}

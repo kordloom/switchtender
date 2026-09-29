@@ -2,6 +2,7 @@ package relay
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,9 +16,16 @@ import (
 
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/event"
+	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
+
+// leaseHeader carries the per-claim capability. The claim response sets it once, and every report,
+// record write, and heartbeat a worker makes for that run presents it back. It is a header rather
+// than a body field because the field is json:"-": the secret must never land in a body a worker can
+// log, cache, or forward, and a header is read once into memory instead.
+const leaseHeader = "X-Switchtender-Lease"
 
 // claimRequest is the body of a relay claim: the owner leasing work and the queues it serves.
 type claimRequest struct {
@@ -84,6 +92,7 @@ func NewHandler(store run.Store, pools *Pools, log *zap.Logger,
 	mux.HandleFunc("POST /relay/v1/runs/{id}/log", s.appendLog)
 	mux.HandleFunc("POST /relay/v1/runs/{id}/events", s.appendEvents)
 	mux.HandleFunc("POST /relay/v1/runs/{id}/host-summary", s.saveHostSummary)
+	mux.HandleFunc("POST /relay/v1/runs/{id}/host-facts", s.saveHostFacts)
 	mux.HandleFunc("POST /relay/v1/runs/{id}/task-summary", s.saveTaskSummary)
 	return s.authed(mux)
 }
@@ -108,6 +117,13 @@ func (s *relayServer) authed(next http.Handler) http.Handler {
 // from an API call without parsing the path.
 const relayMethod = "RELAY"
 
+// actorTypeWorker classifies a relay entry as a machine acting for the estate, distinct from the
+// API's human and token actors. A relay worker executes runs on a machine the control node cannot
+// reach, so "service" is the right class from the vocabulary audit.Entry.ActorType documents, and it
+// is different from every value the API emits, which is what lets a reader tell a worker's report
+// from an operator's API call in the chain.
+const actorTypeWorker = "service"
+
 // record writes one relay decision into the audit chain.
 //
 // The relay serves the mesh from outside the API's own gate, so nothing a worker reported reached
@@ -123,12 +139,20 @@ const relayMethod = "RELAY"
 // store is unhealthy does not un-finish the run; it loses the outcome of work that already happened
 // on real hosts. The API refuses a mutation it cannot record because refusing prevents it. This one
 // cannot be prevented, so it is logged loudly instead.
-func (s *relayServer) record(ctx context.Context, actor, path string) {
+func (s *relayServer) record(ctx context.Context, pool *Pool, owner, path string) {
 	if s.audits == nil {
 		return
 	}
+	// The proven identity is the pool the presented token resolved to, since every worker in a pool
+	// shares one token. The owner is the lease name the worker asserted, which is not proof of
+	// anything on its own. Record the proven pool first, then the asserted name, so a reader can tell
+	// them apart. pool.Name is a non-secret operator label; only the token's hash is ever stored.
+	actor := "worker:" + owner
+	if pool != nil {
+		actor = "pool:" + pool.Name + " " + actor
+	}
 	entry := &audit.Entry{
-		ID: audit.NewID(), At: time.Now(), Actor: actor,
+		ID: audit.NewID(), At: time.Now(), Actor: actor, ActorType: actorTypeWorker,
 		Method: relayMethod, Path: path,
 	}
 	if err := s.audits.Append(ctx, entry); err != nil {
@@ -164,7 +188,12 @@ func (s *relayServer) claim(w http.ResponseWriter, r *http.Request) {
 	default:
 		// A worker took a run onto a machine the control node cannot reach. That is the moment the
 		// work left this side of the boundary, so it is the moment worth recording.
-		s.record(r.Context(), "worker:"+body.Owner, "/relay/claim/"+leased.ID)
+		s.record(r.Context(), poolFrom(r.Context()), body.Owner, "/relay/claim/"+leased.ID)
+		// The capability travels in a header, not the body. The field is json:"-", so it is not in
+		// the body a worker can log, cache, or forward, and this claim response is the one place it
+		// crosses the wire. The transport reads it once and keeps it only in memory, presenting it on
+		// the reports it makes for this run.
+		w.Header().Set(leaseHeader, leased.ClaimSecret)
 		s.writeJSON(w, leased)
 	}
 }
@@ -176,17 +205,26 @@ func (s *relayServer) heartbeat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid heartbeat body")
 		return
 	}
-	// Renewing a lease keeps a run alive, so it answers the same question every other call does.
+	// Renewing a lease keeps a run alive, so it answers the same question every other call does: is
+	// this the run's holder, and is this a run this pool serves. The stored run is fetched for both,
+	// and the not-found answer is reused for a mismatch so a caller learns nothing about a run it
+	// does not hold.
+	stored, gerr := s.store.Get(r.Context(), body.ID)
+	if gerr != nil {
+		writeErr(w, http.StatusNotFound, "run not found")
+		return
+	}
 	if pool := poolFrom(r.Context()); pool != nil {
-		stored, gerr := s.store.Get(r.Context(), body.ID)
-		if gerr != nil {
-			writeErr(w, http.StatusNotFound, "run not found")
-			return
-		}
 		if _, ok := pool.allows([]string{stored.Queue}); !ok {
 			writeErr(w, http.StatusNotFound, "run not found")
 			return
 		}
+	}
+	// The capability minted at claim renews the lease, the same proof the reports carry. A run
+	// claimed before it existed has no secret and falls back to the owner match the store applies.
+	if !leaseHeld(stored, r) {
+		writeErr(w, http.StatusNotFound, "run not found")
+		return
 	}
 	err := s.store.Heartbeat(r.Context(), body.ID, body.Owner)
 	switch {
@@ -267,7 +305,15 @@ func (s *relayServer) save(w http.ResponseWriter, r *http.Request) {
 	if stored == nil {
 		return
 	}
-	if err := checkWorkerReport(stored, &body); err != nil {
+	// The capability minted at claim is the proof this report comes from the run's holder. Every
+	// worker presents the same shared token, so the lease name a report carries is asserted, not
+	// proven, and a worker that reads another run's id could otherwise forge a terminal report for
+	// it. A run claimed before the capability existed carries no secret and is checked the older way.
+	if !leaseHeld(stored, r) {
+		writeErr(w, http.StatusForbidden, "the run's lease was not presented or did not match")
+		return
+	}
+	if err := checkWorkerReport(stored, &body, stored.ClaimSecret != ""); err != nil {
 		writeErr(w, http.StatusConflict, err.Error())
 		return
 	}
@@ -280,7 +326,17 @@ func (s *relayServer) save(w http.ResponseWriter, r *http.Request) {
 	// Only the transition into a terminal state is recorded. A worker saves repeatedly as a run
 	// progresses, and the outcome is the part somebody asks about later.
 	if !wasTerminal && stored.Status.Terminal() {
-		s.record(r.Context(), "worker:"+stored.ClaimedBy,
+		// The control node commits the run's outcome to the chain here, the same entry a run executed
+		// in process gets, so a relay run is receiptable too. The worker streamed its log, events, and
+		// summaries before this terminal save, so the evidence is in the store to digest. A child of a
+		// split or pipeline is skipped, its outcome rolled into the parent the coordinator commits, and
+		// the commit is not fail-closed since the run has already happened.
+		if s.audits != nil && stored.ParentID == nil {
+			if err := outcome.Commit(r.Context(), s.audits, s.store, stored, "system:relay"); err != nil {
+				s.log.Error("relay: commit run outcome: "+err.Error(), zap.String("run_id", stored.ID))
+			}
+		}
+		s.record(r.Context(), poolFrom(r.Context()), stored.ClaimedBy,
 			"/relay/finished/"+stored.ID+"/"+string(stored.Status))
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -303,7 +359,27 @@ var workerStatuses = map[run.Status]bool{
 // reported on at all. Without that, a token holder could mark a queued run succeeded so its
 // playbook never ran, cancel a run another worker was executing, or report on a run nobody had
 // claimed and take it out of band, bypassing the queue that decides order.
-func checkWorkerReport(stored, reported *run.Run) error {
+// leaseHeld reports whether the request carries the capability minted for this run's current claim.
+// A run claimed before the capability existed carries no stored secret, so it is accepted here and
+// the caller falls back to the older lease-name check; this is what keeps runs already in flight at
+// upgrade time from stranding. A run that has a secret must present the matching one, compared in
+// constant time so a wrong guess reveals nothing through how long the comparison took.
+func leaseHeld(stored *run.Run, r *http.Request) bool {
+	if stored.ClaimSecret == "" {
+		return true
+	}
+	presented := r.Header.Get(leaseHeader)
+	if presented == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(presented), []byte(stored.ClaimSecret)) == 1
+}
+
+// checkWorkerReport rejects a report a worker has no business making. leaseVerified is true when the
+// run carried a per-claim secret and the request presented the matching one, which already proves
+// the report comes from the holder; the older lease-name comparison then adds nothing and is skipped.
+// It stays in force for a run claimed before the capability existed, whose secret is empty.
+func checkWorkerReport(stored, reported *run.Run, leaseVerified bool) error {
 	if !workerStatuses[reported.Status] {
 		return fmt.Errorf("a worker may not set status %q", reported.Status)
 	}
@@ -315,16 +391,26 @@ func checkWorkerReport(stored, reported *run.Run) error {
 	if stored.ClaimedBy == "" {
 		return fmt.Errorf("run is not claimed, so there is nothing for a worker to report on")
 	}
+	// A split or pipeline parent is coordinated by the control node, never executed by a worker: the
+	// claim loop skips any run carrying a kind, so no worker can ever have been handed one. Its
+	// holder is the control node's own coordinator, so without this a worker that learned the
+	// parent's id, which its own claim response gives it, could terminalize the coordinator's run and
+	// strand every shard beneath it. A report on one is a report on work this worker did not do.
+	if stored.Kind != "" {
+		return fmt.Errorf("run is coordinated by the control node and is not a worker's to report on")
+	}
 	// A run awaiting a decision was never claimable in the first place.
 	if stored.Status == run.StatusPendingApproval || stored.Status == run.StatusRejected {
 		return fmt.Errorf("run is awaiting a decision and is not a worker's to report on")
 	}
-	// A report has to come from the holder. The lease is the only identity available here, since
-	// every worker presents the same token.
-	// Compared even when the field is absent. Treating an empty value as "no claim to check" meant
-	// a worker omitting claimed_by skipped the holder test entirely and could report on, and
-	// terminate, a run held by somebody else.
-	if reported.ClaimedBy != stored.ClaimedBy {
+	// A report has to come from the holder. When the run carries a per-claim secret, presenting it
+	// is that proof and the caller has already checked it, so the lease name need not be sent. For a
+	// run claimed before the capability existed there is no secret, and the lease name is the only
+	// identity available since every worker presents the same token. It is compared even when the
+	// field is absent: treating an empty value as "no claim to check" let a worker omitting
+	// claimed_by skip the holder test entirely and report on, and terminate, a run held by somebody
+	// else.
+	if !leaseVerified && reported.ClaimedBy != stored.ClaimedBy {
 		return fmt.Errorf("run is held by another executor")
 	}
 	return nil
@@ -368,6 +454,14 @@ func (s *relayServer) heldForReport(w http.ResponseWriter, r *http.Request) bool
 	if stored == nil {
 		return false
 	}
+	// The same capability that gates a status report gates the writes that build the record. A
+	// worker's captured log and events are what an approver reads while deciding, so they are exactly
+	// the thing worth forging, and one shared token is not proof of who is writing. A run claimed
+	// before the capability existed carries no secret and is left to the holder checks below.
+	if !leaseHeld(stored, r) {
+		writeErr(w, http.StatusForbidden, "the run's lease was not presented or did not match")
+		return false
+	}
 	// A finished run is not an error, it is a no-op. The store already drops these writes silently,
 	// so answering with a conflict changed nothing about what is recorded and started a retry storm
 	// instead: the transport retries the post, re-posts the whole batch on a timer, and keeps at it
@@ -382,6 +476,15 @@ func (s *relayServer) heldForReport(w http.ResponseWriter, r *http.Request) bool
 	}
 	if stored.ClaimedBy == "" {
 		writeErr(w, http.StatusConflict, "run is not claimed, so there is nothing to report on")
+		return false
+	}
+	// A split or pipeline parent is coordinated by the control node and executed by nobody, so no
+	// worker has output to add to it. Its captured log and events are the rollup of its children, and
+	// letting a worker append to it would write output into the record of work it did not do. This is
+	// the same boundary the report check draws, applied to the writers that carry the evidence.
+	if stored.Kind != "" {
+		writeErr(w, http.StatusConflict,
+			"run is coordinated by the control node and is not a worker's to add to")
 		return false
 	}
 	return true
@@ -432,25 +535,59 @@ func (s *relayServer) appendLog(w http.ResponseWriter, r *http.Request) {
 
 // maxRelayElements bounds how many items one relay call may carry.
 //
-// The body is capped in bytes, which is not a cap on work: "[{},{},{}...]" fits a million empty
-// structs into a megabyte, and each one becomes a marshal and a single-row insert inside one
-// transaction. Measured, a one megabyte body decoded into 349,525 events and 366 MB of heap, and on
-// SQLite held the single writer for that many round trips. A real run reports in batches of tens.
+// A count cap is not a work cap on its own: "[{},{},{}...]" fits a million empty structs into a
+// megabyte, and each one becomes a marshal and a single-row insert inside one transaction. Measured,
+// a one megabyte body decoded into 349,525 events and 366 MB of heap, and on SQLite held the single
+// writer for that many round trips. A real run reports in batches of tens. The cap is enforced during
+// the decode, not after it, so a body over the cap never lands whole in memory.
 const maxRelayElements = 5000
+
+// errTooManyElements is returned by decodeCapped when the body carries more than the cap allows. It
+// is mapped to 413 so a worker learns to report in smaller batches.
+var errTooManyElements = errors.New("too many items in one call; report in smaller batches")
+
+// decodeCapped decodes a JSON array of T, refusing once it holds more than max elements so a worker
+// cannot force the whole array into memory before the cap applies. It streams the array a token at a
+// time rather than decoding the slice whole, which is what makes the cap bound the work rather than
+// only the result. A body that is not a JSON array is a decode error, the same as before.
+func decodeCapped[T any](r io.Reader, max int) ([]T, error) {
+	dec := json.NewDecoder(r)
+	tok, err := dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	if d, ok := tok.(json.Delim); !ok || d != '[' {
+		return nil, fmt.Errorf("expected a JSON array")
+	}
+	out := make([]T, 0)
+	for dec.More() {
+		if len(out) >= max {
+			return nil, errTooManyElements
+		}
+		var v T
+		if err := dec.Decode(&v); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	if _, err := dec.Token(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
 
 // appendEvents appends the structured events in the body to the run, or 404 when the run is gone.
 func (s *relayServer) appendEvents(w http.ResponseWriter, r *http.Request) {
 	if !s.heldForReport(w, r) {
 		return
 	}
-	var events []event.Event
-	if err := json.NewDecoder(r.Body).Decode(&events); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid events body")
+	events, derr := decodeCapped[event.Event](r.Body, maxRelayElements)
+	switch {
+	case errors.Is(derr, errTooManyElements):
+		writeErr(w, http.StatusRequestEntityTooLarge, derr.Error())
 		return
-	}
-	if len(events) > maxRelayElements {
-		writeErr(w, http.StatusRequestEntityTooLarge,
-			"too many items in one call; report in smaller batches")
+	case derr != nil:
+		writeErr(w, http.StatusBadRequest, "invalid events body")
 		return
 	}
 	err := s.store.AppendEvents(r.Context(), r.PathValue("id"), events)
@@ -469,18 +606,38 @@ func (s *relayServer) saveHostSummary(w http.ResponseWriter, r *http.Request) {
 	if !s.heldForReport(w, r) {
 		return
 	}
-	var summaries []run.HostSummary
-	if err := json.NewDecoder(r.Body).Decode(&summaries); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid host summary body")
+	summaries, derr := decodeCapped[run.HostSummary](r.Body, maxRelayElements)
+	switch {
+	case errors.Is(derr, errTooManyElements):
+		writeErr(w, http.StatusRequestEntityTooLarge, derr.Error())
 		return
-	}
-	if len(summaries) > maxRelayElements {
-		writeErr(w, http.StatusRequestEntityTooLarge,
-			"too many items in one call; report in smaller batches")
+	case derr != nil:
+		writeErr(w, http.StatusBadRequest, "invalid host summary body")
 		return
 	}
 	if err := s.store.SaveHostSummary(r.Context(), r.PathValue("id"), summaries); err != nil {
 		s.internal(w, "save host summary", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// saveHostFacts replaces the facts the run gathered per host with those in the body.
+func (s *relayServer) saveHostFacts(w http.ResponseWriter, r *http.Request) {
+	if !s.heldForReport(w, r) {
+		return
+	}
+	facts, derr := decodeCapped[run.HostFacts](r.Body, maxRelayElements)
+	switch {
+	case errors.Is(derr, errTooManyElements):
+		writeErr(w, http.StatusRequestEntityTooLarge, derr.Error())
+		return
+	case derr != nil:
+		writeErr(w, http.StatusBadRequest, "invalid host facts body")
+		return
+	}
+	if err := s.store.SaveHostFacts(r.Context(), r.PathValue("id"), facts); err != nil {
+		s.internal(w, "save host facts", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -491,14 +648,13 @@ func (s *relayServer) saveTaskSummary(w http.ResponseWriter, r *http.Request) {
 	if !s.heldForReport(w, r) {
 		return
 	}
-	var summaries []run.TaskSummary
-	if err := json.NewDecoder(r.Body).Decode(&summaries); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid task summary body")
+	summaries, derr := decodeCapped[run.TaskSummary](r.Body, maxRelayElements)
+	switch {
+	case errors.Is(derr, errTooManyElements):
+		writeErr(w, http.StatusRequestEntityTooLarge, derr.Error())
 		return
-	}
-	if len(summaries) > maxRelayElements {
-		writeErr(w, http.StatusRequestEntityTooLarge,
-			"too many items in one call; report in smaller batches")
+	case derr != nil:
+		writeErr(w, http.StatusBadRequest, "invalid task summary body")
 		return
 	}
 	if err := s.store.SaveTaskSummary(r.Context(), r.PathValue("id"), summaries); err != nil {

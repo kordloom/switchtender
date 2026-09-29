@@ -157,6 +157,28 @@ class STElement {
 		return n;
 	}
 
+	// tHead is the table's head section, or null. The table properties below are the ones a browser
+	// puts on the table elements themselves, which is how the export and sort code walks a table
+	// rather than by querying for tags.
+	get tHead() { return this.children.find((n) => n.tagName === "THEAD") || null; }
+
+	// tBodies lists the table's body sections, in document order.
+	get tBodies() { return this.children.filter((n) => n.tagName === "TBODY"); }
+
+	// rows lists the row children of a section, or every row of a table across its sections.
+	get rows() {
+		if (this.tagName !== "TABLE") return this.children.filter((n) => n.tagName === "TR");
+		const out = [];
+		for (const section of this.children) {
+			if (section.tagName === "TR") out.push(section);
+			else if (["THEAD", "TBODY", "TFOOT"].includes(section.tagName)) out.push(...section.rows);
+		}
+		return out;
+	}
+
+	// cells lists a row's cells, header cells included.
+	get cells() { return this.children.filter((n) => n.tagName === "TD" || n.tagName === "TH"); }
+
 	// value is the control's current value, seeded from the value attribute the way a browser seeds
 	// a field from its markup and detached from it once anything assigns to the property.
 	get value() {

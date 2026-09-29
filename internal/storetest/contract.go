@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -42,13 +43,21 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("fleet health ranking", func(t *testing.T) { testFleetHealth(t, newStore()) })
 	t.Run("run summaries round trip", func(t *testing.T) { testRunSummaries(t, newStore()) })
 	t.Run("drift status", func(t *testing.T) { testDriftStatus(t, newStore()) })
+	t.Run("drift and fleet health agree after a purge", func(t *testing.T) {
+		testDriftSurvivesPurge(t, newStore())
+	})
 	t.Run("host costs", func(t *testing.T) { testHostCosts(t, newStore()) })
 	t.Run("flaky detection", func(t *testing.T) { testFlaky(t, newStore()) })
 	t.Run("host history", func(t *testing.T) { testHostHistory(t, newStore()) })
+	t.Run("sub-second host order is exact and stable", func(t *testing.T) {
+		testSubSecondHostOrder(t, newStore)
+	})
 	t.Run("task trends", func(t *testing.T) { testTaskTrends(t, newStore()) })
 	t.Run("claim leases oldest", func(t *testing.T) { testClaim(t, newStore()) })
 	t.Run("claim respects queue", func(t *testing.T) { testClaimQueue(t, newStore()) })
 	t.Run("heartbeat and reclaim", func(t *testing.T) { testLeaseLifecycle(t, newStore()) })
+	t.Run("claim mints a per-claim secret", func(t *testing.T) { testClaimSecret(t, newStore()) })
+	t.Run("run timings", func(t *testing.T) { testRunTimings(t, newStore()) })
 	t.Run("reclaim resolves orphaned children", func(t *testing.T) { testReclaimOrphans(t, newStore()) })
 	t.Run("transition and claim are one step", func(t *testing.T) { testTransitionStatusAndClaim(t, newStore()) })
 	t.Run("reclaim settles abandoned parents", func(t *testing.T) { testReclaimAbandonedParents(t, newStore()) })
@@ -75,8 +84,10 @@ func Contract(t *testing.T, newStore func() run.Store) {
 		testStoreAgreementOnEdges(t, newStore())
 	})
 	t.Run("transition status", func(t *testing.T) { testTransitionStatus(t, newStore()) })
+	t.Run("finalize running is one write", func(t *testing.T) { testFinalizeRunning(t, newStore()) })
 	t.Run("workers", func(t *testing.T) { testWorkers(t, newStore()) })
 	t.Run("retention purge", func(t *testing.T) { testPurge(t, newStore()) })
+	t.Run("summary trim bounds growth", func(t *testing.T) { testTrimSummaries(t, newStore()) })
 	t.Run("terminal run fences writes", func(t *testing.T) { testTerminalFence(t, newStore()) })
 }
 
@@ -95,7 +106,10 @@ func sampleRun(id string) *run.Run {
 		ExtraVars: map[string]any{"version": "1.2.3"},
 		Outputs:   map[string]any{"built": true, "count": float64(2)},
 		Tool:      "bash", Command: "echo hi", DryRun: true,
+		Tags: []string{"deploy", "config"}, SkipTags: []string{"slow"},
+		Verbosity: 2, Forks: 10, DiffMode: true,
 		ProposedFrom: "run_check", Intent: "echo hello on the box",
+		OrgID:          "org_sample",
 		IdempotencyKey: "idem_sample",
 		Timeout:        3600,
 		Notifications: []run.NotifyTarget{
@@ -137,6 +151,122 @@ func testTransitionStatus(t *testing.T, store run.Store) {
 	}
 	if ok, err := store.TransitionStatus(ctx, "run_missing", run.StatusPending, run.StatusRejected); err != nil || ok {
 		t.Errorf("missing run transition = (%v, %v), want (false, nil)", ok, err)
+	}
+}
+
+// testFinalizeRunning checks the terminal write: it moves a running run and records every fact that
+// explains how it ended in the same operation, and it changes nothing at all for a run that is not
+// running, whether that run is still queued, already terminal, or missing. A store that moved the
+// status without the facts would leave a run terminal with no exit code, which no sweep reclaims.
+func testFinalizeRunning(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	ended := time.Date(2026, 2, 3, 4, 5, 6, 0, time.UTC)
+	code := 7
+	fin := run.Finalization{
+		Status: run.StatusFailed, ExitCode: &code, Error: "the play failed",
+		Image: "ghcr.io/example/runner:1.2", CommitSHA: "c0ffee1234567890c0ffee1234567890c0ffee12",
+		PullCredentialID: "cred_pull", Outputs: map[string]any{"version": "1.2.3"},
+		Warning: "this run recorded no per-host result", EndedAt: ended,
+	}
+
+	r := sampleRun("run_fin")
+	r.Status = run.StatusRunning
+	r.ExitCode = nil
+	r.EndedAt = nil
+	r.Error = ""
+	r.Image = ""
+	// Resolved while the run is under way, after the last whole-run save, so the terminal write is
+	// their only chance to land.
+	r.CommitSHA = ""
+	r.PullCredentialID = ""
+	r.Outputs = nil
+	r.Warning = ""
+	r.IdempotencyKey = "idem_fin"
+	if err := store.Save(ctx, r); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	ok, err := store.FinalizeRunning(ctx, "run_fin", fin)
+	if err != nil {
+		t.Fatalf("FinalizeRunning() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("FinalizeRunning() changed nothing for a running run, want it to record the result")
+	}
+	got, err := store.Get(ctx, "run_fin")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Status != run.StatusFailed {
+		t.Errorf("status = %q, want failed", got.Status)
+	}
+	if got.ExitCode == nil || *got.ExitCode != code {
+		t.Errorf("exit code = %v, want %d", got.ExitCode, code)
+	}
+	if got.Error != fin.Error {
+		t.Errorf("error = %q, want %q", got.Error, fin.Error)
+	}
+	if got.Image != fin.Image {
+		t.Errorf("image = %q, want %q", got.Image, fin.Image)
+	}
+	if got.EndedAt == nil || !got.EndedAt.Equal(ended) {
+		t.Errorf("ended_at = %v, want %v", got.EndedAt, ended)
+	}
+	// The commit the run executed and the credential its image was pulled with are resolved after
+	// the last whole-run save. Dropping them leaves the dossier without provenance and narrows the
+	// grantable objects the run's own authorization is rebuilt from.
+	if got.CommitSHA != fin.CommitSHA {
+		t.Errorf("commit_sha = %q, want %q", got.CommitSHA, fin.CommitSHA)
+	}
+	if got.PullCredentialID != fin.PullCredentialID {
+		t.Errorf("pull_credential_id = %q, want %q", got.PullCredentialID, fin.PullCredentialID)
+	}
+	// Outputs are what the next pipeline step reads as its inputs, and the warning is the run's note
+	// about itself. Both are folded as the run finishes, so this write is their only chance to land.
+	if diff := cmp.Diff(fin.Outputs, got.Outputs, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("outputs mismatch (-want +got):\n%s", diff)
+	}
+	if got.Warning != fin.Warning {
+		t.Errorf("warning = %q, want %q", got.Warning, fin.Warning)
+	}
+
+	// A second attempt has nothing to finalize, and it must not rewrite what the first one recorded.
+	second := run.Finalization{Status: run.StatusSucceeded, Error: "", Image: "", EndedAt: ended}
+	if ok, err := store.FinalizeRunning(ctx, "run_fin", second); err != nil || ok {
+		t.Errorf("second FinalizeRunning() = (%v, %v), want (false, nil)", ok, err)
+	}
+	again, err := store.Get(ctx, "run_fin")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if again.Status != run.StatusFailed || again.Error != fin.Error {
+		t.Errorf("terminal run changed to (%q, %q), want it left at (failed, %q)",
+			again.Status, again.Error, fin.Error)
+	}
+
+	// A queued run has not been executed by anybody, so nothing about how it ended can be recorded.
+	queued := sampleRun("run_fin_pending")
+	queued.Status = run.StatusPending
+	queued.ExitCode = nil
+	queued.EndedAt = nil
+	queued.IdempotencyKey = "idem_fin_pending"
+	if err := store.Save(ctx, queued); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if ok, err := store.FinalizeRunning(ctx, "run_fin_pending", fin); err != nil || ok {
+		t.Errorf("pending FinalizeRunning() = (%v, %v), want (false, nil)", ok, err)
+	}
+	stillQueued, err := store.Get(ctx, "run_fin_pending")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if stillQueued.Status != run.StatusPending || stillQueued.EndedAt != nil {
+		t.Errorf("pending run became (%q, ended %v), want it untouched",
+			stillQueued.Status, stillQueued.EndedAt)
+	}
+
+	if ok, err := store.FinalizeRunning(ctx, "run_missing", fin); err != nil || ok {
+		t.Errorf("missing FinalizeRunning() = (%v, %v), want (false, nil)", ok, err)
 	}
 }
 
@@ -393,6 +523,18 @@ func testListPage(t *testing.T, store run.Store) {
 	// OldestFirst flips the default ordering.
 	if all, _ := store.ListPage(ctx, run.ListFilter{OldestFirst: true}, 0, 0); cmp.Diff([]string{"a", "b", "c", "d"}, ids(all)) != "" {
 		t.Errorf("ListPage oldest first = %v, want [a b c d]", ids(all))
+	}
+
+	// A limit alongside OldestFirst returns the earliest runs and no more. The change register
+	// bounds itself this way, and a store that answered with the whole window would hand it the
+	// unbounded read the bound exists to prevent, on that store alone.
+	if got, _ := store.ListPage(ctx, run.ListFilter{OldestFirst: true}, 2, 0); cmp.Diff([]string{"a", "b"}, ids(got)) != "" {
+		t.Errorf("ListPage oldest first, limit 2 = %v, want [a b]", ids(got))
+	}
+	if got, _ := store.ListPage(ctx, run.ListFilter{
+		After: base.Add(1 * time.Second), Before: base.Add(4 * time.Second), OldestFirst: true,
+	}, 2, 0); cmp.Diff([]string{"b", "c"}, ids(got)) != "" {
+		t.Errorf("ListPage window, oldest first, limit 2 = %v, want [b c]", ids(got))
 	}
 
 	counts, err := store.RunStatusCounts(ctx)
@@ -901,6 +1043,125 @@ func testDriftStatus(t *testing.T, store run.Store) {
 	}
 }
 
+// saveFinishedRun writes a run, its host summaries, then finalizes it, which is the order a real
+// run takes. Summary writes are fenced once a run is terminal, so the summary has to land first.
+func saveFinishedRun(t *testing.T, store run.Store, id string, at time.Time, dry bool,
+	sums []run.HostSummary,
+) {
+	t.Helper()
+	ctx := context.Background()
+	r := &run.Run{ID: id, Playbook: "site.yml", Status: run.StatusRunning, CreatedAt: at, DryRun: dry}
+	if err := store.Save(ctx, r); err != nil {
+		t.Fatalf("Save(%s) error = %v", id, err)
+	}
+	if err := store.SaveHostSummary(ctx, id, sums); err != nil {
+		t.Fatalf("SaveHostSummary(%s) error = %v", id, err)
+	}
+	r.Status = run.StatusSucceeded
+	if err := store.Save(ctx, r); err != nil {
+		t.Fatalf("Save(%s) finalize error = %v", id, err)
+	}
+}
+
+// testDriftSurvivesPurge verifies the drift view and the fleet health view stay reconciled across a
+// retention purge. Purging deletes the run records but deliberately keeps the host summaries, so a
+// host that has a drift check must keep its drift entry, and a host that only ever had real runs
+// must stay out of the drift view. Both views read the same surviving rows and must agree on them.
+func testDriftSurvivesPurge(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+
+	// web01 was checked by a dry run. app01 only ever had a real run, so it has no drift signal.
+	// app01's summary arrives claiming to be a check, as a compromised remote worker could, and the
+	// store must overwrite that with the run's own flag rather than trust it.
+	saveFinishedRun(t, store, "chk1", base, true,
+		[]run.HostSummary{{Host: "web01", Changed: 2, Worst: "changed", RanAt: base}})
+	saveFinishedRun(t, store, "apply1", base.Add(time.Hour), false, []run.HostSummary{
+		{Host: "app01", Changed: 7, Worst: "changed", RanAt: base.Add(time.Hour), DryRun: true},
+	})
+
+	wantDrift := []run.HostDrift{{Host: "web01", DriftedTasks: 2, RunID: "chk1", CheckedAt: base}}
+	before, err := store.DriftStatus(ctx)
+	if err != nil {
+		t.Fatalf("DriftStatus() before purge error = %v", err)
+	}
+	if diff := cmp.Diff(wantDrift, before, cmpopts.EquateEmpty()); diff != "" {
+		t.Fatalf("DriftStatus() before purge mismatch (-want +got):\n%s", diff)
+	}
+	beforeHealth, err := hostsInHealth(ctx, store)
+	if err != nil {
+		t.Fatalf("FleetHealth() before purge error = %v", err)
+	}
+	if diff := cmp.Diff([]string{"app01", "web01"}, beforeHealth, cmpopts.EquateEmpty()); diff != "" {
+		t.Fatalf("FleetHealth() before purge mismatch (-want +got):\n%s", diff)
+	}
+
+	deleted, err := store.PurgeRunsBefore(ctx, base.Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("PurgeRunsBefore() error = %v", err)
+	}
+	if deleted != 2 {
+		t.Fatalf("PurgeRunsBefore() deleted = %d, want 2", deleted)
+	}
+
+	// Host history is kept on purpose, so fleet health still knows both hosts.
+	afterHealth, err := hostsInHealth(ctx, store)
+	if err != nil {
+		t.Fatalf("FleetHealth() after purge error = %v", err)
+	}
+	if diff := cmp.Diff([]string{"app01", "web01"}, afterHealth, cmpopts.EquateEmpty()); diff != "" {
+		t.Fatalf("FleetHealth() after purge mismatch (-want +got):\n%s", diff)
+	}
+	// The drift view reads the same surviving rows, so it must be unchanged: web01 keeps its check
+	// and app01 stays out, since a purged run must not turn a real run into a drift check.
+	after, err := store.DriftStatus(ctx)
+	if err != nil {
+		t.Fatalf("DriftStatus() after purge error = %v", err)
+	}
+	if diff := cmp.Diff(wantDrift, after, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("DriftStatus() after purge mismatch (-want +got):\n%s", diff)
+	}
+
+	// The surviving rows carry the flag drift is read from, so it is readable on its own and the
+	// answer is traceable to the row rather than to a run record that no longer exists.
+	wantStamps := map[string]bool{"chk1": true, "apply1": false}
+	for runID, wantDry := range wantStamps {
+		sums, err := store.RunHostSummaries(ctx, runID)
+		if err != nil {
+			t.Fatalf("RunHostSummaries(%s) error = %v", runID, err)
+		}
+		if len(sums) != 1 {
+			t.Fatalf("RunHostSummaries(%s) = %d rows, want 1 kept past the purge", runID, len(sums))
+		}
+		if sums[0].DryRun != wantDry {
+			t.Errorf("RunHostSummaries(%s) dry run = %v, want %v", runID, sums[0].DryRun, wantDry)
+		}
+	}
+	// The same flag reads back through host history, the view that outlives the run.
+	hist, err := store.HostHistory(ctx, "app01", 10)
+	if err != nil {
+		t.Fatalf("HostHistory() error = %v", err)
+	}
+	if len(hist) != 1 || hist[0].DryRun {
+		t.Errorf("HostHistory(app01) = %+v, want one apply row, since a worker cannot claim a check", hist)
+	}
+}
+
+// hostsInHealth returns the hosts fleet health reports, sorted, so a test can compare the set of
+// hosts the two fleet views know about without depending on failure ranking.
+func hostsInHealth(ctx context.Context, store run.Store) ([]string, error) {
+	health, err := store.FleetHealth(ctx, 10)
+	if err != nil {
+		return nil, err
+	}
+	hosts := make([]string, 0, len(health))
+	for _, h := range health {
+		hosts = append(hosts, h.Host)
+	}
+	sort.Strings(hosts)
+	return hosts, nil
+}
+
 // testFlaky verifies flip counting marks intermittent hosts flaky and steady hosts not.
 func testFlaky(t *testing.T, store run.Store) {
 	ctx := context.Background()
@@ -944,6 +1205,84 @@ func testFlaky(t *testing.T, store run.Store) {
 	}
 	if h := byHost["solid"]; h.Flips != 0 || h.Flaky {
 		t.Errorf("solid = flips %d flaky %v, want 0 false", h.Flips, h.Flaky)
+	}
+}
+
+// testSubSecondHostOrder pins the order of host summaries that share a second, which is where the
+// stored timestamp stops being a reliable sort key.
+//
+// Two things go wrong there. Times are stored as RFC 3339 with the fractional second trimmed, so a
+// run on a whole second is stored with no fraction at all and sorts, as text, after a later run in
+// the same second. And two runs can carry the very same instant, which leaves the order undecided
+// unless something else decides it, so the in-memory store answered differently from one call to
+// the next. Both move the wrong row into the head of the window, so the fleet view reports the wrong
+// current outcome for a host.
+//
+// The fixture covers both: r1 lands on a whole second, r4 a quarter second later, and r2 and r3
+// share the same instant. The expected answer is checked exactly, not merely for self-consistency,
+// because a wrong order can be perfectly repeatable. The whole fixture is rebuilt from a fresh store
+// on every pass so a store that leans on map iteration order gets many chances to disagree.
+func testSubSecondHostOrder(t *testing.T, newStore func() run.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 8, 11, 10, 0, 0, 0, time.UTC)
+	half := base.Add(500 * time.Millisecond)
+	writes := []struct {
+		RunID string
+		Worst string
+		RanAt time.Time
+	}{
+		{RunID: "r1", Worst: "failed", RanAt: base},
+		{RunID: "r2", Worst: "ok", RanAt: half},
+		{RunID: "r3", Worst: "changed", RanAt: half},
+		{RunID: "r4", Worst: "failed", RanAt: base.Add(250 * time.Millisecond)},
+	}
+	// Newest first: r3 and r2 tie on the half second and the run id breaks it, then r4, then r1 on
+	// the whole second, which plain text order would have hoisted to the front.
+	wantHealth := []run.HostHealth{{
+		Host: "db01", Failures: 2, Total: 4, LastOutcome: "changed", LastRun: half, Flips: 1,
+		Recent:     []string{"changed", "ok", "failed", "failed"},
+		RecentRuns: []string{"r3", "r2", "r4", "r1"},
+	}}
+	wantWindowed := []run.HostHealth{{
+		Host: "db01", Failures: 0, Total: 1, LastOutcome: "changed", LastRun: half,
+		Recent: []string{"changed"}, RecentRuns: []string{"r3"},
+	}}
+	wantHistory := []string{"r3", "r2", "r4", "r1"}
+
+	const passes = 20
+	for pass := range passes {
+		store := newStore()
+		for _, w := range writes {
+			sums := []run.HostSummary{{Host: "db01", Worst: w.Worst, RanAt: w.RanAt}}
+			if err := store.SaveHostSummary(ctx, w.RunID, sums); err != nil {
+				t.Fatalf("pass %d: SaveHostSummary() error = %v", pass, err)
+			}
+		}
+		health, err := store.FleetHealth(ctx, 10)
+		if err != nil {
+			t.Fatalf("pass %d: FleetHealth() error = %v", pass, err)
+		}
+		if diff := cmp.Diff(wantHealth, health, cmpopts.EquateEmpty()); diff != "" {
+			t.Fatalf("pass %d: FleetHealth mismatch (-want +got):\n%s", pass, diff)
+		}
+		windowed, err := store.FleetHealth(ctx, 1)
+		if err != nil {
+			t.Fatalf("pass %d: FleetHealth(1) error = %v", pass, err)
+		}
+		if diff := cmp.Diff(wantWindowed, windowed, cmpopts.EquateEmpty()); diff != "" {
+			t.Fatalf("pass %d: FleetHealth(1) mismatch (-want +got):\n%s", pass, diff)
+		}
+		history, err := store.HostHistory(ctx, "db01", 10)
+		if err != nil {
+			t.Fatalf("pass %d: HostHistory() error = %v", pass, err)
+		}
+		gotHistory := make([]string, len(history))
+		for i, hs := range history {
+			gotHistory[i] = hs.RunID
+		}
+		if diff := cmp.Diff(wantHistory, gotHistory, cmpopts.EquateEmpty()); diff != "" {
+			t.Fatalf("pass %d: HostHistory order mismatch (-want +got):\n%s", pass, diff)
+		}
 	}
 }
 
@@ -1218,6 +1557,62 @@ func testLeaseLifecycle(t *testing.T, store run.Store) {
 	}
 	if err := store.Heartbeat(ctx, gone.ID, "worker-b"); !errors.Is(err, run.ErrNotFound) {
 		t.Errorf("Heartbeat() on interrupted run = %v, want ErrNotFound", err)
+	}
+}
+
+// testClaimSecret verifies a claim mints a fresh per-claim capability, that it is stored and read
+// back, that two claims never share one, and that a reclaim clears it so a report minted against the
+// lost claim no longer verifies against the run. This is the capability that authorizes a worker's
+// relay reports, so it must be present, unique, persisted, and revoked on reclaim.
+func testClaimSecret(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	if err := store.Save(ctx, &run.Run{
+		ID: "run_secret", Playbook: "p", Status: run.StatusPending, CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	first, err := store.Claim(ctx, "worker-a", []string{""})
+	if err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+	if first.ClaimSecret == "" {
+		t.Fatal("Claim() returned an empty claim secret, want a fresh capability")
+	}
+
+	// The secret is stored, not only returned, so the control node can verify a later report against
+	// it. Get reads the same column Save wrote.
+	stored, err := store.Get(ctx, "run_secret")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if stored.ClaimSecret != first.ClaimSecret {
+		t.Errorf("stored secret = %q, want the one the claim returned %q",
+			stored.ClaimSecret, first.ClaimSecret)
+	}
+
+	// A reclaim releases the run and, with it, the capability: the report a worker could still mint
+	// from the first claim no longer matches the run.
+	if _, err := store.ReclaimStale(ctx, 0); err != nil {
+		t.Fatalf("ReclaimStale() error = %v", err)
+	}
+	back, err := store.Get(ctx, "run_secret")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if back.ClaimSecret != "" {
+		t.Errorf("reclaimed run still carries a claim secret %q, want it cleared", back.ClaimSecret)
+	}
+
+	// The re-claim mints a new capability. It must not equal the first, or a stale report would
+	// still verify after the run changed hands.
+	second, err := store.Claim(ctx, "worker-b", []string{""})
+	if err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+	if second.ClaimSecret == "" || second.ClaimSecret == first.ClaimSecret {
+		t.Errorf("re-claim secret = %q, want a fresh value distinct from the first %q",
+			second.ClaimSecret, first.ClaimSecret)
 	}
 }
 
@@ -2429,5 +2824,187 @@ func testTransitionStatusAndClaim(t *testing.T, store run.Store) {
 	} else if after.Status == run.StatusRunning || after.ClaimedBy != "" {
 		t.Errorf("canceled run is %q claimed by %q, want it left unclaimed",
 			after.Status, after.ClaimedBy)
+	}
+}
+
+// testRunTimings verifies the narrow read the metrics endpoint uses returns the newest top-level
+// runs with their timings, and excludes children.
+//
+// It reads seven columns instead of whole rows because a scrape happens every few seconds and a run
+// row carries its extra vars, steps, labels, and notification targets. The contract is that it agrees
+// with the full read about which runs exist and when they ran, so a cheaper query does not become a
+// different answer.
+func testRunTimings(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 8, 11, 9, 0, 0, 0, time.UTC)
+	started := base.Add(time.Minute)
+	ended := base.Add(3 * time.Minute)
+	parentID := "run_t_parent"
+
+	for _, r := range []*run.Run{
+		{ID: "run_t_old", Playbook: "p", Status: run.StatusSucceeded, Queue: "prod",
+			CreatedAt: base, StartedAt: &started, EndedAt: &ended, ClaimedBy: "worker-a"},
+		{ID: "run_t_new", Playbook: "p", Status: run.StatusRunning, Queue: "dmz",
+			CreatedAt: base.Add(time.Hour), ClaimedBy: "worker-b"},
+		{ID: parentID, Playbook: "p", Kind: run.KindSplit, Status: run.StatusRunning,
+			CreatedAt: base.Add(2 * time.Hour)},
+	} {
+		if err := store.Save(ctx, r); err != nil {
+			t.Fatalf("Save(%s) error = %v", r.ID, err)
+		}
+	}
+	// A child must not appear: the histograms describe runs somebody asked for, and a shard is part
+	// of one that is already counted.
+	idx, count := 0, 1
+	if err := store.Save(ctx, &run.Run{
+		ID: "run_t_child", Playbook: "p", Status: run.StatusRunning, CreatedAt: base.Add(3 * time.Hour),
+		ParentID: &parentID, ShardIndex: &idx, ShardCount: &count,
+	}); err != nil {
+		t.Fatalf("Save(child) error = %v", err)
+	}
+
+	got, err := store.RunTimings(ctx, 10)
+	if err != nil {
+		t.Fatalf("RunTimings() error = %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("timings = %d, want the three top-level runs", len(got))
+	}
+	// Newest first, matching the list order the metrics window assumes.
+	if !got[0].CreatedAt.After(got[1].CreatedAt) {
+		t.Errorf("timings are not newest first: %v then %v", got[0].CreatedAt, got[1].CreatedAt)
+	}
+	var oldest run.RunTiming
+	for _, tm := range got {
+		if tm.Queue == "prod" {
+			oldest = tm
+		}
+	}
+	if oldest.Status != run.StatusSucceeded || oldest.ClaimedBy != "worker-a" {
+		t.Errorf("timing = %+v, want the succeeded run held by worker-a", oldest)
+	}
+	if oldest.StartedAt == nil || oldest.EndedAt == nil {
+		t.Fatalf("timing carries no start or end: %+v", oldest)
+	}
+	if !oldest.StartedAt.Equal(started) || !oldest.EndedAt.Equal(ended) {
+		t.Errorf("timings = %v to %v, want %v to %v", oldest.StartedAt, oldest.EndedAt, started, ended)
+	}
+
+	// The limit bounds the window, which is what keeps a scrape cheap as history grows.
+	short, err := store.RunTimings(ctx, 1)
+	if err != nil {
+		t.Fatalf("RunTimings(1) error = %v", err)
+	}
+	if len(short) != 1 {
+		t.Errorf("limited timings = %d, want 1", len(short))
+	}
+}
+
+// testTrimSummaries verifies the only bound on the two summary tables.
+//
+// Summaries outlive the runs they came from, so nothing in retention deletes them by age and the
+// tables grow by one row per host per run forever. TrimSummaries is what stops that, and the
+// contract it has to keep on every backend is exact: the newest keep rows per host and per task
+// survive, the older ones are gone, a key already under the limit is untouched, the two tables are
+// trimmed independently, and no keep can empty a key entirely.
+func testTrimSummaries(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	const (
+		keep      = 3
+		busyRuns  = 10
+		taskFrom  = 3
+		quietRuns = 2
+	)
+	runID := func(i int) string { return fmt.Sprintf("run_%02d", i) }
+
+	// The host table gets more rows than the task table, so a store that trimmed one and reported
+	// the other's count, or trimmed both to the same depth by accident, is caught by the total.
+	for i := range busyRuns {
+		at := base.Add(time.Duration(i) * time.Minute)
+		hosts := []run.HostSummary{{Host: "busy", Worst: "ok", RanAt: at}}
+		if i < quietRuns {
+			hosts = append(hosts, run.HostSummary{Host: "quiet", Worst: "ok", RanAt: at})
+		}
+		if err := store.SaveHostSummary(ctx, runID(i), hosts); err != nil {
+			t.Fatalf("SaveHostSummary(%s) error = %v", runID(i), err)
+		}
+		if i < taskFrom {
+			continue
+		}
+		tasks := []run.TaskSummary{{Task: "busy-task", Seconds: float64(i), RanAt: at}}
+		if i < taskFrom+quietRuns {
+			tasks = append(tasks, run.TaskSummary{Task: "quiet-task", Seconds: 1, RanAt: at})
+		}
+		if err := store.SaveTaskSummary(ctx, runID(i), tasks); err != nil {
+			t.Fatalf("SaveTaskSummary(%s) error = %v", runID(i), err)
+		}
+	}
+
+	wantDeleted := (busyRuns - keep) + (busyRuns - taskFrom - keep)
+	deleted, err := store.TrimSummaries(ctx, keep)
+	if err != nil {
+		t.Fatalf("TrimSummaries() error = %v", err)
+	}
+	if deleted != wantDeleted {
+		t.Errorf("TrimSummaries() deleted = %d, want %d", deleted, wantDeleted)
+	}
+
+	// The newest survive, in order, and the oldest are gone. Trimming the wrong end would leave the
+	// same row count and answer every fleet view with a fossil.
+	history, err := store.HostHistory(ctx, "busy", busyRuns)
+	if err != nil {
+		t.Fatalf("HostHistory(busy) error = %v", err)
+	}
+	gotRuns := make([]string, len(history))
+	for i, hs := range history {
+		gotRuns[i] = hs.RunID
+	}
+	wantRuns := []string{runID(9), runID(8), runID(7)}
+	if diff := cmp.Diff(wantRuns, gotRuns, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("busy history after trim mismatch (-want +got):\n%s", diff)
+	}
+
+	quiet, err := store.HostHistory(ctx, "quiet", busyRuns)
+	if err != nil {
+		t.Fatalf("HostHistory(quiet) error = %v", err)
+	}
+	if len(quiet) != quietRuns {
+		t.Errorf("quiet history len = %d, want %d untouched", len(quiet), quietRuns)
+	}
+
+	trends, err := store.TaskTrends(ctx, busyRuns)
+	if err != nil {
+		t.Fatalf("TaskTrends() error = %v", err)
+	}
+	runsByTask := make(map[string]int, len(trends))
+	for _, tr := range trends {
+		runsByTask[tr.Task] = tr.Runs
+	}
+	want := map[string]int{"busy-task": keep, "quiet-task": quietRuns}
+	if diff := cmp.Diff(want, runsByTask, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("task rows after trim mismatch (-want +got):\n%s", diff)
+	}
+
+	// A second sweep over tables already at the limit deletes nothing.
+	again, err := store.TrimSummaries(ctx, keep)
+	if err != nil {
+		t.Fatalf("TrimSummaries() second error = %v", err)
+	}
+	if again != 0 {
+		t.Errorf("TrimSummaries() second deleted = %d, want 0", again)
+	}
+
+	// A keep of zero is not a wipe. Each key is left with its newest row, so a misconfiguration
+	// cannot erase the fleet's history.
+	if _, err := store.TrimSummaries(ctx, 0); err != nil {
+		t.Fatalf("TrimSummaries(0) error = %v", err)
+	}
+	floored, err := store.HostHistory(ctx, "busy", busyRuns)
+	if err != nil {
+		t.Fatalf("HostHistory(busy) after zero keep error = %v", err)
+	}
+	if len(floored) != 1 || floored[0].RunID != runID(9) {
+		t.Errorf("busy history after zero keep = %+v, want only %s", floored, runID(9))
 	}
 }

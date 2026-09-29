@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -55,8 +54,7 @@ func createSourceHandler(sources invsource.Store, inventories inventory.Store, a
 			return
 		}
 		var req createSourceRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		if req.Name == "" || req.Source == "" {
@@ -126,8 +124,7 @@ func updateSourceHandler(sources invsource.Store, authz *authorizer, log *zap.Lo
 			return
 		}
 		var req createSourceRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		if req.Name == "" || req.Source == "" {
@@ -168,7 +165,7 @@ func updateSourceHandler(sources invsource.Store, authz *authorizer, log *zap.Lo
 }
 
 // listSourcesHandler returns all sources.
-func listSourcesHandler(sources invsource.Store, log *zap.Logger) http.HandlerFunc {
+func listSourcesHandler(sources invsource.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if sources == nil {
 			respondError(w, log, http.StatusNotFound, "inventory sources not enabled")
@@ -179,6 +176,25 @@ func listSourcesHandler(sources invsource.Store, log *zap.Logger) http.HandlerFu
 			log.Error("server: list sources: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not list sources")
 			return
+		}
+		// A source is visible on the same objects that govern writing one, its project and the
+		// credential it borrows. Reading was unauthorized, and a source carries last_error, which is
+		// verbatim plugin output and routinely names cloud accounts and endpoints.
+		restricted, err := grantsEnforced(r.Context(), authz)
+		if err != nil {
+			log.Error("server: read filter: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not list sources")
+			return
+		}
+		if restricted {
+			kept := make([]*invsource.Source, 0, len(list))
+			for _, src := range list {
+				if authz.authorizeAll(r.Context(), grant.AccessUse,
+					src.ProjectID, src.CredentialID, src.InventoryID) == nil {
+					kept = append(kept, src)
+				}
+			}
+			list = kept
 		}
 		respondJSON(w, log, http.StatusOK,
 			listSourcesResponse{Sources: list, Count: len(list)}, wantsPretty(r))

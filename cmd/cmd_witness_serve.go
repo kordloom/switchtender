@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -13,11 +14,12 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/jsonutil"
 	"github.com/kordloom/switchtender/internal/logutil"
-	"github.com/kordloom/switchtender/internal/witness"
+	"github.com/kordloom/switchtender/witness"
 )
 
 var (
@@ -33,7 +35,13 @@ var (
 	witnessServeKeyDir string
 	// witnessServeWebhook receives every finding as a JSON POST.
 	witnessServeWebhook string
+	// witnessServeToken gates the read API. Preferred from the environment.
+	witnessServeToken string
 )
+
+// witnessTokenEnv is the environment variable the read token is taken from when the flag is unset.
+// An environment variable is preferred to a flag because a flag value shows in the host process list.
+const witnessTokenEnv = "SWITCHTENDER_WITNESS_TOKEN"
 
 // witnessServeCmd runs the hosted witness: many servers watched from one process, with an API.
 var witnessServeCmd = &cobra.Command{
@@ -93,9 +101,30 @@ func init() {
 		"Directory holding the witness signing key. Defaults to the state directory.")
 	witnessServeCmd.Flags().StringVar(&witnessServeWebhook, "webhook", "",
 		"URL that receives every finding as a JSON POST.")
+	witnessServeCmd.Flags().StringVar(&witnessServeToken, "api-token", "",
+		"Bearer token required on every /witness route. Prefer "+witnessTokenEnv+", since a flag is "+
+			"visible in the process list. Required when --listen is not loopback, so a public witness "+
+			"does not hand anyone the list of watched servers or the cross-server findings feed.")
 	witnessVerifyCmd.Flags().StringVar(&witnessVerifyPubkey, "pubkey", "",
 		"Pinned witness public key in hex; verification fails when the signer differs.")
 	witnessCmd.AddCommand(witnessServeCmd, witnessVerifyCmd)
+}
+
+// listenIsLoopback reports whether addr binds only the loopback interface, so an open API on it is
+// reachable only from the host. An empty or wildcard host binds every interface and is not loopback.
+func listenIsLoopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // runWitnessServe validates the watch list, starts the service, and serves its API until stopped.
@@ -112,6 +141,19 @@ func runWitnessServe(cmd *cobra.Command, _ []string) error {
 	if witnessServeInterval < 10*time.Second {
 		return fmt.Errorf("--interval must be at least 10s, got %s", witnessServeInterval)
 	}
+	readToken := witnessServeToken
+	if readToken == "" {
+		readToken = os.Getenv(witnessTokenEnv)
+	}
+	// A witness reachable off the host without a token would hand any caller the full list of watched
+	// servers and the cross-server findings feed, which on a multi-tenant deployment is the client
+	// list. Refuse that combination rather than serve it. Offline attestation verification is
+	// unaffected: it needs no call to this API.
+	if readToken == "" && !listenIsLoopback(witnessListen) {
+		return fmt.Errorf("refusing to serve the witness API open on a non-loopback address (%s): set "+
+			"%s or --api-token so the watched-server list is not exposed to anyone who can reach it",
+			witnessListen, witnessTokenEnv)
+	}
 	keyDir := witnessServeKeyDir
 	if keyDir == "" {
 		keyDir = witnessStateDir
@@ -119,7 +161,7 @@ func runWitnessServe(cmd *cobra.Command, _ []string) error {
 	if err := os.MkdirAll(keyDir, 0o750); err != nil {
 		return fmt.Errorf("witness key directory: %w", err)
 	}
-	id, err := audit.LoadIdentity(keyDir)
+	id, err := audit.LoadWitnessIdentity(keyDir)
 	if err != nil {
 		return fmt.Errorf("load witness identity: %w", err)
 	}
@@ -129,18 +171,26 @@ func runWitnessServe(cmd *cobra.Command, _ []string) error {
 	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	log, err := logutil.New()
+	if err != nil {
+		return fmt.Errorf("logger: %w", err)
+	}
 	client := &http.Client{Timeout: 30 * time.Second}
 	var opts []witness.ServiceOption
 	if witnessServeWebhook != "" {
 		opts = append(opts, witness.WithServiceNotify(func(server string, f witness.Finding) {
-			// The service's findings record is the durable copy; a failed delivery is logged by
-			// the poster and the finding stays served by the API.
-			_ = postWitnessFinding(ctx, client, witnessServeWebhook, server, f)
+			// The service's findings record is the durable copy, so a lost POST does not lose the
+			// finding from the API. But the operator wired a webhook to be paged on tampering, so a
+			// delivery failure must be visible rather than swallowed: log it. postWitnessFinding does
+			// not log on its own, and the earlier comment that claimed it did was wrong.
+			if derr := postWitnessFinding(ctx, client, witnessServeWebhook, server, f); derr != nil {
+				log.Warn("witness: webhook delivery failed",
+					zap.String("server", server), zap.String("finding", f.Kind), zap.Error(derr))
+			}
 		}))
 	}
-	log, err := logutil.New()
-	if err != nil {
-		return fmt.Errorf("logger: %w", err)
+	if readToken != "" {
+		opts = append(opts, witness.WithServiceReadToken(readToken))
 	}
 	svc, err := witness.NewService(id, witnessStateDir, witnessServeInterval, witnessWatch,
 		log, client, opts...)
@@ -154,8 +204,12 @@ func runWitnessServe(cmd *cobra.Command, _ []string) error {
 
 	fmt.Fprintf(os.Stderr, "witness: watching %d server(s), state %s, key %s\n",
 		len(witnessWatch), witnessStateDir, id.KeyID())
-	fmt.Fprintf(os.Stderr, "witness: api on %s; publish the key id so relying parties can pin it\n",
-		witnessListen)
+	access := "open"
+	if readToken != "" {
+		access = "token required"
+	}
+	fmt.Fprintf(os.Stderr, "witness: api on %s (%s); publish the key id so relying parties can pin it\n",
+		witnessListen, access)
 
 	httpSrv := &http.Server{
 		Addr: witnessListen, Handler: svc.Handler(), ReadHeaderTimeout: 10 * time.Second,

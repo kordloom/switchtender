@@ -65,8 +65,10 @@ type Input struct {
 }
 
 // Collect gathers a run's evidence from the stores in one streaming pass over the chain. It
-// returns run.ErrNotFound when the run does not exist.
-func Collect(ctx context.Context, runs run.Store, audits audit.Store, id string, now time.Time) (*Input, error) {
+// returns run.ErrNotFound when the run does not exist. installID is the install the tree
+// profile's leaves bind to, which checking a tree anchor requires.
+func Collect(ctx context.Context, runs run.Store, audits audit.Store, installID, id string,
+	now time.Time) (*Input, error) {
 	r, err := runs.Get(ctx, id)
 	if err != nil {
 		return nil, err
@@ -132,7 +134,7 @@ func Collect(ctx context.Context, runs run.Store, audits audit.Store, id string,
 	// One pass gives the run's entries, the whole-chain verdict, the anchor verdicts, the head
 	// receipt, and where the chain stood when the run was recorded.
 	scan := audit.NewChainScanner(true)
-	anchorScan := audit.NewAnchorScanner(anchors)
+	anchorScan := audit.NewAnchorScanner(anchors, installID)
 	// The receipt is parsed once and compared as two scalars, rather than formatting a string for
 	// every entry in a chain that can run to millions.
 	launchSeq, launchHash := parseReceipt(r.AuditReceipt)
@@ -453,6 +455,11 @@ func entryRole(e *audit.Entry) string {
 		return "Canceled"
 	case strings.HasSuffix(e.Path, "/retry"):
 		return "Retried"
+	case e.Method == audit.MethodRun && strings.Contains(e.Path, "/outcome/"):
+		// The outcome is the run's committed result, what it did rather than what was asked. It
+		// carries a content digest over the run's evidence, so it is a decision-grade event: this is
+		// the line that turns a dossier from a record of requests into a record of what happened.
+		return "Outcome"
 	}
 	return ""
 }

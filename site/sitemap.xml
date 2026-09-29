@@ -10,6 +10,7 @@
   <url><loc>https://switchtender.com/aap-alternative</loc></url>
   <url><loc>https://switchtender.com/rundeck-alternative</loc></url>
   <url><loc>https://switchtender.com/privacy</loc></url>
+  <url><loc>https://switchtender.com/verify</loc></url>
   <url><loc>https://switchtender.com/docs/</loc></url>
   <url><loc>https://switchtender.com/docs/quickstart</loc></url>
   <url><loc>https://switchtender.com/docs/faq</loc></url>
@@ -35,6 +36,8 @@
   <url><loc>https://switchtender.com/docs/features</loc></url>
   <url><loc>https://switchtender.com/docs/secrets</loc></url>
   <url><loc>https://switchtender.com/docs/drift</loc></url>
+  <url><loc>https://switchtender.com/docs/compliance</loc></url>
+  <url><loc>https://switchtender.com/docs/sample-evidence-pack</loc></url>
   <url><loc>https://switchtender.com/docs/api</loc></url>
   <url><loc>https://switchtender.com/docs/comparison</loc></url>
   <url><loc>https://switchtender.com/docs/agents</loc></url>

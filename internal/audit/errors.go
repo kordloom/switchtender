@@ -6,6 +6,12 @@ import (
 	"time"
 )
 
+// ErrExport means a bundle could not be assembled from the chain.
+//
+// It is named for the operation rather than the artifact: the bundle builder is the only producer
+// of it now that the legacy signed export is gone.
+var ErrExport = errors.New("audit export")
+
 // ErrReservedSpan is returned by Append when an entry carries the span beat marker. The marker is
 // how every reader of the chain recognizes a beat, so only AppendSpanBeat may write it; an entry
 // that merely arrived wearing it is a forgery attempt, not a beat.
@@ -40,6 +46,12 @@ func (e *ClockBehindError) Error() string {
 
 // Unwrap returns ErrClockBehind so a caller matches the sentinel with errors.Is.
 func (e *ClockBehindError) Unwrap() error { return ErrClockBehind }
+
+// ClockBehind reports the refused beat number, the last beat's recorded time, and the time the
+// clock read, satisfying the interface a beat emitter detects without importing this package.
+func (e *ClockBehindError) ClockBehind() (beat int64, last, clock time.Time) {
+	return e.Beat, e.Prev, e.At
+}
 
 // Behind reports how far the supplied time trails the last beat.
 func (e *ClockBehindError) Behind() time.Duration { return e.Prev.Sub(e.At) }

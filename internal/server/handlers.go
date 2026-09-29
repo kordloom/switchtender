@@ -25,6 +25,25 @@ import (
 // defaultFleetWindow is the number of recent runs per host considered when no window is given.
 const defaultFleetWindow = 10
 
+// summaryWindow returns the window the caller asked for in param, clamped to [1, hardCap], or the
+// default when the parameter is absent or does not parse.
+//
+// The clamp is the point. The summary tables are the ones retention keeps rather than deletes, so
+// they hold a row per host per run for the life of the fleet, and the fleet views turn every row a
+// window admits into an element of the answer. Left uncapped, one query string could ask a single
+// request to rank, concatenate and serialize the whole history of every host.
+func summaryWindow(r *http.Request, param string, hardCap int) int {
+	v := r.URL.Query().Get(param)
+	if v == "" {
+		return defaultFleetWindow
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 {
+		return defaultFleetWindow
+	}
+	return min(n, hardCap)
+}
+
 // idempotencyKeyHeader carries a client-chosen key that dedupes a retried submission, so a dropped
 // response or a client retry on POST /runs and POST /pipelines cannot double-fire a run.
 const idempotencyKeyHeader = "Idempotency-Key"
@@ -43,6 +62,10 @@ type createRunRequest struct {
 	Playbook string `json:"playbook"`
 	// Inventory is the path to the inventory to target. Optional.
 	Inventory string `json:"inventory"`
+	// Limit narrows the run to a host pattern, the same field a template launch accepts. Without it
+	// a caller asking to touch one canary host was answered 202 and run against every host in the
+	// inventory, because an unknown JSON field is dropped rather than refused.
+	Limit string `json:"limit,omitempty"`
 	// Tool selects the execution engine: ansible (default), bash, terraform, or python.
 	Tool string `json:"tool,omitempty"`
 	// Command is the tool's input for non-Ansible tools: the script for bash and python, the working
@@ -50,8 +73,22 @@ type createRunRequest struct {
 	Command string `json:"command,omitempty"`
 	// DryRun runs the tool in its no-change mode: ansible --check, a syntax check for bash.
 	DryRun bool `json:"dry_run,omitempty"`
+	// Tags runs only the Ansible plays and tasks carrying one of these tags. Ignored by other tools.
+	Tags []string `json:"tags,omitempty"`
+	// SkipTags skips the Ansible plays and tasks carrying one of these tags. Ignored by other tools.
+	SkipTags []string `json:"skip_tags,omitempty"`
+	// Verbosity raises Ansible logging from 0 to 4 for this run.
+	Verbosity int `json:"verbosity,omitempty"`
+	// Forks sets how many hosts Ansible addresses in parallel. Zero leaves Ansible's default.
+	Forks int `json:"forks,omitempty"`
+	// DiffMode shows the before-and-after of every Ansible file and template change.
+	DiffMode bool `json:"diff_mode,omitempty"`
 	// Labels are user-supplied key values attached to the run for slicing and audits.
 	Labels map[string]string `json:"labels,omitempty"`
+	// ExtraVars are the variables injected into the run, the same field a template carries and a
+	// template launch overrides. A plugin tool reads them as its input, so dropping them ran the
+	// tool with none of the configuration the caller sent and answered 202 as though it had.
+	ExtraVars map[string]any `json:"extra_vars,omitempty"`
 	// Shards, when two or more, splits the run across that many inventory slices.
 	Shards int `json:"shards,omitempty"`
 	// CredentialIDs names stored credentials to materialize for the run.
@@ -200,12 +237,7 @@ func fleetHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Hand
 		panic("server: fleetHandler: Store required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		window := defaultFleetWindow
-		if v := r.URL.Query().Get("window"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				window = n
-			}
-		}
+		window := summaryWindow(r, "window", run.MaxSummaryWindow)
 		keep, _, ferr := derivedReadFilter(r.Context(), authz, store)
 		if ferr != nil {
 			log.Error("server: read filter: " + ferr.Error())
@@ -296,8 +328,7 @@ func reconcileDriftHandler(store run.Store, submitter Submitter, authz *authoriz
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req reconcileRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid json body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		host := strings.TrimSpace(req.Host)
@@ -359,7 +390,7 @@ func reconcileDriftHandler(store run.Store, submitter Submitter, authz *authoriz
 			run.WithRequireApproval(true),
 			run.WithProposedFrom(check.ID),
 			run.WithSource("reconcile", check.ID),
-			run.WithActor(actorName(r)),
+			run.WithActor(actorName(r)), run.WithActorType(actorType(r)),
 		)
 		if tool == run.ToolAnsible {
 			// The Ansible fix reruns the playbook limited to the drifted host, applying exactly the
@@ -383,12 +414,7 @@ func hostHistoryHandler(store run.Store, authz *authorizer, log *zap.Logger) htt
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		host := r.PathValue("host")
-		limit := defaultFleetWindow
-		if v := r.URL.Query().Get("limit"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				limit = n
-			}
-		}
+		limit := summaryWindow(r, "limit", run.MaxHostHistory)
 		keep, _, ferr := derivedReadFilter(r.Context(), authz, store)
 		if ferr != nil {
 			log.Error("server: read filter: " + ferr.Error())
@@ -418,12 +444,7 @@ func taskTrendsHandler(store run.Store, authz *authorizer, log *zap.Logger) http
 		panic("server: taskTrendsHandler: Store required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		window := defaultFleetWindow
-		if v := r.URL.Query().Get("window"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				window = n
-			}
-		}
+		window := summaryWindow(r, "window", run.MaxSummaryWindow)
 		_, anyReadable, ferr := derivedReadFilter(r.Context(), authz, store)
 		if ferr != nil {
 			log.Error("server: read filter: " + ferr.Error())
@@ -489,6 +510,24 @@ func healthHandler() http.HandlerFunc {
 	}
 }
 
+// readyHandler reports whether the server can serve real work, not just that its process is up. It
+// touches the store with a bounded query, so a database that is unreachable or still starting
+// answers 503 and a load balancer holds traffic off until it responds. /healthz stays a pure
+// liveness check that never touches the store, so the two probes mean different things: alive, and
+// ready. A Kubernetes deployment wires /healthz to livenessProbe and /readyz to readinessProbe.
+func readyHandler(store run.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+		if _, err := store.RunStatusCounts(ctx); err != nil {
+			respondJSON(w, zap.NewNop(), http.StatusServiceUnavailable,
+				map[string]any{"ready": false, "reason": "the run store is not reachable"}, false)
+			return
+		}
+		respondJSON(w, zap.NewNop(), http.StatusOK, map[string]any{"ready": true}, false)
+	}
+}
+
 // createRunHandler accepts a run request and submits it for execution. It authorizes the actor for
 // every object the run references, so a run cannot borrow another user's project, inventory, or
 // credentials to reach hosts they were never granted.
@@ -497,9 +536,14 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 		panic("server: createRunHandler: Submitter required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Not decodeStrict yet, and the exemption in TestEveryHandlerDecodesStrictly says why:
+		// createRunRequest declares no extra_vars, so a submission that carries them, which the
+		// plugin tool contract expects, would be refused outright instead of merely having them
+		// dropped. The field lands with the run submission DTOs, and this decode turns strict with
+		// it. Until then a misspelled control here is still accepted and silently ignored.
 		var req createRunRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+			respondError(w, log, http.StatusBadRequest, badBodyMessage)
 			return
 		}
 		if !run.ValidTool(req.Tool) {
@@ -527,7 +571,11 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 		opts := []run.SubmitOption{
 			run.WithCredentialIDs(req.CredentialIDs),
 			run.WithTool(req.Tool), run.WithCommand(req.Command), run.WithDryRun(req.DryRun),
-			run.WithSource("api", ""), run.WithActor(actorName(r)), run.WithLabels(req.Labels),
+			run.WithSource("api", ""), run.WithActor(actorName(r)),
+			run.WithActorType(actorType(r)), run.WithLabels(req.Labels),
+			run.WithTags(req.Tags...), run.WithSkipTags(req.SkipTags...),
+			run.WithVerbosity(req.Verbosity), run.WithForks(req.Forks), run.WithDiffMode(req.DiffMode),
+			run.WithExtraVars(req.ExtraVars),
 		}
 		if supplied := strings.TrimSpace(r.Header.Get(idempotencyKeyHeader)); supplied != "" {
 			key, err := run.ClientKey(supplied)
@@ -545,6 +593,9 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 		}
 		if req.Queue != "" {
 			opts = append(opts, run.WithQueue(req.Queue))
+		}
+		if req.Limit != "" {
+			opts = append(opts, run.WithLimit(req.Limit))
 		}
 		if req.Image != "" {
 			opts = append(opts, run.WithImage(req.Image, req.PullCredentialID))
@@ -581,6 +632,9 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 			errors.Is(err, dispatch.ErrUnknownTool), errors.Is(err, dispatch.ErrToolCredential):
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
+		case errors.Is(err, dispatch.ErrPolicyDenied):
+			respondError(w, log, http.StatusForbidden, err.Error())
+			return
 		case err != nil:
 			log.Error("server: submit run: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not submit run")
@@ -601,8 +655,7 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req createPipelineRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		if len(req.Steps) == 0 {
@@ -639,7 +692,8 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 			return
 		}
 
-		popts := []run.SubmitOption{run.WithCredentialIDs(req.CredentialIDs)}
+		popts := []run.SubmitOption{run.WithCredentialIDs(req.CredentialIDs),
+			run.WithActor(actorName(r)), run.WithActorType(actorType(r))}
 		// Validated exactly as a run submission is. Taking the header verbatim here let a caller
 		// mint a key in the reserved namespace that derived keys use, plant a run under the key a
 		// webhook or a rerun would later compute, and have that later launch resolve to the planted
@@ -671,9 +725,13 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 			return
 		case errors.Is(err, dispatch.ErrUnnamedStep), errors.Is(err, dispatch.ErrDuplicateStep),
 			errors.Is(err, dispatch.ErrUnknownDependency), errors.Is(err, dispatch.ErrDependencyCycle),
+			errors.Is(err, dispatch.ErrStepInput), errors.Is(err, dispatch.ErrTooManySteps),
 			errors.Is(err, dispatch.ErrNoPlaybook), errors.Is(err, dispatch.ErrNoCommand),
 			errors.Is(err, dispatch.ErrUnknownTool), errors.Is(err, dispatch.ErrToolCredential):
 			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		case errors.Is(err, dispatch.ErrPolicyDenied):
+			respondError(w, log, http.StatusForbidden, err.Error())
 			return
 		case err != nil:
 			log.Error("server: submit pipeline: " + err.Error())
@@ -781,9 +839,66 @@ func retryRunHandler(store run.Store, retrier Retrier, authz *authorizer, log *z
 		case errors.Is(err, dispatch.ErrNoFailedShards):
 			respondError(w, log, http.StatusConflict, "no failed shards to retry")
 			return
+		case errors.Is(err, dispatch.ErrPolicyDenied):
+			respondError(w, log, http.StatusForbidden, err.Error())
+			return
 		case err != nil:
 			log.Error("server: retry run: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not retry run")
+			return
+		}
+		w.Header().Set("Location", "/v1/runs/"+created.ID)
+		respondJSON(w, log, http.StatusAccepted, maskRun(created), wantsPretty(r))
+	}
+}
+
+// relaunchFailedHandler re-runs a finished run against only the hosts that failed or were
+// unreachable, linking the new run back to the one it was built to fix. It is operator work, the
+// same role that launches a run, and every derivation lands in the audit chain.
+func relaunchFailedHandler(store run.Store, retrier Retrier, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+	if store == nil {
+		panic("server: relaunchFailedHandler: Store required")
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if retrier == nil {
+			respondError(w, log, http.StatusNotFound, "relaunch not enabled")
+			return
+		}
+		id := r.PathValue("id")
+		rn, err := store.Get(r.Context(), id)
+		if errors.Is(err, run.ErrNotFound) {
+			respondError(w, log, http.StatusNotFound, "run not found")
+			return
+		}
+		if err != nil {
+			log.Error("server: relaunch failed hosts: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not relaunch run")
+			return
+		}
+		if authorizeRunAccess(w, r, authz, log, rn) {
+			return
+		}
+		created, err := retrier.RelaunchFailedHosts(r.Context(), id, actorName(r), actorType(r))
+		switch {
+		case errors.Is(err, run.ErrNotFound):
+			respondError(w, log, http.StatusNotFound, "run not found")
+			return
+		case errors.Is(err, dispatch.ErrNotFinished):
+			respondError(w, log, http.StatusConflict, "run has not finished")
+			return
+		case errors.Is(err, dispatch.ErrNoHostSummary):
+			respondError(w, log, http.StatusConflict,
+				"this run recorded no per-host results, so it has no failed hosts to relaunch")
+			return
+		case errors.Is(err, dispatch.ErrNoFailedHosts):
+			respondError(w, log, http.StatusConflict, "no hosts failed, so there is nothing to relaunch")
+			return
+		case errors.Is(err, dispatch.ErrPolicyDenied):
+			respondError(w, log, http.StatusForbidden, err.Error())
+			return
+		case err != nil:
+			log.Error("server: relaunch failed hosts: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not relaunch run")
 			return
 		}
 		w.Header().Set("Location", "/v1/runs/"+created.ID)
@@ -868,6 +983,15 @@ func hostFactsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.
 func actorName(r *http.Request) string {
 	if a, ok := actorFrom(r.Context()); ok {
 		return a.Name
+	}
+	return ""
+}
+
+// actorType returns how the caller authenticated, in the audit chain's vocabulary, empty when the
+// API runs open. Stamped on submitted runs so a policy can tell an agent's request from a person's.
+func actorType(r *http.Request) string {
+	if a, ok := actorFrom(r.Context()); ok {
+		return a.Type
 	}
 	return ""
 }
@@ -1011,12 +1135,17 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 			return
 		}
 		opts := append(rerunOptions(rn), run.WithSource("rerun", rn.ID), run.WithRerunOf(rn.ID),
-			run.WithActor(actorName(r)), run.WithIdempotencyKey(key))
+			run.WithActor(actorName(r)), run.WithActorType(actorType(r)),
+			run.WithIdempotencyKey(key))
 		var created *run.Run
 		if rn.Kind == run.KindSplit && rn.ShardCount != nil && *rn.ShardCount > 1 {
 			created, err = submitter.SubmitSplit(r.Context(), rn.Playbook, rn.Inventory, *rn.ShardCount, opts...)
 		} else {
 			created, err = submitter.Submit(r.Context(), rn.Playbook, rn.Inventory, opts...)
+		}
+		if errors.Is(err, dispatch.ErrPolicyDenied) {
+			respondError(w, log, http.StatusForbidden, err.Error())
+			return
 		}
 		if err != nil {
 			log.Error("server: rerun: " + err.Error())
@@ -1054,7 +1183,7 @@ func approveRunHandler(approver Approver, store run.Store, authz *authorizer,
 				return
 			}
 		}
-		created, err := approver.Approve(r.Context(), r.PathValue("id"))
+		created, err := approver.Approve(r.Context(), r.PathValue("id"), actorName(r), actorType(r))
 		switch {
 		case errors.Is(err, run.ErrNotFound):
 			respondError(w, log, http.StatusNotFound, "run not found")
@@ -1086,7 +1215,12 @@ func rejectRunHandler(approver Approver, store run.Store, authz *authorizer,
 		var req struct {
 			Reason string `json:"reason"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&req)
+		// A rejection needs no reason, so an absent body is fine, but a body that is present is held
+		// to the same rule as every other: a misspelled reason is refused rather than dropped, so the
+		// audit trail never records a rejection whose stated cause quietly went missing.
+		if !decodeStrictOptional(w, log, r.Body, &req) {
+			return
+		}
 		// A decision on a run is a decision about the objects it will touch, so the approver has to
 		// be someone who may use them. Every other run mutation checks; these two did not, and they
 		// are the two that release a held run onto real hosts.
@@ -1105,7 +1239,7 @@ func rejectRunHandler(approver Approver, store run.Store, authz *authorizer,
 				return
 			}
 		}
-		created, err := approver.Reject(r.Context(), r.PathValue("id"), req.Reason)
+		created, err := approver.Reject(r.Context(), r.PathValue("id"), req.Reason, actorName(r), actorType(r))
 		switch {
 		case errors.Is(err, run.ErrNotFound):
 			respondError(w, log, http.StatusNotFound, "run not found")
@@ -1331,11 +1465,25 @@ func runLogsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Ha
 		// materializes in the control plane's memory.
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		var after int64
+		var (
+			after     int64
+			atLineEnd = true
+		)
 		for {
 			chunks, err := store.LogAfter(r.Context(), id, after, streamBatch)
 			if err != nil {
+				// The status line is already out, so a reader would otherwise receive a short log
+				// that reads like the whole one. The log has a recorded digest to check a copy
+				// against, which the event export does not, but the download should still say so
+				// itself. The marker takes a line of its own so it is never read as part of
+				// whatever the playbook was printing when the store went away.
 				log.Error("server: get run log: " + err.Error())
+				if !atLineEnd {
+					if _, werr := w.Write([]byte("\n")); werr != nil {
+						return
+					}
+				}
+				writeExportSentinel(w, log, "the log store failed part way through this download")
 				return
 			}
 			for _, c := range chunks {
@@ -1343,6 +1491,9 @@ func runLogsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Ha
 				if _, err := w.Write(c.Data); err != nil {
 					log.Error("server: write run log: " + err.Error())
 					return
+				}
+				if len(c.Data) > 0 {
+					atLineEnd = c.Data[len(c.Data)-1] == '\n'
 				}
 			}
 			if len(chunks) < streamBatch {
@@ -1358,6 +1509,30 @@ const (
 	defaultEventsPage = 5000
 	maxEventsPage     = 20000
 )
+
+// exportSentinel is the trailing line a streaming export writes when it stops short. The status
+// line left with the first byte of the body, so a truncated transfer still reads as a clean 200 and
+// the file it produced still parses. The sentinel is the only thing that tells whoever opens the
+// file that entries are missing from it.
+type exportSentinel struct {
+	// Incomplete is always true. Its presence in the file is the whole signal.
+	Incomplete bool `json:"export_incomplete"`
+	// Reason says in plain words what stopped the export.
+	Reason string `json:"reason"`
+}
+
+// writeExportSentinel appends the incomplete marker as its own line to a body already in flight. A
+// write that fails here means the reader is already gone, so there is nobody left to warn.
+func writeExportSentinel(w http.ResponseWriter, log *zap.Logger, reason string) {
+	line, err := json.Marshal(exportSentinel{Incomplete: true, Reason: reason})
+	if err != nil {
+		log.Error("server: marshal export sentinel: " + err.Error())
+		return
+	}
+	if _, err := w.Write(append(line, '\n')); err != nil {
+		log.Error("server: write export sentinel: " + err.Error())
+	}
+}
 
 // runEventsHandler returns a page of a run's structured events as JSON with a next_after cursor.
 func runEventsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
@@ -1382,21 +1557,60 @@ func runEventsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.
 		// download=1 streams every event as a named NDJSON attachment, the export form tooling
 		// consumes line by line; the paged JSON form below serves the UI.
 		if r.URL.Query().Get("download") == "1" {
-			events, err := store.Events(r.Context(), id)
-			if err != nil {
-				log.Error("server: export run events: " + err.Error())
-				respondError(w, log, http.StatusInternalServerError, "could not export run events")
-				return
-			}
-			w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
-			w.Header().Set("Content-Disposition", `attachment; filename="`+id+`-events.ndjson"`)
-			enc := json.NewEncoder(w)
-			for i := range events {
-				if err := enc.Encode(&events[i]); err != nil {
+			// Paged rather than loaded whole. A run over a thousand hosts holds tens of thousands of
+			// events, and reading them all before writing the first byte put the entire export in the
+			// server's memory at once, for every concurrent download. The log export already streams;
+			// this now matches it. NDJSON is written a line at a time, so a reader sees output
+			// immediately and the server holds one page.
+			var (
+				enc     *json.Encoder
+				flusher http.Flusher
+				after   int64
+				started bool
+			)
+			for {
+				page, err := store.EventsAfter(r.Context(), id, after, maxEventsPage)
+				if err != nil {
+					log.Error("server: export run events: " + err.Error())
+					if !started {
+						// Nothing has been written, so this can still be an honest failure rather
+						// than a file. A 500 with no attachment header cannot be mistaken for an
+						// export the way a zero byte download can.
+						respondError(w, log, http.StatusInternalServerError,
+							"could not export run events")
+						return
+					}
+					// The status line left with the first byte, so it cannot change now. A short
+					// file that parses cleanly reads as a whole export, and this one is an audit
+					// artifact, so its last line says it is incomplete.
+					writeExportSentinel(w, log,
+						"the event store failed part way through this export")
+					return
+				}
+				if len(page) == 0 {
+					return
+				}
+				if !started {
+					started = true
+					w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
+					w.Header().Set("Content-Disposition",
+						`attachment; filename="`+id+`-events.ndjson"`)
+					enc = json.NewEncoder(w)
+					flusher, _ = w.(http.Flusher)
+				}
+				for i := range page {
+					if err := enc.Encode(&page[i]); err != nil {
+						return
+					}
+				}
+				after = page[len(page)-1].Seq
+				if flusher != nil {
+					flusher.Flush()
+				}
+				if len(page) < maxEventsPage {
 					return
 				}
 			}
-			return
 		}
 		after := queryInt64(r, "after")
 		limit := queryInt(r, "limit")

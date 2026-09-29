@@ -32,7 +32,8 @@ var order = []string{
 	"tutorials", "tutorial-run-a-job", "tutorial-save-a-template", "tutorial-schedule-a-job",
 	"tutorial-set-a-secret", "tutorial-migrate",
 	"tool-ansible", "tool-bash", "tool-terraform", "tool-opentofu", "tool-python", "tool-powershell", "tool-go",
-	"concepts", "reliability", "configuration", "desktop", "features", "secrets", "drift", "api", "comparison",
+	"concepts", "reliability", "configuration", "desktop", "features", "secrets", "drift",
+	"compliance", "sample-evidence-pack", "api", "comparison",
 }
 
 // titles overrides the sidebar label for a slug where its first heading reads poorly.
@@ -157,6 +158,7 @@ func writeSitemap(slugs []string) error {
 		"https://switchtender.com/awx-alternative", "https://switchtender.com/ascender-alternative",
 		"https://switchtender.com/semaphore-alternative", "https://switchtender.com/aap-alternative",
 		"https://switchtender.com/rundeck-alternative", "https://switchtender.com/privacy",
+		"https://switchtender.com/verify",
 	}
 	for _, slug := range slugs {
 		urls = append(urls, canonicalFor(slug))

@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -102,7 +101,7 @@ func runAuditBundle(cmd *cobra.Command, _ []string) error {
 		if aerr != nil {
 			return fmt.Errorf("read anchors: %w", aerr)
 		}
-		if reachedAll, results := audit.CheckAnchors(full, recorded); !reachedAll {
+		if reachedAll, results := audit.CheckAnchors(full, recorded, id.InstallID); !reachedAll {
 			for _, res := range results {
 				if !res.Reached {
 					fmt.Fprintln(os.Stderr, "anchor "+res.Anchor.ID+": "+res.Problem)
@@ -177,15 +176,14 @@ func warnAnchorLag(entries []*audit.Entry, anchors []*audit.Anchor) {
 	fmt.Fprintln(os.Stderr, msg)
 }
 
-// keyDir returns where the producer identity lives: the override when given, otherwise beside the
-// database, which is already the directory an operator backs up and protects.
+// keyDir returns where the producer identity lives: the override when given, otherwise the install's
+// identity directory, which serve derives the same way so the bundle is signed with the key serve
+// publishes. For a SQLite file that is the directory beside the database, which an operator already
+// backs up and protects; for a postgres DSN it is a stable per-user directory rather than a path
+// built from the DSN.
 func keyDir() string {
 	if bundleKeyDir != "" {
 		return bundleKeyDir
 	}
-	dir := filepath.Dir(bundleDB)
-	if dir == "" || dir == "." {
-		return "."
-	}
-	return dir
+	return identityDir(bundleDB)
 }

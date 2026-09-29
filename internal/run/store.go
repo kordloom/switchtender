@@ -65,6 +65,40 @@ func AbandonedParent(r *Run, cutoff time.Time) bool {
 	return r.ClaimedBy == "" && r.CreatedAt.Before(cutoff)
 }
 
+// Finalization is everything an executor learns by running a run: how it ended and the facts that
+// explain it. It is one value because a store writes it as one statement, so a run is never left
+// terminal with the facts missing.
+type Finalization struct {
+	// Status is the terminal status the run reached.
+	Status Status
+	// ExitCode is the tool's exit code, nil when the run never produced one.
+	ExitCode *int
+	// Error is the failure detail, empty when the run ended without one.
+	Error string
+	// Image is the container image the run actually executed in, empty for a host run. It is part of
+	// the terminal write because an executor only resolves the image while the run is under way, and
+	// the outcome digest commits to it, so it has to land with the terminal status or the digest can
+	// never be recomputed from the stored run.
+	Image string
+	// CommitSHA is the project commit the run executed, empty when it used no project. It is
+	// resolved with the checkout while the run is under way, after the last whole-run save, so it
+	// lands here or not at all, and the run dossier reports the provenance of what actually ran.
+	CommitSHA string
+	// PullCredentialID is the credential the run's image was pulled with, empty when none was used.
+	// It is resolved with the project and is one of the grantable objects a run's authorization is
+	// built from, so losing it silently narrows what the stored run is checked against.
+	PullCredentialID string
+	// Outputs are the values the run published with set_stats, which a later pipeline step reads as
+	// its inputs. They are folded from the run's events as it finishes, so the terminal write is the
+	// first and only chance to store them.
+	Outputs map[string]any
+	// Warning is the note a run carries about itself, such as having recorded no per-host result.
+	// It is written while the run finishes, for the same reason.
+	Warning string
+	// EndedAt is when the run reached its terminal state.
+	EndedAt time.Time
+}
+
 // Store persists runs, their captured log output, and their structured events.
 // Implementations must be safe for concurrent use.
 type Store interface {
@@ -87,6 +121,11 @@ type Store interface {
 	// RunStatusCounts returns the number of top-level runs in each status. The runs view uses it
 	// for the summary cards without loading every run.
 	RunStatusCounts(ctx context.Context) (map[Status]int, error)
+	// RunTimings returns the timing fields of the most recent top-level runs, newest first. It exists
+	// so the metrics endpoint can build its histograms without reading whole runs: a run row carries
+	// its extra vars, steps, labels, and notification targets, and decoding those for ten thousand
+	// runs on every scrape costs far more than the seven values the histograms use.
+	RunTimings(ctx context.Context, limit int) ([]RunTiming, error)
 	// Shards returns the shard runs of a parent ordered by shard index.
 	Shards(ctx context.Context, parentID string) ([]*Run, error)
 	// Steps returns the pipeline step runs of a parent ordered by step index.
@@ -126,6 +165,21 @@ type Store interface {
 	// whether it changed a row. It changes nothing and returns false when the run is missing or is
 	// not in the from status, so two callers racing to approve or reject the same run cannot both win.
 	TransitionStatus(ctx context.Context, id string, from, to Status) (bool, error)
+	// StampApprovedSpec records the spec digest an approver decided on, in a narrow write that
+	// touches nothing else, so it cannot clobber a concurrent claim or cancel the way a full Save
+	// from a stale snapshot would.
+	StampApprovedSpec(ctx context.Context, id, digest string) error
+	// FinalizeRunning atomically moves a running run to its terminal status and records the fields
+	// that explain how it ended in the same write, reporting whether it changed a row. It changes
+	// nothing and returns false when the run is missing or is no longer running, so an executor
+	// cannot overwrite a terminal state another actor already recorded.
+	//
+	// The transition and the facts belong in one statement. Moving the status first and writing the
+	// exit code, failure text, and end time after left a run terminal with none of them whenever the
+	// second write failed, and a terminal run is swept by nothing: the janitor reclaims pending and
+	// running runs only. The caller must treat a false or an error as "the run did not finish here"
+	// and leave it for the sweep.
+	FinalizeRunning(ctx context.Context, id string, fin Finalization) (bool, error)
 	// Workers lists executors by the leases they hold, most recently seen first. Only leases
 	// stamped within WorkerWindow count, so the listing stays bounded as run history grows.
 	Workers(ctx context.Context) ([]WorkerInfo, error)
@@ -191,12 +245,60 @@ type Store interface {
 	// keeping the per host and per task summaries that power the cross-run views. It returns how
 	// many runs were deleted. Non-terminal runs are never purged.
 	PurgeRunsBefore(ctx context.Context, cutoff time.Time) (int, error)
+	// TrimSummaries keeps the newest keep per host summaries for each host and the newest keep per
+	// task summaries for each task, deleting the rest, and returns how many rows it deleted. Nothing
+	// else ever removes a summary: they outlive the runs they came from on purpose, so a host's
+	// outcome history survives run retention. That makes this the only bound on those two tables,
+	// which otherwise grow by one row per host per run forever. A keep below one is treated as one,
+	// so no caller can empty the tables. Holding keep at or above MinRetainSummaries is the
+	// configuration's job, not the store's.
+	TrimSummaries(ctx context.Context, keep int) (int, error)
 }
 
 // WorkerWindow bounds how far back Workers looks for leases. Terminal runs keep their last lease
 // stamp, so without a bound the listing would aggregate every run ever recorded and report
 // workers dead for months.
 const WorkerWindow = 48 * time.Hour
+
+// Summary window bounds. The window on the fleet and task trend views and the limit on host
+// history are caller supplied, and every row a window admits becomes an element of the answer, so
+// without a cap one request asks the store to rank, concatenate and serialize every summary ever
+// recorded. MinRetainSummaries ties the retention trim to those caps: keeping at least as many
+// rows as the largest window any caller may ask for makes the trim invisible through the API.
+const (
+	// MaxSummaryWindow is the largest window FleetHealth and TaskTrends accept from a caller. Both
+	// return window entries for every host or task, so their cost is the window times the fleet's
+	// cardinality, which is why it is the tighter of the two caps.
+	MaxSummaryWindow = 100
+	// MaxHostHistory is the largest limit HostHistory accepts from a caller. It reads one host's
+	// rows straight off the ordered index, so it can afford a deeper page than the fleet views.
+	MaxHostHistory = 500
+	// MinRetainSummaries is the fewest summaries per host and per task a configured trim may leave
+	// behind. It equals the largest caller-visible window, so trimmed history is history no view
+	// could have reached. The retention sweeper raises a smaller setting to it; the stores trim to
+	// whatever count they are given, so the floor is stated once, where the count is chosen.
+	MinRetainSummaries = MaxHostHistory
+)
+
+// RunTiming is the slice of a run the metrics histograms need: when it was asked for, when it
+// started, when it ended, and how it is grouped. It is deliberately small, because it is read in
+// bulk on a schedule.
+type RunTiming struct {
+	// Status is the run's current status.
+	Status Status
+	// Kind distinguishes a coordinator parent from an executable run, which is empty.
+	Kind string
+	// Queue is the queue the run was submitted to.
+	Queue string
+	// ClaimedBy is the executor holding the run, empty when none does.
+	ClaimedBy string
+	// CreatedAt is when the run was submitted.
+	CreatedAt time.Time
+	// StartedAt is when execution began, nil until it does.
+	StartedAt *time.Time
+	// EndedAt is when the run reached a terminal state, nil until it does.
+	EndedAt *time.Time
+}
 
 // LogChunk is one stored piece of a run's log. Seq orders chunks within the run and serves as an
 // opaque cursor for LogAfter.
@@ -440,6 +542,35 @@ func matchesQuery(r *Run, term string) bool {
 	return false
 }
 
+// RunTimings returns the timing fields of the most recent top-level runs, newest first.
+func (m *memStore) RunTimings(_ context.Context, limit int) ([]RunTiming, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]*Run, 0, len(m.runs))
+	for _, r := range m.runs {
+		if r.ParentID == nil {
+			out = append(out, r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].ID > out[j].ID
+		}
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	timings := make([]RunTiming, 0, len(out))
+	for _, r := range out {
+		timings = append(timings, RunTiming{
+			Status: r.Status, Kind: r.Kind, Queue: r.Queue, ClaimedBy: r.ClaimedBy,
+			CreatedAt: r.CreatedAt, StartedAt: r.StartedAt, EndedAt: r.EndedAt,
+		})
+	}
+	return timings, nil
+}
+
 // RunStatusCounts tallies top-level runs by status.
 func (m *memStore) RunStatusCounts(_ context.Context) (map[Status]int, error) {
 	m.mu.RLock()
@@ -566,6 +697,10 @@ func (m *memStore) Claim(_ context.Context, owner string, queues []string) (*Run
 	now := time.Now()
 	oldest.ClaimedBy = owner
 	oldest.ClaimedAt = &now
+	// Mint a fresh capability for this claim. The worker receives it once, over the relay, and
+	// presents it on every report it makes. A later reclaim replaces it, so a report a worker
+	// minted against a claim it has since lost no longer verifies.
+	oldest.ClaimSecret = NewClaimSecret()
 	return oldest.Clone(), nil
 }
 
@@ -611,12 +746,14 @@ func (m *memStore) ReclaimStale(_ context.Context, ttl time.Duration) (int, erro
 		case StatusPending:
 			r.ClaimedBy = ""
 			r.ClaimedAt = nil
+			r.ClaimSecret = ""
 			changed++
 		case StatusRunning:
 			now := time.Now()
 			r.Status = StatusInterrupted
 			r.ClaimedBy = ""
 			r.ClaimedAt = nil
+			r.ClaimSecret = ""
 			r.EndedAt = &now
 			if r.Error == "" {
 				r.Error = "interrupted: executor lease expired"
@@ -652,6 +789,7 @@ func (m *memStore) resolveOrphans() int {
 			r.Status = StatusCanceled
 			r.ClaimedBy = ""
 			r.ClaimedAt = nil
+			r.ClaimSecret = ""
 			r.EndedAt = &now
 			if r.Error == "" {
 				r.Error = orphanError
@@ -732,6 +870,40 @@ func (m *memStore) TransitionStatus(_ context.Context, id string, from, to Statu
 	return true, nil
 }
 
+// StampApprovedSpec records the spec digest an approver decided on, touching nothing else.
+func (m *memStore) StampApprovedSpec(_ context.Context, id, digest string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.runs[id]
+	if !ok {
+		return ErrNotFound
+	}
+	r.ApprovedSpecDigest = digest
+	return nil
+}
+
+// FinalizeRunning moves a running run to its terminal status and records the exit code, failure
+// detail, resolved image, and end time in the same locked write.
+func (m *memStore) FinalizeRunning(_ context.Context, id string, fin Finalization) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.runs[id]
+	if !ok || r.Status != StatusRunning {
+		return false, nil
+	}
+	ended := fin.EndedAt
+	r.Status = fin.Status
+	r.ExitCode = fin.ExitCode
+	r.Error = fin.Error
+	r.Image = fin.Image
+	r.CommitSHA = fin.CommitSHA
+	r.PullCredentialID = fin.PullCredentialID
+	r.Outputs = fin.Outputs
+	r.Warning = fin.Warning
+	r.EndedAt = &ended
+	return true, nil
+}
+
 // Workers lists executors by the leases they hold within WorkerWindow, most recently seen first.
 func (m *memStore) Workers(_ context.Context) ([]WorkerInfo, error) {
 	m.mu.RLock()
@@ -785,11 +957,13 @@ func (m *memStore) RunHostSummaries(_ context.Context, runID string) ([]HostSumm
 	return out, nil
 }
 
-// SaveHostSummary replaces the stored per host summaries for a run.
+// SaveHostSummary replaces the stored per host summaries for a run, stamping each row with the
+// run's id and its dry-run flag so later reads need nothing from the run record itself.
 func (m *memStore) SaveHostSummary(_ context.Context, runID string, summaries []HostSummary) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if r, ok := m.runs[runID]; ok && r.Status.Terminal() {
+	r, known := m.runs[runID]
+	if known && r.Status.Terminal() {
 		// Fence a terminal run so a reclaimed-but-alive worker cannot overwrite the final summary.
 		return nil
 	}
@@ -797,13 +971,35 @@ func (m *memStore) SaveHostSummary(_ context.Context, runID string, summaries []
 		delete(m.summaries, runID)
 		return nil
 	}
+	dry := known && r.DryRun
 	cp := make([]HostSummary, len(summaries))
 	copy(cp, summaries)
 	for i := range cp {
 		cp[i].RunID = runID
+		cp[i].DryRun = dry
 	}
 	m.summaries[runID] = cp
 	return nil
+}
+
+// newerHostSummary reports whether a comes before b when host summaries read newest first. Two
+// summaries can share an instant, and the map they are gathered from has no order, so the run id
+// decides ties, descending. Without it the answer changes from one call to the next and disagrees
+// with the SQL stores, which break the same tie the same way.
+func newerHostSummary(a, b HostSummary) bool {
+	if !a.RanAt.Equal(b.RanAt) {
+		return a.RanAt.After(b.RanAt)
+	}
+	return a.RunID > b.RunID
+}
+
+// newerTaskSummary reports whether a comes before b when task summaries read newest first, breaking
+// an equal instant by run id, descending, for the same reason as newerHostSummary.
+func newerTaskSummary(a, b TaskSummary) bool {
+	if !a.RanAt.Equal(b.RanAt) {
+		return a.RanAt.After(b.RanAt)
+	}
+	return a.RunID > b.RunID
 }
 
 // recentByHost groups all host summaries by host, newest first, trimmed to window per host.
@@ -815,7 +1011,7 @@ func (m *memStore) recentByHost(window int) map[string][]HostSummary {
 		}
 	}
 	for host, list := range byHost {
-		sort.Slice(list, func(i, j int) bool { return list[i].RanAt.After(list[j].RanAt) })
+		sort.Slice(list, func(i, j int) bool { return newerHostSummary(list[i], list[j]) })
 		if len(list) > window {
 			byHost[host] = list[:window]
 		}
@@ -863,19 +1059,20 @@ func (m *memStore) FleetHealth(_ context.Context, window int) ([]HostHealth, err
 }
 
 // DriftStatus reports each host's most recent drift check, the latest dry run to touch it, worst
-// drift first. A host with no dry run in its history is omitted, having no drift signal.
+// drift first. A host with no dry run in its history is omitted, having no drift signal. It reads
+// the dry-run flag stamped on the summary rather than the run record, which retention deletes, so
+// it reports on exactly the history fleet health reports on.
 func (m *memStore) DriftStatus(_ context.Context) ([]HostDrift, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	latest := make(map[string]HostSummary)
-	for runID, summaries := range m.summaries {
-		r, ok := m.runs[runID]
-		if !ok || !r.DryRun {
-			continue
-		}
+	for _, summaries := range m.summaries {
 		for _, hs := range summaries {
-			if cur, seen := latest[hs.Host]; !seen || hs.RanAt.After(cur.RanAt) {
+			if !hs.DryRun {
+				continue
+			}
+			if cur, seen := latest[hs.Host]; !seen || newerHostSummary(hs, cur) {
 				latest[hs.Host] = hs
 			}
 		}
@@ -948,7 +1145,7 @@ func (m *memStore) HostHistory(_ context.Context, host string, limit int) ([]Hos
 			}
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].RanAt.After(out[j].RanAt) })
+	sort.Slice(out, func(i, j int) bool { return newerHostSummary(out[i], out[j]) })
 	if len(out) > limit {
 		out = out[:limit]
 	}
@@ -1006,7 +1203,7 @@ func (m *memStore) TaskTrends(_ context.Context, window int) ([]TaskTrend, error
 
 	out := make([]TaskTrend, 0, len(byTask))
 	for task, list := range byTask {
-		sort.Slice(list, func(i, j int) bool { return list[i].RanAt.After(list[j].RanAt) })
+		sort.Slice(list, func(i, j int) bool { return newerTaskSummary(list[i], list[j]) })
 		recent := list
 		if len(recent) > window {
 			recent = recent[:window]
@@ -1045,7 +1242,7 @@ func (m *memStore) HostCosts(_ context.Context, window int) (map[string]float64,
 
 	out := make(map[string]float64, len(byHost))
 	for host, list := range byHost {
-		sort.Slice(list, func(i, j int) bool { return list[i].RanAt.After(list[j].RanAt) })
+		sort.Slice(list, func(i, j int) bool { return newerHostSummary(list[i], list[j]) })
 		recent := list
 		if len(recent) > window {
 			recent = recent[:window]
@@ -1218,4 +1415,72 @@ func (m *memStore) PurgeRunsBefore(_ context.Context, cutoff time.Time) (int, er
 		deleted++
 	}
 	return deleted, nil
+}
+
+// TrimSummaries keeps the newest keep summaries for each host and each task and drops the rest.
+func (m *memStore) TrimSummaries(_ context.Context, keep int) (int, error) {
+	if keep < 1 {
+		keep = 1
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	deleted := trimNewestPerKey(m.summaries, keep,
+		func(hs HostSummary) string { return hs.Host }, newerHostSummary)
+	deleted += trimNewestPerKey(m.tasks, keep,
+		func(ts TaskSummary) string { return ts.Task }, newerTaskSummary)
+	return deleted, nil
+}
+
+// summaryRef locates one summary inside the per run slices trimNewestPerKey walks.
+type summaryRef struct {
+	// runID is the run whose slice holds the summary.
+	runID string
+	// index is the summary's position in that slice.
+	index int
+}
+
+// trimNewestPerKey keeps the newest keep entries under each group key across every run's slice in
+// byRun and removes the rest, returning how many entries it removed. key groups an entry, and
+// newer reports whether a sorts ahead of b when the group is ordered newest first.
+func trimNewestPerKey[T any](byRun map[string][]T, keep int, key func(T) string,
+	newer func(a, b T) bool) int {
+	groups := make(map[string][]summaryRef)
+	for runID, list := range byRun {
+		for i, entry := range list {
+			k := key(entry)
+			groups[k] = append(groups[k], summaryRef{runID: runID, index: i})
+		}
+	}
+	drop := make(map[string]map[int]bool)
+	removed := 0
+	for _, refs := range groups {
+		if len(refs) <= keep {
+			continue
+		}
+		sort.Slice(refs, func(i, j int) bool {
+			return newer(byRun[refs[i].runID][refs[i].index], byRun[refs[j].runID][refs[j].index])
+		})
+		for _, ref := range refs[keep:] {
+			if drop[ref.runID] == nil {
+				drop[ref.runID] = make(map[int]bool)
+			}
+			drop[ref.runID][ref.index] = true
+			removed++
+		}
+	}
+	for runID, indexes := range drop {
+		list := byRun[runID]
+		kept := make([]T, 0, len(list)-len(indexes))
+		for i, entry := range list {
+			if !indexes[i] {
+				kept = append(kept, entry)
+			}
+		}
+		if len(kept) == 0 {
+			delete(byRun, runID)
+			continue
+		}
+		byRun[runID] = kept
+	}
+	return removed
 }

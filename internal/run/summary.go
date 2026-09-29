@@ -30,6 +30,10 @@ type HostSummary struct {
 	DurationSeconds float64 `json:"duration_seconds"`
 	// RanAt is when the run was created, used to order host history by recency.
 	RanAt time.Time `json:"ran_at"`
+	// DryRun reports whether the run was a check rather than an apply, stamped by the store from the
+	// run itself. The drift view reads it here so a host keeps its drift entry after retention purges
+	// the run row, which is the same history fleet health keeps. Whatever a caller sets is replaced.
+	DryRun bool `json:"dry_run,omitempty"`
 }
 
 // HostFacts is a host's system facts as of the last run that gathered them. The keys are the

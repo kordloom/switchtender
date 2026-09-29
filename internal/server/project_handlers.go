@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -49,8 +48,7 @@ func createProjectHandler(store project.Store, authz *authorizer, log *zap.Logge
 			return
 		}
 		var req createProjectRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		if req.Name == "" || req.RepoURL == "" {
@@ -98,8 +96,7 @@ func updateProjectHandler(store project.Store, authz *authorizer, log *zap.Logge
 			return
 		}
 		var req createProjectRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		if req.Name == "" || req.RepoURL == "" {

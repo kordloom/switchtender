@@ -10,6 +10,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/safedial"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // webhookTimeout bounds one notification delivery attempt.
@@ -55,13 +57,26 @@ func (d *Dispatcher) notify(r *run.Run) {
 // channel is external and must receive neither survey answers or template vars that can carry
 // secrets nor the target list, whose entries carry a routing key or API token. Each delivery is
 // bounded and its failure logged and dropped, like the built-in channels.
+// redactForExternal returns a copy of r safe to send off the host to an external channel, a plugin
+// notifier or a webhook. Survey answers and template vars can carry secrets, each notification
+// target carries a routing key or API token, and Command holds the raw script body of a bash,
+// python, powershell, or go run, which can embed inline secrets or sensitive arguments. All three
+// are cleared here so the two external paths stay in parity and neither forgets a field the other
+// strips. The in-tenant run store, the SSE hub, and the run-detail API keep Command; only what
+// leaves the host loses it.
+func redactForExternal(r *run.Run) run.Run {
+	out := *r
+	out.ExtraVars = nil
+	out.Notifications = nil
+	out.Command = ""
+	return out
+}
+
 func (d *Dispatcher) notifyExtra(r *run.Run) {
 	if len(notifiers) == 0 {
 		return
 	}
-	redacted := *r
-	redacted.ExtraVars = nil
-	redacted.Notifications = nil
+	redacted := redactForExternal(r)
 	for name, n := range notifiers {
 		d.notifyWG.Add(1)
 		go func(name string, n Notifier) {
@@ -81,12 +96,7 @@ func (d *Dispatcher) notifyWebhooks(r *run.Run) {
 	if len(d.webhooks) == 0 {
 		return
 	}
-	// Redact the run's extra vars and per-run notification targets from the payload. Survey answers
-	// and template vars can carry secrets, and each target carries a routing key or API token, so
-	// neither is sent to a webhook, which is an external endpoint.
-	redacted := *r
-	redacted.ExtraVars = nil
-	redacted.Notifications = nil
+	redacted := redactForExternal(r)
 	body, err := json.Marshal(notification{Event: "run.finished", Run: &redacted})
 	if err != nil {
 		d.log.Error("dispatch: encode notification: "+err.Error(), zap.String("run_id", r.ID))
@@ -110,7 +120,12 @@ func (d *Dispatcher) deliver(url, runID string, body []byte) {
 // failures once. The JSON channels use deliver; a channel like ntfy that sends a text body and
 // custom headers uses this directly.
 func (d *Dispatcher) deliverWithHeaders(url, runID string, body []byte, headers map[string]string) {
-	client := &http.Client{Timeout: webhookTimeout}
+	// A notification target is an operator-supplied URL the server fetches on its own network, the
+	// same shape as a secret source or a project remote, so it gets the same refusal: a resolved
+	// address that is link-local or unspecified is not dialed. Without it a per-run notification
+	// target pointed at the cloud metadata endpoint turned every finished run into a request for
+	// instance credentials, delivered by the server to whoever set the target.
+	client := safedial.Client(webhookTimeout)
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
 		req, err := http.NewRequestWithContext(context.Background(),
@@ -132,9 +147,14 @@ func (d *Dispatcher) deliverWithHeaders(url, runID string, body []byte, headers 
 		lastErr = err
 		time.Sleep(time.Duration(attempt+1) * 250 * time.Millisecond)
 	}
+	// The address is the credential for these channels, and a Twilio endpoint carries the account
+	// SID in its path, so neither the field nor the transport error's own text may show it. The
+	// error is the half that is easy to miss: net/http wraps a failure in a *url.Error that
+	// re-embeds the whole address, so masking the field alone leaves the secret in the same line.
 	msg := "delivery failed"
 	if lastErr != nil {
-		msg = lastErr.Error()
+		msg = util.MaskURLError(lastErr, url).Error()
 	}
-	d.log.Warn("dispatch: webhook: "+msg, zap.String("run_id", runID), zap.String("url", url))
+	d.log.Warn("dispatch: webhook: "+msg,
+		zap.String("run_id", runID), zap.String("url", util.MaskURL(url)))
 }

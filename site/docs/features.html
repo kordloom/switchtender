@@ -36,7 +36,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX or Semaphore</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features" class="active">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX, Semaphore, or Rundeck</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features" class="active">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -112,11 +112,11 @@
 </tr>
 <tr>
 <td>Approvals</td>
-<td>Mark a run to require sign-off, or require it automatically by policy on tool, command, or target. A held run never executes until an admin approves or rejects it, and the request and decision land in the tamper-evident audit trail.</td>
+<td>Mark a run to require sign-off, or require it automatically by policy on tool, command, target, assessed risk, or who is asking. A held run never executes until an admin approves or rejects it. The decision is a chain entry committing a digest of the exact spec released, the executor refuses a spec that changed after the decision, and the receipt proves the approved and executed change are the same.</td>
 </tr>
 <tr>
 <td>Policy as code</td>
-<td>Point <code>--policy-file</code> at a YAML file and it becomes the source of truth for approval policies. A change to what needs approval is then a reviewed diff with a commit behind it, the API refuses policy writes with a 409 that says where to make the change, and a malformed file stops the server rather than silently gating nothing.</td>
+<td>Point <code>--policy-file</code> at a YAML file and it becomes the source of truth for policies. A rule can hold a run for approval or deny it outright (<code>effect: deny</code>), can scope itself to agents or people (<code>actor_kind</code>), to one named principal (<code>actor</code>), or to a risk floor (<code>min_risk</code>), so an agent's authorization boundary is a reviewed diff with a commit behind it. The API refuses policy writes with a 409 that says where to make the change, and a malformed file stops the server rather than silently gating nothing.</td>
 </tr>
 <tr>
 <td>Observability</td>
@@ -124,7 +124,7 @@
 </tr>
 <tr>
 <td>Tamper-evident audit</td>
-<td>Every mutation is linked into a SHA-256 hash chain. <code>GET /v1/audit/verify</code> flags the first altered or deleted entry, and a signed export verified with <code>switchtender audit verify</code> proves the whole chain offline. A change that cannot be recorded is refused rather than performed silently.</td>
+<td>Every mutation is linked into a SHA-256 hash chain. <code>GET /v1/audit/verify</code> flags the first altered or deleted entry, and a signed LoomSeal bundle proves the whole chain offline to a third party running an open verifier this project does not control. A change that cannot be recorded is refused rather than performed silently.</td>
 </tr>
 <tr>
 <td>Anchored history</td>
@@ -136,7 +136,7 @@
 </tr>
 <tr>
 <td>Evidence report</td>
-<td><code>switchtender audit report</code> renders a signed export into a self-contained HTML compliance report, verifying it offline in the same pass, so a vendor-security or SOC 2 reviewer reads the verdict and re-verifies it against the export with no tooling.</td>
+<td><code>switchtender audit report</code> renders the period's changes into a self-contained HTML compliance report a vendor-security or SOC 2 reviewer reads with no tooling. The chain behind it is proved separately by verifying a signed bundle, so the narrative and the proof are independent artifacts.</td>
 </tr>
 <tr>
 <td>Launch receipts</td>
@@ -188,7 +188,7 @@
 </tr>
 <tr>
 <td>Credentials</td>
-<td>Thirteen kinds: SSH keys and SSH passwords, vault passwords, become passwords and full become settings, network device logins, env bundles for cloud SDKs, API tokens and JWTs, registry logins, and typed AWS, Azure, GCP, and VMware cloud credentials, all encrypted at rest.</td>
+<td>Fourteen kinds: SSH keys and SSH passwords, vault passwords, become passwords and full become settings, network device logins, env bundles for cloud SDKs, API tokens and JWTs, registry logins, and typed AWS, Azure, GCP, VMware, and OpenStack cloud credentials, all encrypted at rest.</td>
 </tr>
 <tr>
 <td>Secret masking</td>
@@ -204,7 +204,19 @@
 </tr>
 <tr>
 <td>Surveys</td>
-<td>Templates declare typed launch prompts, validated and injected as extra vars.</td>
+<td>Templates declare typed launch prompts, text, multiline, integer, boolean, or choice, each with bounds checked before launch: min and max on a number, length and a regular-expression pattern on text, and a help line on any field. A launch that breaks a bound is refused with the field it failed, and injected as extra vars.</td>
+</tr>
+<tr>
+<td>Saved workflows</td>
+<td>A template can carry a pipeline graph instead of a single tool, so a multi-step workflow with parallel branches, per-step tools, and retries is one saved object that a launch, a schedule, or a webhook fires the same way, and its survey answers reach every step. <em>Next release.</em></td>
+</tr>
+<tr>
+<td>Ansible controls</td>
+<td>A run or template pins <code>tags</code> and <code>skip_tags</code> to select or exclude tagged plays, <code>forks</code> for how many hosts run at once, <code>verbosity</code> for <code>-v</code> through <code>-vvvv</code>, and <code>diff_mode</code> to show the before and after of every changed file, no hand-built command needed. They carry through schedules, triggers, and retries.</td>
+</tr>
+<tr>
+<td>Relaunch failures</td>
+<td>One action re-runs only the hosts a finished run left failed or unreachable, targeted at exactly that set, so a partial outage is closed without repeating the hosts that already succeeded.</td>
 </tr>
 <tr>
 <td>Worker queues</td>
@@ -308,7 +320,15 @@
 </tr>
 <tr>
 <td>Migration</td>
-<td><code>switchtender import awx</code> and <code>import semaphore</code> read an export and create the equivalent projects, inventories, templates, surveys, schedules, and credential shells, with a dry-run report first.</td>
+<td><code>switchtender import awx</code> and <code>import semaphore</code> read an export and create the equivalent projects, inventories, templates, surveys, schedules, and credential shells, with a dry-run report first. <code>switchtender import rundeck</code> reads a Rundeck job export, converting Quartz schedules and refusing to downgrade secure options to plaintext. <code>switchtender import cron</code> brings a crontab under governance, turning each cron line into an approved, recorded schedule.</td>
+</tr>
+<tr>
+<td>Schedule timezones</td>
+<td>A schedule reads its cron expression in an IANA timezone such as <code>America/New_York</code>, following that zone's daylight-saving shifts, so a nightly window stays put across the year instead of drifting with the server clock.</td>
+</tr>
+<tr>
+<td>Starter templates</td>
+<td><code>switchtender examples</code> seeds a fresh install with a few templates that run with no project, inventory, or credential, so the first launch works on the spot instead of facing an empty list.</td>
 </tr>
 </tbody>
 </table>

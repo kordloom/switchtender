@@ -20,6 +20,9 @@ func Contract(t *testing.T, newStore func() audit.Store) {
 	t.Run("append and list", func(t *testing.T) { testAppendList(t, newStore()) })
 	t.Run("chain verifies", func(t *testing.T) { testChain(t, newStore()) })
 	t.Run("anchors round trip and scope", func(t *testing.T) { testAnchors(t, newStore()) })
+	t.Run("anchor delete removes exactly the named anchor", func(t *testing.T) {
+		testAnchorDelete(t, newStore())
+	})
 	t.Run("concurrent appends do not fork", func(t *testing.T) { testConcurrentAppend(t, newStore()) })
 	t.Run("span beats increment with counts", func(t *testing.T) { testSpanBeats(t, newStore()) })
 	t.Run("span beat one adopts prior history", func(t *testing.T) { testSpanAdoption(t, newStore()) })
@@ -37,6 +40,9 @@ func Contract(t *testing.T, newStore func() audit.Store) {
 	})
 	t.Run("span beats query filters and limits store-side", func(t *testing.T) {
 		testSpanBeatsQuery(t, newStore())
+	})
+	t.Run("content and actor fields round trip and are committed", func(t *testing.T) {
+		testCommittedFields(t, newStore())
 	})
 	t.Run("empty list is non-nil", func(t *testing.T) {
 		got, err := newStore().List(context.Background(), 10)
@@ -633,11 +639,12 @@ func testAnchors(t *testing.T, store audit.Store) {
 
 	at := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
 	stamped := &audit.Anchor{
-		ID: audit.NewAnchorID(), Type: audit.AnchorRFC3161, Seq: 5, Link: "aa", At: at,
-		Ref: "https://freetsa.org/tsr", Proof: "MIIBase64Token",
+		ID: audit.NewAnchorID(), Type: audit.AnchorRFC3161, Shape: audit.AnchorShapeLinear,
+		Seq: 5, Link: "aa", At: at, Ref: "https://freetsa.org/tsr", Proof: "MIIBase64Token",
 	}
 	committed := &audit.Anchor{
-		ID: audit.NewAnchorID(), Type: audit.AnchorGit, Seq: 20, Link: "bb", At: at.Add(time.Hour),
+		ID: audit.NewAnchorID(), Type: audit.AnchorGit, Shape: audit.AnchorShapeTree,
+		Seq: 20, Link: "bb", At: at.Add(time.Hour),
 		Ref: "https://github.com/acme/anchors/commit/deadbeef",
 	}
 	for _, a := range []*audit.Anchor{stamped, committed} {
@@ -678,6 +685,14 @@ func testAnchors(t *testing.T, store audit.Store) {
 	if !got.At.Equal(at) {
 		t.Errorf("anchor time = %s, want %s", got.At, at)
 	}
+	// The shape decides how an anchor is checked, so losing it in storage turns a tree anchor into
+	// one held against the linear hash map, the exact confusion the field exists to prevent.
+	if got.Shape != audit.AnchorShapeLinear {
+		t.Errorf("shape = %q, want %q stored verbatim", got.Shape, audit.AnchorShapeLinear)
+	}
+	if tree := byID[committed.ID]; tree == nil || tree.Shape != audit.AnchorShapeTree {
+		t.Errorf("tree anchor shape did not round trip: %+v", tree)
+	}
 
 	// A bundle covering the first ten entries must not carry an anchor for entry twenty: a verifier
 	// rejects a bundle whose anchor names a link it does not hold.
@@ -700,5 +715,131 @@ func testAnchors(t *testing.T, store audit.Store) {
 	}
 	if !found {
 		t.Error("Anchors(10) dropped the anchor at seq 5, which is inside the range")
+	}
+}
+
+// testAnchorDelete verifies an anchor can be withdrawn by id: the named anchor is gone from the
+// listing, the others survive, and deleting a missing id reports audit.ErrAnchorNotFound. Without
+// a delete path, an anchor recorded over the wrong coordinates fails every export forever.
+func testAnchorDelete(t *testing.T, store audit.Store) {
+	t.Helper()
+	ctx := context.Background()
+	anchors, ok := store.(audit.AnchorStore)
+	if !ok {
+		t.Fatalf("%T does not persist anchors", store)
+	}
+	at := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
+	doomed := &audit.Anchor{
+		ID: audit.NewAnchorID(), Type: audit.AnchorHTTPS, Shape: audit.AnchorShapeTree,
+		Seq: 7, Link: "cc", At: at, Ref: "https://anchors.example/head",
+	}
+	kept := &audit.Anchor{
+		ID: audit.NewAnchorID(), Type: audit.AnchorHTTPS, Shape: audit.AnchorShapeLinear,
+		Seq: 3, Link: "dd", At: at, Ref: "https://anchors.example/head",
+	}
+	for _, a := range []*audit.Anchor{doomed, kept} {
+		if err := anchors.SaveAnchor(ctx, a); err != nil {
+			t.Fatalf("SaveAnchor(%s) error = %v", a.ID, err)
+		}
+	}
+
+	if err := anchors.DeleteAnchor(ctx, doomed.ID); err != nil {
+		t.Fatalf("DeleteAnchor(%s) error = %v", doomed.ID, err)
+	}
+	after, err := anchors.Anchors(ctx, 0)
+	if err != nil {
+		t.Fatalf("Anchors() error = %v", err)
+	}
+	keptSeen := false
+	for _, a := range after {
+		if a.ID == doomed.ID {
+			t.Error("the deleted anchor is still listed")
+		}
+		if a.ID == kept.ID {
+			keptSeen = true
+		}
+	}
+	if !keptSeen {
+		t.Error("deleting one anchor removed another")
+	}
+
+	if err := anchors.DeleteAnchor(ctx, doomed.ID); !errors.Is(err, audit.ErrAnchorNotFound) {
+		t.Errorf("DeleteAnchor() of a missing id error = %v, want audit.ErrAnchorNotFound", err)
+	}
+}
+
+// testCommittedFields proves the fields added beyond the original six survive a store round trip and
+// are committed by the chain link.
+//
+// The forgery attempt is the point. An entry is stored, then its content digest is altered while
+// every field the old construction hashed is left exactly as it was: same sequence, same time, same
+// actor, same method, same path, same previous link. Under the old positional construction the
+// recomputed hash matched and the tampered entry verified, so the chain proved a call had been made
+// and said nothing about what the call contained. Under the current one the hash no longer matches
+// and the chain reports the break, which is what makes "the record covers the change, not only the
+// request" a true statement rather than a marketing one.
+func testCommittedFields(t *testing.T, store audit.Store) {
+	ctx := context.Background()
+	at := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	digest, nonce, err := audit.ContentDigestOf([]byte(`{"limit":"web01"}`))
+	if err != nil {
+		t.Fatalf("ContentDigestOf() error = %v", err)
+	}
+	entry := &audit.Entry{
+		ID: audit.NewID(), At: at, Actor: "agent", ActorType: "token",
+		OnBehalfOf: "deploy-agent", Method: "POST", Path: "/v1/templates/tpl_1/launch",
+		ContentDigest: digest, Nonce: nonce,
+	}
+	if err := store.Append(ctx, entry); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+	chain, err := store.Chain(ctx)
+	if err != nil {
+		t.Fatalf("Chain() error = %v", err)
+	}
+	if len(chain) != 1 {
+		t.Fatalf("chain = %d entries, want 1", len(chain))
+	}
+	got := chain[0]
+	// The fields must come back from the store, or the entry that was hashed is not the entry stored.
+	for _, field := range []struct{ Name, Got, Want string }{
+		{"actor_type", got.ActorType, "token"},
+		{"on_behalf_of", got.OnBehalfOf, "deploy-agent"},
+		{"content_digest", got.ContentDigest, entry.ContentDigest},
+		{"nonce", got.Nonce, entry.Nonce},
+	} {
+		if field.Got != field.Want {
+			t.Errorf("%s did not round trip: got %q, want %q", field.Name, field.Got, field.Want)
+		}
+	}
+	if ok, _ := audit.Verify(chain); !ok {
+		t.Fatal("the stored chain does not verify")
+	}
+
+	// The forgery: change what the call contained, leave everything the old link hashed untouched.
+	otherDigest, _, err := audit.ContentDigestOf([]byte(`{"limit":"*"}`))
+	if err != nil {
+		t.Fatalf("ContentDigestOf() error = %v", err)
+	}
+	forged := *got
+	forged.ContentDigest = otherDigest
+	if forged.ContentDigest == got.ContentDigest {
+		t.Fatal("the two payloads digest alike, so this proves nothing")
+	}
+	if audit.EntryHash(&forged) == got.Hash {
+		t.Error("the content digest is not committed by the link: a change to the payload the entry " +
+			"records leaves its hash intact, so the chain proves only that a call was made")
+	}
+	// The same for the delegation, which is what attributes an agent's work to the authority it used.
+	forgedActor := *got
+	forgedActor.OnBehalfOf = "someone-else"
+	if audit.EntryHash(&forgedActor) == got.Hash {
+		t.Error("on_behalf_of is not committed by the link, so a recorded delegation can be rewritten")
+	}
+	forgedType := *got
+	forgedType.ActorType = "session"
+	if audit.EntryHash(&forgedType) == got.Hash {
+		t.Error("actor_type is not committed by the link, so an agent's change can be presented as a " +
+			"person's")
 	}
 }

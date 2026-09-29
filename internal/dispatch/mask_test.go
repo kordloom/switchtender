@@ -412,6 +412,27 @@ func TestStreamMaskerOverlappingSecrets(t *testing.T) {
 	}
 }
 
+// TestStreamMaskerDrainSplitSecret covers a quiet-run drain whose release point would otherwise land
+// inside a complete secret. A secret's own trailing bytes can be a partial prefix of another secret
+// (SECRET ends in ET, a prefix of ETHER), so partialTail keeps only "ET" and the drain cut falls
+// inside SECRET. Without pushing the cut past the whole occurrence, drain releases "SECR" unredacted
+// and carries "ET" forward, and the two halves emit as the contiguous plaintext SECRET.
+func TestStreamMaskerDrainSplitSecret(t *testing.T) {
+	t.Parallel()
+	m := &masker{}
+	m.set([]string{"SECRET", "ETHER"})
+	sm := &streamMasker{mask: m, tail: []byte("SECRET")}
+	var got strings.Builder
+	got.Write(sm.drain())
+	got.Write(sm.flush())
+	if strings.Contains(got.String(), "SECRET") {
+		t.Fatalf("drain split the secret and leaked it across the release boundary: %q", got.String())
+	}
+	if got.String() != maskToken {
+		t.Errorf("drain+flush = %q, want the fully masked %q", got.String(), maskToken)
+	}
+}
+
 // TestLogSinkReleasesHeldOutput covers a run that writes a little and then goes quiet. The masker
 // withholds as many bytes as the longest secret, and a whole SSH key is registered as one secret, so
 // a slow run showed a blank live log for its entire duration. The hold is released once output stops.

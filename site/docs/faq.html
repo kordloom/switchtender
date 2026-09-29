@@ -65,7 +65,7 @@
    "name": "How are secrets stored?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "Sealed with AES-256-GCM, the key derived from an operator passphrase through argon2id. Secrets decrypt only at execution, into the run's environment or a temporary file created mode 0600 and deleted when the run finishes, and never appear in API responses. Thirteen kinds cover SSH keys and SSH passwords, vault passwords, become passwords and full become settings, network device logins, environment bundles, API tokens, container registry logins, and typed AWS, Azure, GCP, and VMware credentials. Set SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT to enable them. A credential can also be a command source, so the value lives in an external store instead of in SwitchTender. SwitchTender seals a command, for example vault kv get -field=password secret/prod or an aws secretsmanager get-secret-value call, and runs it at execution time. The command's output is the secret and is never stored. This works with any secret manager reachable from a command: Vault, AWS, GCP, 1Password, or your own script."
+    "text": "Sealed with AES-256-GCM, the key derived from an operator passphrase through argon2id. Secrets decrypt only at execution, into the run's environment or a temporary file created mode 0600 and deleted when the run finishes, and never appear in API responses. Fourteen kinds cover SSH keys and SSH passwords, vault passwords, become passwords and full become settings, network device logins, environment bundles, API tokens, container registry logins, and typed AWS, Azure, GCP, VMware, and OpenStack credentials. Set SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT to enable them. A credential can also be a command source, so the value lives in an external store instead of in SwitchTender. SwitchTender seals a command, for example vault kv get -field=password secret/prod or an aws secretsmanager get-secret-value call, and runs it at execution time. The command's output is the secret and is never stored. This works with any secret manager reachable from a command: Vault, AWS, GCP, 1Password, or your own script."
    }
   },
   {
@@ -113,7 +113,7 @@
    "name": "Can I extend SwitchTender?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "Yes, in Go, two ways: compile an extension into the binary, or drop a plugin binary into --plugins-dir on a stock release. Both register execution tools, AI providers, secret engines, and notification channels. See Extend in Go and the official switchtender-plugins repo for a working example."
+    "text": "Yes, in Go, two ways: compile an extension into the binary, or drop a plugin binary into --plugins-dir on a stock release. Both register execution tools, AI providers, secret engines, and notification channels. See Extend in Go, which includes a working drop-in example: Discord, ntfy, and Teams built as one plugin binary."
    }
   },
   {
@@ -156,7 +156,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq" class="active">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX or Semaphore</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq" class="active">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX, Semaphore, or Rundeck</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -199,9 +199,9 @@ name a host set once and reuse it across templates.</p>
 <h2 id="how-are-secrets-stored">How are secrets stored?</h2>
 <p>Sealed with AES-256-GCM, the key derived from an operator passphrase through argon2id. Secrets
 decrypt only at execution, into the run's environment or a temporary file created mode 0600 and
-deleted when the run finishes, and never appear in API responses. Thirteen kinds cover SSH keys and SSH passwords, vault passwords, become passwords and
+deleted when the run finishes, and never appear in API responses. Fourteen kinds cover SSH keys and SSH passwords, vault passwords, become passwords and
 full become settings, network device logins, environment bundles, API tokens, container registry
-logins, and typed AWS, Azure, GCP, and VMware credentials. Set
+logins, and typed AWS, Azure, GCP, VMware, and OpenStack credentials. Set
 <code>SWITCHTENDER_ENCRYPTION_KEY</code> and <code>SWITCHTENDER_ENCRYPTION_SALT</code> to enable them.</p>
 <p>A credential can also be a command source, so the value lives in an external store instead of in
 SwitchTender. SwitchTender seals a command, for example <code>vault kv get -field=password secret/prod</code> or an
@@ -235,8 +235,8 @@ and a run held for approval waits for a human admin, since an operator token can
 <h2 id="can-i-extend-switchtender">Can I extend SwitchTender?</h2>
 <p>Yes, in Go, two ways: compile an extension into the binary, or drop a plugin binary into
 <code>--plugins-dir</code> on a stock release. Both register execution tools, AI providers, secret engines,
-and notification channels. See <a href="/docs/sdk">Extend in Go</a> and the official
-<a href="https://github.com/kordloom/switchtender-plugins">switchtender-plugins</a> repo for a working example.</p>
+and notification channels. See <a href="/docs/sdk">Extend in Go</a>, which includes a working drop-in example:
+Discord, ntfy, and Teams built as one plugin binary.</p>
 <h2 id="what-about-scale">What about scale?</h2>
 <p>Runs stream and page by a sequence cursor, the runs list and event history paginate, and a large host
 matrix renders one cell at a time. Split a run across workers by measured host duration, and run more

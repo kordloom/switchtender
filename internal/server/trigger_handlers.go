@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/template"
@@ -66,8 +66,7 @@ func createTriggerHandler(triggers trigger.Store, templates template.Store, seal
 			return
 		}
 		var req createTriggerRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		if req.Name == "" || req.TemplateID == "" {
@@ -153,8 +152,7 @@ func updateTriggerHandler(triggers trigger.Store, templates template.Store, auth
 			return
 		}
 		var req updateTriggerRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		if req.Name == "" {
@@ -250,7 +248,7 @@ func rotateTriggerSecretHandler(triggers trigger.Store, sealer *credential.Seale
 }
 
 // listTriggersHandler returns all triggers without their tokens.
-func listTriggersHandler(triggers trigger.Store, log *zap.Logger) http.HandlerFunc {
+func listTriggersHandler(triggers trigger.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if triggers == nil {
 			respondError(w, log, http.StatusNotFound, "triggers not enabled")
@@ -261,6 +259,24 @@ func listTriggersHandler(triggers trigger.Store, log *zap.Logger) http.HandlerFu
 			log.Error("server: list triggers: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not list triggers")
 			return
+		}
+		// A trigger is visible on the same test that governs writing and deleting one, its template.
+		// Reading was unauthorized, so any operator could enumerate every webhook launch point on
+		// the install and the template each one fires.
+		restricted, err := grantsEnforced(r.Context(), authz)
+		if err != nil {
+			log.Error("server: read filter: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not list triggers")
+			return
+		}
+		if restricted {
+			kept := make([]*trigger.Trigger, 0, len(list))
+			for _, tg := range list {
+				if authz.authorizeAll(r.Context(), grant.AccessUse, tg.TemplateID) == nil {
+					kept = append(kept, tg)
+				}
+			}
+			list = kept
 		}
 		respondJSON(w, log, http.StatusOK,
 			listTriggersResponse{Triggers: list, Count: len(list)}, wantsPretty(r))
@@ -365,7 +381,7 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 			if existing.AuditReceipt != "" {
 				w.Header().Set(AuditReceiptHeader, existing.AuditReceipt)
 			}
-			respondJSON(w, log, http.StatusAccepted, existing, wantsPretty(r))
+			respondJSON(w, log, http.StatusAccepted, maskRun(existing), wantsPretty(r))
 			return
 		}
 
@@ -399,12 +415,22 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 		}
 
 		opts = append(opts, run.WithIdempotencyKey(key),
-			run.WithSource("trigger", tg.ID), run.WithActor("trigger "+tg.Name))
+			run.WithSource("trigger", tg.ID), run.WithActor("trigger "+tg.Name),
+			run.WithActorType("webhook"))
 		var created *run.Run
-		if t.Shards >= 2 {
+		switch {
+		case len(t.Steps) > 0:
+			// A webhook that fires a workflow template runs its graph. The idempotency key still
+			// applies, so a redelivered webhook does not fire the workflow twice.
+			created, err = submitter.SubmitPipeline(ctx, t.Name, t.Inventory, t.Steps, opts...)
+		case t.Shards >= 2:
 			created, err = submitter.SubmitSplit(ctx, t.Playbook, t.Inventory, t.Shards, opts...)
-		} else {
+		default:
 			created, err = submitter.Submit(ctx, t.Playbook, t.Inventory, opts...)
+		}
+		if errors.Is(err, dispatch.ErrPolicyDenied) {
+			respondError(w, log, http.StatusForbidden, err.Error())
+			return
 		}
 		if err != nil {
 			log.Error("server: fire trigger: " + err.Error())

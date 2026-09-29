@@ -8,51 +8,57 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/beatfeed"
 	"github.com/kordloom/switchtender/internal/audit"
 )
 
-// auditResponse wraps the audit trail.
+// defaultAuditPage is the page size when an audit read names no limit, and maxAuditPage is the
+// largest page one request may ask for. The cap bounds the work a single read can demand; the
+// has_more flag is what keeps the capped answer honest about being a page rather than the trail.
+const (
+	defaultAuditPage = 100
+	maxAuditPage     = 1000
+)
+
+// auditResponse wraps a page of the audit trail.
 type auditResponse struct {
-	// Entries is the trail, newest first.
+	// Entries is the page, newest first.
 	Entries []*audit.Entry `json:"entries"`
-	// Count is the number returned.
+	// Count is the number of entries on this page, which is not the size of the trail whenever
+	// HasMore is set.
 	Count int `json:"count"`
+	// HasMore reports whether the trail holds older entries beyond this page.
+	HasMore bool `json:"has_more"`
 }
 
-// auditHandler returns recent audit entries.
+// auditHandler returns a page of recent audit entries, newest first.
 func auditHandler(store audit.Store, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "audit trail not enabled")
 			return
 		}
-		limit := 100
+		limit := defaultAuditPage
 		if v := r.URL.Query().Get("limit"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				limit = n
+				limit = min(n, maxAuditPage)
 			}
 		}
-		entries, err := store.List(r.Context(), limit)
+		// Read one entry past the page so a cut trail is reported as cut. A reader handed a
+		// truncated trail with a count equal to its length believes it saw every change there was.
+		entries, err := store.List(r.Context(), limit+1)
 		if err != nil {
 			log.Error("server: list audit entries: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not read the audit trail")
 			return
 		}
+		hasMore := len(entries) > limit
+		if hasMore {
+			entries = entries[:limit]
+		}
 		respondJSON(w, log, http.StatusOK,
-			auditResponse{Entries: entries, Count: len(entries)}, wantsPretty(r))
+			auditResponse{Entries: entries, Count: len(entries), HasMore: hasMore}, wantsPretty(r))
 	}
-}
-
-// beatRecord is one span beat as the public feed reports it.
-type beatRecord struct {
-	// Beat is the beat number, starting at one and increasing by exactly one per beat.
-	Beat int64 `json:"beat"`
-	// At is when the beat was appended, RFC 3339 UTC.
-	At string `json:"at"`
-	// Seq is the beat entry's position in the audit chain.
-	Seq int64 `json:"seq"`
-	// Head is the beat entry's own chain hash, the head the beat attests.
-	Head string `json:"head"`
 }
 
 // defaultBeatLimit caps how many beats the feed returns when the caller sets no limit, and stands
@@ -96,13 +102,13 @@ func auditBeatsHandler(store audit.Store, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusInternalServerError, "could not read the audit trail")
 			return
 		}
-		beats := []beatRecord{}
+		beats := []beatfeed.Beat{}
 		for _, e := range entries {
 			beat, _, _, ok := audit.ParseSpanPath(e.Path)
 			if !ok {
 				continue
 			}
-			beats = append(beats, beatRecord{
+			beats = append(beats, beatfeed.Beat{
 				Beat: beat, At: e.At.UTC().Format(time.RFC3339Nano), Seq: e.Seq, Head: e.Hash,
 			})
 		}
@@ -140,8 +146,9 @@ func anchorsFor(ctx context.Context, store audit.Store) ([]*audit.Anchor, error)
 }
 
 // auditVerifyHandler recomputes the audit hash chain and reports whether it is intact, so an
-// operator can prove the trail has not been altered.
-func auditVerifyHandler(store audit.Store, log *zap.Logger) http.HandlerFunc {
+// operator can prove the trail has not been altered. installID is the install the tree profile's
+// leaves bind to, which checking a tree anchor requires.
+func auditVerifyHandler(store audit.Store, installID string, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "audit trail not enabled")
@@ -161,7 +168,7 @@ func auditVerifyHandler(store audit.Store, log *zap.Logger) http.HandlerFunc {
 		// The chain streams past both scanners one entry at a time, so verifying years of trail
 		// holds one entry in memory rather than all of them, however many clients ask at once.
 		chainScan := audit.NewChainScanner(true)
-		anchorScan := audit.NewAnchorScanner(anchors)
+		anchorScan := audit.NewAnchorScanner(anchors, installID)
 		err := store.ChainScan(r.Context(), 0, func(e *audit.Entry) error {
 			chainScan.Feed(e)
 			anchorScan.Feed(e)
@@ -190,12 +197,18 @@ func auditVerifyHandler(store audit.Store, log *zap.Logger) http.HandlerFunc {
 	}
 }
 
-// auditExportHandler returns a portable, self-verifying snapshot of the audit chain, signed when an
-// audit signer is configured, so the trail can be verified offline.
-func auditExportHandler(store audit.Store, signer *audit.Signer, log *zap.Logger) http.HandlerFunc {
+// auditBundleHandler assembles and serves the signed LoomSeal bundle the CLI produces, so the
+// offline-verifiable artifact no rival emits is one click from the audit view rather than only in a
+// terminal. It mirrors the bundle command exactly: build over the whole chain, hold it against every
+// anchor recorded over it and refuse a chain that cannot reach one, attach the anchors, and sign.
+//
+// The signed bytes are written exactly as SignBundleDoc produced them and never re-marshaled. A
+// re-encode would change the bytes the signature covers, so an offline verifier would then reject a
+// bundle this install actually signed.
+func auditBundleHandler(store audit.Store, producer *audit.Identity, version string, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if store == nil {
-			respondError(w, log, http.StatusNotFound, "audit trail not enabled")
+		if store == nil || producer == nil {
+			respondError(w, log, http.StatusNotFound, "signed bundle export is not enabled")
 			return
 		}
 		entries, err := store.Chain(r.Context())
@@ -204,6 +217,38 @@ func auditExportHandler(store audit.Store, signer *audit.Signer, log *zap.Logger
 			respondError(w, log, http.StatusInternalServerError, "could not read the audit trail")
 			return
 		}
-		respondJSON(w, log, http.StatusOK, audit.BuildExport(entries, signer, time.Now()), wantsPretty(r))
+		if len(entries) == 0 {
+			respondError(w, log, http.StatusConflict, "the audit chain is empty, there is nothing to bundle")
+			return
+		}
+		doc, err := audit.BuildBundle(entries, *producer, version, time.Now())
+		if err != nil {
+			log.Error("server: build bundle: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not assemble the bundle")
+			return
+		}
+		if anchors, ok := store.(audit.AnchorStore); ok {
+			recorded, aerr := anchors.Anchors(r.Context(), 0)
+			if aerr != nil {
+				log.Error("server: read anchors: " + aerr.Error())
+				respondError(w, log, http.StatusInternalServerError, "could not read the anchors")
+				return
+			}
+			if reachedAll, _ := audit.CheckAnchors(entries, recorded, producer.InstallID); !reachedAll {
+				respondError(w, log, http.StatusConflict, "the chain does not satisfy every anchor "+
+					"recorded over it, so it cannot be published as a bundle that does")
+				return
+			}
+			doc.AttachAnchors(recorded)
+		}
+		signed, err := audit.SignBundleDoc(doc, producer.Private())
+		if err != nil {
+			log.Error("server: sign bundle: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not sign the bundle")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="switchtender-audit.loomseal.json"`)
+		_, _ = w.Write(signed)
 	}
 }

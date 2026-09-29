@@ -1,5 +1,11 @@
 package audit
 
+import (
+	"encoding/hex"
+
+	"github.com/kordloom/loomseal/merkle"
+)
+
 // ChainScanner verifies a chain fed one entry at a time in chain order, holding only the previous
 // entry, so a caller can check a trail of any length in constant memory. Feed every entry, then
 // read Result. VerifyRange and Verify are the slice forms of the same walk.
@@ -63,35 +69,61 @@ func (v *ChainScanner) Result() (ok bool, brokeAt, count int) {
 	return v.brokeAt == 0, v.brokeAt, v.count
 }
 
-// AnchorScanner holds a chain against its anchors while the chain streams past, keeping only the
-// hashes at anchored positions, so the anchor check needs memory in the number of anchors rather
-// than the length of the chain. CheckAnchors is the slice form of the same walk.
+// AnchorScanner holds a chain against its anchors while the chain streams past. A linear anchor
+// needs only the hash at its position, so those cost memory in the number of anchors. A tree
+// anchor fixes a Merkle root at a tree size, which no single entry carries, so the scanner also
+// folds every streamed entry into an incremental tree and captures the root at each anchored
+// size, costing a logarithm of the chain length on top. CheckAnchors is the slice form of the
+// same walk.
 type AnchorScanner struct {
 	// anchors is the set being checked, in the order results are reported.
 	anchors []*Anchor
-	// wanted marks the anchored sequences still worth capturing.
+	// installID is the install the tree's leaves bind to, the same value TreeHead hashes. It is
+	// only consulted when a tree anchor is present.
+	installID string
+	// wanted marks the linear anchored sequences still worth capturing.
 	wanted map[int64]struct{}
-	// atSeq is the link found at each anchored sequence.
+	// atSeq is the link found at each linear anchored sequence.
 	atSeq map[int64]string
+	// treeSizes marks the tree sizes an anchor fixes a root at.
+	treeSizes map[int64]struct{}
+	// rootAt is the recomputed root at each anchored tree size.
+	rootAt map[int64]string
+	// forest holds the incremental tree as perfect subtree roots, indexed by level, non-nil where
+	// the matching bit of fed is set. It is the standard compact form of an RFC 6962 tree.
+	forest [][]byte
+	// fed is how many entries the tree has folded in, which is the current tree size.
+	fed int64
+	// treeErr is the first failure turning an entry into a leaf, which makes every tree anchor
+	// uncheckable rather than silently unreached.
+	treeErr error
 	// highest is the largest sequence seen.
 	highest int64
 }
 
-// NewAnchorScanner returns a scanner over the given anchors.
-func NewAnchorScanner(anchors []*Anchor) *AnchorScanner {
+// NewAnchorScanner returns a scanner over the given anchors. installID is the install the tree
+// profile's leaves bind to; it matters only when a tree anchor is among them.
+func NewAnchorScanner(anchors []*Anchor, installID string) *AnchorScanner {
 	s := &AnchorScanner{
-		anchors: anchors,
-		wanted:  make(map[int64]struct{}, len(anchors)),
-		atSeq:   make(map[int64]string, len(anchors)),
+		anchors:   anchors,
+		installID: installID,
+		wanted:    make(map[int64]struct{}, len(anchors)),
+		atSeq:     make(map[int64]string, len(anchors)),
+		treeSizes: make(map[int64]struct{}),
+		rootAt:    make(map[int64]string),
 	}
 	for _, a := range anchors {
+		if a.Shape == AnchorShapeTree {
+			s.treeSizes[a.Seq] = struct{}{}
+			continue
+		}
 		s.wanted[a.Seq] = struct{}{}
 	}
 	return s
 }
 
-// Feed records what the entry proves about the anchors: the link at an anchored position, and how
-// far the chain reaches.
+// Feed records what the entry proves about the anchors: the link at a linear anchored position,
+// the tree root at an anchored size, and how far the chain reaches.
 func (s *AnchorScanner) Feed(e *Entry) {
 	if e == nil {
 		return
@@ -102,10 +134,56 @@ func (s *AnchorScanner) Feed(e *Entry) {
 	if _, ok := s.wanted[e.Seq]; ok {
 		s.atSeq[e.Seq] = e.Hash
 	}
+	if len(s.treeSizes) == 0 || s.treeErr != nil || s.installID == "" {
+		return
+	}
+	leaf, err := treeLeaf(claimContent(e), s.installID)
+	if err != nil {
+		s.treeErr = err
+		return
+	}
+	s.pushLeaf(merkle.LeafHash(leaf))
+	s.fed++
+	if _, ok := s.treeSizes[s.fed]; ok {
+		s.rootAt[s.fed] = hex.EncodeToString(s.forestRoot())
+	}
+}
+
+// pushLeaf folds one leaf hash into the forest, merging equal-size perfect subtrees like a binary
+// carry. Node hashing is the reference implementation's, so the root here is TreeHead's root.
+func (s *AnchorScanner) pushLeaf(h []byte) {
+	for i := 0; ; i++ {
+		if i == len(s.forest) {
+			s.forest = append(s.forest, nil)
+		}
+		if s.forest[i] == nil {
+			s.forest[i] = h
+			return
+		}
+		h = merkle.NodeHash(s.forest[i], h)
+		s.forest[i] = nil
+	}
+}
+
+// forestRoot folds the forest's subtree roots, smallest first, into the RFC 6962 root over every
+// leaf pushed so far. It does not consume the forest, so the scan continues past it.
+func (s *AnchorScanner) forestRoot() []byte {
+	var root []byte
+	for _, sub := range s.forest {
+		if sub == nil {
+			continue
+		}
+		if root == nil {
+			root = sub
+			continue
+		}
+		root = merkle.NodeHash(sub, root)
+	}
+	return root
 }
 
 // Results reports what each anchor proves against the chain fed so far, with the same verdicts and
 // wording as CheckAnchors.
 func (s *AnchorScanner) Results() (ok bool, results []AnchorCheck) {
-	return anchorVerdicts(s.anchors, s.atSeq, s.highest)
+	return anchorVerdicts(s)
 }

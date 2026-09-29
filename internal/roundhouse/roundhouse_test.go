@@ -168,3 +168,37 @@ func TestArgsVaultPasswords(t *testing.T) {
 		})
 	}
 }
+
+// TestArgsTagsVerbosityForksDiff pins the AWX-parity run controls onto the ansible-playbook command
+// line: tags and skip-tags as single comma-joined values, forks and diff, and verbosity as one -v
+// per level capped at four. They apply only to the Ansible builder, so no other tool sees them.
+func TestArgsTagsVerbosityForksDiff(t *testing.T) {
+	t.Parallel()
+	args, err := playbookArgs(Spec{
+		Playbook: "site.yml", Tags: []string{"deploy", "config"}, SkipTags: []string{"slow"},
+		Forks: 12, DiffMode: true, Verbosity: 3,
+	})
+	if err != nil {
+		t.Fatalf("playbookArgs() error = %v", err)
+	}
+	joined := strings.Join(args, " ")
+	for _, want := range []string{"--tags deploy,config", "--skip-tags slow", "--forks 12", "--diff", "-vvv"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("args %q missing %q", joined, want)
+		}
+	}
+
+	// Verbosity above four is clamped to four v's, the most ansible-playbook accepts.
+	capped, _ := playbookArgs(Spec{Playbook: "p.yml", Verbosity: 9})
+	if !strings.Contains(strings.Join(capped, " "), "-vvvv") || strings.Contains(strings.Join(capped, " "), "-vvvvv") {
+		t.Errorf("verbosity 9 rendered %v, want it clamped to -vvvv", capped)
+	}
+
+	// Zero and empty values emit nothing, so an ordinary run is unchanged.
+	plain, _ := playbookArgs(Spec{Playbook: "p.yml"})
+	for _, absent := range []string{"--tags", "--skip-tags", "--forks", "--diff", "-v"} {
+		if strings.Contains(strings.Join(plain, " "), absent) {
+			t.Errorf("plain run emitted %q: %v", absent, plain)
+		}
+	}
+}

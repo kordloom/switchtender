@@ -52,10 +52,11 @@ func (s *auditStore) Append(ctx context.Context, e *audit.Entry) error {
 	}
 	cp := *e
 	audit.Link(prev, &cp)
-	const q = `INSERT INTO audit_entries (id, at, actor, method, path, seq, prev_hash, hash)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+	const q = `INSERT INTO audit_entries (id, at, actor, actor_type, on_behalf_of, method, path, content_digest, seq, prev_hash, hash, nonce)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
 	if _, err := tx.ExecContext(ctx, q,
-		cp.ID, sqlutil.FormatTime(cp.At), cp.Actor, cp.Method, cp.Path, cp.Seq, cp.PrevHash, cp.Hash); err != nil {
+		cp.ID, sqlutil.FormatTime(cp.At), cp.Actor, cp.ActorType, cp.OnBehalfOf, cp.Method,
+		cp.Path, cp.ContentDigest, cp.Seq, cp.PrevHash, cp.Hash, cp.Nonce); err != nil {
 		return fmt.Errorf("append audit entry: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -106,10 +107,11 @@ func (s *auditStore) AppendSpanBeat(ctx context.Context, at time.Time, cadenceS 
 	}
 	e := audit.NewSpanEntry(at, beat, count, cadenceS)
 	audit.Link(prev, e)
-	const q = `INSERT INTO audit_entries (id, at, actor, method, path, seq, prev_hash, hash)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+	const q = `INSERT INTO audit_entries (id, at, actor, actor_type, on_behalf_of, method, path, content_digest, seq, prev_hash, hash, nonce)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
 	if _, err := tx.ExecContext(ctx, q,
-		e.ID, sqlutil.FormatTime(e.At), e.Actor, e.Method, e.Path, e.Seq, e.PrevHash, e.Hash); err != nil {
+		e.ID, sqlutil.FormatTime(e.At), e.Actor, e.ActorType, e.OnBehalfOf, e.Method, e.Path,
+		e.ContentDigest, e.Seq, e.PrevHash, e.Hash, e.Nonce); err != nil {
 		return nil, fmt.Errorf("append span beat: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -180,7 +182,7 @@ func (s *auditStore) SpanBeats(ctx context.Context, limit int) ([]*audit.Entry, 
 	if limit < 1 {
 		limit = 1
 	}
-	const q = `SELECT id, at, actor, method, path, seq, prev_hash, hash FROM audit_entries
+	const q = `SELECT id, at, actor, actor_type, on_behalf_of, method, path, content_digest, seq, prev_hash, hash, nonce FROM audit_entries
 WHERE actor = $1 AND method = $2 ORDER BY seq DESC LIMIT $3`
 	rows, err := s.db.QueryContext(ctx, q, audit.SpanActor, audit.SpanMethod, audit.SpanScanLimit(limit))
 	if err != nil {
@@ -194,7 +196,7 @@ func (s *auditStore) List(ctx context.Context, limit int) ([]*audit.Entry, error
 	if limit < 1 {
 		limit = 1
 	}
-	const q = `SELECT id, at, actor, method, path, seq, prev_hash, hash FROM audit_entries
+	const q = `SELECT id, at, actor, actor_type, on_behalf_of, method, path, content_digest, seq, prev_hash, hash, nonce FROM audit_entries
 ORDER BY seq DESC LIMIT $1`
 	rows, err := s.db.QueryContext(ctx, q, limit)
 	if err != nil {
@@ -205,7 +207,7 @@ ORDER BY seq DESC LIMIT $1`
 
 // Chain returns every entry in chain order, oldest first, for verification.
 func (s *auditStore) Chain(ctx context.Context) ([]*audit.Entry, error) {
-	const q = `SELECT id, at, actor, method, path, seq, prev_hash, hash FROM audit_entries
+	const q = `SELECT id, at, actor, actor_type, on_behalf_of, method, path, content_digest, seq, prev_hash, hash, nonce FROM audit_entries
 ORDER BY seq ASC`
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
@@ -217,7 +219,7 @@ ORDER BY seq ASC`
 // ChainScan streams every entry in chain order, oldest first, one row at a time, so verifying a
 // long trail never materializes it.
 func (s *auditStore) ChainScan(ctx context.Context, afterSeq int64, fn func(*audit.Entry) error) error {
-	const q = `SELECT id, at, actor, method, path, seq, prev_hash, hash FROM audit_entries
+	const q = `SELECT id, at, actor, actor_type, on_behalf_of, method, path, content_digest, seq, prev_hash, hash, nonce FROM audit_entries
 WHERE seq > $1 ORDER BY seq ASC`
 	rows, err := s.db.QueryContext(ctx, q, afterSeq)
 	if err != nil {
@@ -229,8 +231,8 @@ WHERE seq > $1 ORDER BY seq ASC`
 			e  audit.Entry
 			at string
 		)
-		if err := rows.Scan(&e.ID, &at, &e.Actor, &e.Method, &e.Path,
-			&e.Seq, &e.PrevHash, &e.Hash); err != nil {
+		if err := rows.Scan(&e.ID, &at, &e.Actor, &e.ActorType, &e.OnBehalfOf, &e.Method, &e.Path,
+			&e.ContentDigest, &e.Seq, &e.PrevHash, &e.Hash, &e.Nonce); err != nil {
 			return fmt.Errorf("chain scan audit entries: %w", err)
 		}
 		if e.At, err = sqlutil.ParseTime(at); err != nil {
@@ -256,8 +258,8 @@ func scanSpanBeats(rows *sql.Rows, limit int) ([]*audit.Entry, error) {
 			e  audit.Entry
 			at string
 		)
-		if err := rows.Scan(&e.ID, &at, &e.Actor, &e.Method, &e.Path,
-			&e.Seq, &e.PrevHash, &e.Hash); err != nil {
+		if err := rows.Scan(&e.ID, &at, &e.Actor, &e.ActorType, &e.OnBehalfOf, &e.Method, &e.Path,
+			&e.ContentDigest, &e.Seq, &e.PrevHash, &e.Hash, &e.Nonce); err != nil {
 			return nil, fmt.Errorf("scan span beat: %w", err)
 		}
 		var err error
@@ -285,8 +287,8 @@ func scanAudit(rows *sql.Rows) ([]*audit.Entry, error) {
 			e  audit.Entry
 			at string
 		)
-		if err := rows.Scan(&e.ID, &at, &e.Actor, &e.Method, &e.Path,
-			&e.Seq, &e.PrevHash, &e.Hash); err != nil {
+		if err := rows.Scan(&e.ID, &at, &e.Actor, &e.ActorType, &e.OnBehalfOf, &e.Method, &e.Path,
+			&e.ContentDigest, &e.Seq, &e.PrevHash, &e.Hash, &e.Nonce); err != nil {
 			return nil, fmt.Errorf("scan audit entry: %w", err)
 		}
 		var err error
@@ -304,11 +306,27 @@ func scanAudit(rows *sql.Rows) ([]*audit.Entry, error) {
 // SaveAnchor records one anchor, which fixes a chain link somewhere this install cannot rewrite
 // alone.
 func (s *auditStore) SaveAnchor(ctx context.Context, a *audit.Anchor) error {
-	const q = `INSERT INTO audit_anchors (id, type, seq, link, at, ref, proof)
-VALUES ($1, $2, $3, $4, $5, $6, $7)`
+	const q = `INSERT INTO audit_anchors (id, type, shape, seq, link, at, ref, proof)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
 	if _, err := s.db.ExecContext(ctx, q,
-		a.ID, a.Type, a.Seq, a.Link, sqlutil.FormatTime(a.At), a.Ref, a.Proof); err != nil {
+		a.ID, a.Type, a.Shape, a.Seq, a.Link, sqlutil.FormatTime(a.At), a.Ref, a.Proof); err != nil {
 		return fmt.Errorf("save anchor: %w", err)
+	}
+	return nil
+}
+
+// DeleteAnchor removes the anchor with the given id, or reports audit.ErrAnchorNotFound.
+func (s *auditStore) DeleteAnchor(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, "DELETE FROM audit_anchors WHERE id = $1", id)
+	if err != nil {
+		return fmt.Errorf("delete anchor: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete anchor: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("delete anchor %s: %w", id, audit.ErrAnchorNotFound)
 	}
 	return nil
 }
@@ -316,7 +334,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)`
 // Anchors returns every anchor at or below seq, oldest first. A seq of zero or less returns all of
 // them, since a caller with no range in mind wants the whole set.
 func (s *auditStore) Anchors(ctx context.Context, seq int64) ([]*audit.Anchor, error) {
-	q := "SELECT id, type, seq, link, at, ref, proof FROM audit_anchors"
+	q := "SELECT id, type, shape, seq, link, at, ref, proof FROM audit_anchors"
 	args := []any{}
 	if seq > 0 {
 		q += " WHERE seq <= $1"
@@ -332,7 +350,7 @@ func (s *auditStore) Anchors(ctx context.Context, seq int64) ([]*audit.Anchor, e
 	for rows.Next() {
 		var a audit.Anchor
 		var at string
-		if err := rows.Scan(&a.ID, &a.Type, &a.Seq, &a.Link, &at, &a.Ref, &a.Proof); err != nil {
+		if err := rows.Scan(&a.ID, &a.Type, &a.Shape, &a.Seq, &a.Link, &at, &a.Ref, &a.Proof); err != nil {
 			return nil, fmt.Errorf("list anchors: %w", err)
 		}
 		parsed, err := sqlutil.ParseTime(at)

@@ -62,6 +62,48 @@ func recordHold(r *run.Run, reason string) {
 	}
 }
 
+// denied refuses r's submission when a deny policy matches it, naming the rule. It fails closed
+// exactly as requiresApproval does: a gate that cannot be evaluated is not a gate that passed.
+func (d *Dispatcher) denied(ctx context.Context, r *run.Run) error {
+	if d.policies == nil {
+		return nil
+	}
+	policies, err := d.policies.List(ctx)
+	if err != nil {
+		d.log.Error("dispatch: list policies: " + err.Error())
+		return fmt.Errorf("%w: approval policies could not be read, so the run is refused "+
+			"rather than run past a gate that could not be checked: %w", ErrPolicyUnavailable, err)
+	}
+	if p := policy.Denying(policies, r); p != nil {
+		return fmt.Errorf("%w: policy %q refuses this submission", ErrPolicyDenied, p.Label())
+	}
+	return nil
+}
+
+// pipelineDenied refuses a pipeline when a deny policy matches the parent or any of its steps, for
+// the same reason pipelineRequiresApproval holds one: wrapping a refused command in a one-step
+// workflow must not launder it past the rule.
+func (d *Dispatcher) pipelineDenied(ctx context.Context, parent *run.Run, steps []run.PipelineStep) error {
+	if d.policies == nil {
+		return nil
+	}
+	policies, err := d.policies.List(ctx)
+	if err != nil {
+		d.log.Error("dispatch: list policies: " + err.Error())
+		return fmt.Errorf("%w: approval policies could not be read, so the pipeline is refused "+
+			"rather than run past a gate that could not be checked: %w", ErrPolicyUnavailable, err)
+	}
+	if p := policy.Denying(policies, parent); p != nil {
+		return fmt.Errorf("%w: policy %q refuses this submission", ErrPolicyDenied, p.Label())
+	}
+	for i, step := range steps {
+		if p := policy.Denying(policies, stepRun(parent, step, i, 0, baseStepVars(parent))); p != nil {
+			return fmt.Errorf("%w: policy %q refuses step %q", ErrPolicyDenied, p.Label(), step.Name)
+		}
+	}
+	return nil
+}
+
 // pipelineRequiresApproval reports whether a pipeline must be held, which it must when the parent
 // itself matches a blanket policy or when any of its steps does. A pipeline is submitted through a
 // different path than a single run, so without this the same command an operator gated would execute
@@ -87,7 +129,7 @@ func (d *Dispatcher) pipelineRequiresApproval(ctx context.Context, parent *run.R
 	for i, step := range steps {
 		// A pipeline held because one of its steps matches records that rule too: the whole graph
 		// is held, so the evidence has to say which step's rule stopped it.
-		if p := policy.Requiring(policies, stepRun(parent, step, i, 0, nil)); p != nil {
+		if p := policy.Requiring(policies, stepRun(parent, step, i, 0, baseStepVars(parent))); p != nil {
 			parent.HeldByPolicy = p.Label()
 			return true, nil
 		}

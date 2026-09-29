@@ -2,11 +2,15 @@ package backup
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/grant"
@@ -145,5 +149,38 @@ func TestHeaderCannotBeEditedAroundTheSeal(t *testing.T) {
 		t.Fatalf("List() error = %v", lerr)
 	} else if len(got) != 0 {
 		t.Errorf("%d accounts were written by a refused restore", len(got))
+	}
+}
+
+// TestRestoreStoresTheNormalizedProfile proves the value that passed validation is the value stored.
+// check normalizes each user's profile, and apply must persist that normalized form, not the raw one
+// from the file, or a restored profile keeps the untrimmed name and blank links the validation gate
+// already cleaned.
+func TestRestoreStoresTheNormalizedProfile(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	stores := freshStores()
+	p := &payload{Users: []userDTO{{User: user.User{
+		ID: "usr_1", Username: "mallory", Role: user.RoleViewer,
+		FullName: "  Mallory  ",
+		Links:    []string{"  ", "  https://example.com/x  "},
+	}}}}
+
+	if err := check(ctx, stores, p); err != nil {
+		t.Fatalf("check() error = %v", err)
+	}
+	if _, err := apply(ctx, stores, p); err != nil {
+		t.Fatalf("apply() error = %v", err)
+	}
+
+	got, err := stores.Users.Get(ctx, "usr_1")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if diff := cmp.Diff("Mallory", got.FullName); diff != "" {
+		t.Errorf("stored full name mismatch (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff([]string{"https://example.com/x"}, got.Links, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("stored links mismatch (-want +got):\n%s", diff)
 	}
 }

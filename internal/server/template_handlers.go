@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"errors"
 	"maps"
 	"net/http"
@@ -38,6 +37,21 @@ type createTemplateRequest struct {
 	Command string `json:"command,omitempty"`
 	// DryRun runs the tool in its no-change mode when the template launches.
 	DryRun bool `json:"dry_run,omitempty"`
+	// Limit narrows every launch to the hosts matching this pattern. The API could not carry it at
+	// all, so a template pinned to a canary host could only be created by the importer, and the
+	// first edit of one wrote the template back with no limit and answered 200: every later
+	// schedule, webhook, and launch reached the whole inventory. Empty targets everything.
+	Limit string `json:"limit,omitempty"`
+	// Tags runs only the Ansible plays and tasks carrying one of these tags on every launch.
+	Tags []string `json:"tags,omitempty"`
+	// SkipTags skips the Ansible plays and tasks carrying one of these tags on every launch.
+	SkipTags []string `json:"skip_tags,omitempty"`
+	// Verbosity raises Ansible logging from 0 to 4 on every launch.
+	Verbosity int `json:"verbosity,omitempty"`
+	// Forks sets how many hosts Ansible addresses in parallel on every launch. Zero leaves the default.
+	Forks int `json:"forks,omitempty"`
+	// DiffMode shows the before-and-after of every Ansible change on every launch.
+	DiffMode bool `json:"diff_mode,omitempty"`
 	// Shards, when two or more, splits launches across that many slices.
 	Shards int `json:"shards,omitempty"`
 	// Queue restricts launches to workers serving the queue.
@@ -56,6 +70,8 @@ type createTemplateRequest struct {
 	SelectableCredentialIDs []string `json:"selectable_credential_ids,omitempty"`
 	// ExtraVars are injected into every launch.
 	ExtraVars map[string]any `json:"extra_vars,omitempty"`
+	// Steps, when set, make the template a saved workflow fired as a pipeline.
+	Steps []run.PipelineStep `json:"steps,omitempty"`
 	// Survey prompts the launcher for typed values that become extra vars.
 	Survey []template.SurveyField `json:"survey,omitempty"`
 	// ConfirmOnLaunch routes the plain Launch action through the overrides dialog, so a risky
@@ -83,13 +99,19 @@ func templateToolError(req createTemplateRequest) string {
 	if req.Name == "" {
 		return "name is required"
 	}
-	if !run.ValidTool(req.Tool) {
-		return "tool must be ansible, bash, terraform, opentofu, python, powershell, or go"
-	}
 	for _, n := range req.Notifications {
 		if err := run.ValidateNotifyTarget(n); err != nil {
 			return err.Error()
 		}
+	}
+	// A saved workflow is a pipeline graph, not a single-tool launch, so it is validated on its own
+	// terms: it carries no top-level tool input or Ansible controls, since every step names its own,
+	// and the graph itself must be legal. A template is one or the other, never both.
+	if len(req.Steps) > 0 {
+		return workflowTemplateError(req)
+	}
+	if !run.ValidTool(req.Tool) {
+		return "tool must be ansible, bash, terraform, opentofu, python, powershell, or go"
 	}
 	if run.NormalizeTool(req.Tool) == run.ToolAnsible {
 		if req.Playbook == "" {
@@ -103,6 +125,27 @@ func templateToolError(req createTemplateRequest) string {
 	return ""
 }
 
+// workflowTemplateError validates a stepped template. The single-launch fields must be empty, since
+// a step carries its own tool, playbook, command, and Ansible controls, and leaving one set would
+// silently do nothing: nothing on a stepped template reads a top-level playbook or fork count. The
+// graph itself is checked through the same run.ValidatePipeline the dispatcher runs it through.
+func workflowTemplateError(req createTemplateRequest) string {
+	switch {
+	case req.Playbook != "" || req.Command != "" || req.Tool != "":
+		return "a workflow template carries steps, so it cannot also set a top-level tool, playbook, " +
+			"or command; each step names its own"
+	case req.Shards >= 2:
+		return "a workflow template is a pipeline, not a split, so it cannot set shards"
+	case len(req.Tags) > 0 || len(req.SkipTags) > 0 || req.Verbosity != 0 || req.Forks != 0 || req.DiffMode:
+		return "a workflow template cannot set top-level tags, verbosity, forks, or diff mode; " +
+			"set those on the individual steps that run Ansible"
+	}
+	if err := run.ValidatePipeline(req.Steps); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
 // createTemplateHandler stores a new template.
 func createTemplateHandler(store template.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -111,8 +154,7 @@ func createTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 			return
 		}
 		var req createTemplateRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		// A template is a saved launch spec, so writing one has to authorize the objects it will
@@ -134,13 +176,21 @@ func createTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 			respondError(w, log, http.StatusBadRequest, msg)
 			return
 		}
+		// Check the survey's own definitions here rather than at launch. A malformed pattern
+		// compiles nowhere until somebody launches, so saving one produced a template that failed
+		// every single launch instead of being refused at the point it was written.
+		if err := template.ValidateSurvey(req.Survey); err != nil {
+			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		}
 		t := &template.Template{
 			ID: template.NewID(), Name: req.Name, ProjectID: req.ProjectID,
 			Playbook: req.Playbook, Inventory: req.Inventory, InventoryID: req.InventoryID,
-			Tool: req.Tool, Command: req.Command, DryRun: req.DryRun,
+			Tool: req.Tool, Command: req.Command, DryRun: req.DryRun, Limit: req.Limit,
+			Tags: req.Tags, SkipTags: req.SkipTags, Verbosity: req.Verbosity, Forks: req.Forks, DiffMode: req.DiffMode,
 			Shards:        req.Shards,
 			CredentialIDs: req.CredentialIDs, SelectableCredentialIDs: req.SelectableCredentialIDs,
-			ExtraVars: req.ExtraVars, Survey: req.Survey,
+			ExtraVars: req.ExtraVars, Steps: req.Steps, Survey: req.Survey,
 			ConfirmOnLaunch: req.ConfirmOnLaunch,
 			Notifications:   req.Notifications,
 			Queue:           req.Queue, Image: req.Image, PullCredentialID: req.PullCredentialID,
@@ -165,8 +215,7 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 			return
 		}
 		var req createTemplateRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		// A template is a saved launch spec, so writing one has to authorize the objects it will
@@ -186,6 +235,13 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 
 		if msg := templateToolError(req); msg != "" {
 			respondError(w, log, http.StatusBadRequest, msg)
+			return
+		}
+		// Check the survey's own definitions here rather than at launch. A malformed pattern
+		// compiles nowhere until somebody launches, so saving one produced a template that failed
+		// every single launch instead of being refused at the point it was written.
+		if err := template.ValidateSurvey(req.Survey); err != nil {
+			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
 		}
 		id := r.PathValue("id")
@@ -217,10 +273,11 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 		t := &template.Template{
 			ID: id, Name: req.Name, ProjectID: req.ProjectID,
 			Playbook: req.Playbook, Inventory: req.Inventory, InventoryID: req.InventoryID,
-			Tool: req.Tool, Command: req.Command, DryRun: req.DryRun,
+			Tool: req.Tool, Command: req.Command, DryRun: req.DryRun, Limit: req.Limit,
+			Tags: req.Tags, SkipTags: req.SkipTags, Verbosity: req.Verbosity, Forks: req.Forks, DiffMode: req.DiffMode,
 			Shards:        req.Shards,
 			CredentialIDs: req.CredentialIDs, SelectableCredentialIDs: req.SelectableCredentialIDs,
-			ExtraVars: req.ExtraVars, Survey: req.Survey,
+			ExtraVars: req.ExtraVars, Steps: req.Steps, Survey: req.Survey,
 			ConfirmOnLaunch: req.ConfirmOnLaunch,
 			Notifications:   notifications,
 			Queue:           req.Queue, Image: req.Image, PullCredentialID: req.PullCredentialID,
@@ -363,10 +420,17 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 		}
 
 		// Decode the optional launch body: survey answers and a chosen credential subset. An empty
-		// body is valid and means no answers and no selection.
+		// body is valid and means no answers and no selection, but a malformed one is refused rather
+		// than silently read as empty.
+		//
+		// Discarding this error made a broken body launch the template with none of its overrides. A
+		// caller asking for a limit of one canary host, whose body was truncated or whose limit was
+		// sent as a number, got a live run against the whole inventory and a 202 saying it worked.
+		// Nothing about the response distinguished that from the run they asked for. A misspelled
+		// override reads the same way, so an unknown field is refused here too.
 		var launchReq launchTemplateRequest
-		if r.Body != nil {
-			_ = json.NewDecoder(r.Body).Decode(&launchReq)
+		if !decodeStrictOptional(w, log, r.Body, &launchReq) {
+			return
 		}
 
 		// A launch may choose only from the template's selectable set, so it cannot pull an arbitrary
@@ -403,6 +467,20 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 		vars := map[string]any{}
 		maps.Copy(vars, t.ExtraVars)
 		if len(t.Survey) > 0 {
+			// A launch may not set a survey variable through extra vars. Overrides are merged last
+			// so a launch can add a variable the template does not set, which meant an extra var
+			// named after a survey field simply overwrote the answer that had just been validated:
+			// every choice list, length bound, and pattern on that field was bypassable by sending
+			// the value under extra_vars instead of answers. The survey is a control, so a launch
+			// that tries to write around it is refused rather than quietly preferred.
+			for _, f := range t.Survey {
+				if _, taken := launchReq.ExtraVars[f.Var]; taken {
+					respondError(w, log, http.StatusBadRequest,
+						"extra_vars sets "+f.Var+", which this template asks as a survey question. "+
+							"Answer it under answers so it is validated.")
+					return
+				}
+			}
 			resolved, err := template.ResolveSurvey(t.Survey, launchReq.Answers)
 			if err != nil {
 				respondError(w, log, http.StatusBadRequest, err.Error())
@@ -424,6 +502,7 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 			run.WithExtraVars(vars),
 			run.WithDryRun(dryRun),
 			run.WithSource("template", t.ID), run.WithActor(actorName(r)),
+			run.WithActorType(actorType(r)),
 			run.WithLabels(launchReq.Labels),
 		)
 		if launchReq.Limit != nil && *launchReq.Limit != "" {
@@ -433,17 +512,29 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 			opts = append(opts, run.WithInventory(inventoryID))
 		}
 		var created *run.Run
-		if t.Shards >= 2 {
+		switch {
+		case len(t.Steps) > 0:
+			// A saved workflow fires as a pipeline, so its survey answers and extra vars, already
+			// folded into opts, reach every step. This takes priority over the split and single
+			// branches, which a stepped template does not use.
+			created, err = submitter.SubmitPipeline(r.Context(), t.Name, t.Inventory, t.Steps, opts...)
+		case t.Shards >= 2:
 			created, err = submitter.SubmitSplit(r.Context(), t.Playbook, t.Inventory, t.Shards, opts...)
-		} else {
+		default:
 			created, err = submitter.Submit(r.Context(), t.Playbook, t.Inventory, opts...)
 		}
 		switch {
 		case errors.Is(err, credential.ErrNotFound), errors.Is(err, credential.ErrNoKey),
 			errors.Is(err, project.ErrNotFound), errors.Is(err, inventory.ErrNotFound),
 			errors.Is(err, dispatch.ErrNoPlaybook), errors.Is(err, dispatch.ErrNoCommand),
-			errors.Is(err, dispatch.ErrUnknownTool):
+			errors.Is(err, dispatch.ErrUnknownTool), errors.Is(err, dispatch.ErrStepInput),
+			errors.Is(err, dispatch.ErrNoSteps), errors.Is(err, dispatch.ErrTooManySteps),
+			errors.Is(err, dispatch.ErrUnnamedStep), errors.Is(err, dispatch.ErrDuplicateStep),
+			errors.Is(err, dispatch.ErrUnknownDependency), errors.Is(err, dispatch.ErrDependencyCycle):
 			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		case errors.Is(err, dispatch.ErrPolicyDenied):
+			respondError(w, log, http.StatusForbidden, err.Error())
 			return
 		case err != nil:
 			log.Error("server: launch template: " + err.Error())
@@ -451,6 +542,6 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 			return
 		}
 		w.Header().Set("Location", "/v1/runs/"+created.ID)
-		respondJSON(w, log, http.StatusAccepted, created, wantsPretty(r))
+		respondJSON(w, log, http.StatusAccepted, maskRun(created), wantsPretty(r))
 	}
 }

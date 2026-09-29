@@ -36,12 +36,17 @@ func TestRoleForRefusesAnOwnedTokenWithoutAccounts(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
 			t.Parallel()
 			g := &authGate{log: zap.NewNop()}
-			role, err := g.roleFor(context.Background(), &auth.Token{ID: "tok_1", UserID: test.UserID})
+			role, boundUser, err := g.roleFor(context.Background(),
+				&auth.Token{ID: "tok_1", UserID: test.UserID})
 			if !errors.Is(err, test.Want) {
 				t.Fatalf("roleFor() error = %v, want %v", err, test.Want)
 			}
 			if role != test.WantRole {
 				t.Errorf("roleFor() role = %q, want %q", role, test.WantRole)
+			}
+			// Neither case resolves an account, so neither names one to record as the delegation.
+			if boundUser != "" {
+				t.Errorf("roleFor() bound account = %q, want empty", boundUser)
 			}
 		})
 	}

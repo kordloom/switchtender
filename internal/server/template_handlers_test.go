@@ -17,6 +17,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/template"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // TestLaunchTemplateCredentialSelection verifies prompt-on-launch credential selection: a chosen
@@ -218,7 +219,7 @@ func TestNotificationURLMasking(t *testing.T) {
 	}
 
 	// Saving the masked value back must not clobber the stored URL.
-	masked := maskNotifyURL(secret)
+	masked := util.MaskURL(secret)
 	body := `{"name":"deploy","playbook":"site.yml","notifications":[{"kind":"slack","url":"` + masked + `"}]}`
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/v1/templates/tpl_1", strings.NewReader(body)))
@@ -258,7 +259,7 @@ func TestPagerDutyKeyMaskRoundTrip(t *testing.T) {
 
 	// Echoing the masked key back on an edit must keep the stored key, not save the marker.
 	body := `{"name":"deploy","playbook":"site.yml",` +
-		`"notifications":[{"kind":"pagerduty","key":"` + maskMarker + `"}]}`
+		`"notifications":[{"kind":"pagerduty","key":"` + util.MaskMarker + `"}]}`
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/v1/templates/tpl_pd", strings.NewReader(body)))
 	if rec.Code != http.StatusOK {
@@ -270,5 +271,121 @@ func TestPagerDutyKeyMaskRoundTrip(t *testing.T) {
 	}
 	if len(after.Notifications) != 1 || after.Notifications[0].Key != secret {
 		t.Errorf("stored notifications = %+v, want the routing key preserved", after.Notifications)
+	}
+}
+
+// TestTemplateSurveyValidatedAtSave proves a malformed survey definition is refused when the
+// template is written rather than on every launch afterward.
+//
+// A pattern that does not compile compiled nowhere until somebody launched, so saving one produced
+// a template that failed every single launch with an obscure error and no indication that the fault
+// was in the definition rather than the answer.
+func TestTemplateSurveyValidatedAtSave(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name     string
+		Survey   string
+		WantCode int
+	}{{ // Test 0: A well formed survey saves.
+		Name:     "valid",
+		Survey:   `[{"var":"env","type":"text","pattern":"^[a-z]+$"}]`,
+		WantCode: http.StatusCreated,
+	}, { // Test 1: An uncompilable pattern is refused at save.
+		Name:     "bad pattern",
+		Survey:   `[{"var":"env","type":"text","pattern":"[unclosed"}]`,
+		WantCode: http.StatusBadRequest,
+	}, { // Test 2: A choice field offering nothing can never be answered.
+		Name:     "choice with no choices",
+		Survey:   `[{"var":"env","type":"choice"}]`,
+		WantCode: http.StatusBadRequest,
+	}, { // Test 3: Inverted length bounds admit no answer at all.
+		Name:     "inverted lengths",
+		Survey:   `[{"var":"env","type":"text","min_length":9,"max_length":2}]`,
+		WantCode: http.StatusBadRequest,
+	}}
+	for i, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", i, test.Name), func(t *testing.T) {
+			t.Parallel()
+			store := template.NewMemStore()
+			handler := New(run.NewMemStore(), &fakeSubmitter{run: &run.Run{ID: "run_x"}},
+				zap.NewNop(), WithTemplates(store)).Handler()
+
+			body := fmt.Sprintf(`{"name":"deploy","playbook":"site.yml","survey":%s}`, test.Survey)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/templates",
+				strings.NewReader(body)))
+			if rec.Code != test.WantCode {
+				t.Fatalf("create status = %d, want %d (body %s)",
+					rec.Code, test.WantCode, rec.Body.String())
+			}
+			if test.WantCode != http.StatusCreated {
+				return
+			}
+
+			// An update carries the same guard, or a valid template could be edited into one that
+			// cannot launch.
+			var created template.Template
+			if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+				t.Fatalf("decode created template: %v", err)
+			}
+			rec = httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/v1/templates/"+created.ID,
+				strings.NewReader(
+					`{"name":"deploy","playbook":"site.yml",`+
+						`"survey":[{"var":"env","type":"text","pattern":"[unclosed"}]}`)))
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("update with a bad pattern = %d, want 400", rec.Code)
+			}
+		})
+	}
+}
+
+// TestLaunchCannotWriteAroundTheSurvey proves a launch may not set a survey variable through extra
+// vars, which would skip the validation the survey exists to apply.
+//
+// Overrides merge last so a launch can add a variable the template does not set. That meant an extra
+// var named after a survey field simply overwrote the answer that had just been checked, and every
+// choice list, length bound, and pattern on that field was bypassable by moving the value from
+// answers to extra_vars. The docs describe the survey as enforced, so this was a governance control
+// that quietly did nothing.
+func TestLaunchCannotWriteAroundTheSurvey(t *testing.T) {
+	t.Parallel()
+	store := template.NewMemStore()
+	if err := store.Save(context.Background(), &template.Template{
+		ID: "tpl_1", Name: "deploy", Playbook: "site.yml",
+		Survey: []template.SurveyField{{
+			Var: "environment", Type: template.FieldChoice,
+			Choices: []string{"staging", "prod"}, Required: true,
+		}},
+		CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	sub := &fakeSubmitter{run: &run.Run{ID: "run_x"}}
+	handler := New(run.NewMemStore(), sub, zap.NewNop(), WithTemplates(store)).Handler()
+
+	launch := func(body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost,
+			"/v1/templates/tpl_1/launch", strings.NewReader(body)))
+		return rec
+	}
+
+	// A value outside the choice list is refused when answered honestly.
+	if rec := launch(`{"answers":{"environment":"production-oops"}}`); rec.Code != http.StatusBadRequest {
+		t.Errorf("an answer outside the choices = %d, want 400", rec.Code)
+	}
+	// The same value smuggled through extra_vars must also be refused, not preferred.
+	rec := launch(`{"answers":{"environment":"staging"},"extra_vars":{"environment":"production-oops"}}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("extra_vars overriding a survey field = %d, want 400 (body %s)",
+			rec.Code, rec.Body.String())
+	}
+	if sub.gotRun != nil && sub.gotRun.ExtraVars["environment"] == "production-oops" {
+		t.Error("the launch reached the dispatcher carrying the unvalidated value")
+	}
+	// An extra var the survey does not ask about is still allowed.
+	if rec := launch(`{"answers":{"environment":"staging"},"extra_vars":{"note":"hello"}}`); rec.Code != http.StatusAccepted {
+		t.Errorf("an unrelated extra var = %d, want 202 (body %s)", rec.Code, rec.Body.String())
 	}
 }

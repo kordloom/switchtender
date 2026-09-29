@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -47,8 +46,7 @@ func createTeamHandler(store team.Store, log *zap.Logger) http.HandlerFunc {
 			return
 		}
 		var req createTeamRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		if req.Name == "" {
@@ -139,8 +137,7 @@ func addTeamMemberHandler(store team.Store, log *zap.Logger) http.HandlerFunc {
 			return
 		}
 		var req teamMemberRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		if req.UserID == "" {

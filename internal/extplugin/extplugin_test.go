@@ -82,13 +82,33 @@ func TestLoadSkipsBrokenEntries(t *testing.T) {
 //nolint:funlen // One load drives all five seams; splitting would rebuild and reload per seam.
 func TestLoadRegistersEverySeam(t *testing.T) {
 	notifyFile := filepath.Join(t.TempDir(), "notified")
-	t.Setenv("EXTTEST_NOTIFY_FILE", notifyFile)
+	// A plugin receives only the namespaced environment an operator passes it deliberately, so the
+	// test fixture is configured the same way a real plugin would be.
+	t.Setenv("SWITCHTENDER_PLUGIN_NOTIFY_FILE", notifyFile)
+	// Set the deployment encryption key in this process so the plugin's report about whether it
+	// could read one means something. Without it the assertion below passes whether or not the
+	// loader withholds anything.
+	t.Setenv("SWITCHTENDER_ENCRYPTION_KEY", "install-key-must-not-escape")
 
+	// The seam registries are process global and nothing unregisters, so a second load in the same
+	// process finds its names taken. Load refuses that plugin rather than panicking, which is right
+	// for a server that must start with its remaining plugins, but it leaves the first load's client
+	// registered and that client is dead by then. Saying so plainly beats failing later with a gRPC
+	// connection error that names none of this.
+	if run.ValidTool("exttest-hello") {
+		t.Skip("the plugin seams are already registered in this process, so a second load would be " +
+			"refused as a duplicate; run this test once per process")
+	}
 	closePlugins, err := Load(buildPlugin(t), zap.NewNop())
 	if err != nil {
 		t.Fatalf("Load error: %v", err)
 	}
 	defer closePlugins()
+	// Load skips a plugin it cannot register and reports that through the log, which is discarded
+	// here, so confirm the seam actually arrived before driving it.
+	if !run.ValidTool("exttest-hello") {
+		t.Fatal("Load did not register the plugin tool, so it was skipped rather than loaded")
+	}
 
 	// Seam 1: the tool validates and routes, with output, extra vars, dry run, and exit code
 	// crossing the wire.
@@ -173,8 +193,28 @@ func TestLoadRegistersEverySeam(t *testing.T) {
 		t.Fatalf("run status = %q, want succeeded", status)
 	}
 	note := waitFile(t, notifyFile)
-	if want := submitted.ID + "|0"; note != want {
-		t.Errorf("notifier recorded %q, want %q (run id with extra vars redacted)", note, want)
+	if want := submitted.ID + "|0|key="; note != want {
+		t.Errorf("notifier recorded %q, want %q (run id, extra vars redacted, and no install key)",
+			note, want)
+	}
+	// The plugin reports what it could read of the deployment encryption key. Anything after "key="
+	// means the loader handed a subprocess the secret that seals every stored credential.
+	if _, leaked, _ := strings.Cut(note, "key="); leaked != "" {
+		t.Errorf("the plugin could read the deployment encryption key %q", leaked)
+	}
+
+	// Last, because it ends the plugin process: a seam outlives the process it proxies. Nothing
+	// unregisters a name, so a plugin that dies stays registered and answers every later call with a
+	// transport error naming neither the plugin nor the reason. Killing it here is the same state a
+	// crash leaves behind, and it rides this load because a second one would be refused as a
+	// duplicate.
+	closePlugins()
+	_, err = roundhouse.NewAnsibleRunner().Run(context.Background(), roundhouse.Spec{
+		Tool: "exttest-hello", Playbook: "end-to-end",
+	}, io.Discard)
+	if !errors.Is(err, ErrPluginGone) {
+		t.Errorf("a call through a dead plugin returned %v, want ErrPluginGone so an operator reading "+
+			"a run log can tell this from a network fault or their own playbook", err)
 	}
 }
 

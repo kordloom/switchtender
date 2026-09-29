@@ -2,11 +2,13 @@ package schedule
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/template"
 )
@@ -32,6 +34,9 @@ type Scheduler struct {
 	submitter Submitter
 	// templates resolves schedules that fire stored templates, nil when unused.
 	templates template.Store
+	// audits records each fire as a chain entry before the run exists, nil when no trail is kept.
+	// With it, a scheduled run carries a creation receipt like any other and can be receipted.
+	audits audit.Store
 	// log records scheduler activity.
 	log *zap.Logger
 	// interval is how often due schedules are checked.
@@ -50,6 +55,12 @@ type SchedulerOption func(*Scheduler)
 // WithTemplates lets schedules fire stored job templates by id.
 func WithTemplates(store template.Store) SchedulerOption {
 	return func(s *Scheduler) { s.templates = store }
+}
+
+// WithAudits records each fire on the tamper-evident chain before the run is created, so a
+// scheduled run has the same creation evidence as one a person requested.
+func WithAudits(store audit.Store) SchedulerOption {
+	return func(s *Scheduler) { s.audits = store }
 }
 
 // WithInterval sets how often due schedules are checked. Values below one are ignored.
@@ -118,7 +129,7 @@ func (s *Scheduler) tick(now time.Time) {
 			continue
 		}
 
-		next, err := NextFire(sc.Cron, now)
+		next, err := sc.NextFire(now)
 		if err != nil {
 			s.log.Error("schedule: next fire: "+err.Error(), zap.String("schedule_id", sc.ID))
 			continue
@@ -137,23 +148,70 @@ func (s *Scheduler) tick(now time.Time) {
 		if err != nil {
 			s.log.Error("schedule: fire: "+err.Error(), zap.String("schedule_id", sc.ID))
 		}
-		sc.LastRunAt = &now
-		if runID != "" {
-			sc.LastRunID = runID
-		}
-		sc.NextRunAt = &next
-		if err := s.store.Save(s.ctx, sc); err != nil {
-			s.log.Error("schedule: save: "+err.Error(), zap.String("schedule_id", sc.ID))
+		// Only what the fire owns is written back. sc came from the List above, so it is a snapshot
+		// taken before the run and writing it whole reverted anything an operator changed meanwhile:
+		// a disable came back enabled, an edit was rolled back, and a delete was re-inserted as a
+		// live schedule that kept firing. NextRunAt is deliberately not written either, because
+		// ClaimDue already advanced it and rewriting it here is what reverted an edited cron.
+		if err := s.store.RecordFire(s.ctx, sc.ID, now, runID); err != nil {
+			s.log.Error("schedule: record fire: "+err.Error(), zap.String("schedule_id", sc.ID))
 		}
 	}
 }
 
+// fireRecord is the canonical body a schedule's fire entry commits: which schedule fired and what
+// it was configured to launch at that moment.
+type fireRecord struct {
+	// ScheduleID and Name identify the schedule.
+	ScheduleID string `json:"schedule_id"`
+	Name       string `json:"name,omitempty"`
+	// TemplateID, Playbook, Inventory, and Shards say what the fire launches.
+	TemplateID string `json:"template_id,omitempty"`
+	Playbook   string `json:"playbook,omitempty"`
+	Inventory  string `json:"inventory,omitempty"`
+	Shards     int    `json:"shards,omitempty"`
+	// Steps counts a pipeline schedule's declared steps.
+	Steps int `json:"steps,omitempty"`
+}
+
+// recordFireEntry appends the chain entry for a fire and returns a context carrying its receipt, so
+// the run the fire creates is tied to the record of what launched it. It fails closed: a fire that
+// cannot be recorded is skipped rather than performed silently, the same rule the API gate applies
+// to every mutation. Without a configured chain the context is returned unchanged.
+func (s *Scheduler) recordFireEntry(ctx context.Context, sc *Schedule) (context.Context, error) {
+	if s.audits == nil {
+		return ctx, nil
+	}
+	body, err := json.Marshal(fireRecord{
+		ScheduleID: sc.ID, Name: sc.Name, TemplateID: sc.TemplateID,
+		Playbook: sc.Playbook, Inventory: sc.Inventory, Shards: sc.Shards, Steps: len(sc.Steps),
+	})
+	if err != nil {
+		return ctx, err
+	}
+	digest, nonce, err := audit.ContentDigestOf(body)
+	if err != nil {
+		return ctx, err
+	}
+	entry := &audit.Entry{
+		ID: audit.NewID(), At: time.Now(),
+		Actor: "system:scheduler", ActorType: "system",
+		Method: audit.MethodSchedule, Path: "/schedules/" + sc.ID + "/fired",
+		ContentDigest: digest, Nonce: nonce,
+	}
+	if err := s.audits.Append(ctx, entry); err != nil {
+		return ctx, fmt.Errorf("refused: the fire could not be recorded in the audit trail: %w", err)
+	}
+	return run.WithAuditReceipt(ctx, audit.Receipt(entry)), nil
+}
+
 // fire submits the schedule's target and returns the created run id.
 func (s *Scheduler) fire(ctx context.Context, sc *Schedule) (string, error) {
-	var (
-		created *run.Run
-		err     error
-	)
+	ctx, err := s.recordFireEntry(ctx, sc)
+	if err != nil {
+		return "", err
+	}
+	var created *run.Run
 	switch {
 	case sc.TemplateID != "":
 		created, err = s.fireTemplate(ctx, sc)
@@ -186,8 +244,13 @@ func (s *Scheduler) fireTemplate(ctx context.Context, sc *Schedule) (*run.Run, e
 		return nil, fmt.Errorf("schedule %s: %w", sc.ID, err)
 	}
 	opts := append(t.LaunchOptions(), run.WithSource("schedule", sc.ID))
-	if t.Shards >= 2 {
+	switch {
+	case len(t.Steps) > 0:
+		// A scheduled workflow template fires its graph, the same as an on-demand launch does.
+		return s.submitter.SubmitPipeline(ctx, t.Name, t.Inventory, t.Steps, opts...)
+	case t.Shards >= 2:
 		return s.submitter.SubmitSplit(ctx, t.Playbook, t.Inventory, t.Shards, opts...)
+	default:
+		return s.submitter.Submit(ctx, t.Playbook, t.Inventory, opts...)
 	}
-	return s.submitter.Submit(ctx, t.Playbook, t.Inventory, opts...)
 }

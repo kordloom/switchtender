@@ -8,8 +8,8 @@
 # HTTP API
 
 Every endpoint the server exposes. The API is served under the `/v1` base path. The web UI at
-`/ui/`, along with `/healthz`, `/metrics`, the OpenID Connect and SAML sign-in routes, the webhook
-`/hooks` path, and the `/relay` worker path, is unversioned. The root redirects to the UI.
+`/ui/`, along with `/healthz`, `/readyz`, `/metrics`, the OpenID Connect and SAML sign-in routes, the
+webhook `/hooks` path, and the `/relay` worker path, is unversioned. The root redirects to the UI.
 
 | Method | Path                    | What                                                    |
 |--------|-------------------------|---------------------------------------------------------|
@@ -18,6 +18,7 @@ Every endpoint the server exposes. The API is served under the `/v1` base path. 
 | GET    | `/v1/runs/{id}`            | One run.                                                |
 | POST   | `/v1/runs/{id}/cancel`     | Cancel a pending or running run.                        |
 | POST   | `/v1/runs/{id}/retry`      | New split from only the failed shards of a finished one.|
+| POST   | `/v1/runs/{id}/relaunch-failed` | Re-run only the hosts a finished run left failed or unreachable. |
 | POST   | `/v1/runs/{id}/approve`    | Release a run held for approval so it runs.             |
 | POST   | `/v1/runs/{id}/reject`     | Deny a run held for approval.                           |
 | GET    | `/v1/runs/{id}/shards`     | Shard runs of a split.                                  |
@@ -56,7 +57,7 @@ Every endpoint the server exposes. The API is served under the `/v1` base path. 
 | GET    | `/v1/triggers`             | List webhook triggers.                                  |
 | DELETE | `/v1/triggers/{id}`        | Delete a trigger, revoking its webhook.                 |
 | POST   | `/hooks/{token}`        | Fire a trigger from a git push. A required HMAC signature is checked first.|
-| POST   | `/v1/credentials`          | Store a credential, encrypted at rest. Thirteen built-in kinds, or a custom type via `type_id` and `fields`. Non-secret `settings` ride beside the secret and return from the API. |
+| POST   | `/v1/credentials`          | Store a credential, encrypted at rest. Fourteen built-in kinds, or a custom type via `type_id` and `fields`. Non-secret `settings` ride beside the secret and return from the API. |
 | GET    | `/v1/credentials`          | List credentials, secrets never included.               |
 | POST   | `/v1/credential-types`     | Define a custom credential type: fields and how they inject. Admin only. |
 | GET    | `/v1/credential-types`     | List custom credential types. Admin only.               |
@@ -100,16 +101,23 @@ Every endpoint the server exposes. The API is served under the `/v1` base path. 
 | GET    | `/v1/inventories`          | List stored inventories.                                |
 | PUT    | `/v1/inventories/{id}`     | Update a stored inventory.                              |
 | DELETE | `/v1/inventories/{id}`     | Delete a stored inventory.                              |
-| POST   | `/v1/policies`             | Create an approval policy that gates matching runs.     |
+| POST   | `/v1/policies`             | Create a policy that holds or denies matching runs.     |
 | GET    | `/v1/policies`             | List approval policies.                                 |
 | PUT    | `/v1/policies/{id}`        | Update an approval policy.                              |
 | DELETE | `/v1/policies/{id}`        | Delete an approval policy.                              |
-| POST   | `/v1/import/{format}`      | Import an AWX or Semaphore export. Format is awx or semaphore.|
-| GET    | `/v1/audit`                | The mutation trail, admin only.                         |
+| POST   | `/v1/import/{format}`      | Import an AWX, Semaphore, or Rundeck export. Format is awx, semaphore, or rundeck. Rundeck takes `?inventory=` to say which hosts its jobs target.|
+| GET    | `/v1/audit`                | A page of the mutation trail, admin only. `?limit=` up to 1000, default 100; `has_more` reports whether older entries remain. |
 | GET    | `/v1/audit/verify`         | Verify the audit hash chain is intact.                  |
-| GET    | `/v1/audit/export`         | Signed, self-verifying snapshot of the audit chain.     |
+| GET    | `/v1/audit/bundle`         | The audit chain as a signed LoomSeal bundle, verifiable offline or on the /verify page. |
 | GET    | `/metrics`              | Prometheus series: run, fleet, queue-depth, and worker gauges, plus a run-duration histogram. |
 | GET    | `/healthz`              | Liveness.                                               |
+| GET    | `/readyz`               | Readiness: 200 once the store answers, 503 while it does not. |
+
+A streamed export whose status line has already been sent cannot report a later failure with a
+status code. The run event NDJSON download and the run log download therefore end with a
+`{"export_incomplete":true,"reason":"..."}` line when they stop early, so a short file is never
+mistaken for a whole one.
+
 
 ## Account profiles
 
@@ -164,6 +172,78 @@ Zero, or the field omitted, leaves launches on the server default set by `--run-
 template saved before this field existed is unchanged. A run that exceeds its timeout is canceled
 and finalized as failed. A launch cannot raise the cap; the template's value is what applies.
 
+## Ansible run controls
+
+A run submission and a template both accept the Ansible controls that used to require a hand-built
+command. They ride onto a run the same way from the API, a schedule, or a webhook trigger, and a
+retry keeps them.
+
+| Field | Type | What it does |
+|-------|------|--------------|
+| `limit` | string | Narrows the run to the hosts matching this pattern. Becomes `--limit`. Empty targets the whole inventory. |
+| `tags` | list of strings | Runs only the plays and tasks carrying one of these tags. Becomes `--tags`. |
+| `skip_tags` | list of strings | Skips the plays and tasks carrying one of these tags. Becomes `--skip-tags`. |
+| `forks` | integer | How many hosts Ansible addresses at once. Zero leaves the Ansible default. Becomes `--forks`. |
+| `verbosity` | integer 0 to 4 | Raises Ansible logging. One through four becomes `-v` through `-vvvv`; a higher number is clamped to four. |
+| `diff_mode` | boolean | Shows the before and after of every changed file and template. Becomes `--diff`. |
+
+```bash
+curl -X POST https://switchtender.example.com/v1/runs \
+  -H "Authorization: Bearer $SWITCHTENDER_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "playbook": "plays/deploy.yml",
+    "inventory": "prod",
+    "limit": "canary01",
+    "tags": ["web", "config"],
+    "skip_tags": ["reboot"],
+    "forks": 25,
+    "verbosity": 2,
+    "diff_mode": true
+  }'
+```
+
+These apply to the Ansible tool. The other tools ignore them, so a Bash or Terraform template that
+carries one is unaffected.
+
+A run submission also accepts `extra_vars`, an object of variables injected into the run. Ansible
+receives them the way `--extra-vars` supplies them, and a plugin tool reads them as its input. A
+template carries its own `extra_vars` and a launch may merge more over them.
+
+## Saved workflows
+
+*Next release.* A template may carry `steps`, a pipeline graph, instead of a single tool. Such a
+template is a saved workflow: every path that fires a template, a launch, a schedule, or a webhook
+trigger, runs the graph as a pipeline, and the template's survey answers and extra vars reach every
+step. A workflow template sets no top-level `playbook`, `command`, `tool`, `shards`, or Ansible
+controls, since each step names its own; the graph is validated when the template is saved, so a
+cycle or an unknown dependency is refused then rather than on every launch.
+
+```bash
+curl -X POST https://switchtender.example.com/v1/templates   -H "Authorization: Bearer $SWITCHTENDER_TOKEN"   -H 'Content-Type: application/json'   -d '{
+    "name": "build and ship",
+    "inventory": "prod",
+    "steps": [
+      {"name": "build", "tool": "bash", "command": "make release"},
+      {"name": "deploy", "playbook": "deploy.yml", "depends_on": ["build"]}
+    ]
+  }'
+```
+
+## Survey field constraints
+
+A template survey field accepts bounds beyond its type, checked at launch before any answer becomes
+an extra var. A field also takes an optional `help` string shown beneath its prompt, and a
+`multiline` type for a block of text such as a set of variables or a note.
+
+| Field kind | Constraints |
+|------------|-------------|
+| `int` | `min` and `max` bound the answer, inclusive. |
+| `text`, `multiline` | `min_length` and `max_length` bound the length; `pattern` is a regular expression the whole answer must match. |
+| `choice` | The answer must be one of `choices`. |
+
+A launch that violates a constraint is refused with the field it failed, and no run is submitted.
+
 ## Per-template notifications
 
 A template or a run submission may carry `notifications`, a list of targets that receive its
@@ -201,6 +281,40 @@ delivery. A Twilio or email target names only a recipient. The account credentia
 flags, so a template never carries them. On read, webhook URLs, PagerDuty routing keys, and
 Grafana tokens come back masked; an edit that echoes the mask back keeps the stored value.
 
+## Schedule timezone
+
+A schedule reads its cron expression in the server's local time unless it carries a `timezone`, an
+IANA name such as `America/New_York` or `Europe/Berlin`. With one set, `0 2 * * *` fires at 02:00
+in that zone and follows its daylight-saving shifts, so a nightly window stays put across the year.
+The field is accepted on create and update and applies to the same expression the preview endpoint
+renders.
+
+```bash
+curl -X POST https://switchtender.example.com/v1/schedules \
+  -H "Authorization: Bearer $SWITCHTENDER_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"cron":"0 2 * * *","timezone":"America/New_York","template_id":"tpl_abc123"}'
+```
+
+## Fleet view windows
+
+`/v1/fleet` and `/v1/tasks` take a `window`, the number of recent runs per host or per task the
+view considers, and `/v1/hosts/{host}/runs` takes a `limit`. All three default to 10. The window is
+capped at 100 and the host history limit at 500; a larger value is answered with the cap, and the
+response echoes the window it actually used. The caps exist because the per-host and per-task
+summaries are kept when their runs are deleted, so on a long-lived fleet the tables hold a row for
+every host of every run, and every row a window admits becomes an element of the answer.
+
+The same tables are bounded by count rather than by age. `--retain-history` keeps the newest N
+summaries for each host and each task and drops the rest, so a host's outcome history still
+outlives its runs without the tables growing forever. N is never allowed below 500, the deepest
+window these endpoints will answer, so trimmed history is history no request could have reached.
+
+```bash
+curl -s "https://switchtender.example.com/v1/fleet?window=30" \
+  -H "Authorization: Bearer $SWITCHTENDER_TOKEN"
+```
+
 ## Relay endpoints
 
 With `--worker-token` set, the server also serves the mesh relay under `/relay`: the execution
@@ -217,4 +331,5 @@ presents the worker bearer token.
 | POST   | `/relay/v1/runs/{id}/log`          | Append captured output.                       |
 | POST   | `/relay/v1/runs/{id}/events`       | Append structured events.                     |
 | POST   | `/relay/v1/runs/{id}/host-summary` | Save the run's per-host summaries.            |
+| POST   | `/relay/v1/runs/{id}/host-facts`   | Save the facts the run gathered per host.     |
 | POST   | `/relay/v1/runs/{id}/task-summary` | Save the run's per-task summaries.            |

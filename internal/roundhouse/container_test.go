@@ -3,10 +3,15 @@ package roundhouse
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestRegistryHost(t *testing.T) {
@@ -58,17 +63,22 @@ func TestRunArgs(t *testing.T) {
 		"--pids-limit 512",
 		"--network bridge",
 		"-w /checkout",
-		"--env-file /tmp/env",
+		// The env is mounted and sourced, never passed with --env-file, so its values never enter the
+		// container's inspectable environment.
+		"-v /tmp/env:/tmp/env:ro",
 		"-v /checkout:/checkout:ro",
-		"quay.io/ansible/creator-ee:latest ansible-playbook",
+		`sh -c . "$1"; shift; exec "$@" sh /tmp/env ansible-playbook`,
 		"-i /checkout/hosts.ini --limit web01 -- /checkout/site.yml",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("runArgs() = %q, missing %q", joined, want)
 		}
 	}
-	// The image must precede the ansible-playbook command, not appear as a mount.
-	if idx := slices.Index(args, spec.Image); idx == -1 || args[idx+1] != "ansible-playbook" {
+	if strings.Contains(joined, "--env-file") {
+		t.Errorf("runArgs() passes --env-file, which would expose secrets to docker inspect: %v", args)
+	}
+	// The image must precede the shell wrapper that sources the env and execs the tool.
+	if idx := slices.Index(args, spec.Image); idx == -1 || args[idx+1] != "sh" {
 		t.Errorf("image not positioned before the command: %v", args)
 	}
 }
@@ -83,6 +93,13 @@ func TestRunArgsRefusesSensitiveMounts(t *testing.T) {
 		{"root dir", Spec{Playbook: "/site.yml", Dir: "/", Image: "alpine"}},                                     // Test 0.
 		{"etc dir", Spec{Playbook: "/etc/site.yml", Dir: "/etc", Image: "alpine"}},                               // Test 1.
 		{"docker socket", Spec{Playbook: "/checkout/s.yml", Inventory: "/var/run/docker.sock", Image: "alpine"}}, // Test 2.
+		// The socket's directory is the same escape as the socket. /var is refused but subpaths are
+		// deliberately allowed, so /var/run needs naming on its own or a container gets the host.
+		{"var run dir", Spec{Playbook: "/checkout/s.yml", Dir: "/var/run", Image: "alpine"}}, // Test 3.
+		{"run dir", Spec{Playbook: "/checkout/s.yml", Dir: "/run", Image: "alpine"}},         // Test 4.
+		{"podman socket", Spec{Playbook: "/checkout/s.yml", // Test 5.
+			Inventory: "/run/podman/podman.sock", Image: "alpine"}},
+		{"docker lib", Spec{Playbook: "/checkout/s.yml", Dir: "/var/lib/docker", Image: "alpine"}}, // Test 6.
 	}
 	for i, test := range tests {
 		plan, cleanup, err := buildContainerPlan(test.Spec)
@@ -217,5 +234,126 @@ func TestContainerRunRejectsUnpinnedImage(t *testing.T) {
 	}
 	if res.ExitCode != -1 {
 		t.Errorf("ExitCode = %d, want -1", res.ExitCode)
+	}
+}
+
+// TestRegistryLoginIsScopedToTheRun proves a private-image credential does not outlive the run that
+// used it, and does not authenticate a later run of a different project.
+//
+// The runtime writes a login into its config directory, and that directory used to be the executor's
+// own. One project's credential therefore stayed on disk after its run and served every later pull,
+// so a project with no credential could pull from a registry it was never granted. The login now
+// lands in a per-run directory that is removed with the run.
+func TestRegistryLoginIsScopedToTheRun(t *testing.T) {
+	t.Parallel()
+	dir, cleanup, err := newRuntimeConfigDir()
+	if err != nil {
+		t.Fatalf("newRuntimeConfigDir() error = %v", err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+	// Another user on the executor must not read a credential out of it.
+	if perm := info.Mode().Perm(); perm != 0o700 {
+		t.Errorf("config dir mode = %v, want 0700", perm)
+	}
+	// A second run gets its own directory, so one run's login cannot serve another.
+	other, cleanupOther, err := newRuntimeConfigDir()
+	if err != nil {
+		t.Fatalf("second newRuntimeConfigDir() error = %v", err)
+	}
+	if other == dir {
+		t.Error("two runs share a registry config directory, so one run's login serves the other")
+	}
+	cleanupOther()
+
+	// Writing a credential there and cleaning up removes it from disk.
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"auths":{}}`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	cleanup()
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("the registry config survived the run, err = %v", err)
+	}
+}
+
+// TestCredentialFilesAreMountedForEveryTool proves a credential injection's file reaches the
+// container, whatever tool the run uses.
+//
+// An injection writes the file on the host and points an environment variable at it. The variable
+// crosses into the container unchanged, so without the mount the tool is handed a path that is not
+// there: a GCP service account or a kubeconfig silently fails to apply and the run looks like a
+// broken credential rather than a missing mount.
+func TestCredentialFilesAreMountedForEveryTool(t *testing.T) {
+	t.Parallel()
+	credFile := filepath.Join(t.TempDir(), "gcp.json")
+	if err := os.WriteFile(credFile, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	tools := []struct {
+		Tool string
+		Spec Spec
+	}{
+		{"ansible", Spec{Tool: "ansible", Playbook: "/checkout/site.yml", Dir: "/checkout",
+			Image: "alpine", CredentialFiles: []string{credFile}}},
+		{"bash", Spec{Tool: "bash", Command: "echo hi", Dir: "/checkout",
+			Image: "alpine", CredentialFiles: []string{credFile}}},
+		{"python", Spec{Tool: "python", Command: "print(1)", Dir: "/checkout",
+			Image: "alpine", CredentialFiles: []string{credFile}}},
+		{"terraform", Spec{Tool: "terraform", Command: "/checkout", Dir: "/checkout",
+			Image: "alpine", CredentialFiles: []string{credFile}}},
+	}
+	for _, tc := range tools {
+		plan, cleanup, err := buildContainerPlan(tc.Spec)
+		if err != nil {
+			cleanup()
+			t.Fatalf("%s: buildContainerPlan() error = %v", tc.Tool, err)
+		}
+		var mounted bool
+		for _, m := range plan.mounts {
+			if m.path == credFile {
+				mounted = true
+			}
+		}
+		cleanup()
+		if !mounted {
+			t.Errorf("%s: the credential file is not mounted, so the variable pointing at it names "+
+				"a path that does not exist in the container", tc.Tool)
+		}
+	}
+}
+
+// TestRunArgsRunsAsHostUser checks the container runs as the host executor's own uid:gid, so the
+// private 0600/0700 files it owns (callback config, credential files, events sidecar) are readable
+// and writable by the identically-uid'd in-container process. Without a matching --user the sidecar
+// and callback silently fail and a run's events are lost.
+func TestRunArgsRunsAsHostUser(t *testing.T) {
+	t.Parallel()
+	if os.Getuid() < 0 {
+		t.Skip("uid mapping is a unix concern")
+	}
+	c := newContainerRunner("docker", "missing", false, nil, &pluginCache{}, DefaultContainerLimits())
+	spec := Spec{Playbook: "/work/site.yml", Dir: "/work", Image: "alpine"}
+	plan, cleanup, err := buildContainerPlan(spec)
+	if err != nil {
+		t.Fatalf("buildContainerPlan() error = %v", err)
+	}
+	defer cleanup()
+	args, err := c.runArgs(spec, plan, "ym-test", "/tmp/env")
+	if err != nil {
+		t.Fatalf("runArgs() error = %v", err)
+	}
+	idx := slices.Index(args, "--user")
+	if idx == -1 || idx+1 >= len(args) {
+		t.Fatalf("runArgs() = %q, missing a --user flag", args)
+	}
+	want := fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
+	if diff := cmp.Diff(want, args[idx+1]); diff != "" {
+		t.Errorf("--user value mismatch (-want +got):\n%s", diff)
+	}
+	// The flag must precede the image so it configures the run, not the tool.
+	if img := slices.Index(args, "alpine"); img != -1 && idx > img {
+		t.Errorf("--user at %d comes after the image at %d, want it as a run flag", idx, img)
 	}
 }

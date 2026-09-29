@@ -3,6 +3,8 @@
 package run
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"maps"
 	"sort"
@@ -162,6 +164,16 @@ type Run struct {
 	ShardCount *int `json:"shard_count,omitempty"`
 	// Limit restricts execution to a host pattern, used to target a shard's hosts.
 	Limit string `json:"limit,omitempty"`
+	// Tags runs only Ansible plays and tasks carrying one of these tags. Ignored by other tools.
+	Tags []string `json:"tags,omitempty"`
+	// SkipTags skips Ansible plays and tasks carrying one of these tags. Ignored by other tools.
+	SkipTags []string `json:"skip_tags,omitempty"`
+	// Verbosity raises Ansible logging from 0 to 4, for debugging a run without editing the playbook.
+	Verbosity int `json:"verbosity,omitempty"`
+	// Forks sets how many hosts Ansible addresses in parallel. Zero leaves Ansible's default.
+	Forks int `json:"forks,omitempty"`
+	// DiffMode shows the before-and-after of every Ansible file and template change.
+	DiffMode bool `json:"diff_mode,omitempty"`
 	// Kind distinguishes a plain run from a split or pipeline parent. Empty means a plain run.
 	Kind string `json:"kind,omitempty"`
 	// RetryOf links a split created by a failed shard retry back to the run it retries.
@@ -185,6 +197,14 @@ type Run struct {
 	ClaimedBy string `json:"claimed_by,omitempty"`
 	// ClaimedAt is when the lease was taken or last renewed.
 	ClaimedAt *time.Time `json:"claimed_at,omitempty"`
+	// ClaimSecret is the per-claim capability minted when a worker leases the run. It authorizes the
+	// reports that worker makes back over the relay, where every worker presents the same shared
+	// token and the lease name alone is not proof. The json:"-" tag is load-bearing: it keeps the
+	// secret out of the relay's own run reads, every bundle, every SIEM forward, and every evidence
+	// document, so a worker cannot read it back the way it can read the lease name. A fresh claim
+	// mints a new one and a reclaim clears it, so a report minted against a stale claim no longer
+	// verifies. It is not derived from anything a worker supplies.
+	ClaimSecret string `json:"-"`
 	// CancelRequested asks whichever process holds the run to stop it.
 	CancelRequested bool `json:"cancel_requested,omitempty"`
 	// CredentialIDs names the stored credentials materialized for this run.
@@ -195,6 +215,14 @@ type Run struct {
 	CommitSHA string `json:"commit_sha,omitempty"`
 	// InventoryID names a stored inventory materialized for this run instead of a file path.
 	InventoryID string `json:"inventory_id,omitempty"`
+	// OrgID is the owning organization stamped from the submitting actor at creation. It is what
+	// scopes a run that references no stored object: an inline script, a proposed run, or a
+	// terraform working directory names no project, inventory, or credential, so there is nothing
+	// for the per-object grant check to filter on and the run would otherwise be readable, cancelable,
+	// and approvable across every tenant. The run-scoped authorizer treats an objectless run as owned
+	// by this org, so a caller outside it who holds no grant on any object the run references is
+	// denied. Empty for a run created outside an actor's request, such as a seeded demo run.
+	OrgID string `json:"org_id,omitempty"`
 	// Queue restricts execution to workers serving this queue. Empty runs on the default pool.
 	Queue string `json:"queue,omitempty"`
 	// Image names a container image the run executes inside, its execution environment. It outranks
@@ -217,6 +245,11 @@ type Run struct {
 	// run to the record of who asked for it. Empty for a run created outside a recorded request,
 	// such as a seeded demo run.
 	AuditReceipt string `json:"audit_receipt,omitempty"`
+	// ApprovedSpecDigest is the digest of the run's spec at the moment an approver decided on it,
+	// stamped when the decision chain entry commits the same value. The executor recomputes the
+	// spec digest before running and refuses a mismatch, so an approval releases exactly the change
+	// that was decided on. Empty for a run that never needed a decision.
+	ApprovedSpecDigest string `json:"approved_spec_digest,omitempty"`
 	// Intent is the plain-language request an AI turned into this proposed run. A run carrying it
 	// was proposed from a description and is born held for approval, so an approver can judge the
 	// generated run against what was asked before anything executes.
@@ -229,6 +262,11 @@ type Run struct {
 	SourceID string `json:"source_id,omitempty"`
 	// Actor is the authenticated user who fired the run, when the server knows one.
 	Actor string `json:"actor,omitempty"`
+	// ActorType is how the requesting actor authenticated, in the audit chain's vocabulary: agent
+	// for an AI agent's token, session for a signed-in person, token for an owner-held API token,
+	// cli for the command line, webhook for a trigger. Empty when the server does not know. It is
+	// what lets a policy treat an agent's request differently from a person's.
+	ActorType string `json:"actor_type,omitempty"`
 	// RerunOf is the finished run whose spec this run replayed.
 	RerunOf string `json:"rerun_of,omitempty"`
 	// Labels are user-supplied key values for slicing runs: env, ticket, team.
@@ -425,6 +463,16 @@ func WithInventory(id string) SubmitOption {
 	return func(r *Run) { r.InventoryID = id }
 }
 
+// WithOrgID stamps the owning organization on the run, the org of the submitting actor. It is what
+// scopes an objectless run to a tenant. An empty id leaves the run unowned.
+func WithOrgID(orgID string) SubmitOption {
+	return func(r *Run) {
+		if orgID != "" {
+			r.OrgID = orgID
+		}
+	}
+}
+
 // WithQueue restricts the run to workers serving the named queue.
 func WithQueue(queue string) SubmitOption {
 	return func(r *Run) { r.Queue = queue }
@@ -489,6 +537,12 @@ func WithActor(actor string) SubmitOption {
 	return func(r *Run) { r.Actor = actor }
 }
 
+// WithActorType stamps how the requesting actor authenticated, so a policy can tell an agent's
+// request from a person's.
+func WithActorType(kind string) SubmitOption {
+	return func(r *Run) { r.ActorType = kind }
+}
+
 // WithRerunOf records the finished run whose spec this run replays.
 func WithRerunOf(id string) SubmitOption {
 	return func(r *Run) { r.RerunOf = id }
@@ -512,6 +566,58 @@ func WithLimit(pattern string) SubmitOption {
 	}
 }
 
+// WithTags runs only the Ansible plays and tasks carrying one of these tags.
+func WithTags(tags ...string) SubmitOption {
+	return func(r *Run) { r.Tags = cloneNonEmpty(tags) }
+}
+
+// WithSkipTags skips the Ansible plays and tasks carrying one of these tags.
+func WithSkipTags(tags ...string) SubmitOption {
+	return func(r *Run) { r.SkipTags = cloneNonEmpty(tags) }
+}
+
+// WithVerbosity raises Ansible logging from 0 to 4, clamped to that range.
+func WithVerbosity(level int) SubmitOption {
+	return func(r *Run) {
+		if level < 0 {
+			level = 0
+		}
+		if level > 4 {
+			level = 4
+		}
+		r.Verbosity = level
+	}
+}
+
+// WithForks sets how many hosts Ansible addresses in parallel. A value below one leaves the default.
+func WithForks(n int) SubmitOption {
+	return func(r *Run) {
+		if n > 0 {
+			r.Forks = n
+		}
+	}
+}
+
+// WithDiffMode shows the before-and-after of every Ansible file and template change.
+func WithDiffMode(diff bool) SubmitOption {
+	return func(r *Run) { r.DiffMode = diff }
+}
+
+// cloneNonEmpty returns a copy of in with blank entries dropped, or nil when nothing remains, so a
+// stored tag list never carries an empty tag that would widen or narrow a run in a surprising way.
+func cloneNonEmpty(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // WithProposedFrom marks the run as a machine-built reconcile proposal and records the drift check
 // run it was derived from.
 func WithProposedFrom(checkRunID string) SubmitOption {
@@ -525,6 +631,16 @@ func WithProposedFrom(checkRunID string) SubmitOption {
 func WithIntent(intent string) SubmitOption {
 	return func(r *Run) {
 		r.Intent = intent
+	}
+}
+
+// WithRetryOf links a run back to the run it was derived from, so a failed-host relaunch or a retry
+// records its lineage in the chain rather than looking like an unrelated run.
+func WithRetryOf(sourceID string) SubmitOption {
+	return func(r *Run) {
+		if sourceID != "" {
+			r.RetryOf = &sourceID
+		}
 	}
 }
 
@@ -548,6 +664,11 @@ func (r *Run) ExecutionOptions() []SubmitOption {
 		WithDryRun(r.DryRun),
 		WithExtraVars(r.ExtraVars),
 		WithCredentialIDs(r.CredentialIDs),
+		WithTags(r.Tags...),
+		WithSkipTags(r.SkipTags...),
+		WithVerbosity(r.Verbosity),
+		WithForks(r.Forks),
+		WithDiffMode(r.DiffMode),
 	}
 	if r.ProjectID != "" {
 		opts = append(opts, WithProject(r.ProjectID))
@@ -605,4 +726,17 @@ func ApplyOptions(r *Run, opts []SubmitOption) {
 // NewID returns a random run identifier prefixed with "run_".
 func NewID() string {
 	return idgen.New("run_", 8)
+}
+
+// NewClaimSecret returns a fresh 256-bit capability for a claim, hex encoded. It is minted by the
+// control node when a worker leases a run and never derived from anything the worker supplies, so a
+// worker cannot predict or reconstruct another claim's secret.
+func NewClaimSecret() string {
+	var b [32]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// The system random source failing is not a condition to paper over with a weak secret: a
+		// predictable capability is worse than none, so this is a programming-time fault.
+		panic("run: read claim secret: " + err.Error())
+	}
+	return hex.EncodeToString(b[:])
 }

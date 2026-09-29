@@ -18,7 +18,6 @@ import (
 	"github.com/kordloom/switchtender/internal/logutil"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/relay"
-	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -125,8 +124,7 @@ func runWorker(cmd *cobra.Command, _ []string) error {
 	if len(workerQueues) > 0 {
 		opts = append(opts, dispatch.WithQueues(workerQueues))
 	}
-	runner := roundhouse.NewSelectiveRunner(workerAllowContainerEE, containerRuntimeFromFlags(),
-		containerPullPolicyFromFlags(), workerRequireImageDigest, containerLimitsFromFlags())
+	runner := newSelectiveRunnerFromFlags(workerAllowContainerEE, workerRequireImageDigest)
 	disp := dispatch.New(store, runner, log, opts...)
 	defer disp.Close()
 

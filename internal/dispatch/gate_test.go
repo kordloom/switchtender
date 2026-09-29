@@ -32,7 +32,7 @@ func TestRetryOfARejectedSplitIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}
-	if _, err := d.Reject(ctx, parent.ID, "not on prod"); err != nil {
+	if _, err := d.Reject(ctx, parent.ID, "not on prod", "approver-pat", "session"); err != nil {
 		t.Fatalf("Reject() error = %v", err)
 	}
 	if _, err := d.RetryFailedShards(ctx, parent.ID); err == nil {
@@ -168,7 +168,7 @@ func TestApprovedSplitSurvivesTheAbandonedParentSweep(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 
-	if _, err := d.Approve(ctx, parent.ID); err != nil {
+	if _, err := d.Approve(ctx, parent.ID, "approver-pat", "session"); err != nil {
 		t.Fatalf("Approve() error = %v", err)
 	}
 	// A sweep landing right behind the approval must not touch it.
@@ -210,7 +210,7 @@ func (f *failingLister) Run(context.Context, roundhouse.Spec, io.Writer) (roundh
 }
 
 // Hosts returns the fixed host set.
-func (f *failingLister) Hosts(context.Context, string) ([]string, error) { return f.hosts, nil }
+func (f *failingLister) Hosts(context.Context, string, string) ([]string, error) { return f.hosts, nil }
 
 // TestCancelBeforeStartIsNotUndone pins that a parent canceled between its submit and its
 // coordinator's first write stays canceled.
@@ -354,7 +354,7 @@ func TestCancelingAHeldSplitSettlesItsShards(t *testing.T) {
 		t.Fatal("the held split stored no shards")
 	}
 	// A shard is never approvable on its own, because the parent carries the decision.
-	if _, err := d.Approve(ctx, shards[0].ID); !errors.Is(err, ErrChildNotApprovable) {
+	if _, err := d.Approve(ctx, shards[0].ID, "approver-pat", "session"); !errors.Is(err, ErrChildNotApprovable) {
 		t.Errorf("Approve(shard) error = %v, want ErrChildNotApprovable: releasing a shard alone "+
 			"runs it outside the parent an approver decided on", err)
 	}

@@ -120,7 +120,7 @@ func doctorHandler(templates template.Store, schedules schedule.Store, creds cre
 						ObjectName: s.Name, Problem: problem, FixPath: "/ui/schedules",
 					})
 				}
-				if _, err := schedule.NextFire(s.Cron, time.Now()); err != nil {
+				if _, err := s.NextFire(time.Now()); err != nil {
 					add("broken", "Cron expression "+s.Cron+" does not parse, so it never fires.")
 				}
 				if s.TemplateID != "" && templates != nil {

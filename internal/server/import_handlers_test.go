@@ -47,3 +47,46 @@ func TestImportHandler(t *testing.T) {
 		})
 	}
 }
+
+// TestImportRundeckFormat proves the Rundeck importer is reachable over the API and that the target
+// inventory named in the query reaches the imported templates.
+func TestImportRundeckFormat(t *testing.T) {
+	t.Parallel()
+	export := `
+- name: Nightly
+  schedule:
+    crontab: '0 0 2 * * ? *'
+  options:
+    - name: secret_token
+      secure: true
+  sequence:
+    commands:
+      - exec: nightly.sh
+`
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop()).Handler()
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost,
+		"/v1/import/rundeck?inventory=prod-hosts", strings.NewReader(export)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("import status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Nightly") {
+		t.Errorf("preview does not name the imported job: %s", body)
+	}
+	// A secure option must be reported as refused, never quietly imported as a plaintext survey field.
+	if !strings.Contains(body, "secret_token") {
+		t.Errorf("preview does not report the refused secure option: %s", body)
+	}
+
+	// An unknown format is still refused, and the message names what is accepted.
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/import/jenkins",
+		strings.NewReader("{}")))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("unknown format = %d, want 400", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "rundeck") {
+		t.Errorf("the error does not name rundeck as accepted: %s", rec.Body.String())
+	}
+}

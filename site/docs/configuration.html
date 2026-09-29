@@ -36,7 +36,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX or Semaphore</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration" class="active">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX, Semaphore, or Rundeck</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration" class="active">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -66,7 +66,7 @@ variable.</p>
 <tr>
 <td><code>SWITCHTENDER_AUDIT_KEY</code></td>
 <td>serve</td>
-<td>Hex-encoded ed25519 seed that signs audit exports so the trail can be verified offline. Signing is off when unset. A malformed value stops startup. Generate one with <code>switchtender audit keygen</code>.</td>
+<td>Hex-encoded ed25519 seed for the install's signing identity, which signs the LoomSeal bundles it emits. Unset, the install mints and stores its own key beside the database. A malformed value stops startup.</td>
 </tr>
 <tr>
 <td><code>SWITCHTENDER_PASSWORD</code></td>
@@ -528,6 +528,11 @@ that variable is unset.</p>
 <td>Drop run events and logs older than this, for example <code>30d</code>. Empty keeps them forever.</td>
 </tr>
 <tr>
+<td><code>--retain-history</code></td>
+<td>none</td>
+<td>Keep only this many per-host and per-task summaries for each host and each task, for example <code>500</code>. Summaries outlive the runs they came from, so this is the only bound on them. Zero keeps every summary forever. A smaller value is raised to 500, the deepest window the fleet views will answer.</td>
+</tr>
+<tr>
 <td><code>--retention-interval</code></td>
 <td><code>1h</code></td>
 <td>How often the retention sweeper runs.</td>
@@ -746,12 +751,16 @@ service, or an AI agent. See <a href="/docs/agents">running an agent</a>.</li>
 <p>Both take <code>--db</code> for the target database. Without <code>--apply</code> the command only reports what it would
 create.</p>
 <h2 id="audit">audit</h2>
-<p>Audit trail tools for the signed export.</p>
+<p>Audit trail tools.</p>
 <ul>
-<li><code>audit keygen</code> generates an ed25519 signing key. Set the printed seed as <code>SWITCHTENDER_AUDIT_KEY</code>.</li>
-<li><code>audit verify &lt;export.json&gt;</code> verifies an export offline: it recomputes the hash chain and checks
-the signature. <code>--pubkey</code> pins the expected signer public key in hex, and verification fails when
-the export's key differs.</li>
+<li><code>audit bundle</code> emits the chain as a signed LoomSeal bundle. Anyone verifies it offline with the
+open <code>loomseal</code> verifier, or in a browser, without trusting the server that produced it.</li>
+<li><code>audit anchor</code> has a public timestamp authority sign the current head, so a chain that has lost
+its tail no longer reaches its anchor.</li>
+<li><code>audit receipt &lt;seq:link&gt;</code> redeems a receipt the server issued, proving that entry is still in the
+chain.</li>
+<li><code>audit report</code> renders the period's change register as a self-contained HTML evidence report.</li>
+<li><code>audit run &lt;id&gt;</code> emits one run's evidence dossier as a self-contained HTML document.</li>
 </ul>
 <h2 id="demo">demo</h2>
 <p>Seeds a fresh database with sample data and real runs, then serves it read-only, so a public

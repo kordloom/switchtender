@@ -1,8 +1,10 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"path"
 	"strings"
@@ -11,6 +13,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/beatfeed"
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/run"
@@ -39,8 +42,11 @@ type authGate struct {
 	authz *authorizer
 	// mu guards enforced and checkedAt.
 	mu sync.Mutex
-	// enforced caches whether any token exists.
+	// enforced caches whether the install is configured and so must authenticate.
 	enforced bool
+	// latched records that enforcement has been on once. It never returns to off in this process,
+	// so an emptied or briefly unreadable store cannot reopen a running server.
+	latched bool
 	// checkedAt is when enforced was last refreshed.
 	checkedAt time.Time
 }
@@ -66,7 +72,9 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			// the install. A hook that resolves to a trigger is recorded by the handler, where the
 			// trigger is known and the entry can say which one fired.
 			if !isSignIn(r) && !isHook(r) {
-				receipt, ok := g.record(w, unauthenticatedActor(r), r)
+				receipt, ok := g.record(w, recordedActor{
+					Name: unauthenticatedActor(r), Type: actorTypeUnauthenticated,
+				}, r)
 				if !ok {
 					return
 				}
@@ -92,15 +100,18 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 				unauthorized(w)
 				return
 			}
-			actor := Actor{UserID: u.ID, Role: u.Role, Name: u.Username}
+			actor := Actor{UserID: u.ID, Role: u.Role, Name: u.Username, Type: actorTypeSession}
 			if !g.decide(w, r, actor) {
 				return
 			}
-			receipt, ok := g.record(w, u.Username, r)
+			receipt, ok := g.record(w, recordedActor{
+				Name: u.Username, Type: actorTypeSession,
+			}, r)
 			if !ok {
 				return
 			}
 			ctx := run.WithAuditReceipt(context.WithValue(r.Context(), actorKey{}, actor), receipt)
+			ctx = g.stampSubmitterOrg(ctx, actor)
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
@@ -115,23 +126,136 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			unauthorized(w)
 			return
 		}
-		role, err := g.roleFor(r.Context(), tok)
+		role, boundUser, err := g.roleFor(r.Context(), tok)
 		if err != nil {
 			unauthorized(w)
 			return
 		}
-		actor := Actor{UserID: tok.UserID, Role: role, Name: tok.Name}
+		// An agent token is capped at operator no matter what account it is bound to, so it can
+		// launch and propose work but can never manage identity, access, or secrets, and can never
+		// approve its own held run. Every route that does those is admin, so one ceiling closes the
+		// whole surface at the door. Capping here, before decide, means the guarantee holds however
+		// the agent reaches the API, not only through the MCP client that also restricts it.
+		actorType := actorTypeToken
+		if tok.IsAgent() {
+			actorType = actorTypeAgent
+			role = capAgentRole(role)
+		}
+		actor := Actor{UserID: tok.UserID, Role: role, Name: tok.Name, Agent: tok.IsAgent(),
+			Type: actorType}
 		if !g.decide(w, r, actor) {
 			return
 		}
 		g.touch(tok)
-		receipt, ok := g.record(w, tok.Name, r)
+		// A token's label is chosen by whoever minted it and is not unique, so the label alone cannot
+		// attribute a change: two tokens named "agent" on different accounts read identically. The
+		// bound account is recorded beside it, which is also the delegation an agent operates under.
+		// The type says whether a person or an agent held the token, which is set when the token is
+		// minted rather than inferred from the request.
+		receipt, ok := g.record(w, recordedActor{
+			Name: tok.Name, Type: actorType, OnBehalfOf: boundUser,
+		}, r)
 		if !ok {
 			return
 		}
 		ctx := run.WithAuditReceipt(context.WithValue(r.Context(), actorKey{}, actor), receipt)
+		ctx = g.stampSubmitterOrg(ctx, actor)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// stampSubmitterOrg carries the actor's owning organization on the context so a run created while
+// handling the request is stamped with the tenant that scopes an objectless run. Resolving it here,
+// once per request beside the actor and the receipt, keeps every submit path stamping the same way
+// without each handler re-deriving it. A resolution failure leaves the org unset, which fails closed
+// for reads: an unowned objectless run is visible only to an admin under strict grants.
+func (g *authGate) stampSubmitterOrg(ctx context.Context, actor Actor) context.Context {
+	if g.authz == nil {
+		return ctx
+	}
+	orgID, err := g.authz.submitterOrg(ctx, actor)
+	if err != nil {
+		g.log.Error("server: resolve submitter org: " + err.Error())
+		return ctx
+	}
+	return run.WithSubmitterOrg(ctx, orgID)
+}
+
+// recordedActor is the identity written into one audit entry.
+//
+// Each field is something the server observed rather than something it inferred. Type says how the
+// caller authenticated, not what kind of thing they are: a token cannot tell whether a person or an
+// agent is holding it, and writing a guess into a signed record would be the one thing this trail
+// must never do. OnBehalfOf carries the account a token is bound to, which is observed directly and
+// is what distinguishes two tokens sharing a label on different accounts.
+type recordedActor struct {
+	// Name is the actor as it appears in the trail: a token label, a username, or a caller class.
+	Name string
+	// Type is how the caller authenticated: session, token, webhook, saml, or unauthenticated.
+	Type string
+	// OnBehalfOf is the account whose authority the actor used, empty when it acted as itself.
+	OnBehalfOf string
+}
+
+// Actor types, naming how a caller authenticated.
+const (
+	// actorTypeSession is an interactive sign-in, a person at a browser or an SSO session.
+	actorTypeSession = "session"
+	// actorTypeToken is an API token held by a person or a script.
+	actorTypeToken = "token"
+	// actorTypeAgent is a token minted for an AI agent, declared at issuance and recorded so the
+	// chain attributes the change to an agent rather than leaving a reader to guess.
+	actorTypeAgent = "agent"
+	// actorTypeUnauthenticated is a caller that presented no credential, such as a webhook whose
+	// path is its only secret.
+	actorTypeUnauthenticated = "unauthenticated"
+)
+
+// digestBody reads the request body, returns the digest committed for it, and restores the body so
+// the handler still reads it.
+//
+// A body that cannot be read fails the request closed. The alternative, recording an entry with no
+// digest and letting the change proceed, would let a truncated body buy an unrecorded payload, which
+// is the hole the digest exists to close.
+//
+// The read is bounded here rather than trusted to the bodyLimit middleware, because the digest runs
+// for every mutating method and bodyLimit does not cap all of them the same way. The import and hook
+// uploads are allowed a larger body and carry no secret by design, an export omits secret material
+// and a hook authenticates by the token in its path, so they pass through undigested rather than
+// buffered whole in the gate on top of the handler's own copy. Every other mutation, which is where
+// a secret can appear, is read up to one byte past maxBodyBytes and refused if it exceeds it, so a
+// DELETE with a multi-gigabyte body cannot exhaust memory.
+func (g *authGate) digestBody(w http.ResponseWriter, r *http.Request) (digest, nonce string, ok bool) {
+	if r.Body == nil || r.Body == http.NoBody {
+		return "", "", true
+	}
+	if uploadPath(r.URL.Path) {
+		return "", "", true
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes+1))
+	_ = r.Body.Close()
+	if err != nil {
+		respondError(w, g.log, http.StatusRequestEntityTooLarge,
+			"the request body could not be read, so the change was not recorded or made")
+		return "", "", false
+	}
+	if len(body) > maxBodyBytes {
+		respondError(w, g.log, http.StatusRequestEntityTooLarge,
+			"the request body exceeds the limit, so the change was not recorded or made")
+		return "", "", false
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	// ContentLength is left as the client sent it; the restored body is the same bytes.
+	digest, nonce, err = audit.ContentDigestOf(body)
+	if err != nil {
+		// The nonce comes from the system random source. If it cannot be read the change is refused
+		// rather than recorded under a weaker digest, the same fail-closed stance the trail takes
+		// when the entry cannot be appended at all.
+		respondError(w, g.log, http.StatusServiceUnavailable,
+			"refused: the change could not be recorded in the audit trail")
+		return "", "", false
+	}
+	return digest, nonce, true
 }
 
 // actorKey is the context key under which the authenticated actor is stored.
@@ -142,10 +266,26 @@ type actorKey struct{}
 type Actor struct {
 	// UserID is the caller's account id, empty for a command-line admin token.
 	UserID string
-	// Role is the caller's global role.
+	// Role is the caller's global role, already capped when the caller is an agent.
 	Role user.Role
 	// Name is the token name, used for audit attribution.
 	Name string
+	// Agent reports whether an AI agent holds the token, so a handler that needs to treat an agent
+	// differently can, without re-reading the token.
+	Agent bool
+	// Type is how the caller authenticated, in the audit chain's vocabulary: session, token, or
+	// agent. It is stamped onto submitted runs so policies can tell who is asking.
+	Type string
+}
+
+// capAgentRole lowers an admin role to operator for an agent, and leaves any lower role unchanged.
+// An agent may launch and propose work but must not manage identity, access, or secrets, or approve
+// its own held run, all of which are admin.
+func capAgentRole(role user.Role) user.Role {
+	if role == user.RoleAdmin {
+		return user.RoleOperator
+	}
+	return role
 }
 
 // actorFrom returns the authenticated actor from the context, and whether one was present. It is
@@ -246,13 +386,18 @@ const AuditReceiptHeader = "Audit-Receipt"
 // the alternative ordering loses the record entirely whenever a process dies mid-change.
 //
 // It takes the actor name directly so token and JWT callers are recorded on the same trail.
-func (g *authGate) record(w http.ResponseWriter, actor string, r *http.Request) (receipt string, ok bool) {
+func (g *authGate) record(w http.ResponseWriter, who recordedActor, r *http.Request) (receipt string, ok bool) {
 	if g.audits == nil || r.Method == http.MethodGet || r.Method == http.MethodHead {
 		return "", true
 	}
+	digest, nonce, ok := g.digestBody(w, r)
+	if !ok {
+		return "", false
+	}
 	entry := &audit.Entry{
-		ID: audit.NewID(), At: time.Now(), Actor: actor,
-		Method: r.Method, Path: auditPath(r),
+		ID: audit.NewID(), At: time.Now(), Actor: who.Name,
+		ActorType: who.Type, OnBehalfOf: who.OnBehalfOf,
+		Method: r.Method, Path: auditPath(r), ContentDigest: digest, Nonce: nonce,
 	}
 	if err := g.audits.Append(r.Context(), entry); err != nil {
 		g.log.Error("server: append audit entry: "+err.Error(),
@@ -279,19 +424,21 @@ var errNoAccounts = errors.New("token is bound to an account but accounts are no
 // was absent, and nothing in the reply would have said so. Every path that binds a token to an
 // account needs an account store to do it, so on a real serve path the store is always there and
 // this is unreachable; if it ever becomes reachable it denies rather than promotes.
-func (g *authGate) roleFor(ctx context.Context, tok *auth.Token) (user.Role, error) {
+// It also returns the bound account's username, empty for an unbound token, so the audit entry can
+// name the authority a token acted under rather than only the token's own label.
+func (g *authGate) roleFor(ctx context.Context, tok *auth.Token) (user.Role, string, error) {
 	if tok.UserID == "" {
-		return user.RoleAdmin, nil
+		return user.RoleAdmin, "", nil
 	}
 	if g.users == nil {
 		g.log.Error("server: " + errNoAccounts.Error())
-		return "", errNoAccounts
+		return "", "", errNoAccounts
 	}
 	u, err := g.users.Get(ctx, tok.UserID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return u.Role, nil
+	return u.Role, u.Username, nil
 }
 
 // requiredRole maps a request to the minimum role that may perform it. Reads are for viewers,
@@ -368,7 +515,8 @@ func requiredRole(r *http.Request) user.Role {
 		// for approval, so releasing it stays admin work.
 		return user.RoleOperator
 	case strings.HasPrefix(p, "/runs/") &&
-		(strings.HasSuffix(p, "/cancel") || strings.HasSuffix(p, "/retry")):
+		(strings.HasSuffix(p, "/cancel") || strings.HasSuffix(p, "/retry") ||
+			strings.HasSuffix(p, "/relaunch-failed")):
 		return user.RoleOperator
 	case strings.HasPrefix(p, "/templates/") && strings.HasSuffix(p, "/launch"):
 		return user.RoleOperator
@@ -458,6 +606,9 @@ func (g *authGate) protects(r *http.Request) bool {
 	if r.Method == http.MethodGet && p == "/healthz" {
 		return false
 	}
+	if r.Method == http.MethodGet && p == "/readyz" {
+		return false
+	}
 	if r.Method == http.MethodGet && (p == "/" || strings.HasPrefix(p, "/ui/")) {
 		return false
 	}
@@ -469,7 +620,7 @@ func (g *authGate) protects(r *http.Request) bool {
 	// The span beat feed is how an outside watcher notices a chain that went quiet or lost its
 	// tail. Like the trust document, it exists for a party with no account here, and a feed that
 	// needs a token cannot be watched by the one the record is meant to convince.
-	if r.Method == http.MethodGet && p == "/audit/beats" {
+	if r.Method == http.MethodGet && p == beatfeed.FeedPath {
 		return false
 	}
 	// Sign in must be reachable while the API is enforced.
@@ -500,23 +651,57 @@ func (g *authGate) protects(r *http.Request) bool {
 	return true
 }
 
-// enforcing reports whether any token exists, cached briefly to keep request overhead flat.
+// enforcing reports whether the install has been configured and so must authenticate, cached briefly
+// to keep request overhead flat.
+//
+// Open mode is a first-run convenience, reachable only before anything has been set up. It is not a
+// state an install may return to. Enforcement keyed on the live token count alone did allow that:
+// session tokens carry a thirty day lifetime, this gate deletes an expired token the moment it meets
+// one, and the count then reached zero. A browser or single sign-on install, whose only tokens are
+// sessions, therefore served its whole API to anonymous callers with admin authority thirty days
+// after the last sign-in, silently. Revoking the last API token did it immediately.
+//
+// Two things close it. An account is durable where a session is not, so an install that has ever had
+// a user keeps authenticating across restarts. And enforcement latches in memory, so a store that
+// briefly reads empty cannot reopen a running server.
 func (g *authGate) enforcing(ctx context.Context) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if g.enforced && g.latched {
+		return true
+	}
 	if time.Since(g.checkedAt) < enforcementCacheTTL {
 		return g.enforced
 	}
-	n, err := g.tokens.Count(ctx)
-	if err != nil {
-		g.log.Error("server: count tokens: " + err.Error())
-		// Fail closed: an unreadable token store should not open the API.
-		g.enforced = true
-	} else {
-		g.enforced = n > 0
+	g.enforced = g.configured(ctx)
+	if g.enforced {
+		g.latched = true
 	}
 	g.checkedAt = time.Now()
 	return g.enforced
+}
+
+// configured reports whether this install has any credential or account, meaning setup has happened
+// and authentication applies. An unreadable store counts as configured, so a database problem cannot
+// open the API.
+func (g *authGate) configured(ctx context.Context) bool {
+	n, err := g.tokens.Count(ctx)
+	if err != nil {
+		g.log.Error("server: count tokens: " + err.Error())
+		return true
+	}
+	if n > 0 {
+		return true
+	}
+	if g.users == nil {
+		return false
+	}
+	accounts, err := g.users.List(ctx)
+	if err != nil {
+		g.log.Error("server: list users: " + err.Error())
+		return true
+	}
+	return len(accounts) > 0
 }
 
 // touch records the token's last use, at most once a minute, without blocking the request.
@@ -526,8 +711,13 @@ func (g *authGate) touch(tok *auth.Token) {
 	}
 	now := time.Now()
 	tok.LastUsedAt = &now
+	// Touch updates the stored row and cannot create one. Saving the whole token here re-inserted it,
+	// so an admin who revoked a token while a request was in flight watched it come back: the
+	// attacker's own polling kept firing touches, and each one restored the row that had just been
+	// deleted. A note about a request that already happened must never resurrect the authority for
+	// the next one.
 	go func() {
-		if err := g.tokens.Save(context.Background(), tok); err != nil {
+		if err := g.tokens.Touch(context.Background(), tok.ID, now); err != nil {
 			g.log.Error("server: touch token: " + err.Error())
 		}
 	}()

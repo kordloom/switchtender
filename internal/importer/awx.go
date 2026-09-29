@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -29,6 +30,13 @@ type awxExport struct {
 	// InventorySources are dynamic inventory sources exported at the top level. Some exports nest them
 	// under each inventory's related block instead.
 	InventorySources []awxInventorySource `json:"inventory_sources"`
+	// The rest are counted, not mapped. They are decoded as raw messages so the report can say how
+	// many of each an export held and what will not come across, rather than staying silent about
+	// the part of an AWX install a team's orchestration actually lives in.
+	Workflows             []awxWorkflow     `json:"workflow_job_templates"`
+	Organizations         []json.RawMessage `json:"organizations"`
+	Teams                 []json.RawMessage `json:"teams"`
+	NotificationTemplates []json.RawMessage `json:"notification_templates"`
 }
 
 // awxProject is an AWX project.
@@ -59,6 +67,38 @@ type awxInventory struct {
 type awxInventoryRelated struct {
 	// InventorySources are the inventory's dynamic sources.
 	InventorySources []awxInventorySource `json:"inventory_sources"`
+	// Hosts are the inventory's hosts when the export nests them, which awxkit does.
+	Hosts []awxHost `json:"hosts"`
+	// Groups are the inventory's groups when the export nests them, which awxkit does.
+	Groups []awxGroup `json:"groups"`
+}
+
+// hosts returns the inventory's hosts from whichever place the export carried them.
+//
+// awxkit, the tool the migration guide tells an operator to run, writes hosts and groups under the
+// inventory's related block rather than at the top level. Reading only the top level meant every
+// inventory from a real export arrived empty, and silently: the import reported success, the
+// inventory existed, and it had no hosts in it. That is the first thing an evaluator does, so it is
+// the first thing they saw fail.
+func (i awxInventory) hosts() []awxHost {
+	if len(i.Hosts) > 0 {
+		return i.Hosts
+	}
+	if i.Related != nil {
+		return i.Related.Hosts
+	}
+	return nil
+}
+
+// groups returns the inventory's groups from whichever place the export carried them.
+func (i awxInventory) groups() []awxGroup {
+	if len(i.Groups) > 0 {
+		return i.Groups
+	}
+	if i.Related != nil {
+		return i.Related.Groups
+	}
+	return nil
 }
 
 // awxInventorySource is an AWX dynamic inventory source: a file in a project or a cloud plugin that
@@ -108,6 +148,21 @@ type awxJobTemplate struct {
 	ExtraVars string `json:"extra_vars"`
 	// JobSliceCount is AWX's job slicing count, mapped to shard count.
 	JobSliceCount int `json:"job_slice_count"`
+	// Limit narrows the run to matching hosts, the same pattern ansible-playbook takes.
+	Limit string `json:"limit"`
+	// JobTags and SkipTags select and skip tagged plays and tasks.
+	JobTags  string `json:"job_tags"`
+	SkipTags string `json:"skip_tags"`
+	// Verbosity is AWX's 0 to 4 logging level.
+	Verbosity int `json:"verbosity"`
+	// Forks is how many hosts Ansible addresses in parallel.
+	Forks int `json:"forks"`
+	// Timeout caps a job's runtime in seconds.
+	Timeout int `json:"timeout"`
+	// JobType is "run" or "check"; check is Ansible's no-change mode.
+	JobType string `json:"job_type"`
+	// DiffMode shows the before and after of each change.
+	DiffMode bool `json:"diff_mode"`
 	// Credentials references credentials by natural key.
 	Credentials []awxRef `json:"credentials"`
 	// SurveySpec is the survey when exported at the top level.
@@ -115,6 +170,10 @@ type awxJobTemplate struct {
 	// Related carries the survey and schedules when exported nested.
 	Related *awxRelated `json:"related"`
 }
+
+// checkMode reports whether the template runs in Ansible's no-change mode. AWX spells it as a job
+// type rather than a flag, and both the template and the workflow import paths ask the same way.
+func (t awxJobTemplate) checkMode() bool { return strings.EqualFold(t.JobType, "check") }
 
 // awxRelated holds a job template's nested related assets.
 type awxRelated struct {
@@ -201,7 +260,12 @@ func (r *awxRef) UnmarshalJSON(b []byte) error {
 // so a partial export still migrates what it can.
 func FromAWX(data []byte, now time.Time) (*Plan, error) {
 	var export awxExport
-	if err := json.Unmarshal(data, &export); err != nil {
+	// UseNumber keeps JSON numbers as json.Number rather than float64, so a host variable or survey
+	// choice that is a large integer survives to the inventory verbatim instead of being reformatted
+	// through float64, which loses precision past 2^53 and prints in scientific notation.
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	if err := dec.Decode(&export); err != nil {
 		return nil, fmt.Errorf("parse awx export: %w", err)
 	}
 	plan := &Plan{}
@@ -236,7 +300,7 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 	for _, inv := range append(export.Inventory, export.Inventories...) {
 		obj := &inventory.Inventory{
 			ID: inventory.NewID(), Name: inv.Name,
-			Content:   buildInventoryINI(plan, inv.Name, convertHosts(inv.Hosts), convertGroups(inv.Groups)),
+			Content:   buildInventoryINI(plan, inv.Name, convertHosts(inv.hosts()), convertGroups(inv.groups())),
 			CreatedAt: now,
 		}
 		if _, dup := inventoryIDs[inv.Name]; dup {
@@ -304,6 +368,10 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 	for _, jt := range export.JobTemplates {
 		plan.addTemplate(jt, now, projectIDs, inventoryIDs, credentialIDs)
 	}
+	// Workflows come after the job templates they run, since each node's step inlines the playbook
+	// of the template it points at.
+	plan.addWorkflows(export, now, projectIDs, inventoryIDs, credentialIDs)
+	reportUnmapped(plan, export)
 	return plan, nil
 }
 
@@ -356,6 +424,17 @@ func (p *Plan) addTemplate(jt awxJobTemplate, now time.Time,
 	projectIDs, inventoryIDs, credentialIDs map[string]string) {
 	tpl := &template.Template{
 		ID: template.NewID(), Name: jt.Name, Playbook: jt.Playbook, CreatedAt: now,
+		// The execution settings AWX holds on the job template. Dropping these silently changed what
+		// the template does: a check-mode template imported as a live one, and a template limited to
+		// a canary host imported targeting the whole inventory, both without a word in the report.
+		Limit:     jt.Limit,
+		Tags:      splitAWXTags(jt.JobTags),
+		SkipTags:  splitAWXTags(jt.SkipTags),
+		Verbosity: jt.Verbosity,
+		Forks:     jt.Forks,
+		Timeout:   jt.Timeout,
+		DiffMode:  jt.DiffMode,
+		DryRun:    jt.checkMode(),
 	}
 	if name := string(jt.Project); name != "" {
 		if id, ok := projectIDs[name]; ok {
@@ -412,6 +491,17 @@ func (p *Plan) mapSurvey(jt awxJobTemplate) []template.SurveyField {
 	}
 	var fields []template.SurveyField
 	for _, f := range survey.Spec {
+		// AWX's password survey type prompts for a secret and stores it obscured. A survey field here
+		// is plain text whose answer is kept on the run and injected as an extra var, so importing one
+		// would quietly turn a password prompt into a stored plaintext value, and AWX exports the
+		// field's default alongside it. Refusing and naming it is honest; a silent downgrade hands the
+		// operator a migration that looks complete and is less safe than what they left.
+		if strings.EqualFold(f.Type, "password") {
+			p.warn("survey field %q of template %q is a password prompt and was NOT imported. Store "+
+				"its value as a credential instead: importing it as a survey field would keep the "+
+				"answer in plain text on every run.", f.Variable, jt.Name)
+			continue
+		}
 		fieldType, exact := mapSurveyType(f.Type)
 		if !exact {
 			p.warn("survey field %q of template %q: type %q mapped to %q",
@@ -439,8 +529,22 @@ func (p *Plan) addSchedules(jt awxJobTemplate, templateID string, now time.Time)
 			continue
 		}
 		enabled := s.Enabled == nil || *s.Enabled
+		// AWX records the zone on the rule. Keeping it is what makes an imported 2am window still
+		// fire at 2am where the operator lives, and follow that zone's daylight saving shifts. A zone
+		// this build cannot resolve is reported and the schedule still imports, in server time,
+		// because a job that runs at the wrong hour is recoverable and one that was never created is
+		// easy to miss.
+		zone := dtstartZone(s.RRule)
+		if zone != "" {
+			if _, err := time.LoadLocation(zone); err != nil {
+				p.warn("schedule %q of template %q names the timezone %q, which this system cannot "+
+					"resolve, so it imports in the server's local time: %v",
+					s.Name, jt.Name, oneLine(zone), err)
+				zone = ""
+			}
+		}
 		p.addSchedule(&schedule.Schedule{
-			ID: schedule.NewID(), Name: s.Name, Cron: cron, TemplateID: templateID,
+			ID: schedule.NewID(), Name: s.Name, Cron: cron, Timezone: zone, TemplateID: templateID,
 			Enabled: enabled, CreatedAt: now,
 		}, "this AWX export", now)
 	}
@@ -470,7 +574,9 @@ func decodeVars(raw json.RawMessage) map[string]any {
 		return nil
 	}
 	var asMap map[string]any
-	if err := json.Unmarshal(raw, &asMap); err == nil {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&asMap); err == nil {
 		return asMap
 	}
 	var asString string
@@ -480,4 +586,50 @@ func decodeVars(raw json.RawMessage) map[string]any {
 		}
 	}
 	return nil
+}
+
+// reportUnmapped names the AWX objects an export held that this importer does not create, so the
+// report says what is not coming across instead of leaving the operator to discover it later.
+//
+// Workflows matter most: an AWX shop's orchestration lives in workflow job templates, and an import
+// that recreates every job template while silently dropping the graph that sequences them looks
+// complete and is not.
+func reportUnmapped(plan *Plan, export awxExport) {
+	for _, item := range []struct {
+		Count int
+		What  string
+		Why   string
+	}{
+		{len(export.Organizations), "organization",
+			"create them with POST /v1/orgs and add members, which carries the same ownership"},
+		{len(export.Teams), "team",
+			"create them with POST /v1/teams and grant access per object"},
+		{len(export.NotificationTemplates), "notification template",
+			"set notifications on each template, or configure the server-wide channels"},
+	} {
+		if item.Count == 0 {
+			continue
+		}
+		plural := "s"
+		if item.Count == 1 {
+			plural = ""
+		}
+		plan.warn("this export holds %d %s%s, which are not imported: %s",
+			item.Count, item.What, plural, item.Why)
+	}
+}
+
+// splitAWXTags turns AWX's comma separated tag string into the list a template holds, dropping the
+// blanks a trailing or doubled comma leaves behind.
+func splitAWXTags(v string) []string {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(v, ",") {
+		if t := strings.TrimSpace(part); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }

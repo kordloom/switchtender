@@ -170,6 +170,51 @@ function wfSetStatus(msg, kind) {
 	el.hidden = !msg;
 }
 
+// saveWorkflowTemplate stores the graph as a reusable workflow template rather than firing it once.
+//
+// A graph built here used to be fire-and-forget: it ran as a pipeline and was gone. Saving it makes
+// it an object a schedule, a webhook, or a later launch can fire, which is what a workflow is for.
+// The template carries only the graph, so it sets no top-level tool or playbook, which is what the
+// API requires of a workflow template.
+async function saveWorkflowTemplate() {
+	if (wfState.submitting) return;
+	if (wfState.nodes.length === 0) {
+		wfSetStatus("Add at least one step before saving.", "err");
+		return;
+	}
+	const doc = workflowDocument();
+	const body = { name: doc.name, steps: doc.steps };
+	if (doc.inventory) body.inventory = doc.inventory;
+	const btn = document.getElementById("wf-save-template");
+	wfState.submitting = true;
+	if (btn) btn.disabled = true;
+	wfSetStatus("Saving workflow template.", "");
+	try {
+		const res = await fetch(API + "/templates", {
+			method: "POST",
+			headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
+			body: JSON.stringify(body),
+		});
+		if (res.status === 401) {
+			wfSave();
+			requireLogin();
+			return;
+		}
+		const data = await res.json().catch(() => ({}));
+		if (!res.ok) {
+			wfSetStatus(data.error || ("Could not save the template: HTTP " + res.status), "err");
+			return;
+		}
+		wfSetStatus("Saved as the workflow template " + (data.name || doc.name) +
+			". A schedule or a webhook can fire it now.", "ok");
+	} catch (err) {
+		wfSetStatus("Could not save the template: " + err.message, "err");
+	} finally {
+		wfState.submitting = false;
+		if (btn) btn.disabled = false;
+	}
+}
+
 // runWorkflow serializes the graph into pipeline steps and submits it, then opens the new run. An
 // in-flight guard stops a double click from starting the workflow twice, and a 401 saves the draft
 // and routes through sign-in so the graph survives the round trip.
@@ -423,6 +468,11 @@ function applyReadOnly() {
 	if (wfRun) {
 		wfRun.dataset.mutates = "true";
 		wfRun.dataset.tip = "Click to run this graph as a pipeline";
+	}
+	const wfSaveBtn = document.getElementById("wf-save-template");
+	if (wfSaveBtn) {
+		wfSaveBtn.dataset.mutates = "true";
+		wfSaveBtn.dataset.tip = "Click to save this graph as a reusable workflow template";
 	}
 }
 

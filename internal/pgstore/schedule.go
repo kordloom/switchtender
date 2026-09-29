@@ -14,7 +14,7 @@ import (
 
 // scheduleColumns is the shared select list for schedule reads.
 const scheduleColumns = `id, name, cron, playbook, inventory, shards, steps, enabled,
-	created_at, next_run_at, last_run_at, last_run_id, template_id`
+	created_at, next_run_at, last_run_at, last_run_id, template_id, timezone, org_id`
 
 // scheduleStore is a schedule.Store backed by the shared PostgreSQL database.
 type scheduleStore struct {
@@ -31,18 +31,18 @@ func (s *scheduleStore) Save(ctx context.Context, sc *schedule.Schedule) error {
 	const q = `
 INSERT INTO schedules
 	(id, name, cron, playbook, inventory, shards, steps, enabled, created_at,
-	 next_run_at, last_run_at, last_run_id, template_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+	 next_run_at, last_run_at, last_run_id, template_id, timezone, org_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 ON CONFLICT(id) DO UPDATE SET
 	name=excluded.name, cron=excluded.cron, playbook=excluded.playbook,
 	inventory=excluded.inventory, shards=excluded.shards, steps=excluded.steps,
 	enabled=excluded.enabled, created_at=excluded.created_at, next_run_at=excluded.next_run_at,
 	last_run_at=excluded.last_run_at, last_run_id=excluded.last_run_id,
-	template_id=excluded.template_id`
+	template_id=excluded.template_id, timezone=excluded.timezone, org_id=excluded.org_id`
 	_, err = s.db.ExecContext(ctx, q,
 		sc.ID, sc.Name, sc.Cron, sc.Playbook, sc.Inventory, sc.Shards, string(steps),
 		boolInt(sc.Enabled), sqlutil.FormatTime(sc.CreatedAt), sqlutil.NullTime(sc.NextRunAt), sqlutil.NullTime(sc.LastRunAt),
-		sc.LastRunID, sc.TemplateID,
+		sc.LastRunID, sc.TemplateID, sc.Timezone, sc.OrgID,
 	)
 	if err != nil {
 		return fmt.Errorf("save schedule: %w", err)
@@ -114,7 +114,7 @@ func scanSchedule(sc scanner) (*schedule.Schedule, error) {
 	)
 	if err := sc.Scan(&out.ID, &out.Name, &out.Cron, &out.Playbook, &out.Inventory, &out.Shards,
 		&steps, &enabled, &created, &nextRun, &lastRun, &out.LastRunID,
-		&out.TemplateID); err != nil {
+		&out.TemplateID, &out.Timezone, &out.OrgID); err != nil {
 		return nil, err
 	}
 	out.Enabled = enabled != 0
@@ -143,6 +143,51 @@ func boolInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// Update replaces an existing schedule, or returns ErrNotFound when the row is gone. It exists so
+// an edit racing a delete cannot re-create what was deleted, which the upsert in Save would.
+func (s *scheduleStore) Update(ctx context.Context, sc *schedule.Schedule) error {
+	steps, err := json.Marshal(sc.Steps)
+	if err != nil {
+		return fmt.Errorf("update schedule: %w", err)
+	}
+	const q = `
+UPDATE schedules SET
+	name=$1, cron=$2, playbook=$3, inventory=$4, shards=$5, steps=$6, enabled=$7, created_at=$8,
+	next_run_at=$9, last_run_at=$10, last_run_id=$11, template_id=$12, timezone=$13,
+	org_id=$14
+WHERE id=$15`
+	res, err := s.db.ExecContext(ctx, q,
+		sc.Name, sc.Cron, sc.Playbook, sc.Inventory, sc.Shards, string(steps),
+		boolInt(sc.Enabled), sqlutil.FormatTime(sc.CreatedAt), sqlutil.NullTime(sc.NextRunAt),
+		sqlutil.NullTime(sc.LastRunAt), sc.LastRunID, sc.TemplateID, sc.Timezone, sc.OrgID, sc.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("update schedule: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update schedule: %w", err)
+	}
+	if n == 0 {
+		return schedule.ErrNotFound
+	}
+	return nil
+}
+
+// RecordFire records that a schedule fired, writing only the two columns a fire owns. An empty run
+// id keeps the stored one, and a row that is gone is not an error. The text cast is defensive
+// rather than required: pg resolves the parameter from the text sibling operand either way.
+func (s *scheduleStore) RecordFire(ctx context.Context, id string, at time.Time, runID string) error {
+	const q = `
+UPDATE schedules SET
+	last_run_at=$1, last_run_id=COALESCE(NULLIF($2::text, ''), last_run_id)
+WHERE id=$3`
+	if _, err := s.db.ExecContext(ctx, q, sqlutil.FormatTime(at), runID, id); err != nil {
+		return fmt.Errorf("record schedule fire: %w", err)
+	}
+	return nil
 }
 
 // ClaimDue atomically advances a schedule's next fire time and reports whether this caller won.

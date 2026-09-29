@@ -1,6 +1,7 @@
 package importer_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/importer"
 	"github.com/kordloom/switchtender/internal/invsource"
+	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/template"
 )
 
@@ -112,7 +114,7 @@ func TestFromAWX(t *testing.T) {
 
 	// One template, wired to the project, inventory, and credentials by id.
 	if len(plan.Templates) != 1 {
-		t.Fatalf("templates = %d, want 1", len(plan.Templates))
+		t.Fatalf("templates = %d, want 1; warnings: %s", len(plan.Templates), strings.Join(plan.Warnings, " | "))
 	}
 	tpl := plan.Templates[0]
 	if tpl.Name != "Deploy Web" || tpl.Playbook != "site.yml" {
@@ -137,7 +139,9 @@ func TestFromAWX(t *testing.T) {
 	// The survey maps field for field, including the type translations.
 	wantSurvey := []template.SurveyField{
 		{Var: "version", Label: "Release version", Type: template.FieldText, Required: true, Default: "1.0.0"},
-		{Var: "count", Label: "How many", Type: template.FieldInt, Default: float64(1)},
+		// The export is decoded with UseNumber, so a numeric default arrives as json.Number and keeps
+		// its exact digits rather than passing through float64. It marshals back to the same JSON.
+		{Var: "count", Label: "How many", Type: template.FieldInt, Default: json.Number("1")},
 		{Var: "region", Label: "Region", Type: template.FieldChoice, Required: true, Choices: []string{"us-east", "us-west", "eu"}},
 	}
 	if diff := cmp.Diff(wantSurvey, tpl.Survey); diff != "" {
@@ -303,5 +307,292 @@ func TestFromAWXCarriesVaultID(t *testing.T) {
 	// carried into a --vault-id argument.
 	if c := byName["bad-vault"]; c == nil || c.VaultID != "" {
 		t.Errorf("bad-vault = %+v, want the malformed label dropped", c)
+	}
+}
+
+// TestAWXPasswordSurveyRefused proves an AWX password survey field is not imported as a plaintext
+// survey field.
+//
+// AWX prompts for such a value and stores it obscured. A survey field here is plain text whose
+// answer is kept on the run and injected as an extra var, and AWX exports the field's default
+// alongside it, so importing one would quietly downgrade a password prompt into a stored plaintext
+// value. The Rundeck importer refuses the equivalent secure option, and this must agree with it.
+func TestAWXPasswordSurveyRefused(t *testing.T) {
+	t.Parallel()
+	export := `{"job_templates":[{
+		"name":"Rotate keys","playbook":"rotate.yml",
+		"survey_spec":{"spec":[
+			{"variable":"vault_pass","question_name":"Vault password","type":"password",
+			 "required":true,"default":"hunter2"},
+			{"variable":"region","question_name":"Region","type":"text"}
+		]}
+	}]}`
+	plan, err := importer.FromAWX([]byte(export), time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("FromAWX() error = %v", err)
+	}
+	if len(plan.Templates) != 1 {
+		t.Fatalf("templates = %d, want 1 (warnings %v)", len(plan.Templates), plan.Warnings)
+	}
+	for _, f := range plan.Templates[0].Survey {
+		if f.Var == "vault_pass" {
+			t.Fatal("a password survey field was imported, which stores the secret in plain text")
+		}
+	}
+	if len(plan.Templates[0].Survey) != 1 {
+		t.Errorf("survey fields = %d, want only the non-secret one", len(plan.Templates[0].Survey))
+	}
+	// The exported default must not ride along in the plan either.
+	for _, f := range plan.Templates[0].Survey {
+		if fmt.Sprint(f.Default) == "hunter2" {
+			t.Error("the password field's default was imported")
+		}
+	}
+	var told bool
+	for _, w := range plan.Warnings {
+		if strings.Contains(w, "vault_pass") && strings.Contains(w, "password") {
+			told = true
+		}
+	}
+	if !told {
+		t.Errorf("refusing the password field was not reported; warnings = %v", plan.Warnings)
+	}
+}
+
+// TestAWXScheduleKeepsItsTimezone proves an AWX schedule's zone survives the import.
+//
+// AWX records the zone on the recurrence rule. Dropping it moved every imported maintenance window
+// by the offset between that zone and the server's, silently, and the cron expression looked correct
+// either way.
+func TestAWXScheduleKeepsItsTimezone(t *testing.T) {
+	t.Parallel()
+	export := `{"job_templates":[{
+		"name":"Nightly","playbook":"site.yml",
+		"related":{"schedules":[
+			{"name":"ny window","enabled":true,
+			 "rrule":"DTSTART;TZID=America/New_York:20260101T020000 RRULE:FREQ=DAILY;INTERVAL=1"},
+			{"name":"plain window","enabled":true,
+			 "rrule":"DTSTART:20260101T030000Z RRULE:FREQ=DAILY;INTERVAL=1"}
+		]}
+	}]}`
+	plan, err := importer.FromAWX([]byte(export), time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("FromAWX() error = %v", err)
+	}
+	byName := map[string]string{}
+	for _, sc := range plan.Schedules {
+		byName[sc.Name] = sc.Timezone
+	}
+	if got := byName["ny window"]; got != "America/New_York" {
+		t.Errorf("timezone = %q, want America/New_York; the window would fire at the wrong hour", got)
+	}
+	if got := byName["plain window"]; got != "" {
+		t.Errorf("a rule with no TZID got timezone %q, want none", got)
+	}
+}
+
+// TestAWXReportsUnmappedObjects proves the report names what an export held and the importer does
+// not create, rather than staying silent about it.
+func TestAWXReportsUnmappedObjects(t *testing.T) {
+	t.Parallel()
+	export := `{"job_templates":[{"name":"a","playbook":"a.yml"}],
+		"workflow_job_templates":[{"name":"deploy chain"},{"name":"nightly chain"}],
+		"organizations":[{"name":"acme"}],
+		"teams":[{"name":"ops"}],
+		"notification_templates":[{"name":"slack"}]}`
+	plan, err := importer.FromAWX([]byte(export), time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("FromAWX() error = %v", err)
+	}
+	joined := strings.Join(plan.Warnings, "\n")
+	// Workflows are imported now rather than reported as unmapped, so only the object kinds this
+	// importer still does not create are named here.
+	for _, want := range []string{
+		"1 organization", "1 team", "1 notification template",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the report does not mention %q:\n%s", want, joined)
+		}
+	}
+}
+
+// TestAWXWorkflowImportsAsSteppedTemplate proves an AWX workflow job template becomes a saved
+// workflow template whose graph matches the AWX node wiring.
+func TestAWXWorkflowImportsAsSteppedTemplate(t *testing.T) {
+	t.Parallel()
+	export := `{
+		"job_templates":[
+			{"name":"Build","playbook":"build.yml"},
+			{"name":"Test","playbook":"test.yml"},
+			{"name":"Deploy","playbook":"deploy.yml"}
+		],
+		"workflow_job_templates":[{
+			"name":"ship it",
+			"workflow_nodes":[
+				{"id":1,"identifier":"build","unified_job_template":"Build","success_nodes":[2,3]},
+				{"id":2,"identifier":"test","unified_job_template":"Test","success_nodes":[]},
+				{"id":3,"identifier":"deploy","unified_job_template":"Deploy","success_nodes":[]}
+			]
+		}]
+	}`
+	plan, err := importer.FromAWX([]byte(export), time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("FromAWX() error = %v", err)
+	}
+	var wf *template.Template
+	for _, tpl := range plan.Templates {
+		if tpl.Name == "ship it" {
+			wf = tpl
+		}
+	}
+	if wf == nil {
+		t.Fatalf("the workflow was not imported; warnings = %v", plan.Warnings)
+	}
+	if len(wf.Steps) != 3 {
+		t.Fatalf("steps = %d, want 3", len(wf.Steps))
+	}
+	byName := map[string]run.PipelineStep{}
+	for _, s := range wf.Steps {
+		byName[s.Name] = s
+	}
+	if got := byName["build"]; len(got.DependsOn) != 0 || got.Playbook != "build.yml" {
+		t.Errorf("build step = %+v, want no dependencies and build.yml", got)
+	}
+	for _, name := range []string{"test", "deploy"} {
+		got := byName[name]
+		if len(got.DependsOn) != 1 || got.DependsOn[0] != "build" {
+			t.Errorf("%s depends on %v, want [build]", name, got.DependsOn)
+		}
+	}
+	// The imported graph must be one the dispatcher will actually run.
+	if err := run.ValidatePipeline(wf.Steps); err != nil {
+		t.Errorf("the imported graph does not validate: %v", err)
+	}
+}
+
+// TestAWXWorkflowRefusedRatherThanPartial proves a workflow this importer cannot express whole is
+// skipped and reported, never reduced to a subset.
+//
+// A partial graph is the dangerous outcome: it carries the workflow's name and runs some of its
+// steps, so an operator who migrated would believe their change process moved across when part of it
+// silently did not.
+func TestAWXWorkflowRefusedRatherThanPartial(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		Name    string
+		Export  string
+		Because string
+	}{{ // A failure edge runs work because something failed, which a pipeline cannot express.
+		Name: "failure edge",
+		Export: `{"job_templates":[{"name":"A","playbook":"a.yml"},{"name":"B","playbook":"b.yml"}],
+			"workflow_job_templates":[{"name":"wf","workflow_nodes":[
+				{"id":1,"unified_job_template":"A","failure_nodes":[2]},
+				{"id":2,"unified_job_template":"B"}]}]}`,
+		Because: "failure",
+	}, { // A node pointing at a job template the export does not carry has no work to do.
+		Name: "unresolved node",
+		Export: `{"job_templates":[{"name":"A","playbook":"a.yml"}],
+			"workflow_job_templates":[{"name":"wf","workflow_nodes":[
+				{"id":1,"unified_job_template":"A","success_nodes":[2]},
+				{"id":2,"unified_job_template":"Ghost"}]}]}`,
+		Because: "not a job template",
+	}}
+	for _, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Parallel()
+			plan, err := importer.FromAWX([]byte(test.Export), at)
+			if err != nil {
+				t.Fatalf("FromAWX() error = %v", err)
+			}
+			for _, tpl := range plan.Templates {
+				if tpl.Name == "wf" {
+					t.Fatalf("a workflow that cannot be expressed whole was imported anyway: %+v", tpl.Steps)
+				}
+			}
+			joined := strings.Join(plan.Warnings, "\n")
+			if !strings.Contains(joined, test.Because) {
+				t.Errorf("the refusal does not say why (%q):\n%s", test.Because, joined)
+			}
+		})
+	}
+}
+
+// TestAWXImportsARealAwxkitExport pins the shape awxkit actually writes, which is the shape the
+// migration guide tells an operator to produce.
+//
+// awxkit nests an inventory's hosts and groups under its related block. The importer read only the
+// top level, so every inventory from a real export arrived empty and the import still reported
+// success: the inventory existed, it had no hosts, and nothing said so. The execution settings on a
+// job template were dropped the same way, which silently converted a check-mode template limited to
+// one canary host into a live template targeting the whole fleet.
+func TestAWXImportsARealAwxkitExport(t *testing.T) {
+	t.Parallel()
+	const export = `{
+	  "inventory": [{
+	    "name": "Production",
+	    "related": {
+	      "hosts": [{"name": "web01"}, {"name": "web02"}],
+	      "groups": [{"name": "web", "hosts": [{"name": "web01"}]}]
+	    }
+	  }],
+	  "projects": [{"name": "infra", "scm_type": "git", "scm_url": "https://example.com/infra.git", "scm_branch": "main"}],
+	  "job_templates": [{
+	    "name": "canary",
+	    "playbook": "site.yml",
+	    "project": "infra",
+	    "inventory": "Production",
+	    "limit": "canary-01",
+	    "job_tags": "preflight, smoke",
+	    "skip_tags": "slow",
+	    "verbosity": 2,
+	    "forks": 10,
+	    "timeout": 600,
+	    "job_type": "check",
+	    "diff_mode": true
+	  }]
+	}`
+
+	plan, err := importer.FromAWX([]byte(export), time.Now())
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	if len(plan.Inventories) != 1 {
+		t.Fatalf("inventories = %d, want 1", len(plan.Inventories))
+	}
+	content := plan.Inventories[0].Content
+	for _, host := range []string{"web01", "web02"} {
+		if !strings.Contains(content, host) {
+			t.Errorf("inventory imported without %s, so a real export arrives empty:\n%s", host, content)
+		}
+	}
+	if !strings.Contains(content, "[web]") {
+		t.Errorf("inventory imported without its group:\n%s", content)
+	}
+
+	if len(plan.Templates) != 1 {
+		t.Fatalf("templates = %d, want 1", len(plan.Templates))
+	}
+	tpl := plan.Templates[0]
+	checks := []struct {
+		Name string
+		Got  any
+		Want any
+	}{
+		{"limit", tpl.Limit, "canary-01"},
+		{"verbosity", tpl.Verbosity, 2},
+		{"forks", tpl.Forks, 10},
+		{"timeout", tpl.Timeout, 600},
+		{"diff mode", tpl.DiffMode, true},
+		{"check mode becomes dry run", tpl.DryRun, true},
+		{"tags", strings.Join(tpl.Tags, ","), "preflight,smoke"},
+		{"skip tags", strings.Join(tpl.SkipTags, ","), "slow"},
+	}
+	for _, c := range checks {
+		if c.Got != c.Want {
+			t.Errorf("%s = %v, want %v; the import silently changed what this template does",
+				c.Name, c.Got, c.Want)
+		}
 	}
 }

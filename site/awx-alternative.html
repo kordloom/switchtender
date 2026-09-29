@@ -47,7 +47,7 @@
 	<main>
 		<section class="wrap gs-hero reveal">
 			<span class="eyebrow">AWX alternative</span>
-			<h1>Everything AWX does.<br><span class="grad">Without the Kubernetes bill.</span></h1>
+			<h1>The AWX workflow, on one binary.<br><span class="grad">Without the Kubernetes bill.</span></h1>
 			<p class="lede">AWX needs a Kubernetes cluster, an operator, Postgres, Redis, and Receptor before it runs a single playbook, and it has not shipped a release since July 2024. SwitchTender is one Go binary. Download it, run it, and you have job templates, schedules, RBAC, surveys, SSO, workflows, and approvals, plus a live host-by-task matrix AWX never had. Your AWX export imports in one command.</p>
 			<div class="hero-cta">
 				<a class="btn big" href="/get-started">Get started</a>
@@ -63,7 +63,7 @@
 			<div class="cards cards-3">
 				<article class="card reveal">
 					<h3>The platform tax</h3>
-					<p>Running AWX means running Kubernetes, the AWX Operator, Postgres, and Redis, then keeping all of it patched. That's a week of platform work every month, just to run playbooks. SwitchTender is one process and one file. Upgrading is replacing a binary.</p>
+					<p>Running AWX means running Kubernetes, the AWX Operator, Postgres, and Redis, then keeping all of it patched. That's a week of platform work every month, just to run playbooks. SwitchTender is one process and one file. Upgrading is replacing a binary. We <a href="/docs/benchmarks#head-to-head">measured both</a>: a 40&nbsp;MiB image against roughly 1.6&nbsp;GiB across four containers, before the first job runs.</p>
 				</article>
 				<article class="card reveal">
 					<h3>Ansible-only</h3>
@@ -135,7 +135,7 @@
 						<tr><td>Fleet memory: flaky hosts, trends</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Tamper-evident, signed audit</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Drift detection and reconcile, Ansible and Terraform</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Notification channels</td><td class="us">Eleven server-wide, seven of them per template</td><td><span class="muted">About ten, per job template</span></td></tr>
+						<tr><td>Notification channels</td><td class="us">Eleven, each with per-template targets</td><td><span class="muted">About ten, per job template</span></td></tr>
 						<tr><td>Advisory AI triage and fleet answers</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Drop-in Go plugins: tools, secrets, AI, notifiers</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Import from the other side</td><td class="us">One command</td><td><i class="n"></i></td></tr>

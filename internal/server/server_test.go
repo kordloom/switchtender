@@ -68,11 +68,23 @@ type fakeRetrier struct {
 	err error
 	// gotID is the id from the most recent retry call.
 	gotID string
+	// gotActor is the actor from the most recent relaunch call.
+	gotActor string
 }
 
 // RetryFailedShards records the id and returns the configured run or error.
 func (f *fakeRetrier) RetryFailedShards(_ context.Context, parentID string) (*run.Run, error) {
 	f.gotID = parentID
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.run, nil
+}
+
+// RelaunchFailedHosts records the id and returns the configured run or error.
+func (f *fakeRetrier) RelaunchFailedHosts(_ context.Context, runID, actor, _ string) (*run.Run, error) {
+	f.gotID = runID
+	f.gotActor = actor
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -1610,6 +1622,51 @@ func TestSchedulePreview(t *testing.T) {
 	}
 }
 
+// TestSchedulePreviewTimezone proves the preview reads the same timezone a schedule fires in.
+//
+// The preview computed firings in the server's local zone while the saved schedule fired in its
+// own, so a form creating an overnight window in New York promised times hours away from when the
+// job actually ran, and the operator had no way to see the difference before saving.
+func TestSchedulePreviewTimezone(t *testing.T) {
+	t.Parallel()
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop()).Handler()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
+		"/v1/schedules/preview?cron=0+2+*+*+*&timezone=America/New_York", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("preview = %d %s, want 200", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Next []time.Time `json:"next"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+	if len(got.Next) != 5 {
+		t.Fatalf("preview returned %d firings, want 5", len(got.Next))
+	}
+	zone, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skipf("timezone database unavailable: %v", err)
+	}
+	for i, fire := range got.Next {
+		if h, m := fire.In(zone).Hour(), fire.In(zone).Minute(); h != 2 || m != 0 {
+			t.Errorf("firing %d = %s, which is %02d:%02d in New York, want 02:00 there",
+				i, fire, h, m)
+		}
+	}
+
+	// A timezone the database does not know cannot be silently ignored, or the preview would show
+	// server-local times while claiming to show that zone's.
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
+		"/v1/schedules/preview?cron=0+2+*+*+*&timezone=Mars/Olympus", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("preview with an unknown timezone = %d, want 400", rec.Code)
+	}
+}
+
 // TestLaunchOverrides verifies prompt-on-launch overrides reach the submitted run and the
 // inventory override cannot dodge validation.
 func TestLaunchOverrides(t *testing.T) {
@@ -2040,6 +2097,71 @@ func TestMutationReturnsAnAuditReceipt(t *testing.T) {
 	}
 }
 
+// TestRecordedEntryCarriesActorTypeAndContentDigest drives the audit chokepoint over the real HTTP
+// path and checks the fields the chain now commits to: the entry records how the caller authenticated
+// (a token), the account the token is bound to, and a digest of the change payload. It also proves a
+// secret in the body does not enter that digest.
+func TestRecordedEntryCarriesActorTypeAndContentDigest(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	users := user.NewMemStore()
+	tokens := auth.NewMemStore()
+	audits := audit.NewMemStore()
+	creds := credential.NewMemStore()
+
+	operator, err := user.New("deploy-agent", "pw", user.RoleOperator)
+	if err != nil {
+		t.Fatalf("user.New() error = %v", err)
+	}
+	if err := users.Save(ctx, operator); err != nil {
+		t.Fatalf("users.Save() error = %v", err)
+	}
+	plain, tok, err := auth.New("agent")
+	if err != nil {
+		t.Fatalf("auth.New() error = %v", err)
+	}
+	tok.UserID = operator.ID
+	if err := tokens.Save(ctx, tok); err != nil {
+		t.Fatalf("tokens.Save() error = %v", err)
+	}
+	// A second operator token must exist so the operator has grant to create a credential, which the
+	// role gate allows for an operator only via a manage grant; simplest is an admin token minting.
+	sealer := credential.NewSealer("k", "s")
+	handler := New(run.NewMemStore(), &fakeSubmitter{run: &run.Run{ID: "r"}}, zap.NewNop(),
+		WithTokens(tokens), WithUsers(users), WithAudit(audits),
+		WithCredentials(creds, sealer)).Handler()
+
+	// The operator submits a run; the entry should record the token authentication and the bound
+	// account, and a digest of the body.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/runs",
+		strings.NewReader(`{"playbook":"site.yml"}`))
+	req.Header.Set("Authorization", "Bearer "+plain)
+	req.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated && rec.Code != http.StatusOK && rec.Code != http.StatusAccepted {
+		t.Fatalf("submit status = %d (body %s)", rec.Code, rec.Body.String())
+	}
+	chain, err := audits.Chain(ctx)
+	if err != nil || len(chain) == 0 {
+		t.Fatalf("Chain() = %v, %v", chain, err)
+	}
+	e := chain[len(chain)-1]
+	if e.ActorType != actorTypeToken {
+		t.Errorf("actor_type = %q, want %q", e.ActorType, actorTypeToken)
+	}
+	if e.OnBehalfOf != "deploy-agent" {
+		t.Errorf("on_behalf_of = %q, want the bound account deploy-agent", e.OnBehalfOf)
+	}
+	if e.ContentDigest == "" {
+		t.Error("the run submission recorded no content digest")
+	}
+	// The digest must be committed by the link.
+	if audit.EntryHash(e) != e.Hash {
+		t.Error("the recorded entry does not hash to its stored link")
+	}
+}
+
 // TestWebhookSecretNeverReachesTheAuditChain pins that a webhook's token stays out of the audit
 // trail.
 //
@@ -2155,5 +2277,62 @@ func TestSignInDoesNotAppendToTheAuditChain(t *testing.T) {
 	if len(chain) != 0 {
 		t.Errorf("25 failed sign-ins appended %d entries, so anyone reachable on the network can "+
 			"grow the audit chain without bound", len(chain))
+	}
+}
+
+// TestLaunchRefusesAMalformedBody pins that a launch whose body does not parse is refused rather
+// than read as empty.
+//
+// The blast radius is why this matters. A caller asking to limit a run to one canary host, whose body
+// was truncated in transit or whose limit was sent as a number, previously got a 202 and a live run
+// against the entire inventory: the decode error was discarded, so every override the caller asked
+// for silently vanished and nothing in the response said so. An empty body still means no overrides,
+// which is a real and different case.
+func TestLaunchRefusesAMalformedBody(t *testing.T) {
+	t.Parallel()
+	store := template.NewMemStore()
+	tpl := &template.Template{
+		ID: "tpl_blast", Name: "deploy", Playbook: "site.yml", Inventory: "whole-fleet.ini",
+	}
+	if err := store.Save(context.Background(), tpl); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	tests := []struct {
+		Name       string
+		Body       string
+		WantStatus int
+		WantRun    bool
+	}{
+		{
+			Name: "truncated body naming a limit", Body: `{"limit":"canary-01"`,
+			WantStatus: http.StatusBadRequest, WantRun: false,
+		},
+		{
+			Name: "limit sent as a number", Body: `{"limit":42}`,
+			WantStatus: http.StatusBadRequest, WantRun: false,
+		},
+		{
+			Name: "empty body is still a valid launch", Body: "",
+			WantStatus: http.StatusAccepted, WantRun: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Parallel()
+			sub := &fakeSubmitter{run: &run.Run{ID: "run_new", Status: run.StatusPending}}
+			handler := New(run.NewMemStore(), sub, zap.NewNop(), WithTemplates(store)).Handler()
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost,
+				"/v1/templates/"+tpl.ID+"/launch", strings.NewReader(test.Body)))
+
+			if rec.Code != test.WantStatus {
+				t.Errorf("status = %d, want %d: %s", rec.Code, test.WantStatus, rec.Body.String())
+			}
+			if got := sub.gotRun != nil; got != test.WantRun {
+				t.Errorf("a run was submitted = %v, want %v; a refused launch must not reach the "+
+					"fleet", got, test.WantRun)
+			}
+		})
 	}
 }

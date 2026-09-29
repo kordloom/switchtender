@@ -65,7 +65,7 @@ func runAuditReceipt(cmd *cobra.Command, args []string) error {
 	// checked before the receipt is looked for in it.
 	if ok, brokeAt := audit.Verify(chain); !ok {
 		return fmt.Errorf("the chain does not verify at entry %d, so no receipt can be redeemed "+
-			"against it; run audit verify to see where", brokeAt)
+			"against it; GET /v1/audit/verify reports where", brokeAt)
 	}
 	// The anchors are consulted too. A receipt is what somebody outside this install holds, and the
 	// question they are really asking is whether the record still contains what they were told it
@@ -77,7 +77,13 @@ func runAuditReceipt(cmd *cobra.Command, args []string) error {
 		if aerr != nil {
 			return fmt.Errorf("read anchors: %w", aerr)
 		}
-		if reached, results := audit.CheckAnchors(chain, recorded); !reached {
+		// The install identity binds the tree profile's leaves, so a tree anchor cannot be checked
+		// without it.
+		id, ierr := audit.LoadIdentity(identityDir(receiptDB))
+		if ierr != nil {
+			return ierr
+		}
+		if reached, results := audit.CheckAnchors(chain, recorded, id.InstallID); !reached {
 			for _, res := range results {
 				if !res.Reached {
 					fmt.Fprintln(os.Stderr, "anchor "+res.Anchor.ID+": "+res.Problem)

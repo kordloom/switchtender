@@ -1,6 +1,6 @@
 // Package backup writes and reads a portable snapshot of a SwitchTender control plane: its
-// credentials, projects, templates, inventories, inventory sources, schedules, triggers, and the
-// identity and access objects. The snapshot is a logical export, so it restores into either the
+// credentials, projects, templates, inventories, inventory sources, schedules, triggers, API tokens,
+// and the identity and access objects. The snapshot is a logical export, so it restores into either the
 // SQLite or the PostgreSQL backend, which makes it a migration tool as well as a disaster-recovery
 // one.
 //
@@ -22,11 +22,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
 	"github.com/kordloom/switchtender/internal/org"
+	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/team"
@@ -90,12 +92,20 @@ type Stores struct {
 	Triggers trigger.Store
 	// Users holds accounts.
 	Users user.Store
+	// Tokens holds API bearer tokens, restored by their hash.
+	Tokens auth.Store
 	// Teams holds teams.
 	Teams team.Store
 	// Orgs holds organizations.
 	Orgs org.Store
 	// Grants holds per-object access grants.
 	Grants grant.Store
+	// CredentialTypes holds operator-defined credential types. A typed credential names its type and
+	// injects through it, so a credential restored without its type cannot be used at all.
+	CredentialTypes credential.TypeStore
+	// Policies holds the approval policies that decide which runs wait for a person. Nil when the
+	// install pins them from a file, which is its own source of truth and is backed up with the file.
+	Policies policy.Store
 }
 
 // Summary reports how many objects of each kind a backup or restore moved, so the operator sees what
@@ -119,10 +129,18 @@ type Summary struct {
 	Triggers int `json:"triggers"`
 	// Users is the account count.
 	Users int `json:"users"`
+	// Tokens is the API token count.
+	Tokens int `json:"tokens"`
 	// Teams is the team count.
 	Teams int `json:"teams"`
 	// Orgs is the organization count.
 	Orgs int `json:"orgs"`
+	// Policies is the approval policy count.
+	Policies int `json:"policies"`
+	// CredentialTypes is the custom credential type count.
+	CredentialTypes int `json:"credential_types"`
+	// Memberships is the number of team and organization memberships.
+	Memberships int `json:"memberships"`
 	// Grants is the access grant count.
 	Grants int `json:"grants"`
 }
@@ -161,9 +179,41 @@ type payload struct {
 	Schedules        []*schedule.Schedule `json:"schedules,omitempty"`
 	Triggers         []triggerDTO         `json:"triggers,omitempty"`
 	Users            []userDTO            `json:"users,omitempty"`
+	Tokens           []tokenDTO           `json:"tokens,omitempty"`
 	Teams            []*team.Team         `json:"teams,omitempty"`
 	Orgs             []*org.Org           `json:"orgs,omitempty"`
 	Grants           []*grant.Grant       `json:"grants,omitempty"`
+	// CredentialTypes are the operator-defined credential types every typed credential resolves
+	// through. Restoring the credentials without them leaves each one naming a type that is not
+	// there, so it injects nothing and every run that needs it fails.
+	CredentialTypes []*credential.CredentialType `json:"credential_types,omitempty"`
+	// Policies are the approval policies. Without them a restored control plane runs every change
+	// unapproved while still reporting a healthy restore, which is the failure that looks like
+	// success: the gates are simply gone.
+	Policies []*policy.Policy `json:"policies,omitempty"`
+	// TeamMembers and OrgMembers carry who belongs to what. A team or an organization restores as an
+	// empty shell without them, so every grant written to one reaches nobody and access silently
+	// narrows to whoever holds a direct grant.
+	TeamMembers []teamMemberDTO `json:"team_members,omitempty"`
+	OrgMembers  []orgMemberDTO  `json:"org_members,omitempty"`
+}
+
+// teamMemberDTO is one user's membership of one team.
+type teamMemberDTO struct {
+	// TeamID is the team joined.
+	TeamID string `json:"team_id"`
+	// UserID is the member.
+	UserID string `json:"user_id"`
+}
+
+// orgMemberDTO is one user's membership of one organization, with the role it carries there.
+type orgMemberDTO struct {
+	// OrgID is the organization joined.
+	OrgID string `json:"org_id"`
+	// UserID is the member.
+	UserID string `json:"user_id"`
+	// Role is the member's organization role.
+	Role org.Role `json:"role"`
 }
 
 // credentialDTO carries a credential with its sealed Secret, which the entity hides from JSON.
@@ -194,6 +244,15 @@ type userDTO struct {
 	user.User
 	// PasswordHash is the hashed password, restored onto the entity's hidden field.
 	PasswordHash string `json:"password_hash"`
+}
+
+// tokenDTO carries an API token with its hidden hash, restored onto the entity's hidden field. The
+// Token entity hides its Hash from JSON, so the backup carries it explicitly, sealed inside the
+// payload like every other secret.
+type tokenDTO struct {
+	auth.Token
+	// Hash is the SHA-256 of the plaintext token, restored onto the entity's hidden field.
+	Hash string `json:"hash"`
 }
 
 // Write gathers every control-plane object, seals it with the deployment key, and writes the backup
@@ -356,6 +415,15 @@ func gather(ctx context.Context, s Stores) (*payload, Summary, error) {
 	}
 	sum.Users = len(users)
 
+	toks, err := s.Tokens.List(ctx)
+	if err != nil {
+		return nil, sum, fmt.Errorf("backup: list tokens: %w", err)
+	}
+	for _, t := range toks {
+		p.Tokens = append(p.Tokens, tokenDTO{Token: *t, Hash: t.Hash})
+	}
+	sum.Tokens = len(toks)
+
 	if p.Teams, err = s.Teams.List(ctx); err != nil {
 		return nil, sum, fmt.Errorf("backup: list teams: %w", err)
 	}
@@ -370,6 +438,44 @@ func gather(ctx context.Context, s Stores) (*payload, Summary, error) {
 		return nil, sum, fmt.Errorf("backup: list grants: %w", err)
 	}
 	sum.Grants = len(p.Grants)
+
+	if s.CredentialTypes != nil {
+		if p.CredentialTypes, err = s.CredentialTypes.List(ctx); err != nil {
+			return nil, sum, fmt.Errorf("backup: list credential types: %w", err)
+		}
+		sum.CredentialTypes = len(p.CredentialTypes)
+	}
+
+	// Policies are skipped when the install pins them from a file: that file is the source of truth,
+	// the API refuses writes to them, and restoring a copy would put a second answer in the database.
+	if s.Policies != nil {
+		if p.Policies, err = s.Policies.List(ctx); err != nil {
+			return nil, sum, fmt.Errorf("backup: list policies: %w", err)
+		}
+		sum.Policies = len(p.Policies)
+	}
+
+	// Membership is stored separately from the team and organization rows, so listing those alone
+	// captured empty shells.
+	for _, t := range p.Teams {
+		members, err := s.Teams.Members(ctx, t.ID)
+		if err != nil {
+			return nil, sum, fmt.Errorf("backup: list members of team %s: %w", t.ID, err)
+		}
+		for _, uid := range members {
+			p.TeamMembers = append(p.TeamMembers, teamMemberDTO{TeamID: t.ID, UserID: uid})
+		}
+	}
+	for _, o := range p.Orgs {
+		members, err := s.Orgs.Members(ctx, o.ID)
+		if err != nil {
+			return nil, sum, fmt.Errorf("backup: list members of organization %s: %w", o.ID, err)
+		}
+		for _, m := range members {
+			p.OrgMembers = append(p.OrgMembers, orgMemberDTO{OrgID: o.ID, UserID: m.UserID, Role: m.Role})
+		}
+	}
+	sum.Memberships = len(p.TeamMembers) + len(p.OrgMembers)
 
 	return &p, sum, nil
 }
@@ -387,8 +493,13 @@ func gather(ctx context.Context, s Stores) (*payload, Summary, error) {
 // script URL. The role and grant cases fail closed, but the profile link is rendered as an anchor in
 // the users page on the strength of the server having validated it.
 func check(ctx context.Context, s Stores, p *payload) error {
-	for _, u := range p.Users {
-		acct := u.User
+	for i := range p.Users {
+		// Point at the payload element so NormalizeProfile mutates the value that apply then stores.
+		// Copying it here normalized a throwaway and let the raw, un-normalized profile reach the
+		// store, so the value that passed validation was not the value kept. check runs before apply
+		// on the same payload, and Read discards the payload on any check error, so no partly
+		// normalized state is ever stored.
+		acct := &p.Users[i].User
 		if !user.ValidRole(acct.Role) {
 			return fmt.Errorf("%w: user %s has role %q, which is not a role", ErrFormat,
 				acct.ID, acct.Role)
@@ -431,6 +542,8 @@ func check(ctx context.Context, s Stores, p *payload) error {
 // returns the true number written rather than zero for rows already committed.
 func apply(ctx context.Context, s Stores, p *payload) (Summary, error) {
 	var sum Summary
+	// One clock reading for the whole restore, so every schedule recomputes against the same instant.
+	now := time.Now()
 
 	for _, o := range p.Orgs {
 		if err := s.Orgs.Save(ctx, o); err != nil {
@@ -455,11 +568,57 @@ func apply(ctx context.Context, s Stores, p *payload) (Summary, error) {
 		sum.Users++
 	}
 
+	// Tokens reference a user, so they are restored after the users that own them.
+	for _, t := range p.Tokens {
+		tok := t.Token
+		tok.Hash = t.Hash
+		if err := s.Tokens.Save(ctx, &tok); err != nil {
+			return sum, fmt.Errorf("restore: save token %s: %w", tok.ID, err)
+		}
+		sum.Tokens++
+	}
+
+	// Credential types come before the credentials that name them.
+	if s.CredentialTypes != nil {
+		for _, ct := range p.CredentialTypes {
+			if err := s.CredentialTypes.Save(ctx, ct); err != nil {
+				return sum, fmt.Errorf("restore: save credential type %s: %w", ct.ID, err)
+			}
+			sum.CredentialTypes++
+		}
+	}
+
 	for _, g := range p.Grants {
 		if err := s.Grants.Save(ctx, g); err != nil {
 			return sum, fmt.Errorf("restore: save grant %s: %w", g.ID, err)
 		}
 		sum.Grants++
+	}
+
+	// Memberships come after the users, teams, and organizations they join, since they reference all
+	// three.
+	for _, m := range p.TeamMembers {
+		if err := s.Teams.AddMember(ctx, m.TeamID, m.UserID); err != nil {
+			return sum, fmt.Errorf("restore: add %s to team %s: %w", m.UserID, m.TeamID, err)
+		}
+		sum.Memberships++
+	}
+	for _, m := range p.OrgMembers {
+		if err := s.Orgs.AddMember(ctx, m.OrgID, m.UserID, m.Role); err != nil {
+			return sum, fmt.Errorf("restore: add %s to organization %s: %w", m.UserID, m.OrgID, err)
+		}
+		sum.Memberships++
+	}
+
+	// Policies last among the access objects, and only when this install manages them in the
+	// database. A restore that silently dropped them left every gated change running unapproved.
+	if s.Policies != nil {
+		for _, pol := range p.Policies {
+			if err := s.Policies.Save(ctx, pol); err != nil {
+				return sum, fmt.Errorf("restore: save policy %s: %w", pol.ID, err)
+			}
+			sum.Policies++
+		}
 	}
 
 	for _, pr := range p.Projects {
@@ -502,7 +661,25 @@ func apply(ctx context.Context, s Stores, p *payload) (Summary, error) {
 	}
 
 	for _, sc := range p.Schedules {
-		if err := s.Schedules.Save(ctx, sc); err != nil {
+		// The next fire time is recomputed from the cron rather than restored as it was written.
+		//
+		// The scheduler reads any next-run time that is not in the future as due, so a backup taken
+		// yesterday restored today made every enabled schedule due at once: the restore finished and
+		// the whole estate's nightly work fired together, against an install somebody was still
+		// bringing up. Missed occurrences are skipped the way cron skips them, so the schedule
+		// resumes on its own cadence instead of catching up.
+		restored := *sc
+		if restored.Enabled {
+			if next, err := restored.NextFire(now); err == nil {
+				restored.NextRunAt = &next
+			} else {
+				// A cadence that can never come due was already broken before the backup. It is
+				// restored without a fire time, which the scheduler skips, rather than with a stale
+				// one that would fire it immediately.
+				restored.NextRunAt = nil
+			}
+		}
+		if err := s.Schedules.Save(ctx, &restored); err != nil {
 			return sum, fmt.Errorf("restore: save schedule %s: %w", sc.ID, err)
 		}
 		sum.Schedules++

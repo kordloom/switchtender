@@ -21,8 +21,26 @@ const (
 	AnchorHTTPS = "https"
 )
 
+// Anchor shapes, the coordinate space an anchor's Seq and Link live in. A linear anchor and a tree
+// anchor are checked in entirely different ways, so the shape is persisted with the anchor rather
+// than guessed from its values, which are both hex strings.
+const (
+	// AnchorShapeLinear fixes a chain position: Seq is an entry's sequence and Link is that
+	// entry's hash. It is checked by finding the entry and comparing hashes.
+	AnchorShapeLinear = "linear"
+	// AnchorShapeTree fixes a Merkle coordinate: Seq is a tree size and Link is the root over the
+	// first Seq entries. It is checked by recomputing that tree, never against an entry hash.
+	AnchorShapeTree = "tree"
+)
+
 // ErrAnchorType is returned for an anchor type the format does not define.
 var ErrAnchorType = errors.New("unknown anchor type")
+
+// ErrAnchorShape is returned for an anchor shape the format does not define.
+var ErrAnchorShape = errors.New("unknown anchor shape")
+
+// ErrAnchorNotFound is returned when a named anchor does not exist.
+var ErrAnchorNotFound = errors.New("anchor not found")
 
 // Anchor fixes one chain link in time somewhere outside this install.
 //
@@ -35,9 +53,14 @@ type Anchor struct {
 	ID string `json:"id"`
 	// Type is the anchor kind: rfc3161, git, or https.
 	Type string `json:"type"`
-	// Seq is the chain position this anchor fixes.
+	// Shape is the coordinate space Seq and Link live in: linear for an entry hash at a chain
+	// position, tree for a Merkle root at a tree size.
+	Shape string `json:"shape"`
+	// Seq is the coordinate's position: a chain sequence for a linear anchor, a tree size for a
+	// tree anchor.
 	Seq int64 `json:"seq"`
-	// Link is the hash of the entry at Seq, the value being anchored.
+	// Link is the value being anchored: the entry hash at Seq for a linear anchor, the Merkle root
+	// over the first Seq entries for a tree anchor.
 	Link string `json:"link"`
 	// At is when the anchor was made.
 	At time.Time `json:"at"`
@@ -55,6 +78,10 @@ type AnchorStore interface {
 	// Anchors returns every anchor at or below seq, oldest first, so a bundle carries the anchors
 	// that actually cover the range it holds. A seq of zero or less returns all of them.
 	Anchors(ctx context.Context, seq int64) ([]*Anchor, error)
+	// DeleteAnchor removes the anchor with the given id, so one recorded over the wrong
+	// coordinates can be withdrawn rather than failing every export forever. It returns
+	// ErrAnchorNotFound when no anchor carries that id.
+	DeleteAnchor(ctx context.Context, id string) error
 }
 
 // NewAnchorID returns a random anchor identifier prefixed with "anc_".
@@ -68,4 +95,9 @@ func ValidAnchorType(t string) bool {
 	default:
 		return false
 	}
+}
+
+// ValidAnchorShape reports whether s is an anchor shape the format defines.
+func ValidAnchorShape(s string) bool {
+	return s == AnchorShapeLinear || s == AnchorShapeTree
 }

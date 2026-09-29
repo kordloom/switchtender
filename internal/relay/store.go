@@ -59,6 +59,11 @@ func (c *Client) SaveHostSummary(ctx context.Context, runID string, summaries []
 	return c.t.SaveHostSummary(ctx, runID, summaries)
 }
 
+// SaveHostFacts records the system facts a run gathered per host on the control node.
+func (c *Client) SaveHostFacts(ctx context.Context, runID string, facts []run.HostFacts) error {
+	return c.t.SaveHostFacts(ctx, runID, facts)
+}
+
 // SaveTaskSummary records a run's per-task durations on the control node.
 func (c *Client) SaveTaskSummary(ctx context.Context, runID string, summaries []run.TaskSummary) error {
 	return c.t.SaveTaskSummary(ctx, runID, summaries)
@@ -92,6 +97,11 @@ func (c *Client) RunStatusCounts(context.Context) (map[run.Status]int, error) {
 	return nil, ErrUnsupported
 }
 
+// RunTimings is a control-node read and is not served to workers.
+func (c *Client) RunTimings(context.Context, int) ([]run.RunTiming, error) {
+	return nil, ErrUnsupported
+}
+
 // Shards is a control-node query and is not served to workers.
 func (c *Client) Shards(context.Context, string) ([]*run.Run, error) { return nil, ErrUnsupported }
 
@@ -111,6 +121,18 @@ func (c *Client) RequestCancel(context.Context, string) error { return ErrUnsupp
 
 // TransitionStatus is a control-node operation and is not served to workers.
 func (c *Client) TransitionStatus(context.Context, string, run.Status, run.Status) (bool, error) {
+	return false, ErrUnsupported
+}
+
+// StampApprovedSpec is a control-node write and is not served to workers: decisions are made where
+// the approver is, never on the far side of the relay.
+func (c *Client) StampApprovedSpec(context.Context, string, string) error {
+	return ErrUnsupported
+}
+
+// FinalizeRunning is a control-node write and is not served to workers. A relay worker reports how
+// a run ended through Save, and the control node applies that report to the run it holds.
+func (c *Client) FinalizeRunning(context.Context, string, run.Finalization) (bool, error) {
 	return false, ErrUnsupported
 }
 
@@ -143,11 +165,6 @@ func (c *Client) RunHostSummaries(context.Context, string) ([]run.HostSummary, e
 // RunTaskSummaries is a control-node read and is not served to workers.
 func (c *Client) RunTaskSummaries(context.Context, string) ([]run.TaskSummary, error) {
 	return nil, ErrUnsupported
-}
-
-// SaveHostFacts is a control-node write and is not served to workers.
-func (c *Client) SaveHostFacts(context.Context, string, []run.HostFacts) error {
-	return ErrUnsupported
 }
 
 // HostFactsFor is a control-node read and is not served to workers.
@@ -194,3 +211,6 @@ func (c *Client) PurgeEventsBefore(context.Context, time.Time) (int, error) {
 
 // PurgeRunsBefore is a control-node retention sweep and is not served to workers.
 func (c *Client) PurgeRunsBefore(context.Context, time.Time) (int, error) { return 0, ErrUnsupported }
+
+// TrimSummaries is a control-node retention sweep and is not served to workers.
+func (c *Client) TrimSummaries(context.Context, int) (int, error) { return 0, ErrUnsupported }

@@ -99,8 +99,8 @@ func TestWorkerTokenCannotWriteTheRecordOfARunItDoesNotHold(t *testing.T) {
 		t.Errorf("a finished run now records %q", got)
 	}
 
-	// The other three writers build the same record and answer the same question.
-	for _, path := range []string{"events", "host-summary", "task-summary"} {
+	// The other writers build the same record and answer the same question.
+	for _, path := range []string{"events", "host-summary", "host-facts", "task-summary"} {
 		if code := postAsWorker(t, ts.URL, "/relay/v1/runs/run_held/"+path, []byte("[]")); code < 400 {
 			t.Errorf("posting %s to a run awaiting a decision answered %d", path, code)
 		}
@@ -145,5 +145,61 @@ func TestWorkerReportBoundaryLeavesLegitimateWorkAlone(t *testing.T) {
 	}
 	if len(summaries) != 1 {
 		t.Errorf("host summaries = %d, want the worker's summary recorded", len(summaries))
+	}
+}
+
+// TestWorkerCannotReportOnACoordinatorParent proves a worker cannot terminalize a split or pipeline
+// parent, which the control node coordinates and no worker ever executes.
+//
+// A worker learns a parent's id from its own claim response, since a shard carries parent_id, and
+// the relay serves any run whose queue its pool allows. The report check authenticated the reporter
+// by replaying the run's lease, and a parent's lease is the control node's own coordinator. Without
+// this refusal a worker could mark the parent finished while its shards were still executing,
+// stranding them under a run the API already reported as done, and the chain would record the
+// completion against an executor that never reported it.
+func TestWorkerCannotReportOnACoordinatorParent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	backing := run.NewMemStore()
+	ts := httptest.NewServer(relay.NewHandler(backing, relay.SinglePool(testWorkerToken), nil, nil, nil))
+	defer ts.Close()
+
+	claimed := time.Now()
+	for _, kind := range []string{run.KindSplit, run.KindPipeline} {
+		parent := &run.Run{
+			ID: "run_parent_" + kind, Playbook: "site.yml", Kind: kind,
+			Status: run.StatusRunning, CreatedAt: time.Now(),
+			ClaimedBy: "control-node-1", ClaimedAt: &claimed,
+		}
+		if err := backing.Save(ctx, parent); err != nil {
+			t.Fatalf("Save(%s) error = %v", kind, err)
+		}
+		// The lease name is exactly what the relay discloses, so the forgery replays it.
+		body := []byte(`{"id":"` + parent.ID + `","status":"failed","claimed_by":"control-node-1"}`)
+		code := postAsWorker(t, ts.URL, "/relay/v1/runs/"+parent.ID+"/save", body)
+		if code < 400 {
+			t.Errorf("a worker terminalized a %s parent: HTTP %d", kind, code)
+		}
+		got, err := backing.Get(ctx, parent.ID)
+		if err != nil {
+			t.Fatalf("Get(%s) error = %v", kind, err)
+		}
+		if got.Status != run.StatusRunning {
+			t.Errorf("%s parent status = %q, want it untouched as running", kind, got.Status)
+		}
+
+		// The record writers draw the same boundary. A parent's captured output is the rollup of its
+		// children, so a worker appending to it would write output into the record of work it did not
+		// do, and that record is the evidence this product sells.
+		for _, path := range []string{"/log", "/events", "/hosts", "/tasks"} {
+			code := postAsWorker(t, ts.URL, "/relay/v1/runs/"+parent.ID+path, []byte(`[]`))
+			if code < 400 {
+				t.Errorf("a worker wrote to a %s parent's %s: HTTP %d", kind, path, code)
+			}
+		}
+		gotLog, err := backing.Log(ctx, parent.ID)
+		if err == nil && len(gotLog) != 0 {
+			t.Errorf("a worker's output reached the %s parent's log: %q", kind, gotLog)
+		}
 	}
 }

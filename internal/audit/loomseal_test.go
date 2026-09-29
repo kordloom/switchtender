@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -272,13 +271,9 @@ func TestBundleSpanClaimLinksRecompute(t *testing.T) {
 	// member the bundle does not carry is an empty string, never recovered from the store.
 	var doc struct {
 		Claims []struct {
-			At      string `json:"at"`
-			Payload struct {
-				Actor  string `json:"actor"`
-				Method string `json:"method"`
-				Path   string `json:"path"`
-			} `json:"payload"`
-			Chain struct {
+			At      string         `json:"at"`
+			Payload map[string]any `json:"payload"`
+			Chain   struct {
 				Seq  int64  `json:"seq"`
 				Prev string `json:"prev"`
 				Link string `json:"link"`
@@ -292,10 +287,26 @@ func TestBundleSpanClaimLinksRecompute(t *testing.T) {
 		t.Fatalf("claims = %d, want %d", len(doc.Claims), len(chain))
 	}
 	for i, c := range doc.Claims {
-		payload, err := jcs.Serialize([]any{
-			strconv.FormatInt(c.Chain.Seq, 10), c.At,
-			c.Payload.Actor, c.Payload.Method, c.Payload.Path, c.Chain.Prev,
-		})
+		// The link commits to the members the profile names, taken from the bundle alone. A payload
+		// member outside that set, such as the decoded span beat and count, is carried for a reader
+		// and is not hashed; the beat's own values are already committed through the path.
+		claim := map[string]any{
+			"seq":  c.Chain.Seq,
+			"at":   c.At,
+			"prev": c.Chain.Prev,
+		}
+		for _, key := range []string{"actor", "method", "path"} {
+			value, _ := c.Payload[key].(string)
+			claim[key] = value
+		}
+		// The fields added later appear only when the entry carries them, exactly as the link omits
+		// them, so an entry recorded before they existed recomputes unchanged.
+		for _, key := range []string{"actor_type", "on_behalf_of", "content_digest"} {
+			if value, ok := c.Payload[key].(string); ok && value != "" {
+				claim[key] = value
+			}
+		}
+		payload, err := jcs.Serialize(claim)
 		if err != nil {
 			t.Fatalf("claim %d: jcs.Serialize() error = %v", i, err)
 		}

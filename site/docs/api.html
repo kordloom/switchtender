@@ -36,14 +36,14 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX or Semaphore</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api" class="active">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX, Semaphore, or Rundeck</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api" class="active">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
 			<h1 id="http-api">HTTP API</h1>
 <p>Every endpoint the server exposes. The API is served under the <code>/v1</code> base path. The web UI at
-<code>/ui/</code>, along with <code>/healthz</code>, <code>/metrics</code>, the OpenID Connect and SAML sign-in routes, the webhook
-<code>/hooks</code> path, and the <code>/relay</code> worker path, is unversioned. The root redirects to the UI.</p>
+<code>/ui/</code>, along with <code>/healthz</code>, <code>/readyz</code>, <code>/metrics</code>, the OpenID Connect and SAML sign-in routes, the
+webhook <code>/hooks</code> path, and the <code>/relay</code> worker path, is unversioned. The root redirects to the UI.</p>
 <table>
 <thead>
 <tr>
@@ -77,6 +77,11 @@
 <td>POST</td>
 <td><code>/v1/runs/{id}/retry</code></td>
 <td>New split from only the failed shards of a finished one.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/v1/runs/{id}/relaunch-failed</code></td>
+<td>Re-run only the hosts a finished run left failed or unreachable.</td>
 </tr>
 <tr>
 <td>POST</td>
@@ -271,7 +276,7 @@
 <tr>
 <td>POST</td>
 <td><code>/v1/credentials</code></td>
-<td>Store a credential, encrypted at rest. Thirteen built-in kinds, or a custom type via <code>type_id</code> and <code>fields</code>. Non-secret <code>settings</code> ride beside the secret and return from the API.</td>
+<td>Store a credential, encrypted at rest. Fourteen built-in kinds, or a custom type via <code>type_id</code> and <code>fields</code>. Non-secret <code>settings</code> ride beside the secret and return from the API.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -491,7 +496,7 @@
 <tr>
 <td>POST</td>
 <td><code>/v1/policies</code></td>
-<td>Create an approval policy that gates matching runs.</td>
+<td>Create a policy that holds or denies matching runs.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -511,12 +516,12 @@
 <tr>
 <td>POST</td>
 <td><code>/v1/import/{format}</code></td>
-<td>Import an AWX or Semaphore export. Format is awx or semaphore.</td>
+<td>Import an AWX, Semaphore, or Rundeck export. Format is awx, semaphore, or rundeck. Rundeck takes <code>?inventory=</code> to say which hosts its jobs target.</td>
 </tr>
 <tr>
 <td>GET</td>
 <td><code>/v1/audit</code></td>
-<td>The mutation trail, admin only.</td>
+<td>A page of the mutation trail, admin only. <code>?limit=</code> up to 1000, default 100; <code>has_more</code> reports whether older entries remain.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -525,8 +530,8 @@
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/v1/audit/export</code></td>
-<td>Signed, self-verifying snapshot of the audit chain.</td>
+<td><code>/v1/audit/bundle</code></td>
+<td>The audit chain as a signed LoomSeal bundle, verifiable offline or on the /verify page.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -538,8 +543,17 @@
 <td><code>/healthz</code></td>
 <td>Liveness.</td>
 </tr>
+<tr>
+<td>GET</td>
+<td><code>/readyz</code></td>
+<td>Readiness: 200 once the store answers, 503 while it does not.</td>
+</tr>
 </tbody>
 </table>
+<p>A streamed export whose status line has already been sent cannot report a later failure with a
+status code. The run event NDJSON download and the run log download therefore end with a
+<code>{&quot;export_incomplete&quot;:true,&quot;reason&quot;:&quot;...&quot;}</code> line when they stop early, so a short file is never
+mistaken for a whole one.</p>
 <h2 id="account-profiles">Account profiles</h2>
 <p>An account carries an optional profile alongside its role: <code>full_name</code>, <code>email</code>, <code>phone</code>, <code>title</code>,
 <code>links</code>, and <code>notes</code>. All of them are optional, so an account created by the CLI or provisioned over
@@ -582,6 +596,113 @@ run, whether the launch came from the API, a schedule, or a webhook trigger.</p>
 <p>Zero, or the field omitted, leaves launches on the server default set by <code>--run-timeout</code>, so a
 template saved before this field existed is unchanged. A run that exceeds its timeout is canceled
 and finalized as failed. A launch cannot raise the cap; the template's value is what applies.</p>
+<h2 id="ansible-run-controls">Ansible run controls</h2>
+<p>A run submission and a template both accept the Ansible controls that used to require a hand-built
+command. They ride onto a run the same way from the API, a schedule, or a webhook trigger, and a
+retry keeps them.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>limit</code></td>
+<td>string</td>
+<td>Narrows the run to the hosts matching this pattern. Becomes <code>--limit</code>. Empty targets the whole inventory.</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td>list of strings</td>
+<td>Runs only the plays and tasks carrying one of these tags. Becomes <code>--tags</code>.</td>
+</tr>
+<tr>
+<td><code>skip_tags</code></td>
+<td>list of strings</td>
+<td>Skips the plays and tasks carrying one of these tags. Becomes <code>--skip-tags</code>.</td>
+</tr>
+<tr>
+<td><code>forks</code></td>
+<td>integer</td>
+<td>How many hosts Ansible addresses at once. Zero leaves the Ansible default. Becomes <code>--forks</code>.</td>
+</tr>
+<tr>
+<td><code>verbosity</code></td>
+<td>integer 0 to 4</td>
+<td>Raises Ansible logging. One through four becomes <code>-v</code> through <code>-vvvv</code>; a higher number is clamped to four.</td>
+</tr>
+<tr>
+<td><code>diff_mode</code></td>
+<td>boolean</td>
+<td>Shows the before and after of every changed file and template. Becomes <code>--diff</code>.</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-bash">curl -X POST https://switchtender.example.com/v1/runs \
+  -H &quot;Authorization: Bearer $SWITCHTENDER_TOKEN&quot; \
+  -H 'Content-Type: application/json' \
+  -d '{
+    &quot;playbook&quot;: &quot;plays/deploy.yml&quot;,
+    &quot;inventory&quot;: &quot;prod&quot;,
+    &quot;limit&quot;: &quot;canary01&quot;,
+    &quot;tags&quot;: [&quot;web&quot;, &quot;config&quot;],
+    &quot;skip_tags&quot;: [&quot;reboot&quot;],
+    &quot;forks&quot;: 25,
+    &quot;verbosity&quot;: 2,
+    &quot;diff_mode&quot;: true
+  }'
+</code></pre>
+<p>These apply to the Ansible tool. The other tools ignore them, so a Bash or Terraform template that
+carries one is unaffected.</p>
+<p>A run submission also accepts <code>extra_vars</code>, an object of variables injected into the run. Ansible
+receives them the way <code>--extra-vars</code> supplies them, and a plugin tool reads them as its input. A
+template carries its own <code>extra_vars</code> and a launch may merge more over them.</p>
+<h2 id="saved-workflows">Saved workflows</h2>
+<p><em>Next release.</em> A template may carry <code>steps</code>, a pipeline graph, instead of a single tool. Such a
+template is a saved workflow: every path that fires a template, a launch, a schedule, or a webhook
+trigger, runs the graph as a pipeline, and the template's survey answers and extra vars reach every
+step. A workflow template sets no top-level <code>playbook</code>, <code>command</code>, <code>tool</code>, <code>shards</code>, or Ansible
+controls, since each step names its own; the graph is validated when the template is saved, so a
+cycle or an unknown dependency is refused then rather than on every launch.</p>
+<pre><code class="language-bash">curl -X POST https://switchtender.example.com/v1/templates   -H &quot;Authorization: Bearer $SWITCHTENDER_TOKEN&quot;   -H 'Content-Type: application/json'   -d '{
+    &quot;name&quot;: &quot;build and ship&quot;,
+    &quot;inventory&quot;: &quot;prod&quot;,
+    &quot;steps&quot;: [
+      {&quot;name&quot;: &quot;build&quot;, &quot;tool&quot;: &quot;bash&quot;, &quot;command&quot;: &quot;make release&quot;},
+      {&quot;name&quot;: &quot;deploy&quot;, &quot;playbook&quot;: &quot;deploy.yml&quot;, &quot;depends_on&quot;: [&quot;build&quot;]}
+    ]
+  }'
+</code></pre>
+<h2 id="survey-field-constraints">Survey field constraints</h2>
+<p>A template survey field accepts bounds beyond its type, checked at launch before any answer becomes
+an extra var. A field also takes an optional <code>help</code> string shown beneath its prompt, and a
+<code>multiline</code> type for a block of text such as a set of variables or a note.</p>
+<table>
+<thead>
+<tr>
+<th>Field kind</th>
+<th>Constraints</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>int</code></td>
+<td><code>min</code> and <code>max</code> bound the answer, inclusive.</td>
+</tr>
+<tr>
+<td><code>text</code>, <code>multiline</code></td>
+<td><code>min_length</code> and <code>max_length</code> bound the length; <code>pattern</code> is a regular expression the whole answer must match.</td>
+</tr>
+<tr>
+<td><code>choice</code></td>
+<td>The answer must be one of <code>choices</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>A launch that violates a constraint is refused with the field it failed, and no run is submitted.</p>
 <h2 id="per-template-notifications">Per-template notifications</h2>
 <p>A template or a run submission may carry <code>notifications</code>, a list of targets that receive its
 terminal state in addition to the server-wide channels. Each target names a <code>kind</code> and the field
@@ -654,6 +775,31 @@ that kind is addressed by, plus an optional <code>on_failure</code> that limits 
 delivery. A Twilio or email target names only a recipient. The account credentials stay in server
 flags, so a template never carries them. On read, webhook URLs, PagerDuty routing keys, and
 Grafana tokens come back masked; an edit that echoes the mask back keeps the stored value.</p>
+<h2 id="schedule-timezone">Schedule timezone</h2>
+<p>A schedule reads its cron expression in the server's local time unless it carries a <code>timezone</code>, an
+IANA name such as <code>America/New_York</code> or <code>Europe/Berlin</code>. With one set, <code>0 2 * * *</code> fires at 02:00
+in that zone and follows its daylight-saving shifts, so a nightly window stays put across the year.
+The field is accepted on create and update and applies to the same expression the preview endpoint
+renders.</p>
+<pre><code class="language-bash">curl -X POST https://switchtender.example.com/v1/schedules \
+  -H &quot;Authorization: Bearer $SWITCHTENDER_TOKEN&quot; \
+  -H 'Content-Type: application/json' \
+  -d '{&quot;cron&quot;:&quot;0 2 * * *&quot;,&quot;timezone&quot;:&quot;America/New_York&quot;,&quot;template_id&quot;:&quot;tpl_abc123&quot;}'
+</code></pre>
+<h2 id="fleet-view-windows">Fleet view windows</h2>
+<p><code>/v1/fleet</code> and <code>/v1/tasks</code> take a <code>window</code>, the number of recent runs per host or per task the
+view considers, and <code>/v1/hosts/{host}/runs</code> takes a <code>limit</code>. All three default to 10. The window is
+capped at 100 and the host history limit at 500; a larger value is answered with the cap, and the
+response echoes the window it actually used. The caps exist because the per-host and per-task
+summaries are kept when their runs are deleted, so on a long-lived fleet the tables hold a row for
+every host of every run, and every row a window admits becomes an element of the answer.</p>
+<p>The same tables are bounded by count rather than by age. <code>--retain-history</code> keeps the newest N
+summaries for each host and each task and drops the rest, so a host's outcome history still
+outlives its runs without the tables growing forever. N is never allowed below 500, the deepest
+window these endpoints will answer, so trimmed history is history no request could have reached.</p>
+<pre><code class="language-bash">curl -s &quot;https://switchtender.example.com/v1/fleet?window=30&quot; \
+  -H &quot;Authorization: Bearer $SWITCHTENDER_TOKEN&quot;
+</code></pre>
 <h2 id="relay-endpoints">Relay endpoints</h2>
 <p>With <code>--worker-token</code> set, the server also serves the mesh relay under <code>/relay</code>: the execution
 path an outbound worker started with <code>--server</code> uses instead of a database connection. Every call
@@ -706,6 +852,11 @@ presents the worker bearer token.</p>
 <td>POST</td>
 <td><code>/relay/v1/runs/{id}/host-summary</code></td>
 <td>Save the run's per-host summaries.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/relay/v1/runs/{id}/host-facts</code></td>
+<td>Save the facts the run gathered per host.</td>
 </tr>
 <tr>
 <td>POST</td>

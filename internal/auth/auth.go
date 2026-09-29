@@ -27,6 +27,11 @@ type Token struct {
 	// UserID names the account the token authenticates as. Empty means an unscoped token from
 	// the command line, which carries admin rights.
 	UserID string `json:"user_id,omitempty"`
+	// Kind declares what holds the token. Empty means a person. KindAgent marks a token issued to an
+	// AI agent: the chain records its actions under that identity, and the token is capped so it
+	// cannot manage identity, access, or secrets no matter what account it is bound to. The kind is
+	// set when the token is minted and observed, never guessed from how a request looks.
+	Kind string `json:"kind,omitempty"`
 	// Hash is the hex encoded SHA-256 of the plaintext token.
 	Hash string `json:"-"`
 	// CreatedAt is when the token was created.
@@ -37,9 +42,17 @@ type Token struct {
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
+// KindAgent marks a token held by an AI agent rather than a person. An empty kind is a person.
+const KindAgent = "agent"
+
 // Expired reports whether the token is past its expiry.
 func (t *Token) Expired(now time.Time) bool {
 	return t.ExpiresAt != nil && now.After(*t.ExpiresAt)
+}
+
+// IsAgent reports whether the token was issued to an agent.
+func (t *Token) IsAgent() bool {
+	return t.Kind == KindAgent
 }
 
 // Store persists API tokens. Implementations must be safe for concurrent use.
@@ -48,6 +61,11 @@ type Store interface {
 	Save(ctx context.Context, t *Token) error
 	// List returns all tokens ordered by creation time, oldest first.
 	List(ctx context.Context) ([]*Token, error)
+	// Touch records that a token authenticated a request, at the given time. It updates an existing
+	// row and never creates one, so a token revoked while a touch was in flight stays revoked. It
+	// reports no error when the token is gone, because a touch is a note about a request that already
+	// happened rather than a change anyone is waiting on.
+	Touch(ctx context.Context, id string, at time.Time) error
 	// Delete removes the token with the given id, or returns ErrNotFound.
 	Delete(ctx context.Context, id string) error
 	// FindByHash returns the token with the given hash, or ErrNotFound.

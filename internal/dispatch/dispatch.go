@@ -18,10 +18,12 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
+	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -45,9 +47,6 @@ const (
 	watchInterval = 3 * time.Second
 	// leaseTTL is how stale a lease may grow before the janitor treats its holder as dead.
 	leaseTTL = 30 * time.Second
-	// summaryPageSize is how many events are read at a time when folding a finished run's summaries.
-	// It bounds peak memory at completion, which is when several runs tend to finish at once.
-	summaryPageSize = 5000
 	// janitorInterval is how often stale leases are swept.
 	janitorInterval = 10 * time.Second
 	// idleBackoffShift is how many times an idle claim wait may double, so the ceiling is the claim
@@ -56,6 +55,8 @@ const (
 	idleBackoffShift = 3
 	// dedupeRetryShards names the shard-retry action in the idempotency keys it dedupes under.
 	dedupeRetryShards = "retry-shards"
+	// dedupeRelaunchHosts names the failed-host relaunch action it dedupes under.
+	dedupeRelaunchHosts = "relaunch-hosts"
 )
 
 // Publisher receives live run output for streaming to clients. All methods must be safe for
@@ -85,6 +86,8 @@ func (noopPublisher) CloseRun(string) {}
 type Dispatcher struct {
 	// store persists runs and their output.
 	store run.Store
+	// audits commits each run's outcome to the tamper-evident chain, nil when no trail is kept.
+	audits audit.Store
 	// runner executes a single playbook.
 	runner roundhouse.Runner
 	// log records dispatcher activity.
@@ -193,6 +196,8 @@ type Option func(*config)
 
 // config holds optional Dispatcher settings before construction.
 type config struct {
+	// audits commits each run's outcome to the audit chain, nil when no trail is kept.
+	audits audit.Store
 	// workers is the worker pool size.
 	workers int
 	// maxShards caps how many groups a split fans out into.
@@ -287,6 +292,12 @@ func WithMaxShards(n int) Option {
 	return func(c *config) { c.maxShards = n }
 }
 
+// WithAudits gives the dispatcher the audit chain, so it commits each run's outcome as a
+// tamper-evident entry when the run finishes. Nil keeps no such record.
+func WithAudits(audits audit.Store) Option {
+	return func(c *config) { c.audits = audits }
+}
+
 // WithPublisher sets the Publisher that receives live events and log chunks.
 func WithPublisher(p Publisher) Option {
 	return func(c *config) { c.publisher = p }
@@ -354,6 +365,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &Dispatcher{
 		store:              store,
+		audits:             cfg.audits,
 		runner:             runner,
 		log:                log,
 		sem:                make(chan struct{}, cfg.workers),
@@ -531,12 +543,18 @@ func (d *Dispatcher) janitor() {
 	}
 }
 
-// validateRun checks a run's credential and project references before it is accepted.
+// validateRun checks a run's credential and project references before it is accepted. The run's own
+// credentials are held to the tool-compatibility gate; credentials inherited from the target
+// inventory are checked for existence and decryptability but not tool fit, since materializeCredentials
+// resolves the inherited set too and an undecryptable one there would otherwise fail only at execution.
 func (d *Dispatcher) validateRun(ctx context.Context, r *run.Run) error {
-	if err := d.validateCredentials(ctx, r.Tool, r.CredentialIDs); err != nil {
+	if err := d.validateCredentials(ctx, r.Tool, r.CredentialIDs, true); err != nil {
 		return err
 	}
 	if err := d.validateInventory(ctx, r.InventoryID); err != nil {
+		return err
+	}
+	if err := d.validateCredentials(ctx, r.Tool, d.inventoryCredentialIDs(ctx, r), false); err != nil {
 		return err
 	}
 	return d.validateProject(ctx, r.ProjectID)
@@ -571,24 +589,6 @@ func requireToolInput(r *run.Run) error {
 		return nil
 	}
 	if r.Command == "" {
-		return ErrNoCommand
-	}
-	return nil
-}
-
-// requireStepInput checks that a pipeline step carries the input its tool needs, mirroring
-// requireToolInput for a step.
-func requireStepInput(s run.PipelineStep) error {
-	if !run.ValidTool(s.Tool) {
-		return ErrUnknownTool
-	}
-	if run.NormalizeTool(s.Tool) == run.ToolAnsible {
-		if s.Playbook == "" {
-			return ErrNoPlaybook
-		}
-		return nil
-	}
-	if s.Command == "" {
 		return ErrNoCommand
 	}
 	return nil
@@ -644,6 +644,7 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 	}
 	run.ApplyOptions(r, opts)
 	stampReceipt(ctx, r)
+	stampOrg(ctx, r)
 	if err := requireToolInput(r); err != nil {
 		return nil, err
 	}
@@ -656,6 +657,11 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 		return nil, err
 	}
 	d.resolveQueue(ctx, r)
+	// Deny is checked before the hold, and even for a run born held: a rule that refuses a
+	// submission outright must not be satisfied by parking the run in front of an approver.
+	if err := d.denied(ctx, r); err != nil {
+		return nil, err
+	}
 	if r.Status != run.StatusPendingApproval {
 		held, perr := d.requiresApproval(ctx, r)
 		if perr != nil {
@@ -715,7 +721,10 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		defer cleanup()
 		listPath = path
 	}
-	hosts, err := d.hostLister.Hosts(ctx, listPath)
+	// The caller's host limit narrows the enumeration, not just the runs. Listing the whole
+	// inventory and sharding that meant a limited submit fanned out across every host it excluded,
+	// and answered 202, so the first sign was the run touching hosts nobody asked for.
+	hosts, err := d.hostLister.Hosts(ctx, listPath, probe.Limit)
 	if err != nil {
 		return nil, fmt.Errorf("list hosts: %w", err)
 	}
@@ -737,6 +746,7 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 	}
 	run.ApplyOptions(parent, opts)
 	stampReceipt(ctx, parent)
+	stampOrg(ctx, parent)
 	if err := d.validateRun(ctx, parent); err != nil {
 		return nil, err
 	}
@@ -746,6 +756,9 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 	// held for an approver executed on every host the moment it was split in two. A shard matches
 	// exactly what its parent matches, since it inherits everything but its host group, so the
 	// parent is the only thing worth testing.
+	if err := d.denied(ctx, parent); err != nil {
+		return nil, err
+	}
 	if parent.Status != run.StatusPendingApproval {
 		held, perr := d.requiresApproval(ctx, parent)
 		if perr != nil {
@@ -793,6 +806,9 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		// after it returned. Inheriting is the one rule; re-deriving from context would make an
 		// in-request shard and a later step disagree about which receipt is truthful.
 		child.AuditReceipt = parent.AuditReceipt
+		// A shard owns the same tenant as its parent. A shard names no stored object of its own, so
+		// without the parent's org it would be an objectless run readable across every tenant.
+		child.OrgID = parent.OrgID
 		if err := d.store.Save(ctx, child); err != nil {
 			return nil, err
 		}
@@ -824,6 +840,17 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 func stampReceipt(ctx context.Context, r *run.Run) {
 	if r.AuditReceipt == "" {
 		r.AuditReceipt = run.AuditReceiptFrom(ctx)
+	}
+}
+
+// stampOrg records the submitting actor's owning organization on the run, defaulting it to the org
+// carried on the request context. It is what scopes an objectless run to a tenant: a run that names
+// no stored project, inventory, or credential has nothing for the per-object grant check to filter
+// on, so without an owning org it is readable, cancelable, and approvable across every tenant. An
+// explicit WithOrgID, such as a child inheriting its parent's org, wins over the ambient context.
+func stampOrg(ctx context.Context, r *run.Run) {
+	if r.OrgID == "" {
+		r.OrgID = run.SubmitterOrgFrom(ctx)
 	}
 }
 
@@ -910,12 +937,16 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 		ShardCount: &count, RetryOf: &parent.ID, IdempotencyKey: key,
 	}
 	inheritExecution(retry, parent)
+	retry.OrgID = parent.OrgID
 	// A retry is authorized by the retry request, not by whatever authorized the parent weeks ago.
 	stampReceipt(ctx, retry)
 	// A retry is a fourth way to submit a run, and it inherits the parent's entire execution spec,
 	// so it has to face the same gate as the other three. Submit, SubmitSplit, and SubmitPipeline
 	// each consult the policy; this path did not, which made retrying a way to run a spec an
 	// approver would have held.
+	if err := d.denied(ctx, retry); err != nil {
+		return nil, err
+	}
 	held, perr := d.requiresApproval(ctx, retry)
 	if perr != nil {
 		return nil, perr
@@ -950,6 +981,7 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 		}
 		inheritExecution(child, retry)
 		child.AuditReceipt = retry.AuditReceipt
+		child.OrgID = retry.OrgID
 		if err := d.store.Save(ctx, child); err != nil {
 			return nil, err
 		}
@@ -965,6 +997,67 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 	go d.coordinate(retry.Clone(), children)
 
 	return retry, nil
+}
+
+// RelaunchFailedHosts creates and starts a new run of the same spec restricted to only the hosts
+// that failed or were unreachable in a finished run, links it back to that run, and records the
+// derivation in the chain. Where AWX and Rundeck re-run the failed nodes, the new run here carries a
+// receipt to the run it came from, so an auditor can see exactly which run's failures this one was
+// built to fix rather than taking the operator's word.
+//
+// It targets a run that recorded per-host results, which is an Ansible run; a run with none, such as
+// a single bash command, has no notion of a failed host and is refused. Relaunching the same run
+// twice inside the dedupe window returns the first relaunch, so a double click cannot fire two.
+//
+// The actor is whoever asked for the relaunch, which is not necessarily whoever launched the run it
+// is built from.
+func (d *Dispatcher) RelaunchFailedHosts(ctx context.Context, runID, actor, actorType string) (*run.Run, error) {
+	existing, key, err := run.ResolveDedupe(ctx, d.store, dedupeRelaunchHosts, runID, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return existing, nil
+	}
+	src, err := d.store.Get(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if !src.Status.Terminal() {
+		return nil, ErrNotFinished
+	}
+	summaries, err := d.store.RunHostSummaries(ctx, runID)
+	if err != nil {
+		return nil, fmt.Errorf("read host summaries: %w", err)
+	}
+	if len(summaries) == 0 {
+		return nil, ErrNoHostSummary
+	}
+	var failed []string
+	for _, s := range summaries {
+		if s.Failures > 0 || s.Unreachable > 0 {
+			failed = append(failed, s.Host)
+		}
+	}
+	if len(failed) == 0 {
+		return nil, ErrNoFailedHosts
+	}
+	opts := append(src.ExecutionOptions(),
+		run.WithLimit(strings.Join(failed, ",")),
+		run.WithSource("relaunch", runID),
+		run.WithRetryOf(runID),
+		run.WithIdempotencyKey(key),
+		// The relaunch is a new launch by whoever asked for it, not by whoever ran the original.
+		// Stamping the source run's actor credited the relaunch to the wrong person, so asking
+		// what a given operator started missed the runs they started this way.
+		run.WithActor(actor),
+		run.WithActorType(actorType),
+		// The relaunch belongs to the same tenant as the run it fixes. A relaunch of an objectless
+		// run names no stored object, so without the source run's org it would be readable across
+		// every tenant.
+		run.WithOrgID(src.OrgID),
+	)
+	return d.Submit(ctx, src.Playbook, src.Inventory, opts...)
 }
 
 // parentMayStart claims the parent for this coordinator and reports whether it may begin.
@@ -1053,7 +1146,7 @@ func (d *Dispatcher) coordinate(parent *run.Run, children []*run.Run) {
 	parent.StartedAt = &started
 	parent.ClaimedBy = d.owner
 	parent.ClaimedAt = &started
-	d.save(parent)
+	_ = d.save(parent)
 
 	watchCtx, stopWatch := context.WithCancel(parentCtx)
 	defer stopWatch()
@@ -1210,18 +1303,8 @@ func (d *Dispatcher) cancelChildren(ids []string) {
 // in order, or as a dependency graph when any step declares depends_on. A step that fails stops
 // what follows or depends on it unless the step is marked continue on failure.
 func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string, steps []run.PipelineStep, opts ...run.SubmitOption) (*run.Run, error) {
-	if len(steps) == 0 {
-		return nil, ErrNoSteps
-	}
-	for _, s := range steps {
-		if err := requireStepInput(s); err != nil {
-			return nil, err
-		}
-	}
-	if hasDependencies(steps) {
-		if err := validateDAG(steps); err != nil {
-			return nil, err
-		}
+	if err := run.ValidatePipeline(steps); err != nil {
+		return nil, err
 	}
 
 	parent := &run.Run{
@@ -1230,6 +1313,7 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 	}
 	run.ApplyOptions(parent, opts)
 	stampReceipt(ctx, parent)
+	stampOrg(ctx, parent)
 	// The graph is stored on the parent so a pipeline held for approval can still be executed after
 	// a restart, and so a finished pipeline can show the shape it ran.
 	parent.Steps = steps
@@ -1243,6 +1327,9 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 		return nil, err
 	}
 	d.resolveQueue(ctx, parent)
+	if err := d.pipelineDenied(ctx, parent, steps); err != nil {
+		return nil, err
+	}
 	if parent.Status != run.StatusPendingApproval {
 		held, perr := d.pipelineRequiresApproval(ctx, parent, steps)
 		if perr != nil {
@@ -1293,7 +1380,7 @@ func (d *Dispatcher) runPipeline(parent *run.Run, steps []run.PipelineStep) {
 	parent.StartedAt = &started
 	parent.ClaimedBy = d.owner
 	parent.ClaimedAt = &started
-	d.save(parent)
+	_ = d.save(parent)
 
 	watchCtx, stopWatch := context.WithCancel(pipeCtx)
 	defer stopWatch()
@@ -1323,7 +1410,7 @@ func (d *Dispatcher) runPipeline(parent *run.Run, steps []run.PipelineStep) {
 // step continues on failure. It returns whether any step failed and whether execution was
 // canceled.
 func (d *Dispatcher) runStepsLinear(ctx context.Context, parent *run.Run, steps []run.PipelineStep) (failed, canceled bool) {
-	vars := make(map[string]any)
+	vars := baseStepVars(parent)
 	for i, step := range steps {
 		if ctx.Err() != nil {
 			return failed, true
@@ -1352,6 +1439,20 @@ func cloneVars(vars map[string]any) map[string]any {
 		return nil
 	}
 	return maps.Clone(vars)
+}
+
+// baseStepVars is the variable map a step starts from before any dependency outputs are layered on.
+//
+// It is the pipeline parent's own extra vars, so a workflow's survey answers and extra vars reach its
+// steps. A saved workflow template applies its survey answers to the pipeline parent, and without
+// this seed those answers reached no step and were silently dropped. A fresh map is returned each
+// call so a step mutating its inputs cannot reach the parent or another step. Dependency outputs are
+// copied on top of this, so a step's published output still overrides a parent var of the same name
+// for anything downstream.
+func baseStepVars(parent *run.Run) map[string]any {
+	vars := make(map[string]any, len(parent.ExtraVars))
+	maps.Copy(vars, parent.ExtraVars)
+	return vars
 }
 
 // stepRun builds the run a pipeline step executes as. The approval gate and the executor both go
@@ -1385,6 +1486,14 @@ func stepRun(parent *run.Run, step run.PipelineStep, idx, attempt int, vars map[
 	child.PullCredentialID = parent.PullCredentialID
 	child.Labels = parent.Labels
 	child.Actor = parent.Actor
+	child.ActorType = parent.ActorType
+	// A step is scoped to the pipeline's tenant. A step may name no stored object, so without the
+	// parent's org it would be an objectless run readable across every tenant.
+	child.OrgID = parent.OrgID
+	// A launch-time host limit constrains every step, matching how a workflow limit applies to each
+	// job. A step names its own inventory but never its own host limit, so the parent's is the only
+	// one, and dropping it would run a limited launch against the whole fleet.
+	child.Limit = parent.Limit
 	// A dry-run pipeline is dry all the way down. A step cannot opt out of a parent that was
 	// submitted to make no changes: check mode is a promise about the whole run, and a step running
 	// for real underneath it would break that promise silently.
@@ -1422,41 +1531,24 @@ func (d *Dispatcher) runStepAttempts(ctx context.Context, parent *run.Run, step 
 	return status, nil
 }
 
-// stepOutputs reads a finished step's published outputs from its events and records them on the
-// run. It is best effort; a read failure just means no outputs flow downstream. The outputs are
-// recorded on a fresh read of the run, never on the coordinator's pre-claim snapshot, because
-// saving that stale snapshot would flip the finished step back to pending and a claim loop would
-// execute it a second time.
+// stepOutputs returns what a finished step published with set_stats, read from the step's own run
+// record. It is best effort; a read failure just means no outputs flow downstream.
+//
+// The values are folded and recorded by whichever process executed the step, before the step went
+// terminal, so the coordinator reads the answer rather than recomputing it from events. Recomputing
+// it here re-read the step's events through the coordinator's store, and a step executed across the
+// relay leaves its events on the control node while the executor's store cannot read them back at
+// all, so every relay-executed step silently published nothing to its dependents.
 func (d *Dispatcher) stepOutputs(child *run.Run) map[string]any {
-	fold := run.NewSummaryFold(child.CreatedAt)
-	var after int64
-	for {
-		batch, err := d.store.EventsAfter(context.Background(), child.ID, after, summaryPageSize)
-		if err != nil {
-			d.log.Error("dispatch: read events for outputs: "+err.Error(), zap.String("run_id", child.ID))
-			return nil
-		}
-		if len(batch) == 0 {
-			break
-		}
-		fold.Add(batch)
-		after = batch[len(batch)-1].Seq
-		if len(batch) < summaryPageSize {
-			break
-		}
-	}
-	outputs := fold.Outputs()
-	if len(outputs) == 0 {
-		return nil
-	}
-	fresh, err := d.store.Get(context.Background(), child.ID)
+	fresh, err := d.storeGetWithRetries(context.Background(), child.ID)
 	if err != nil {
 		d.log.Error("dispatch: read run for outputs: "+err.Error(), zap.String("run_id", child.ID))
-		return outputs
+		return nil
 	}
-	fresh.Outputs = outputs
-	d.save(fresh)
-	return outputs
+	if len(fresh.Outputs) == 0 {
+		return nil
+	}
+	return fresh.Outputs
 }
 
 // DefaultMaxShards caps how many groups a split fans out into when an operator sets no override, so
@@ -1563,6 +1655,25 @@ func (d *Dispatcher) executeLeased(base context.Context, r *run.Run) run.Status 
 // single phase, unchanged. The run carries this process's lease while it executes: a watcher renews
 // it and honors cancel requests written to the store by any process.
 func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
+	// An approved run executes exactly the spec that was approved. The digest was committed to the
+	// chain when the decision was made and stamped on the run; a mismatch here means the row
+	// changed underneath the decision, so the run fails with that stated rather than executing
+	// something nobody approved. The chain catches the same tampering at verify time; this refuses
+	// to perform it in the first place.
+	if r.ApprovedSpecDigest != "" {
+		got, serr := outcome.SpecDigest(r)
+		if serr != nil {
+			d.finalize(r, run.StatusFailed, nil, "could not recompute the approved spec: "+serr.Error())
+			d.publisher.CloseRun(r.ID)
+			return run.StatusFailed
+		}
+		if got != r.ApprovedSpecDigest {
+			d.finalize(r, run.StatusFailed, nil,
+				"refused: the spec changed after it was approved, so this is not the change the approver released")
+			d.publisher.CloseRun(r.ID)
+			return run.StatusFailed
+		}
+	}
 	policies, perr := d.planGatePolicies(ctx, r)
 	if perr != nil {
 		// The plan-content gate could not be evaluated, so applying now would apply past a gate
@@ -1582,12 +1693,12 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 // outcome. It is the single-phase path taken by every run a plan-content policy does not gate.
 func (d *Dispatcher) executeRun(ctx context.Context, r *run.Run) run.Status {
 	return d.streamSpec(ctx, r, r.DryRun, nil,
-		func(res roundhouse.Result, runErr error, mask *masker) run.Status {
+		func(res roundhouse.Result, runErr error, mask *masker, fold *run.SummaryFold) run.Status {
 			// Write the summaries and any drift while the run is still non-terminal. The store fences
 			// auxiliary writes to a terminal run, so finalizing first would reject the run's own final
 			// summaries; ordering the writes before finalize lets them land and drops only a
 			// reclaimed-but-alive worker's late writes.
-			d.summarize(r)
+			d.summarize(r, fold)
 			if res.Drift {
 				d.recordPlanDrift(r)
 			}
@@ -1602,14 +1713,18 @@ func (d *Dispatcher) executeRun(ctx context.Context, r *run.Run) run.Status {
 // the gate can inspect the plan. A setup failure finalizes r as failed, redacting the detail, and
 // returns without calling finish. It always closes the run's output stream before returning, and
 // returns finish's status on success or StatusFailed on a setup failure.
+//
+// finish also receives the summary fold the tailer filled from the run's events. The tailer has
+// stopped by the time finish is called, so the fold is complete and safe to read.
 func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, tee io.Writer,
-	finish func(res roundhouse.Result, runErr error, mask *masker) run.Status) run.Status {
+	finish func(res roundhouse.Result, runErr error, mask *masker, fold *run.SummaryFold) run.Status,
+) run.Status {
 	started := time.Now()
 	r.Status = run.StatusRunning
 	r.StartedAt = &started
 	r.ClaimedBy = d.owner
 	r.ClaimedAt = &started
-	d.save(r)
+	_ = d.save(r)
 
 	watchCtx, stopWatch := context.WithCancel(ctx)
 	defer stopWatch()
@@ -1621,7 +1736,7 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 		// Capture is off, so this run will finish with an empty matrix and no events however well
 		// it goes. Record why on the run, rather than leaving a green run that shows nothing.
 		r.Warning = "event capture unavailable, so this run records no events: " + eventsErr.Error()
-		d.save(r)
+		_ = d.save(r)
 	}
 
 	parent := ""
@@ -1631,9 +1746,12 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	stop := make(chan struct{})
 	tailed := make(chan struct{})
 	mask := &masker{}
+	// The fold accumulates the run's summaries as its events go by, so finishing needs no second
+	// read of them. Only the tail goroutine writes to it, and it has exited before finish reads it.
+	fold := run.NewSummaryFold(r.CreatedAt)
 	go func() {
 		defer close(tailed)
-		d.tailEvents(r.ID, parent, eventsPath, stop, mask)
+		d.tailEvents(r.ID, parent, eventsPath, stop, mask, fold)
 	}()
 
 	// fail finalizes r as failed and closes its output stream when a setup step cannot complete, so a
@@ -1691,7 +1809,8 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	spec := roundhouse.Spec{
 		Playbook: r.Playbook, Inventory: r.Inventory, Tool: r.Tool, Command: r.Command,
 		DryRun: dryRun, EventsPath: eventsPath, Limit: r.Limit, ExtraVars: r.ExtraVars,
-		Image: r.Image,
+		Tags: r.Tags, SkipTags: r.SkipTags, Verbosity: r.Verbosity, Forks: r.Forks,
+		DiffMode: r.DiffMode, Image: r.Image,
 	}
 	if r.Image != "" {
 		if err := d.resolvePullCredential(r.PullCredentialID, &spec); err != nil {
@@ -1706,10 +1825,17 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	defer invCleanup()
 	mask.set(invSecrets)
 
-	if err := d.resolveProject(r, &spec); err != nil {
+	projectCleanup, err := d.resolveProject(r, &spec)
+	defer projectCleanup()
+	if err != nil {
 		return fail(err)
 	}
 	d.applyDefaultImage(&spec)
+	// Record the image the run actually executed in. spec.Image was seeded from r.Image and is only
+	// ever filled when it was empty, so a run that pinned its own image sees no change, a run that
+	// took a project or server default now has that image on its record, and a host run stays empty.
+	// The evidence a run leaves must show which environment ran it, not only the one it asked for.
+	r.Image = spec.Image
 
 	credCleanup, secrets, err := d.materializeCredentials(ctx, r, &spec)
 	if err != nil {
@@ -1717,7 +1843,13 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 		return fail(err)
 	}
 	defer credCleanup()
-	mask.set(append(secrets, invSecrets...))
+	// The registry pull login reaches the spec through resolvePullCredential, not
+	// materializeCredentials, so its values are not in secrets. Add them here, or a container
+	// runner that echoes a failed registry login leaks the password into the run's output the way
+	// every other credential is masked against. Both the run's and the project's pull credential
+	// have resolved onto the spec by now, so masking the effective login covers both.
+	allSecrets := append(secrets, registrySecrets(&spec)...)
+	mask.set(append(allSecrets, invSecrets...))
 
 	res, runErr := d.runner.Run(ctx, spec, sink)
 	// The masker holds back the end of each chunk so a secret split across two of them is caught
@@ -1728,7 +1860,7 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	close(stop)
 	<-tailed
 
-	status := finish(res, runErr, mask)
+	status := finish(res, runErr, mask, fold)
 	d.publisher.CloseRun(r.ID)
 	return status
 }
@@ -1771,37 +1903,35 @@ func (d *Dispatcher) watch(ctx context.Context, id string) {
 	}
 }
 
-// summarize computes the run's per host and per task summaries from its events and stores them for
-// summarize folds the run's events into its per-host, per-task, and facts summaries.
+// summarize records the run's per-host, per-task, and facts summaries and the values it published,
+// from the fold the tailer filled as the run's events streamed past. It runs while the run is still
+// non-terminal, so the writes are not fenced, and it must run before the run's terminal save, which
+// is what commits its outcome.
 //
-// The events are paged rather than loaded whole. A long run can carry hundreds of thousands of them,
-// and unmarshaling the list at once cost hundreds of megabytes at the exact moment several runs tend
-// to finish together, which is how a small control node ran out of memory. The fold keeps state
-// proportional to hosts and tasks, so peak memory is now one page.
-func (d *Dispatcher) summarize(r *run.Run) {
-	fold := run.NewSummaryFold(r.CreatedAt)
-	var after int64
-	for {
-		batch, err := d.store.EventsAfter(context.Background(), r.ID, after, summaryPageSize)
-		if err != nil {
-			d.log.Error("dispatch: read events for summary: "+err.Error(), zap.String("run_id", r.ID))
-			return
-		}
-		if len(batch) == 0 {
-			break
-		}
-		fold.Add(batch)
-		after = batch[len(batch)-1].Seq
-		if len(batch) < summaryPageSize {
-			break
-		}
-	}
-	if summaries := fold.HostSummaries(); len(summaries) > 0 {
+// The fold is filled while the events go by rather than read back afterwards. Reading them back
+// asked the store for a run's own events, which the control node can serve and a relay worker's
+// store cannot: every run executed across the relay recorded no host at all, emptying fleet health,
+// drift, host history, task trends, host costs, run comparison, and the failed-host relaunch for it,
+// while the outcome committed on the control node said the run had no hosts. Folding as the events
+// stream also keeps the state proportional to hosts and tasks rather than to a page of events, and
+// spends no second pass over a run that can carry hundreds of thousands of them.
+//
+// The caller must have stopped the tailer before calling this, which is what makes reading the
+// fold safe: the tail goroutine is the only writer, and its completion happens before this read.
+func (d *Dispatcher) summarize(r *run.Run, fold *run.SummaryFold) {
+	summaries := fold.HostSummaries()
+	if len(summaries) > 0 {
 		if err := withRetries(func() error {
 			return d.store.SaveHostSummary(context.Background(), r.ID, summaries)
 		}); err != nil {
 			d.log.Error("dispatch: save host summary: "+err.Error(), zap.String("run_id", r.ID))
 		}
+	} else if run.NormalizeTool(r.Tool) == run.ToolAnsible {
+		// A playbook run with no recap leaves nothing behind for fleet health, drift, host history,
+		// or a failed-host relaunch. Recording zero hosts silently is what made that invisible, so
+		// the run says so on its own record.
+		addWarning(r, "this run recorded no per-host result, so it is absent from fleet health, "+
+			"drift, and host history")
 	}
 	if facts := fold.HostFacts(); len(facts) > 0 {
 		if err := withRetries(func() error {
@@ -1817,6 +1947,22 @@ func (d *Dispatcher) summarize(r *run.Run) {
 			d.log.Error("dispatch: save task summary: "+err.Error(), zap.String("run_id", r.ID))
 		}
 	}
+	// The values a playbook published belong on the run, so a pipeline step's dependents read them
+	// from the step's record instead of re-reading its events from a store that may not hold them.
+	// The terminal save that follows carries them, across the relay as well as in process.
+	if outputs := fold.Outputs(); len(outputs) > 0 {
+		r.Outputs = outputs
+	}
+}
+
+// addWarning records a degradation on r, keeping any warning already there. A run can be degraded
+// more than once, and the later note must not erase the earlier one.
+func addWarning(r *run.Run, warning string) {
+	if r.Warning == "" {
+		r.Warning = warning
+		return
+	}
+	r.Warning += "; " + warning
 }
 
 // outcome finalizes r from the run result and returns the terminal status. Failure text passes
@@ -1869,66 +2015,99 @@ func (d *Dispatcher) Cancel(id string) bool {
 	return ok
 }
 
-// finalize records the terminal status, exit code, failure detail, and end time of r, and sends
-// webhook notifications for top-level runs. It refuses to resurrect a run another actor already moved
-// to a different terminal state, such as the janitor interrupting an expired lease, so a slow but
-// still alive worker that is reclaimed cannot overwrite the interrupt with a success.
+// finalize records the terminal status, exit code, failure detail, and end time of r, commits the
+// run's outcome to the audit chain, and sends webhook notifications for top-level runs. It refuses to
+// resurrect a run another actor already moved to a different terminal state, such as the janitor
+// interrupting an expired lease, so a slow but still alive worker that is reclaimed cannot overwrite
+// the interrupt with a success.
+//
+// The chain is written only after the store confirms the terminal record landed. An outcome entry
+// commits a digest of what the stored evidence says the run did, so committing one the store never
+// accepted leaves the chain asserting an outcome the database contradicts and a receipt nobody can
+// verify. When the write does not land, r keeps the status the store holds and the run is left for
+// the sweep to reclaim and mark interrupted, which is retryable.
 func (d *Dispatcher) finalize(r *run.Run, status run.Status, exitCode *int, failure string) {
-	if stored, fenced := d.fencedFinalize(r.ID, status); fenced {
+	fin := run.Finalization{
+		Status: status, ExitCode: exitCode, Error: failure, Image: r.Image,
+		CommitSHA: r.CommitSHA, PullCredentialID: r.PullCredentialID,
+		Outputs: r.Outputs, Warning: r.Warning, EndedAt: time.Now(),
+	}
+	stored, recorded := d.recordTerminal(r, fin)
+	if !recorded {
 		r.Status = stored
-		d.log.Warn("dispatch: run already finalized by another actor, not overwriting",
-			zap.String("run_id", r.ID), zap.String("stored", string(stored)),
-			zap.String("attempted", string(status)))
 		return
 	}
-	ended := time.Now()
-	r.Status = status
-	r.ExitCode = exitCode
-	r.Error = failure
-	r.EndedAt = &ended
-	d.save(r)
+	// Commit the outcome to the chain before notifying anyone. A notification is external and
+	// after-the-fact; the tamper-evident record of what the run did comes first.
+	d.commitOutcome(r)
 	d.notify(r)
 }
 
-// fencedFinalize reports whether a run must not be finalized to status because another actor already
-// moved it to a different terminal state. It first tries to claim the terminal transition atomically
-// from running, the state every executing run finalizes from; a successful claim means no other actor
-// intervened. When the store cannot compare and swap, such as the relay client, or the run was not in
-// running, it falls back to reading the current status. It returns the stored status alongside the
-// decision so the caller can reflect reality. A legitimate finalize from a non running state, such as
-// a rejected run, is never fenced because its stored status already equals the target. When even a
-// retried read cannot establish the stored state, the finalize is fenced: skipping the write risks a
-// janitor interrupt on a healthy run, but writing blind risks resurrecting a run another actor
-// already terminalized, which is the failure the fence exists to stop.
-func (d *Dispatcher) fencedFinalize(id string, status run.Status) (run.Status, bool) {
+// recordTerminal writes r's terminal record to the store and reports the run's stored status and
+// whether the write landed. It applies fin to r only once the store has accepted it, so an in-memory
+// run that says succeeded is a run the database says succeeded too.
+//
+// The first attempt is one conditional update from running, the state every executing run finalizes
+// from: it claims the transition and records the facts that explain it together, so no failure can
+// leave a run terminal with no exit code, where neither this dispatcher nor the janitor, which sweeps
+// pending and running runs, would ever look at it again.
+//
+// A run that is not running falls back to reading the stored state and deciding from it. That covers
+// a legitimate finalize from a non running state, such as a rejection, which is never fenced because
+// its stored status already equals the target, and it covers a relay worker, whose client cannot
+// compare and swap and reports through Save. When even a retried read cannot establish the stored
+// state, nothing is written: skipping the write risks a janitor interrupt on a healthy run, but
+// writing blind risks resurrecting a run another actor already terminalized, which is the failure the
+// fence exists to stop.
+func (d *Dispatcher) recordTerminal(r *run.Run, fin run.Finalization) (run.Status, bool) {
 	ctx := context.Background()
-	if moved, err := d.store.TransitionStatus(ctx, id, run.StatusRunning, status); err == nil && moved {
-		return status, false
+	if moved, err := d.store.FinalizeRunning(ctx, r.ID, fin); err == nil && moved {
+		applyFinalization(r, fin)
+		return fin.Status, true
 	}
-	var cur *run.Run
-	if err := withRetries(func() error {
-		var err error
-		cur, err = d.store.Get(ctx, id)
-		return err
-	}); err != nil {
+	cur, err := d.storeGetWithRetries(ctx, r.ID)
+	if err != nil {
 		d.log.Warn("dispatch: cannot verify run state, skipping finalize: "+err.Error(),
-			zap.String("run_id", id))
-		return status, true
+			zap.String("run_id", r.ID))
+		return r.Status, false
 	}
-	if cur.Status.Terminal() && cur.Status != status {
-		return cur.Status, true
+	if cur.Status.Terminal() && cur.Status != fin.Status {
+		d.log.Warn("dispatch: run already finalized by another actor, not overwriting",
+			zap.String("run_id", r.ID), zap.String("stored", string(cur.Status)),
+			zap.String("attempted", string(fin.Status)))
+		return cur.Status, false
 	}
-	return cur.Status, false
+	// Save writes the whole run, so the terminal fields go on a copy: a save that fails must leave
+	// the caller's run reading the way the store still does.
+	next := *r
+	applyFinalization(&next, fin)
+	if err := d.save(&next); err != nil {
+		return cur.Status, false
+	}
+	*r = next
+	return fin.Status, true
+}
+
+// applyFinalization copies a stored terminal record onto the run in memory.
+func applyFinalization(r *run.Run, fin run.Finalization) {
+	ended := fin.EndedAt
+	r.Status = fin.Status
+	r.ExitCode = fin.ExitCode
+	r.Error = fin.Error
+	r.EndedAt = &ended
 }
 
 // save persists r using a background context so terminal state is recorded even during shutdown.
-// A failed save retries briefly, since losing a terminal status strands the run as running.
-func (d *Dispatcher) save(r *run.Run) {
-	if err := withRetries(func() error {
+// A failed save retries briefly, since losing a terminal status strands the run as running, and is
+// logged here and returned for a caller whose next step depends on the write having landed.
+func (d *Dispatcher) save(r *run.Run) error {
+	err := withRetries(func() error {
 		return d.store.Save(context.Background(), r)
-	}); err != nil {
+	})
+	if err != nil {
 		d.log.Error("dispatch: save run: "+err.Error(), zap.String("run_id", r.ID))
 	}
+	return err
 }
 
 // withRetries runs a store write, retrying transient failures with a short backoff. Concurrent
@@ -1975,8 +2154,10 @@ func (d *Dispatcher) eventsFile(id string) (string, func(), error) {
 // line as one batch, so a chatty tool costs one store write per tick instead of one per line.
 // Events from a child run are also published under its parent so a split or pipeline page streams
 // live. The final drain keeps a trailing line missing its newline, since a killed tool can be cut
-// off mid-write and what it managed to publish still belongs to the run.
-func (d *Dispatcher) tailEvents(id, parent, path string, stop <-chan struct{}, mask *masker) {
+// off mid-write and what it managed to publish still belongs to the run. Every line it parses also
+// goes into fold, which is how the run's summaries are built without reading its events back.
+func (d *Dispatcher) tailEvents(id, parent, path string, stop <-chan struct{}, mask *masker,
+	fold *run.SummaryFold) {
 	if path == "" {
 		<-stop
 		return
@@ -2010,7 +2191,7 @@ func (d *Dispatcher) tailEvents(id, parent, path string, stop <-chan struct{}, m
 			lines = append(lines, append([]byte(nil), partial...))
 			partial = partial[:0]
 		}
-		d.flushEventLines(id, parent, lines, mask)
+		d.flushEventLines(id, parent, lines, mask, fold)
 	}
 
 	ticker := time.NewTicker(tailPollInterval)
@@ -2031,7 +2212,12 @@ func (d *Dispatcher) tailEvents(id, parent, path string, stop <-chan struct{}, m
 // child of a split or pipeline, it also publishes them to the parent's topic, where the parent's
 // stream forwards them live, since a coordinator keeps no event log of its own to re-read. A single
 // damaged line is logged and skipped so the rest of the batch lands.
-func (d *Dispatcher) flushEventLines(id, parent string, lines [][]byte, mask *masker) {
+//
+// The batch is folded into the run's summaries here too, after redaction, so what a summary records
+// is what the store holds. Folding as the batch passes is what lets a run be summarized without
+// reading its events back out of a store, which a relay worker cannot do.
+func (d *Dispatcher) flushEventLines(id, parent string, lines [][]byte, mask *masker,
+	fold *run.SummaryFold) {
 	var events []event.Event
 	for _, raw := range lines {
 		e, ok, err := event.ParseLine(raw)
@@ -2050,6 +2236,7 @@ func (d *Dispatcher) flushEventLines(id, parent string, lines [][]byte, mask *ma
 	for i := range events {
 		mask.redactEvent(&events[i])
 	}
+	fold.Add(events)
 	if err := withRetries(func() error {
 		return d.store.AppendEvents(context.Background(), id, events)
 	}); err != nil {

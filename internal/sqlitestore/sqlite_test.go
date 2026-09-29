@@ -116,6 +116,63 @@ func TestStoreMigratesIdempotencyKey(t *testing.T) {
 	}
 }
 
+// TestStoreMigratesHostSummaryDryRun proves the on-open migration heals a host summary table created
+// before the dry-run flag moved onto the row. CREATE TABLE IF NOT EXISTS is a no-op on such a
+// database, so without the migration every summary write would fail on the missing column and the
+// drift page would go blank on upgrade.
+func TestStoreMigratesHostSummaryDryRun(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "switchtender.db")
+
+	// Open once to build the current schema, then strip the column to mimic an older database.
+	db, err := sqlitestore.Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw db: %v", err)
+	}
+	if _, err := raw.Exec("ALTER TABLE run_host_summary DROP COLUMN dry_run"); err != nil {
+		t.Fatalf("simulate old schema: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw db: %v", err)
+	}
+
+	// Reopening runs the migration, which must re-add the column so a check still records drift.
+	migrated, err := sqlitestore.Open(path)
+	if err != nil {
+		t.Fatalf("reopen after downgrade error = %v", err)
+	}
+	t.Cleanup(func() { _ = migrated.Close() })
+	store := migrated.Runs()
+
+	at := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	check := &run.Run{
+		ID: "chk1", Playbook: "p", Status: run.StatusRunning, CreatedAt: at, DryRun: true,
+	}
+	if err := store.Save(ctx, check); err != nil {
+		t.Fatalf("Save() after migration error = %v", err)
+	}
+	sums := []run.HostSummary{{Host: "web01", Changed: 4, Worst: "changed", RanAt: at}}
+	if err := store.SaveHostSummary(ctx, check.ID, sums); err != nil {
+		t.Fatalf("SaveHostSummary() after migration error = %v", err)
+	}
+	drift, err := store.DriftStatus(ctx)
+	if err != nil {
+		t.Fatalf("DriftStatus() after migration error = %v", err)
+	}
+	want := []run.HostDrift{{Host: "web01", DriftedTasks: 4, RunID: "chk1", CheckedAt: at}}
+	if diff := cmp.Diff(want, drift); diff != "" {
+		t.Errorf("DriftStatus() after migration mismatch (-want +got):\n%s", diff)
+	}
+}
+
 // TestStoreMigratesTemplateTimeout proves the on-open migration heals a templates table created
 // before a template could cap its own run length. CREATE TABLE IF NOT EXISTS is a no-op on such a
 // database, so without the migration every read and write of a template would fail on the missing

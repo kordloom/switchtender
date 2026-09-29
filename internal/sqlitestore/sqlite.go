@@ -34,7 +34,9 @@ import (
 )
 
 // schema is the full table layout created on open. It uses IF NOT EXISTS, so opening an existing
-// database is safe.
+// database is safe. The summary indexes are dropped by their old names first because they were
+// created over the raw ran_at column, which does not sort in time order; the replacements carry new
+// names so IF NOT EXISTS cannot skip them on an upgrade.
 const schema = `
 CREATE TABLE IF NOT EXISTS runs (
 	id            TEXT PRIMARY KEY,
@@ -60,11 +62,13 @@ CREATE TABLE IF NOT EXISTS runs (
 	outputs       TEXT NOT NULL DEFAULT '',
 	claimed_by    TEXT NOT NULL DEFAULT '',
 	claimed_at    TEXT,
+	claim_secret  TEXT NOT NULL DEFAULT '',
 	cancel_requested INTEGER NOT NULL DEFAULT 0,
 	credential_ids TEXT NOT NULL DEFAULT '',
 	project_id    TEXT NOT NULL DEFAULT '',
 	commit_sha    TEXT NOT NULL DEFAULT '',
 	inventory_id  TEXT NOT NULL DEFAULT '',
+	org_id        TEXT NOT NULL DEFAULT '',
 	queue         TEXT NOT NULL DEFAULT '',
 	tool          TEXT NOT NULL DEFAULT '',
 	command       TEXT NOT NULL DEFAULT '',
@@ -83,7 +87,12 @@ CREATE TABLE IF NOT EXISTS runs (
 	labels TEXT NOT NULL DEFAULT '',
 	warning TEXT NOT NULL DEFAULT '',
 	audit_receipt TEXT NOT NULL DEFAULT '',
-	held_by_policy TEXT NOT NULL DEFAULT ''
+	held_by_policy TEXT NOT NULL DEFAULT '',
+	tags TEXT NOT NULL DEFAULT '',
+	skip_tags TEXT NOT NULL DEFAULT '',
+	verbosity INTEGER NOT NULL DEFAULT 0,
+	forks INTEGER NOT NULL DEFAULT 0,
+	diff_mode INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
@@ -110,9 +119,12 @@ CREATE TABLE IF NOT EXISTS run_host_summary (
 	worst       TEXT NOT NULL,
 	duration_seconds REAL NOT NULL DEFAULT 0,
 	ran_at      TEXT NOT NULL,
+	dry_run     INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (run_id, host)
 );
-CREATE INDEX IF NOT EXISTS idx_host_summary_host ON run_host_summary(host, ran_at DESC);
+DROP INDEX IF EXISTS idx_host_summary_host;
+CREATE INDEX IF NOT EXISTS idx_host_summary_order
+	ON run_host_summary(host, ` + sqlutil.TimeOrder + ` DESC, run_id DESC);
 CREATE TABLE IF NOT EXISTS host_facts (
 	host        TEXT PRIMARY KEY,
 	run_id      TEXT NOT NULL,
@@ -126,7 +138,9 @@ CREATE TABLE IF NOT EXISTS run_task_summary (
 	ran_at  TEXT NOT NULL,
 	PRIMARY KEY (run_id, task)
 );
-CREATE INDEX IF NOT EXISTS idx_task_summary_task ON run_task_summary(task, ran_at DESC);
+DROP INDEX IF EXISTS idx_task_summary_task;
+CREATE INDEX IF NOT EXISTS idx_task_summary_order
+	ON run_task_summary(task, ` + sqlutil.TimeOrder + ` DESC, run_id DESC);
 CREATE TABLE IF NOT EXISTS schedules (
 	id          TEXT PRIMARY KEY,
 	name        TEXT NOT NULL DEFAULT '',
@@ -140,7 +154,9 @@ CREATE TABLE IF NOT EXISTS schedules (
 	next_run_at TEXT,
 	last_run_at TEXT,
 	last_run_id TEXT NOT NULL DEFAULT '',
-	template_id TEXT NOT NULL DEFAULT ''
+	template_id TEXT NOT NULL DEFAULT '',
+	timezone    TEXT NOT NULL DEFAULT '',
+	org_id      TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_schedules_created ON schedules(created_at, id);
 CREATE TABLE IF NOT EXISTS users (
@@ -164,7 +180,8 @@ CREATE TABLE IF NOT EXISTS tokens (
 	user_id      TEXT NOT NULL DEFAULT '',
 	created_at   TEXT NOT NULL,
 	last_used_at TEXT,
-	expires_at   TEXT
+	expires_at   TEXT,
+	kind         TEXT NOT NULL DEFAULT ''
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tokens_hash ON tokens(hash);
 CREATE TABLE IF NOT EXISTS projects (
@@ -201,7 +218,14 @@ CREATE TABLE IF NOT EXISTS templates (
 	notifications  TEXT NOT NULL DEFAULT '',
 	selectable_credential_ids TEXT NOT NULL DEFAULT '',
 	timeout        INTEGER NOT NULL DEFAULT 0,
-	confirm_on_launch INTEGER NOT NULL DEFAULT 0
+	confirm_on_launch INTEGER NOT NULL DEFAULT 0,
+	tags           TEXT NOT NULL DEFAULT '',
+	skip_tags      TEXT NOT NULL DEFAULT '',
+	verbosity      INTEGER NOT NULL DEFAULT 0,
+	forks          INTEGER NOT NULL DEFAULT 0,
+	diff_mode      INTEGER NOT NULL DEFAULT 0,
+	steps          TEXT NOT NULL DEFAULT '',
+	limit_pattern  TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS inventory_sources (
 	id            TEXT PRIMARY KEY,
@@ -231,15 +255,20 @@ CREATE TABLE IF NOT EXISTS audit_entries (
 	id        TEXT PRIMARY KEY,
 	at        TEXT NOT NULL,
 	actor     TEXT NOT NULL DEFAULT '',
+	actor_type TEXT NOT NULL DEFAULT '',
+	on_behalf_of TEXT NOT NULL DEFAULT '',
 	method    TEXT NOT NULL,
 	path      TEXT NOT NULL,
+	content_digest TEXT NOT NULL DEFAULT '',
 	seq       INTEGER NOT NULL DEFAULT 0,
 	prev_hash TEXT NOT NULL DEFAULT '',
-	hash      TEXT NOT NULL DEFAULT ''
+	hash      TEXT NOT NULL DEFAULT '',
+	nonce     TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS audit_anchors (
 	id    TEXT PRIMARY KEY,
 	type  TEXT NOT NULL,
+	shape TEXT NOT NULL,
 	seq   INTEGER NOT NULL,
 	link  TEXT NOT NULL,
 	at    TEXT NOT NULL,
@@ -260,6 +289,10 @@ CREATE TABLE IF NOT EXISTS policies (
 	inventory_id     TEXT NOT NULL DEFAULT '',
 	exclude_dry_run  INTEGER NOT NULL DEFAULT 0,
 	max_destroy      INTEGER NOT NULL DEFAULT -1,
+	actor_kind       TEXT NOT NULL DEFAULT '',
+	actor            TEXT NOT NULL DEFAULT '',
+	min_risk         TEXT NOT NULL DEFAULT '',
+	effect           TEXT NOT NULL DEFAULT '',
 	created_at       TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS inventories (
@@ -452,6 +485,10 @@ func Open(path string) (*DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := migrateHostSummary(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := migrateSources(db); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -468,6 +505,10 @@ func Open(path string) (*DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := migrateSchedules(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := migrateInventories(db); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -476,7 +517,15 @@ func Open(path string) (*DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := migrateAuditEntries(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := migrateUsers(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := migrateTokens(db); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -560,9 +609,16 @@ func migrateRuns(db *sql.DB) error {
 		!strings.Contains(err.Error(), "duplicate column name") {
 		return fmt.Errorf("add notifications column: %w", err)
 	}
-	for _, column := range []string{"source", "source_id", "actor", "rerun_of", "labels", "steps", "warning", "audit_receipt", "held_by_policy"} {
+	for _, column := range []string{"source", "source_id", "actor", "rerun_of", "labels", "steps", "warning", "audit_receipt", "held_by_policy", "tags", "skip_tags", "claim_secret", "actor_type", "approved_spec_digest"} {
 		if _, err := db.Exec(
 			"ALTER TABLE runs ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''"); err != nil &&
+			!strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("add %s column: %w", column, err)
+		}
+	}
+	for _, column := range []string{"verbosity", "forks", "diff_mode"} {
+		if _, err := db.Exec(
+			"ALTER TABLE runs ADD COLUMN " + column + " INTEGER NOT NULL DEFAULT 0"); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {
 			return fmt.Errorf("add %s column: %w", column, err)
 		}
@@ -571,6 +627,26 @@ func migrateRuns(db *sql.DB) error {
 		"CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_idempotency_key " +
 			"ON runs(idempotency_key) WHERE idempotency_key <> ''"); err != nil {
 		return fmt.Errorf("index idempotency_key: %w", err)
+	}
+	// An anchor records which coordinate space its link lives in, a linear entry hash or a tree
+	// root, and a database created before the column existed gains it here.
+	if _, err := db.Exec(
+		"ALTER TABLE audit_anchors ADD COLUMN shape TEXT NOT NULL DEFAULT 'linear'"); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("add anchor shape column: %w", err)
+	}
+	return nil
+}
+
+// migrateHostSummary adds the dry-run flag to an existing host summary table. The flag is copied
+// onto the summary at write time so the drift view never joins the runs table, which retention
+// purges out from under it. Rows written before this column keep the zero value, counting as
+// applies, which is the safe reading: an old row cannot be proven to have been a check.
+func migrateHostSummary(db *sql.DB) error {
+	if _, err := db.Exec(
+		"ALTER TABLE run_host_summary ADD COLUMN dry_run INTEGER NOT NULL DEFAULT 0"); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("add dry_run column: %w", err)
 	}
 	return nil
 }
@@ -623,6 +699,13 @@ func migratePolicies(db *sql.DB) error {
 		!strings.Contains(err.Error(), "duplicate column name") {
 		return fmt.Errorf("migrate policies: %w", err)
 	}
+	for _, column := range []string{"actor_kind", "actor", "min_risk", "effect"} {
+		if _, err := db.Exec(
+			"ALTER TABLE policies ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''"); err != nil &&
+			!strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("migrate policies: add %s: %w", column, err)
+		}
+	}
 	return nil
 }
 
@@ -650,11 +733,29 @@ func migrateTemplates(db *sql.DB) error {
 		"ALTER TABLE templates ADD COLUMN selectable_credential_ids TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE templates ADD COLUMN timeout INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE templates ADD COLUMN confirm_on_launch INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE templates ADD COLUMN tags TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE templates ADD COLUMN skip_tags TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE templates ADD COLUMN verbosity INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE templates ADD COLUMN forks INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE templates ADD COLUMN diff_mode INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE templates ADD COLUMN steps TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE templates ADD COLUMN limit_pattern TEXT NOT NULL DEFAULT ''",
 	} {
 		if _, err := db.Exec(stmt); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {
 			return fmt.Errorf("migrate templates: %w", err)
 		}
+	}
+	return nil
+}
+
+// migrateSchedules adds the timezone column a schedules table created before per-schedule timezones
+// lacks. Empty is the server-local default, so a schedule made before it fires exactly as it did.
+func migrateSchedules(db *sql.DB) error {
+	if _, err := db.Exec(
+		"ALTER TABLE schedules ADD COLUMN timezone TEXT NOT NULL DEFAULT ''"); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("migrate schedules: %w", err)
 	}
 	return nil
 }
@@ -674,6 +775,17 @@ func migrateInventories(db *sql.DB) error {
 // migrateUsers adds the profile columns to a users table created before them. Every one defaults to
 // empty, so an account made before this migration keeps working with no profile at all. Adding a
 // column that already exists is the ordinary case for a current database and is treated as success.
+// migrateTokens adds the kind column to a tokens table created before it, defaulting to a person.
+func migrateTokens(db *sql.DB) error {
+	if _, err := db.Exec(
+		"ALTER TABLE tokens ADD COLUMN kind TEXT NOT NULL DEFAULT ''"); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("add tokens kind column: %w", err)
+	}
+	return nil
+}
+
+// migrateUsers adds the profile columns to a users table created before them. Every one defaults to
 func migrateUsers(db *sql.DB) error {
 	for _, column := range []string{"full_name", "email", "phone", "title", "links", "notes"} {
 		if _, err := db.Exec(
@@ -698,6 +810,26 @@ func migrateCredentials(db *sql.DB) error {
 		if _, err := db.Exec(col); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {
 			return fmt.Errorf("migrate credentials: %w", err)
+		}
+	}
+	return nil
+}
+
+// migrateAuditEntries adds the columns the chain link commits to beyond the original six values: the
+// actor's authentication type, the account a token acted on behalf of, and the digest of the change
+// payload. Each defaults to empty, which is exactly what an entry recorded before the column existed
+// carries, and an empty field is omitted from the link, so migrating a database does not disturb a
+// single existing hash.
+func migrateAuditEntries(db *sql.DB) error {
+	for _, col := range []string{
+		"ALTER TABLE audit_entries ADD COLUMN actor_type TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE audit_entries ADD COLUMN on_behalf_of TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE audit_entries ADD COLUMN content_digest TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE audit_entries ADD COLUMN nonce TEXT NOT NULL DEFAULT ''",
+	} {
+		if _, err := db.Exec(col); err != nil &&
+			!strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("migrate audit entries: %w", err)
 		}
 	}
 	return nil
@@ -816,9 +948,33 @@ func (d *DB) Close() error {
 const runColumns = `id, playbook, inventory, status, exit_code, error, created_at, started_at,
 	ended_at, parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index,
 	retry_of, attempt, steps, extra_vars, outputs, claimed_by, claimed_at, cancel_requested,
-	credential_ids, project_id, commit_sha, inventory_id, queue, tool, command, dry_run,
+	credential_ids, project_id, commit_sha, inventory_id, org_id, queue, tool, command, dry_run,
 	proposed_from, intent, image, pull_credential_id, idempotency_key, timeout, notifications,
-	source, source_id, actor, rerun_of, labels, warning, audit_receipt, held_by_policy`
+	source, source_id, actor, rerun_of, labels, warning, audit_receipt, held_by_policy,
+	tags, skip_tags, verbosity, forks, diff_mode, claim_secret, actor_type, approved_spec_digest`
+
+// hostSummaryColumns is the shared run_host_summary column list, in the one order the insert binds
+// its placeholders and every read scans, so a column cannot land on one path and be missed on
+// another.
+const hostSummaryColumns = `run_id, host, ok, changed, failures, unreachable, skipped, worst,
+	duration_seconds, ran_at, dry_run`
+
+// scanHostSummary reads one host summary row selected as hostSummaryColumns.
+func scanHostSummary(rows *sql.Rows) (run.HostSummary, error) {
+	var (
+		hs     run.HostSummary
+		ranAt  string
+		dryRun int
+	)
+	if err := rows.Scan(&hs.RunID, &hs.Host, &hs.OK, &hs.Changed, &hs.Failures, &hs.Unreachable,
+		&hs.Skipped, &hs.Worst, &hs.DurationSeconds, &ranAt, &dryRun); err != nil {
+		return hs, err
+	}
+	hs.DryRun = dryRun != 0
+	var err error
+	hs.RanAt, err = sqlutil.ParseTime(ranAt)
+	return hs, err
+}
 
 // Save inserts or replaces the run identified by r.ID. The cancel flag merges with MAX so a
 // replace from a stale snapshot cannot erase a cancel another process just requested.
@@ -828,10 +984,11 @@ INSERT INTO runs
 	(id, playbook, inventory, status, exit_code, error, created_at, started_at, ended_at,
 	 parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index, retry_of,
 	 attempt, steps, extra_vars, outputs, claimed_by, claimed_at, cancel_requested, credential_ids,
-	 project_id, commit_sha, inventory_id, queue, tool, command, dry_run, proposed_from, intent,
+	 project_id, commit_sha, inventory_id, org_id, queue, tool, command, dry_run, proposed_from, intent,
 	 image, pull_credential_id, idempotency_key, timeout, notifications,
-	 source, source_id, actor, rerun_of, labels, warning, audit_receipt, held_by_policy)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	 source, source_id, actor, rerun_of, labels, warning, audit_receipt, held_by_policy,
+	 tags, skip_tags, verbosity, forks, diff_mode, claim_secret, actor_type, approved_spec_digest)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -845,14 +1002,17 @@ ON CONFLICT(id) DO UPDATE SET
 	cancel_requested=MAX(runs.cancel_requested, excluded.cancel_requested),
 	credential_ids=excluded.credential_ids,
 	project_id=excluded.project_id, commit_sha=excluded.commit_sha,
-	inventory_id=excluded.inventory_id, queue=excluded.queue, tool=excluded.tool,
+	inventory_id=excluded.inventory_id, org_id=excluded.org_id, queue=excluded.queue, tool=excluded.tool,
 	command=excluded.command, dry_run=excluded.dry_run, proposed_from=excluded.proposed_from,
 	intent=excluded.intent, image=excluded.image, pull_credential_id=excluded.pull_credential_id,
 	idempotency_key=excluded.idempotency_key, timeout=excluded.timeout,
 	notifications=excluded.notifications, source=excluded.source, source_id=excluded.source_id,
 	actor=excluded.actor, rerun_of=excluded.rerun_of, labels=excluded.labels,
 	warning=excluded.warning, audit_receipt=excluded.audit_receipt,
-	held_by_policy=excluded.held_by_policy`
+	held_by_policy=excluded.held_by_policy, tags=excluded.tags, skip_tags=excluded.skip_tags,
+	verbosity=excluded.verbosity, forks=excluded.forks, diff_mode=excluded.diff_mode,
+	claim_secret=excluded.claim_secret, actor_type=excluded.actor_type,
+	approved_spec_digest=excluded.approved_spec_digest`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), sqlutil.NullInt(r.ExitCode), r.Error,
 		sqlutil.FormatTime(r.CreatedAt), sqlutil.NullTime(r.StartedAt), sqlutil.NullTime(r.EndedAt),
@@ -860,10 +1020,11 @@ ON CONFLICT(id) DO UPDATE SET
 		r.Kind, r.StepName, sqlutil.NullInt(r.StepIndex), sqlutil.NullString(r.RetryOf), r.Attempt,
 		marshalSteps(r.Steps), sqlutil.JSONMap(r.ExtraVars), sqlutil.JSONMap(r.Outputs), r.ClaimedBy, sqlutil.NullTime(r.ClaimedAt),
 		sqlutil.BoolToInt(r.CancelRequested), sqlutil.JoinIDs(r.CredentialIDs), r.ProjectID, r.CommitSHA,
-		r.InventoryID, r.Queue, r.Tool, r.Command, sqlutil.BoolToInt(r.DryRun), r.ProposedFrom, r.Intent,
+		r.InventoryID, r.OrgID, r.Queue, r.Tool, r.Command, sqlutil.BoolToInt(r.DryRun), r.ProposedFrom, r.Intent,
 		r.Image, r.PullCredentialID, r.IdempotencyKey, r.Timeout, marshalNotifications(r.Notifications),
 		r.Source, r.SourceID, r.Actor, r.RerunOf, marshalLabels(r.Labels), r.Warning, r.AuditReceipt,
-		r.HeldByPolicy,
+		r.HeldByPolicy, sqlutil.JoinIDs(r.Tags), sqlutil.JoinIDs(r.SkipTags), r.Verbosity, r.Forks,
+		sqlutil.BoolToInt(r.DiffMode), r.ClaimSecret, r.ActorType, r.ApprovedSpecDigest,
 	)
 	if err != nil {
 		if r.IdempotencyKey != "" && isKeyConflict(err) {
@@ -1044,7 +1205,6 @@ func (s *store) NonTerminal(ctx context.Context) ([]*run.Run, error) {
 	return s.queryRuns(ctx, "list non-terminal runs", q)
 }
 
-// SaveHostSummary replaces the stored per host summaries for a run.
 // summaryFenced reports whether a run's summaries must not be written because the run has reached a
 // terminal state, in which case a reclaimed-but-alive worker must not overwrite the final summary a
 // healthy finalize already stored. A run with no row is not fenced, since cross-run summary views are
@@ -1061,6 +1221,22 @@ func summaryFenced(ctx context.Context, q rowQuerier, runID string) (bool, error
 	return run.Status(status).Terminal(), nil
 }
 
+// runIsDryRun reports whether a run was a check. A run with no row counts as an apply, since
+// nothing proves it was a check and drift must not be invented from a missing record.
+func runIsDryRun(ctx context.Context, q rowQuerier, runID string) (bool, error) {
+	var dryRun int
+	err := q.QueryRowContext(ctx, "SELECT dry_run FROM runs WHERE id=?", runID).Scan(&dryRun)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return dryRun != 0, nil
+}
+
+// SaveHostSummary replaces the stored per host summaries for a run, stamping each row with the
+// run's dry-run flag so the drift view reads the summary alone and outlives the run record.
 func (s *store) SaveHostSummary(ctx context.Context, runID string, summaries []run.HostSummary) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -1073,13 +1249,17 @@ func (s *store) SaveHostSummary(ctx context.Context, runID string, summaries []r
 	} else if fenced {
 		return nil
 	}
+	dry, err := runIsDryRun(ctx, tx, runID)
+	if err != nil {
+		return fmt.Errorf("save host summary: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM run_host_summary WHERE run_id=?", runID); err != nil {
 		return fmt.Errorf("save host summary: %w", err)
 	}
 	stmt, err := tx.PrepareContext(ctx, `
 INSERT INTO run_host_summary
-	(run_id, host, ok, changed, failures, unreachable, skipped, worst, duration_seconds, ran_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	(`+hostSummaryColumns+`)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("save host summary: %w", err)
 	}
@@ -1087,7 +1267,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 
 	for _, hs := range summaries {
 		if _, err := stmt.ExecContext(ctx, runID, hs.Host, hs.OK, hs.Changed, hs.Failures,
-			hs.Unreachable, hs.Skipped, hs.Worst, hs.DurationSeconds, sqlutil.FormatTime(hs.RanAt)); err != nil {
+			hs.Unreachable, hs.Skipped, hs.Worst, hs.DurationSeconds, sqlutil.FormatTime(hs.RanAt),
+			sqlutil.BoolToInt(dry)); err != nil {
 			return fmt.Errorf("save host summary: %w", err)
 		}
 	}
@@ -1107,13 +1288,13 @@ func (s *store) FleetHealth(ctx context.Context, window int) ([]run.HostHealth, 
 	const q = `
 WITH ranked AS (
 	SELECT host, worst, run_id, ran_at,
-		ROW_NUMBER() OVER (PARTITION BY host ORDER BY ran_at DESC) AS rn
+		ROW_NUMBER() OVER (PARTITION BY host ORDER BY ` + sqlutil.TimeOrder + ` DESC, run_id DESC) AS rn
 	FROM run_host_summary
 ), recent AS (
 	SELECT host, worst, run_id, ran_at, rn,
 		CASE WHEN worst IN ('failed', 'unreachable') THEN 1 ELSE 0 END AS bad,
 		LAG(CASE WHEN worst IN ('failed', 'unreachable') THEN 1 ELSE 0 END)
-			OVER (PARTITION BY host ORDER BY ran_at DESC) AS prev_bad
+			OVER (PARTITION BY host ORDER BY ` + sqlutil.TimeOrder + ` DESC, run_id DESC) AS prev_bad
 	FROM ranked
 	WHERE rn <= ?
 )
@@ -1121,7 +1302,7 @@ SELECT host,
 	SUM(bad) AS failures,
 	COUNT(*) AS total,
 	MAX(CASE WHEN rn = 1 THEN worst END) AS last_outcome,
-	MAX(ran_at) AS last_run,
+	MAX(CASE WHEN rn = 1 THEN ran_at END) AS last_run,
 	SUM(CASE WHEN prev_bad IS NOT NULL AND bad != prev_bad THEN 1 ELSE 0 END) AS flips,
 	GROUP_CONCAT(worst, ',' ORDER BY rn) AS recent,
 	GROUP_CONCAT(run_id, ',' ORDER BY rn) AS recent_runs
@@ -1166,16 +1347,18 @@ ORDER BY failures DESC, host`
 }
 
 // DriftStatus reports each host's most recent drift check, the latest dry run to touch it, worst
-// drift first. It joins host summaries to their run so only dry runs count, where a changed result
-// means a task would change, so the host has diverged from the desired state.
+// drift first. Only dry runs count, where a changed result means a task would change, so the host
+// has diverged from the desired state. The dry-run flag is read off the summary row that
+// SaveHostSummary stamped, not off the runs table, because retention deletes runs and keeps the
+// summaries. Joining runs dropped purged hosts out of this view while fleet health, which reads the
+// same summaries, kept them, so the two views of one fleet stopped reconciling.
 func (s *store) DriftStatus(ctx context.Context) ([]run.HostDrift, error) {
 	const q = `
 WITH checks AS (
 	SELECT hs.host, hs.changed, hs.run_id, hs.ran_at,
-		ROW_NUMBER() OVER (PARTITION BY hs.host ORDER BY hs.ran_at DESC) AS rn
+		ROW_NUMBER() OVER (PARTITION BY hs.host ORDER BY ` + sqlutil.TimeOrder + ` DESC, run_id DESC) AS rn
 	FROM run_host_summary hs
-	JOIN runs r ON r.id = hs.run_id
-	WHERE r.dry_run = 1
+	WHERE hs.dry_run = 1
 )
 SELECT host, changed, run_id, ran_at FROM checks WHERE rn = 1 ORDER BY changed DESC, host`
 
@@ -1261,13 +1444,13 @@ func (s *store) HostFactsFor(ctx context.Context, host string) (*run.HostFacts, 
 	return &out, nil
 }
 
+// HostHistory returns a host's most recent per run summaries, newest first, with run ids.
 func (s *store) HostHistory(ctx context.Context, host string, limit int) ([]run.HostSummary, error) {
 	if limit < 1 {
 		limit = 1
 	}
-	const q = `
-SELECT run_id, host, ok, changed, failures, unreachable, skipped, worst, duration_seconds, ran_at
-FROM run_host_summary WHERE host = ? ORDER BY ran_at DESC LIMIT ?`
+	const q = `SELECT ` + hostSummaryColumns + `
+FROM run_host_summary WHERE host = ? ORDER BY ` + sqlutil.TimeOrder + ` DESC, run_id DESC LIMIT ?`
 
 	rows, err := s.db.QueryContext(ctx, q, host, limit)
 	if err != nil {
@@ -1277,15 +1460,8 @@ FROM run_host_summary WHERE host = ? ORDER BY ran_at DESC LIMIT ?`
 
 	var out []run.HostSummary
 	for rows.Next() {
-		var (
-			hs    run.HostSummary
-			ranAt string
-		)
-		if err := rows.Scan(&hs.RunID, &hs.Host, &hs.OK, &hs.Changed, &hs.Failures,
-			&hs.Unreachable, &hs.Skipped, &hs.Worst, &hs.DurationSeconds, &ranAt); err != nil {
-			return nil, fmt.Errorf("host history: %w", err)
-		}
-		if hs.RanAt, err = sqlutil.ParseTime(ranAt); err != nil {
+		hs, err := scanHostSummary(rows)
+		if err != nil {
 			return nil, fmt.Errorf("host history: %w", err)
 		}
 		out = append(out, hs)
@@ -1298,8 +1474,7 @@ FROM run_host_summary WHERE host = ? ORDER BY ran_at DESC LIMIT ?`
 
 // RunHostSummaries returns one run's stored per host summaries, ordered by host.
 func (s *store) RunHostSummaries(ctx context.Context, runID string) ([]run.HostSummary, error) {
-	const q = `
-SELECT run_id, host, ok, changed, failures, unreachable, skipped, worst, duration_seconds, ran_at
+	const q = `SELECT ` + hostSummaryColumns + `
 FROM run_host_summary WHERE run_id = ? ORDER BY host ASC`
 	rows, err := s.db.QueryContext(ctx, q, runID)
 	if err != nil {
@@ -1308,15 +1483,8 @@ FROM run_host_summary WHERE run_id = ? ORDER BY host ASC`
 	defer func() { _ = rows.Close() }()
 	var out []run.HostSummary
 	for rows.Next() {
-		var (
-			hs    run.HostSummary
-			ranAt string
-		)
-		if err := rows.Scan(&hs.RunID, &hs.Host, &hs.OK, &hs.Changed, &hs.Failures,
-			&hs.Unreachable, &hs.Skipped, &hs.Worst, &hs.DurationSeconds, &ranAt); err != nil {
-			return nil, fmt.Errorf("run host summaries: %w", err)
-		}
-		if hs.RanAt, err = sqlutil.ParseTime(ranAt); err != nil {
+		hs, err := scanHostSummary(rows)
+		if err != nil {
 			return nil, fmt.Errorf("run host summaries: %w", err)
 		}
 		out = append(out, hs)
@@ -1400,10 +1568,10 @@ func (s *store) TaskTrends(ctx context.Context, window int) ([]run.TaskTrend, er
 	const q = `
 WITH ranked AS (
 	SELECT task, seconds, ran_at,
-		ROW_NUMBER() OVER (PARTITION BY task ORDER BY ran_at DESC) AS rn
+		ROW_NUMBER() OVER (PARTITION BY task ORDER BY ` + sqlutil.TimeOrder + ` DESC, run_id DESC) AS rn
 	FROM run_task_summary
 )
-SELECT task, seconds, ran_at FROM ranked WHERE rn <= ? ORDER BY task, ran_at`
+SELECT task, seconds, ran_at FROM ranked WHERE rn <= ? ORDER BY task, rn DESC`
 
 	rows, err := s.db.QueryContext(ctx, q, window)
 	if err != nil {
@@ -1453,7 +1621,7 @@ func (s *store) HostCosts(ctx context.Context, window int) (map[string]float64, 
 	const q = `
 WITH ranked AS (
 	SELECT host, duration_seconds,
-		ROW_NUMBER() OVER (PARTITION BY host ORDER BY ran_at DESC) AS rn
+		ROW_NUMBER() OVER (PARTITION BY host ORDER BY ` + sqlutil.TimeOrder + ` DESC, run_id DESC) AS rn
 	FROM run_host_summary
 )
 SELECT host, AVG(duration_seconds) FROM ranked WHERE rn <= ? GROUP BY host`
@@ -1841,19 +2009,26 @@ func scanRun(s scanner) (*run.Run, error) {
 		notifs   string
 		labels   string
 		steps    string
+		tags     string
+		skipTags string
+		diffMode int
 	)
 	if err := s.Scan(&r.ID, &r.Playbook, &r.Inventory, &status, &exit, &r.Error,
 		&created, &started, &ended, &parent, &shardIdx, &shardCnt, &r.Limit,
 		&r.Kind, &r.StepName, &stepIdx, &retryOf, &r.Attempt, &steps, &extra, &outputs,
 		&r.ClaimedBy, &claimed, &cancelI, &credIDs, &r.ProjectID, &r.CommitSHA,
-		&r.InventoryID, &r.Queue, &r.Tool, &r.Command, &dryRun, &r.ProposedFrom, &r.Intent,
+		&r.InventoryID, &r.OrgID, &r.Queue, &r.Tool, &r.Command, &dryRun, &r.ProposedFrom, &r.Intent,
 		&r.Image, &r.PullCredentialID, &r.IdempotencyKey, &r.Timeout, &notifs,
 		&r.Source, &r.SourceID, &r.Actor, &r.RerunOf, &labels, &r.Warning, &r.AuditReceipt,
-		&r.HeldByPolicy); err != nil {
+		&r.HeldByPolicy, &tags, &skipTags, &r.Verbosity, &r.Forks, &diffMode,
+		&r.ClaimSecret, &r.ActorType, &r.ApprovedSpecDigest); err != nil {
 		return nil, err
 	}
 	r.CancelRequested = cancelI != 0
 	r.DryRun = dryRun != 0
+	r.DiffMode = diffMode != 0
+	r.Tags = sqlutil.SplitIDs(tags)
+	r.SkipTags = sqlutil.SplitIDs(skipTags)
 	r.CredentialIDs = sqlutil.SplitIDs(credIDs)
 	extraVars, err := sqlutil.ParseMap(extra)
 	if err != nil {
@@ -2002,7 +2177,7 @@ func parseNotifications(s string) []run.NotifyTarget {
 func (s *store) Claim(ctx context.Context, owner string, queues []string) (*run.Run, error) {
 	placeholders, args := sqlutil.QueuePlaceholders(queues, "?", 0)
 	q := `
-UPDATE runs SET claimed_by=?, claimed_at=?
+UPDATE runs SET claimed_by=?, claimed_at=?, claim_secret=?
 WHERE id = (
 	SELECT id FROM runs
 	WHERE status='pending' AND claimed_by='' AND kind='' AND cancel_requested=0
@@ -2012,7 +2187,8 @@ WHERE id = (
 	ORDER BY created_at, id LIMIT 1
 )
 RETURNING ` + runColumns
-	full := append([]any{owner, sqlutil.FormatTime(time.Now())}, args...)
+	// The capability is minted here, when the claim is won, and returned to the worker in the run row.
+	full := append([]any{owner, sqlutil.FormatTime(time.Now()), run.NewClaimSecret()}, args...)
 	// The claim is a write that returns its row, so it must run on the write connection.
 	r, err := scanRun(s.db.writeQueryRowContext(ctx, q, full...))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -2067,7 +2243,7 @@ func (s *store) ReclaimStale(ctx context.Context, ttl time.Duration) (int, error
 	defer func() { _ = tx.Rollback() }()
 
 	res, err := tx.ExecContext(ctx, `
-UPDATE runs SET claimed_by='', claimed_at=NULL
+UPDATE runs SET claimed_by='', claimed_at=NULL, claim_secret=''
 WHERE status='pending' AND claimed_by!='' AND claimed_at < ?`, cut)
 	if err != nil {
 		return 0, fmt.Errorf("reclaim stale: %w", err)
@@ -2077,7 +2253,7 @@ WHERE status='pending' AND claimed_by!='' AND claimed_at < ?`, cut)
 		return 0, fmt.Errorf("reclaim stale: %w", err)
 	}
 	res, err = tx.ExecContext(ctx, `
-UPDATE runs SET status='interrupted', claimed_by='', claimed_at=NULL,
+UPDATE runs SET status='interrupted', claimed_by='', claimed_at=NULL, claim_secret='',
 ended_at=?, error='interrupted: executor lease expired'
 WHERE status='running' AND claimed_by!='' AND claimed_at < ?`, sqlutil.FormatTime(time.Now()), cut)
 	if err != nil {
@@ -2111,7 +2287,7 @@ WHERE status IN ('pending','running') AND claimed_by='' AND kind IN ('split','pi
 	// children up. A child no executor has started is canceled outright, since leaving it pending
 	// means it stays claimable and would run long after its parent gave up.
 	res, err = tx.ExecContext(ctx, `
-UPDATE runs SET status='canceled', claimed_by='', claimed_at=NULL, ended_at=?,
+UPDATE runs SET status='canceled', claimed_by='', claimed_at=NULL, claim_secret='', ended_at=?,
 error=CASE WHEN error='' THEN '`+run.OrphanError()+`' ELSE error END
 WHERE status IN ('pending','pending_approval') AND parent_id IS NOT NULL
 	AND parent_id IN (SELECT id FROM runs WHERE status='interrupted' AND kind IN ('split','pipeline'))`,
@@ -2213,4 +2389,92 @@ func (s *store) TransitionStatus(ctx context.Context, id string, from, to run.St
 		return false, fmt.Errorf("transition status: %w", err)
 	}
 	return n > 0, nil
+}
+
+// StampApprovedSpec records the spec digest an approver decided on, in a narrow write that cannot
+// clobber a concurrent claim or cancel.
+func (s *store) StampApprovedSpec(ctx context.Context, id, digest string) error {
+	res, err := s.db.ExecContext(ctx,
+		"UPDATE runs SET approved_spec_digest=? WHERE id=?", digest, id)
+	if err != nil {
+		return fmt.Errorf("stamp approved spec: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("stamp approved spec: %w", err)
+	}
+	if n == 0 {
+		return run.ErrNotFound
+	}
+	return nil
+}
+
+// FinalizeRunning moves a running run to its terminal status and records the exit code, failure
+// detail, resolved image, and end time in the same statement, so a run is never terminal with the
+// facts that explain it missing.
+func (s *store) FinalizeRunning(ctx context.Context, id string, fin run.Finalization) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE runs SET status=?, exit_code=?, error=?, image=?, commit_sha=?,
+pull_credential_id=?, outputs=?, warning=?, ended_at=?
+WHERE id=? AND status=?`,
+		string(fin.Status), sqlutil.NullInt(fin.ExitCode), fin.Error, fin.Image,
+		fin.CommitSHA, fin.PullCredentialID, sqlutil.JSONMap(fin.Outputs), fin.Warning,
+		sqlutil.FormatTime(fin.EndedAt), id, string(run.StatusRunning))
+	if err != nil {
+		return false, fmt.Errorf("finalize running run: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("finalize running run: %w", err)
+	}
+	return n > 0, nil
+}
+
+// RunTimings returns the timing fields of the most recent top-level runs, newest first.
+//
+// It selects seven columns rather than the whole row on purpose. The metrics endpoint reads this on
+// every scrape, and a run row carries its extra vars, steps, labels, and notification targets, so
+// decoding full rows for ten thousand runs cost more than everything else the endpoint does put
+// together.
+func (s *store) RunTimings(ctx context.Context, limit int) ([]run.RunTiming, error) {
+	const q = `
+SELECT status, kind, queue, claimed_by, created_at, started_at, ended_at
+FROM runs WHERE parent_id IS NULL
+ORDER BY created_at DESC, id DESC LIMIT ?`
+	rows, err := s.db.QueryContext(ctx, q, limit)
+	if err != nil {
+		return nil, fmt.Errorf("run timings: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return scanTimings(rows)
+}
+
+// scanTimings reads the narrow timing rows.
+func scanTimings(rows *sql.Rows) ([]run.RunTiming, error) {
+	var out []run.RunTiming
+	for rows.Next() {
+		var (
+			t              run.RunTiming
+			status         string
+			created        string
+			started, ended sql.NullString
+		)
+		if err := rows.Scan(&status, &t.Kind, &t.Queue, &t.ClaimedBy, &created, &started, &ended); err != nil {
+			return nil, fmt.Errorf("run timings: %w", err)
+		}
+		t.Status = run.Status(status)
+		at, err := sqlutil.ParseTime(created)
+		if err != nil {
+			return nil, fmt.Errorf("run timings: %w", err)
+		}
+		t.CreatedAt = at
+		if t.StartedAt, err = sqlutil.ParseNullTime(started); err != nil {
+			return nil, fmt.Errorf("run timings: %w", err)
+		}
+		if t.EndedAt, err = sqlutil.ParseNullTime(ended); err != nil {
+			return nil, fmt.Errorf("run timings: %w", err)
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
 }

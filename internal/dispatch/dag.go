@@ -2,7 +2,6 @@ package dispatch
 
 import (
 	"context"
-	"fmt"
 	"maps"
 
 	"github.com/kordloom/switchtender/internal/run"
@@ -71,61 +70,6 @@ func hasDependencies(steps []run.PipelineStep) bool {
 	return false
 }
 
-// validateDAG checks that a dependency declaring pipeline has uniquely named steps, that every
-// dependency references a known step, and that the graph has no cycles.
-func validateDAG(steps []run.PipelineStep) error {
-	idx := make(map[string]int, len(steps))
-	for i, s := range steps {
-		if s.Name == "" {
-			return ErrUnnamedStep
-		}
-		if _, ok := idx[s.Name]; ok {
-			return fmt.Errorf("%w: %q", ErrDuplicateStep, s.Name)
-		}
-		idx[s.Name] = i
-	}
-
-	indegree := make([]int, len(steps))
-	dependents := make([][]int, len(steps))
-	for i, s := range steps {
-		for _, dep := range s.DependsOn {
-			j, ok := idx[dep]
-			if !ok {
-				return fmt.Errorf("%w: %q", ErrUnknownDependency, dep)
-			}
-			if j == i {
-				return fmt.Errorf("%w: %q depends on itself", ErrDependencyCycle, s.Name)
-			}
-			indegree[i]++
-			dependents[j] = append(dependents[j], i)
-		}
-	}
-
-	// Kahn's algorithm: if a topological order does not cover every step, a cycle remains.
-	queue := make([]int, 0, len(steps))
-	for i, deg := range indegree {
-		if deg == 0 {
-			queue = append(queue, i)
-		}
-	}
-	seen := 0
-	for len(queue) > 0 {
-		i := queue[0]
-		queue = queue[1:]
-		seen++
-		for _, dep := range dependents[i] {
-			indegree[dep]--
-			if indegree[dep] == 0 {
-				queue = append(queue, dep)
-			}
-		}
-	}
-	if seen != len(steps) {
-		return ErrDependencyCycle
-	}
-	return nil
-}
-
 // runStepsDAG executes the steps as a dependency graph. Steps whose dependencies are settled run
 // concurrently through the worker pool. A step runs when every dependency succeeded, or failed
 // with continue on failure set; otherwise the step is skipped and creates no run. Each step
@@ -146,13 +90,14 @@ func (d *Dispatcher) runStepsDAG(ctx context.Context, parent *run.Run, steps []r
 	// inputsFor merges the outputs of the step's transitive dependencies in declaration order, so
 	// the result does not depend on which branch finished first.
 	inputsFor := func(i int) map[string]any {
-		var vars map[string]any
+		// The parent's own vars are the base every step starts from, so a workflow's survey answers
+		// reach each step; a transitive dependency's outputs are layered on top in declaration order,
+		// so a published output overrides a parent var of the same name and the result does not
+		// depend on which branch finished first.
+		vars := baseStepVars(parent)
 		for j := range steps {
 			if !closures[i][j] || len(outputs[j]) == 0 {
 				continue
-			}
-			if vars == nil {
-				vars = make(map[string]any)
 			}
 			maps.Copy(vars, outputs[j])
 		}

@@ -52,6 +52,8 @@
 		.tier-price { margin: 18px 0 2px; display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
 		.tier-price b { font-family: "Space Grotesk", sans-serif; font-size: 34px; font-weight: 700; line-height: 1; }
 		.tier-price .cadence { color: var(--muted); font-size: 14px; }
+		/* "From" sits with the cadence, not the figure, so the number stays the thing you read. */
+		.tier-price .from { color: var(--muted); font-size: 14px; align-self: center; }
 		.tier-sub { color: var(--muted); font-size: 13px; min-height: 20px; }
 		.tier-payoff {
 			margin: 14px 0 2px; padding: 12px 14px; border-radius: 10px;
@@ -155,11 +157,11 @@
 						<li>Full orchestration: inventory, projects, job templates, schedules, ad hoc runs</li>
 						<li>Single binary with an embedded <b>SQLite</b> store; <b>Postgres and HA</b> when you outgrow it</li>
 						<li>All seven tools: Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</li>
-						<li><b>SSO login</b> (OIDC and SAML), RBAC, organizations and teams</li>
-						<li>Run approvals and policy gates</li>
+						<li><b>SSO login</b> (OIDC, SAML, and LDAP), RBAC, organizations and teams</li>
+						<li>Run approvals and policy gates, including per-agent rules, risk floors, and outright denials</li>
 						<li>REST API, webhooks, and per-template notifications</li>
 						<li><b>Secrets masking</b> in run logs</li>
-						<li>Hash-chain generation, signed export, and local verification, the <code>verify</code> command free forever</li>
+						<li>Hash-chain generation, signed <a href="https://loomseal.com" rel="noopener">LoomSeal</a> bundles, per-run receipts, and offline verification with an open verifier, free forever</li>
 						<li>Community support via GitHub issues</li>
 					</ul>
 				</article>
@@ -167,7 +169,7 @@
 				<article class="card tier tier-featured">
 					<div class="tier-name">Team</div>
 					<p class="tier-for">Stop hand-managing who can touch production.</p>
-					<div class="tier-price"><b>$250&ndash;500</b><span class="cadence">/ mo</span></div>
+					<div class="tier-price"><span class="from">From</span><b>$250</b><span class="cadence">/ mo</span></div>
 					<p class="tier-sub">Flat per org. No per-seat bill.</p>
 					<div class="tier-payoff">When someone leaves the company, their access <b>ends that day</b>, everywhere. Risky changes wait for a real sign-off from a link. Secrets never live in playbooks. And when something breaks, you're talking to the engineers who built it, and we put our response time in writing. Cheaper than one engineer-day a month.</div>
 					<a class="ghost" href="mailto:hello@kordloom.com?subject=SwitchTender%20Team%20tier">Talk to us</a>
@@ -175,9 +177,8 @@
 					<p class="tier-inherit">Everything in Free, plus:</p>
 					<ul class="tier-list">
 						<li><b>SCIM</b> provisioning, the standard your identity provider uses to create and remove accounts automatically. Access ends the day someone leaves</li>
-						<li>External approvers who sign off from a link, without a seat or the automation UI</li>
+						<li>External approvers who sign off from a link, without a seat or the automation UI, including on changes AI agents propose</li>
 						<li>N-of-M and required-approver policies per environment or playbook</li>
-						<li><b>Vault dynamic secrets</b> with lease handling (basic Vault reads will be free)</li>
 						<li><b>Managed execution environments</b>, built and pinned centrally for the whole fleet</li>
 						<li>Private support channel to the engineers who built it, response time in writing</li>
 					</ul>
@@ -186,18 +187,18 @@
 				<article class="card tier">
 					<div class="tier-name">Governed</div>
 					<p class="tier-for">Turn the audit scramble into a scheduled export.</p>
-					<div class="tier-price"><b>$1,000&ndash;2,500</b><span class="cadence">/ mo</span></div>
+					<div class="tier-price"><span class="from">From</span><b>$1,000</b><span class="cadence">/ mo</span></div>
 					<p class="tier-sub">Flat per org. Migration priced separately.</p>
 					<div class="tier-payoff">The evidence an auditor asks for <b>generates itself on a schedule</b>, mapped to your controls, and they verify it offline without you in the room. Add priority support with a real SLA and hands-on migration from us. Days of gathering screenshots become one download. One passed audit pays for the year.</div>
 					<a class="ghost" href="mailto:hello@kordloom.com?subject=SwitchTender%20Governed%20tier">Talk to us</a>
 					<span class="tier-badge">Early access</span>
 					<p class="tier-inherit">Everything in Team, plus:</p>
 					<ul class="tier-list">
-						<li><b>Evidence packs</b> mapped to common change-management controls, generated on a schedule</li>
-						<li>Auditor-facing attestation reports; local verification stays free for everyone</li>
+						<li><b>Evidence packs</b> mapped to common change-management controls, generated on a schedule, covering human and agent changes alike</li>
+						<li>Attestation report packs assembled for auditors; witness attestations and local verification stay free for everyone</li>
 						<li>Audit chain <b>archival and re-anchoring</b> for long retention windows</li>
 						<li>Air-gapped licensing and offline activation</li>
-						<li>AWX migration assistance, priced separately</li>
+						<li>Hands-on AWX migration available through the engagements below</li>
 						<li>Priority support with a real SLA</li>
 					</ul>
 				</article>
@@ -207,14 +208,16 @@
 			<p class="pricing-note">
 				<strong>Free is shipping today. Team and Governed are earlier. We're building them now with
 				our first customers</strong>, and what we build first follows what they actually need. The
-				prices are public because you shouldn't have to email us to find out what something costs.
+				subscription prices start where they say because you shouldn't have to email us to find out
+				roughly what something costs. Early access is priced per org and settles on scope, so the
+				figure you see is the floor, not an opening bid.
 				If you want in early, <a href="mailto:hello@kordloom.com?subject=SwitchTender%20pricing" style="color: var(--accent);">write us</a>.
 			</p>
 
 			<div class="sprint reveal">
 				<div>
 					<h3>Migration-to-Production Sprint</h3>
-					<p>A fixed-price engagement, not a subscription: we migrate your AWX or Tower install hands-on, validate your real workflows in production, and bundle the first year of Team. One invoice, and you're live before you ever pay again.</p>
+					<p>A fixed-price engagement, not a subscription: we migrate your AWX or Tower install hands-on, validate your real workflows in production, and bundle the first year of Team. One invoice, and you're live before you ever pay again. This is the lighter engagement, for teams that need the migration done and Team running; regulated shops that also need approval-policy and evidence design want the Automation Governance Install below.</p>
 				</div>
 				<a class="btn" href="mailto:hello@kordloom.com?subject=SwitchTender%20migration%20sprint">Scope it in one call</a>
 			</div>
@@ -289,7 +292,7 @@
 				</details>
 				<details>
 					<summary>Can I move from AWX?</summary>
-					<p>Yes. Your AWX export imports in one command on the free tier. For a large or regulated migration, Governed includes hands-on assistance, priced separately. Start with the <a href="/docs/switching-from-awx" style="color: var(--accent);">switching guide</a>.</p>
+					<p>Yes. Your AWX export imports in one command on the free tier. For a large or regulated migration, add hands-on help through the Migration-to-Production Sprint or the Automation Governance Install above. Start with the <a href="/docs/switching-from-awx" style="color: var(--accent);">switching guide</a>.</p>
 				</details>
 				<details>
 					<summary>How do I actually buy Team or Governed?</summary>

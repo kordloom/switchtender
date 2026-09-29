@@ -201,7 +201,9 @@ function mountTableExport() {
 		btn.innerHTML = svgIcon('<path d="M12 3v12"/><polyline points="7 10 12 15 17 10"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>');
 		btn.appendChild(document.createTextNode(label));
 		btn.dataset.tip = tip;
-		btn.addEventListener("click", fn);
+		// A page that knows its table is only part of the data turns these off, so the handler
+		// checks rather than trusting the browser to withhold the click.
+		btn.addEventListener("click", () => { if (!btn.disabled) fn(); });
 		host.appendChild(btn);
 	};
 	make("CSV", "Click to export the filtered rows as a CSV spreadsheet", () => {

@@ -43,12 +43,12 @@ import (
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/server"
-	"github.com/kordloom/switchtender/internal/spanbeat"
 	"github.com/kordloom/switchtender/internal/sqlitestore"
 	"github.com/kordloom/switchtender/internal/team"
 	"github.com/kordloom/switchtender/internal/template"
 	"github.com/kordloom/switchtender/internal/trigger"
 	"github.com/kordloom/switchtender/internal/user"
+	"github.com/kordloom/switchtender/spanbeat"
 )
 
 const (
@@ -263,6 +263,9 @@ var retainRuns string
 // retainEvents holds the value of the --retain-events flag, a duration like 30d.
 var retainEvents string
 
+// retainHistory holds the value of the --retain-history flag, a count of summaries per host.
+var retainHistory int
+
 // retentionInterval holds the value of the --retention-interval flag.
 var retentionInterval time.Duration
 
@@ -342,6 +345,15 @@ func containerPullPolicyFromFlags() string {
 	default:
 		return "missing"
 	}
+}
+
+// newSelectiveRunnerFromFlags builds the run executor shared by serve and worker. The container
+// flags decide the runtime, the pull policy, and the resource caps, while the caller passes the
+// command's own execution-environment and digest-pinning flags. Both commands go through here so a
+// cap or a policy can never reach one executor and miss the other.
+func newSelectiveRunnerFromFlags(allowContainer, requireDigest bool) roundhouse.Runner {
+	return roundhouse.NewSelectiveRunner(allowContainer, containerRuntimeFromFlags(),
+		containerPullPolicyFromFlags(), requireDigest, containerLimitsFromFlags())
 }
 
 // galaxyServer holds the --galaxy-server flag: a private Ansible Galaxy or Automation Hub URL.
@@ -567,6 +579,11 @@ func init() {
 		"Delete terminal runs older than this, for example 90d. Empty keeps them forever.")
 	serveCmd.Flags().StringVar(&retainEvents, "retain-events", "",
 		"Drop run events and logs older than this, for example 30d. Empty keeps them forever.")
+	serveCmd.Flags().IntVar(&retainHistory, "retain-history", 0,
+		"Keep only this many per-host and per-task summaries for each host and task, for example "+
+			"500. Summaries outlive the runs they came from, so this is the only bound on them. "+
+			"Zero keeps every summary forever. Values below "+
+			strconv.Itoa(run.MinRetainSummaries)+" are raised to it.")
 	serveCmd.Flags().DurationVar(&retentionInterval, "retention-interval", retention.DefaultInterval,
 		"How often the retention sweeper runs.")
 	serveCmd.Flags().StringVar(&smtpAddr, "smtp-addr", "",
@@ -683,21 +700,6 @@ func newSealerFromEnv(log *zap.Logger) *credential.Sealer {
 	return sealer
 }
 
-// newAuditSignerFromEnv builds an audit export Signer from SWITCHTENDER_AUDIT_KEY, a hex-encoded
-// ed25519 seed. When it is unset, export signing is off; when it is malformed the server refuses to
-// start so a bad key is caught, not silently ignored. The public key is logged so an operator can
-// record it for offline verification.
-func newAuditSignerFromEnv(log *zap.Logger) (*audit.Signer, error) {
-	signer, err := audit.NewSigner(os.Getenv("SWITCHTENDER_AUDIT_KEY"))
-	if err != nil {
-		return nil, err
-	}
-	if signer != nil {
-		log.Info("audit export signing enabled", zap.String("public_key", signer.PublicKeyHex()))
-	}
-	return signer, nil
-}
-
 // projectCacheDir returns where project checkouts live: the user cache directory when available,
 // the system temp directory otherwise.
 func projectCacheDir() string {
@@ -706,6 +708,28 @@ func projectCacheDir() string {
 		base = os.TempDir()
 	}
 	return filepath.Join(base, "switchtender", "projects")
+}
+
+// identityDir returns the directory holding the producer signing identity for a database target.
+// serve, which signs the bundles it serves, and the bundle command, which signs the bundle it
+// emits, both derive it here so one install mints a single key and every tool reads that same key. A
+// SQLite file keeps its identity beside it, so a copied database carries its key. A postgres DSN has
+// no filesystem home: filepath.Dir on a DSN yields a cwd-relative junk directory whose name embeds
+// the DSN's user:password@host, both wrong and a credential leak, so the identity falls back to a
+// stable per-user directory instead.
+func identityDir(db string) string {
+	if strings.HasPrefix(db, "postgres://") || strings.HasPrefix(db, "postgresql://") {
+		base, err := os.UserConfigDir()
+		if err != nil || base == "" {
+			base = os.TempDir()
+		}
+		return filepath.Join(base, "switchtender", "identity")
+	}
+	dir := filepath.Dir(db)
+	if dir == "" || dir == "." {
+		return "."
+	}
+	return dir
 }
 
 // runServe builds the server dependencies and serves until interrupted.
@@ -783,16 +807,13 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 
 	sealer := newSealerFromEnv(log)
-	auditSigner, err := newAuditSignerFromEnv(log)
-	if err != nil {
-		return err
-	}
 	// The producer identity signs LoomSeal bundles and is published so a relying party can pin its
-	// fingerprint. It is created on first start beside the database. A failure to create it is not
-	// fatal: the server still runs and still records the audit chain, it just cannot attribute a
-	// bundle, which is better than refusing to start over an export feature.
+	// fingerprint. It is created on first start in the install's identity directory, the same one the
+	// bundle command reads, so a bundle is signed with the key serve publishes. A failure to create
+	// it is not fatal: the server still runs and still records the audit chain, it just cannot
+	// attribute a bundle, which is better than refusing to start over an export feature.
 	var producer *audit.Identity
-	if id, err := audit.LoadIdentity(filepath.Dir(serveDB)); err != nil {
+	if id, err := audit.LoadIdentity(identityDir(serveDB)); err != nil {
 		log.Warn("producer identity unavailable, bundles cannot be attributed: " + err.Error())
 	} else {
 		producer = &id
@@ -807,8 +828,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	defer closePlugins()
 
 	hub := live.NewHub()
-	runner := roundhouse.NewSelectiveRunner(serveAllowContainerEE, containerRuntimeFromFlags(),
-		containerPullPolicyFromFlags(), serveRequireImageDigest, containerLimitsFromFlags())
+	runner := newSelectiveRunnerFromFlags(serveAllowContainerEE, serveRequireImageDigest)
 	syncer, err := project.NewSyncer(projectCacheDir(), galaxySyncerOpts()...)
 	if err != nil {
 		return fmt.Errorf("project cache: %w", err)
@@ -830,6 +850,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 
 	disp := dispatch.New(store, runner, log, dispatch.WithPublisher(hub),
+		dispatch.WithAudits(bundle.Audits()),
 		dispatch.WithWorkers(serveWorkers),
 		dispatch.WithMaxShards(serveMaxShards),
 		dispatch.WithRunTimeout(serveRunTimeout),
@@ -855,7 +876,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	defer disp.Close()
 
 	scheduler := schedule.NewScheduler(schedules, disp, log,
-		schedule.WithInterval(scheduleInterval), schedule.WithTemplates(bundle.Templates()))
+		schedule.WithInterval(scheduleInterval), schedule.WithTemplates(bundle.Templates()),
+		schedule.WithAudits(bundle.Audits()))
 	scheduler.Start()
 	defer scheduler.Close()
 
@@ -869,7 +891,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 	sweeper := retention.NewSweeper(store, log,
 		retention.WithRetainRuns(runsWindow), retention.WithRetainEvents(eventsWindow),
-		retention.WithInterval(retentionInterval))
+		retention.WithRetainHistory(retainHistory), retention.WithInterval(retentionInterval))
 	sweeper.Start()
 	defer sweeper.Close()
 
@@ -886,11 +908,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			}
 			client := &http.Client{Timeout: anchorTimeout}
 			beatOpts = append(beatOpts, spanbeat.WithAnchorFunc(
-				func(ctx context.Context, e *audit.Entry) error {
+				func(ctx context.Context, b spanbeat.AppendedBeat) error {
 					ctx, cancel := context.WithTimeout(ctx, anchorTimeout)
 					defer cancel()
 					a, err := audit.NewAnchor(ctx, client, audit.AnchorRFC3161, serveAnchorTSAURL,
-						e.Seq, e.Hash, time.Now())
+						audit.AnchorShapeLinear, b.Seq, b.Hash, time.Now())
 					if err != nil {
 						return err
 					}
@@ -898,7 +920,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 				}))
 			log.Info("span beats will be anchored", zap.String("tsa", serveAnchorTSAURL))
 		}
-		beats := spanbeat.NewEmitter(bundle.Audits(), spanCadence, log, beatOpts...)
+		beats := spanbeat.NewEmitter(auditBeatStore{store: bundle.Audits()}, spanCadence, log, beatOpts...)
 		beats.Start()
 		defer beats.Close()
 		log.Info("span beats enabled", zap.Duration("cadence", spanCadence))
@@ -920,7 +942,12 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		if evidenceCadence < time.Hour {
 			return fmt.Errorf("--evidence-cadence must be at least 1h, got %s", evidenceCadence)
 		}
-		packs := evidence.NewEmitter(bundle.Runs(), bundle.Audits(), evidenceDir, evidenceCadence,
+		var packInstallID string
+		if producer != nil {
+			packInstallID = producer.InstallID
+		}
+		packs := evidence.NewEmitter(bundle.Runs(), bundle.Audits(), packInstallID, evidenceDir,
+			evidenceCadence,
 			log, evidence.WithNotify(func(path string, from, to time.Time) {
 				log.Info("evidence pack ready", zap.String("path", path),
 					zap.Time("from", from), zap.Time("to", to))
@@ -1044,38 +1071,38 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	srv := server.New(store, disp, log, server.WithStreamer(hub),
+		server.WithShutdown(ctx),
+		server.WithCanceler(disp), server.WithRetrier(disp), server.WithApprover(disp),
+		server.WithSchedules(schedules), server.WithTokens(bundle.Tokens()),
+		server.WithCredentials(bundle.Credentials(), sealer),
+		server.WithCredentialTypes(bundle.CredentialTypes()),
+		server.WithProjects(bundle.Projects()),
+		server.WithProjectFiles(syncer),
+		server.WithTemplates(bundle.Templates()),
+		server.WithUsers(bundle.Users()),
+		server.WithInventories(bundle.Inventories()),
+		server.WithPolicies(policies),
+		server.WithAudit(bundle.Audits()),
+		server.WithProducerIdentity(producer, resolveVersion()),
+		server.WithInventorySources(bundle.InventorySources(), disp),
+		server.WithTriggers(bundle.Triggers(), sealer),
+		server.WithTeams(bundle.Teams()),
+		server.WithOrgs(bundle.Orgs()),
+		server.WithGrants(bundle.Grants(), serveStrictGrants),
+		server.WithReadOnly(serveReadOnly),
+		server.WithRelay(store, workerToken()),
+		server.WithWorkerPools(workerPools),
+		server.WithMatrixCap(serveMatrixCap),
+		server.WithOIDC(oidcAuth),
+		server.WithSAML(samlAuth),
+		server.WithLDAP(ldapAuth),
+		server.WithJWT(jwtAuth),
+		server.WithAI(aiProvider),
+		server.WithDocs(docsFS))
 	httpServer := &http.Server{
-		Addr: serveAddr,
-		Handler: server.New(store, disp, log, server.WithStreamer(hub),
-			server.WithShutdown(ctx),
-			server.WithCanceler(disp), server.WithRetrier(disp), server.WithApprover(disp),
-			server.WithSchedules(schedules), server.WithTokens(bundle.Tokens()),
-			server.WithCredentials(bundle.Credentials(), sealer),
-			server.WithCredentialTypes(bundle.CredentialTypes()),
-			server.WithProjects(bundle.Projects()),
-			server.WithProjectFiles(syncer),
-			server.WithTemplates(bundle.Templates()),
-			server.WithUsers(bundle.Users()),
-			server.WithInventories(bundle.Inventories()),
-			server.WithPolicies(policies),
-			server.WithAudit(bundle.Audits()),
-			server.WithProducerIdentity(producer, resolveVersion()),
-			server.WithAuditSigner(auditSigner),
-			server.WithInventorySources(bundle.InventorySources(), disp),
-			server.WithTriggers(bundle.Triggers(), sealer),
-			server.WithTeams(bundle.Teams()),
-			server.WithOrgs(bundle.Orgs()),
-			server.WithGrants(bundle.Grants(), serveStrictGrants),
-			server.WithReadOnly(serveReadOnly),
-			server.WithRelay(store, workerToken()),
-			server.WithWorkerPools(workerPools),
-			server.WithMatrixCap(serveMatrixCap),
-			server.WithOIDC(oidcAuth),
-			server.WithSAML(samlAuth),
-			server.WithLDAP(ldapAuth),
-			server.WithJWT(jwtAuth),
-			server.WithAI(aiProvider),
-			server.WithDocs(docsFS)).Handler(),
+		Addr:              serveAddr,
+		Handler:           srv.Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		IdleTimeout:       idleTimeout,

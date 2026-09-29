@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/kordloom/switchtender/internal/safedial"
 )
 
 // blockedResolveHosts are hostnames a secret source must never reach. The cloud metadata service can
@@ -75,16 +77,8 @@ func safeTransport() *http.Transport {
 // blockUnsafeDial rejects a resolved address that is link-local, link-local multicast, or
 // unspecified, which covers the cloud metadata endpoint, so a rebinding hostname cannot reach it.
 func blockUnsafeDial(_, address string, _ syscall.RawConn) error {
-	host, _, err := net.SplitHostPort(address)
-	if err != nil {
+	if err := safedial.Blocked(address); err != nil {
 		return fmt.Errorf("%w: %v", ErrResolve, err)
-	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return fmt.Errorf("%w: could not parse resolved address %q", ErrResolve, host)
-	}
-	if ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
-		return fmt.Errorf("%w: resolved address %q is not allowed", ErrResolve, host)
 	}
 	return nil
 }

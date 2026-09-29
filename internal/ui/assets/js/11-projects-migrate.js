@@ -203,6 +203,16 @@ function wireMigrate() {
 			runImport();
 		});
 	}
+
+	// Only Rundeck needs a target inventory, so the field appears with that format and is hidden
+	// otherwise rather than asking for something the other importers would ignore.
+	const format = document.getElementById("migrate-format");
+	const inventoryField = document.getElementById("migrate-inventory-field");
+	if (format && inventoryField) {
+		const sync = () => { inventoryField.hidden = format.value !== "rundeck"; };
+		format.addEventListener("change", sync);
+		sync();
+	}
 }
 
 // runMigrate posts the raw export text to the import endpoint and renders the result. It sends the
@@ -219,7 +229,13 @@ async function runMigrate(apply) {
 	}
 	document.getElementById("migrate-plan").innerHTML = "";
 	status.textContent = apply ? "Importing." : "Building preview.";
-	const path = API + "/import/" + format + (apply ? "?apply=true" : "");
+	// Rundeck dispatches by node filter and names no inventory, so the target hosts ride along as a
+	// query parameter. The other formats carry their own and ignore it.
+	const params = [];
+	if (apply) params.push("apply=true");
+	const inventory = (document.getElementById("migrate-inventory")?.value || "").trim();
+	if (format === "rundeck" && inventory) params.push("inventory=" + encodeURIComponent(inventory));
+	const path = API + "/import/" + format + (params.length ? "?" + params.join("&") : "");
 	const res = await fetch(path, { method: "POST", headers: authHeaders(), body });
 	if (res.status === 401) {
 		requireLogin();
@@ -307,13 +323,13 @@ function migrateGroup(label, names) {
 }
 
 // syncTemplateTool shows the Ansible fields or the command box in the template dialog to match the
-// selected tool, so a bash, terraform, python, or go template hides playbook, inventory, shards,
-// and the execution image.
+// selected tool, so a bash, terraform, python, or go template hides playbook, inventory, limit,
+// shards, and the execution image.
 function syncTemplateTool() {
 	const tool = document.getElementById("tpl-tool").value;
 	const ansible = tool === "ansible" || tool === "";
-	const ansibleFields = ["tpl-field-playbook", "tpl-field-inventory", "tpl-field-shards",
-		"tpl-field-image", "tpl-field-pull-credential"];
+	const ansibleFields = ["tpl-field-playbook", "tpl-field-inventory", "tpl-field-limit",
+		"tpl-field-shards", "tpl-field-image", "tpl-field-pull-credential"];
 	for (const id of ansibleFields) {
 		const el = document.getElementById(id);
 		if (el) el.hidden = !ansible;

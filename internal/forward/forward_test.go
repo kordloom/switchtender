@@ -331,7 +331,7 @@ func TestHTTPSinkNameHidesTheTokenBearingURL(t *testing.T) {
 	if strings.Contains(name, "SECRET-TOKEN") || strings.Contains(name, "collector") {
 		t.Errorf("Name() = %q, want scheme and host only, not the token-bearing path", name)
 	}
-	if name != "http https://splunk.example:8088" {
+	if name != "http https://splunk.example:8088/…" {
 		t.Errorf("Name() = %q, want the scheme and host", name)
 	}
 }

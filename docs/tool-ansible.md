@@ -22,7 +22,13 @@ exactly those check runs.
 
 Ansible runs are the ones that split. A split run shards the inventory across parallel slices,
 packs hosts onto shards by their measured durations from past runs, and merges every slice back
-into one matrix. Failed shards retry alone.
+into one matrix. Failed shards retry alone, and `relaunch-failed` re-runs only the hosts a finished
+run left failed or unreachable.
+
+A run or template may carry the usual Ansible controls without a hand-built command: `tags` and
+`skip_tags` select or exclude tagged plays and tasks, `forks` sets how many hosts run at once,
+`verbosity` from one to four raises logging as `-v` through `-vvvv`, and `diff_mode` shows the
+before and after of every changed file. They are Ansible-only and the other tools ignore them.
 
 ## How values reach the play
 

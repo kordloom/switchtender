@@ -144,10 +144,9 @@ same at run time. Pick per extension: compile in for one static artifact, plug i
 release binary you did not build.
 
 Discord, ntfy, and Microsoft Teams are built-in notification channels, configured with the
-`--notify-discord`, `--notify-ntfy`, and `--notify-teams` flags, so they need no plugin. For a
-working example of the SDK itself, the
-[switchtender-plugins](https://github.com/kordloom/switchtender-plugins) repo builds those same
-channels as a drop-in binary, doubling as the template for writing your own extension.
+`--notify-discord`, `--notify-ntfy`, and `--notify-teams` flags, so they need no plugin. The
+official switchtender-plugins repo builds those same channels as a drop-in binary, doubling as the
+template for writing your own extension; it publishes alongside an upcoming release.
 
 ## The seams in detail
 

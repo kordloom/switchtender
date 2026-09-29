@@ -16,7 +16,7 @@ variable.
 |----------|---------|---------|
 | `SWITCHTENDER_ENCRYPTION_KEY` | serve, worker | Passphrase that seals stored credentials with AES-256-GCM. Credentials are disabled when unset. |
 | `SWITCHTENDER_ENCRYPTION_SALT` | serve, worker | Per-deployment salt for argon2id key derivation. Must be set alongside the key and stay stable across restarts, or stored credentials cannot be decrypted. Credentials are disabled when unset. |
-| `SWITCHTENDER_AUDIT_KEY` | serve | Hex-encoded ed25519 seed that signs audit exports so the trail can be verified offline. Signing is off when unset. A malformed value stops startup. Generate one with `switchtender audit keygen`. |
+| `SWITCHTENDER_AUDIT_KEY` | serve | Hex-encoded ed25519 seed for the install's signing identity, which signs the LoomSeal bundles it emits. Unset, the install mints and stores its own key beside the database. A malformed value stops startup. |
 | `SWITCHTENDER_PASSWORD` | user new | Initial account password, read instead of prompting so it never lands on the command line. |
 | `SWITCHTENDER_SMTP_PASSWORD` | serve | Password for SMTP authentication when `--smtp-username` is set. |
 | `SWITCHTENDER_AI_KEY` | serve | API key for a cloud AI provider such as Anthropic or an OpenAI-compatible endpoint. A local Ollama needs none. |
@@ -121,6 +121,7 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--worker-pools` | none | YAML file binding each worker token to the queues it may lease from, so a queue is a boundary rather than a routing hint. |
 | `--retain-runs` | none | Delete terminal runs older than this, for example `90d`. Empty keeps them forever. |
 | `--retain-events` | none | Drop run events and logs older than this, for example `30d`. Empty keeps them forever. |
+| `--retain-history` | none | Keep only this many per-host and per-task summaries for each host and each task, for example `500`. Summaries outlive the runs they came from, so this is the only bound on them. Zero keeps every summary forever. A smaller value is raised to 500, the deepest window the fleet views will answer. |
 | `--retention-interval` | `1h` | How often the retention sweeper runs. |
 | `--evidence-dir` | none | Directory for periodic change registers. Set together with `--evidence-cadence`. |
 | `--evidence-cadence` | none | How long each change register covers and how often one is written, for example `2160h` for a quarter. Minimum `1h`. Zero writes none. Progress is read from the archive, so a restart resumes from the newest pack rather than starting the period again. |
@@ -222,12 +223,16 @@ create.
 
 ## audit
 
-Audit trail tools for the signed export.
+Audit trail tools.
 
-- `audit keygen` generates an ed25519 signing key. Set the printed seed as `SWITCHTENDER_AUDIT_KEY`.
-- `audit verify <export.json>` verifies an export offline: it recomputes the hash chain and checks
-  the signature. `--pubkey` pins the expected signer public key in hex, and verification fails when
-  the export's key differs.
+- `audit bundle` emits the chain as a signed LoomSeal bundle. Anyone verifies it offline with the
+  open `loomseal` verifier, or in a browser, without trusting the server that produced it.
+- `audit anchor` has a public timestamp authority sign the current head, so a chain that has lost
+  its tail no longer reaches its anchor.
+- `audit receipt <seq:link>` redeems a receipt the server issued, proving that entry is still in the
+  chain.
+- `audit report` renders the period's change register as a self-contained HTML evidence report.
+- `audit run <id>` emits one run's evidence dossier as a self-contained HTML document.
 
 ## demo
 

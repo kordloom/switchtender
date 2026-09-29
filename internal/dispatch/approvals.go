@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
 // Approve releases a run held for approval so the claim loop can pick it up. It fails when the run is
 // not awaiting approval, so a decision cannot be applied twice or to a run that already moved on.
-func (d *Dispatcher) Approve(ctx context.Context, id string) (*run.Run, error) {
+// by and byType name the approver in the audit chain's vocabulary; the decision is committed to the
+// chain before the run is released, binding the approver to a digest of the exact spec released.
+func (d *Dispatcher) Approve(ctx context.Context, id, by, byType string) (*run.Run, error) {
 	r, err := d.store.Get(ctx, id)
 	if err != nil {
 		return nil, err
@@ -27,6 +30,21 @@ func (d *Dispatcher) Approve(ctx context.Context, id string) (*run.Run, error) {
 	if r.CancelRequested {
 		return nil, fmt.Errorf("%w: this run was canceled while it waited for a decision",
 			ErrNotPendingApproval)
+	}
+	// The decision entry is appended before the run is released, fail-closed, matching the gate's
+	// rule that a change which cannot be recorded is refused. If the release below then fails, the
+	// chain truthfully holds a decision for a run that stayed held, and a second attempt appends a
+	// second decision. The digest is also stamped on the run so the executor can refuse a spec
+	// that changed underneath the decision.
+	if d.audits != nil {
+		specDigest, derr := outcome.CommitDecision(ctx, d.audits, r, "approved", by, byType)
+		if derr != nil {
+			return nil, fmt.Errorf("record the approval decision: %w", derr)
+		}
+		if serr := d.store.StampApprovedSpec(ctx, id, specDigest); serr != nil {
+			return nil, fmt.Errorf("stamp the approved spec: %w", serr)
+		}
+		r.ApprovedSpecDigest = specDigest
 	}
 	// A parent goes straight to running, never through pending.
 	//
@@ -135,8 +153,9 @@ func (d *Dispatcher) startPipeline(parent *run.Run) {
 }
 
 // Reject terminally denies a run held for approval so it never executes. reason is recorded as the
-// run's error; a blank reason becomes a default.
-func (d *Dispatcher) Reject(ctx context.Context, id, reason string) (*run.Run, error) {
+// run's error; a blank reason becomes a default. by and byType name the decider, and the rejection
+// is committed to the chain before the run is settled, binding the decider to the spec refused.
+func (d *Dispatcher) Reject(ctx context.Context, id, reason, by, byType string) (*run.Run, error) {
 	r, err := d.store.Get(ctx, id)
 	if err != nil {
 		return nil, err
@@ -145,6 +164,11 @@ func (d *Dispatcher) Reject(ctx context.Context, id, reason string) (*run.Run, e
 	// alone leaves the rest of the fan-out to run without it, which is not a decision anyone made.
 	if r.ParentID != nil {
 		return nil, ErrChildNotApprovable
+	}
+	if d.audits != nil {
+		if _, derr := outcome.CommitDecision(ctx, d.audits, r, "rejected", by, byType); derr != nil {
+			return nil, fmt.Errorf("record the rejection decision: %w", derr)
+		}
 	}
 	ok, err := d.store.TransitionStatus(ctx, id, run.StatusPendingApproval, run.StatusRejected)
 	if err != nil {

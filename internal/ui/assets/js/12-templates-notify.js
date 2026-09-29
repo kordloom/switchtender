@@ -1,6 +1,3 @@
-// openTemplateEdit fills the template dialog with an existing record and switches it to edit mode.
-// The dialog does not expose inventory_id, so it is carried through the form dataset to avoid
-// dropping a stored inventory reference on save.
 // NOTIFY_KINDS lists every selectable per-template channel. The first seven take a URL; the rest
 // carry a routing key, a Grafana url and token, or a recipient, and the row shows the right field.
 const NOTIFY_KINDS = [
@@ -113,14 +110,27 @@ function collectNotifyTargets() {
 	return out;
 }
 
+// openTemplateEdit fills the template dialog with an existing record and switches it to edit mode,
+// so the next save issues a PUT rather than a create.
 function openTemplateEdit(t) {
 	const form = document.getElementById("template-form");
 	form.dataset.editId = t.id;
 	form.dataset.inventoryId = t.inventory_id || "";
+	// A save writes the record whole, and the dialog has no field for the rest of the Ansible
+	// controls. Carrying them across the edit is what keeps a rename from writing them back empty:
+	// an imported template's tags, forks, and selectable credentials used to vanish on the first
+	// save, and the answer was 200.
+	const carry = {};
+	for (const key of ["tags", "skip_tags", "verbosity", "forks", "selectable_credential_ids"]) {
+		if (t[key]) carry[key] = t[key];
+	}
+	if (t.diff_mode) carry.diff_mode = true;
+	form.dataset.carry = JSON.stringify(carry);
 	document.getElementById("tpl-name").value = t.name;
 	document.getElementById("tpl-project").value = t.project_id || "";
 	document.getElementById("tpl-playbook").value = t.playbook;
 	document.getElementById("tpl-inventory").value = t.inventory || "";
+	document.getElementById("tpl-limit").value = t.limit || "";
 	document.getElementById("tpl-shards").value = t.shards ? String(t.shards) : "";
 	document.getElementById("tpl-queue").value = t.queue || "";
 	document.getElementById("tpl-timeout").value = t.timeout ? String(t.timeout) : "";
@@ -164,6 +174,7 @@ function wireTemplateForm() {
 	const resetToCreate = () => {
 		delete form.dataset.editId;
 		delete form.dataset.inventoryId;
+		delete form.dataset.carry;
 		form.reset();
 		for (const opt of document.getElementById("tpl-credentials").options) opt.selected = false;
 		syncTemplateTool();
@@ -193,6 +204,8 @@ function wireTemplateForm() {
 		} else {
 			payload.playbook = document.getElementById("tpl-playbook").value.trim();
 			payload.inventory = document.getElementById("tpl-inventory").value.trim();
+			const tlimit = document.getElementById("tpl-limit").value.trim();
+			if (tlimit) payload.limit = tlimit;
 			const shards = parseInt(document.getElementById("tpl-shards").value, 10);
 			if (shards >= 2) payload.shards = shards;
 			const image = document.getElementById("tpl-image").value.trim();
@@ -232,6 +245,13 @@ function wireTemplateForm() {
 		payload.notifications = collectNotifyTargets();
 		const editId = form.dataset.editId;
 		if (editId && form.dataset.inventoryId) payload.inventory_id = form.dataset.inventoryId;
+		// The controls the dialog does not render ride along on an edit, so a PUT replaces the
+		// template with what it already was plus the changes, not with the subset this form knows.
+		if (editId && form.dataset.carry) {
+			for (const [key, value] of Object.entries(JSON.parse(form.dataset.carry))) {
+				if (!(key in payload)) payload[key] = value;
+			}
+		}
 		inFlight = true;
 		if (submitBtn) submitBtn.disabled = true;
 		try {

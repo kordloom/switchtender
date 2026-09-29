@@ -69,22 +69,43 @@ func (c *containerRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Re
 		return Result{ExitCode: -1}, err
 	}
 	plan, cleanup, err := buildContainerPlan(spec)
+	// Deferred before the error is checked. The plan writes temp files for some tools and returns a
+	// usable cleanup even when it then fails, so checking first and deferring after left those files
+	// behind on exactly the path where something already went wrong.
+	defer cleanup()
 	if err != nil {
 		return Result{ExitCode: -1}, err
 	}
-	defer cleanup()
 
+	// A registry login is scoped to this run.
+	//
+	// The runtime writes the credential into its config directory, and that directory was the
+	// executor's own, shared by every run on the machine. One project's private-image credential
+	// therefore stayed on disk after its run and authenticated every later pull, so a project with no
+	// credential of its own could pull from a registry it was never given access to. A per-run
+	// directory means the credential exists for the length of the run and is removed with it.
+	runEnv := c.baseEnv
 	if spec.RegistryUsername != "" {
-		if err := c.login(ctx, spec, out); err != nil {
+		configDir, cleanupConfig, err := newRuntimeConfigDir()
+		if err != nil {
+			return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
+		}
+		defer cleanupConfig()
+		runEnv = append(append([]string(nil), c.baseEnv...), "DOCKER_CONFIG="+configDir,
+			"REGISTRY_AUTH_FILE="+filepath.Join(configDir, "config.json"))
+		if err := c.login(ctx, spec, runEnv, out); err != nil {
 			return Result{ExitCode: -1}, fmt.Errorf("%w: registry login: %w", ErrLaunch, err)
 		}
 	}
 
 	envFile, cleanupEnv, err := c.writeEnvFile(spec, plan.extraEnv)
+	// Same ordering, and it matters more here: this file holds every resolved environment credential
+	// in the clear. Returning before the defer was registered left it in the temp directory until the
+	// operating system cleared it, which on most hosts is a reboot.
+	defer cleanupEnv()
 	if err != nil {
 		return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
 	}
-	defer cleanupEnv()
 
 	name := containerName()
 	args, err := c.runArgs(spec, plan, name, envFile)
@@ -95,7 +116,8 @@ func (c *containerRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Re
 	cmd := exec.CommandContext(ctx, c.runtime, args...)
 	cmd.Stdout = out
 	cmd.Stderr = out
-	cmd.Env = c.baseEnv
+	// The same config the login wrote to, so the pull this command performs can see it.
+	cmd.Env = runEnv
 
 	// A canceled run must stop the container itself: killing the client leaves the container running
 	// under the daemon, so remove it by name. A cancel during a slow image pull can land before the
@@ -147,10 +169,18 @@ func (c *containerRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Re
 func (c *containerRunner) runArgs(spec Spec, plan containerPlan, name, envFile string) ([]string, error) {
 	args := []string{"run", "--rm", "--name", name, "--pull", c.pullPolicy}
 	args = append(args, c.limits.args()...)
+	// Run as the host executor's own uid and gid. The plugin dir (0700), the callback config and
+	// inline script files (0600), the credential files, and the events sidecar are all owned by this
+	// uid and kept private. Without a matching --user the in-container process runs as a different uid
+	// and silently cannot read the callback config or write the events sidecar, so a run's events and
+	// summaries are lost with no error. Matching the uid keeps every secret-bearing file at 0600
+	// rather than loosening it. The guard skips Windows, where Getuid returns -1.
+	if uid := os.Getuid(); uid >= 0 {
+		args = append(args, "--user", fmt.Sprintf("%d:%d", uid, os.Getgid()))
+	}
 	if plan.workdir != "" {
 		args = append(args, "-w", plan.workdir)
 	}
-	args = append(args, "--env-file", envFile)
 
 	mounts := newMountSet()
 	var addErr error
@@ -161,6 +191,15 @@ func (c *containerRunner) runArgs(spec Spec, plan containerPlan, name, envFile s
 	}
 	for _, m := range plan.mounts {
 		addMount(m.path, !m.writable)
+	}
+	// The environment, credentials and all, is mounted and sourced inside the container rather than
+	// passed with --env-file. --env-file copies every value into the container's Config.Env, which
+	// docker inspect returns for the life of the container, so a resolved secret was readable by
+	// anything that could inspect the run. Mounting the file read-only and sourcing it in a shell
+	// wrapper keeps the values out of Config.Env; inspect shows only the mount path. The file is 0600
+	// and the container runs as its owner (see the --user flag above), so nothing else can read it.
+	if envFile != "" {
+		addMount(envFile, true)
 	}
 	if spec.EventsPath != "" {
 		dir, err := c.plugin.ensure()
@@ -177,21 +216,46 @@ func (c *containerRunner) runArgs(spec Spec, plan containerPlan, name, envFile s
 	args = append(args, mounts.args()...)
 
 	args = append(args, spec.Image)
+	if envFile != "" {
+		return append(args, sourceEnvArgv(envFile, plan.argv)...), nil
+	}
 	return append(args, plan.argv...), nil
+}
+
+// sourceEnvArgv wraps the tool argv so the container sources the mounted env file before running it.
+// The file holds shell-safe "export KEY='...'" lines, so a value with a space, a quote, or a dollar
+// sign survives intact. $0 is sh, $1 is the env path; sourcing it exports the run's environment,
+// shift drops the path, and exec replaces the shell with the tool argv verbatim. This is why a
+// container image must carry a POSIX shell, which every built-in tool's image already does.
+func sourceEnvArgv(envFile string, argv []string) []string {
+	wrapper := []string{"sh", "-c", `. "$1"; shift; exec "$@"`, "sh", envFile}
+	return append(wrapper, argv...)
 }
 
 // writeEnvFile writes the run's environment, the tool's extra environment, and, for Ansible, the
 // callback variables to a temp file passed as --env-file so secret values never appear on the
 // command line. It returns the path and a cleanup.
 func (c *containerRunner) writeEnvFile(spec Spec, extraEnv []string) (string, func(), error) {
-	lines := append([]string{}, spec.Env...)
-	lines = append(lines, extraEnv...)
+	env := append([]string{}, spec.Env...)
+	env = append(env, extraEnv...)
 	if spec.EventsPath != "" {
 		dir, err := c.plugin.ensure()
 		if err != nil {
 			return "", func() {}, err
 		}
-		lines = append(lines, callbackEnv(dir, spec.EventsPath)...)
+		env = append(env, callbackEnv(dir, spec.EventsPath)...)
+	}
+	// No environment means no file and no shell wrapper: a run that injects nothing runs the tool
+	// directly, so a container image without a shell is only a constraint for a run that has env to
+	// source, which in practice is every run that carries a credential.
+	lines := make([]string, 0, len(env))
+	for _, kv := range env {
+		if line := shellExport(kv); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) == 0 {
+		return "", func() {}, nil
 	}
 
 	f, err := os.CreateTemp("", "switchtender-env-*")
@@ -204,11 +268,9 @@ func (c *containerRunner) writeEnvFile(spec Spec, extraEnv []string) (string, fu
 		_ = f.Close()
 		return "", cleanup, err
 	}
-	if len(lines) > 0 {
-		if _, err := f.WriteString(strings.Join(lines, "\n") + "\n"); err != nil {
-			_ = f.Close()
-			return "", cleanup, err
-		}
+	if _, err := f.WriteString(strings.Join(lines, "\n") + "\n"); err != nil {
+		_ = f.Close()
+		return "", cleanup, err
 	}
 	if err := f.Close(); err != nil {
 		return "", cleanup, err
@@ -216,9 +278,46 @@ func (c *containerRunner) writeEnvFile(spec Spec, extraEnv []string) (string, fu
 	return path, cleanup, nil
 }
 
+// shellExport turns a KEY=VALUE environment entry into a POSIX sh statement that exports it, with the
+// value single-quoted so any character in it, a space, a dollar sign, a backtick, a newline, is taken
+// literally. Each embedded single quote is closed, escaped, and reopened, the standard way to place
+// an arbitrary string inside single quotes. An entry without an '=' is not an assignment and is
+// skipped. The result is sourced inside the container, which is what keeps secrets out of the
+// command line and out of the container's inspectable environment.
+func shellExport(kv string) string {
+	key, value, ok := strings.Cut(kv, "=")
+	if !ok || !validEnvName(key) {
+		return ""
+	}
+	return "export " + key + "='" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+}
+
+// validEnvName reports whether a name is a POSIX shell variable name, which is what makes it safe to
+// write unquoted on the left of an assignment.
+//
+// Quoting the value and not the name leaves half a hole. A name is not quotable, since quoting it
+// would stop it being an assignment at all, so a name carrying a shell metacharacter has to be
+// refused instead. Names are not always the product's own: a custom credential type lets an operator
+// choose the variable a secret injects into, and an import reads those types out of a file from
+// another system, so the name reaching this line is not guaranteed to be well formed.
+func validEnvName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r == '_':
+		case i > 0 && r >= '0' && r <= '9':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // login authenticates to the image's registry so a private execution environment can be pulled. The
 // password is fed on stdin, never as an argument.
-func (c *containerRunner) login(ctx context.Context, spec Spec, out io.Writer) error {
+func (c *containerRunner) login(ctx context.Context, spec Spec, env []string, out io.Writer) error {
 	args := []string{"login"}
 	if host := registryHost(spec.Image); host != "" {
 		args = append(args, host)
@@ -228,8 +327,23 @@ func (c *containerRunner) login(ctx context.Context, spec Spec, out io.Writer) e
 	cmd.Stdin = strings.NewReader(spec.RegistryPassword)
 	cmd.Stdout = out
 	cmd.Stderr = out
-	cmd.Env = c.baseEnv
+	cmd.Env = env
 	return cmd.Run()
+}
+
+// newRuntimeConfigDir makes a private config directory for one run's registry login and returns it
+// with a cleanup that removes it. Both the Docker and Podman variable names point at it, so the
+// login lands there whichever runtime is configured.
+func newRuntimeConfigDir() (string, func(), error) {
+	dir, err := os.MkdirTemp("", "switchtender-registry-*")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("create registry config dir: %w", err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		_ = os.RemoveAll(dir)
+		return "", func() {}, fmt.Errorf("secure registry config dir: %w", err)
+	}
+	return dir, func() { _ = os.RemoveAll(dir) }, nil
 }
 
 // mountSet collects unique host paths to bind mount into the container at the same path.
@@ -272,6 +386,12 @@ var sensitiveMountRoots = map[string]bool{
 	"/": true, "/etc": true, "/var": true, "/usr": true, "/bin": true,
 	"/sbin": true, "/lib": true, "/lib64": true, "/boot": true, "/proc": true,
 	"/sys": true, "/dev": true, "/root": true, "/home": true, "/Users": true,
+	// The container runtime's own socket lives under these, and handing a container the socket hands
+	// it the host: it can start a second container with the whole filesystem mounted and no limits.
+	// Blocking /var alone did not cover it, because subpaths are deliberately allowed so a project
+	// checkout under /var can still be mounted, and /var/run is a subpath.
+	"/run": true, "/var/run": true, "/var/lib/docker": true, "/var/lib/containerd": true,
+	"/etc/docker": true,
 }
 
 // checkMountPath rejects a host path that would expose a sensitive root directory or the docker
@@ -284,7 +404,11 @@ func checkMountPath(path string) error {
 	if sensitiveMountRoots[clean] {
 		return fmt.Errorf("%w: %s", ErrForbiddenMount, clean)
 	}
-	if filepath.Base(clean) == "docker.sock" {
+	// Any unix socket, not only docker.sock. The runtimes this executes under name theirs
+	// differently, podman.sock, containerd.sock, crio.sock, and a socket is never something an
+	// execution environment needs mounted, so the whole class is refused rather than a list of names
+	// that has to keep up with the runtimes.
+	if strings.HasSuffix(clean, ".sock") {
 		return fmt.Errorf("%w: %s", ErrForbiddenMount, clean)
 	}
 	return nil

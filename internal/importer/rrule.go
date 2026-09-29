@@ -102,8 +102,9 @@ func parseRRULE(rrule string) map[string]string {
 
 // dtstartTime reads the hour and minute out of an iCalendar DTSTART, in either the plain or the
 // TZID-qualified form. It returns midnight when there is no usable DTSTART, which matches the
-// iCalendar default. The wall-clock time is used as written, since cron fires in the server's
-// local time and that is the time the operator chose.
+// iCalendar default. The wall-clock time is used as written, because it is the time the operator
+// chose; the zone it was written in is read separately by dtstartZone and carried onto the schedule,
+// so the imported job keeps firing at that hour in that zone.
 func dtstartTime(rrule string) (hour, minute string) {
 	for field := range strings.FieldsSeq(strings.ReplaceAll(rrule, "\n", " ")) {
 		if !strings.HasPrefix(strings.ToUpper(field), "DTSTART") {
@@ -207,4 +208,32 @@ func cronDays(byday string) (string, bool) {
 		days = append(days, n)
 	}
 	return strings.Join(days, ","), true
+}
+
+// dtstartZone returns the IANA zone named by a DTSTART's TZID parameter, or empty when the rule
+// carries none.
+//
+// An AWX schedule records its zone here, and dropping it moved every imported maintenance window by
+// the offset between that zone and the server's. A 2am America/New_York window became 2am UTC, which
+// is nine the previous evening in New York, silently and with the same cron expression to look at.
+func dtstartZone(rrule string) string {
+	for field := range strings.FieldsSeq(strings.ReplaceAll(rrule, "\n", " ")) {
+		upper := strings.ToUpper(field)
+		if !strings.HasPrefix(upper, "DTSTART") {
+			continue
+		}
+		idx := strings.Index(upper, "TZID=")
+		if idx < 0 {
+			continue
+		}
+		zone := field[idx+len("TZID="):]
+		// The parameter ends at the value separator: DTSTART;TZID=America/New_York:20260101T020000.
+		if colon := strings.Index(zone, ":"); colon >= 0 {
+			zone = zone[:colon]
+		}
+		if zone = strings.TrimSpace(zone); zone != "" {
+			return zone
+		}
+	}
+	return ""
 }

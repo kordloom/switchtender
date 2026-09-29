@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -67,8 +66,7 @@ func proposeRunHandler(submitter Submitter, provider ai.Provider, log *zap.Logge
 			return
 		}
 		var req proposeRequest
-		if err := json.NewDecoder(io.LimitReader(r.Body, proposeBodyCap)).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid json body")
+		if !decodeStrict(w, log, io.LimitReader(r.Body, proposeBodyCap), &req) {
 			return
 		}
 		intent := strings.TrimSpace(req.Intent)
@@ -99,6 +97,7 @@ func proposeRunHandler(submitter Submitter, provider ai.Provider, log *zap.Logge
 			run.WithIntent(intent),
 			run.WithSource("propose", ""),
 			run.WithActor(actorName(r)),
+			run.WithActorType(actorType(r)),
 		}
 		created, err := submitter.Submit(r.Context(), proposal.Playbook, "", opts...)
 		if err != nil {
@@ -106,7 +105,7 @@ func proposeRunHandler(submitter Submitter, provider ai.Provider, log *zap.Logge
 			respondError(w, log, http.StatusInternalServerError, "could not create the proposal")
 			return
 		}
-		respondJSON(w, log, http.StatusAccepted, created, wantsPretty(r))
+		respondJSON(w, log, http.StatusAccepted, maskRun(created), wantsPretty(r))
 	}
 }
 
@@ -119,8 +118,11 @@ func parseProposedRun(answer string) (proposedRun, bool) {
 	if start < 0 || end <= start {
 		return proposedRun{}, false
 	}
+	// The reply is a model's, not a client's, so it is decoded with decodeForeign: a model that
+	// volunteers an extra key alongside the run is answering usefully, and refusing the whole
+	// proposal over it would be refusing work the operator still has to approve by hand.
 	var p proposedRun
-	if err := json.Unmarshal([]byte(raw[start:end+1]), &p); err != nil {
+	if err := decodeForeign([]byte(raw[start:end+1]), &p); err != nil {
 		return proposedRun{}, false
 	}
 	p.Tool = strings.ToLower(strings.TrimSpace(p.Tool))

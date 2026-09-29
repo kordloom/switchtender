@@ -5,6 +5,8 @@ import (
 	"maps"
 	"sort"
 	"sync"
+
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // memStore is an in-memory template Store guarded by a mutex.
@@ -27,6 +29,15 @@ func clone(t *Template) *Template {
 	cp.SelectableCredentialIDs = append([]string(nil), t.SelectableCredentialIDs...)
 	cp.ExtraVars = maps.Clone(t.ExtraVars)
 	cp.Survey = append([]SurveyField(nil), t.Survey...)
+	// Steps and each step's DependsOn are copied so a caller mutating a returned step's dependency
+	// list cannot reach stored state.
+	if t.Steps != nil {
+		cp.Steps = make([]run.PipelineStep, len(t.Steps))
+		for i, st := range t.Steps {
+			st.DependsOn = append([]string(nil), st.DependsOn...)
+			cp.Steps[i] = st
+		}
+	}
 	return &cp
 }
 

@@ -36,7 +36,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX or Semaphore</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts" class="active">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX, Semaphore, or Rundeck</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts" class="active">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -81,9 +81,9 @@ webhook secret on the git host and turn on enforcement, and every inbound push m
 missing signature never launches a run.</p>
 <h2 id="credentials">Credentials</h2>
 <p>A credential is a secret sealed with AES-256-GCM, decrypted only at execution into the run's
-environment or a temporary file created mode 0600 and deleted when the run ends. Thirteen kinds cover SSH keys and SSH passwords, vault passwords, become
+environment or a temporary file created mode 0600 and deleted when the run ends. Fourteen kinds cover SSH keys and SSH passwords, vault passwords, become
 passwords and full become settings, network device logins, environment bundles for cloud SDKs, API
-tokens, container registry logins, and typed AWS, Azure, GCP, and VMware cloud credentials. The
+tokens, container registry logins, and typed AWS, Azure, GCP, VMware, and OpenStack cloud credentials. The
 <a href="/docs/secrets">secrets guide</a> describes each. Secrets never appear in API responses.</p>
 <h2 id="teams-and-grants">Teams and grants</h2>
 <p>The global roles, admin, operator, and viewer, decide the broad strokes. On top of them, a grant
@@ -108,11 +108,20 @@ run, then template, then inventory. Pin a DMZ inventory to workers inside the DM
 against it lands there, no matter how it was launched.</p>
 <h2 id="provable-audit">Provable audit</h2>
 <p>Every authenticated mutation is recorded in the audit trail, and each entry is linked into a SHA-256
-hash chain. It carries the previous entry's hash and its own hash over its content. Altering,
-reordering, or deleting an entry breaks the chain, which <code>GET /v1/audit/verify</code> detects. A signed
-export from <code>GET /v1/audit/export</code> seals the chain with an ed25519 signature, so
-<code>switchtender audit verify</code> proves the trail is intact and unaltered offline, without trusting the
-server that produced it.</p>
+hash chain. Each entry commits to who acted, how they authenticated, the account whose authority
+they used, the method and path, a digest of the change payload, and the previous entry's hash.
+Altering,
+reordering, or deleting an entry breaks the chain, which <code>GET /v1/audit/verify</code> detects. <code>GET /v1/audit/bundle</code>
+seals the chain into a signed LoomSeal bundle, so the open <code>loomseal</code> verifier proves the trail is
+intact and unaltered offline, on the command line or in a browser, without trusting the server that
+produced it.</p>
+<p><strong>The record covers the change, not only that a call was made.</strong> The link commits to
+a digest of the request payload, so a recorded change cannot be re-cast as a different one while the
+chain still verifies. The digest is taken over the payload with its secret fields redacted first, so
+it proves the shape and non-secret content of a change without becoming a way to brute-force a
+secret the request carried. Each entry also records how the caller authenticated and, for a token
+bound to an account, the account it acted on behalf of, so a change an AI agent made under an
+operator's authority is attributable to both and cannot later be presented as a person's.</p>
 <p>A chain proves that what it holds was not altered. On its own it cannot prove that nothing is
 missing, because the same server decides both what happens and what gets written down, and because a
 prefix of a valid chain is itself a valid chain. Three things close that gap.</p>
@@ -131,8 +140,22 @@ handler runs, at a request path that names the template rather than the run it g
 so the two cannot be matched by name. The run keeps the receipt instead, the same <code>seq:link</code> the
 <code>Audit-Receipt</code> header returned, and its dossier redeems that receipt against the live chain. A
 server that dropped the creation entry cannot answer the receipt, and the dossier says so rather
-than showing a run with no origin. A run the scheduler started on its own carries no receipt, since
-no request authorized it, and the document states that rather than leaving it ambiguous.</p>
+than showing a run with no origin. A run the scheduler starts carries a receipt too: the fire is
+recorded as its own chain entry before the run exists, naming the schedule and committing what it
+was configured to launch, and a fire that cannot be recorded is skipped rather than performed
+silently.</p>
+<p><strong>Authentication attempts are not in the chain, and this is deliberate.</strong> An assessor reviewing an
+append-only trail will notice sign-in attempts are absent, so here is why. A sign-in and a webhook
+probe are reachable by anyone on the network, and the audit append is fail-closed: recording every
+attempt would let a stranger fill the chain with entries, and once the store filled, the fail-closed
+append would refuse every real change and lock the install, including sign-in itself on a fresh
+install with no token yet. So authentication attempts live in the server log instead; from the next
+release the log records each attempt by username and outcome, success, failure, and rate-limited,
+and never the password or a token. A successful single sign-on arrival is recorded as a chain entry,
+since the identity provider already vouched for it, and every local sign-in leaves a durable mark
+indirectly: it mints a session, and every change that session then makes is recorded with that
+account as its actor. Forward the server log to your SIEM to retain and examine authentication
+activity alongside the change trail.</p>
 <p><strong>Evidence comes out as documents, not screenshots.</strong> <code>switchtender audit run &lt;id&gt;</code> emits one
 run's dossier: what ran, its risk grade, who approved it, what happened on each host, and the
 receipts and anchors behind all of it. <code>switchtender audit report --from --to</code> renders the period's
@@ -156,6 +179,11 @@ cannot answer one that disagrees with the chain they serve, which turns &quot;ou
 from a claim the operator makes into one a third party signs. When the witness cannot see a feed,
 the attestation says so rather than going quiet, because a server going dark on its witness is
 itself a signal.</p>
+<p>A hosted witness reachable off its own host requires a read token on every
+API call, set with <code>--api-token</code> or <code>SWITCHTENDER_WITNESS_TOKEN</code>, so a public deployment does not
+hand any caller the list of watched servers or the cross-server findings feed. Offline attestation
+verification is unaffected: a relying party checks an attestation it already holds against the
+pinned key with no call to the witness at all, so the token gates delivery, not trust.</p>
 <p><strong>The chain streams into the SIEM, and stays checkable there.</strong> <code>--forward-url</code> and
 <code>--forward-syslog</code> deliver every audit entry to the operator's collector, each event carrying its
 <code>seq:link</code> receipt. That makes the forwarded copy more than a copy: an analyst who samples any

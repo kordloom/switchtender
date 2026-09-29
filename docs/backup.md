@@ -11,7 +11,14 @@ A backup holds the configuration and secrets a deployment needs to stand back up
 - Credentials, with their sealed secrets.
 - Projects, templates, inventories, and inventory sources.
 - Schedules and webhook triggers.
-- Users, teams, organizations, and access grants.
+- Users, teams, organizations, their memberships, and access grants.
+- Approval policies, unless the install pins them from a file with `--policy-file`, in which case
+  that file is the source of truth and is backed up alongside your other configuration.
+- Custom credential types, which every typed credential injects through.
+
+A restored schedule waits for its next real occurrence rather than firing the moment the restore
+finishes. Missed occurrences are skipped the way cron skips them, so recovering from a day-old
+backup does not fire the whole estate's nightly work at once.
 
 Run history and the audit chain are not included. The audit chain has its own signed, self-verifying
 export through `switchtender audit`, which keeps its integrity guarantees intact.

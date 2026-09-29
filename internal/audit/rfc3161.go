@@ -316,18 +316,22 @@ func randomNonce() (*big.Int, error) {
 	return new(big.Int).SetBytes(buf), nil
 }
 
-// NewAnchor builds an anchor record for a chain head, timestamping it when the type calls for one.
-// The clock is passed in so the recorded time is the caller's, matching every other audit time.
-func NewAnchor(ctx context.Context, client *http.Client, kind, ref string,
+// NewAnchor builds an anchor record for a chain coordinate, timestamping it when the type calls
+// for one. shape names the coordinate space seq and link live in, linear or tree. The clock is
+// passed in so the recorded time is the caller's, matching every other audit time.
+func NewAnchor(ctx context.Context, client *http.Client, kind, ref, shape string,
 	seq int64, link string, now time.Time) (*Anchor, error) {
 	if !ValidAnchorType(kind) {
 		return nil, fmt.Errorf("%w: %q", ErrAnchorType, kind)
+	}
+	if !ValidAnchorShape(shape) {
+		return nil, fmt.Errorf("%w: %q", ErrAnchorShape, shape)
 	}
 	if seq < 1 || link == "" {
 		return nil, fmt.Errorf("anchor: nothing to anchor, the chain is empty")
 	}
 	a := &Anchor{
-		ID: NewAnchorID(), Type: kind, Seq: seq, Link: link,
+		ID: NewAnchorID(), Type: kind, Shape: shape, Seq: seq, Link: link,
 		At: now.UTC().Truncate(time.Microsecond), Ref: ref,
 	}
 	if kind != AnchorRFC3161 {

@@ -5,8 +5,10 @@
 package importer
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -86,7 +88,7 @@ func (p *Plan) addSchedule(sc *schedule.Schedule, source string, now time.Time) 
 		p.warn("schedule %q from %s was not imported: %v", sc.Name, source, err)
 		return
 	}
-	next, err := schedule.NextFire(sc.Cron, now)
+	next, err := sc.NextFire(now)
 	if err != nil {
 		p.warn("schedule %q from %s was not imported: its schedule never comes due: %v",
 			sc.Name, source, err)
@@ -241,7 +243,7 @@ func hostLine(plan *Plan, inv string, h importHost) string {
 				"variables", inv, oneLine(k), h.Name)
 			continue
 		}
-		value, ok := renderINIValue(fmt.Sprintf("%v", h.Variables[k]))
+		value, ok := renderINIValue(jsonScalarString(h.Variables[k]))
 		if !ok {
 			plan.warn("inventory %q: variable %q on host %q was dropped because its value carries a "+
 				"control character, which cannot be written on a single inventory line", inv, k, h.Name)
@@ -277,9 +279,13 @@ type importGroup struct {
 
 // mapSurveyType converts an AWX survey field type to a SwitchTender field type, reporting whether the
 // mapping is exact. Unknown types fall back to text.
+//
+// The password type is absent deliberately. Its caller refuses such a field rather than mapping it,
+// because there is no field kind here that keeps an answer secret, and mapping it to text would
+// downgrade a password prompt to a stored plaintext value without saying so.
 func mapSurveyType(awxType string) (template.FieldType, bool) {
 	switch awxType {
-	case "text", "textarea", "password":
+	case "text", "textarea":
 		return template.FieldText, true
 	case "integer":
 		return template.FieldInt, true
@@ -338,6 +344,32 @@ func publicInputs(inputs map[string]any) []string {
 		out[i] = p[0] + "=" + p[1]
 	}
 	return out
+}
+
+// jsonScalarString renders a JSON-decoded value as the text an inventory line or a survey choice
+// should carry, faithfully rather than through Go's default formatting. A string is itself; a bool
+// is true or false; a number is its source digits (json.Number when the export was decoded with
+// UseNumber, otherwise a float printed without scientific notation); JSON null is empty; and an
+// object or array is compact JSON rather than Go's map[k:v] or [a b] form, which an inventory could
+// not read back.
+func jsonScalarString(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return t
+	case bool:
+		return strconv.FormatBool(t)
+	case json.Number:
+		return t.String()
+	case float64:
+		return strconv.FormatFloat(t, 'f', -1, 64)
+	default:
+		if b, err := json.Marshal(t); err == nil {
+			return string(b)
+		}
+		return fmt.Sprintf("%v", t)
+	}
 }
 
 // settingsKey translates an AWX input name to the settings key the kind's injection reads. The
@@ -459,7 +491,7 @@ func choicesFrom(v any) []string {
 	case []any:
 		out := make([]string, 0, len(c))
 		for _, item := range c {
-			out = append(out, fmt.Sprintf("%v", item))
+			out = append(out, jsonScalarString(item))
 		}
 		return out
 	case string:

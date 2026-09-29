@@ -16,7 +16,7 @@
 		<div class="page-head">
 			<div class="page-head-text">
 				<h1>Migrate</h1>
-				<p class="muted">Import projects, inventories, templates, and schedules from AWX or Semaphore. Preview first. Nothing is created until you import.</p>
+				<p class="muted">Import projects, inventories, templates, and schedules from AWX, Semaphore, or Rundeck. Preview first. Nothing is created until you import.</p>
 			</div>
 			<div class="head-actions"></div>
 		</div>
@@ -26,11 +26,17 @@
 				<select id="migrate-format" class="input">
 					<option value="awx">AWX</option>
 					<option value="semaphore">Semaphore</option>
+					<option value="rundeck">Rundeck</option>
 				</select>
 			</label>
-			<label class="field-label">Export JSON
+			<label class="field-label" id="migrate-inventory-field" hidden>Inventory
+				<input id="migrate-inventory" class="input" type="text" placeholder="prod-hosts"
+					data-tip="Rundeck dispatches by node filter and names no inventory, so say which hosts these jobs target">
+				<span class="muted">Rundeck jobs name no inventory of their own, so say which hosts they target.</span>
+			</label>
+			<label class="field-label">Export
 				<textarea id="migrate-export" class="input mono" rows="12"
-					placeholder="Paste your AWX or Semaphore export JSON here"></textarea>
+					placeholder="Paste your AWX, Semaphore, or Rundeck export here"></textarea>
 			</label>
 			<div class="launch-actions">
 				<button id="migrate-sample" type="button" class="button" data-tip="Click to fill the box with a sample AWX export so you can try the import">Load a sample export</button>

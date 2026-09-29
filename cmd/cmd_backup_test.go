@@ -6,9 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/project"
@@ -198,5 +200,71 @@ func TestBackupRefusesWithoutEncryption(t *testing.T) {
 	}
 	if _, statErr := os.Stat(backupOut); statErr == nil {
 		t.Error("a backup file was written despite the refusal")
+	}
+}
+
+// TestRestoreRecordsProvenance proves a restore records not only that it happened but what it drew
+// from: an entry whose path carries the instant the source backup was taken and whose content digest
+// commits the restored counts. The pre-restore guard entry proves the change was authorized; this
+// provenance entry proves which snapshot produced it, so an operator can tell one restore from
+// another.
+func TestRestoreRecordsProvenance(t *testing.T) {
+	t.Setenv("SWITCHTENDER_ENCRYPTION_KEY", "test-key-material")
+	t.Setenv("SWITCHTENDER_ENCRYPTION_SALT", "test-salt-material")
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source.db")
+	target := filepath.Join(dir, "target.db")
+	archive := filepath.Join(dir, "backup.json")
+
+	seedForBackup(t, source)
+	backupDB, backupOut = source, archive
+	t.Cleanup(func() { backupDB, backupOut, restoreDB, restoreIn = "", "", "", "" })
+	if err := runBackup(testCommand(), nil); err != nil {
+		t.Fatalf("runBackup() error = %v", err)
+	}
+	restoreDB, restoreIn = target, archive
+	if err := runRestore(testCommand(), nil); err != nil {
+		t.Fatalf("runRestore() error = %v", err)
+	}
+
+	ctx := context.Background()
+	restored, err := openBundle(target)
+	if err != nil {
+		t.Fatalf("openBundle(target) error = %v", err)
+	}
+	defer func() { _ = restored.Close() }()
+
+	chain, err := restored.Audits().Chain(ctx)
+	if err != nil {
+		t.Fatalf("Chain() error = %v", err)
+	}
+	var guard, provenance bool
+	for _, e := range chain {
+		if e.Path == "/cli/restore" {
+			guard = true
+		}
+		if strings.HasPrefix(e.Path, "/cli/restore?taken_at=") {
+			provenance = true
+			if e.Method != audit.MethodCLI {
+				t.Errorf("provenance method = %q, want %q", e.Method, audit.MethodCLI)
+			}
+			if e.ActorType != "cli" {
+				t.Errorf("provenance actor type = %q, want cli", e.ActorType)
+			}
+			// The digest commits the restored counts into the chain.
+			if e.ContentDigest == "" {
+				t.Error("provenance entry has no content digest, want the counts committed")
+			}
+			takenAt := strings.TrimPrefix(e.Path, "/cli/restore?taken_at=")
+			if _, perr := time.Parse(time.RFC3339, takenAt); perr != nil {
+				t.Errorf("provenance taken_at %q is not an RFC3339 time: %v", takenAt, perr)
+			}
+		}
+	}
+	if !guard {
+		t.Error("no pre-restore guard entry recorded")
+	}
+	if !provenance {
+		t.Error("no restore provenance entry recorded")
 	}
 }

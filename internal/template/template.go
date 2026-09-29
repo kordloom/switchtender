@@ -7,8 +7,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kordloom/switchtender/internal/idgen"
 	"github.com/kordloom/switchtender/internal/run"
@@ -33,6 +35,8 @@ const (
 	FieldBool FieldType = "bool"
 	// FieldChoice is one of a fixed set of strings.
 	FieldChoice FieldType = "choice"
+	// FieldMultiline is free text spanning several lines, such as a block of variables or a note.
+	FieldMultiline FieldType = "multiline"
 )
 
 // SurveyField is one prompt shown at launch, whose answer becomes an extra var.
@@ -49,6 +53,17 @@ type SurveyField struct {
 	Default any `json:"default,omitempty"`
 	// Choices lists the allowed values for a choice field.
 	Choices []string `json:"choices,omitempty"`
+	// Help is optional guidance shown beneath the prompt.
+	Help string `json:"help,omitempty"`
+	// Min and Max bound an int field's answer, inclusive. Nil leaves that side unbounded.
+	Min *int `json:"min,omitempty"`
+	Max *int `json:"max,omitempty"`
+	// MinLength and MaxLength bound a text or multiline answer's length. Zero leaves that side
+	// unbounded, except a MinLength of zero on a required field still rejects an empty answer.
+	MinLength int `json:"min_length,omitempty"`
+	MaxLength int `json:"max_length,omitempty"`
+	// Pattern is a regular expression a text answer must match in full. Empty imposes no pattern.
+	Pattern string `json:"pattern,omitempty"`
 }
 
 // Template is one saved launch preset.
@@ -73,6 +88,21 @@ type Template struct {
 	Command string `json:"command,omitempty"`
 	// DryRun runs the tool in its no-change mode when the template launches.
 	DryRun bool `json:"dry_run,omitempty"`
+	// Limit narrows every launch to the hosts matching this pattern, the way an operator types
+	// --limit by hand. A template that pins one is safe to fire unattended: a schedule and a webhook
+	// carry it too, where before they reached the whole inventory because only an interactive launch
+	// could supply one. Empty targets everything the inventory holds.
+	Limit string `json:"limit,omitempty"`
+	// Tags runs only the Ansible plays and tasks carrying one of these tags on every launch.
+	Tags []string `json:"tags,omitempty"`
+	// SkipTags skips the Ansible plays and tasks carrying one of these tags on every launch.
+	SkipTags []string `json:"skip_tags,omitempty"`
+	// Verbosity raises Ansible logging from 0 to 4 on every launch.
+	Verbosity int `json:"verbosity,omitempty"`
+	// Forks sets how many hosts Ansible addresses in parallel on every launch. Zero leaves the default.
+	Forks int `json:"forks,omitempty"`
+	// DiffMode shows the before-and-after of every Ansible file and template change on every launch.
+	DiffMode bool `json:"diff_mode,omitempty"`
 	// Shards, when two or more, splits the run across that many inventory slices.
 	Shards int `json:"shards,omitempty"`
 	// Queue restricts launches to workers serving this queue.
@@ -81,7 +111,7 @@ type Template struct {
 	// leaves the launch on the server default, so a template that sets nothing behaves as before.
 	Timeout int `json:"timeout,omitempty"`
 	// Image names a container image every launch executes inside, its execution environment. It
-	// outranks the project's image. Only the Ansible tool runs in a container.
+	// outranks the project's image. Every tool the container runner knows executes inside it.
 	Image string `json:"image,omitempty"`
 	// PullCredentialID names a registry credential for pulling a private Image. Empty for public.
 	PullCredentialID string `json:"pull_credential_id,omitempty"`
@@ -93,6 +123,11 @@ type Template struct {
 	SelectableCredentialIDs []string `json:"selectable_credential_ids,omitempty"`
 	// ExtraVars are injected into the run as extra vars, under any survey answers.
 	ExtraVars map[string]any `json:"extra_vars,omitempty"`
+	// Steps, when set, make the template a saved workflow: a pipeline graph fired as one run instead
+	// of a single tool launch. A stepped template carries no top-level tool, playbook, command, or
+	// Ansible controls, since each step names its own; the survey answers, extra vars, credentials,
+	// project, inventory, and image still apply to the whole workflow.
+	Steps []run.PipelineStep `json:"steps,omitempty"`
 	// Survey prompts the launcher for typed values that become extra vars.
 	Survey []SurveyField `json:"survey,omitempty"`
 	// ConfirmOnLaunch routes the plain Launch action through the overrides dialog, so a risky
@@ -134,24 +169,94 @@ func ResolveSurvey(fields []SurveyField, answers map[string]any) (map[string]any
 	return out, nil
 }
 
+// ValidateSurvey checks a survey's field definitions on their own, with no launch answers, so a
+// template with a malformed field is refused when it is saved rather than failing every launch. It
+// compiles each text pattern, confirms a choice field offers choices, and confirms bounds are
+// ordered.
+func ValidateSurvey(fields []SurveyField) error {
+	for _, f := range fields {
+		switch f.Type {
+		case FieldText, FieldMultiline, "":
+			if f.Pattern != "" {
+				if _, err := regexp.Compile(anchorPattern(f.Pattern)); err != nil {
+					return fmt.Errorf("%w: %q has an invalid pattern: %v", ErrSurvey, f.Var, err)
+				}
+			}
+			if f.MinLength > 0 && f.MaxLength > 0 && f.MinLength > f.MaxLength {
+				return fmt.Errorf("%w: %q sets min_length above max_length", ErrSurvey, f.Var)
+			}
+		case FieldInt:
+			if f.Min != nil && f.Max != nil && *f.Min > *f.Max {
+				return fmt.Errorf("%w: %q sets min above max", ErrSurvey, f.Var)
+			}
+		case FieldBool:
+		case FieldChoice:
+			if len(f.Choices) == 0 {
+				return fmt.Errorf("%w: %q is a choice field with no choices", ErrSurvey, f.Var)
+			}
+		default:
+			return fmt.Errorf("%w: %q has an unknown field type %q", ErrSurvey, f.Var, f.Type)
+		}
+	}
+	return nil
+}
+
+// anchorPattern wraps a survey pattern so it must match the whole answer, not just a substring. A
+// bare regexp matches anywhere, so "\\d{4}" would accept "abc1234xyz"; anchoring with \A and \z ties
+// it to the full string the way a format constraint is meant to read.
+func anchorPattern(p string) string {
+	return `\A(?:` + p + `)\z`
+}
+
 // coerce converts a raw answer to the field's type or reports why it cannot.
 func coerce(f SurveyField, raw any) (any, error) {
 	switch f.Type {
-	case FieldText, "":
+	case FieldText, FieldMultiline, "":
 		s, ok := raw.(string)
 		if !ok {
 			return nil, fmt.Errorf("%w: %q must be text", ErrSurvey, f.Var)
 		}
+		// A required field present but empty is still unanswered. ResolveSurvey only rejects a
+		// missing key, so without this an empty string satisfies a required text field.
+		if f.Required && s == "" {
+			return nil, fmt.Errorf("%w: %q is required", ErrSurvey, f.Var)
+		}
+		// Bounds count characters, not bytes, so a multibyte answer is measured the way a person
+		// reads it rather than rejected for being long in UTF-8.
+		n := utf8.RuneCountInString(s)
+		if f.MinLength > 0 && n < f.MinLength {
+			return nil, fmt.Errorf("%w: %q must be at least %d characters", ErrSurvey, f.Var, f.MinLength)
+		}
+		if f.MaxLength > 0 && n > f.MaxLength {
+			return nil, fmt.Errorf("%w: %q must be at most %d characters", ErrSurvey, f.Var, f.MaxLength)
+		}
+		if f.Pattern != "" {
+			re, err := regexp.Compile(anchorPattern(f.Pattern))
+			if err != nil {
+				return nil, fmt.Errorf("%w: %q has an invalid pattern: %v", ErrSurvey, f.Var, err)
+			}
+			if !re.MatchString(s) {
+				return nil, fmt.Errorf("%w: %q does not match the required pattern", ErrSurvey, f.Var)
+			}
+		}
 		return s, nil
 	case FieldInt:
-		switch n := raw.(type) {
+		var n int
+		switch v := raw.(type) {
 		case float64:
-			return int(n), nil
+			n = int(v)
 		case int:
-			return n, nil
+			n = v
 		default:
 			return nil, fmt.Errorf("%w: %q must be an integer", ErrSurvey, f.Var)
 		}
+		if f.Min != nil && n < *f.Min {
+			return nil, fmt.Errorf("%w: %q must be at least %d", ErrSurvey, f.Var, *f.Min)
+		}
+		if f.Max != nil && n > *f.Max {
+			return nil, fmt.Errorf("%w: %q must be at most %d", ErrSurvey, f.Var, *f.Max)
+		}
+		return n, nil
 	case FieldBool:
 		b, ok := raw.(bool)
 		if !ok {
@@ -210,6 +315,14 @@ func (t *Template) LaunchOptions() []run.SubmitOption {
 		run.WithTool(t.Tool),
 		run.WithCommand(t.Command),
 		run.WithDryRun(t.DryRun),
+		run.WithTags(t.Tags...),
+		run.WithSkipTags(t.SkipTags...),
+		run.WithVerbosity(t.Verbosity),
+		run.WithForks(t.Forks),
+		run.WithDiffMode(t.DiffMode),
+	}
+	if t.Limit != "" {
+		opts = append(opts, run.WithLimit(t.Limit))
 	}
 	if t.ProjectID != "" {
 		opts = append(opts, run.WithProject(t.ProjectID))

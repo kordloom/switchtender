@@ -1,0 +1,111 @@
+{
+  "__comment": "SwitchTender Grafana dashboard. Import in Grafana (Dashboards, New, Import) and pick your Prometheus datasource. Panels read the metrics served at /metrics. Proof panels at the bottom watch the tamper-evident audit chain, the part no other controller exposes.",
+  "title": "SwitchTender",
+  "uid": "switchtender",
+  "schemaVersion": 39,
+  "editable": true,
+  "timezone": "",
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "title": "Runs by status",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "sum by (status) (switchtender_runs_total)", "legendFormat": "{{status}}" }
+      ]
+    },
+    {
+      "title": "Run duration (p50 and p95)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        { "expr": "histogram_quantile(0.5, sum by (le) (rate(switchtender_run_duration_seconds_bucket[5m])))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum by (le) (rate(switchtender_run_duration_seconds_bucket[5m])))", "legendFormat": "p95" }
+      ]
+    },
+    {
+      "title": "Queue depth",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 8 },
+      "targets": [
+        { "expr": "sum by (queue) (switchtender_queue_depth)", "legendFormat": "{{queue}}" }
+      ]
+    },
+    {
+      "title": "Workers and active runs",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 8 },
+      "targets": [
+        { "expr": "switchtender_workers_total", "legendFormat": "workers" },
+        { "expr": "switchtender_worker_active_runs", "legendFormat": "active runs" }
+      ]
+    },
+    {
+      "title": "Hosts failing and flaky",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 8 },
+      "targets": [
+        { "expr": "switchtender_hosts_failing", "legendFormat": "failing" },
+        { "expr": "switchtender_hosts_flaky", "legendFormat": "flaky" }
+      ]
+    },
+    {
+      "title": "Audit chain verified",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 15 },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "TAMPERED", "color": "red" }, "1": { "text": "intact", "color": "green" } } }
+          ],
+          "thresholds": { "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] }
+        }
+      },
+      "targets": [ { "expr": "switchtender_audit_chain_verified" } ]
+    },
+    {
+      "title": "Last anchor age",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 15 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [ { "expr": "switchtender_audit_last_anchor_age_seconds" } ]
+    },
+    {
+      "title": "Span beat age",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 15 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [ { "expr": "switchtender_span_beat_age_seconds" } ]
+    },
+    {
+      "title": "Suppressed span beats",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 15 },
+      "description": "A rising count means this host's clock did not advance past the last beat, leaving an unattested window in the record.",
+      "targets": [ { "expr": "switchtender_span_beats_suppressed_total" } ]
+    }
+  ]
+}

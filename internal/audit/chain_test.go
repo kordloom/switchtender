@@ -1,6 +1,8 @@
 package audit_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"testing"
 	"time"
@@ -111,30 +113,44 @@ func TestVerify(t *testing.T) {
 func TestEntryHashMatchesTheSpec(t *testing.T) {
 	t.Parallel()
 	at := time.Date(2026, 7, 27, 15, 0, 0, 0, time.UTC)
+	// The expected digest is built here from the canonical JSON an independent verifier would
+	// construct, written out literally and hashed, rather than copied from this package's output. A
+	// test that pasted EntryHash's result would pass whatever EntryHash did; this one fails if the
+	// canonical form drifts from what the profile says, which is the point of a conformance vector.
+	wantFor := func(canonical string) string {
+		sum := sha256.Sum256([]byte(canonical))
+		return hex.EncodeToString(sum[:])
+	}
 	tests := []struct {
 		Name string
 		Path string
-		Want string
+		// Canonical is the exact JCS form of the claim: keys sorted, no insignificant whitespace, no
+		// HTML or JavaScript escaping, and empty fields omitted.
+		Canonical string
 	}{{ // Test 0: A plain path, where every serializer already agreed.
 		Name: "plain", Path: "/v1/projects/plain",
-		Want: "651aae892f9e83147a108bdcc46e9184ea3fb27f76bc303a556f7b3c1bd7273a",
-	}, { // Test 1: An ampersand, which encoding/json escapes as &.
+		Canonical: `{"actor":"admin","at":"2026-07-27T15:00:00Z","method":"POST",` +
+			`"path":"/v1/projects/plain","prev":"","seq":1}`,
+	}, { // Test 1: An ampersand, which encoding/json escapes as \u0026.
 		Name: "ampersand", Path: "/v1/projects/a&b",
-		Want: "aa85832c8f817a00220513e42a69d06862148ba1d4eb5d17efe4410802164d3b",
-	}, { // Test 2: Angle brackets, which encoding/json escapes as < and >.
+		Canonical: `{"actor":"admin","at":"2026-07-27T15:00:00Z","method":"POST",` +
+			`"path":"/v1/projects/a&b","prev":"","seq":1}`,
+	}, { // Test 2: Angle brackets, which encoding/json escapes as \u003c and \u003e.
 		Name: "angle brackets", Path: "/v1/p/<x>",
-		Want: "488c21c89f47f2ce82e3883502d0630c62a61f803de8f54a2890f16c4e892fb0",
+		Canonical: `{"actor":"admin","at":"2026-07-27T15:00:00Z","method":"POST",` +
+			`"path":"/v1/p/<x>","prev":"","seq":1}`,
 	}, { // Test 3: U+2028, which encoding/json escapes even with HTML escaping disabled.
 		Name: "line separator", Path: "/v1/p/a b",
-		Want: "9cc1e182b8342e31a9cd6027a35470347d33a0a2f7db7830438d3ae9fdd279cf",
+		Canonical: `{"actor":"admin","at":"2026-07-27T15:00:00Z","method":"POST",` +
+			`"path":"/v1/p/a b","prev":"","seq":1}`,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
 			t.Parallel()
 			e := &audit.Entry{Seq: 1, At: at, Actor: "admin", Method: "POST", Path: test.Path}
-			if got := audit.EntryHash(e); got != test.Want {
+			if got, want := audit.EntryHash(e), wantFor(test.Canonical); got != want {
 				t.Errorf("EntryHash() = %s, want %s\nan independent verifier will reject this link",
-					got, test.Want)
+					got, want)
 			}
 		})
 	}

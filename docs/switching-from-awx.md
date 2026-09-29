@@ -147,19 +147,19 @@ Add a schedule in Schedules with a cron expression to fire a template on a caden
   renders as a small form.
 - Workflows are built on the canvas at Workflows: add steps, drag them into place, wire dependencies
   by dragging from a step's edge onto another, and run the graph as a pipeline.
-- Access is a global role plus optional per-object grants, rather than AWX's organization tree. Grant
-  a user or a team `use` or `manage` on a specific project, template, inventory, or credential.
+- Organizations exist and objects belong to them: create one with `POST /v1/orgs`, add members with
+  a role, and a project, template, inventory, or credential can name its owning `org_id`. On top of
+  that, access is a global role plus optional per-object grants, which AWX's tree does not have.
+  Grant a user or a team `use` or `manage` on one specific object.
 - Notifications are configured on the server with `--notify-*` flags and cover eleven channels:
   webhook, Slack, Mattermost, Rocket.Chat, Discord, Microsoft Teams, ntfy, PagerDuty, Grafana,
   Twilio SMS, and email. Every finished run reaches every channel configured that way. A template
-  can additionally name its own targets in the template dialog, for the seven channels that need
-  only a URL: webhook, Slack, Mattermost, Rocket.Chat, Discord, Microsoft Teams, and ntfy.
+  can additionally name its own targets in the template dialog, for all eleven channels: a
+  PagerDuty target names its own routing key, a Grafana target its own instance and token, and a
+  Twilio or email target names only a recipient and sends through the server-held account.
 
 ## What is not one to one yet
 
-- Per-template notification routing covers seven of the eleven channels. PagerDuty, Grafana, Twilio,
-  and email are configured once on the server and fire for every run, so a single template cannot
-  page its own PagerDuty service the way an AWX notification template can.
 - Execution environments are a single pinned container image behind a flag, not a managed catalog.
 - Import creates objects that belong to no organization. Under the default access model that leaves
   them usable by every operator, which matches how a single-team install already works. If you run

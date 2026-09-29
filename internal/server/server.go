@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/beatfeed"
 	"github.com/kordloom/switchtender/internal/ai"
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
@@ -53,12 +54,14 @@ type Canceler interface {
 // satisfies it.
 type Retrier interface {
 	RetryFailedShards(ctx context.Context, parentID string) (*run.Run, error)
+	RelaunchFailedHosts(ctx context.Context, runID, actor, actorType string) (*run.Run, error)
 }
 
-// Approver releases or denies a run held for approval. The dispatcher satisfies it.
+// Approver releases or denies a run held for approval, naming the deciding actor so the decision
+// entry on the chain carries who decided. The dispatcher satisfies it.
 type Approver interface {
-	Approve(ctx context.Context, id string) (*run.Run, error)
-	Reject(ctx context.Context, id, reason string) (*run.Run, error)
+	Approve(ctx context.Context, id, by, byType string) (*run.Run, error)
+	Reject(ctx context.Context, id, reason, by, byType string) (*run.Run, error)
 }
 
 // Option configures a Server.
@@ -103,11 +106,6 @@ func WithUsers(users user.Store) Option {
 // WithAudit records authenticated mutations to the given store and serves the trail.
 func WithAudit(store audit.Store) Option {
 	return func(srv *Server) { srv.audits = store }
-}
-
-// WithAuditSigner signs audit exports with the given signer so they can be verified offline.
-func WithAuditSigner(signer *audit.Signer) Option {
-	return func(srv *Server) { srv.auditSigner = signer }
 }
 
 // WithProducerIdentity publishes the install's signing identity so a relying party can pin the
@@ -318,8 +316,6 @@ type Server struct {
 	policies policy.Store
 	// audits backs the audit trail when configured.
 	audits audit.Store
-	// auditSigner signs audit exports when configured, nil when export signing is off.
-	auditSigner *audit.Signer
 	// producer is the install's signing identity, published so a verifier can pin it. Nil when the
 	// install has none.
 	producer *audit.Identity
@@ -403,9 +399,17 @@ func (s *Server) Handler() http.Handler {
 		orgOwners: s.orgResolver(), strict: s.strictGrants,
 	}
 	mux.Handle("GET /healthz", healthHandler())
+	mux.Handle("GET /readyz", readyHandler(s.store))
+	// The producer identity's install id binds the tree profile's leaves, so every anchor check
+	// that may meet a tree anchor carries it. Without a producer it stays empty and tree anchors
+	// are reported uncheckable rather than silently passed.
+	var installID string
+	if s.producer != nil {
+		installID = s.producer.InstallID
+	}
 	var health *chainHealth
 	if s.audits != nil {
-		health = newChainHealth(s.audits)
+		health = newChainHealth(s.audits, installID)
 	}
 	mux.Handle("GET /metrics", metricsHandler(s.store, health, s.log))
 	mux.Handle("GET /v1/fleet", fleetHandler(s.store, authz, s.log))
@@ -416,12 +420,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/tasks", taskTrendsHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/workers", workersHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/audit", auditHandler(s.audits, s.log))
-	mux.Handle("GET /v1/audit/verify", auditVerifyHandler(s.audits, s.log))
-	mux.Handle("GET /v1/audit/export", auditExportHandler(s.audits, s.auditSigner, s.log))
-	mux.Handle("GET /v1/audit/register", auditRegisterHandler(s.store, s.audits, s.log))
+	mux.Handle("GET /v1/audit/verify", auditVerifyHandler(s.audits, installID, s.log))
+	mux.Handle("GET /v1/audit/bundle", auditBundleHandler(s.audits, s.producer, s.productVersion, s.log))
+	mux.Handle("GET /v1/audit/register", auditRegisterHandler(s.store, s.audits, installID, s.log))
 	// Served unauthenticated: the beat feed exists so an outside watcher can see the chain is
 	// alive and whole, and that watcher has no account here.
-	mux.Handle("GET /v1/audit/beats", auditBeatsHandler(s.audits, s.log))
+	mux.Handle("GET "+beatfeed.APIPath, auditBeatsHandler(s.audits, s.log))
 	// Served unversioned and unauthenticated: a relying party checking a bundle has no account here,
 	// and the document holds only the public half of the signing key.
 	mux.Handle("GET /.well-known/loomseal.json", trustHandler(s.producer, s.productVersion, s.log))
@@ -429,6 +433,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/pipelines", createPipelineHandler(s.submitter, authz, s.log))
 	mux.Handle("POST /v1/runs/{id}/cancel", cancelRunHandler(s.store, s.canceler, authz, s.log))
 	mux.Handle("POST /v1/runs/{id}/retry", retryRunHandler(s.store, s.retrier, authz, s.log))
+	mux.Handle("POST /v1/runs/{id}/relaunch-failed", relaunchFailedHandler(s.store, s.retrier, authz, s.log))
 	mux.Handle("POST /v1/runs/{id}/rerun", rerunRunHandler(s.store, s.submitter, authz, s.log))
 	mux.Handle("POST /v1/runs/{id}/approve", approveRunHandler(s.approver, s.store, authz, s.log))
 	mux.Handle("POST /v1/runs/{id}/reject", rejectRunHandler(s.approver, s.store, authz, s.log))
@@ -439,7 +444,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/runs/{id}/steps", runStepsHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/runs/{id}/logs", runLogsHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/runs/{id}/events", runEventsHandler(s.store, authz, s.log))
-	mux.Handle("GET /v1/runs/{id}/evidence", runEvidenceHandler(s.store, s.audits, authz, s.log))
+	mux.Handle("GET /v1/runs/{id}/evidence",
+		runEvidenceHandler(s.store, s.audits, installID, authz, s.log))
 	mux.Handle("POST /v1/runs/{id}/explain", explainRunHandler(s.store, s.ai, authz, s.log))
 	mux.Handle("POST /v1/ai/draft", draftStepHandler(s.ai, s.log))
 	mux.Handle("POST /v1/ai/ask", askFleetHandler(s.store, s.ai, authz, s.log))
@@ -449,8 +455,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/schedules/preview", previewScheduleHandler(s.log))
 	mux.Handle("GET /v1/doctor", doctorHandler(s.templates, s.schedules, s.credentials, s.inventories, s.projects, s.log))
 	mux.Handle("POST /v1/schedules", createScheduleHandler(s.schedules, authz, s.log))
-	mux.Handle("GET /v1/schedules", listSchedulesHandler(s.schedules, s.log))
-	mux.Handle("GET /v1/schedules/{id}", getScheduleHandler(s.schedules, s.log))
+	mux.Handle("GET /v1/schedules", listSchedulesHandler(s.schedules, authz, s.log))
+	mux.Handle("GET /v1/schedules/{id}", getScheduleHandler(s.schedules, authz, s.log))
 	mux.Handle("PUT /v1/schedules/{id}", updateScheduleHandler(s.schedules, authz, s.log))
 	mux.Handle("DELETE /v1/schedules/{id}", deleteScheduleHandler(s.schedules, authz, s.log))
 	mux.Handle("/ui/", s.web.Handler())
@@ -502,13 +508,13 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /v1/policies/{id}", deletePolicyHandler(s.policies, s.log))
 	mux.Handle("POST /v1/inventory-sources", createSourceHandler(s.invSources, s.inventories, authz, s.log))
 	mux.Handle("PUT /v1/inventory-sources/{id}", updateSourceHandler(s.invSources, authz, s.log))
-	mux.Handle("GET /v1/inventory-sources", listSourcesHandler(s.invSources, s.log))
+	mux.Handle("GET /v1/inventory-sources", listSourcesHandler(s.invSources, authz, s.log))
 	mux.Handle("DELETE /v1/inventory-sources/{id}", deleteSourceHandler(s.invSources, authz, s.log))
 	mux.Handle("POST /v1/inventory-sources/{id}/refresh", refreshSourceHandler(s.refresher, s.invSources, authz, s.log))
 	mux.Handle("POST /v1/triggers", createTriggerHandler(s.triggers, s.templates, s.sealer, authz, s.log))
 	mux.Handle("PUT /v1/triggers/{id}", updateTriggerHandler(s.triggers, s.templates, authz, s.log))
 	mux.Handle("POST /v1/triggers/{id}/rotate-secret", rotateTriggerSecretHandler(s.triggers, s.sealer, authz, s.log))
-	mux.Handle("GET /v1/triggers", listTriggersHandler(s.triggers, s.log))
+	mux.Handle("GET /v1/triggers", listTriggersHandler(s.triggers, authz, s.log))
 	mux.Handle("DELETE /v1/triggers/{id}", deleteTriggerHandler(s.triggers, authz, s.log))
 	mux.Handle("POST /hooks/{token}", hookHandler(s.triggers, s.templates, s.submitter, s.store, s.sealer, s.audits, s.log))
 	mux.Handle("POST /v1/templates", createTemplateHandler(s.templates, authz, s.log))

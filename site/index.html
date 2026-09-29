@@ -71,14 +71,17 @@
 				<span class="eyebrow">Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</span>
 				<h1>Run everything.<br>Watch every host.<br><span class="grad">Prove every change.</span></h1>
 				<p class="lede">
-					Your whole automation stack in one Go binary. Every run painted live, host by task.
-					Every change hash-chained and verifiable offline, every risky run held for sign-off.
+					The governed execution boundary between your operators, human or AI agent, and the
+					systems they change. Every run painted live, host by task. Every change walks one
+					path: request, policy, approval, execution, evidence, and comes out as a signed
+					receipt anyone verifies offline.
 					<strong>All of it ships in one binary that starts in seconds.</strong>
 				</p>
 				<div class="hero-cta">
 					<a class="btn big" href="https://demo.switchtender.com">Open the live demo</a>
 					<a class="ghost big" href="/get-started">Install</a>
 				</div>
+				<p class="hero-note">Already on AWX? <code>switchtender import awx</code> brings your projects, inventories, templates, surveys, and schedules across in one command. Preview the plan, then apply.</p>
 				<p class="hero-note">Source-available. BSL 1.1. Go SDK with drop-in plugins. One file to back up.</p>
 			</div>
 			<div class="hero-shot reveal">
@@ -94,6 +97,14 @@
 			<p><b>Why SwitchTender?</b> A switchtender is the person who throws the track switches in a rail yard, deciding which train goes where. Nothing moves without them. That's the job here too: one control point for every playbook on every host.</p>
 		</section>
 
+		<section class="strip wrap reveal" aria-label="The path every change walks">
+			<div><b>Request</b><span>recorded before anything acts</span></div>
+			<div><b>Policy</b><span>sees who's asking, can refuse</span></div>
+			<div><b>Approval</b><span>binds to the exact change</span></div>
+			<div><b>Execution</b><span>gated wherever it runs</span></div>
+			<div><b>Evidence</b><span>a receipt verified offline</span></div>
+		</section>
+
 		<section class="strip wrap reveal">
 			<div><b>1</b><span>binary, zero Kubernetes</span></div>
 			<div><b>&lt;100ms</b><span><a href="/docs/benchmarks">cold boot on a laptop</a></span></div>
@@ -103,10 +114,16 @@
 
 		<section class="section wrap" id="features">
 			<div class="section-head reveal">
-				<h2>Everything here is free.</h2>
-				<p>Every feature below ships free in the binary you already deployed, no caps, no time limit. Paid tiers only add what never shipped free, and nothing on this page ever moves behind a paywall. If it's on this page, it's in the box.</p>
+				<h2>Every feature below is free.</h2>
+				<p>All of it ships in the binary you already deployed, no caps, no time limit. Paid tiers only add what never shipped free, and nothing on this page ever moves behind a paywall. If it's on this page, it's in the box.</p>
 			</div>
 			<div class="cards cards-3">
+				<article class="card reveal">
+					<div class="ic ic-audit"></div>
+					<h3>Provable audit</h3>
+					<p>Every change links into a tamper-evident SHA-256 hash chain; a change that can't be recorded is refused rather than made quietly. Export the chain as a signed <a href="https://loomseal.com" rel="noopener">LoomSeal</a> bundle and verify it offline with an open, independent verifier, without trusting the server.</p>
+					<p class="card-bound">What it doesn't claim: the chain proves the record wasn't altered after writing, not that a compromised controller recorded everything. The full boundary statement is in <a href="/docs/concepts#provable-audit">the docs</a>.</p>
+				</article>
 				<article class="card reveal">
 					<div class="ic ic-matrix"></div>
 					<h3>Live host-by-task matrix</h3>
@@ -140,7 +157,7 @@
 				<article class="card reveal">
 					<div class="ic ic-drift"></div>
 					<h3>Drift detection</h3>
-					<p>A dry run shows exactly what has drifted, across Ansible hosts and Terraform directories, before you touch a thing. One click builds the fix, held for approval. Most of the field does neither.</p>
+					<p>A dry run shows exactly what has drifted, across Ansible hosts and Terraform directories, before you touch a thing. One click builds the fix, held for approval. No other Ansible controller does either, and the Terraform control planes that do detect drift do not govern your Ansible fleet beside it.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-gate"></div>
@@ -185,18 +202,13 @@
 				<article class="card reveal">
 					<div class="ic ic-bell"></div>
 					<h3>Notifications everywhere</h3>
-					<p>A finished run reaches Slack, Teams, Discord, Mattermost, Rocket.Chat, ntfy, email, or a webhook; a failure pages PagerDuty or texts through Twilio. Eleven channels, server-wide or per template, so each team pages its own people.</p>
+					<p>A finished run reaches Slack, Teams, Discord, Mattermost, Rocket.Chat, ntfy, email, or a webhook; a failure pages PagerDuty, alerts Grafana OnCall, or texts through Twilio. Eleven channels, server-wide or per template, so each team pages its own people.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-secret"></div>
-					<h3>Secrets that can't escape</h3>
-					<p>Sealed at rest, sourced live from Vault, AWS, Google, Azure, CyberArk, or 1Password, and masked out of run logs; a tool that prints a secret shows <code>***</code>. Typed cloud credentials inject the exact variables each tool expects.</p>
-				</article>
-				<article class="card reveal">
-					<div class="ic ic-audit"></div>
-					<h3>Provable audit</h3>
-					<p>Every change links into a tamper-evident SHA-256 hash chain; a change that can't be recorded is refused rather than made quietly. Export the chain as a signed <a href="https://loomseal.com" rel="noopener">LoomSeal</a> bundle and verify it offline with an open, independent verifier, without trusting the server.</p>
-					<p class="card-bound">What it doesn't claim: the chain proves the record wasn't altered after writing, not that a compromised controller recorded everything. The full boundary statement is in <a href="/docs/concepts#provable-audit">the docs</a>.</p>
+					<h3>Secrets kept out of the log</h3>
+					<p>Sealed at rest, sourced live from Vault, AWS, Google, Azure, CyberArk, or 1Password, and kept off the command line so nothing shows in the process table. A tool that prints a secret shows <code>***</code>. Typed cloud credentials inject the exact variables each tool expects.</p>
+					<p class="card-bound">What it doesn't claim: log masking matches the secret's literal text, so a value a tool re-encodes as base64 or hex, or one shorter than four characters, is not caught. Every tool in the field has the same limit; treat it as a safety net, not a boundary.</p>
 				</article>
 			</div>
 		</section>
@@ -247,7 +259,7 @@
 		<section class="section wrap" id="proof">
 			<div class="section-head reveal">
 				<h2>Evidence you can <span class="grad">hand to an auditor.</span></h2>
-				<p>Most controllers keep an activity log: rows in their own database, editable by whoever holds the database. SwitchTender writes every change into a hash chain, then gives you five ways to carry the proof out of the building. What changed, who asked, and who approved it become things you show, not things you say.</p>
+				<p>Most controllers keep an activity log: rows in their own database, editable by whoever holds the database. SwitchTender writes every change into a hash chain, then gives you six ways to carry the proof out of the building. What changed, who asked, and who approved it become things you show, not things you say.</p>
 			</div>
 			<div class="cards cards-3">
 				<article class="card reveal">
@@ -263,7 +275,7 @@
 				<article class="card reveal">
 					<div class="ic ic-lineage"></div>
 					<h3>The change register</h3>
-					<p><code>switchtender audit report</code> renders every change in a period, the sample a SOC 2 CC8.1 or ISO/IEC 27001 A.8.32 review asks for. Point <code>--evidence-dir</code> at an archive and registers write themselves on a cadence, so the evidence exists before anyone asks.</p>
+					<p><code>switchtender audit report</code> renders every change in a period, the sample a SOC 2 CC8.1 or ISO/IEC 27001 A.8.32 review asks for; the <a href="/docs/compliance">control mapping</a> and a <a href="/docs/sample-evidence-pack">sample pack</a> show exactly what an assessor gets. Point <code>--evidence-dir</code> at an archive and registers write themselves on a cadence, so the evidence exists before anyone asks.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-doctor"></div>
@@ -278,29 +290,37 @@
 				<article class="card reveal">
 					<div class="ic ic-secret"></div>
 					<h3>Verified without trusting the server</h3>
-					<p>Export the chain as a signed <a href="https://loomseal.com" rel="noopener">LoomSeal</a> bundle and verify it on a machine with no network, using an open verifier that isn't SwitchTender. The binary proves itself the same way: <code>switchtender version --verify</code> checks the running build against its release hashes.</p>
+					<p>Export the chain as a signed <a href="https://loomseal.com" rel="noopener">LoomSeal</a> bundle and verify it on a machine with no network, using an open verifier that isn't SwitchTender. Or <a href="/verify">drop it into your browser</a> and watch the same verifier check it, offline, with nothing uploaded. The binary proves itself the same way: <code>switchtender version --verify</code> checks the running build against its release hashes.</p>
 				</article>
 			</div>
 			<div class="section-head reveal" style="margin-top:48px">
 				<h3>Don't take our word for it. Check the live demo's chain right now.</h3>
-				<p>These run against <a href="https://demo.switchtender.com">demo.switchtender.com</a>, a real instance with a real history. The third one makes your machine its witness: run it again tomorrow, and a history that shrank or changed behind your back is a finding, not a feeling.</p>
+				<p>These run against <a href="https://demo.switchtender.com">demo.switchtender.com</a>, a live instance that wipes and reseeds its history every night. That makes the third command a live-fire exercise: become its witness today, run it again tomorrow, and the witness will refuse the rebuilt history with a finding. That alarm is the product working. A nightly reseed is exactly what a rewritten chain looks like from outside, and nothing the server says can talk your witness out of what it saw.</p>
 			</div>
 			<div class="code reveal">
 				<button class="copy" aria-label="Copy">Copy</button>
 				<pre><code><span class="c"># 1. the server re-verifies its whole chain, entry by entry</span>
 curl -s https://demo.switchtender.com/v1/audit/verify
 
-<span class="c"># 2. pull the full chain, every hash included, yours to keep</span>
-curl -s https://demo.switchtender.com/v1/audit/export
+<span class="c"># 2. pull the whole chain as a signed bundle, yours to keep and verify anywhere</span>
+curl -s https://demo.switchtender.com/v1/audit/bundle &gt; demo-bundle.json
 
-<span class="c"># 3. become its witness: keep a signed checkpoint of the head you saw,
-#    then run it again later. Rewritten history can't get past you.</span>
+<span class="c"># 3. become its witness: keep a signed checkpoint of the head you saw.
+#    Run it again after tonight's reseed and watch it catch the rewrite.</span>
 switchtender witness --server https://demo.switchtender.com --once</code></pre>
 			</div>
 		</section>
 
-		<section class="namebar wrap reveal" id="agent-gov">
-			<p><b>Agents are operators now.</b> When an AI agent runs your infrastructure, hand it one credential: a SwitchTender token bound to an operator account. Secrets stay sealed on the server, policy holds risky runs for a person to release, and every change lands in the chain under the agent's own name. The gate is the agent's only door. <a href="/agents">Run an agent with proof</a>.</p>
+		<section class="section wrap" id="agent-gov">
+			<div class="section-head reveal">
+				<span class="eyebrow">AI agent change governance</span>
+				<h2>Agents are principals here, not API keys.</h2>
+				<p>An agent's token is minted as an agent's, naming the human it acts for, and capped below admin so it can never approve its own work or touch identity, access, or secrets. Policy can say what an agent may do, what needs a person first, and what it may never do at all. Every change lands in the chain as the agent's, on behalf of its human, and the receipt proves a person approved exactly the change that ran. The gate is the agent's only door.</p>
+			</div>
+			<div class="hero-cta center reveal">
+				<a class="btn big" href="/agents">Run an agent with proof</a>
+				<a class="ghost big" href="/docs/agents">How agents connect</a>
+			</div>
 		</section>
 
 		<section class="section wrap" id="ai">
@@ -325,7 +345,7 @@ switchtender witness --server https://demo.switchtender.com --once</code></pre>
 			<div class="section-head reveal">
 				<span class="eyebrow">Extensibility: SDK + drop-in plugins</span>
 				<h2>Seven tools in the box.<br>Add more in Go.</h2>
-				<p>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go all run out of the box, no plugins required. When you need an eighth tool, a custom secret backend, a new AI provider, or your own notification channel, you write it in Go against a stable SDK. Compile it into the binary, or build it once and drop it into <code>--plugins-dir</code>, where a stock release loads it at startup over gRPC with mutual TLS and treats it as its own. A plugged-in tool submits, validates, and audits like a built-in. A plugged-in channel gets every terminal run with secret-carrying vars already redacted. The <a href="/docs/sdk">SDK guide</a> walks both paths, and the official <a href="https://github.com/kordloom/switchtender-plugins">switchtender-plugins</a> repo ships a real one: Discord, ntfy, and Teams from a single drop-in binary.</p>
+				<p>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go all run out of the box, no plugins required. When you need an eighth tool, a custom secret backend, a new AI provider, or your own notification channel, you write it in Go against a stable SDK. Compile it into the binary, or build it once and drop it into <code>--plugins-dir</code>, where a stock release loads it at startup over gRPC with mutual TLS and treats it as its own. A plugged-in tool submits, validates, and audits like a built-in. A plugged-in channel gets every terminal run with secret-carrying vars already redacted. The <a href="/docs/sdk">SDK guide</a> walks both paths and includes a real one: Discord, ntfy, and Teams from a single drop-in binary.</p>
 			</div>
 			<div class="code reveal">
 				<button class="copy" aria-label="Copy">Copy</button>
@@ -354,7 +374,7 @@ func main() {
 					<tbody>
 						<tr><td>Deploy without Kubernetes</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><span class="muted">VM installer</span></td><td><i class="y"></i></td><td><i class="y"></i></td></tr>
 						<tr><td>Live host-by-task matrix</td><td class="us"><i class="y"></i></td><td><span class="muted">per-host summary</span></td><td><span class="muted">per-host summary</span></td><td><i class="n"></i></td><td><span class="muted">per-node, per-step</span></td></tr>
-						<tr><td>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</td><td class="us"><i class="y"></i></td><td><span class="muted">Ansible only</span></td><td><span class="muted">Ansible only</span></td><td><span class="muted">no Python or Go</span></td><td><span class="muted">scripts, no native IaC</span></td></tr>
+						<tr><td>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</td><td class="us"><i class="y"></i></td><td><span class="muted">Ansible only</span></td><td><span class="muted">Ansible only</span></td><td><span class="muted">no Go, no uniform dry run</span></td><td><span class="muted">scripts, no native IaC</span></td></tr>
 						<tr><td>Duration-balanced job splitting</td><td class="us"><i class="y"></i></td><td><span class="muted">round-robin</span></td><td><span class="muted">round-robin</span></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Fleet memory: flaky hosts, trends</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Tamper-evident, signed audit</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><span class="muted">activity log</span></td><td><i class="n"></i></td><td><span class="muted">activity log</span></td></tr>
@@ -453,8 +473,8 @@ open http://localhost:8080/ui/</code></pre>
 		</section>
 
 <section class="cta wrap reveal">
-			<h2>Retire the controller you've been babysitting.</h2>
-			<p>Structured runs, balanced splits, host history that survives the run, and an audit trail you can verify offline, all from one binary.</p>
+			<h2>Every run leaves a receipt.</h2>
+			<p>Who asked, who approved, what changed on every host, and proof that none of it was edited after the fact. Human or AI agent, the record is the same, and anyone can check it offline without trusting your server or ours.</p>
 			<div class="hero-cta center">
 				<a class="btn big" href="/get-started">Get started</a>
 				<a class="ghost big" href="https://demo.switchtender.com">Live demo</a>

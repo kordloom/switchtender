@@ -24,7 +24,7 @@ type mapFunc func(data []byte, now time.Time) (*importer.Plan, error)
 // importCmd groups the migration importers.
 var importCmd = &cobra.Command{
 	Use:   "import",
-	Short: "Import AWX or Semaphore exports into SwitchTender.",
+	Short: "Import AWX, Semaphore, Rundeck, or crontab definitions into SwitchTender.",
 }
 
 // importAWXCmd imports an awx export document.
@@ -47,15 +47,74 @@ var importSemaphoreCmd = &cobra.Command{
 	},
 }
 
+// importCronInventory is the inventory imported crontab schedules target, since a crontab names no
+// host. importCronSystem selects the six-field /etc/crontab form with a user column.
+var (
+	importCronInventory string
+	importCronSystem    bool
+)
+
+// importRundeckInventory is the inventory imported Rundeck templates target, since Rundeck
+// dispatches by node filter rather than by inventory file.
+var (
+	importRundeckInventory string
+)
+
+// importCronCmd imports a crontab into governed schedules.
+var importCronCmd = &cobra.Command{
+	Use:   "cron <crontab-file>",
+	Short: "Import a crontab into governed schedules.",
+	Long: `Import a crontab into governed schedules.
+
+Each job line becomes a scheduled bash run, so an untracked cron job turns into one that is audited,
+held for approval where a policy covers it, and tracked in host history like every other change. A
+crontab names no target host, so pass --inventory to say where the jobs run. Read /etc/crontab and
+the system tabs with --system, which parses the user column and reports it. Comments, environment
+assignments, and @reboot lines are reported and skipped rather than guessed at.
+
+Without --apply the import only reports what it would create.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runImport(cmd, args[0], importer.FromCron(importCronInventory, importCronSystem))
+	},
+}
+
+// importRundeckCmd imports a Rundeck job export.
+var importRundeckCmd = &cobra.Command{
+	Use:   "rundeck <jobs.yaml>",
+	Short: "Import a Rundeck job export into SwitchTender.",
+	Long: `Import a Rundeck job export into SwitchTender.
+
+Each job becomes a Bash template carrying its step sequence, its options become a survey, and its
+schedule becomes a cron schedule with the Quartz weekday numbering converted. Rundeck dispatches by
+node filter rather than by inventory file, so pass --inventory to say which hosts these jobs target.
+
+A secure option is never imported as a survey field, because that would turn a password prompt into
+a value stored in plain text on every run. Store those as credentials instead; the report names each
+one. Job references, plugin steps, and remote script URLs are reported rather than guessed at.
+
+Without --apply the import only reports what it would create.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runImport(cmd, args[0], importer.FromRundeck(importRundeckInventory))
+	},
+}
+
 // init registers the import commands and their flags.
 func init() {
-	for _, c := range []*cobra.Command{importAWXCmd, importSemaphoreCmd} {
+	for _, c := range []*cobra.Command{importAWXCmd, importSemaphoreCmd, importCronCmd, importRundeckCmd} {
 		c.Flags().StringVar(&importDB, "db", defaultDBPath,
 			"SQLite file path, or a postgres:// DSN, to write into with --apply.")
 		c.Flags().BoolVar(&importApply, "apply", false,
 			"Create the objects. Without it the import only reports what it would create.")
 		importCmd.AddCommand(c)
 	}
+	importCronCmd.Flags().StringVar(&importCronInventory, "inventory", "",
+		"Inventory the imported schedules target, since a crontab names no host.")
+	importCronCmd.Flags().BoolVar(&importCronSystem, "system", false,
+		"Parse the six-field /etc/crontab form, whose user column sits before the command.")
+	importRundeckCmd.Flags().StringVar(&importRundeckInventory, "inventory", "",
+		"Inventory the imported templates target, since Rundeck dispatches by node filter.")
 }
 
 // runImport reads an export, maps it to a plan, reports the plan, and applies it when --apply is set.
