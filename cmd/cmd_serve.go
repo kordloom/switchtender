@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"syscall"
@@ -591,6 +592,10 @@ func newSealerFromEnv(log *zap.Logger) *credential.Sealer {
 	salt := os.Getenv("SWITCHTENDER_ENCRYPTION_SALT")
 	sealer := credential.NewSealer(key, salt)
 	if sealer.Enabled() {
+		// Key derivation allocates a 64 MiB argon2id arena that is dead the moment the key exists.
+		// Hand it back to the OS now, once at startup, so a long-running process idles at its real
+		// footprint instead of carrying the derivation arena in resident memory for its lifetime.
+		debug.FreeOSMemory()
 		return sealer
 	}
 	if key == "" {

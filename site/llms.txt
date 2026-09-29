@@ -1,0 +1,46 @@
+# SwitchTender
+
+> SwitchTender is a one-binary alternative to AWX and Semaphore. It runs Ansible, Terraform,
+> OpenTofu, Bash, PowerShell, Python, and Go across a fleet from a single Go binary, paints
+> every run as a live host-by-task matrix, splits big jobs by measured host cost, records a
+> tamper-evident audit trail, and imports AWX projects, inventories, templates, surveys, and
+> schedules in one command. State lives in one SQLite file by default, with Postgres optional.
+> No Kubernetes, no Redis, no message bus. Source-available under BSL 1.1: free to self-host
+> with every feature, converts to Apache 2.0 four years per release.
+
+Install: `go install github.com/kordloom/switchtender@latest`, Homebrew, or signed release
+binaries for Linux, macOS, and Windows at https://github.com/kordloom/switchtender/releases.
+Quickstart: run `switchtender serve`, open the browser UI. Try `switchtender demo` for a
+seeded read-only tour.
+
+## Start here
+
+- [Homepage](https://switchtender.com/): what it is and the live matrix
+- [Get started](https://switchtender.com/get-started): install and first run
+- [Quickstart](https://switchtender.com/docs/quickstart): first job in minutes
+- [FAQ](https://switchtender.com/docs/faq): the questions everyone asks
+
+## Compare and migrate
+
+- [AWX alternative](https://switchtender.com/awx-alternative): the wedge, in detail
+- [Semaphore alternative](https://switchtender.com/semaphore-alternative)
+- [Ansible Automation Platform alternative](https://switchtender.com/aap-alternative)
+- [Ascender alternative](https://switchtender.com/ascender-alternative)
+- [Switching from AWX](https://switchtender.com/docs/switching-from-awx): the one-command import
+- [Feature comparison](https://switchtender.com/docs/comparison)
+
+## Docs
+
+- [Concepts](https://switchtender.com/docs/concepts): jobs, templates, fleets, runs
+- [Tools](https://switchtender.com/docs/features): Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go
+- [Reliability](https://switchtender.com/docs/reliability): sharding, retries, drift detection
+- [Secrets](https://switchtender.com/docs/secrets)
+- [API](https://switchtender.com/docs/api)
+- [Benchmarks](https://switchtender.com/docs/benchmarks)
+
+## Company
+
+- [Blog: Why I built a one-binary alternative to AWX](https://switchtender.com/blog/why-i-built-a-one-binary-alternative-to-awx)
+- [GitHub](https://github.com/kordloom/switchtender)
+- SwitchTender is a [KordLoom](https://kordloom.com) product, alongside
+  [Dormouse](https://dormousehq.com), tamper-evident vendor monitoring for compliance teams.
