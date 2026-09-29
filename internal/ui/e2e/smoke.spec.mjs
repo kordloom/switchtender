@@ -226,6 +226,35 @@ for (const path of PAGES) {
   });
 }
 
+// The demo's whole job is to answer whether the product fits, and the most expensive question a
+// visitor brings is whether their AWX export survives the move. That answer is a POST, so it was
+// refused twice over: once by a read-only gate reading the method alone, and once by the page, which
+// disables every button in a form unless it is marked as changing nothing.
+//
+// Fixing only the server leaves the wall standing in the browser, which is why this drives the real
+// journey rather than the endpoint: paste an export, press Preview, and read the summary back.
+test("the demo says what an export would bring across", async ({ page }) => {
+  const assertNoErrors = attachErrorGuards(page);
+  await page.goto("/ui/migrate", { waitUntil: "domcontentloaded" });
+
+  const preview = page.locator("#migrate-preview");
+  await expect(preview, "Preview is dead in the demo, so the migration page answers nothing")
+    .toBeEnabled();
+
+  await page.locator("#migrate-export").fill(JSON.stringify({
+    projects: [{ name: "web", scm_type: "git", scm_url: "https://example.invalid/w.git" }],
+  }));
+  await preview.click();
+
+  const summary = page.locator(".migrate-summary");
+  await expect(summary).toBeVisible();
+  await expect(summary).toContainText("Comes across");
+  await expect(summary).toContainText("Does not come across");
+  // Import still writes, so it stays refused. The exception is a preview, not the demo opening up.
+  await expect(page.locator("#migrate-apply")).toBeDisabled();
+  assertNoErrors();
+});
+
 test("an unknown ui path is refused rather than served as the overview", async ({ page }) => {
   // "/ui/" is a subtree pattern, so it also matches every path beneath it that no route claims. Left
   // alone it answered a mistyped or renamed route with the overview page and a 200, which tells a
