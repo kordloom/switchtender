@@ -217,7 +217,13 @@ curl -s https://demo.switchtender.com/v1/audit/verify
 <span class="c"># 2. pull the whole chain as a signed bundle, yours to keep and verify anywhere</span>
 curl -s https://demo.switchtender.com/v1/audit/bundle &gt; demo-bundle.json
 
-<span class="c"># 3. become its witness: keep a signed checkpoint of the head you saw.
+<span class="c"># 3. verify that bundle offline against the key the demo publishes,
+#    with an open verifier this project doesn't control (install: loomseal.com,
+#    or skip the install and drop the file on switchtender.com/verify)</span>
+loomseal verify demo-bundle.json --fingerprint "$(curl -s \
+  https://demo.switchtender.com/.well-known/loomseal.json | jq -r .key_id)"
+
+<span class="c"># 4. become its witness: keep a signed checkpoint of the head you saw.
 #    Run it again after tonight's reseed and watch it catch the rewrite.</span>
 switchtender witness --server https://demo.switchtender.com --once</code></pre>
 			</div>

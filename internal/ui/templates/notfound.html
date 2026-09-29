@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Not found - SwitchTender</title>
+	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="notfound"{{if .ReadOnly}} data-readonly="true"{{end}}>
+	<header class="topbar">
+		<div class="brand"><a href="/ui/"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="SwitchTender"></picture>SwitchTender</a></div>
+	</header>
+
+	<main class="content">
+		<div class="page-head">
+			<div class="page-head-text">
+				<h1>No page at this address</h1>
+				<p class="muted" id="notfound-path">The path <code>{{.Path}}</code> is not one this server serves. A link may be stale, or the address may be a near miss for a real one.</p>
+			</div>
+		</div>
+
+		<div class="empty" id="notfound-ways-on">
+			<p>Somewhere to go from here:</p>
+			<ul class="spec">
+				<li><a href="/ui/">Overview</a>, the fleet and its automation at a glance.</li>
+				<li><a href="/ui/runs">Runs</a>, every execution, newest first.</li>
+				<li><a href="/ui/audit">Audit</a>, the chain and its bundles.</li>
+				<li><a href="/ui/docs">Docs</a>, if you are looking for how something works.</li>
+			</ul>
+			<p class="muted">Plural and singular are not interchangeable in these addresses. <code>/ui/workflows</code> is a page; <code>/ui/workflow</code> is not.</p>
+		</div>
+	</main>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>

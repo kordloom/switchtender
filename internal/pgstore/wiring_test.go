@@ -300,8 +300,15 @@ func TestSummaryWritesFenceATerminalRun(t *testing.T) {
 	ctx, s := fenceStore(t)
 	stamp := time.Now().UnixNano()
 
-	hosts := []run.HostSummary{{Host: "web1", OK: 1, Worst: "ok", RanAt: time.Now().UTC()}}
-	tasks := []run.TaskSummary{{Task: "install", Seconds: 1.5, RanAt: time.Now().UTC()}}
+	// Each write builds its own summaries. The store sanitizes what it is handed in place, so
+	// parallel subtests sharing one slice raced: one subtest's save scrubbed the element while
+	// another's append was still reading it.
+	hosts := func() []run.HostSummary {
+		return []run.HostSummary{{Host: "web1", OK: 1, Worst: "ok", RanAt: time.Now().UTC()}}
+	}
+	tasks := func() []run.TaskSummary {
+		return []run.TaskSummary{{Task: "install", Seconds: 1.5, RanAt: time.Now().UTC()}}
+	}
 
 	// The incremental writers live on a second interface, reached by assertion at the call site, so
 	// a store that lost them would compile and pass every run.Store test and fail on the first
@@ -318,19 +325,19 @@ func TestSummaryWritesFenceATerminalRun(t *testing.T) {
 		Count func(id string) (int, error)
 	}{{ // Test 0: The whole-set host writer.
 		Name:  "SaveHostSummary",
-		Write: func(id string) error { return s.SaveHostSummary(ctx, id, hosts) },
+		Write: func(id string) error { return s.SaveHostSummary(ctx, id, hosts()) },
 		Count: func(id string) (int, error) { n, err := s.RunHostSummaries(ctx, id); return len(n), err },
 	}, { // Test 1: The incremental host writer used by a relayed report.
 		Name:  "AppendHostSummary",
-		Write: func(id string) error { return appender.AppendHostSummary(ctx, id, hosts) },
+		Write: func(id string) error { return appender.AppendHostSummary(ctx, id, hosts()) },
 		Count: func(id string) (int, error) { n, err := s.RunHostSummaries(ctx, id); return len(n), err },
 	}, { // Test 2: The whole-set task writer.
 		Name:  "SaveTaskSummary",
-		Write: func(id string) error { return s.SaveTaskSummary(ctx, id, tasks) },
+		Write: func(id string) error { return s.SaveTaskSummary(ctx, id, tasks()) },
 		Count: func(id string) (int, error) { n, err := s.RunTaskSummaries(ctx, id); return len(n), err },
 	}, { // Test 3: The incremental task writer.
 		Name:  "AppendTaskSummary",
-		Write: func(id string) error { return appender.AppendTaskSummary(ctx, id, tasks) },
+		Write: func(id string) error { return appender.AppendTaskSummary(ctx, id, tasks()) },
 		Count: func(id string) (int, error) { n, err := s.RunTaskSummaries(ctx, id); return len(n), err },
 	}}
 	for testNum, test := range tests {
