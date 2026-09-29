@@ -10,11 +10,11 @@
 	<meta property="og:description" content="This guide assumes you know AWX and have never run SwitchTender.">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/switching-from-awx">
-	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
 	<meta name="twitter:card" content="summary_large_image">
 	<meta name="twitter:title" content="Switching from AWX | SwitchTender docs">
 	<meta name="twitter:description" content="This guide assumes you know AWX and have never run SwitchTender.">
-	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
 	<script type="application/ld+json">
 {
  "@context": "https://schema.org",
@@ -237,14 +237,19 @@ that, access is a global role plus optional per-object grants, which AWX's tree 
 Grant a user or a team <code>use</code> or <code>manage</code> on one specific object.</li>
 <li>Notifications are configured on the server with <code>--notify-*</code> flags and cover eleven channels:
 webhook, Slack, Mattermost, Rocket.Chat, Discord, Microsoft Teams, ntfy, PagerDuty, Grafana,
-Twilio SMS, and email. Every finished run reaches every channel configured that way. A template
-can additionally name its own targets in the template dialog, for all eleven channels: a
-PagerDuty target names its own routing key, a Grafana target its own instance and token, and a
-Twilio or email target names only a recipient and sends through the server-held account.</li>
+Twilio SMS, and email. Every finished run reaches every channel configured that way, and a run
+held for approval reaches the chat channels and webhooks, and email when <code>--notify-on</code> is
+<code>finish</code>, so the person who decides is told. A template can additionally name its own targets in
+the template dialog, for all eleven channels: a PagerDuty target names its own routing key, a
+Grafana target its own instance and token, and a Twilio or email target names only a recipient and
+sends through the server-held account.</li>
 </ul>
 <h2 id="what-is-not-one-to-one-yet">What is not one to one yet</h2>
 <ul>
 <li>Execution environments are a single pinned container image behind a flag, not a managed catalog.</li>
+<li>A workflow approval node is not a step here. Approval is a policy that holds a whole run before it
+starts, so a workflow carrying one is reported and not imported rather than imported without its
+gate. Write the policy first, then rebuild the workflow on the Workflows page.</li>
 <li>Import creates objects that belong to no organization. Under the default access model that leaves
 them usable by every operator, which matches how a single-team install already works. If you run
 with strict grants, imported objects have no grants yet, so assign them after importing.</li>

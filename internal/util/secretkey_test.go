@@ -76,18 +76,16 @@ func TestSecretKeyOnAVeryLongName(t *testing.T) {
 	}
 }
 
-// TestSecretKeyMissesHyphenatedNames demonstrates a name whose value is a credential and which the
-// classifier calls ordinary.
+// TestSecretKeyReadsHyphenatedNames holds the classifier to the spelling headers and flags use.
 //
-// The stem list carries apikey and api_key but not api-key, and privatekey and private_key but not
-// private-key. Both assignment patterns accept a hyphen in a name, and an HTTP header is
-// conventionally written with hyphens, so X-Api-Key: SECRET in a bash run's command line, in an
-// inventory's content, or as a YAML key is read as an ordinary assignment. Its value is then
+// The stem list is written with underscores, and it carries apikey and api_key but not api-key,
+// privatekey and private_key but not private-key. Both assignment patterns accept a hyphen in a
+// name and an HTTP header is conventionally written with them, so the classifier folds a hyphen to
+// an underscore before it looks. Without that fold, X-Api-Key: SECRET in a bash run's command line,
+// in an inventory's content, or as a YAML key reads as an ordinary assignment, and its value is
 // committed to the audit content digest, served by the inventory reader, disclosed in a receipt and
-// a dossier, and never handed to the run-log masker, so a set -x echoes it into the stored log. The
-// Authorization stem was added for exactly this shape, which is what says hyphenated header names
-// are in scope rather than out of it.
-func TestSecretKeyMissesHyphenatedNames(t *testing.T) {
+// a dossier, and never handed to the run-log masker, so a set -x echoes it into the stored log.
+func TestSecretKeyReadsHyphenatedNames(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		// In is the name as a header, a flag, or a YAML key writes it.
@@ -108,9 +106,10 @@ func TestSecretKeyMissesHyphenatedNames(t *testing.T) {
 	}
 }
 
-// TestRedactAssignmentsMissesHyphenatedHeaders is the reachable end of the same defect: the exact
-// text an operator submits as a one-line shell run, with the credential still in it afterward.
-func TestRedactAssignmentsMissesHyphenatedHeaders(t *testing.T) {
+// TestRedactAssignmentsMasksAHyphenatedHeader is the reachable end of the same requirement: the
+// exact text an operator submits as a one-line shell run, with the credential gone from it
+// afterward and reported so the run-log masker can match it.
+func TestRedactAssignmentsMasksAHyphenatedHeader(t *testing.T) {
 	t.Parallel()
 	const secret = "SUPERSECRETAPIKEY"
 	in := `curl -H "X-Api-Key: ` + secret + `" https://api.example.com/deploy`

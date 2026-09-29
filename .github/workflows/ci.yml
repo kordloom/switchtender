@@ -221,6 +221,34 @@ jobs:
           cd "$MOD"
           node wasm/selftest.mjs "$out"
 
+  # The browser assessment, checked on every pull request rather than first at deploy. The deploy
+  # builds and checks it again before it publishes; a change that breaks the page's reader, its
+  # agreement with the command, or its recovery from a file too large for it fails here, while it
+  # can still be fixed before it merges.
+  assessment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Build the browser assessment and check it against the command
+        run: |
+          set -euo pipefail
+          out="$(mktemp -d)"
+          GOOS=js GOARCH=wasm go build -ldflags="-s -w" -o "$out/assess.wasm" ./cmd/assessweb/
+          cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" "$out/wasm_exec.js"
+          go run . assess awx test/supertest/manifests/awx-export.json > "$out/expected.txt"
+          node scripts/assess-conformance.cjs "$out/assess.wasm" "$out/wasm_exec.js" \
+            test/supertest/manifests/awx-export.json "$out/expected.txt"
+          node --wasm-max-mem-pages=4096 scripts/assess-worker-check.cjs \
+            site/assess/assess-worker.js "$out/assess.wasm" "$out/wasm_exec.js" \
+            test/supertest/manifests/awx-export.json
+
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -281,7 +309,14 @@ jobs:
             command -v "$binary" >/dev/null 2>&1 || { echo "missing engine binary: $binary" >&2; exit 1; }
           done
           tofu version && terraform version && pwsh --version
+      # This job installs docker, ansible and every advertised engine, so a test standing down
+      # here for want of one of them is a gate proving less than it claims. The variable is the
+      # same one the PostgreSQL contract, the drift tests and the engine contract already read, and
+      # it turns those skips into failures. A developer's machine, which sets nothing, still skips
+      # and says why.
       - name: Run the real SSH fleet suite
+        env:
+          SWITCHTENDER_REQUIRE_FULL_SUITE: "1"
         run: go test -tags integration -v -timeout 10m ./internal/integration/...
 
   vuln:
@@ -327,6 +362,8 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Build the binary the demo server runs from
         run: npm run build:bin
+      - name: Build the browser assessment's reader into the site
+        run: npm run build:assess
       - name: Run the smoke tests
         run: npm run test:ci
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

@@ -10,11 +10,11 @@
 	<meta property="og:description" content="No install needed to look around. The live demo is a seeded, read-only instance of exactly what you get.">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/quickstart">
-	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
 	<meta name="twitter:card" content="summary_large_image">
 	<meta name="twitter:title" content="Quickstart | SwitchTender docs">
 	<meta name="twitter:description" content="No install needed to look around. The live demo is a seeded, read-only instance of exactly what you get.">
-	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
 	<script type="application/ld+json">
 {
  "@context": "https://schema.org",
@@ -67,10 +67,12 @@
 			<h1 id="quickstart">Quickstart</h1>
 <p>No install needed to look around. The <a href="https://demo.switchtender.com">live demo</a> is a seeded, read-only instance of exactly what you get.</p>
 <h2 id="requirements">Requirements</h2>
-<p>Ansible on the PATH: <code>ansible-playbook</code> and <code>ansible-inventory</code>. Nothing else for the default
-SQLite setup. Building from source instead of installing the release binary needs Go 1.26, and
-Docker Compose is an alternative, where <code>docker compose --profile stack up --build</code> builds the image from this
-repository.</p>
+<p>The tools your runs use, on the PATH: <code>ansible-playbook</code> and <code>ansible-inventory</code> for Ansible, and
+<code>terraform</code>, <code>tofu</code>, <code>python3</code>, <code>pwsh</code> (PowerShell 7), or <code>go</code> for the rest. Bash runs use the
+system shell. Nothing else for the default SQLite setup. Building from source instead of installing
+the release binary needs Go 1.26, and Docker Compose is an alternative, where
+<code>docker compose --profile stack up --build</code> builds the image from this repository. That image
+already carries Ansible, Python, Terraform, and OpenTofu.</p>
 <h2 id="install">Install</h2>
 <pre><code>curl -fsSL https://switchtender.com/install.sh | sh
 </code></pre>

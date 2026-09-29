@@ -47,7 +47,11 @@ type Streamer interface {
 
 // Canceler stops a pending or executing run. The dispatcher satisfies it.
 type Canceler interface {
+	// Cancel stops a run this process is executing and reports whether it held one.
 	Cancel(id string) bool
+	// CancelWaiting cancels a run waiting unclaimed, pending or held for approval, settles its end,
+	// and reports whether it did.
+	CancelWaiting(ctx context.Context, id string) (bool, error)
 }
 
 // Retrier starts a new split run from the failed shards of a finished one. The dispatcher
@@ -75,6 +79,12 @@ func WithStreamer(s Streamer) Option {
 // WithCanceler enables the cancel endpoint backed by c.
 func WithCanceler(c Canceler) Option {
 	return func(srv *Server) { srv.canceler = c }
+}
+
+// WithAnnouncer makes the relay announce, through a, the runs workers finish and the applies their
+// plans leave held. The dispatcher satisfies it.
+func WithAnnouncer(a relay.Announcer) Option {
+	return func(srv *Server) { srv.announcer = a }
 }
 
 // WithRetrier enables the failed shard retry endpoint backed by r.
@@ -174,10 +184,6 @@ func WithShutdown(ctx context.Context) Option {
 	return func(srv *Server) { srv.shutdown = ctx }
 }
 
-// WithRelay mounts the phase-1 mesh relay worker endpoints, backed by the given run store and
-// guarded by the worker token. A relay worker in an isolated segment dials them over one outbound
-// connection to lease and execute runs without a path to the database. An empty token leaves the
-// endpoints off, so the mesh is opt-in.
 // WithWorkerPools confines each worker token to the queues it may lease from.
 //
 // A queue routes work to the segment that can reach it, so the queues a token may claim are that
@@ -187,6 +193,10 @@ func WithWorkerPools(pools *relay.Pools) Option {
 	return func(srv *Server) { srv.workerPools = pools }
 }
 
+// WithRelay mounts the phase-1 mesh relay worker endpoints, backed by the given run store and
+// guarded by the worker token. A relay worker in an isolated segment dials them over one outbound
+// connection to lease and execute runs without a path to the database. An empty token leaves the
+// endpoints off, so the mesh is opt-in.
 func WithRelay(store run.Store, workerToken string) Option {
 	return func(srv *Server) {
 		srv.relayStore = store
@@ -301,6 +311,9 @@ type Server struct {
 	streamer Streamer
 	// canceler backs the cancel endpoint when configured.
 	canceler Canceler
+	// announcer tells the notification channels about what relay workers finish, nil when the
+	// control node announces nothing for them.
+	announcer relay.Announcer
 	// retrier backs the failed shard retry endpoint when configured.
 	retrier Retrier
 	// approver backs the run approval endpoints when configured.
@@ -647,7 +660,12 @@ func (s *Server) Handler() http.Handler {
 		if pools == nil {
 			pools = relay.SinglePool(s.workerToken)
 		}
-		handler = relayGate(relay.NewHandler(s.relayStore, pools, s.log, s.policies, s.audits), handler)
+		var opts []relay.HandlerOption
+		if s.announcer != nil {
+			opts = append(opts, relay.WithAnnouncer(s.announcer))
+		}
+		handler = relayGate(relay.NewHandler(s.relayStore, pools, s.log, s.policies, s.audits,
+			opts...), handler)
 	}
 	return securityHeaders(bodyLimit(handler))
 }

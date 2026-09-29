@@ -1,7 +1,6 @@
 package dispatch
 
 import (
-	"bytes"
 	"sort"
 	"strings"
 	"sync"
@@ -22,17 +21,59 @@ const minMaskLen = 4
 // the run's credentials resolve, and it is safe for concurrent use by the log sink and the event
 // tailer.
 type masker struct {
-	// mu guards secrets, strs, and shortest.
+	// mu guards strs, byFirst, and shortest.
 	mu sync.RWMutex
-	// secrets holds the values to redact, longest first so a longer secret is masked before a
-	// shorter substring of it.
-	secrets [][]byte
-	// strs holds the same values in the same order as strings. Keeping both representations means
-	// masking a string field costs no conversion per secret per call.
+	// strs holds the values to redact, longest first, so a longer secret wins over a shorter one
+	// starting in the same place.
 	strs []string
+	// byFirst indexes strs by the first byte of each value, keeping that longest-first order.
+	// Redaction asks what begins at a position rather than searching the text once per secret, so
+	// this is what makes that a lookup per byte instead of a pass per secret.
+	byFirst [256][]int
 	// shortest is the byte length of the shortest secret, zero when none are set. Text shorter than
 	// it cannot contain any secret, so it is returned untouched.
 	shortest int
+}
+
+// matchAt returns the length of the longest secret that begins in text at i, or zero when none
+// does. It is generic over the two shapes the masker is asked about, a byte chunk of a run's output
+// and a string field of an event, so one matcher serves both rather than a second copy of this loop
+// or a byte copy of every string.
+//
+// byFirst keeps strs order, which is longest first, so the first value that matches is the longest
+// one that can.
+func matchAt[T ~string | ~[]byte](m *masker, text T, i int) int {
+	for _, k := range m.byFirst[text[i]] {
+		sec := m.strs[k]
+		// Shorter values follow, so a value that does not fit is skipped rather than ending the
+		// search.
+		if len(sec) > len(text)-i {
+			continue
+		}
+		j := 1
+		for ; j < len(sec); j++ {
+			if text[i+j] != sec[j] {
+				break
+			}
+		}
+		if j == len(sec) {
+			return len(sec)
+		}
+	}
+	return 0
+}
+
+// beginsWith reports whether the secret sec starts with prefix.
+func beginsWith(sec string, prefix []byte) bool {
+	if len(prefix) > len(sec) {
+		return false
+	}
+	for i := range prefix {
+		if sec[i] != prefix[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // maskBytes is the mask token as bytes, converted once rather than per replacement.
@@ -63,9 +104,9 @@ func (m *masker) set(values []string) {
 	}
 	sort.Slice(out, func(i, j int) bool { return len(out[i]) > len(out[j]) })
 
-	secrets := make([][]byte, len(out))
-	for i, s := range out {
-		secrets[i] = []byte(s)
+	var byFirst [256][]int
+	for i, v := range out {
+		byFirst[v[0]] = append(byFirst[v[0]], i)
 	}
 	shortest := 0
 	if len(out) > 0 {
@@ -74,28 +115,47 @@ func (m *masker) set(values []string) {
 	}
 
 	m.mu.Lock()
-	m.secrets = secrets
 	m.strs = out
+	m.byFirst = byFirst
 	m.shortest = shortest
 	m.mu.Unlock()
 }
 
-// redact returns p with every known secret replaced by the mask token. It returns p unchanged when
-// no secrets are set, allocating a new slice only when a redaction is made.
+// redact returns p with every known secret replaced by the mask token, allocating only when a
+// redaction is made.
+//
+// One left-to-right pass, taking the longest value that begins at each position and resuming after
+// it. A pass per secret, which this was, reads its own output: hiding "CRET" in "CRET000" writes
+// "***000", and a second secret of "*000" then matches text the mask token created and was never in
+// the stream. It also left the result dependent on the order equal-length values happened to sort
+// into. One pass never rescans what it wrote, so what comes out depends on the secret set and the
+// text and on nothing else.
 func (m *masker) redact(p []byte) []byte {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.shortest == 0 || len(p) < m.shortest {
 		return p
 	}
-	out := p
-	for _, s := range m.secrets {
-		if len(s) > len(out) {
+	first := -1
+	for i := range p {
+		if matchAt(m, p, i) > 0 {
+			first = i
+			break
+		}
+	}
+	if first < 0 {
+		return p
+	}
+	out := make([]byte, 0, len(p))
+	out = append(out, p[:first]...)
+	for i := first; i < len(p); {
+		if n := matchAt(m, p, i); n > 0 {
+			out = append(out, maskBytes...)
+			i += n
 			continue
 		}
-		if bytes.Contains(out, s) {
-			out = bytes.ReplaceAll(out, s, maskBytes)
-		}
+		out = append(out, p[i])
+		i++
 	}
 	return out
 }
@@ -105,11 +165,11 @@ func (m *masker) redact(p []byte) []byte {
 func (m *masker) longest() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if len(m.secrets) == 0 {
+	if len(m.strs) == 0 {
 		return 0
 	}
-	// secrets is sorted longest first, so the head is the longest.
-	return len(m.secrets[0])
+	// strs is sorted longest first, so the head is the longest.
+	return len(m.strs[0])
 }
 
 // partialTail returns the length of the longest suffix of buf that is a proper prefix of some secret,
@@ -120,55 +180,54 @@ func (m *masker) longest() int {
 func (m *masker) partialTail(buf []byte) int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if len(m.secrets) == 0 || len(buf) == 0 {
+	if len(m.strs) == 0 || len(buf) == 0 {
 		return 0
 	}
 	// The longest possible partial is one byte short of the longest secret, and never more than the
-	// buffer itself. secrets is sorted longest first, so the head bounds it.
-	maxLen := min(len(m.secrets[0])-1, len(buf))
-	// Try the longest candidate suffix first; the first that begins a secret is the answer.
-	for w := maxLen; w > 0; w-- {
-		suffix := buf[len(buf)-w:]
-		for _, sec := range m.secrets {
-			if len(suffix) < len(sec) && bytes.HasPrefix(sec, suffix) {
-				return w
+	// buffer itself. strs is sorted longest first, so the head bounds it.
+	from := max(len(buf)-(len(m.strs[0])-1), 0)
+	// Earliest start first, so the longest candidate suffix is the one that answers.
+	for at := from; at < len(buf); at++ {
+		for _, k := range m.byFirst[buf[at]] {
+			sec := m.strs[k]
+			if len(buf)-at < len(sec) && beginsWith(sec, buf[at:]) {
+				return len(buf) - at
 			}
 		}
 	}
 	return 0
 }
 
-// wholeSecretCut returns a release point at or after cut that no secret occurrence straddles.
+// releasePoint returns the point at or before cut where the stream can be split without cutting a
+// redaction in half.
 //
-// Splitting an occurrence would leave half of it in the released bytes, where redaction can no
-// longer see the whole value, and half in the withheld tail. Extending the point to the end of any
-// straddling occurrence keeps every match intact on the side that gets redacted.
-func (m *masker) wholeSecretCut(buf []byte, cut int) int {
+// Releasing the head of a value that is about to be masked puts bytes in the log that redaction can
+// no longer see the whole of, so the point moves off any match it lands inside, back to where that
+// match begins.
+//
+// It walks the buffer exactly as redact does: left to right, taking the longest value that begins at
+// each position and resuming after it. Walking rather than searching for an occurrence anywhere is
+// the whole of it, because those are not the same set. A secret whose own prefix is also its own
+// suffix occurs at every position of a long enough run of one character, so "does an occurrence
+// straddle this point" answers yes at every point in such a buffer and nothing is ever releasable.
+// Redaction never replaces those overlapping occurrences; it takes one and resumes after it. Asking
+// about the matches it will actually make leaves a release point after every one of them.
+func (m *masker) releasePoint(buf []byte, cut int) int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if len(m.secrets) == 0 {
+	if len(m.strs) == 0 {
 		return cut
 	}
-	// A secret can only reach past the point from within the preceding longest-1 bytes, and pushing
-	// the point forward can expose another straddle, so this repeats until it settles.
-	for moved := true; moved; {
-		moved = false
-		for _, sec := range m.secrets {
-			from := max(cut-len(sec)+1, 0)
-			for at := from; at < cut; at++ {
-				if at+len(sec) > len(buf) {
-					break
-				}
-				if bytes.Equal(buf[at:at+len(sec)], sec) && at+len(sec) > cut {
-					cut = at + len(sec)
-					moved = true
-					break
-				}
-			}
-			if moved {
-				break
-			}
+	for i := 0; i < cut; {
+		n := matchAt(m, buf, i)
+		if n == 0 {
+			i++
+			continue
 		}
+		if i+n > cut {
+			return i
+		}
+		i += n
 	}
 	return cut
 }
@@ -217,9 +276,9 @@ func (s *streamMasker) next(chunk []byte) []byte {
 		s.tail = append(s.tail[:0], buf...)
 		return nil
 	}
-	// Release everything except the last keep bytes, then push the release point past any secret
-	// that would otherwise be cut in half by it, so the whole occurrence is redacted together.
-	cut := s.mask.wholeSecretCut(buf, len(buf)-keep)
+	// Release everything except the last keep bytes, then move the release point off any match it
+	// lands inside, so the whole of it is redacted together.
+	cut := s.mask.releasePoint(buf, len(buf)-keep)
 	s.tail = append(s.tail[:0], buf[cut:]...)
 	return s.mask.redact(buf[:cut])
 }
@@ -245,14 +304,13 @@ func (s *streamMasker) drain() []byte {
 		// Every byte could still be the start of a secret, so none of it is safe to release yet.
 		return nil
 	}
-	// Release everything before the risky suffix and keep that suffix. The release point is pushed
-	// past any secret occurrence it would otherwise split, exactly as next does: a secret's own
-	// trailing bytes can be a partial prefix of another secret (SECRET ends in ET, a prefix of
-	// ETHER), so the cut from partialTail alone can land inside a complete occurrence, releasing its
-	// head unredacted and carrying its tail forward, where the two halves emit as contiguous
-	// plaintext. A fresh slice backs the new tail so it cannot alias the emitted bytes, which redact
-	// may return pointing into the old tail.
-	cut := s.mask.wholeSecretCut(s.tail, len(s.tail)-w)
+	// Release everything before the risky suffix and keep that suffix. The release point moves off
+	// any match it lands inside, exactly as next does: a secret's own trailing bytes can be a
+	// partial prefix of another secret (SECRET ends in ET, a prefix of ETHER), so the cut from
+	// partialTail alone can land inside a match, releasing its head unredacted and carrying its tail
+	// forward, where the two halves emit as contiguous plaintext. A fresh slice backs the new tail so
+	// it cannot alias the emitted bytes, which redact may return pointing into the old tail.
+	cut := s.mask.releasePoint(s.tail, len(s.tail)-w)
 	out := s.mask.redact(s.tail[:cut])
 	s.tail = append([]byte(nil), s.tail[cut:]...)
 	return out
@@ -286,13 +344,29 @@ func (m *masker) redactStringLocked(s string) string {
 	if m.shortest == 0 || len(s) < m.shortest {
 		return s
 	}
-	for _, sec := range m.strs {
-		if len(sec) > len(s) {
+	first := -1
+	for i := 0; i < len(s); i++ {
+		if matchAt(m, s, i) > 0 {
+			first = i
+			break
+		}
+	}
+	if first < 0 {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	b.WriteString(s[:first])
+	for i := first; i < len(s); {
+		if n := matchAt(m, s, i); n > 0 {
+			b.WriteString(maskToken)
+			i += n
 			continue
 		}
-		s = strings.ReplaceAll(s, sec, maskToken)
+		b.WriteByte(s[i])
+		i++
 	}
-	return s
+	return b.String()
 }
 
 // redactEvent masks the free-text fields of an event in place, covering a task's captured output,

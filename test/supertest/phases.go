@@ -206,6 +206,9 @@ func (h *harness) phaseCommunity() error {
 	// the distance between that and what the playbook now says.
 	h.checkDriftIsSeenAndAttributed(phase)
 	h.checkAScheduleFiresOnItsOwn(phase)
+	// The way into this product is one command off AWX, and no deployed install had ever been
+	// asked to run it.
+	h.checkAnAWXEstateMigrates(phase, "community")
 	h.checkEveryAdvertisedEngineAnswers(phase)
 
 	if err := h.verifyReceiptOffline(phase, runID, ""); err != nil {

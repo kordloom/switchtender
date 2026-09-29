@@ -179,9 +179,48 @@ func TestPlanGated(t *testing.T) {
 		Run:      run.Run{Tool: "terraform", Command: "infra"}, Want: false,
 	}, { // Test 3: No policies, no gate.
 		Name: "no policies", Policies: nil, Run: run.Run{Tool: "terraform"}, Want: false,
+	}, { // Test 4: An irreversible floor is reached only through the plan, so the apply plans first.
+		Name: "irreversible floor plans first",
+		Policies: []*policy.Policy{{Tool: "terraform", Reversibility: run.Irreversible,
+			MaxDestroy: policy.DisabledMaxDestroy}},
+		Run: run.Run{Tool: "terraform", Command: "infra"}, Want: true,
+	}, { // Test 5: So is a high risk floor, since an apply is medium until its plan says more.
+		Name:     "high risk floor plans first",
+		Policies: []*policy.Policy{{MinRisk: run.RiskHigh, MaxDestroy: policy.DisabledMaxDestroy}},
+		Run:      run.Run{Tool: "opentofu", Command: "infra"}, Want: true,
+	}, { // Test 6: A floor the apply already meets holds it at submission instead.
+		Name: "floor already met",
+		Policies: []*policy.Policy{{Reversibility: run.ReversibleCostly,
+			MaxDestroy: policy.DisabledMaxDestroy}},
+		Run: run.Run{Tool: "terraform", Command: "infra"}, Want: false,
+	}, { // Test 7: A floor rule scoped to another tool leaves the apply alone.
+		Name: "floor for another tool",
+		Policies: []*policy.Policy{{Tool: "ansible", Reversibility: run.Irreversible,
+			MaxDestroy: policy.DisabledMaxDestroy}},
+		Run: run.Run{Tool: "terraform", Command: "infra"}, Want: false,
+	}, { // Test 8: A dry run changes nothing, so no plan is needed to grade it.
+		Name: "dry run",
+		Policies: []*policy.Policy{{Reversibility: run.Irreversible,
+			MaxDestroy: policy.DisabledMaxDestroy}},
+		Run: run.Run{Tool: "terraform", Command: "infra", DryRun: true}, Want: false,
+	}, { // Test 9: A proposed apply already carries its plan and never gates again.
+		Name: "proposed apply",
+		Policies: []*policy.Policy{{Reversibility: run.Irreversible,
+			MaxDestroy: policy.DisabledMaxDestroy}},
+		Run: run.Run{Tool: "terraform", Command: "infra", ProposedFrom: "run_plan"}, Want: false,
+	}, { // Test 10: An Ansible run has no plan to read, so a floor never sends it to one.
+		Name: "ansible run",
+		Policies: []*policy.Policy{{Reversibility: run.Irreversible,
+			MaxDestroy: policy.DisabledMaxDestroy}},
+		Run: run.Run{Tool: "ansible", Playbook: "site.yml"}, Want: false,
+	}, { // Test 11: A deny rule with a floor plans first too, so a destroying apply is refused.
+		Name: "deny floor plans first",
+		Policies: []*policy.Policy{{Effect: policy.EffectDeny, Reversibility: run.Irreversible,
+			MaxDestroy: policy.DisabledMaxDestroy}},
+		Run: run.Run{Tool: "terraform", Command: "infra"}, Want: true,
 	}}
 	for testNum, test := range tests {
-		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
 			t.Parallel()
 			r := test.Run
 			if got := policy.PlanGated(test.Policies, &r); got != test.Want {
@@ -233,6 +272,65 @@ func TestPlanExceeds(t *testing.T) {
 			r := test.Run
 			if got := policy.PlanExceeds(test.Policies, &r, test.Destroys); got != test.Want {
 				t.Errorf("PlanExceeds() = %v, want %v", got, test.Want)
+			}
+		})
+	}
+}
+
+// TestExceedingDistinct confirms a held apply needs a second person exactly when a rule its destroy
+// count exceeds asks for one. Too eager and a lone admin can never release an apply no rule
+// reserved for two people; too lax and separation of duties drops silently. The last two rows pin
+// the reason the function exists: the strictest exceeded rule decides, whatever the list order.
+func TestExceedingDistinct(t *testing.T) {
+	t.Parallel()
+	strict := func(limit int) *policy.Policy {
+		return &policy.Policy{Tool: "terraform", MaxDestroy: limit, RequireDistinctApprover: true}
+	}
+	tests := []struct {
+		Name     string
+		Policies []*policy.Policy
+		Run      run.Run
+		Destroys int
+		Want     bool
+	}{{ // Test 0: A distinct-approver rule the count exceeds demands a second person.
+		Name:     "exceeded strict rule",
+		Policies: []*policy.Policy{strict(2)},
+		Run:      run.Run{Tool: "terraform"}, Destroys: 3, Want: true,
+	}, { // Test 1: At the limit nothing is exceeded, so no second person is demanded.
+		Name:     "at the limit",
+		Policies: []*policy.Policy{strict(2)},
+		Run:      run.Run{Tool: "terraform"}, Destroys: 2, Want: false,
+	}, { // Test 2: An exceeded limit that asks for no second person demands none.
+		Name:     "exceeded loose rule",
+		Policies: []*policy.Policy{{Tool: "terraform", MaxDestroy: 2}},
+		Run:      run.Run{Tool: "terraform"}, Destroys: 3, Want: false,
+	}, { // Test 3: A strict rule scoped to another tool demands nothing of this run.
+		Name:     "other tool",
+		Policies: []*policy.Policy{{Tool: "opentofu", MaxDestroy: 0, RequireDistinctApprover: true}},
+		Run:      run.Run{Tool: "terraform"}, Destroys: 5, Want: false,
+	}, { // Test 4: A disabled limit never demands a second person, however large the plan.
+		Name:     "disabled limit",
+		Policies: []*policy.Policy{strict(policy.DisabledMaxDestroy)},
+		Run:      run.Run{Tool: "terraform"}, Destroys: 99, Want: false,
+	}, { // Test 5: A zero limit demands a second person for any destroy.
+		Name:     "zero limit",
+		Policies: []*policy.Policy{strict(0)},
+		Run:      run.Run{Tool: "terraform"}, Destroys: 1, Want: true,
+	}, { // Test 6: A loose rule listed ahead of an exceeded strict one does not drop the second person.
+		Name:     "strict rule behind a loose one",
+		Policies: []*policy.Policy{{Tool: "terraform", MaxDestroy: 1}, strict(2)},
+		Run:      run.Run{Tool: "terraform"}, Destroys: 3, Want: true,
+	}, { // Test 7: A strict rule the count stays under demands nothing beside an exceeded loose one.
+		Name:     "strict rule not exceeded",
+		Policies: []*policy.Policy{{Tool: "terraform", MaxDestroy: 1}, strict(5)},
+		Run:      run.Run{Tool: "terraform"}, Destroys: 3, Want: false,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			r := test.Run
+			if got := policy.ExceedingDistinct(test.Policies, &r, test.Destroys); got != test.Want {
+				t.Errorf("%s: ExceedingDistinct() = %v, want %v", test.Name, got, test.Want)
 			}
 		})
 	}

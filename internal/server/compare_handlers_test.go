@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -251,5 +252,71 @@ func TestCompareRollsUpASplitBaseline(t *testing.T) {
 	if c.Tasks[0].DeltaSeconds != 6 {
 		t.Errorf("deploy delta = %v, want 6 (18 now against 12 across three shards)",
 			c.Tasks[0].DeltaSeconds)
+	}
+}
+
+// TestPreviousRunComparesLikeWithLike pins the baseline a compare picks for runs the plan gate
+// produced. The apply a plan proposes carries the plan's origin, so a gated template's history runs
+// plan, apply, plan, apply, and taking the newest earlier run of the same origin compared every
+// apply with the plan that proposed it and every plan with the last apply: a comparison of two
+// different kinds of work that said nothing about either. A proposed apply is compared with the
+// apply before it, and anything else with the run before it that was not proposed.
+func TestPreviousRunComparesLikeWithLike(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	at := func(min int) time.Time { return time.Date(2026, 9, 28, 12, min, 0, 0, time.UTC) }
+	for _, r := range []*run.Run{
+		{ID: "plan_1", Tool: run.ToolTerraform, Source: "template", SourceID: "tpl_1", CreatedAt: at(0)},
+		{ID: "apply_1", Tool: run.ToolTerraform, Source: "template", SourceID: "tpl_1",
+			ProposedFrom: "plan_1", CreatedAt: at(1)},
+		{ID: "plan_2", Tool: run.ToolTerraform, Source: "template", SourceID: "tpl_1", CreatedAt: at(2)},
+		{ID: "apply_2", Tool: run.ToolTerraform, Source: "template", SourceID: "tpl_1",
+			ProposedFrom: "plan_2", CreatedAt: at(3)},
+		{ID: "plan_a", Tool: run.ToolTerraform, CreatedAt: at(10)},
+		{ID: "apply_a", Tool: run.ToolTerraform, ProposedFrom: "plan_a", CreatedAt: at(11)},
+		{ID: "plan_b", Tool: run.ToolTerraform, CreatedAt: at(12)},
+		{ID: "apply_b", Tool: run.ToolTerraform, ProposedFrom: "plan_b", CreatedAt: at(13)},
+	} {
+		r.Status = run.StatusSucceeded
+		if err := store.Save(ctx, r); err != nil {
+			t.Fatalf("Save(%s) error = %v", r.ID, err)
+		}
+	}
+	tests := []struct {
+		// Name says which run is compared.
+		Name string
+		// ID is the run compared.
+		ID string
+		// WantResult is the baseline it must be compared with, empty for none.
+		WantResult string
+	}{{ // Test 0: An apply against the apply before it.
+		Name: "apply", ID: "apply_2", WantResult: "apply_1",
+	}, { // Test 1: A plan against the plan before it.
+		Name: "plan", ID: "plan_2", WantResult: "plan_1",
+	}, { // Test 2: The first apply has no earlier apply, and the plan before it is not one.
+		Name: "first apply", ID: "apply_1",
+	}, { // Test 3: The first plan has no earlier plan.
+		Name: "first plan", ID: "plan_1",
+	}, { // Test 4: A run with no recorded origin falls back to its tool, still like with like.
+		Name: "apply with no origin", ID: "apply_b", WantResult: "apply_a",
+	}, { // Test 5: The same for a plan with no recorded origin.
+		Name: "plan with no origin", ID: "plan_b", WantResult: "plan_a",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			a, err := store.Get(ctx, test.ID)
+			if err != nil {
+				t.Fatalf("Get(%s) error = %v", test.ID, err)
+			}
+			got, err := previousRun(ctx, store, a)
+			if err != nil {
+				t.Fatalf("previousRun() error = %v", err)
+			}
+			if got != test.WantResult {
+				t.Errorf("previousRun(%s) = %q, want %q", test.ID, got, test.WantResult)
+			}
+		})
 	}
 }

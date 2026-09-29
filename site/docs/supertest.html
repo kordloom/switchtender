@@ -10,11 +10,11 @@
 	<meta property="og:description" content="Every push to main deploys SwitchTender into a Kubernetes cluster that has never seen it and proves the whole product against three real machines.">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/supertest">
-	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
 	<meta name="twitter:card" content="summary_large_image">
 	<meta name="twitter:title" content="The supertest | SwitchTender docs">
 	<meta name="twitter:description" content="Every push to main deploys SwitchTender into a Kubernetes cluster that has never seen it and proves the whole product against three real machines.">
-	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
 	<script type="application/ld+json">
 {
  "@context": "https://schema.org",
@@ -69,20 +69,23 @@
 proves the whole product against three real machines. Not a mock of a deployment: the Helm chart
 this repository ships, installed twice, driven over its own HTTP API, and checked in ways that
 never take the product's word for anything.</p>
-<p>The harness is <a href="../test/supertest"><code>test/supertest</code></a>, one standalone Go package. Run it yourself
-from the repository root with Docker, kind, kubectl, and helm installed:</p>
+<p>The harness is
+<a href="https://github.com/kordloom/switchtender/tree/main/test/supertest"><code>test/supertest</code></a>, one
+standalone Go package. Run it yourself from the repository root with Docker, kind, kubectl, and helm
+installed:</p>
 <pre><code>go run ./test/supertest -skip-team          # the free tier alone
 go run ./test/supertest -license lic.json   # both tiers, the whole arc
 </code></pre>
-<p>The <a href="../.github/workflows/supertest.yml">supertest workflow</a> runs it on every push. The report
-lands in the job summary as one table of claims and evidence, and the screenshots of the deployed
-UI land in the run's artifacts.</p>
+<p>The
+<a href="https://github.com/kordloom/switchtender/blob/main/.github/workflows/supertest.yml">supertest workflow</a>
+runs it on every push. The report lands in the job summary as one table of claims and evidence, and
+the screenshots of the deployed UI land in the run's artifacts.</p>
 <h2 id="what-a-run-proves">What a run proves</h2>
 <p><strong>The cluster is fresh and the images are built from the working tree.</strong> The product image comes
 from the repository's own Dockerfile at the commit under test, not from the last release. The
 fleet is three SSH servers with stable DNS names, keys only, built from
-<a href="../test/supertest/manifests/fleet.Dockerfile">one small Dockerfile</a> that is honestly a server:
-real sshd, real python, a real non-root account.</p>
+<a href="https://github.com/kordloom/switchtender/blob/main/test/supertest/manifests/fleet.Dockerfile">one small Dockerfile</a>
+that is honestly a server: real sshd, real python, a real non-root account.</p>
 <p><strong>Community installs the way the chart installs it and does real work.</strong> No license, no external
 database: SQLite on a PersistentVolumeClaim, updating by Recreate because SQLite holds one writer.
 The harness adopts the initial admin token the server prints on first boot, exactly as an operator

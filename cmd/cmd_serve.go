@@ -457,19 +457,26 @@ func init() {
 	serveCmd.Flags().DurationVar(&scheduleInterval, "schedule-interval", schedule.DefaultInterval,
 		"How often the scheduler checks for due schedules.")
 	serveCmd.Flags().StringArrayVar(&notifyWebhooks, "notify-webhook", nil,
-		"URL that receives a JSON notification when a run finishes. Repeatable.")
+		"URL that receives a JSON notification when a run finishes or is held for approval. "+
+			"Repeatable.")
 	serveCmd.Flags().StringArrayVar(&notifySlack, "notify-slack", nil,
-		"Slack incoming webhook URL that receives a message when a run finishes. Repeatable.")
+		"Slack incoming webhook URL that receives a message when a run finishes or is held "+
+			"for approval. Repeatable.")
 	serveCmd.Flags().StringArrayVar(&notifyMattermost, "notify-mattermost", nil,
-		"Mattermost incoming webhook URL that receives a message when a run finishes. Repeatable.")
+		"Mattermost incoming webhook URL that receives a message when a run finishes or is "+
+			"held for approval. Repeatable.")
 	serveCmd.Flags().StringArrayVar(&notifyRocketChat, "notify-rocketchat", nil,
-		"Rocket.Chat incoming webhook URL that receives a message when a run finishes. Repeatable.")
+		"Rocket.Chat incoming webhook URL that receives a message when a run finishes or is "+
+			"held for approval. Repeatable.")
 	serveCmd.Flags().StringArrayVar(&notifyDiscord, "notify-discord", nil,
-		"Discord incoming webhook URL that receives a message when a run finishes. Repeatable.")
+		"Discord incoming webhook URL that receives a message when a run finishes or is held "+
+			"for approval. Repeatable.")
 	serveCmd.Flags().StringArrayVar(&notifyTeams, "notify-teams", nil,
-		"Microsoft Teams incoming webhook URL that receives an Adaptive Card when a run finishes. Repeatable.")
+		"Microsoft Teams incoming webhook URL that receives an Adaptive Card when a run "+
+			"finishes or is held for approval. Repeatable.")
 	serveCmd.Flags().StringArrayVar(&notifyNtfy, "notify-ntfy", nil,
-		"ntfy topic URL that receives a notification when a run finishes, such as https://ntfy.sh/my-topic. Repeatable.")
+		"ntfy topic URL that receives a notification when a run finishes or is held for "+
+			"approval, such as https://ntfy.sh/my-topic. Repeatable.")
 	serveCmd.Flags().StringVar(&notifyNtfyToken, "notify-ntfy-token", "",
 		"Optional bearer token for a protected ntfy topic, applied to every --notify-ntfy URL. Prefer SWITCHTENDER_NOTIFY_NTFY_TOKEN, which a run cannot read, since a flag is visible in the process list.")
 	serveCmd.Flags().StringArrayVar(&notifyPagerDuty, "notify-pagerduty", nil,
@@ -628,7 +635,8 @@ func init() {
 	serveCmd.Flags().StringVar(&smtpUsername, "smtp-username", "",
 		"SMTP username. The password comes from SWITCHTENDER_SMTP_PASSWORD.")
 	serveCmd.Flags().StringVar(&notifyOn, "notify-on", "failure",
-		"When to email: failure for failed runs only, or finish for every terminal run.")
+		"When to email: failure for failed runs only, "+
+			"or finish for every finished run and every run held for approval.")
 }
 
 // buildEmailer constructs the SMTP notifier from the flags, or returns nil when email is not
@@ -1186,16 +1194,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		schedule.WithAudits(bundle.Audits()),
 		// A schedule waits for its own previous run rather than stacking a second copy of the same
 		// work on the same hosts.
-		schedule.WithRunActive(func(ctx context.Context, runID string) (bool, error) {
-			r, err := store.Get(ctx, runID)
-			if errors.Is(err, run.ErrNotFound) {
-				return false, nil
-			}
-			if err != nil {
-				return false, err
-			}
-			return !r.Status.Terminal(), nil
-		}))
+		schedule.WithRunActive(schedule.ActiveIn(store)))
 	scheduler.Start()
 	defer scheduler.Close()
 
@@ -1438,6 +1437,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	srv := server.New(store, disp, log, server.WithStreamer(hub),
 		server.WithShutdown(ctx),
 		server.WithCanceler(disp), server.WithRetrier(disp), server.WithApprover(disp),
+		// Relay workers hold no notification channels, so the control node announces for them.
+		server.WithAnnouncer(disp),
 		server.WithSchedules(schedules), server.WithTokens(bundle.Tokens()),
 		server.WithCredentials(bundle.Credentials(), sealer),
 		server.WithCredentialTypes(bundle.CredentialTypes()),

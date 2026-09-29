@@ -3,12 +3,12 @@ package demo
 import (
 	"context"
 	"fmt"
-	"github.com/kordloom/switchtender/internal/audit"
 	"testing"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -67,45 +67,32 @@ func (f *fakeApprover) Approve(ctx context.Context, id, by, byType string) (*run
 	return r, f.store.Save(ctx, r)
 }
 
-// TestSeedGovernanceShowsTheGateHoldingAndReleasing covers the two runs that are the only evidence on
-// the demo that the policy boundary does anything. Every other seeded run goes straight from submit to
-// execution, so without these the rules are listed as configuration and no run has ever been stopped
-// by one, which leaves the product's central claim as the one thing a visitor cannot see.
-func TestSeedGovernanceShowsTheGateHoldingAndReleasing(t *testing.T) {
+// TestSeedGovernanceCarriesARunThroughTheGate covers the run that shows the policy boundary
+// deciding something: held by a rule, released by somebody other than the person who asked, and
+// only then executed. Without it the rules are listed as configuration and no decision is ever on
+// the chain. The change the gate is still holding comes from the plan gate itself, and
+// TestSeedHeldDestroyHoldsTheApplyItsPlanProposed covers it.
+func TestSeedGovernanceCarriesARunThroughTheGate(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
 	approver := &fakeApprover{store: store}
 	deps := Deps{Submitter: &fakeSubmitter{store: store}, Runs: store, Approver: approver}
 
-	seedGovernance(ctx, deps, "site.yml", "inv.ini", "infra/network", seededIDs{}, zap.NewNop())
+	seedGovernance(ctx, deps, "site.yml", "inv.ini", seededIDs{}, zap.NewNop())
 
 	all, err := store.List(ctx)
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
-	var held, released *run.Run
+	var released *run.Run
 	for _, r := range all {
-		switch {
-		case r.Status == run.StatusPendingApproval:
-			held = r
-		case r.HeldByPolicy != "":
+		if r.HeldByPolicy != "" {
 			released = r
 		}
 	}
 
-	// Test 0: a run the gate is still holding, so the demo always shows a change being refused.
-	if held == nil {
-		t.Fatal("no run left held for approval, so the demo shows no change the gate is stopping")
-	}
-	if held.HeldByPolicy == "" {
-		t.Error("the held run names no rule, so a visitor cannot tell what stopped it")
-	}
-	if !held.RequireDistinctApprover {
-		t.Error("the held run accepts its own requester as approver, which is not the rule it shows")
-	}
-
-	// Test 1: a run carried through the whole gate, released by somebody other than the requester.
+	// Test 0: a run carried through the whole gate, released by somebody other than the requester.
 	if released == nil {
 		t.Fatal("no run was held and then released, so the demo never shows an approval")
 	}
@@ -119,6 +106,13 @@ func TestSeedGovernanceShowsTheGateHoldingAndReleasing(t *testing.T) {
 	if approver.approvedBy == released.Actor {
 		t.Errorf("run requested by %q and released by the same account, which the rule forbids",
 			released.Actor)
+	}
+
+	// Test 1: nothing here is left held. A run submitted already held would be a hold no rule made.
+	for _, r := range all {
+		if r.Status == run.StatusPendingApproval {
+			t.Errorf("run %s is held by %q without the gate having held it", r.ID, r.HeldByPolicy)
+		}
 	}
 }
 

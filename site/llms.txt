@@ -7,7 +7,9 @@
 > schedules in one command. Every change returns a chain receipt, every run exports an evidence
 > dossier, a change register covers each period, an external witness countersigns attestations,
 > and the chain exports as a LoomSeal bundle verified offline. State lives in one SQLite file by default, with Postgres optional.
-> No Kubernetes, no Redis, no message bus. Source-available under BSL 1.1: the controller, every
+> No Kubernetes, no Redis, no message bus. The tools themselves are not inside the binary: a run
+> uses its tool from the PATH, and the container image carries Ansible, Python, Terraform, and
+> OpenTofu. Source-available under BSL 1.1: the controller, every
 > tool, and the full evidence chain are free to self-host with no seat, host, or run limits. Paid
 > tiers add what an organization needs around it: SSO, the full policy engine, PostgreSQL and
 > active-active HA, distributed workers, drift reconcile, and audit-ready change registers. Each

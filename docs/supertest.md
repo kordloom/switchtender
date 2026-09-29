@@ -5,23 +5,26 @@ proves the whole product against three real machines. Not a mock of a deployment
 this repository ships, installed twice, driven over its own HTTP API, and checked in ways that
 never take the product's word for anything.
 
-The harness is [`test/supertest`](../test/supertest), one standalone Go package. Run it yourself
-from the repository root with Docker, kind, kubectl, and helm installed:
+The harness is
+[`test/supertest`](https://github.com/kordloom/switchtender/tree/main/test/supertest), one
+standalone Go package. Run it yourself from the repository root with Docker, kind, kubectl, and helm
+installed:
 
     go run ./test/supertest -skip-team          # the free tier alone
     go run ./test/supertest -license lic.json   # both tiers, the whole arc
 
-The [supertest workflow](../.github/workflows/supertest.yml) runs it on every push. The report
-lands in the job summary as one table of claims and evidence, and the screenshots of the deployed
-UI land in the run's artifacts.
+The
+[supertest workflow](https://github.com/kordloom/switchtender/blob/main/.github/workflows/supertest.yml)
+runs it on every push. The report lands in the job summary as one table of claims and evidence, and
+the screenshots of the deployed UI land in the run's artifacts.
 
 ## What a run proves
 
 **The cluster is fresh and the images are built from the working tree.** The product image comes
 from the repository's own Dockerfile at the commit under test, not from the last release. The
 fleet is three SSH servers with stable DNS names, keys only, built from
-[one small Dockerfile](../test/supertest/manifests/fleet.Dockerfile) that is honestly a server:
-real sshd, real python, a real non-root account.
+[one small Dockerfile](https://github.com/kordloom/switchtender/blob/main/test/supertest/manifests/fleet.Dockerfile)
+that is honestly a server: real sshd, real python, a real non-root account.
 
 **Community installs the way the chart installs it and does real work.** No license, no external
 database: SQLite on a PersistentVolumeClaim, updating by Recreate because SQLite holds one writer.

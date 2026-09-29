@@ -10,7 +10,7 @@ import (
 )
 
 // WithDiscord posts a formatted message to each Discord incoming webhook URL when a top-level run
-// reaches a terminal state.
+// finishes or is held for approval.
 func WithDiscord(urls []string) Option {
 	return func(c *config) { c.discordWebhooks = append([]string(nil), urls...) }
 }
@@ -21,7 +21,7 @@ type discordPayload struct {
 	Content string `json:"content"`
 }
 
-// notifyDiscord posts a terminal top-level run to every configured Discord webhook.
+// notifyDiscord posts a finished or held top-level run to every configured Discord webhook.
 func (d *Dispatcher) notifyDiscord(r *run.Run) {
 	if len(d.discordWebhooks) == 0 {
 		return
@@ -43,6 +43,9 @@ func (d *Dispatcher) notifyDiscord(r *run.Run) {
 // discordMessage renders a run as a one-line Discord message with a status emoji, the run label, and
 // the elapsed time. It carries no extra vars, so channel secrets are not exposed.
 func discordMessage(r *run.Run) string {
+	if r.Status == run.StatusPendingApproval {
+		return "SwitchTender run **" + runLabel(r) + "** " + heldSentences(r)
+	}
 	icon := "✅"
 	if r.Status != run.StatusSucceeded {
 		icon = "❌"

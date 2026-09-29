@@ -9,7 +9,7 @@ import (
 )
 
 // WithTeams posts an Adaptive Card to each Microsoft Teams incoming webhook URL when a top-level run
-// reaches a terminal state.
+// finishes or is held for approval.
 func WithTeams(urls []string) Option {
 	return func(c *config) { c.teamsWebhooks = append([]string(nil), urls...) }
 }
@@ -43,7 +43,7 @@ type teamsCard struct {
 	Body []map[string]any `json:"body"`
 }
 
-// notifyTeams posts a terminal top-level run to every configured Teams webhook.
+// notifyTeams posts a finished or held top-level run to every configured Teams webhook.
 func (d *Dispatcher) notifyTeams(r *run.Run) {
 	if len(d.teamsWebhooks) == 0 {
 		return
@@ -66,6 +66,7 @@ func (d *Dispatcher) notifyTeams(r *run.Run) {
 // with the status, the elapsed time, and any failure detail. It carries no extra vars, so channel
 // secrets are not exposed.
 func teamsCardPayload(r *run.Run) teamsMessage {
+	title := "SwitchTender run " + runLabel(r)
 	color := "Good"
 	if r.Status != run.StatusSucceeded {
 		color = "Attention"
@@ -77,13 +78,25 @@ func teamsCardPayload(r *run.Run) teamsMessage {
 	if r.Status != run.StatusSucceeded && r.Error != "" {
 		facts = append(facts, map[string]string{"title": "Error", "value": truncateError(r.Error)})
 	}
+	// A held run is a question for whoever reads the card, so it says what is being asked and who
+	// is asking rather than an outcome it does not have yet.
+	if r.Status == run.StatusPendingApproval {
+		title += " is waiting for approval"
+		color = "Warning"
+		if r.HeldByPolicy != "" {
+			facts = append(facts, map[string]string{"title": "Held by", "value": r.HeldByPolicy})
+		}
+		if r.Actor != "" {
+			facts = append(facts, map[string]string{"title": "Requested by", "value": r.Actor})
+		}
+	}
 	card := teamsCard{
 		Schema:  "http://adaptivecards.io/schemas/adaptive-card.json",
 		Type:    "AdaptiveCard",
 		Version: "1.4",
 		Body: []map[string]any{
 			{
-				"type": "TextBlock", "text": "SwitchTender run " + runLabel(r),
+				"type": "TextBlock", "text": title,
 				"weight": "Bolder", "size": "Medium", "color": color, "wrap": true,
 			},
 			{"type": "FactSet", "facts": facts},

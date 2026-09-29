@@ -3,13 +3,13 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>SwitchTender: gate every change, watch every host, prove every run</title>
+	<title>SwitchTender: one control point for every way your infrastructure can change</title>
 	<meta name="description" content="The boundary every infrastructure change comes through, human operator or AI agent. Nothing runs until it clears request, policy, and approval, and every run leaves a signed receipt anyone can verify offline without us. Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go in one self-hosted Go binary. Import from AWX, Ansible Automation Platform, Semaphore, Rundeck, or Jenkins in one command.">
-	<meta property="og:title" content="SwitchTender: gate every change, watch every host, prove every run">
+	<meta property="og:title" content="SwitchTender: one control point for every way your infrastructure can change">
 	<meta property="og:description" content="The boundary every infrastructure change comes through, human operator or AI agent. Nothing runs until it clears policy and approval, and every run leaves a receipt anyone can verify without us.">
 	<meta property="og:type" content="website">
 	<meta property="og:url" content="https://switchtender.com/">
-	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
 	<meta name="twitter:card" content="summary_large_image">
 	<link rel="canonical" href="https://switchtender.com/">
 	<!-- st:entity -->
@@ -103,23 +103,24 @@
 		<section class="hero wrap">
 			<div class="hero-copy reveal">
 				<span class="eyebrow">Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</span>
-				<h1>Gate every change.<br>Watch every host.<br><span class="grad">Prove every run.</span></h1>
+				<h1>One control point for <span class="grad">every way</span> your infrastructure can change.</h1>
 				<p class="lede">
-					Right now several people and a few scripts can change production, and afterward
-					you cannot prove which of them did. If the thing holding that together is AWX,
-					it hasn't shipped a release in over two years, it carries an unpatched
-					<a href="/awx-alternative">CVSS 9.6</a> whose fix ships only in the paid
-					product, and the supported way off it is priced per managed node.
-					SwitchTender is the one path every change goes through: request, policy,
-					approval, whether a person or an AI agent asked. Ansible, Terraform, OpenTofu,
-					Bash, PowerShell, Python, and Go, all through the same gate.
-					<strong>One binary. Starts in seconds.</strong>
+					You have one production environment and five different things that can change
+					it. Terraform runs Terraform. AWX runs Ansible. A pipeline runs deploys. A
+					Jenkins job nobody owns runs something. Somebody has an SSH session open right
+					now. Each one decides for itself who may run what, and afterward no two of them
+					tell the same story about what happened.
+					SwitchTender is one gate in front of all of them:
+					<strong>same identity, same policy, same approval, same evidence</strong>,
+					whether a person or an AI agent asked. <strong>One binary. Starts in
+					seconds.</strong>
 				</p>
 				<div class="hero-cta">
-					<a class="btn big" href="https://demo.switchtender.com">Open the live demo</a>
+					<a class="btn big" href="https://demo.switchtender.com/ui/runs?status=pending_approval">Watch it stop a change</a>
 					<a class="ghost big" href="/get-started">Install</a>
 				</div>
-				<p class="hero-note">Already on AWX? <code>switchtender assess awx export.json</code> tells you what comes across, what does not, and which of your templates nobody currently has to approve. Then <code>switchtender import awx</code> brings projects, inventories, templates, surveys, and schedules over in one command.</p>
+				<p class="hero-note">Already on AWX? <a href="/assess">Drop your export here</a> and see what moves, what does not, and how many of your templates can destroy something today without a second person agreeing. It is read in your browser and never uploaded. The same report comes from <code>switchtender assess awx export.json</code>, and <code>switchtender import awx</code> then brings projects, inventories, templates, surveys, and schedules over in one command.</p>
+				<p class="hero-note">Worth knowing if that is where you are: AWX has not shipped a release in over two years, it carries an unpatched <a href="/awx-alternative">CVSS 9.6</a> whose fix ships only in the paid product, and the supported way off it is priced per managed node.</p>
 				<p class="hero-note hero-offer">Would rather not do it yourself? The <a href="/pricing#sprint">Migration Program</a> is $25,000 fixed price, four milestones, about six weeks, first year of Team included. Founder-led, and it covers the part that actually goes wrong: cutting over without a window where neither system is authoritative.</p>
 				<p class="hero-note">Source-available. BSL 1.1. Go SDK with drop-in plugins. One file to back up.</p>
 			</div>
@@ -373,7 +374,7 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 				<article class="card reveal">
 					<div class="ic ic-bell"></div>
 					<h3>Notifications everywhere</h3>
-					<p>A finished run reaches Slack, Teams, Discord, Mattermost, Rocket.Chat, ntfy, email, or a webhook; a failure pages PagerDuty, alerts Grafana OnCall, or texts through Twilio. Eleven channels, server-wide or per template, so each team pages its own people.</p>
+					<p>A finished run, or one held for approval, reaches Slack, Teams, Discord, Mattermost, Rocket.Chat, ntfy, email, or a webhook; a failure pages PagerDuty, alerts Grafana OnCall, or texts through Twilio. Eleven channels, server-wide or per template, so each team pages its own people.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-secret"></div>
@@ -511,7 +512,7 @@ open http://localhost:8080/ui/</code></pre>
 				<h2>Every run, <span class="grad">readable at a glance.</span></h2>
 				<p>Structured data end to end: what fired each run, who asked for it, which hosts it touched, and where it broke. Every column sorts and filters.</p>
 			</div>
-			<a class="window demo-frame" href="https://demo.switchtender.com/ui/runs">
+			<a class="window demo-frame" href="https://demo.switchtender.com/ui/runs?status=pending_approval">
 				<div class="window-bar"><span></span><span></span><span></span><em>runs, with origin and labels</em></div>
 				<img src="/assets/screenshot-runs.png?v=2" alt="The runs list with status, type, origin, playbook, and label columns, all sortable" loading="lazy">
 			</a>
@@ -523,7 +524,7 @@ open http://localhost:8080/ui/</code></pre>
 				<p class="hero-note" style="text-align:center;margin-top:8px">Self-hosted, nothing phones home, and a lapsed license takes nothing with it. You never bet your operations on our survival.</p>
 			<div class="hero-cta center">
 				<a class="btn big" href="/get-started">Get started</a>
-				<a class="ghost big" href="https://demo.switchtender.com">Live demo</a>
+				<a class="ghost big" href="https://demo.switchtender.com/ui/runs?status=pending_approval">Live demo</a>
 				<a class="ghost big" href="/docs/">Read the docs</a>
 			</div>
 

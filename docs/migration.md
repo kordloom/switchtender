@@ -350,8 +350,15 @@ import has none to re-enter and none to attach.
   and skipped rather than converted to a wrong cadence.
 - A workflow whose graph cannot be expressed whole is reported and skipped rather than reduced. A
   failure edge, which runs work precisely because something failed, has no pipeline equivalent, and a
-  node pointing at a job template the export does not carry has no work to do. A partial graph would
-  keep the workflow's name and run a subset of it, which is worse than not importing it.
+  node pointing at a job template the export does not carry has no work to do. A node that runs a
+  nested workflow, a project or inventory sync, or a system job is refused the same way, since a step
+  runs a playbook, even when that object shares its name with a job template in the export. A partial
+  graph would keep the workflow's name and run a subset of it, which is worse than not importing it.
+- A workflow with an approval node is reported and skipped, and the assessment names it in its
+  governance section. Approval here is a policy that holds a whole run before it starts, not a step
+  partway through, and an import writes no policies, so bringing the other nodes across would run
+  them with the gate gone. Write a policy that holds the workflow's steps, then rebuild it on the
+  Workflows page.
 - A workflow's own schedules import onto the workflow template, so a graph that fired nightly in AWX
   keeps firing nightly here. The one case that does not carry is a workflow the import refused: with
   no template to fire, its schedules cannot import either, and the report says so by name and count

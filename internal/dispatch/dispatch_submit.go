@@ -182,9 +182,13 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 	}
 	recordHold(r, holdRequested)
 	d.pinHeldRunCommit(r)
-	created, _, err := d.idempotentSave(ctx, r)
+	created, dup, err := d.idempotentSave(ctx, r)
 	if err != nil {
 		return nil, err
+	}
+	// A retry that resolved to the original run was announced when the original was held.
+	if !dup {
+		d.notifyHeld(created)
 	}
 	// Execution happens through the claim loop, here or in any worker sharing the store, so the
 	// local loop is nudged rather than left to finish an idle backoff a user would wait out.
@@ -323,13 +327,14 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		// without the parent's org it would be an objectless run readable across every tenant.
 		child.OrgID = parent.OrgID
 		if err := d.store.Save(ctx, child); err != nil {
-			return nil, err
+			return nil, d.abandonSplit(ctx, parent, children, count, err)
 		}
 		children = append(children, child)
 	}
 
 	if parent.Status == run.StatusPendingApproval {
 		// Held for an approver. Approve starts the coordinator, since no claim loop takes a parent.
+		d.notifyHeld(parent)
 		return parent, nil
 	}
 
@@ -338,6 +343,32 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 	go d.coordinate(parent.Clone(), children)
 
 	return parent, nil
+}
+
+// abandonSplit settles a split whose shards could not all be stored and returns the error to
+// report.
+//
+// A split is its whole set of shards. Returning on the first shard that failed to store left the
+// parent stored with only the shards saved before it: held, it could be approved and run a subset
+// of the hosts the approver released, and a retry of the request under the same key resolved to it
+// as though it had been accepted. The stored shards are canceled and the parent ends failed with
+// the reason, through finalize, so its end is recorded and announced like any other.
+func (d *Dispatcher) abandonSplit(ctx context.Context, parent *run.Run, stored []*run.Run, count int,
+	cause error) error {
+	for _, s := range stored {
+		if _, err := d.store.CancelPending(ctx, s.ID); err != nil {
+			d.log.Error("dispatch: cancel shard " + s.ID + " of an abandoned split: " + err.Error())
+		}
+	}
+	// The status moves first, in one guarded write, so an approval racing this cannot start the
+	// parent. finalize then records the reason on the terminal status, as it does for a rejection.
+	_, err := d.store.TransitionStatus(ctx, parent.ID, parent.Status, run.StatusFailed)
+	if err != nil {
+		d.log.Error("dispatch: fail abandoned split " + parent.ID + ": " + err.Error())
+	}
+	d.finalize(parent, run.StatusFailed, nil, fmt.Sprintf("only %d of %d shards could be stored, so "+
+		"the split was stopped before any of it ran: %v", len(stored), count, cause))
+	return fmt.Errorf("store shard %d of %d: %w", len(stored)+1, count, cause)
 }
 
 // stampReceipt records which chain entry authorized this run's creation, defaulting it to the
@@ -423,6 +454,12 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string, opt
 	shards, err := d.store.Shards(ctx, parentID)
 	if err != nil {
 		return nil, fmt.Errorf("list shards: %w", err)
+	}
+	// A split that stored fewer shards than it counts has hosts no shard ever covered, and nothing
+	// stored says which. Retrying what is there would run part of the split and report it complete.
+	if parent.ShardCount != nil && len(shards) < *parent.ShardCount {
+		return nil, fmt.Errorf("%w: only %d of %d shards were stored, so submit the split again",
+			ErrIncompleteSplit, len(shards), *parent.ShardCount)
 	}
 	var failed []*run.Run
 	// A shard is worth running again when it ran and failed, or when it was canceled because its
@@ -536,13 +573,14 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string, opt
 		child.AuditReceipt = retry.AuditReceipt
 		child.OrgID = retry.OrgID
 		if err := d.store.Save(ctx, child); err != nil {
-			return nil, err
+			return nil, d.abandonSplit(ctx, retry, children, count, err)
 		}
 		children = append(children, child)
 	}
 
 	if retry.Status == run.StatusPendingApproval {
 		// Held for an approver. Approve starts the coordinator, since no claim loop takes a parent.
+		d.notifyHeld(retry)
 		return retry, nil
 	}
 	d.wake()

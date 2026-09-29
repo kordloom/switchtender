@@ -3,9 +3,10 @@ package pgstore
 import (
 	"database/sql"
 	"fmt"
-	"github.com/kordloom/switchtender/internal/license"
+	"strings"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/sqlutil"
 )
 
@@ -75,7 +76,8 @@ CREATE TABLE IF NOT EXISTS runs (
 	distinct_approver INTEGER NOT NULL DEFAULT 0,
 	pinned_commit TEXT NOT NULL DEFAULT '',
 	policy_set TEXT NOT NULL DEFAULT '',
-	actor_user_id TEXT NOT NULL DEFAULT ''
+	actor_user_id TEXT NOT NULL DEFAULT '',
+	plan_destroys INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
@@ -101,6 +103,7 @@ ALTER TABLE runs ADD COLUMN IF NOT EXISTS distinct_approver INTEGER NOT NULL DEF
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS pinned_commit TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS policy_set TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS actor_user_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS plan_destroys INTEGER;
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS tags TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS skip_tags TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS verbosity INTEGER NOT NULL DEFAULT 0;
@@ -541,9 +544,18 @@ func Open(dsn string) (*DB, error) {
 	// leaks for the life of that connection. Nothing else touches the pool in between today, so one
 	// connection is reused and it works, which is an accident of timing rather than a property. A
 	// transaction-scoped lock releases when the transaction ends, including when it fails.
-	if err := migrate(db); err != nil {
-		_ = db.Close()
-		return nil, err
+	//
+	// A start with nothing to migrate skips all of that. The question is asked of the catalog, which
+	// locks nothing the cluster is using, and a question that did not answer is not an answer that
+	// the schema is current: the error means the migration runs, since skipping on an unanswered
+	// question would leave a database unmigrated while running one that was not needed costs a
+	// single transaction on a start.
+	current, cerr := schemaIsCurrent(db)
+	if cerr != nil || !current {
+		if err := migrate(db); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
 	}
 	if err := normalizeScheduleTimes(db); err != nil {
 		_ = db.Close()
@@ -571,6 +583,112 @@ const pgUniqueViolation = "23505"
 // isKeyConflict reports whether a keyed insert failed because another run already holds the
 // idempotency key. A runs insert carrying a key can only trip the idempotency-key unique index, its
 // primary-key conflict being absorbed by ON CONFLICT(id), so a unique violation on one is that race
+// schemaIsCurrent reports whether applying the schema would change nothing, so the caller can skip
+// the migration entirely.
+//
+// The migration issues ADD COLUMN IF NOT EXISTS for every declared column and then executes the
+// schema, and an ADD COLUMN that changes nothing still takes AccessExclusiveLock. Every process
+// calls Open, workers included, so on an install whose schema is already current that lock was taken
+// on every table by every process that started. PostgreSQL breaks the resulting cycle by killing one
+// of the two transactions, and about half the time the victim was an ordinary runtime write coming
+// back as SQLSTATE 40P01 to a caller with no retry. Six nodes starting beside six writers cost 28 of
+// 180 host summary writes. In production that is a rolling restart making healthy nodes lose
+// history, which is the opposite of the direction the migration's own timeout comment intends to
+// fail in.
+//
+// This asks the catalog instead, which takes no lock on anything the rest of the cluster is using,
+// and a start that has nothing to migrate now takes no exclusive lock at all. A real upgrade still
+// migrates and still contends, which is the one time contending is the right answer.
+//
+// What it checks is exactly what the schema can change: every table it declares exists, every column
+// an ALTER could add exists, every index it declares exists, and every index it drops is gone. A
+// column no ALTER could add is deliberately not checked, because the migration cannot create one
+// either, and demanding it would say "not current" on every start forever.
+func schemaIsCurrent(db *sql.DB) (bool, error) {
+	columns, err := liveColumns(db)
+	if err != nil {
+		return false, err
+	}
+	for table, cols := range sqlutil.ParseSchemaColumns(schema) {
+		live, ok := columns[strings.ToLower(table)]
+		if !ok {
+			return false, nil
+		}
+		for _, col := range cols {
+			if !col.Addable() {
+				continue
+			}
+			if !live[strings.ToLower(col.Name)] {
+				return false, nil
+			}
+		}
+	}
+	indexes, err := liveIndexes(db)
+	if err != nil {
+		return false, err
+	}
+	declared := sqlutil.ParseSchemaIndexes(schema)
+	for _, name := range declared.Created {
+		if !indexes[name] {
+			return false, nil
+		}
+	}
+	for _, name := range declared.Dropped {
+		if indexes[name] {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// liveColumns returns the columns this database actually has, by table.
+func liveColumns(db *sql.DB) (map[string]map[string]bool, error) {
+	const q = `SELECT table_name, column_name FROM information_schema.columns
+	WHERE table_schema = current_schema()`
+	rows, err := db.Query(q)
+	if err != nil {
+		return nil, fmt.Errorf("read the live columns: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]map[string]bool{}
+	for rows.Next() {
+		var table, column string
+		if err := rows.Scan(&table, &column); err != nil {
+			return nil, fmt.Errorf("read the live columns: %w", err)
+		}
+		table, column = strings.ToLower(table), strings.ToLower(column)
+		if out[table] == nil {
+			out[table] = map[string]bool{}
+		}
+		out[table][column] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read the live columns: %w", err)
+	}
+	return out, nil
+}
+
+// liveIndexes returns the index names this database actually has.
+func liveIndexes(db *sql.DB) (map[string]bool, error) {
+	rows, err := db.Query("SELECT indexname FROM pg_indexes WHERE schemaname = current_schema()")
+	if err != nil {
+		return nil, fmt.Errorf("read the live indexes: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("read the live indexes: %w", err)
+		}
+		out[strings.ToLower(name)] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read the live indexes: %w", err)
+	}
+	return out, nil
+}
+
 // migrateLockKey serializes schema migration across every process opening this database.
 const migrateLockKey = 7973821001
 

@@ -28,8 +28,8 @@ type Emailer interface {
 	SendTo(ctx context.Context, to []string, subject, body string) error
 }
 
-// WithEmail sends an email when a top-level run reaches a terminal state. When onFailureOnly is
-// set, only failed runs notify; otherwise every finished run does.
+// WithEmail sends an email when a top-level run finishes or is held for approval. When
+// onFailureOnly is set, only failed runs notify; otherwise every finished or held run does.
 func WithEmail(emailer Emailer, onFailureOnly bool) Option {
 	return func(c *config) {
 		c.emailer = emailer
@@ -37,7 +37,7 @@ func WithEmail(emailer Emailer, onFailureOnly bool) Option {
 	}
 }
 
-// notifyEmail sends a terminal top-level run to the configured emailer without blocking the
+// notifyEmail sends a finished or held top-level run to the configured emailer without blocking the
 // executor. Failures are logged and dropped; the store remains the source of truth.
 func (d *Dispatcher) notifyEmail(r *run.Run) {
 	if d.emailer == nil {
@@ -46,7 +46,7 @@ func (d *Dispatcher) notifyEmail(r *run.Run) {
 	if d.emailOnFailureOnly && r.Status != run.StatusFailed {
 		return
 	}
-	subject := fmt.Sprintf("SwitchTender run %s %s", r.ID, r.Status)
+	subject := emailSubject(r)
 	body := emailBody(r)
 	d.notifyWG.Add(1)
 	go func() {
@@ -59,9 +59,32 @@ func (d *Dispatcher) notifyEmail(r *run.Run) {
 	}()
 }
 
-// emailBody renders a short plain-text summary of a finished run.
+// emailSubject is the subject line of a run's email, shared by the server-wide recipients and a
+// run's own email targets so the two cannot disagree.
+func emailSubject(r *run.Run) string {
+	if r.Status == run.StatusPendingApproval {
+		return "SwitchTender run " + r.ID + " is waiting for approval"
+	}
+	return fmt.Sprintf("SwitchTender run %s %s", r.ID, r.Status)
+}
+
+// emailBody renders a short plain-text summary of a finished run, or of what a held run is waiting
+// for and how to decide on it.
 func emailBody(r *run.Run) string {
 	var b strings.Builder
+	if r.Status == run.StatusPendingApproval {
+		fmt.Fprintf(&b, "Run %s is waiting for approval.\n\n", r.ID)
+		fmt.Fprintf(&b, "Run: %s\n", runLabel(r))
+		if r.HeldByPolicy != "" {
+			fmt.Fprintf(&b, "Held by: %s\n", r.HeldByPolicy)
+		}
+		if r.Actor != "" {
+			fmt.Fprintf(&b, "Requested by: %s\n", r.Actor)
+		}
+		fmt.Fprintf(&b, "\nDecide on it from the run's page, or with POST /v1/runs/%s/approve or "+
+			"POST /v1/runs/%s/reject under an admin token.\n", r.ID, r.ID)
+		return b.String()
+	}
 	fmt.Fprintf(&b, "Run %s finished with status %s.\n\n", r.ID, r.Status)
 	fmt.Fprintf(&b, "Playbook: %s\n", r.Playbook)
 	if r.Inventory != "" {

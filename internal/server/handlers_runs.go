@@ -8,13 +8,14 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/run"
-	"go.uber.org/zap"
 )
 
 // idempotencyKeyHeader carries a client-chosen key that dedupes a retried submission, so a dropped
@@ -357,10 +358,17 @@ func cancelRunHandler(store run.Store, canceler Canceler, authz *authorizer, log
 			return
 		}
 		// A run no executor holds yet is terminalized directly: no process would ever act on the
-		// cooperative flag, so without this the run stayed claimable and could still launch.
+		// cooperative flag, so without this the run stayed claimable and could still launch. The
+		// dispatcher does it when there is one, because the store alone ends the run without
+		// settling it: no outcome reached the chain, and a channel told the run was held never
+		// heard that it was canceled.
 		if existing.ClaimedBy == "" &&
 			(existing.Status == run.StatusPending || existing.Status == run.StatusPendingApproval) {
-			if done, err := store.CancelPending(r.Context(), id); err == nil && done {
+			cancelWaiting := store.CancelPending
+			if canceler != nil {
+				cancelWaiting = canceler.CancelWaiting
+			}
+			if done, err := cancelWaiting(r.Context(), id); err == nil && done {
 				// A split stores its shards alongside the parent, so canceling the parent has to
 				// settle them too. Rejecting a split already did this; canceling did not, and the
 				// store sweep cannot cover it either, because orphan resolution only fires for an
@@ -429,6 +437,10 @@ func retryRunHandler(store run.Store, retrier Retrier, authz *authorizer, log *z
 			return
 		case errors.Is(err, dispatch.ErrNoFailedShards):
 			respondError(w, log, http.StatusConflict, "no failed shards to retry")
+			return
+		case errors.Is(err, dispatch.ErrIncompleteSplit):
+			// The error names how many shards exist and what to do instead, which is the answer.
+			respondError(w, log, http.StatusConflict, err.Error())
 			return
 		case errors.Is(err, dispatch.ErrPolicyDenied) ||
 			errors.Is(err, dispatch.ErrQueueUnlicensed):

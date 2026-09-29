@@ -37,6 +37,11 @@ cd switchtender.git && git fetch --all --tags   # repeat on a schedule
 Under BSL 1.1 you may copy, modify, and run the source in production for your own organization
 right now. Continuity does not wait for the conversion date.
 
+This is also the answer to source code escrow. Escrow exists to hand you the code, and the right to
+keep using it, if the vendor goes under. You already have both: the source is public now, and the
+continuity clause makes every published version Apache 2.0 on the day it triggers, with no escrow
+agent in between.
+
 ## What degrades on vendor death
 
 Honesty requires the other column. Vendor-operated services stop: hosted witness

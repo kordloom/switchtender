@@ -11,9 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kordloom/switchtender/internal/live"
 	"github.com/kordloom/switchtender/internal/run"
-	"go.uber.org/zap"
 )
 
 // defaultEventsPage is the page size when an events read names none, and maxEventsPage is the

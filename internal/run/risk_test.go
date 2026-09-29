@@ -2,6 +2,7 @@ package run
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -10,10 +11,13 @@ import (
 func TestAssessRisk(t *testing.T) {
 	t.Parallel()
 	shards := func(n int) *int { return &n }
+	three := 3
 	tests := []struct {
 		Name string
 		Run  *Run
 		Want string
+		// WantReason is a phrase the approver must see among the reasons, when set.
+		WantReason string
 	}{{ // Test 0: A dry run is always low, whatever it would do.
 		Name: "dry run destroy",
 		Run:  &Run{Tool: "terraform", Command: "destroy", DryRun: true},
@@ -46,6 +50,21 @@ func TestAssessRisk(t *testing.T) {
 		Name: "big split",
 		Run:  &Run{Tool: "ansible", Playbook: "site.yml", Limit: "web*", ShardCount: shards(64)},
 		Want: RiskMedium,
+	}, { // Test 8: A reboot is high risk though it undoes itself, and says what raised it.
+		Name:       "reboot",
+		Run:        &Run{Tool: "bash", Command: "shutdown -r now"},
+		Want:       RiskHigh,
+		WantReason: "destructive command: shutdown",
+	}, { // Test 9: A forced flag raises a command that is otherwise ordinary.
+		Name:       "forced push",
+		Run:        &Run{Tool: "bash", Command: "git push --force origin main"},
+		Want:       RiskHigh,
+		WantReason: "destructive command: --force",
+	}, { // Test 10: A proposed apply carrying its plan's destroys is high, and names the count.
+		Name:       "planned destroys",
+		Run:        &Run{Tool: "terraform", Command: "apply", PlanDestroys: &three},
+		Want:       RiskHigh,
+		WantReason: "plan destroys 3",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -56,6 +75,10 @@ func TestAssessRisk(t *testing.T) {
 			}
 			if len(got.Reasons) == 0 {
 				t.Error("AssessRisk() returned no reasons, want at least one")
+			}
+			said := strings.Join(got.Reasons, "\n")
+			if test.WantReason != "" && !strings.Contains(said, test.WantReason) {
+				t.Errorf("AssessRisk() reasons %v do not say %q", got.Reasons, test.WantReason)
 			}
 		})
 	}

@@ -155,14 +155,19 @@ Add a schedule in Schedules with a cron expression to fire a template on a caden
   Grant a user or a team `use` or `manage` on one specific object.
 - Notifications are configured on the server with `--notify-*` flags and cover eleven channels:
   webhook, Slack, Mattermost, Rocket.Chat, Discord, Microsoft Teams, ntfy, PagerDuty, Grafana,
-  Twilio SMS, and email. Every finished run reaches every channel configured that way. A template
-  can additionally name its own targets in the template dialog, for all eleven channels: a
-  PagerDuty target names its own routing key, a Grafana target its own instance and token, and a
-  Twilio or email target names only a recipient and sends through the server-held account.
+  Twilio SMS, and email. Every finished run reaches every channel configured that way, and a run
+  held for approval reaches the chat channels and webhooks, and email when `--notify-on` is
+  `finish`, so the person who decides is told. A template can additionally name its own targets in
+  the template dialog, for all eleven channels: a PagerDuty target names its own routing key, a
+  Grafana target its own instance and token, and a Twilio or email target names only a recipient and
+  sends through the server-held account.
 
 ## What is not one to one yet
 
 - Execution environments are a single pinned container image behind a flag, not a managed catalog.
+- A workflow approval node is not a step here. Approval is a policy that holds a whole run before it
+  starts, so a workflow carrying one is reported and not imported rather than imported without its
+  gate. Write the policy first, then rebuild the workflow on the Workflows page.
 - Import creates objects that belong to no organization. Under the default access model that leaves
   them usable by every operator, which matches how a single-team install already works. If you run
   with strict grants, imported objects have no grants yet, so assign them after importing.

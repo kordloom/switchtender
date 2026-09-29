@@ -23,13 +23,16 @@ MODE="${1:-full}"
 say()  { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 skip() { printf '   \033[33mskipped\033[0m %s\n' "$*"; }
 
-say "PostgreSQL (throwaway container, same image as CI)"
+say "PostgreSQL (throwaway container, same image, user, and database as CI)"
 PG_NAME="st-ci-local-$$"
-docker run --rm -d --name "$PG_NAME" -e POSTGRES_PASSWORD=st-ci -e POSTGRES_DB=switchtender_test \
-  -p 55432:5432 postgres:16 >/dev/null
+# The same user, password, and database name as the ci workflow's service. The name is not
+# cosmetic: tests that need a database the suite never initialized derive one from this DSN, so a
+# different name skips them here while CI runs them, and the license gate is one of them.
+docker run --rm -d --name "$PG_NAME" -e POSTGRES_USER=switchtender -e POSTGRES_PASSWORD=switchtender \
+  -e POSTGRES_DB=switchtender -p 55432:5432 postgres:16 >/dev/null
 trap 'docker stop "$PG_NAME" >/dev/null 2>&1 || true' EXIT
-until docker exec "$PG_NAME" pg_isready -U postgres >/dev/null 2>&1; do sleep 0.5; done
-export SWITCHTENDER_TEST_POSTGRES_DSN="postgres://postgres:st-ci@localhost:55432/switchtender_test?sslmode=disable"
+until docker exec "$PG_NAME" pg_isready -U switchtender >/dev/null 2>&1; do sleep 0.5; done
+export SWITCHTENDER_TEST_POSTGRES_DSN="postgres://switchtender:switchtender@localhost:55432/switchtender?sslmode=disable"
 
 say "loomseal checkout at the pinned version (the cross-check ratchet needs it)"
 version="$(go list -m -f '{{.Version}}' github.com/kordloom/loomseal)"
@@ -57,6 +60,21 @@ fi
 say "JS unit tests (same command as CI)"
 if command -v node >/dev/null; then
   node --test internal/ui/assets/jstest/*.test.mjs
+else
+  skip "node is not installed"
+fi
+
+say "Browser assessment: agrees with the command and survives a file too large for it"
+if command -v node >/dev/null; then
+  assess_out="$(mktemp -d)"
+  GOOS=js GOARCH=wasm go build -ldflags="-s -w" -o "$assess_out/assess.wasm" ./cmd/assessweb/
+  cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" "$assess_out/wasm_exec.js"
+  go run . assess awx test/supertest/manifests/awx-export.json > "$assess_out/expected.txt"
+  node scripts/assess-conformance.cjs "$assess_out/assess.wasm" "$assess_out/wasm_exec.js" \
+    test/supertest/manifests/awx-export.json "$assess_out/expected.txt"
+  node --wasm-max-mem-pages=4096 scripts/assess-worker-check.cjs site/assess/assess-worker.js \
+    "$assess_out/assess.wasm" "$assess_out/wasm_exec.js" test/supertest/manifests/awx-export.json
+  rm -rf "$assess_out"
 else
   skip "node is not installed"
 fi

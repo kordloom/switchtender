@@ -3,6 +3,7 @@ package schedule
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -72,9 +73,10 @@ func WithAudits(store audit.Store) SchedulerOption {
 	return func(s *Scheduler) { s.audits = store }
 }
 
-// RunActive reports whether the run named is still going, so a schedule does not start a second copy
-// of work the first has not finished.
-type RunActive func(ctx context.Context, runID string) (bool, error)
+// RunActive returns the id of a run of the schedule's that is still going, given the schedule and
+// the run it last created, or the empty string when none is. A schedule does not start a second
+// copy of work the first has not finished, and the id says in the log which run it is waiting on.
+type RunActive func(ctx context.Context, scheduleID, lastRunID string) (string, error)
 
 // WithRunActive makes a schedule wait for its own previous run rather than stacking on top of it.
 //
@@ -89,6 +91,54 @@ type RunActive func(ctx context.Context, runID string) (bool, error)
 // Without this option the old behavior stands, so a caller that wants overlap keeps it.
 func WithRunActive(active RunActive) SchedulerOption {
 	return func(s *Scheduler) { s.runActive = active }
+}
+
+// RunReader is the part of a run store the overlap check reads.
+type RunReader interface {
+	// Get returns the run with the given id, or run.ErrNotFound.
+	Get(ctx context.Context, id string) (*run.Run, error)
+	// ListPage returns the top-level runs matching filter, newest first.
+	ListPage(ctx context.Context, filter run.ListFilter, limit, offset int) ([]*run.Run, error)
+}
+
+// ActiveIn returns the overlap check a server wires: a schedule's work is still going while the run
+// it last created, or any run fired under its name, has not finished.
+//
+// Reading the last run alone missed the apply a plan gate proposes. A scheduled terraform apply
+// under a plan-content rule is planned first, and the plan run finishes the moment it proposes the
+// apply, so the next tick found the schedule's last run done and fired another plan while the first
+// apply was still held for a person or running. Each tick added a held apply, and approving the
+// queue ran them one after another. The proposed apply carries the plan's source, so asking for any
+// unfinished run the schedule fired finds it, and finds one the retention sweep left behind a
+// pruned last run.
+func ActiveIn(runs RunReader) RunActive {
+	return func(ctx context.Context, scheduleID, lastRunID string) (string, error) {
+		// The run the schedule last created is read by id first. It is the common case, and a run
+		// stored before runs recorded their source is found no other way.
+		if lastRunID != "" {
+			r, err := runs.Get(ctx, lastRunID)
+			switch {
+			case err == nil && !r.Status.Terminal():
+				return r.ID, nil
+			case err != nil && !errors.Is(err, run.ErrNotFound):
+				return "", err
+			}
+		}
+		for _, status := range []run.Status{
+			run.StatusPending, run.StatusPendingApproval, run.StatusRunning,
+		} {
+			found, err := runs.ListPage(ctx, run.ListFilter{
+				Source: "schedule", SourceID: scheduleID, Status: string(status),
+			}, 1, 0)
+			if err != nil {
+				return "", err
+			}
+			if len(found) > 0 {
+				return found[0].ID, nil
+			}
+		}
+		return "", nil
+	}
 }
 
 // WithInterval sets how often due schedules are checked. Values below one are ignored.
@@ -178,13 +228,13 @@ func (s *Scheduler) tick(now time.Time) {
 		// This is checked before the row is claimed so a skipped tick still advances the next run
 		// time, which is what keeps the schedule on its cadence instead of firing the moment the
 		// slow run ends.
-		if s.overlaps(sc) {
+		if waiting := s.overlaps(sc); waiting != "" {
 			if _, err := s.store.ClaimDue(s.ctx, sc.ID, *sc.NextRunAt, next); err != nil {
 				s.log.Error("schedule: advance past overlap: "+err.Error(),
 					zap.String("schedule_id", sc.ID))
 			}
-			s.log.Warn("schedule: previous run still going, skipping this fire",
-				zap.String("schedule_id", sc.ID), zap.String("run_id", sc.LastRunID))
+			s.log.Warn("schedule: a run this schedule fired is still going, skipping this fire",
+				zap.String("schedule_id", sc.ID), zap.String("run_id", waiting))
 			continue
 		}
 		// Win the row before firing so concurrent scheduler instances never double-launch.
@@ -212,24 +262,24 @@ func (s *Scheduler) tick(now time.Time) {
 	}
 }
 
-// overlaps reports whether the schedule's own previous run is still going.
+// overlaps returns the id of a run the schedule fired that is still going, or the empty string.
 //
 // A read error counts as not overlapping. Refusing to fire because the run store could not be read
 // would turn a transient database problem into silently skipped automation, which is the failure
 // nobody notices; firing may at worst produce the overlap this avoids, which is visible.
-func (s *Scheduler) overlaps(sc *Schedule) bool {
-	if s.runActive == nil || sc.LastRunID == "" {
-		return false
+func (s *Scheduler) overlaps(sc *Schedule) string {
+	if s.runActive == nil {
+		return ""
 	}
-	active, err := s.runActive(s.ctx, sc.LastRunID)
+	waiting, err := s.runActive(s.ctx, sc.ID, sc.LastRunID)
 	if err != nil {
 		if s.ctx.Err() == nil {
 			s.log.Error("schedule: check previous run: "+err.Error(),
 				zap.String("schedule_id", sc.ID), zap.String("run_id", sc.LastRunID))
 		}
-		return false
+		return ""
 	}
-	return active
+	return waiting
 }
 
 // fireRecord is the canonical body a schedule's fire entry commits: which schedule fired and what

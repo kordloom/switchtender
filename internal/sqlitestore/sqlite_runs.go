@@ -22,7 +22,7 @@ const runColumns = `id, playbook, inventory, status, exit_code, error, created_a
 	proposed_from, intent, image, pull_credential_id, idempotency_key, timeout, notifications,
 	source, source_id, actor, rerun_of, labels, warning, audit_receipt, held_by_policy,
 	tags, skip_tags, verbosity, forks, diff_mode, claim_secret, actor_type, approved_spec_digest,
-	distinct_approver, pinned_commit, policy_set, actor_user_id, approved_spec_binding`
+	distinct_approver, pinned_commit, policy_set, actor_user_id, approved_spec_binding, plan_destroys`
 
 // Save inserts or replaces the run identified by r.ID. The cancel flag merges with MAX so a
 // replace from a stale snapshot cannot erase a cancel another process just requested.
@@ -39,8 +39,8 @@ INSERT INTO runs
 	 image, pull_credential_id, idempotency_key, timeout, notifications,
 	 source, source_id, actor, rerun_of, labels, warning, audit_receipt, held_by_policy,
 	 tags, skip_tags, verbosity, forks, diff_mode, claim_secret, actor_type, approved_spec_digest,
-	 distinct_approver, pinned_commit, policy_set, actor_user_id, approved_spec_binding)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	 distinct_approver, pinned_commit, policy_set, actor_user_id, approved_spec_binding, plan_destroys)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -67,7 +67,7 @@ ON CONFLICT(id) DO UPDATE SET
 	approved_spec_digest=excluded.approved_spec_digest,
 	distinct_approver=excluded.distinct_approver, pinned_commit=excluded.pinned_commit,
 	policy_set=excluded.policy_set, actor_user_id=excluded.actor_user_id,
-	approved_spec_binding=excluded.approved_spec_binding`
+	approved_spec_binding=excluded.approved_spec_binding, plan_destroys=excluded.plan_destroys`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), sqlutil.NullInt(r.ExitCode), r.Error,
 		sqlutil.FormatTime(r.CreatedAt), sqlutil.NullTime(r.StartedAt), sqlutil.NullTime(r.EndedAt),
@@ -81,7 +81,7 @@ ON CONFLICT(id) DO UPDATE SET
 		r.HeldByPolicy, sqlutil.JoinIDs(r.Tags), sqlutil.JoinIDs(r.SkipTags), r.Verbosity, r.Forks,
 		sqlutil.BoolToInt(r.DiffMode), r.ClaimSecret, r.ActorType, r.ApprovedSpecDigest,
 		sqlutil.BoolToInt(r.RequireDistinctApprover), r.PinnedCommit, marshalPolicySet(r.PolicySet),
-		r.ActorUserID, r.ApprovedSpecBinding,
+		r.ActorUserID, r.ApprovedSpecBinding, sqlutil.NullInt(r.PlanDestroys),
 	)
 	if err != nil {
 		if r.IdempotencyKey != "" && isKeyConflict(err) {
@@ -391,6 +391,8 @@ func scanRun(s scanner) (*run.Run, error) {
 		distinctApprover int
 		// policySet is the recorded rule set, stored as JSON like the run's other structured fields.
 		policySet string
+		// planDestroys is the destroy count a proposed apply's plan reported, NULL for no plan read.
+		planDestroys sql.NullInt64
 	)
 	if err := s.Scan(&r.ID, &r.Playbook, &r.Inventory, &status, &exit, &r.Error,
 		&created, &started, &ended, &parent, &shardIdx, &shardCnt, &r.Limit,
@@ -401,8 +403,12 @@ func scanRun(s scanner) (*run.Run, error) {
 		&r.Source, &r.SourceID, &r.Actor, &r.RerunOf, &labels, &r.Warning, &r.AuditReceipt,
 		&r.HeldByPolicy, &tags, &skipTags, &r.Verbosity, &r.Forks, &diffMode,
 		&r.ClaimSecret, &r.ActorType, &r.ApprovedSpecDigest, &distinctApprover, &r.PinnedCommit,
-		&policySet, &r.ActorUserID, &r.ApprovedSpecBinding); err != nil {
+		&policySet, &r.ActorUserID, &r.ApprovedSpecBinding, &planDestroys); err != nil {
 		return nil, err
+	}
+	if planDestroys.Valid {
+		n := int(planDestroys.Int64)
+		r.PlanDestroys = &n
 	}
 	r.RequireDistinctApprover = distinctApprover != 0
 	set, err := unmarshalPolicySet(policySet)

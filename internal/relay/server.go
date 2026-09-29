@@ -79,13 +79,44 @@ type relayServer struct {
 	audits audit.Store
 	// log records server-side faults, never token material.
 	log *zap.Logger
+	// announcer tells the notification channels about the runs workers finish and the applies their
+	// plans leave held, nil when the control node announces nothing.
+	announcer Announcer
+}
+
+// Announcer tells the notification channels about a run: that it finished, or that it is held for a
+// person. The dispatcher satisfies it.
+//
+// A worker holds no notification channels, and one in a segment that cannot reach a chat service
+// could not use them anyway, so a run a worker executed was never announced: every channel an
+// operator configured heard about the runs the control node executed and not one a worker did, and
+// an apply held on a worker's plan waited for a person nobody told. The control node announces them
+// instead, at the moment it records the change.
+type Announcer interface {
+	// Announce tells the channels about r.
+	Announce(r *run.Run)
+}
+
+// AnnouncerFunc adapts a function to an Announcer.
+type AnnouncerFunc func(r *run.Run)
+
+// Announce calls f.
+func (f AnnouncerFunc) Announce(r *run.Run) { f(r) }
+
+// HandlerOption configures a relay handler.
+type HandlerOption func(*relayServer)
+
+// WithAnnouncer makes the control node announce the runs workers finish and the applies their plans
+// leave held.
+func WithAnnouncer(a Announcer) HandlerOption {
+	return func(s *relayServer) { s.announcer = a }
 }
 
 // NewHandler returns an http.Handler that serves the Transport methods over the run store, guarded
 // by the worker pools. Mount it on the control node so relay workers have a path to the shared
 // store. It panics on a nil store or no pools, both wiring errors; a nil logger becomes a no-op.
 func NewHandler(store run.Store, pools *Pools, log *zap.Logger,
-	policies policy.Store, audits audit.Store) http.Handler {
+	policies policy.Store, audits audit.Store, opts ...HandlerOption) http.Handler {
 	if store == nil {
 		panic("relay: Store required")
 	}
@@ -104,6 +135,9 @@ func NewHandler(store run.Store, pools *Pools, log *zap.Logger,
 	}
 	s := &relayServer{store: store, appender: appender, pools: pools, log: log,
 		policies: policies, audits: audits}
+	for _, opt := range opts {
+		opt(s)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /relay/v1/policies", s.listPolicies)
 	mux.HandleFunc("POST /relay/v1/claim", s.claim)
@@ -504,6 +538,12 @@ func (s *relayServer) save(w http.ResponseWriter, r *http.Request) {
 		}
 		s.record(r.Context(), poolFrom(r.Context()), final.ClaimedBy,
 			"/relay/finished/"+final.ID+"/"+string(final.Status))
+		// Announced once, by the node whose compare-and-swap moved the run, and after its outcome is
+		// on the chain, the order the in-process executor keeps. A child is rolled into its parent,
+		// which the coordinator announces.
+		if final.ParentID == nil {
+			s.announce(final)
+		}
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -1040,18 +1080,20 @@ func (s *relayServer) unrecordedHost(ctx context.Context, runID string, want []s
 
 // proposableFrom reports why a run cannot have an apply proposed from it, or nil when it can.
 //
-// The apply is a clone of the run with the dry-run flag forced off, so the run has to be the thing that
-// clone is meant to be: a plan of infrastructure, still executing, that is not itself a proposal. Any
-// other run reaching here means a worker is asking the control node to build a real execution of
-// something nobody gated.
+// The plan gate plans an apply request before it runs, so the run a proposal comes from is the one
+// the gate takes: a terraform or opentofu apply someone asked for, still executing, that is not
+// itself a proposal. A dry run is never that run. It asked for a preview and nothing else, and the
+// gate leaves it alone, so accepting one here would let a worker holding its lease turn a preview
+// into a real change with the same credentials against the same infrastructure.
 func proposableFrom(plan *run.Run) error {
 	switch tool := run.NormalizeTool(plan.Tool); tool {
 	case run.ToolTerraform, run.ToolOpenTofu:
 	default:
 		return fmt.Errorf("an apply is proposed from a terraform or opentofu plan, not from %s", tool)
 	}
-	if !plan.DryRun {
-		return errors.New("an apply is proposed from a plan, and this run is not one")
+	if plan.DryRun {
+		return errors.New("this run is a dry run, which previews a change and never applies one, so " +
+			"no apply is proposed from it")
 	}
 	// A plan proposes its apply while it is still the run in hand. A finished one does not: the lease
 	// secret outlives the run, so without this a worker could return to any plan it ever executed.
@@ -1109,23 +1151,36 @@ func (s *relayServer) proposeApply(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, err.Error())
 		return
 	}
-	// The policies are read here rather than taken from the worker, so the rule that decides the hold is
-	// the control node's. A store that cannot answer holds the apply instead of queueing it, the same
-	// fail-closed rule the in-process gate follows: a gate that could not be evaluated has not passed.
+	// The policies are read here rather than taken from the worker, so the rule that decides the hold
+	// is the control node's. A store that cannot answer holds the apply instead of queueing it, the
+	// same fail-closed rule the in-process gate follows: a gate that could not be evaluated has not
+	// passed.
+	//
+	// The rules also decide whether there is a proposal to make at all. A worker plans first only when
+	// a plan-content rule sends the run through the gate, so an install with no rules, or with none
+	// that gates this run, never asked for one. Refusing then keeps this endpoint from minting an
+	// apply for a run the gate never took, while a store that cannot answer still holds, as above.
 	var policies []*policy.Policy
 	read := body.Read
 	if s.policies == nil {
-		read = false
-	} else {
-		list, err := s.policies.List(r.Context())
-		if err != nil {
-			s.log.Error("relay: list policies: " + err.Error())
-			read = false
-		} else {
-			policies = list
-		}
+		writeErr(w, http.StatusConflict, "this install holds no approval policies, so no plan gate "+
+			"asked for an apply from this run")
+		return
 	}
-	proposal, err := dispatch.ProposeApplyFor(r.Context(), s.store, policies, plan, body.Destroys, read)
+	list, err := s.policies.List(r.Context())
+	switch {
+	case err != nil:
+		s.log.Error("relay: list policies: " + err.Error())
+		read = false
+	case !policy.PlanGated(list, plan):
+		writeErr(w, http.StatusConflict, "no plan-content policy sends this run through the plan "+
+			"gate, so there is no apply to propose from it")
+		return
+	default:
+		policies = list
+	}
+	proposal, created, err := dispatch.ProposeApplyFor(r.Context(), s.store, policies, plan,
+		body.Destroys, read)
 	if errors.Is(err, dispatch.ErrPolicyDenied) {
 		// A rule refused the apply. That is an answer, not a fault, and the worker records it on the
 		// plan run, so the reason travels rather than becoming "propose apply failed".
@@ -1138,7 +1193,19 @@ func (s *relayServer) proposeApply(w http.ResponseWriter, r *http.Request) {
 	}
 	s.record(r.Context(), poolFrom(r.Context()), plan.ClaimedBy,
 		"/relay/proposed/"+plan.ID+"/"+proposal.ID)
+	// A held apply waits for a person, so the person is told, once: a worker retrying a report whose
+	// answer it never received gets the same proposal back, and hears nothing announced again.
+	if created && proposal.Status == run.StatusPendingApproval {
+		s.announce(proposal)
+	}
 	s.writeJSONStatus(w, http.StatusCreated, proposal)
+}
+
+// announce hands r to the announcer when the control node has one.
+func (s *relayServer) announce(r *run.Run) {
+	if s.announcer != nil {
+		s.announcer.Announce(r)
+	}
 }
 
 // saveTaskSummary replaces the run's per-task summaries with those in the body.

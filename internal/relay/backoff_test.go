@@ -3,8 +3,6 @@ package relay_test
 import (
 	"context"
 	"errors"
-	"github.com/kordloom/switchtender/internal/run"
-	"go.uber.org/zap"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -13,7 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kordloom/switchtender/internal/relay"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // TestDownRelayIsNotAskedPerWrite pins that a relay refusing posts is retried on a backoff rather

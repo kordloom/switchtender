@@ -2,6 +2,7 @@ package relay_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -210,17 +211,36 @@ func TestARunTheControlNodeCannotSerializeIsAFaultNotATruncatedBody(t *testing.T
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
-	if _, ok := stored.Outputs["handle"].(chan int); !ok {
-		t.Skip("the store normalizes outputs, so an unserializable run cannot be stored")
-	}
+	_, unserializable := stored.Outputs["handle"].(chan int)
 
 	status, body := post(t, fixture.URL, http.MethodGet, "/relay/v1/runs/run_unserializable",
 		bearer, "")
-	if status == http.StatusOK {
-		t.Fatalf("a run the control node cannot serialize answered 200 with %q", body)
+	// Two worlds, and a worker must not be handed half a run in either. Where the store keeps the
+	// value it was given, the handler has to refuse. Where the store normalizes it away on the way
+	// in, the run is serializable and the answer is a whole one. This used to stand down in the
+	// second world, which left the route unchecked the moment the store started protecting it: the
+	// thing being relied on was never asserted, only assumed.
+	if unserializable {
+		if status == http.StatusOK {
+			t.Fatalf("a run the control node cannot serialize answered 200 with %q", body)
+		}
+		if status != http.StatusInternalServerError {
+			t.Errorf("status = %d (%s), want 500", status, body)
+		}
+		return
 	}
-	if status != http.StatusInternalServerError {
-		t.Errorf("status = %d (%s), want 500", status, body)
+	if status != http.StatusOK {
+		t.Fatalf("the store normalized the output it could not serialize, so the run is whole and "+
+			"the read should answer it: status = %d (%s)", status, body)
+	}
+	var whole map[string]any
+	if err := json.Unmarshal([]byte(body), &whole); err != nil {
+		t.Fatalf("the store normalized the output, so the body must be a whole run and it does "+
+			"not parse: %v\n%s", err, body)
+	}
+	if whole["id"] != "run_unserializable" {
+		t.Errorf("the body is not the run that was asked for, so a worker reading it acts on "+
+			"something else: %s", body)
 	}
 }
 

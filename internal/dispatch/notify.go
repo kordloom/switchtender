@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -24,18 +25,88 @@ const webhookTimeout = 5 * time.Second
 // rather than trusted.
 const notifyDrainLimit = 64 << 10
 
-// WithWebhooks posts a JSON notification to each URL when a top-level run reaches a terminal
-// state.
+// WithWebhooks posts a JSON notification to each URL when a top-level run finishes or is held for
+// approval.
 func WithWebhooks(urls []string) Option {
 	return func(c *config) { c.webhooks = append([]string(nil), urls...) }
 }
 
 // notification is the JSON body delivered to webhooks.
 type notification struct {
-	// Event names what happened; currently always run.finished.
+	// Event names what happened: run.finished for a run that reached a terminal state, or run.held
+	// for one a rule is holding for a person to decide on.
 	Event string `json:"event"`
-	// Run is the terminal run.
+	// Run is the run the event is about.
 	Run *run.Run `json:"run"`
+}
+
+// webhookEvent names the event a webhook payload reports for r, so the server-wide and per-run
+// webhook paths cannot disagree about it.
+func webhookEvent(r *run.Run) string {
+	if r.Status == run.StatusPendingApproval {
+		return "run.held"
+	}
+	return "run.finished"
+}
+
+// heldSentences is what a held notification says after each channel's own rendering of the run's
+// label: that it waits, the rule holding it when one is named, and who asked for it when that is
+// known.
+func heldSentences(r *run.Run) string {
+	msg := "is waiting for approval."
+	if detail := heldDetail(r); detail != "" {
+		msg += " " + detail
+	}
+	return msg
+}
+
+// heldDetail is what a held notification says beyond the fact of the hold, as whole sentences: the
+// rule holding it when one is named, and who asked for it when that is known. It is empty when
+// neither is recorded.
+func heldDetail(r *run.Run) string {
+	var detail []string
+	if r.HeldByPolicy != "" {
+		detail = append(detail, "Held by \""+r.HeldByPolicy+"\".")
+	}
+	if r.Actor != "" {
+		detail = append(detail, "Requested by "+r.Actor+".")
+	}
+	return strings.Join(detail, " ")
+}
+
+// notifyHeld tells the channels a top-level run is waiting for a person, at the moment it is held.
+//
+// A channel that hears about a run only when it finishes never hears about a held one, since a held
+// run finishes only after somebody decides on it. The gate would stop the change and the person who
+// could release it would not be told, so an agent's request, a plan over its destroy limit, or a
+// production deploy would sit until somebody happened to open the Runs page. A hold is a request
+// for a decision rather than an incident, so it goes where finished runs go, the chat channels,
+// email, and webhooks, and never to a pager, a text message, or a dashboard annotation. Plugin
+// notifiers keep receiving finished runs only, which is the contract they were written against.
+func (d *Dispatcher) notifyHeld(r *run.Run) {
+	if r.ParentID != nil || r.Status != run.StatusPendingApproval {
+		return
+	}
+	d.notifyWebhooks(r)
+	d.notifySlack(r)
+	d.notifyMattermost(r)
+	d.notifyRocketChat(r)
+	d.notifyDiscord(r)
+	d.notifyTeams(r)
+	d.notifyNtfy(r)
+	d.notifyEmail(r)
+	d.notifyRunTargets(r)
+}
+
+// Announce tells the channels about a run this process did not execute: one a relay worker
+// finished, or an apply held on a worker's plan. It satisfies relay.Announcer, so the control node
+// announces what the relay records the way it announces what it executes itself.
+func (d *Dispatcher) Announce(r *run.Run) {
+	if r.Status == run.StatusPendingApproval {
+		d.notifyHeld(r)
+		return
+	}
+	d.notify(r)
 }
 
 // notify delivers a terminal top-level run to every configured channel without blocking the
@@ -59,11 +130,6 @@ func (d *Dispatcher) notify(r *run.Run) {
 	d.notifyRunTargets(r)
 }
 
-// notifyExtra fans a terminal top-level run out to every registered Notifier, off the executor
-// path. The run is redacted of extra vars and per-run notification targets first, since a registered
-// channel is external and must receive neither survey answers or template vars that can carry
-// secrets nor the target list, whose entries carry a routing key or API token. Each delivery is
-// bounded and its failure logged and dropped, like the built-in channels.
 // redactForExternal returns a copy of r safe to send off the host to an external channel, a plugin
 // notifier or a webhook. Survey answers and template vars can carry secrets, each notification
 // target carries a routing key or API token, Command holds the raw script body of a bash, python,
@@ -93,6 +159,11 @@ func redactForExternal(r *run.Run) run.Run {
 	return out
 }
 
+// notifyExtra fans a terminal top-level run out to every registered Notifier, off the executor
+// path. The run is redacted of extra vars and per-run notification targets first, since a
+// registered channel is external and must receive neither survey answers or template vars that can
+// carry secrets nor the target list, whose entries carry a routing key or API token. Each delivery
+// is bounded and its failure logged and dropped, like the built-in channels.
 func (d *Dispatcher) notifyExtra(r *run.Run) {
 	if len(notifiers) == 0 {
 		return
@@ -112,13 +183,13 @@ func (d *Dispatcher) notifyExtra(r *run.Run) {
 	}
 }
 
-// notifyWebhooks posts a terminal top-level run to every configured webhook.
+// notifyWebhooks posts a top-level run to every configured webhook, when it finishes or is held.
 func (d *Dispatcher) notifyWebhooks(r *run.Run) {
 	if len(d.webhooks) == 0 {
 		return
 	}
 	redacted := redactForExternal(r)
-	body, err := json.Marshal(notification{Event: "run.finished", Run: &redacted})
+	body, err := json.Marshal(notification{Event: webhookEvent(r), Run: &redacted})
 	if err != nil {
 		d.log.Error("dispatch: encode notification: "+err.Error(), zap.String("run_id", r.ID))
 		return

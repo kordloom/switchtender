@@ -4,13 +4,17 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,10 +26,12 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
+	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/template"
@@ -617,19 +623,33 @@ func TestSeedConfigStoresPoliciesTheGovernanceSeedNames(t *testing.T) {
 	for _, p := range policies {
 		byName[p.Name] = p
 	}
-	tfDestroy, ok := byName["irreversible needs a second approver"]
+	tfDestroy, ok := byName["terraform destroys need a second approver"]
 	if !ok {
-		t.Fatal("the rule the held run cites was not seeded")
+		t.Fatal("the rule the held apply cites was not seeded")
 	}
-	// Graded rather than string matched. A rule keyed on the word "destroy" misses the spelling a
-	// destroy usually reaches production as, an apply replaying a plan file, and it teaches a
-	// visitor that governing this means maintaining a list of dangerous words.
-	if tfDestroy.Tool != run.ToolTerraform || tfDestroy.Reversibility != run.Irreversible {
-		t.Errorf("the terraform rule = %+v, want it holding on an irreversible grade", tfDestroy)
+	// It holds on what the plan destroys rather than on a command string. A rule keyed on the word
+	// "destroy" misses the spelling a destroy usually reaches production as, an apply replaying a
+	// plan file, and it teaches a visitor that governing this means maintaining a list of words.
+	if tfDestroy.Tool != run.ToolTerraform {
+		t.Errorf("the terraform rule = %+v, want it scoped to terraform", tfDestroy)
 	}
 	if tfDestroy.CommandContains != "" {
 		t.Errorf("the terraform rule still matches on a command string (%q), which is the brittle "+
 			"form this demo should not be teaching", tfDestroy.CommandContains)
+	}
+	if !tfDestroy.RequireDistinctApprover {
+		t.Error("the terraform rule lets whoever asked for a destroy release it")
+	}
+	// The rule has to be able to hold what the demo shows it holding. An apply grades costly before
+	// its plan exists, so an irreversible floor failed every terraform apply before the destroy limit
+	// was weighed, and a rule that reads as holding destroys could never hold one.
+	apply := &run.Run{Tool: run.ToolTerraform, Command: "infra/legacy-network"}
+	if !policy.PlanGated([]*policy.Policy{tfDestroy}, apply) {
+		t.Error("the terraform rule does not send a terraform apply through the plan gate, so it " +
+			"can never hold one")
+	}
+	if policy.Exceeding([]*policy.Policy{tfDestroy}, apply, 3) == nil {
+		t.Error("a plan destroying three resources does not exceed the terraform rule's limit")
 	}
 	// Zero holds a plan that would destroy anything. The default disables the check, and leaving
 	// it disabled on the one rule demonstrating change control said the opposite of the point.
@@ -955,10 +975,8 @@ func TestSeedRunsEndToEnd(t *testing.T) {
 		t.Errorf("Seed() produced %d runs, want the full sample history", len(runs))
 	}
 
-	var held int
 	for _, r := range runs {
 		if r.Status == run.StatusPendingApproval {
-			held++
 			if r.HeldByPolicy == "" {
 				t.Errorf("run %s is held but names no rule", r.ID)
 			}
@@ -977,9 +995,9 @@ func TestSeedRunsEndToEnd(t *testing.T) {
 			t.Errorf("run %s carries no creation receipt, so its receipt button fails", r.ID)
 		}
 	}
-	if held == 0 {
-		t.Error("no run is left held by the gate, so the demo shows no change being refused")
-	}
+	// A terminal submitter executes nothing, so no gate runs here and nothing has to be left held.
+	// The held destroy comes from the plan gate, and TestSeedHeldDestroyHoldsTheApplyItsPlanProposed
+	// covers it through the real dispatcher.
 
 	// The seeded history spreads across the window rather than piling into one instant.
 	oldest, newest := runs[0].CreatedAt, runs[0].CreatedAt
@@ -1096,9 +1114,9 @@ func TestSeedGovernanceDegradesWithoutFailingTheSeed(t *testing.T) {
 	deps.Submitter = &refusingSubmitter{}
 	deps.Approver = &releasingApprover{runs: stores.Runs}
 	core, logs := observer.New(zapcore.WarnLevel)
-	seedGovernance(ctx, deps, "site.yml", "inv.ini", "/srv/infra", seededIDs{}, zap.New(core))
-	if logs.FilterMessageSnippet("seed held run").Len() == 0 {
-		t.Error("a refused held run was not reported")
+	seedGovernance(ctx, deps, "site.yml", "inv.ini", seededIDs{}, zap.New(core))
+	if logs.FilterMessageSnippet("seed approved run").Len() == 0 {
+		t.Error("a refused submission was not reported")
 	}
 
 	// Test 1: an approver that refuses the decision is logged, and nothing is left half released.
@@ -1107,70 +1125,175 @@ func TestSeedGovernanceDegradesWithoutFailingTheSeed(t *testing.T) {
 	deps.Submitter = &terminalSubmitter{runs: stores.Runs, audits: stores.Audit}
 	deps.Approver = sameActorApprover{}
 	core, logs = observer.New(zapcore.WarnLevel)
-	seedGovernance(ctx, deps, "site.yml", "inv.ini", "/srv/infra", seededIDs{}, zap.New(core))
+	seedGovernance(ctx, deps, "site.yml", "inv.ini", seededIDs{}, zap.New(core))
 	if logs.FilterMessageSnippet("approve seeded run").Len() == 0 {
 		t.Error("a refused approval was not reported")
 	}
 
-	// Test 2: with no approver at all the held run is still seeded, which is the documented default.
+	// Test 2: with no approver there is no decision to show, so nothing is submitted at all.
 	stores = newSeedStores()
 	deps = stores.deps()
 	deps.Submitter = &terminalSubmitter{runs: stores.Runs, audits: stores.Audit}
-	deps.Clock = NewSeedClock()
-	before := deps.Clock.cursor
-	seedGovernance(ctx, deps, "site.yml", "inv.ini", "/srv/infra", seededIDs{}, zap.NewNop())
+	seedGovernance(ctx, deps, "site.yml", "inv.ini", seededIDs{}, zap.NewNop())
 	runs, err := stores.Runs.List(ctx)
 	if err != nil {
 		t.Fatalf("Runs.List() error = %v", err)
 	}
-	if len(runs) != 1 {
-		t.Fatalf("seeded %d runs with no approver, want only the held one", len(runs))
-	}
-	if runs[0].Status != run.StatusPendingApproval {
-		t.Errorf("the seeded run is %s, want it held by the gate", runs[0].Status)
-	}
-	// The held run never settles, so the clock is stepped here to keep the next run's window in order.
-	if moved := deps.Clock.cursor.Sub(before); moved < seedRunGap {
-		t.Errorf("the clock moved %v for the held run, want at least the between-run gap %v",
-			moved, seedRunGap)
+	if len(runs) != 0 {
+		t.Errorf("seeded %d runs with no approver, want none: a run held for a decision nobody on "+
+			"this install can make is not a demonstration of one", len(runs))
 	}
 }
 
-// TestSeedGovernanceHoldsATerraformDestroyWithoutRunningIt pins what the held run actually is. It
-// stands in the runs list as a change the gate is refusing right now, and it must never execute, so
-// it needs no terraform on the host and must carry the second-pair-of-eyes requirement the rule it
-// cites imposes.
-func TestSeedGovernanceHoldsATerraformDestroyWithoutRunningIt(t *testing.T) {
+// legacyNetworkPlan is what terraform 1.9.8 printed planning the demo's legacy network, cut to one
+// subnet's detail and the summary the plan gate reads.
+const legacyNetworkPlan = `Terraform will perform the following actions:
+
+  # terraform_data.legacy_subnet[0] will be destroyed
+  # (because terraform_data.legacy_subnet is not in configuration)
+  - resource "terraform_data" "legacy_subnet" {
+      - id     = "bca31dd6-5bd5-4658-30f3-b25f0c74649c" -> null
+      - input  = "10.30.0.0/24" -> null
+      - output = "10.30.0.0/24" -> null
+    }
+
+Plan: 0 to add, 0 to change, 3 to destroy.
+`
+
+// TestSeedHeldDestroyHoldsTheApplyItsPlanProposed pins that the change the demo shows the gate
+// refusing is one the gate refused. The held run was submitted already held and labeled with the
+// terraform rule's name, while that rule could not have held it. Here the real dispatcher runs the
+// seeded rule against the seeded submission, so the held apply exists only because the product
+// held it.
+func TestSeedHeldDestroyHoldsTheApplyItsPlanProposed(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	stores := newSeedStores()
-	deps := stores.deps()
-	deps.Submitter = &terminalSubmitter{runs: stores.Runs, audits: stores.Audit}
+	seedConfig(ctx, stores.deps(), zap.NewNop())
 
-	seedGovernance(ctx, deps, "site.yml", "inv.ini", "/srv/infra/network", seededIDs{}, zap.NewNop())
+	var applies atomic.Int64
+	runner := roundhouse.RunnerFunc(func(_ context.Context, spec roundhouse.Spec,
+		out io.Writer) (roundhouse.Result, error) {
+		if spec.DryRun {
+			_, _ = io.WriteString(out, legacyNetworkPlan)
+			return roundhouse.Result{ExitCode: 0, Drift: true}, nil
+		}
+		applies.Add(1)
+		return roundhouse.Result{ExitCode: 0}, nil
+	})
+	disp := dispatch.New(stores.Runs, runner, zap.NewNop(), dispatch.WithPolicies(stores.Policies),
+		dispatch.WithAudits(stores.Audit), dispatch.WithNoJanitor())
+	defer disp.Close()
+	deps := stores.deps()
+	deps.Submitter = disp
+	legacyDir := t.TempDir()
+
+	seedHeldDestroy(ctx, deps, legacyDir, zap.NewNop())
 
 	runs, err := stores.Runs.List(ctx)
 	if err != nil {
 		t.Fatalf("Runs.List() error = %v", err)
 	}
-	if len(runs) != 1 {
-		t.Fatalf("seeded %d runs, want the single held one", len(runs))
+	var plan, apply *run.Run
+	for _, r := range runs {
+		switch {
+		case r.ProposedFrom != "":
+			apply = r
+		case r.Tool == run.ToolTerraform:
+			plan = r
+		}
 	}
-	held := runs[0]
-	if held.Tool != run.ToolTerraform {
-		t.Errorf("the held run uses %q, want terraform, which is what the rule it cites matches", held.Tool)
+
+	// Test 0: the plan ran to completion in the directory the seed named.
+	if plan == nil {
+		t.Fatalf("no plan run was seeded among %d runs", len(runs))
 	}
-	if held.Command != "/srv/infra/network" {
-		t.Errorf("the held run's working directory = %q, want the seeded terraform root", held.Command)
+	if plan.Status != run.StatusSucceeded || plan.Command != legacyDir {
+		t.Errorf("plan run = %s in %q, want succeeded in %q", plan.Status, plan.Command, legacyDir)
 	}
-	if held.HeldByPolicy != "irreversible needs a second approver" {
-		t.Errorf("the held run cites %q, want the seeded terraform rule", held.HeldByPolicy)
+
+	// Test 1: the gate proposed the apply and holds it under the seeded rule, naming the count.
+	if apply == nil {
+		t.Fatal("the plan proposed no apply, so the demo shows no change the gate is holding")
 	}
-	if !held.RequireDistinctApprover {
-		t.Error("the held run accepts its own requester as approver, which is not the rule it shows")
+	const wantHeld = "terraform destroys need a second approver (plan destroys 3, limit 0)"
+	if apply.Status != run.StatusPendingApproval || apply.HeldByPolicy != wantHeld {
+		t.Errorf("apply = %s held by %q, want pending_approval held by %q", apply.Status,
+			apply.HeldByPolicy, wantHeld)
 	}
-	if held.EndedAt != nil {
-		t.Error("the held run recorded an end, so the demo shows a gated change that executed anyway")
+	if apply.ProposedFrom != plan.ID {
+		t.Errorf("apply proposed from %q, want the plan run %q", apply.ProposedFrom, plan.ID)
+	}
+	// The grade beside the hold says what the hold says. It read costly beside a rule citing three
+	// destroys, because the grade never saw the plan; the apply now carries the plan's count, read
+	// back from the store here, and grades from it.
+	if undo := run.AssessReversibility(apply); undo.Class != run.Irreversible {
+		t.Errorf("the held apply grades %q (%v), want irreversible beside a hold citing three "+
+			"destroys", undo.Class, undo.Reasons)
+	}
+	if !apply.RequireDistinctApprover {
+		t.Error("the held apply accepts its own requester as approver, which is not the rule it cites")
+	}
+	if apply.Actor != "deploy-bot" || apply.Source != "api" || apply.Labels["ticket"] != "OPS-511" {
+		t.Errorf("apply provenance = %q/%q/%v, want deploy-bot, api, and the plan's ticket",
+			apply.Actor, apply.Source, apply.Labels)
+	}
+	if apply.EndedAt != nil || applies.Load() != 0 {
+		t.Error("the held apply executed, so the demo shows a gated destroy that ran anyway")
+	}
+
+	// Test 2: the plan run's log is what an approver reads, the plan and the gate's decision on it.
+	logText, err := stores.Runs.Log(ctx, plan.ID)
+	if err != nil {
+		t.Fatalf("Log(plan) error = %v", err)
+	}
+	for _, want := range []string{"3 to destroy", "held for approval"} {
+		if !strings.Contains(string(logText), want) {
+			t.Errorf("the plan run's log does not say %q:\n%s", want, logText)
+		}
+	}
+}
+
+// TestTheLegacyNetworkPlansThreeDestroys proves the held destroy against terraform itself. The
+// test above feeds the gate what terraform printed. This checks that the embedded configuration and
+// state still make terraform print it, offline, so a change to either cannot leave the live demo
+// with a plan that destroys nothing and a gate with nothing to hold.
+func TestTheLegacyNetworkPlansThreeDestroys(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("terraform"); err != nil {
+		if os.Getenv("SWITCHTENDER_REQUIRE_FULL_SUITE") == "1" {
+			t.Fatal("SWITCHTENDER_REQUIRE_FULL_SUITE is set and terraform is not installed, so the " +
+				"demo's held destroy went unchecked against the tool that plans it")
+		}
+		t.Skip("terraform is not installed")
+	}
+	tree, err := fs.Sub(assets, "assets/repos/database-ops/infra/legacy-network")
+	if err != nil {
+		t.Fatalf("fs.Sub() error = %v", err)
+	}
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, tree); err != nil {
+		t.Fatalf("CopyFS() error = %v", err)
+	}
+	var plan []byte
+	for _, args := range [][]string{
+		{"init", "-input=false", "-no-color"},
+		{"plan", "-input=false", "-no-color", "-detailed-exitcode"},
+	} {
+		cmd := exec.Command("terraform", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "CHECKPOINT_DISABLE=1")
+		out, err := cmd.CombinedOutput()
+		// A plan with changes exits 2 under -detailed-exitcode, which is the answer wanted here.
+		var exit *exec.ExitError
+		changes := args[0] == "plan" && errors.As(err, &exit) && exit.ExitCode() == 2
+		if err != nil && !changes {
+			t.Fatalf("terraform %s: %v\n%s", args[0], err, out)
+		}
+		plan = out
+	}
+	if !regexp.MustCompile(`(?m)^Plan: 0 to add, 0 to change, 3 to destroy\.$`).Match(plan) {
+		t.Errorf("the legacy network's plan is not the three destroys the demo shows held:\n%s", plan)
 	}
 }
 

@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Assess your AWX estate | SwitchTender</title>
+	<meta name="description" content="Drop an AWX, AAP, Tower, Ascender, Semaphore, Chef or Puppet export to see what moves, what does not, and how many of your templates run today with nobody required to approve them. Read in your browser; the export is never uploaded.">
+	<link rel="canonical" href="https://switchtender.com/assess">
+	<meta property="og:title" content="Assess your AWX estate | SwitchTender">
+	<meta property="og:description" content="See how many of your templates can destroy something that nobody currently has to approve. Your export is read in your browser and never uploaded.">
+	<meta property="og:type" content="website">
+	<meta property="og:url" content="https://switchtender.com/assess">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
+	<meta name="twitter:card" content="summary_large_image">
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/styles.css?v=34">
+	<style>
+		.assess-wrap { max-width: 860px; margin: 0 auto; }
+		.drop { border: 2px dashed var(--border, #3a3f4b); border-radius: 16px; padding: 56px 24px; text-align: center; cursor: pointer; transition: border-color .15s, background .15s; }
+		.drop:hover, .drop.over { border-color: var(--accent, #6ea8fe); background: rgba(110,168,254,.06); }
+		.drop-main { font-family: "Space Grotesk", sans-serif; font-size: 1.25rem; font-weight: 600; }
+		.drop-sub { color: var(--muted, #9aa3b2); margin-top: 8px; }
+		.assess-format { display: flex; gap: 10px; align-items: center; margin: 18px 0 0; flex-wrap: wrap; color: var(--muted, #9aa3b2); font-size: .92rem; }
+		.assess-format select { padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border, #3a3f4b); background: transparent; color: inherit; font-family: inherit; font-size: .92rem; }
+		.headline { font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 1.28rem; line-height: 1.45; padding: 18px 20px; border-radius: 12px; margin: 26px 0 14px; }
+		.headline.gap { background: rgba(217,161,58,.16); color: #e0a558; }
+		.headline.clear { background: rgba(46,160,90,.14); color: #4ade80; }
+		.headline.no { background: rgba(220,80,80,.14); color: #f87171; }
+		.figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 16px 0 22px; }
+		.figure { border: 1px solid var(--border, #3a3f4b); border-radius: 12px; padding: 14px 16px; }
+		.figure b { display: block; font-family: "Space Grotesk", sans-serif; font-size: 1.7rem; line-height: 1.1; }
+		.figure span { color: var(--muted, #9aa3b2); font-size: .86rem; }
+		#report { overflow-x: auto; background: rgba(127,127,127,.08); border-radius: 12px; padding: 16px; }
+		/* Text that comes from the file is set in fonts already on the machine. A web font is fetched a
+		   subset at a time, when text first needs one, so an export or a file name with characters
+		   beyond the subsets the page loaded would fetch another file after the drop, telling the font
+		   host which scripts the export uses and breaking the promise that nothing leaves. */
+		#report, #report code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: .85rem; white-space: pre; }
+		.headline.no, .file-name { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+		.after { display: flex; gap: 10px; flex-wrap: wrap; margin: 18px 0 6px; }
+		.note { color: var(--muted, #9aa3b2); font-size: .9rem; margin-top: 24px; }
+		.hidden { display: none; }
+	</style>
+	<noscript><style>.reveal{opacity:1 !important;transform:none !important}</style></noscript>
+</head>
+<body>
+	<header class="nav" id="nav">
+		<div class="wrap nav-inner">
+			<a class="brand" href="/" aria-label="SwitchTender"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+			<nav class="nav-links">
+				<a href="/#features">Features</a>
+				<a href="/#compare">Compare</a>
+				<a href="/pricing">Pricing</a>
+				<a href="/agents">Agents</a>
+				<a href="/docs/">Docs</a>
+			</nav>
+			<div class="nav-cta">
+				<a class="ghost" href="https://github.com/kordloom/switchtender">GitHub</a>
+				<a class="btn" href="/get-started">Get started</a>
+			</div>
+			<button class="nav-toggle" id="nav-toggle" aria-label="Menu">
+				<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="7" x2="21" y2="7"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="17" x2="21" y2="17"/></svg>
+			</button>
+		</div>
+	</header>
+
+	<main class="section wrap">
+		<div class="assess-wrap">
+			<h1>How much of your estate runs with nobody required to agree?</h1>
+			<p class="lede">Drop an export below. It is read here, in your browser, by the same Go reader and the same grader the product uses at run time, compiled to WebAssembly. You get what moves, what does not, and how many of your templates can destroy something today without a second person agreeing first.</p>
+
+			<div class="drop" id="drop" tabindex="0" role="button" aria-label="Drop an export to assess">
+				<div class="drop-main" id="drop-main">Loading the reader...</div>
+				<div class="drop-sub" id="drop-sub">Nothing is uploaded. Your export never leaves this machine.</div>
+			</div>
+
+			<div class="assess-format">
+				<label for="format">Export format</label>
+				<select id="format" disabled><option value="awx">awx</option></select>
+				<span id="format-note">AWX also covers Ansible Automation Platform, Tower, and Ascender.</span>
+			</div>
+
+			<div id="result" class="hidden">
+				<div class="headline" id="headline"></div>
+				<div class="figures" id="figures"></div>
+				<div class="after">
+					<button class="btn" id="save">Save this report</button>
+					<a class="ghost" href="/get-started">Install and import it</a>
+					<a class="ghost" href="/pricing#sprint">Have it done with you</a>
+				</div>
+				<pre id="report"><code id="report-text"></code></pre>
+			</div>
+
+			<p class="note" id="privacy">Your export is never sent anywhere, and you can check that rather than take it on trust: open your browser's network panel, drop the file, and watch nothing leave once the page has loaded. The reader is a WebAssembly build of the same code the <code>switchtender assess</code> command runs, so the file is opened by your own browser and the report is produced on your machine. An export names every project, inventory, credential and schedule you run, which is the map of your estate, and handing that to a stranger to get a sales document back is a bad trade. Run <code>switchtender assess awx export.json</code> yourself and you get this same report from a terminal.</p>
+
+			<p class="note">Where to get an export. From AWX or Ansible Automation Platform, <code>awx export --all &gt; export.json</code> with the AWX CLI, or the Tower CLI equivalent. The same file is what <code>switchtender import awx</code> reads, so an export that assesses here is one that imports.</p>
+
+			<p class="note">What the grades mean. Every count comes from the graders the product uses when it actually runs something, not from a separate heuristic written for this page, so a number here cannot disagree with what a run later says. Grades are read from what each template declares: its tool, command, limit, and variables. A template whose playbook text lives in a repository nothing has fetched yet is graded from its declaration alone, and reading that playbook can only raise a grade, never lower one, so the numbers are a floor. Reversibility and risk are defined in the <a href="/docs/concepts">concepts</a>.</p>
+		</div>
+	</main>
+
+	<footer class="footer">
+		<div class="wrap footer-inner">
+			<img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="foot-logo">
+			<nav>
+				<a href="https://github.com/kordloom/switchtender">GitHub</a>
+				<a href="/docs/">Docs</a>
+				<a href="/pricing">Pricing</a>
+				<a href="/agents">Agents</a>
+				<a href="/docs/comparison">Compare</a>
+				<a href="/privacy">Privacy</a>
+				<a href="/terms">Terms</a>
+				<a href="/refund">Refunds</a>
+				<a href="https://github.com/kordloom/switchtender/blob/main/LICENSE">License</a>
+			</nav>
+			<span class="foot-note">Source-available. BSL 1.1. Self-host free.</span>
+		</div>
+		<div class="foot-legal">SwitchTender&trade; is a trademark of KordLoom LLC. Copyright 2026 KordLoom LLC.</div>
+	</footer>
+
+	<script src="/app.js?v=7"></script>
+	<script src="/assess/assess.js"></script>
+</body>
+</html>

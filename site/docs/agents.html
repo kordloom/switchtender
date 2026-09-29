@@ -10,11 +10,11 @@
 	<meta property="og:description" content="AI agents are operators now. They patch hosts, roll configs, and apply Terraform, through whatever credentials they are handed.">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/agents">
-	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
 	<meta name="twitter:card" content="summary_large_image">
 	<meta name="twitter:title" content="Run an AI agent through the gate | SwitchTender docs">
 	<meta name="twitter:description" content="AI agents are operators now. They patch hosts, roll configs, and apply Terraform, through whatever credentials they are handed.">
-	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
 	<script type="application/ld+json">
 {
  "@context": "https://schema.org",
@@ -214,6 +214,21 @@ reported back as a preview.</li>
 <li>An agent can read the evidence and the signed receipt for runs it proposed. Another actor's
 evidence needs an admin.</li>
 </ul>
+<h2 id="waiting-for-a-decision">Waiting for a decision</h2>
+<p>A held run does not block the agent. The submission answers at once with the run, and the run's
+<code>status</code> says where it stands: <code>pending_approval</code> until a person decides, then it runs and ends
+<code>succeeded</code> or <code>failed</code>, or it ends <code>rejected</code> with the reason the person gave in <code>error</code>. The agent
+learns the decision by reading the run again, with <code>GET /v1/runs/{id}</code> or the <code>get_run</code> tool, and
+<code>GET /v1/runs?status=pending_approval</code> lists everything still waiting. Reading is all it can do
+about the decision: an agent that tries to approve its own run is refused with 403.</p>
+<p>The person who decides is told when the run is held: the chat channels and webhooks the server
+sends finished runs to also carry each hold, naming the rule that held it and who asked, and so
+does email when <code>--notify-on</code> is <code>finish</code>, since an install set to email failures alone is not
+sent approval requests it never asked for.
+The same channels carry how it ended, whether it ran, was rejected, or was canceled while it waited.
+They decide on the run's page in the interface, or with <code>POST /v1/runs/{id}/approve</code> or
+<code>POST /v1/runs/{id}/reject</code> under an admin token, so a chat bot or a script can carry the decision
+to wherever the approver already is.</p>
 <h2 id="what-the-record-shows">What the record shows</h2>
 <p>The actor on every chain entry the agent produces is its token's label, <code>agent-bot</code> above, and, for
 a token minted with <code>--agent</code>, the entry also carries <code>actor_type: agent</code> and <code>on_behalf_of</code> naming

@@ -26,11 +26,13 @@ jobs:
           - { pkg: ./internal/importer, fn: FuzzFromChef }
           - { pkg: ./internal/importer, fn: FuzzFromPuppet }
           - { pkg: ./internal/importer, fn: FuzzFromCron }
+          - { pkg: ./internal/importer, fn: FuzzTextOf }
           - { pkg: ./internal/event, fn: FuzzParse }
           - { pkg: ./internal/server, fn: FuzzParseProposedRun }
           - { pkg: ./internal/audit, fn: FuzzContentDigestOf }
           - { pkg: ./internal/audit, fn: FuzzParseSpanPath }
           - { pkg: ./internal/credential, fn: FuzzInject }
+          - { pkg: ./internal/dispatch, fn: FuzzStreamMaskerHoldsAcrossAnyChunking }
           - { pkg: ./internal/mcp, fn: FuzzServe }
           - { pkg: ./witness, fn: FuzzCheck }
           - { pkg: ./witness, fn: FuzzLoad }

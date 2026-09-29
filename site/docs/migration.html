@@ -10,11 +10,11 @@
 	<meta property="og:description" content="SwitchTender imports an AWX, Semaphore, Rundeck, or Jenkins export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/migration">
-	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
 	<meta name="twitter:card" content="summary_large_image">
 	<meta name="twitter:title" content="Migration | SwitchTender docs">
 	<meta name="twitter:description" content="SwitchTender imports an AWX, Semaphore, Rundeck, or Jenkins export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.">
-	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
 	<script type="application/ld+json">
 {
  "@context": "https://schema.org",
@@ -546,8 +546,15 @@ import has none to re-enter and none to attach.</p>
 and skipped rather than converted to a wrong cadence.</li>
 <li>A workflow whose graph cannot be expressed whole is reported and skipped rather than reduced. A
 failure edge, which runs work precisely because something failed, has no pipeline equivalent, and a
-node pointing at a job template the export does not carry has no work to do. A partial graph would
-keep the workflow's name and run a subset of it, which is worse than not importing it.</li>
+node pointing at a job template the export does not carry has no work to do. A node that runs a
+nested workflow, a project or inventory sync, or a system job is refused the same way, since a step
+runs a playbook, even when that object shares its name with a job template in the export. A partial
+graph would keep the workflow's name and run a subset of it, which is worse than not importing it.</li>
+<li>A workflow with an approval node is reported and skipped, and the assessment names it in its
+governance section. Approval here is a policy that holds a whole run before it starts, not a step
+partway through, and an import writes no policies, so bringing the other nodes across would run
+them with the gate gone. Write a policy that holds the workflow's steps, then rebuild it on the
+Workflows page.</li>
 <li>A workflow's own schedules import onto the workflow template, so a graph that fired nightly in AWX
 keeps firing nightly here. The one case that does not carry is a workflow the import refused: with
 no template to fire, its schedules cannot import either, and the report says so by name and count

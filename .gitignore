@@ -79,6 +79,12 @@ campaigns/
 # for exactly that reason.
 site/verify/loomseal.wasm
 site/verify/wasm_exec.js
+
+# The browser assessment, built at deploy from this repository's own importer for the same reason.
+# It is the same reader and renderer the assess command runs, and a committed copy of it is a
+# separate build nothing holds to the command it claims to agree with.
+site/assess/assess.wasm
+site/assess/wasm_exec.js
 /supertest
 
 # Working notes, not product. A triage list of the product's own unfixed defects was

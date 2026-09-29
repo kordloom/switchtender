@@ -90,7 +90,7 @@ func TestProposeApplyForFacesTheSameRulesAsASubmit(t *testing.T) {
 				policies = append(policies, test.Policy)
 			}
 
-			got, err := ProposeApplyFor(ctx, store, policies, plan, test.Destroys, test.Read)
+			got, _, err := ProposeApplyFor(ctx, store, policies, plan, test.Destroys, test.Read)
 			if !errors.Is(err, test.Want) {
 				t.Fatalf("ProposeApplyFor() error = %v, want %v", err, test.Want)
 			}
@@ -164,13 +164,19 @@ func TestProposeApplyForMakesOnlyOneApplyPerPlan(t *testing.T) {
 		t.Fatalf("Save(plan) error = %v", err)
 	}
 
-	first, err := ProposeApplyFor(ctx, store, nil, plan, 2, true)
+	first, created, err := ProposeApplyFor(ctx, store, nil, plan, 2, true)
 	if err != nil {
 		t.Fatalf("ProposeApplyFor(first) error = %v", err)
 	}
-	second, err := ProposeApplyFor(ctx, store, nil, plan, 2, true)
+	if !created {
+		t.Error("the first proposal reports it was not created, so it would never be announced")
+	}
+	second, created, err := ProposeApplyFor(ctx, store, nil, plan, 2, true)
 	if err != nil {
 		t.Fatalf("ProposeApplyFor(second) error = %v", err)
+	}
+	if created {
+		t.Error("a retried report says it created the apply again, so the hold is announced twice")
 	}
 	if second.ID != first.ID {
 		t.Errorf("a retried report created apply %s, want the first one (%s): two applies means the "+
@@ -195,7 +201,7 @@ func TestProposeApplyForMakesOnlyOneApplyPerPlan(t *testing.T) {
 // defaults would apply an empty spec.
 func TestProposeApplyForRefusesWithoutAPlan(t *testing.T) {
 	t.Parallel()
-	got, err := ProposeApplyFor(context.Background(), run.NewMemStore(), nil, nil, 0, true)
+	got, _, err := ProposeApplyFor(context.Background(), run.NewMemStore(), nil, nil, 0, true)
 	if err == nil {
 		t.Fatal("ProposeApplyFor reported success with no plan run")
 	}

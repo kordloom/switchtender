@@ -20,6 +20,11 @@ func gatedPlan(t *testing.T, policies ...*policy.Policy) (*Client, run.Store) {
 	ctx := context.Background()
 	store := run.NewMemStore()
 	rules := policy.NewMemStore()
+	// The rule that sends the apply through the plan gate at all, set high enough that the destroy
+	// count never trips it, so what decides each case is the rule under test.
+	gate := policy.NewPolicy("terraform plans first")
+	gate.Tool, gate.MaxDestroy = run.ToolTerraform, 100
+	policies = append([]*policy.Policy{gate}, policies...)
 	for _, p := range policies {
 		if err := rules.Save(ctx, p); err != nil {
 			t.Fatalf("Save policy: %v", err)
@@ -29,7 +34,7 @@ func gatedPlan(t *testing.T, policies ...*policy.Policy) (*Client, run.Store) {
 	plan := &run.Run{
 		ID: "run_plan", Status: run.StatusPending, CreatedAt: now,
 		Queue: "default", Tool: run.ToolTerraform, Command: "infra/prod",
-		DryRun: true, Actor: "casey", ActorType: "session", OrgID: "org_1",
+		Actor: "casey", ActorType: "session", OrgID: "org_1",
 	}
 	if err := store.Save(ctx, plan); err != nil {
 		t.Fatalf("Save run: %v", err)
@@ -150,8 +155,9 @@ func TestAProposedApplyFacesTheSameRulesAsAnySubmission(t *testing.T) {
 			t.Fatal("the apply records no rule set, so its evidence reads as a run submitted before " +
 				"rules were captured")
 		}
-		if proposal.PolicySet.Count != 1 {
-			t.Errorf("the apply records %d rules in force, want 1", proposal.PolicySet.Count)
+		if proposal.PolicySet.Count != 2 {
+			t.Errorf("the apply records %d rules in force, want both the gate and the ansible rule",
+				proposal.PolicySet.Count)
 		}
 		// A rule that does not match still has to be in the recorded set, since the point is what was
 		// in force, not what fired.

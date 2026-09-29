@@ -153,6 +153,10 @@ var jenkinsEnvVars = []string{
 // of being half-imported into something that would not do what it used to.
 func FromJenkins(inventory string) func([]byte, time.Time) (*Plan, error) {
 	return func(data []byte, now time.Time) (*Plan, error) {
+		data, err := textOf(data)
+		if err != nil {
+			return nil, err
+		}
 		jobs, err := decodeJenkins(data)
 		if err != nil {
 			return nil, err

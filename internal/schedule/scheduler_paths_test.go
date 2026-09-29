@@ -222,7 +222,7 @@ func TestSchedulerOptionsInstallWhatTheyName(t *testing.T) {
 	templates := template.NewMemStore()
 	s := NewScheduler(NewMemStore(), &countingKindSubmitter{}, zap.NewNop(),
 		WithTemplates(templates),
-		WithRunActive(func(context.Context, string) (bool, error) { return true, nil }))
+		WithRunActive(func(context.Context, string, string) (string, error) { return "run_prev", nil }))
 	if s.templates == nil {
 		t.Error("WithTemplates installed no template store, so a scheduled template would refuse")
 	}
@@ -474,21 +474,22 @@ func TestOverlapCheckFailsTowardFiring(t *testing.T) {
 		Name string
 		// LastRunID is the run recorded on the schedule.
 		LastRunID string
-		// Active is what the check returns.
-		Active bool
+		// Active is the run the check reports is still going, empty for none.
+		Active string
 		// Err is what the check reports instead.
 		Err error
 		// WantFires is how many runs the tick must submit.
 		WantFires int64
 	}{{ // Test 0: The previous run is still going, so this fire is skipped.
-		Name: "still going", LastRunID: "run_prev", Active: true, WantFires: 0,
+		Name: "still going", LastRunID: "run_prev", Active: "run_prev", WantFires: 0,
 	}, { // Test 1: The previous run finished, so the schedule fires.
-		Name: "finished", LastRunID: "run_prev", Active: false, WantFires: 1,
+		Name: "finished", LastRunID: "run_prev", WantFires: 1,
 	}, { // Test 2: The check could not read the run store, so the schedule fires rather than going
 		// silently dark.
 		Name: "unreadable", LastRunID: "run_prev", Err: errors.New("db down"), WantFires: 1,
-	}, { // Test 3: There is no previous run to wait for, so the check is never consulted.
-		Name: "no previous run", LastRunID: "", Active: true, WantFires: 1,
+	}, { // Test 3: No run is recorded as the last one, and the check is still what decides, since
+		// a run the schedule fired can be going without being the one it recorded last.
+		Name: "no previous run recorded", LastRunID: "", Active: "run_apply", WantFires: 0,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -502,7 +503,7 @@ func TestOverlapCheckFailsTowardFiring(t *testing.T) {
 			}
 			sub := &countingKindSubmitter{}
 			s := NewScheduler(store, sub, zap.NewNop(),
-				WithRunActive(func(context.Context, string) (bool, error) {
+				WithRunActive(func(context.Context, string, string) (string, error) {
 					return test.Active, test.Err
 				}))
 			s.tick(time.Now())
@@ -536,7 +537,7 @@ func TestOverlapCheckFailsTowardFiring(t *testing.T) {
 		store := &errStore{Store: inner, claimErr: errors.New("db down")}
 		sub := &countingKindSubmitter{}
 		s := NewScheduler(store, sub, zap.NewNop(),
-			WithRunActive(func(context.Context, string) (bool, error) { return true, nil }))
+			WithRunActive(func(context.Context, string, string) (string, error) { return "run_prev", nil }))
 		s.tick(time.Now())
 		if got := sub.calls.Load(); got != 0 {
 			t.Errorf("fired %d times while the previous run was going and the advance failed", got)

@@ -4,17 +4,17 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Desktop | SwitchTender docs</title>
-	<meta name="description" content="SwitchTender runs as a local desktop application with one command.">
+	<meta name="description" content="SwitchTender runs as a local desktop application with one command. Because the whole product is a single binary with an embedded web UI, it needs no database server, no container, and no Kubernetes.">
 	<link rel="canonical" href="https://switchtender.com/docs/desktop">
 	<meta property="og:title" content="Desktop | SwitchTender docs">
-	<meta property="og:description" content="SwitchTender runs as a local desktop application with one command.">
+	<meta property="og:description" content="SwitchTender runs as a local desktop application with one command. Because the whole product is a single binary with an embedded web UI, it needs no database server, no container, and no Kubernetes.">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/desktop">
-	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
 	<meta name="twitter:card" content="summary_large_image">
 	<meta name="twitter:title" content="Desktop | SwitchTender docs">
-	<meta name="twitter:description" content="SwitchTender runs as a local desktop application with one command.">
-	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta name="twitter:description" content="SwitchTender runs as a local desktop application with one command. Because the whole product is a single binary with an embedded web UI, it needs no database server, no container, and no Kubernetes.">
+	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
 	<script type="application/ld+json">
 {
  "@context": "https://schema.org",
@@ -24,7 +24,7 @@
   "name": "SwitchTender",
   "url": "https://switchtender.com/"
  },
- "description": "SwitchTender runs as a local desktop application with one command.",
+ "description": "SwitchTender runs as a local desktop application with one command. Because the whole product is a single binary with an embedded web UI, it needs no database server, no container, and no Kubernetes.",
  "headline": "Desktop",
  "isPartOf": {
   "@type": "WebSite",
@@ -66,8 +66,11 @@
 		<main class="dcontent prose">
 			<h1 id="desktop">Desktop</h1>
 <p>SwitchTender runs as a local desktop application with one command. Because the whole product is a
-single binary with an embedded web UI, there is nothing to install alongside it: no database server,
-no container, no Kubernetes.</p>
+single binary with an embedded web UI, it needs no database server, no container, and no Kubernetes.
+What a run needs is its own tool on the PATH, such as <code>ansible-playbook</code> for an Ansible run and
+<code>bash</code> for a Bash run. macOS and Linux ship <code>bash</code>, so a Bash run works there as soon as the binary
+does. Windows does not ship one, so on Windows a Bash run needs a <code>bash</code> installed and on the PATH
+first.</p>
 <h2 id="download">Download</h2>
 <p>Every release attaches ready-to-run downloads on the
 <a href="https://github.com/kordloom/switchtender/releases">releases page</a>: a <code>windows_amd64.zip</code> holding

@@ -156,6 +156,10 @@ type semaphoreSchedule struct {
 // wired by generated id. Like the AWX mapping it records warnings rather than failing on an asset
 // it cannot map cleanly.
 func FromSemaphore(data []byte, now time.Time) (*Plan, error) {
+	data, err := textOf(data)
+	if err != nil {
+		return nil, err
+	}
 	if err := refuseJSONTail(data); err != nil {
 		return nil, err
 	}

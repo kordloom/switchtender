@@ -1,13 +1,16 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// Two servers back two suites. The smoke suite drives the seeded, read-only demo, where the data is
-// rich and nothing can be changed, so it covers rendering and navigation of every main page. The
+// Three servers back three suites. The smoke suite drives the seeded, read-only demo, where the data
+// is rich and nothing can be changed, so it covers rendering and navigation of every main page. The
 // interactive suite drives a writable serve instance, where it exercises the mutating flows the demo
-// disables: launching a run and creating objects, then checking the change actually landed.
+// disables: launching a run and creating objects, then checking the change actually landed. The
+// assess suite drives the browser assessment, a static page, from the site directory itself.
 const DEMO_PORT = 18777;
 const SERVE_PORT = 18778;
+const SITE_PORT = 18779;
 const DEMO = `http://127.0.0.1:${DEMO_PORT}`;
 const SERVE = `http://127.0.0.1:${SERVE_PORT}`;
+const SITE = `http://127.0.0.1:${SITE_PORT}`;
 
 // ST_E2E_CHANNEL, when set (e.g. "chrome"), drives a system-installed browser instead of the one
 // Playwright downloads. It is a convenience for a machine that already has Chrome but not the headless
@@ -48,6 +51,11 @@ export default defineConfig({
       testMatch: "interactive.spec.mjs",
       use: { ...devices["Desktop Chrome"], ...channel, baseURL: SERVE },
     },
+    {
+      name: "assess",
+      testMatch: "assess.spec.mjs",
+      use: { ...devices["Desktop Chrome"], ...channel, baseURL: SITE },
+    },
   ],
   webServer: [
     {
@@ -73,6 +81,16 @@ export default defineConfig({
       timeout: 60_000,
       reuseExistingServer: !process.env.CI,
       env: serveEnv,
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+    {
+      // The site as it deploys, with the reader built into it by npm run build:assess. A static
+      // server is all the page has in production too.
+      command: `python3 -m http.server ${SITE_PORT} --bind 127.0.0.1 --directory ../../../site`,
+      url: `${SITE}/assess/`,
+      timeout: 30_000,
+      reuseExistingServer: !process.env.CI,
       stdout: "pipe",
       stderr: "pipe",
     },

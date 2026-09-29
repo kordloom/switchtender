@@ -10,9 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/kordloom/loomseal/jcs"
+	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
 )

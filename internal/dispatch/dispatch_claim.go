@@ -7,9 +7,10 @@ import (
 	"math/rand/v2"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
-	"go.uber.org/zap"
 )
 
 // claimLoop leases pending runs from the store and executes them, one claim per free worker slot,

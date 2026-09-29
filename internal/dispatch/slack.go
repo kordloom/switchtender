@@ -12,7 +12,7 @@ import (
 )
 
 // WithSlack posts a formatted message to each Slack incoming webhook URL when a top-level run
-// reaches a terminal state.
+// finishes or is held for approval.
 func WithSlack(urls []string) Option {
 	return func(c *config) { c.slackWebhooks = append([]string(nil), urls...) }
 }
@@ -23,7 +23,7 @@ type slackPayload struct {
 	Text string `json:"text"`
 }
 
-// notifySlack posts a terminal top-level run to every configured Slack webhook.
+// notifySlack posts a finished or held top-level run to every configured Slack webhook.
 func (d *Dispatcher) notifySlack(r *run.Run) {
 	d.deliverSlackFormat(d.slackWebhooks, "slack", r)
 }
@@ -52,6 +52,9 @@ func (d *Dispatcher) deliverSlackFormat(urls []string, label string, r *run.Run)
 // slackMessage renders a run as a one-line Slack message with a status icon, the run label, and
 // the elapsed time. It carries no extra vars, so channel secrets are not exposed.
 func slackMessage(r *run.Run) string {
+	if r.Status == run.StatusPendingApproval {
+		return "SwitchTender run *" + runLabel(r) + "* " + heldSentences(r)
+	}
 	icon := ":white_check_mark:"
 	if r.Status != run.StatusSucceeded {
 		icon = ":x:"

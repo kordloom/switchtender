@@ -54,16 +54,35 @@ type sshHost struct {
 	Port string
 }
 
+// standDownOrFail skips on a machine allowed to lack something, and fails where the gate provides
+// everything.
+//
+// The job that runs this suite installs docker, ansible and every advertised engine, and then a
+// missing one of them stood the test down and reported a pass. That is the same shape that refused
+// v1.97.0's predecessor publication one job over: a gate expected to supply a thing, quietly
+// proving less than it claims when the thing is absent.
+//
+// A developer's machine is still allowed to lack any of it and say so. The variable below is the
+// switch the PostgreSQL contract, the drift tests, the loomseal cross-check and the engine contract
+// already read for exactly this, so this reads the same one rather than inventing another.
+func standDownOrFail(t *testing.T, format string, args ...any) {
+	t.Helper()
+	if os.Getenv("SWITCHTENDER_REQUIRE_FULL_SUITE") == "1" {
+		t.Fatalf("SWITCHTENDER_REQUIRE_FULL_SUITE is set and "+format, args...)
+	}
+	t.Skipf(format, args...)
+}
+
 // requireStack skips the test unless docker and ansible are usable.
 func requireStack(t *testing.T) {
 	t.Helper()
 	for _, bin := range []string{"docker", "ansible-playbook", "ansible-inventory", "ssh-keygen"} {
 		if _, err := exec.LookPath(bin); err != nil {
-			t.Skipf("%s not on PATH", bin)
+			standDownOrFail(t, "%s is not on PATH", bin)
 		}
 	}
 	if err := exec.Command("docker", "info").Run(); err != nil {
-		t.Skip("docker daemon not running")
+		standDownOrFail(t, "the docker daemon is not running: %v", err)
 	}
 }
 
@@ -456,8 +475,9 @@ func requireHostBindMounts(t *testing.T) {
 	out, err := exec.Command("docker", "run", "--rm", "-v", dir+":"+dir+":ro",
 		"alpine:3.22", "cat", filepath.Join(dir, "probe")).CombinedOutput()
 	if err != nil || !strings.Contains(string(out), "visible") {
-		t.Skipf("this docker cannot bind mount a host path, so container execution cannot be "+
-			"exercised here; run it where the daemon shares this filesystem: %v\n%s", err, out)
+		standDownOrFail(t, "this docker cannot bind mount a host path, so container execution "+
+			"cannot be exercised here; run it where the daemon shares this filesystem: %v\n%s",
+			err, out)
 	}
 }
 
@@ -465,16 +485,18 @@ func requireHostBindMounts(t *testing.T) {
 // ansible-core reported by the play is the image's, not the host's, proving execution isolation.
 func TestContainerExecutionEnvironment(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
-		t.Skip("docker not on PATH")
+		standDownOrFail(t, "docker is not on PATH")
 	}
 	if err := exec.Command("docker", "info").Run(); err != nil {
-		t.Skip("docker daemon not running")
+		standDownOrFail(t, "the docker daemon is not running: %v", err)
 	}
 	requireHostBindMounts(t)
 	pull, cancelPull := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancelPull()
+	// A pull that fails is the sharpest of these. Container execution is an advertised feature and
+	// a registry having a bad minute made the one test covering it disappear, green.
 	if out, err := exec.CommandContext(pull, "docker", "pull", eeImage).CombinedOutput(); err != nil {
-		t.Skipf("cannot pull %s: %v\n%s", eeImage, err, out)
+		standDownOrFail(t, "cannot pull %s: %v\n%s", eeImage, err, out)
 	}
 
 	dir := t.TempDir()

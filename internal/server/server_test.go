@@ -74,12 +74,26 @@ type fakeCanceler struct {
 	ok bool
 	// gotID is the id from the most recent Cancel call.
 	gotID string
+	// store is where CancelWaiting cancels a waiting run, or nil to report none waiting.
+	store run.Store
+	// gotWaitingID is the id from the most recent CancelWaiting call.
+	gotWaitingID string
 }
 
 // Cancel records the id and returns the fixed result.
 func (f *fakeCanceler) Cancel(id string) bool {
 	f.gotID = id
 	return f.ok
+}
+
+// CancelWaiting records the id and cancels the run in store, the part of the dispatcher's answer
+// the handler can see.
+func (f *fakeCanceler) CancelWaiting(ctx context.Context, id string) (bool, error) {
+	f.gotWaitingID = id
+	if f.store == nil {
+		return false, nil
+	}
+	return f.store.CancelPending(ctx, id)
 }
 
 // fakeRetrier records the retried id and returns canned results.
@@ -1149,6 +1163,66 @@ func TestCancelRun(t *testing.T) {
 	}
 }
 
+// TestCancelingAWaitingRunGoesThroughTheDispatcher pins who ends a run nothing has claimed. The
+// handler canceled it in the store itself, which ended the run without settling it: no outcome
+// reached the chain and a channel told the run was held never heard that it was canceled. The
+// dispatcher settles it, so the handler hands the cancel over whenever one is wired, and falls back
+// to the store alone only on a server with no dispatcher to hand it to.
+func TestCancelingAWaitingRunGoesThroughTheDispatcher(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		// Name says what the run is waiting for and whether a dispatcher is wired.
+		Name string
+		// Status is the run's status when the cancel arrives.
+		Status run.Status
+		// Dispatcher reports whether the server has a canceler wired.
+		Dispatcher bool
+		// WantHandedOver reports whether the dispatcher must have been asked to cancel the run.
+		WantHandedOver bool
+	}{{ // Test 0: A held run goes through the dispatcher.
+		Name: "held", Status: run.StatusPendingApproval, Dispatcher: true, WantHandedOver: true,
+	}, { // Test 1: So does a queued run nobody claimed.
+		Name: "queued", Status: run.StatusPending, Dispatcher: true, WantHandedOver: true,
+	}, { // Test 2: With no dispatcher the store still cancels it, which is all that server can do.
+		Name: "no dispatcher", Status: run.StatusPendingApproval,
+	}}
+
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			store := run.NewMemStore()
+			if err := store.Save(ctx, &run.Run{
+				ID: "run_1", Status: test.Status, CreatedAt: time.Now(),
+			}); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+			canceler := &fakeCanceler{store: store}
+			var opts []Option
+			if test.Dispatcher {
+				opts = append(opts, WithCanceler(canceler))
+			}
+			handler := New(store, &fakeSubmitter{}, zap.NewNop(), opts...).Handler()
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/runs/run_1/cancel", nil))
+			if rec.Code != http.StatusAccepted || !strings.Contains(rec.Body.String(), `"canceled"`) {
+				t.Fatalf("cancel = %d %s, want 202 canceled", rec.Code, rec.Body.String())
+			}
+			if handed := canceler.gotWaitingID == "run_1"; handed != test.WantHandedOver {
+				t.Errorf("handed to the dispatcher = %v, want %v", handed, test.WantHandedOver)
+			}
+			stored, err := store.Get(ctx, "run_1")
+			if err != nil {
+				t.Fatalf("Get() error = %v", err)
+			}
+			if stored.Status != run.StatusCanceled {
+				t.Errorf("stored status = %q, want canceled", stored.Status)
+			}
+		})
+	}
+}
+
 func TestRetryRun(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -1187,6 +1261,12 @@ func TestRetryRun(t *testing.T) {
 		{ // Test 6: Retry disabled is not found.
 			Name: "disabled", Retrier: nil,
 			WantStatus: http.StatusNotFound, WantBodyContains: "retry not enabled",
+		},
+		{ // Test 7: A split missing shards conflicts and says why, since a retry cannot fix it.
+			Name: "incomplete split", Retrier: &fakeRetrier{err: fmt.Errorf(
+				"%w: only 2 of 3 shards were stored, so submit the split again",
+				dispatch.ErrIncompleteSplit)},
+			WantStatus: http.StatusConflict, WantBodyContains: "submit the split again",
 		},
 	}
 	for testNum, test := range tests {

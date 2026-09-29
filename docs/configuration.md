@@ -109,13 +109,13 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--workers` | `4` | Concurrent runs this process executes at once. At least 1: the server executes its own runs, so there is no value that makes it execute none. |
 | `--max-shards` | `512` | Most groups a split fans out into. A split is always bounded by the host count. |
 | `--run-timeout` | `0` | Default cap on how long a run may execute before it is canceled and failed, for example `1h`. A run may set a shorter timeout. Zero leaves runs uncapped. |
-| `--notify-webhook` | none | URL that receives a JSON notification when a run finishes. Repeatable. |
-| `--notify-slack` | none | Slack incoming webhook URL that receives a message when a run finishes. Repeatable. |
-| `--notify-mattermost` | none | Mattermost incoming webhook URL that receives a message when a run finishes. Repeatable. |
-| `--notify-rocketchat` | none | Rocket.Chat incoming webhook URL that receives a message when a run finishes. Repeatable. |
-| `--notify-discord` | none | Discord incoming webhook URL that receives a message when a run finishes. Repeatable. |
-| `--notify-teams` | none | Microsoft Teams incoming webhook URL that receives an Adaptive Card when a run finishes. Repeatable. |
-| `--notify-ntfy` | none | ntfy topic URL that receives a notification when a run finishes, such as https://ntfy.sh/my-topic. Repeatable. |
+| `--notify-webhook` | none | URL that receives a JSON notification when a run finishes or is held for approval. Repeatable. |
+| `--notify-slack` | none | Slack incoming webhook URL that receives a message when a run finishes or is held for approval. Repeatable. |
+| `--notify-mattermost` | none | Mattermost incoming webhook URL that receives a message when a run finishes or is held for approval. Repeatable. |
+| `--notify-rocketchat` | none | Rocket.Chat incoming webhook URL that receives a message when a run finishes or is held for approval. Repeatable. |
+| `--notify-discord` | none | Discord incoming webhook URL that receives a message when a run finishes or is held for approval. Repeatable. |
+| `--notify-teams` | none | Microsoft Teams incoming webhook URL that receives an Adaptive Card when a run finishes or is held for approval. Repeatable. |
+| `--notify-ntfy` | none | ntfy topic URL that receives a notification when a run finishes or is held for approval, such as https://ntfy.sh/my-topic. Repeatable. |
 | `--notify-ntfy-token` | none | Optional bearer token for a protected ntfy topic, applied to every `--notify-ntfy` URL. |
 | `--notify-pagerduty` | none | PagerDuty Events API routing key that triggers an incident when a run fails. Repeatable. |
 | `--notify-grafana` | none | Grafana base URL that receives an annotation when a run finishes. Repeatable. |
@@ -158,7 +158,7 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--smtp-from` | none | Sender address for notification emails. |
 | `--smtp-to` | none | Recipient address for notification emails. Repeatable. |
 | `--smtp-username` | none | SMTP username. The password comes from `SWITCHTENDER_SMTP_PASSWORD`. |
-| `--notify-on` | `failure` | When to email: `failure` for failed runs only, or `finish` for every terminal run. |
+| `--notify-on` | `failure` | When to email: `failure` for failed runs only, or `finish` for every finished run and every run held for approval. |
 | `--policy-file` | none | YAML file holding the approval policies. When set, the file is the source of truth and the API refuses policy edits. |
 | `--trusted-proxy` | none | CIDR of a reverse proxy whose client IP header to believe, repeatable. Required behind a proxy: without it every request appears to come from the proxy itself, so the failed sign-in budget, the webhook rate limit, and the per-client stream budget all become one budget shared by everyone behind it, and one stranger's failed guesses can lock sign-in for the whole install. |
 | `--client-ip-header` | none | Header carrying the real client address from a trusted proxy. Defaults to the leftmost `X-Forwarded-For` entry. |
@@ -273,6 +273,9 @@ a number in an assessment cannot disagree with what a run would later say.
 
 Formats are `awx`, `semaphore`, `chef`, and `puppet`. An AWX-format export also covers Ansible
 Automation Platform, Tower, and Ascender.
+
+An export saved as UTF-8 with a byte order mark, or as UTF-16 the way Windows PowerShell writes a
+file by default, is read the same as plain UTF-8, here, by `import`, and by the assessment page.
 
 The output has three parts: what is in the export, what survives the move, and what changes about
 how it is governed. The third part names the templates that cannot be undone, the ones carrying a

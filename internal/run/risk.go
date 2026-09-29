@@ -64,6 +64,10 @@ func AssessRisk(r *Run) Risk {
 		reasons = append(reasons, "destructive "+findings[0])
 		level = RiskHigh
 	}
+	if planned := plannedDestroys(r); planned != "" {
+		reasons = append(reasons, planned)
+		level = RiskHigh
+	}
 	for _, m := range disruptiveMarkers {
 		if strings.Contains(lower, m) {
 			reasons = append(reasons, "destructive command: "+strings.TrimSpace(m))

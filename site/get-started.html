@@ -10,7 +10,7 @@
 	<meta property="og:description" content="Get SwitchTender running in about a minute: one binary, one SQLite file, no Kubernetes. Install, serve, open the UI, launch your first run.">
 	<meta property="og:type" content="website">
 	<meta property="og:url" content="https://switchtender.com/get-started">
-	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
 	<meta name="twitter:card" content="summary_large_image">
 	<link rel="icon" href="/favicon.ico" sizes="any">
 	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
@@ -116,7 +116,7 @@
 						<p>Pick the build for your platform: the <code>.dmg</code> or a <code>darwin</code> tarball on macOS, a <code>linux</code> tarball on Linux, or the <code>windows</code> zip. Verify it against the <code>SHA256SUMS</code> file on the same release.</p>
 						<p>Prefer to build from source? With the Go toolchain installed:</p>
 						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>go install github.com/kordloom/switchtender@latest</code></pre></div>
-						<p>To run Ansible you also need <code>ansible-playbook</code> on the box. Terraform, OpenTofu, Python, and Go runs each need their own toolchain. Bash and PowerShell use what the OS already provides.</p>
+						<p>Each tool a run uses has to be on the box too: <code>ansible-playbook</code> for Ansible, and <code>terraform</code>, <code>tofu</code>, <code>python3</code>, <code>pwsh</code> (PowerShell 7), or <code>go</code> for the rest. Bash runs use the shell macOS and Linux already have. The container image carries Ansible, Python, Terraform, and OpenTofu. PowerShell and Go bring their own, on the host or in a pinned container image.</p>
 					</div>
 				</li>
 				<li class="gs-step reveal">

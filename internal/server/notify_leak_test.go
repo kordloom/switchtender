@@ -57,16 +57,28 @@ func TestNotificationSecretsNeverLeaveOnARun(t *testing.T) {
 			t.Parallel()
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+			// A route that cannot answer is a route whose masking is unknown, not one with
+			// nothing to check. This stood the route down instead, so a route that broke or whose
+			// fixture drifted would have left this listing silently and gone on passing, which is
+			// the enumeration being trusted after all.
 			if rec.Code >= 400 {
-				t.Skipf("%s answered %d, nothing to check", path, rec.Code)
+				t.Fatalf("%s answered %d, so whether it masks the notification secret is no "+
+					"longer being checked on any response: %s", path, rec.Code, rec.Body.String())
 			}
-			if strings.Contains(rec.Body.String(), "ZZZZsupersecretZZZZ") {
+			body := rec.Body.String()
+			// And the response has to be carrying a target for the absence of a secret to mean
+			// anything. An empty listing answers 200 and contains no secret either, so a route that
+			// stopped returning runs would pass this while looking at nothing at all.
+			if !strings.Contains(body, `"notifications"`) {
+				t.Fatalf("%s returned no notification target, so finding no secret in it proves "+
+					"nothing about whether it masks one: %s", path, body)
+			}
+			if strings.Contains(body, "ZZZZsupersecretZZZZ") {
 				t.Errorf("%s returned the notification secret in full, so anyone who may read a "+
-					"run can post as this install: %s", path, rec.Body.String())
+					"run can post as this install: %s", path, body)
 			}
 			// The channel is still visible, so masking did not blind the interface.
-			if strings.Contains(rec.Body.String(), "notifications") &&
-				!strings.Contains(rec.Body.String(), "slack") {
+			if !strings.Contains(body, "slack") {
 				t.Errorf("%s masked the channel as well as the secret", path)
 			}
 		})

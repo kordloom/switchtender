@@ -14,23 +14,19 @@ import (
 	"github.com/kordloom/switchtender/internal/schedule"
 )
 
-// TestListSurvivesOneUnreadableScheduleStamp demonstrates a defect and is skipped so the suite stays
-// green. The operator decides whether to fix it.
+// TestListSurvivesOneUnreadableScheduleStamp holds one damaged row to costing only itself.
 //
 // normalizeScheduleTimes deliberately leaves a next_run_at it cannot parse alone, and says why:
 // "Rewriting a value we cannot read would be a guess, and the schedule is already broken in a way a
-// migration cannot honestly repair." That reasoning assumes the damage stays with the one row. It
-// does not. scanSchedule returns the parse error, and List turns any scan error into a failure for
-// the whole query, so a single unreadable stamp takes down every schedule listing in the install:
-// the schedules API page and the scheduler's own enumeration both return an error, and no schedule
-// fires, not just the damaged one.
+// migration cannot honestly repair." That reasoning assumes the damage stays with the one row, and it
+// did not. scanSchedule returned the parse error and List turns any scan error into a failure for the
+// whole query, so a single unreadable stamp took down every schedule listing in the install: the
+// schedules API page errored, the scheduler enumerated nothing, and no schedule fired at all.
 //
-// The write path tolerates the row on purpose and the read path does not, which is the inconsistency
-// rather than either half on its own. A skip on the bad row, or a zero next run with the raw text
-// preserved, would keep the blast radius where the migration comment already assumes it is.
+// The write path tolerating the row while the read path refused it was the inconsistency, rather than
+// either half alone. A stamp that cannot be read is now absent rather than fatal, which puts the cost
+// where the migration comment already assumes it is.
 func TestListSurvivesOneUnreadableScheduleStamp(t *testing.T) {
-	t.Skip("BUG: one unparseable schedules.next_run_at makes every List fail, so no schedule fires")
-
 	dsn := testDSN(t)
 	db, err := pgstore.Open(dsn)
 	if err != nil {
@@ -335,28 +331,25 @@ func trivialEvents(n int) []event.Event {
 	return out
 }
 
-// TestStartupMigrationDoesNotBreakRuntimeWrites demonstrates a defect and is skipped so the suite
-// stays green. The operator decides whether to fix it.
+// TestStartupMigrationDoesNotBreakRuntimeWrites holds a rolling restart to costing the nodes that
+// are already running nothing.
 //
-// Open runs the whole migration inside one transaction that takes AccessExclusiveLock on every
-// table, and its comment says every process calls Open, workers included, so it runs on ordinary
-// starts and not only on upgrades. The comment then reasons about the failure it wants: "Failing
-// fast instead means the starting process retries rather than freezing everyone else, which is the
-// direction this should fail in."
+// Open used to run the whole migration inside one transaction that takes AccessExclusiveLock on
+// every table, on every start, because every process calls Open and workers do too. The migration's
+// own timeout comment reasons about the failure it wants: "Failing fast instead means the starting
+// process retries rather than freezing everyone else, which is the direction this should fail in."
 //
-// The cost does not land only on the starting process. PostgreSQL breaks the lock cycle by killing
-// one of the two transactions, and roughly half the time the victim is the ordinary runtime write,
-// which comes back as SQLSTATE 40P01 to a caller that has no retry. Running six writers alongside
-// six nodes opening the database, twenty-four of a hundred and eighty summary writes failed this
-// way. In production that is a rolling restart making healthy nodes lose host summaries.
+// The cost did not land only on the starting process. PostgreSQL breaks the lock cycle by killing
+// one of the two transactions, and roughly half the time the victim was the ordinary runtime write,
+// coming back as SQLSTATE 40P01 to a caller with no retry. Six writers beside six nodes opening the
+// database lost 28 of 180 summary writes. In production that is a rolling restart making healthy
+// nodes lose host summaries. The lock_timeout does not help, because deadlock detection fires first
+// and returns a different error.
 //
-// The lock_timeout the migration sets does not help, because deadlock detection fires first and
-// returns a different error. Taking the schema lock before the per-column ALTERs, or letting the
-// migration skip entirely when the schema is already current, would keep the failure on the side
-// the comment intends.
+// Open now asks the catalog whether applying the schema would change anything and migrates only when
+// it would, so a start with nothing to do takes no exclusive lock at all. A real upgrade still
+// migrates and still contends, which is the one time contending is the right answer.
 func TestStartupMigrationDoesNotBreakRuntimeWrites(t *testing.T) {
-	t.Skip("BUG: a node running Open deadlocks ordinary summary writes on other nodes (40P01)")
-
 	dsn := testDSN(t)
 	ctx, s := fenceStore(t)
 	stamp := time.Now().UnixNano()

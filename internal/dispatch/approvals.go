@@ -156,6 +156,20 @@ func (d *Dispatcher) startSplit(ctx context.Context, parent *run.Run) {
 		d.finalize(parent, run.StatusFailed, nil, "split has no stored shards to run")
 		return
 	}
+	// A split whose fan-out could not be settled when it was stored holds fewer shards than it
+	// counts. Starting it would run part of what the approver released and roll that up as the
+	// whole, so its shards are canceled and it fails with the count instead.
+	if parent.ShardCount != nil && len(shards) < *parent.ShardCount {
+		for _, s := range shards {
+			if _, err := d.store.CancelPending(ctx, s.ID); err != nil {
+				d.log.Error("dispatch: cancel shard " + s.ID + " of an incomplete split: " + err.Error())
+			}
+		}
+		d.finalize(parent, run.StatusFailed, nil, fmt.Sprintf("only %d of %d shards were stored, so "+
+			"running it would change part of what was approved: submit it again",
+			len(shards), *parent.ShardCount))
+		return
+	}
 	// A shard that fails to release is logged and the rest proceed.
 	//
 	// Returning here instead left the shards already released claimable and running, under a parent

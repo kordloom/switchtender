@@ -32,6 +32,9 @@ var (
 	ErrNotFinished = errors.New("run not finished")
 	// ErrNoFailedShards is returned when a shard retry finds nothing to retry.
 	ErrNoFailedShards = errors.New("no failed shards")
+	// ErrIncompleteSplit is returned when a shard retry targets a split that stored fewer shards than
+	// it counts, so no retry can tell which hosts never had one.
+	ErrIncompleteSplit = errors.New("split is missing shards")
 	// ErrNoFailedHosts is returned when a failed-host relaunch finds no host that failed.
 	ErrNoFailedHosts = errors.New("no failed hosts")
 	// ErrNoHostSummary is returned when a relaunch targets a run that recorded no per-host results,

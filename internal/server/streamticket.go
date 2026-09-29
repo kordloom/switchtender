@@ -6,9 +6,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"time"
-
 	"net/http"
+	"time"
 
 	"go.uber.org/zap"
 

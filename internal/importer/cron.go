@@ -29,6 +29,10 @@ var cronEnvAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*\s*=`)
 // reproduced per schedule.
 func FromCron(inventory string, system bool) func([]byte, time.Time) (*Plan, error) {
 	return func(data []byte, now time.Time) (*Plan, error) {
+		data, err := textOf(data)
+		if err != nil {
+			return nil, err
+		}
 		p := &Plan{}
 		// A crontab line ran on the machine it was taken from. Imported, it becomes a shell step, and a
 		// shell step runs where SwitchTender runs. Naming an inventory does not move it: an inventory

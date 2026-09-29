@@ -2,13 +2,13 @@ package run
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/kordloom/switchtender/internal/event"
-	"slices"
 )
 
 // memStore is an in-memory Store backed by maps guarded by a read-write mutex.

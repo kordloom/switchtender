@@ -76,7 +76,8 @@ CREATE TABLE IF NOT EXISTS runs (
 	distinct_approver INTEGER NOT NULL DEFAULT 0,
 	pinned_commit TEXT NOT NULL DEFAULT '',
 	policy_set TEXT NOT NULL DEFAULT '',
-	actor_user_id TEXT NOT NULL DEFAULT ''
+	actor_user_id TEXT NOT NULL DEFAULT '',
+	plan_destroys INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 -- Every run listing selects top-level runs and pages them by creation time, and that pair has to sit

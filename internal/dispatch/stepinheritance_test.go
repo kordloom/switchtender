@@ -100,6 +100,7 @@ var stepFields = map[string]stepFieldRule{
 	"RetryOf":        notOnAStep,
 	"RerunOf":        notOnAStep,
 	"ProposedFrom":   notOnAStep,
+	"PlanDestroys":   notOnAStep,
 	"Intent":         notOnAStep,
 	"Source":         notOnAStep,
 	"SourceID":       notOnAStep,

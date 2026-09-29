@@ -8,10 +8,11 @@ import (
 	"github.com/kordloom/switchtender/internal/run"
 )
 
-// notifyRunTargets delivers a terminal top-level run to the per-run notification targets it carries,
-// in addition to the server-wide channels. Each target names a channel kind and a URL, so a template
-// routes its runs to its own team. A target marked OnFailure is skipped for a successful run.
-// Delivery reuses the built-in channel formatters and their bounded, best-effort sending.
+// notifyRunTargets delivers a finished or held top-level run to the notification targets it
+// carries, in addition to the server-wide channels. Each target names a channel kind and a URL, so
+// a template routes its runs to its own team. A target marked OnFailure is skipped for a successful
+// run and for a held one. Delivery reuses the built-in channel formatters and their bounded,
+// best-effort sending.
 func (d *Dispatcher) notifyRunTargets(r *run.Run) {
 	if len(r.Notifications) == 0 {
 		return
@@ -32,7 +33,8 @@ func (d *Dispatcher) notifyRunTargets(r *run.Run) {
 		if !run.ValidNotifyKind(t.Kind) {
 			continue
 		}
-		if t.OnFailure && r.Status == run.StatusSucceeded {
+		// A target that asked for failures only hears neither a success nor a hold.
+		if t.OnFailure && (r.Status == run.StatusSucceeded || r.Status == run.StatusPendingApproval) {
 			continue
 		}
 		// A URL-configured channel groups by URL; a richer channel carries its own key or recipient
@@ -81,7 +83,7 @@ func (d *Dispatcher) notifyRunTargets(r *run.Run) {
 		// about what a webhook may see. Listing the fields here instead let this one keep the command,
 		// which is the run's raw script body, while the server-wide webhook for the same run stripped it.
 		redacted := redactForExternal(r)
-		if body := encode("webhook", notification{Event: "run.finished", Run: &redacted}); body != nil {
+		if body := encode("webhook", notification{Event: webhookEvent(r), Run: &redacted}); body != nil {
 			postJSON(urls, body)
 		}
 	}
@@ -96,15 +98,7 @@ func (d *Dispatcher) notifyRunTargets(r *run.Run) {
 		}
 	}
 	if urls := byKind[run.NotifyNtfy]; len(urls) > 0 {
-		headers := map[string]string{
-			"Content-Type": "text/plain",
-			"Title":        "SwitchTender run " + runLabel(r) + " " + string(r.Status),
-			"Tags":         "white_check_mark",
-		}
-		if r.Status != run.StatusSucceeded {
-			headers["Tags"] = "x"
-			headers["Priority"] = "high"
-		}
+		headers := ntfyHeaders(r)
 		body := []byte(ntfyBody(r))
 		for _, u := range urls {
 			d.notifyWG.Add(1)

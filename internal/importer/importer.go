@@ -54,6 +54,12 @@ type Plan struct {
 	Warnings []string
 	// suppressed counts the warnings past the cap, so the total is still knowable.
 	suppressed int
+	// gates names the workflows refused because they wait on an approval node, so an assessment can
+	// say which approvals the estate has today that an import does not carry.
+	gates []string
+	// refused counts the objects the export held that were recognized and then refused, each with a
+	// warning saying why, so a document of nothing else reads as an export rather than as nothing.
+	refused int
 }
 
 // objects counts everything the plan would create, which is what makes an import a success or a
@@ -71,10 +77,19 @@ func (p *Plan) objects() int {
 // The one thing an import must never do is look complete when it read nothing.
 var ErrNothingRecognized = errors.New("nothing in this document was recognized")
 
+// ErrNotText is returned for an export whose byte order mark promises an encoding its bytes do not
+// hold, which is a file cut short or one that is not text.
+var ErrNotText = errors.New("this export is not whole text in the encoding it is marked with")
+
 // requireObjects turns an empty plan into a refusal, naming what the importer was looking for so the
 // operator can tell a wrong export from an empty one.
+//
+// A plan whose every object was recognized and refused is not empty in that sense. Its warnings say
+// why each one did not come across, which is the report, and refusing the document threw them away:
+// an export of workflows alone was called unrecognized, and the approval gates its workflows would
+// lose were never named.
 func (p *Plan) requireObjects(expected string) error {
-	if p.objects() > 0 {
+	if p.objects() > 0 || p.refused > 0 {
 		return nil
 	}
 	return fmt.Errorf("%w: no %s were found. Check that this is the right export and the right "+

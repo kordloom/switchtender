@@ -379,12 +379,15 @@ losing a field.
 ## Per-template notifications
 
 A template or a run submission may carry `notifications`, a list of targets that receive its
-terminal state in addition to the server-wide channels. Each target names a `kind` and the field
-that kind is addressed by, plus an optional `on_failure` that limits the target to failed runs.
+terminal state in addition to the server-wide channels, and hear when a rule holds it for approval.
+Each target names a `kind` and the field that kind is addressed by, plus an optional `on_failure`
+that limits the target to failed runs, which also leaves it out of holds. A hold reaches webhook,
+chat, ntfy, and email targets, and never a PagerDuty, Grafana, or Twilio one: a hold asks for a
+decision, and those report incidents.
 
 | Kind | Required fields | What is sent |
 |------|-----------------|--------------|
-| `webhook` | `url` | The finished run as JSON, extra vars redacted. |
+| `webhook` | `url` | The run as JSON with its `event`, extra vars redacted. |
 | `slack`, `mattermost`, `rocketchat` | `url` | A message to the incoming webhook. |
 | `discord`, `teams` | `url` | A message or Adaptive Card to the webhook. |
 | `ntfy` | `url` | A notification to the topic, raised priority on failure. |
@@ -407,6 +410,10 @@ curl -X POST https://switchtender.example.com/v1/templates \
     ]
   }'
 ```
+
+A webhook, a target or one named with `--notify-webhook`, receives one body shape:
+`{"event": "run.finished", "run": {...}}` when a run reaches a terminal state, and the same with
+`"event": "run.held"` when a rule holds it for a person to decide on.
 
 A malformed target is refused at create or update with the field it lacks, not dropped at
 delivery. A Twilio or email target names only a recipient. The account credentials stay in server

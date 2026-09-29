@@ -17,6 +17,7 @@ import (
 func Contract(t *testing.T, newStore func() run.Store) {
 	t.Helper()
 	t.Run("save and get", func(t *testing.T) { testSaveGet(t, newStore()) })
+	t.Run("plan destroys round trip", func(t *testing.T) { testPlanDestroysRoundTrip(t, newStore()) })
 	t.Run("stream ticket refuses a wrong run and an expiry", func(t *testing.T) {
 		testStreamTicketRefusesWrongRunAndExpiry(t, newStore())
 	})

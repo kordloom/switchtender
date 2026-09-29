@@ -163,30 +163,35 @@ func mergeTasks(tasks []run.TaskSummary) []run.TaskSummary {
 	return out
 }
 
+// previousScan bounds how many earlier runs a baseline search reads.
+const previousScan = 200
+
 // previousRun returns the most recent run fired by the same source before a, or empty when there
 // is none. A run with no source falls back to the newest earlier run of the same playbook and
 // tool, scanning a bounded page rather than all of history.
+//
+// Either way the baseline is the same kind of run as a. The apply a plan proposes carries the
+// plan's origin, so a gated template's history runs plan, apply, plan, apply, and the newest
+// earlier run compared every apply with the plan that proposed it and every plan with the last
+// apply. A proposed apply is compared with an earlier proposed apply, and anything else with an
+// earlier run that was not proposed.
 func previousRun(ctx context.Context, store run.Store, a *run.Run) (string, error) {
+	filter := run.ListFilter{Before: a.CreatedAt}
 	if a.SourceID != "" {
-		page, err := store.ListPage(ctx, run.ListFilter{
-			Source: a.Source, SourceID: a.SourceID, Before: a.CreatedAt,
-		}, 1, 0)
-		if err != nil {
-			return "", err
-		}
-		if len(page) > 0 {
-			return page[0].ID, nil
-		}
-		return "", nil
+		filter.Source, filter.SourceID = a.Source, a.SourceID
 	}
-	page, err := store.ListPage(ctx, run.ListFilter{Before: a.CreatedAt}, 200, 0)
+	page, err := store.ListPage(ctx, filter, previousScan, 0)
 	if err != nil {
 		return "", err
 	}
 	for _, candidate := range page {
-		if candidate.Playbook == a.Playbook && candidate.Tool == a.Tool && candidate.ID != a.ID {
-			return candidate.ID, nil
+		if candidate.ID == a.ID || (candidate.ProposedFrom != "") != (a.ProposedFrom != "") {
+			continue
 		}
+		if a.SourceID == "" && (candidate.Playbook != a.Playbook || candidate.Tool != a.Tool) {
+			continue
+		}
+		return candidate.ID, nil
 	}
 	return "", nil
 }

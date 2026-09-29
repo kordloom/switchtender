@@ -2,9 +2,13 @@ package dispatch
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
@@ -185,5 +189,162 @@ func TestThePlanGateAsksAStoreThatCannotCreateRuns(t *testing.T) {
 	}
 	if store.destroys != 3 || !store.read {
 		t.Errorf("reported destroys=%d read=%v, want 3 and true", store.destroys, store.read)
+	}
+}
+
+// TestProposedApplyCarriesThePlansSourceAndLabels covers the rest of what the apply owes the plan
+// that proposed it. The apply is the second half of one request, and it arrived with no origin, so
+// the runs list showed a blank where it says what started a run, the template that launched the
+// plan never listed the apply in its history, and a ticket label on the plan was nowhere on the run
+// that destroys what the ticket is about.
+func TestProposedApplyCarriesThePlansSourceAndLabels(t *testing.T) {
+	t.Parallel()
+	policies := []*policy.Policy{
+		{ID: "pol_1", Name: "tf-destroy-guard", Tool: run.ToolTerraform, MaxDestroy: 0},
+	}
+	tests := []struct {
+		Name         string
+		Plan         *run.Run
+		WantSource   string
+		WantSourceID string
+		WantLabels   map[string]string
+	}{{ // Test 0: A template launch keeps its template and its labels.
+		Name: "template launch",
+		Plan: &run.Run{ID: "run_plan", Tool: run.ToolTerraform, Command: "infra/legacy",
+			Source: "template", SourceID: "tpl_decom",
+			Labels: map[string]string{"env": "prod", "ticket": "OPS-511"}},
+		WantSource: "template", WantSourceID: "tpl_decom",
+		WantLabels: map[string]string{"env": "prod", "ticket": "OPS-511"},
+	}, { // Test 1: A plan submitted over the API keeps that origin with no source id.
+		Name: "api submission",
+		Plan: &run.Run{ID: "run_api", Tool: run.ToolTerraform, Command: "infra/legacy",
+			Source: "api"},
+		WantSource: "api",
+	}, { // Test 2: A plan with no recorded origin does not have one invented for its apply.
+		Name: "no origin",
+		Plan: &run.Run{ID: "run_bare", Tool: run.ToolTerraform, Command: "infra/legacy"},
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			proposal := &run.Run{}
+			run.ApplyOptions(proposal, applyOptions(test.Plan, policies, 3, true))
+			if diff := cmp.Diff(test.WantSource, proposal.Source); diff != "" {
+				t.Errorf("Source mismatch (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff(test.WantSourceID, proposal.SourceID); diff != "" {
+				t.Errorf("SourceID mismatch (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff(test.WantLabels, proposal.Labels, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("Labels mismatch (-want +got):\n%s", diff)
+			}
+			// The labels are the apply's own copy, so a later edit to the plan's cannot rewrite the
+			// record of the run that destroyed something.
+			if len(test.Plan.Labels) > 0 {
+				test.Plan.Labels["ticket"] = "edited"
+				if proposal.Labels["ticket"] == "edited" {
+					t.Error("the apply shares its labels map with the plan, so editing one edits both")
+				}
+			}
+		})
+	}
+}
+
+// TestProposedApplyCarriesThePlansTimeoutTargetsAndIntent covers what the apply owes the request
+// beyond its origin. A template that launches a terraform run with a timeout and notification
+// targets meant them for the change, and the apply is the run that makes the change: it ran with no
+// timeout of its own and told none of the template's channels that it held, finished, or failed. An
+// apply proposed from a plain-language request also lost the request, which is what its approver
+// checks the plan against.
+func TestProposedApplyCarriesThePlansTimeoutTargetsAndIntent(t *testing.T) {
+	t.Parallel()
+	policies := []*policy.Policy{
+		{ID: "pol_1", Name: "tf-destroy-guard", Tool: run.ToolTerraform, MaxDestroy: 0},
+	}
+	targets := []run.NotifyTarget{
+		{Kind: "slack", URL: "https://hooks.slack.test/T0/B0/x"},
+		{Kind: "email", To: "oncall@example.com", OnFailure: true},
+	}
+	tests := []struct {
+		Name        string
+		Plan        *run.Run
+		WantTimeout int
+		WantTargets []run.NotifyTarget
+		WantIntent  string
+	}{{ // Test 0: A template launch keeps its timeout and its targets.
+		Name: "template launch",
+		Plan: &run.Run{ID: "run_plan", Tool: run.ToolTerraform, Command: "infra/legacy",
+			Timeout: 900, Notifications: targets},
+		WantTimeout: 900, WantTargets: targets,
+	}, { // Test 1: A plan proposed from a plain-language request keeps the request.
+		Name: "plain-language proposal",
+		Plan: &run.Run{ID: "run_intent", Tool: run.ToolTerraform, Command: "infra/legacy",
+			Intent: "retire the legacy network"},
+		WantIntent: "retire the legacy network",
+	}, { // Test 2: A plan with none of them does not have any invented for its apply.
+		Name: "none",
+		Plan: &run.Run{ID: "run_bare", Tool: run.ToolTerraform, Command: "infra/legacy"},
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			proposal := &run.Run{}
+			run.ApplyOptions(proposal, applyOptions(test.Plan, policies, 3, true))
+			if proposal.Timeout != test.WantTimeout {
+				t.Errorf("Timeout = %d, want %d", proposal.Timeout, test.WantTimeout)
+			}
+			diff := cmp.Diff(test.WantTargets, proposal.Notifications, cmpopts.EquateEmpty())
+			if diff != "" {
+				t.Errorf("Notifications mismatch (-want +got):\n%s", diff)
+			}
+			if proposal.Intent != test.WantIntent {
+				t.Errorf("Intent = %q, want %q", proposal.Intent, test.WantIntent)
+			}
+			// The targets are the apply's own copy, so a later edit to the plan's cannot redirect
+			// where the apply reports.
+			if len(test.Plan.Notifications) > 0 && len(proposal.Notifications) > 0 {
+				test.Plan.Notifications[0].URL = "https://edited.test"
+				if proposal.Notifications[0].URL == "https://edited.test" {
+					t.Error("the apply shares its targets with the plan, so editing one edits both")
+				}
+			}
+		})
+	}
+}
+
+// TestProposedApplyRunsThePlansWholeSpec pins that the apply executes exactly what its plan
+// planned, field for field. The apply's options were a list kept beside the plan gate, and a kept
+// list falls behind the run model: it lost the plan's timeout. Every field that decides how a run
+// executes is set on the plan here, so a field the apply drops fails by name.
+func TestProposedApplyRunsThePlansWholeSpec(t *testing.T) {
+	t.Parallel()
+	plan := &run.Run{
+		ID: "run_plan", Tool: run.ToolTerraform, Command: "infra/prod",
+		ExtraVars: map[string]any{"region": "us-east-1"}, CredentialIDs: []string{"cred_aws"},
+		Tags: []string{"network"}, SkipTags: []string{"slow"}, Verbosity: 2, Forks: 10,
+		DiffMode: true, ProjectID: "proj_1", InventoryID: "inv_1", Queue: "dmz", Timeout: 900,
+		Image: "registry.example/ee:1", PullCredentialID: "cred_pull", CommitSHA: "abc123",
+	}
+	proposal := &run.Run{}
+	run.ApplyOptions(proposal, applyOptions(plan, nil, 0, true))
+
+	want := &run.Run{
+		Tool: run.ToolTerraform, Command: "infra/prod",
+		ExtraVars: map[string]any{"region": "us-east-1"}, CredentialIDs: []string{"cred_aws"},
+		Tags: []string{"network"}, SkipTags: []string{"slow"}, Verbosity: 2, Forks: 10,
+		DiffMode: true, ProjectID: "proj_1", InventoryID: "inv_1", Queue: "dmz", Timeout: 900,
+		Image: "registry.example/ee:1", PullCredentialID: "cred_pull", PinnedCommit: "abc123",
+	}
+	spec := func(r *run.Run) *run.Run {
+		return &run.Run{
+			Tool: r.Tool, Command: r.Command, DryRun: r.DryRun, ExtraVars: r.ExtraVars,
+			CredentialIDs: r.CredentialIDs, Tags: r.Tags, SkipTags: r.SkipTags,
+			Verbosity: r.Verbosity, Forks: r.Forks, DiffMode: r.DiffMode, ProjectID: r.ProjectID,
+			InventoryID: r.InventoryID, Queue: r.Queue, Timeout: r.Timeout, Image: r.Image,
+			PullCredentialID: r.PullCredentialID, PinnedCommit: r.PinnedCommit,
+		}
+	}
+	if diff := cmp.Diff(spec(want), spec(proposal), cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("the apply's spec differs from its plan's (-want +got):\n%s", diff)
 	}
 }

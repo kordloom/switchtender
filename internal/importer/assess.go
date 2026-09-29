@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"slices"
 	"sort"
 
 	"github.com/kordloom/switchtender/internal/run"
@@ -51,6 +52,9 @@ type Governance struct {
 	// Unread is how many templates run a playbook whose text this assessment could not read,
 	// because it lives in a repository nothing has fetched yet. Their grades are a floor.
 	Unread int
+	// ApprovalGates names the workflows that wait for a person at an approval node today. None of
+	// them comes across, because approval here is a policy rather than a step.
+	ApprovalGates []string
 }
 
 // CredentialUse is one credential and how many templates materialize it.
@@ -64,7 +68,7 @@ type CredentialUse struct {
 // Assess grades a plan for what it holds and what governing it would change.
 func (p *Plan) Assess() Assessment {
 	a := Assessment{Report: p.Report()}
-	g := Governance{Templates: len(p.Templates)}
+	g := Governance{Templates: len(p.Templates), ApprovalGates: slices.Clone(p.gates)}
 
 	credUse := map[string]int{}
 	for _, t := range p.Templates {
@@ -105,7 +109,8 @@ func (p *Plan) Assess() Assessment {
 		}
 		return g.SharedCredentials[i].ID < g.SharedCredentials[j].ID
 	})
-	for _, list := range []*[]string{&g.Irreversible, &g.Costly, &g.HighRisk, &g.NoInventory} {
+	for _, list := range []*[]string{&g.Irreversible, &g.Costly, &g.HighRisk, &g.NoInventory,
+		&g.ApprovalGates} {
 		sort.Strings(*list)
 	}
 	a.Governance = g

@@ -107,20 +107,17 @@ func redactPatternDepth(pattern *regexp.Regexp, text, mask string, found *[]Assi
 		name := text[pos+loc[2] : pos+loc[3]]
 		valueStart, valueEnd := pos+loc[4], pos+loc[5]
 		value := text[valueStart:valueEnd]
-		// A quote that closes one opened earlier belongs to the text, not to this value. The
-		// unquoted alternative runs to the next whitespace, so in psql "host=db password=hunter2"
-		// it captured `hunter2"`: the mask then ate the closing quote, and the captured secret
-		// carried one the run's output never had, which is what the log scrubber searches for.
-		trailer := ""
-		if q := danglingQuote(value); q != "" {
-			// valueEnd is deliberately left where it was: it is where the scan resumes, and the
-			// quote is emitted once from trailer. Moving it back made the loop's own tail write
-			// the quote a second time.
-			trailer = q
-			value = value[:len(value)-1]
+		// The pattern took the value without knowing what encloses it, so it is cut back to what the
+		// surrounding syntax actually assigns. Whatever the cut leaves behind is not skipped: the
+		// scan resumes at the new end and walks it like any other text.
+		if stop := valueStop(lineBefore(text, valueStart), value); stop < len(value) {
+			value, valueEnd = value[:stop], valueStart+stop
 		}
 		out.WriteString(text[pos:valueStart])
 		switch {
+		case value == "":
+			// The value was cut back to nothing, so the name assigns nothing here and there is
+			// neither anything to mask nor anything to report.
 		case SecretKey(name):
 			out.WriteString(mask)
 			*found = append(*found, Assignment{Name: name, Value: Unquote(value)})
@@ -144,34 +141,66 @@ func redactPatternDepth(pattern *regexp.Regexp, text, mask string, found *[]Assi
 		default:
 			out.WriteString(value)
 		}
-		out.WriteString(trailer)
 		pos = valueEnd
 	}
 	out.WriteString(text[pos:])
 	return out.String()
 }
 
-// Unquote strips one matching pair of surrounding quotes, so a caller holds the bare value and matches
-// it literally in output. Keeping the quotes would mask a string the output never contains.
-// danglingQuote reports a single trailing quote character that closes a quote opened before this
-// value rather than belonging to it, and returns empty for a properly quoted value or one with no
-// trailing quote. An odd count is what distinguishes the two: "a=b" is balanced and its own, while
-// hunter2" carries one that closes something earlier.
-func danglingQuote(value string) string {
-	if len(value) < 2 {
-		return ""
+// shellSeparators end an unquoted value on a command line. A value that is not held open by a quote
+// cannot contain one of these, because the shell would have ended the word there too.
+const shellSeparators = ";&|"
+
+// valueStop returns how much of value the assignment actually gives it, which is all of it unless
+// the syntax around the value ends it sooner.
+//
+// The patterns read a name and then take a value, and neither knows what encloses the text. Two
+// things end a value that they run straight past. A quote opened before the name closes it where it
+// matches: in curl -H "X-Api-Key: <secret>" https://host the YAML form ran to the end of the line
+// and swallowed the URL. And a shell separator ends an unquoted one: in
+// export API_TOKEN=<secret>; deploy the INI form took the semicolon with it.
+//
+// Both cost the same two things, and the first is a leak. The value handed back is longer than the
+// secret, and callers match that value literally against a run's output to mask it, so a tool that
+// echoed the secret put it in the stored log and the live stream while the receipt showed it
+// redacted. The second is the evidence: the mask replaced text that was not secret, so the command
+// in the signed record is not the command that ran.
+//
+// prefix is the text before the value on its own line, which is what says whether a quote is open.
+func valueStop(prefix, value string) int {
+	if value == "" {
+		return 0
 	}
-	last := value[len(value)-1]
-	if last != '"' && last != '\'' {
-		return ""
+	if value[0] == '"' || value[0] == '\'' {
+		// The pattern delimited this one itself, and a separator inside it is ordinary text.
+		return len(value)
 	}
-	if value[0] == last {
-		return ""
+	stop := -1
+	for _, q := range []byte{'"', '\''} {
+		if strings.Count(prefix, string(q))%2 == 0 {
+			continue
+		}
+		if i := strings.IndexByte(value, q); i >= 0 && (stop < 0 || i < stop) {
+			stop = i
+		}
 	}
-	if strings.Count(value, string(last))%2 == 0 {
-		return ""
+	if stop >= 0 {
+		return stop
 	}
-	return string(last)
+	if i := strings.IndexAny(value, shellSeparators); i >= 0 {
+		return i
+	}
+	return len(value)
+}
+
+// lineBefore returns what precedes valueStart on its own line, which is what says whether a quote is
+// open around the value. An earlier line cannot leave one open for this one: a shell word and a YAML
+// scalar both end at the newline.
+func lineBefore(text string, valueStart int) string {
+	if i := strings.LastIndexByte(text[:valueStart], '\n'); i >= 0 {
+		return text[i+1 : valueStart]
+	}
+	return text[:valueStart]
 }
 
 // splitQuoted separates a value's surrounding quote pair from its contents, returning empty
@@ -184,6 +213,9 @@ func splitQuoted(value string) (open, inner, close string) {
 	return "", value, ""
 }
 
+// Unquote strips one matching pair of surrounding quotes, so a caller holds the bare value and can
+// match it literally in a run's output. Keeping the quotes would have it searching for a string the
+// output never contains.
 func Unquote(value string) string {
 	if len(value) >= 2 && (value[0] == '"' || value[0] == '\'') && value[len(value)-1] == value[0] {
 		return value[1 : len(value)-1]

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,7 +14,6 @@ import (
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/template"
-	"strconv"
 )
 
 // awxExport is the top level of an awx export document, keyed by asset type.
@@ -393,6 +393,10 @@ func (r *awxRef) UnmarshalJSON(b []byte) error {
 // by generated id. It never fails on a single unmappable asset: it records a warning and continues,
 // so a partial export still migrates what it can.
 func FromAWX(data []byte, now time.Time) (*Plan, error) {
+	data, err := textOf(data)
+	if err != nil {
+		return nil, err
+	}
 	var export awxExport
 	// UseNumber keeps JSON numbers as json.Number rather than float64, so a host variable or survey
 	// choice that is a large integer survives to the inventory verbatim instead of being reformatted
@@ -534,8 +538,8 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 	// What the struct never had a field for, which reportUnmapped cannot see: it names the kinds this
 	// importer knows it drops, and a field it does not know about is exactly the one nobody wrote down.
 	reportUnread(plan, data, export)
-	if err := plan.requireObjects("projects, inventories, credentials, job templates, or " +
-		"schedules"); err != nil {
+	if err := plan.requireObjects("projects, inventories, credentials, job templates, " +
+		"workflows, or schedules"); err != nil {
 		return nil, err
 	}
 	return plan, nil
@@ -614,6 +618,7 @@ func (p *Plan) addTemplate(jt awxJobTemplate, now time.Time,
 			p.warn("template %q was not imported: it references project %q, which is not in this "+
 				"export, and a template with no project has no checkout to resolve its playbook "+
 				"against", jt.Name, name)
+			p.refused++
 			return
 		}
 	}

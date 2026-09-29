@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -97,6 +98,63 @@ func (p *planGateRunner) Run(_ context.Context, spec roundhouse.Spec,
 	return roundhouse.Result{ExitCode: 0}, nil
 }
 
+// TestCancelingAPlanGateEndsItCanceledAndProposesNothing pins what a person's cancel does to a
+// plan-gated run while its plan executes: the run ends canceled, like any run stopped in flight,
+// and no apply is proposed from a plan that never finished. Finalized as failed instead, a plan a
+// person stopped reads as a plan that broke, which somebody investigates and a failure channel
+// pages on.
+func TestCancelingAPlanGateEndsItCanceledAndProposesNothing(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	policies := policy.NewMemStore()
+	if err := policies.Save(ctx, &policy.Policy{
+		ID: policy.NewID(), Name: "tf-destroy-guard", Tool: run.ToolTerraform, MaxDestroy: 0,
+	}); err != nil {
+		t.Fatalf("policies.Save() error = %v", err)
+	}
+	store := run.NewMemStore()
+	planning := make(chan struct{})
+	runner := roundhouse.RunnerFunc(
+		func(ctx context.Context, spec roundhouse.Spec, _ io.Writer) (roundhouse.Result, error) {
+			if !spec.DryRun {
+				t.Error("an apply ran although its plan was canceled before it finished")
+				return roundhouse.Result{ExitCode: 0}, nil
+			}
+			close(planning)
+			<-ctx.Done()
+			return roundhouse.Result{ExitCode: -1}, ctx.Err()
+		})
+	d := New(store, runner, nil, WithPolicies(policies), WithNoJanitor())
+	defer d.Close()
+
+	submitted, err := d.Submit(ctx, "", "", run.WithTool(run.ToolTerraform),
+		run.WithCommand("infra/legacy"))
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	select {
+	case <-planning:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the plan never started, so the run did not go through the plan gate")
+	}
+	if !d.Cancel(submitted.ID) {
+		t.Fatal("Cancel() = false for a plan-gated run whose plan is executing")
+	}
+	if got := waitTerminal(t, store, submitted.ID); got.Status != run.StatusCanceled {
+		t.Errorf("status = %q, want canceled: a plan a person stopped is not a plan that broke",
+			got.Status)
+	}
+	runs, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	for _, r := range runs {
+		if r.ProposedFrom == submitted.ID {
+			t.Errorf("apply %s was proposed from a plan that was canceled", r.ID)
+		}
+	}
+}
+
 // TestPlanGateHoldsImportPlan pins that the destroy limit is enforced on every plan summary shape,
 // and that a summary nobody could read holds the apply instead of applying it.
 //
@@ -112,27 +170,33 @@ func TestPlanGateHoldsImportPlan(t *testing.T) {
 		Summary      string
 		WantHeld     string
 		WantApproval bool
+		// WantNote is what the plan run's log tells the approver the plan found.
+		WantNote string
 	}{{ // Test 0: An import clause must not hide the five destroys from a limit of three.
 		Name:         "import clause",
 		Summary:      "Plan: 2 to import, 3 to add, 1 to change, 5 to destroy.\n",
 		WantApproval: true,
 		WantHeld:     "tf-destroy-guard (plan destroys 5, limit 3)",
+		WantNote:     "plan would destroy 5 resource(s)",
 	}, { // Test 1: A plan with nothing to do queues without approval, as every drift check does.
 		Name:         "no changes",
 		Summary:      "No changes. Your infrastructure matches the configuration.\n",
 		WantApproval: false,
 		WantHeld:     "",
+		WantNote:     "plan would destroy 0 resource(s)",
 	}, { // Test 2: A summary that cannot be read was never weighed, so the apply waits.
 		Name:         "unreadable",
 		Summary:      "Terraform emitted something this parser does not know.\n",
 		WantApproval: true,
 		WantHeld: "plan summary unreadable, so the destroy count was never weighed " +
 			"against the limit",
+		WantNote: "plan summary could not be read",
 	}, { // Test 3: A readable plan under the limit still queues and applies.
 		Name:         "under the limit",
 		Summary:      "Plan: 1 to import, 0 to add, 0 to change, 2 to destroy.\n",
 		WantApproval: false,
 		WantHeld:     "",
+		WantNote:     "plan would destroy 2 resource(s)",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -156,6 +220,17 @@ func TestPlanGateHoldsImportPlan(t *testing.T) {
 			}
 			if plan := waitTerminal(t, store, created.ID); plan.Status != run.StatusSucceeded {
 				t.Fatalf("plan run status = %q, want succeeded", plan.Status)
+			}
+
+			// The approver reads this note beside the plan. An unreadable summary told as "would destroy
+			// 0" would say the plan is harmless when nobody could read it.
+			planLog, err := store.Log(ctx, created.ID)
+			if err != nil {
+				t.Fatalf("Log(plan) error = %v", err)
+			}
+			if !strings.Contains(string(planLog), test.WantNote) {
+				t.Errorf("the plan's log does not say %q; it ends:\n%s", test.WantNote,
+					planLog[max(0, len(planLog)-200):])
 			}
 
 			proposal := waitProposal(t, store, created.ID)
@@ -232,6 +307,27 @@ func TestCappedBufferHoldsALimitAndSaysWhenItStopped(t *testing.T) {
 	}
 	if got := len(big.String()); got > 1024 {
 		t.Errorf("held %d bytes past a 1024 limit: the plan is not actually bounded", got)
+	}
+
+	// Exactly the limit: all of it fits, so it is whole. Reported truncated, a plan that happened
+	// to fill the cap to the byte would be held as unreadable.
+	exact := &cappedBuffer{cap: 64}
+	if _, err := exact.Write(bytes.Repeat([]byte("y"), 64)); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if exact.truncated || len(exact.String()) != 64 {
+		t.Errorf("a write of exactly the limit held %d bytes and truncated = %v, want 64 and false",
+			len(exact.String()), exact.truncated)
+	}
+
+	// One byte over in a single write: the limit's worth is kept, not dropped with the overflow.
+	over := &cappedBuffer{cap: 64}
+	if _, err := over.Write(bytes.Repeat([]byte("z"), 65)); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if !over.truncated || len(over.String()) != 64 {
+		t.Errorf("a write one byte over held %d bytes and truncated = %v, want 64 and true",
+			len(over.String()), over.truncated)
 	}
 }
 

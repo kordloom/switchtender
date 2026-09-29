@@ -85,7 +85,7 @@ homebrew_casks:
       # plain .Env is the only portable form.
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: "https://switchtender.com"
-    description: "Gate every change, watch every host, prove every run: one binary control plane for Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go."
+    description: "One control point for every way your infrastructure can change"
 
 # Linux packages: deb, rpm, and apk built with nfpm. No secrets required.
 nfpms:
@@ -93,7 +93,7 @@ nfpms:
     package_name: switchtender
     maintainer: "SwitchTender <noreply@switchtender.com>"
     homepage: "https://switchtender.com"
-    description: "Gate every change, watch every host, prove every run: one binary control plane for Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go."
+    description: "One control point for every way your infrastructure can change: Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go behind one identity, policy, approval, and evidence trail."
     license: "BUSL-1.1"
     formats:
       - deb

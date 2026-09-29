@@ -6,6 +6,8 @@ import (
 	"crypto"
 	cryptorand "crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/base64"
 	"encoding/hex"
@@ -15,9 +17,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	"crypto/x509"
-	"crypto/x509/pkix"
 )
 
 // timestampLimit caps how much of a timestamp authority's reply is read, so a hostile or broken

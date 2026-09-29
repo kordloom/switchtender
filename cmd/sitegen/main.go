@@ -171,6 +171,7 @@ var landingURLs = []string{
 	"https://switchtender.com/procurement",
 	"https://switchtender.com/refund",
 	"https://switchtender.com/verify",
+	"https://switchtender.com/assess",
 }
 
 // writeSitemap emits site/sitemap.xml covering the landing pages and every docs page, so crawlers
@@ -655,11 +656,11 @@ const layout = `<!DOCTYPE html>
 	<meta property="og:description" content="{{.Description}}">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="{{.Canonical}}">
-	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
 	<meta name="twitter:card" content="summary_large_image">
 	<meta name="twitter:title" content="{{.Title}} | SwitchTender docs">
 	<meta name="twitter:description" content="{{.Description}}">
-	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
 {{- if .HeadExtra}}
 	{{.HeadExtra}}
 {{- end}}

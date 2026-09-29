@@ -2,12 +2,12 @@ package server
 
 import (
 	"errors"
-	"github.com/kordloom/switchtender/internal/license"
 	"net/http"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )

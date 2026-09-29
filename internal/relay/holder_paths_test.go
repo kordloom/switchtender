@@ -294,11 +294,12 @@ func (nilPolicies) Save(context.Context, *policy.Policy) error { return policy.E
 // Delete refuses.
 func (nilPolicies) Delete(context.Context, string) error { return policy.ErrReadOnly }
 
-// seedPlan stores a live terraform plan a worker holds, with the per-claim capability set, and returns
-// that capability.
+// seedPlan stores the run a worker's plan gate is planning, with the per-claim capability set, and
+// returns that capability. It is a terraform apply someone asked for, not a dry run: the gate plans
+// an apply request before it runs and leaves a dry run alone.
 func seedPlan(t *testing.T, store run.Store, id string, shape func(*run.Run)) string {
 	t.Helper()
-	r := &run.Run{ID: id, Tool: run.ToolTerraform, Command: "infra/prod", DryRun: true,
+	r := &run.Run{ID: id, Tool: run.ToolTerraform, Command: "infra/prod",
 		Status: run.StatusRunning, CreatedAt: time.Now(), ClaimedBy: "worker-a",
 		ClaimSecret: "capability-for-" + id}
 	if shape != nil {
@@ -332,14 +333,14 @@ func TestProposeApplyRefusesARunThatIsNotAPlanInHand(t *testing.T) {
 	}, { // Test 3: A run with no tool named, which means Ansible, not terraform.
 		Name:  "default tool",
 		Shape: func(r *run.Run) { r.Tool = ""; r.Playbook = "site.yml" },
-	}, { // Test 4: A real execution rather than a plan.
-		Name:  "not a plan",
-		Shape: func(r *run.Run) { r.DryRun = false },
+	}, { // Test 4: A dry run previews a change and never applies one, so nothing was gated.
+		Name:  "a dry run",
+		Shape: func(r *run.Run) { r.DryRun = true },
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
 			t.Parallel()
-			fixture := newRelayFixture(t, nil, nil)
+			fixture := newRelayFixture(t, nil, planGateRules(t))
 			lease := seedPlan(t, fixture.Store, "run_plan", test.Shape)
 			status, body := leasedPost(t, fixture.URL, "/relay/v1/runs/run_plan/propose-apply",
 				lease, `{"destroys":0,"read":true}`)
@@ -371,10 +372,8 @@ func TestAProposedApplyIsHeldWhenTheGateCouldNotBeEvaluated(t *testing.T) {
 		Name: "policy store unreachable", Policies: unreachablePolicies{},
 		Body: `{"destroys":0,"read":true}`,
 	}, { // Test 1: The worker could not read the plan's summary, so nothing was weighed.
-		Name: "plan summary unreadable", Policies: policy.NewMemStore(),
+		Name: "plan summary unreadable", Policies: planGateRules(t),
 		Body: `{"destroys":0,"read":false}`,
-	}, { // Test 2: No policy store is configured at all, so nothing could weigh the plan either.
-		Name: "no policy store", Policies: nil, Body: `{"destroys":0,"read":true}`,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -573,5 +572,56 @@ func TestProposeApplyOnARunTheControlNodeDoesNotHold(t *testing.T) {
 	}
 	if len(all) != 0 {
 		t.Errorf("the store holds %d runs after a proposal from a plan that does not exist", len(all))
+	}
+}
+
+// TestProposeApplyRefusesARunNoRuleGates pins that a proposal needs a rule that asked for one. A
+// worker plans a terraform apply first only when a plan-content rule sends it through the gate, so
+// with no rules, or with none that gates the run, no gate asked for an apply and the endpoint must
+// not mint one. The alternative let any worker holding a lease on a terraform apply have the
+// control node create a second real change from it.
+func TestProposeApplyRefusesARunNoRuleGates(t *testing.T) {
+	t.Parallel()
+	blanket := policy.NewMemStore()
+	blanketRule := policy.NewPolicy("terraform needs a person")
+	if err := blanket.Save(context.Background(), blanketRule); err != nil {
+		t.Fatalf("Save policy: %v", err)
+	}
+	otherTool := policy.NewMemStore()
+	ansibleGate := policy.NewPolicy("ansible destroys need a person")
+	ansibleGate.Tool, ansibleGate.MaxDestroy = run.ToolAnsible, 0
+	if err := otherTool.Save(context.Background(), ansibleGate); err != nil {
+		t.Fatalf("Save policy: %v", err)
+	}
+	tests := []struct {
+		Policies policy.Store
+		Name     string
+	}{{ // Test 0: No policy store is configured, so the worker's gate could not have fired.
+		Name: "no policy store",
+	}, { // Test 1: A rule with no destroy limit holds at submission and never sends a run to the gate.
+		Name: "no plan-content rule", Policies: blanket,
+	}, { // Test 2: The only plan-content rule is for another tool.
+		Name: "a plan-content rule for another tool", Policies: otherTool,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			fixture := newRelayFixture(t, nil, test.Policies)
+			lease := seedPlan(t, fixture.Store, "run_plan", nil)
+			status, body := leasedPost(t, fixture.URL, "/relay/v1/runs/run_plan/propose-apply",
+				lease, `{"destroys":3,"read":true}`)
+			if status != http.StatusConflict {
+				t.Errorf("%s answered %d (%s), want 409", test.Name, status, body)
+			}
+			list, err := fixture.Store.List(context.Background())
+			if err != nil {
+				t.Fatalf("List() error = %v", err)
+			}
+			for _, got := range list {
+				if got.ID != "run_plan" {
+					t.Errorf("%s: a worker minted run %q from a run no rule gated", test.Name, got.ID)
+				}
+			}
+		})
 	}
 }

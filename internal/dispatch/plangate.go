@@ -138,16 +138,20 @@ func (d *Dispatcher) proposeApply(
 // found and the control node builds the proposal from the plan run it already holds, which is narrower
 // than letting a worker submit a run: the apply's command, target, credentials, image, and commit come
 // from the stored plan rather than from the worker's request.
+//
 // One apply per plan, always the same one. A worker whose 201 never arrived retries, which is
 // legitimate, so the second call has to return the proposal the first one made rather than mint a
 // second real apply. The key is derived from the plan and carries the server's reserved prefix, which
 // no caller may supply, so the store's unique index settles it whichever process asks.
+//
+// created reports whether this call stored the proposal, false when a retry found the one an
+// earlier call made, so a caller announcing the proposal announces it once.
 func ProposeApplyFor(ctx context.Context, store run.Store, policies []*policy.Policy, plan *run.Run,
-	destroys int, read bool) (*run.Run, error) {
+	destroys int, read bool) (proposal *run.Run, created bool, err error) {
 	if plan == nil {
-		return nil, fmt.Errorf("propose apply: no plan run")
+		return nil, false, fmt.Errorf("propose apply: no plan run")
 	}
-	proposal := &run.Run{
+	proposal = &run.Run{
 		ID: run.NewID(), Playbook: plan.Playbook, Inventory: plan.Inventory,
 		Status: run.StatusPending, CreatedAt: time.Now(),
 		IdempotencyKey: applyKeyFor(plan.ID),
@@ -165,7 +169,7 @@ func ProposeApplyFor(ctx context.Context, store run.Store, policies []*policy.Po
 	// otherwise apply everywhere except here.
 	gp := graded(proposal)
 	if p := policy.Denying(policies, gp); p != nil {
-		return nil, fmt.Errorf("%w: policy %q refuses this apply", ErrPolicyDenied, p.Label())
+		return nil, false, fmt.Errorf("%w: policy %q refuses this apply", ErrPolicyDenied, p.Label())
 	}
 	if p := policy.Requiring(policies, gp); p != nil {
 		proposal.Status = run.StatusPendingApproval
@@ -174,18 +178,18 @@ func ProposeApplyFor(ctx context.Context, store run.Store, policies []*policy.Po
 			policy.RequireDistinct(policies, gp)
 	}
 
-	err := store.Save(ctx, proposal)
+	err = store.Save(ctx, proposal)
 	if errors.Is(err, run.ErrDuplicateKey) {
 		existing, ferr := store.ByIdempotencyKey(ctx, proposal.IdempotencyKey)
 		if ferr != nil {
-			return nil, fmt.Errorf("propose apply: %w", ferr)
+			return nil, false, fmt.Errorf("propose apply: %w", ferr)
 		}
-		return existing, nil
+		return existing, false, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("propose apply: %w", err)
+		return nil, false, fmt.Errorf("propose apply: %w", err)
 	}
-	return proposal, nil
+	return proposal, true, nil
 }
 
 // applyKeyFor is the idempotency key the apply proposed from one plan holds, so a plan can only ever
@@ -204,12 +208,10 @@ type applyProposer interface {
 // applyOptions builds the submit options for the apply a plan proposes: everything about the plan run
 // that decides what the apply does, who asked for it, and which code it runs.
 func applyOptions(r *run.Run, policies []*policy.Policy, destroys int, read bool) []run.SubmitOption {
-	opts := []run.SubmitOption{
-		run.WithTool(r.Tool),
-		run.WithCommand(r.Command),
-		run.WithDryRun(false),
-		run.WithProposedFrom(r.ID),
-	}
+	// The apply is the plan's own spec run for real, so it starts from the one description of how a
+	// run executes rather than from a list kept here. A list kept here is how the apply lost the
+	// plan's timeout, the way every other hand-kept copy of the spec lost a field.
+	opts := append(r.ExecutionOptions(), run.WithDryRun(false), run.WithProposedFrom(r.ID))
 	// A plan held for destroying too much records the rule and the count, since "why did this
 	// wait" is answered by the threshold it crossed, not merely by the rule's name. A plan whose
 	// summary could not be read is held as well: this run reached here only because a plan-content
@@ -219,10 +221,22 @@ func applyOptions(r *run.Run, policies []*policy.Policy, destroys int, read bool
 		opts = append(opts, run.WithRequireApproval(true), run.WithHeldByPolicy(
 			"plan summary unreadable, so the destroy count was never weighed against the limit"))
 	} else {
+		// The count is recorded on the apply, where the grade reads it. Without it the apply graded
+		// like any command naming a directory, costly and medium, so a rule holding irreversible or
+		// high risk changes let an apply that destroys resources run straight through.
+		opts = append(opts, run.WithPlanDestroys(destroys))
 		// Graded like every other evaluation: the hold decision and the release decision must see
 		// the same run, or a rule with a risk or reversibility floor can hold an apply whose
-		// second-approver requirement was computed blind to that floor.
+		// second-approver requirement was computed blind to that floor. The run weighed is the apply
+		// as proposed, carrying the count, on a copy so the plan run keeps its own record. Weighed
+		// as the plan run, a rule pairing a destroy limit with a floor read the grade as costly and
+		// never held a plan past its limit.
 		gr := graded(r)
+		if gr != nil {
+			apply := *gr
+			apply.PlanDestroys = &destroys
+			gr = &apply
+		}
 		if p := policy.Exceeding(policies, gr, destroys); p != nil {
 			// The second-approver requirement travels with the hold, and it is the strictest
 			// answer across every rule the count exceeded, not the first one's. policy.Requiring,
@@ -234,24 +248,6 @@ func applyOptions(r *run.Run, policies []*policy.Policy, destroys int, read bool
 				run.WithHeldByPolicy(fmt.Sprintf(
 					"%s (plan destroys %d, limit %d)", p.Label(), destroys, p.MaxDestroy)))
 		}
-	}
-	if r.ProjectID != "" {
-		opts = append(opts, run.WithProject(r.ProjectID))
-	}
-	if r.InventoryID != "" {
-		opts = append(opts, run.WithInventory(r.InventoryID))
-	}
-	if len(r.CredentialIDs) > 0 {
-		opts = append(opts, run.WithCredentialIDs(r.CredentialIDs))
-	}
-	if len(r.ExtraVars) > 0 {
-		opts = append(opts, run.WithExtraVars(r.ExtraVars))
-	}
-	if r.Queue != "" {
-		opts = append(opts, run.WithQueue(r.Queue))
-	}
-	if r.Image != "" {
-		opts = append(opts, run.WithImage(r.Image, r.PullCredentialID))
 	}
 	// The apply is proposed while executing the plan, long after the plan's request returned, so
 	// the executor's context carries no receipt. The plan run's receipt is the truthful one: the
@@ -278,6 +274,19 @@ func applyOptions(r *run.Run, policies []*policy.Policy, destroys int, read bool
 		opts = append(opts, run.WithActor(r.Actor), run.WithActorType(r.ActorType),
 			run.WithActorAccount(r.ActorUserID))
 	}
+	// It carries the plan's origin and labels too, because it is the second half of the same request.
+	// Without them the run that actually destroys infrastructure showed a blank origin in the runs
+	// list, fell out of the history of the template that launched its plan, and lost the ticket label
+	// its plan was filed under.
+	if r.Source != "" {
+		opts = append(opts, run.WithSource(r.Source, r.SourceID))
+	}
+	opts = append(opts, run.WithLabels(r.Labels))
+	// The notification targets were set for the change, and the apply is the run that makes it.
+	// The execution spec leaves them to each caller, and without them the apply told none of the
+	// channels the request named that it held, finished, or failed. A plain-language request travels
+	// too, since it is what the apply's approver checks the plan against.
+	opts = append(opts, run.WithNotifications(r.Notifications), run.WithIntent(r.Intent))
 	// And it is pinned to the commit the plan was read from. An approver reads a plan and releases the
 	// apply on the strength of what it said it would destroy; without a pin the apply re-syncs the
 	// project and takes whatever the branch head is by then, so an approval of one plan could release

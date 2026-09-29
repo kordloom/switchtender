@@ -30,7 +30,7 @@ func planFixture(t *testing.T) (client *Client, store run.Store, baseURL string)
 	plan := &run.Run{
 		ID: "run_plan", Status: run.StatusPending, CreatedAt: now,
 		Queue: "default", Tool: run.ToolTerraform, Command: "infra/prod",
-		DryRun: true, Actor: "casey", ActorType: "session", OrgID: "org_1",
+		Actor: "casey", ActorType: "session", OrgID: "org_1",
 		CommitSHA: "abc123", ProjectID: "prj_1",
 	}
 	if err := store.Save(ctx, plan); err != nil {

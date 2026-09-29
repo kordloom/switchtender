@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kordloom/switchtender/internal/sqlutil"
 )
 
 // TestMigrateFailsFastRatherThanQueueingBehindALock proves the migration gives up on a lock instead
@@ -38,6 +40,33 @@ func TestMigrateFailsFastRatherThanQueueingBehindALock(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = first.Close() })
 
+	// Give the migration something to do. Open skips it entirely when the catalog says the schema is
+	// already current, which is what stops an ordinary start from locking every table, so against an
+	// up-to-date database the second Open below would take no lock at all and sail past a blocker
+	// holding one. That is the improvement rather than a hole in it, but it means this check has to
+	// arrange the one case that still needs the lock: a column the migration must add.
+	column := anAddableColumnOn(t, "runs")
+	damaged, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	if _, err := damaged.ExecContext(ctx, "ALTER TABLE runs DROP COLUMN "+column+" CASCADE"); err != nil {
+		_ = damaged.Close()
+		t.Fatalf("drop %s to give the migration work: %v", column, err)
+	}
+	_ = damaged.Close()
+	// The blocked migration below fails, so the column it was going to add is still missing when
+	// this test ends. Every test after it reads that table, so it is put back here rather than left
+	// for the next one to trip over.
+	t.Cleanup(func() {
+		healed, herr := Open(dsn)
+		if herr != nil {
+			t.Errorf("could not repair the schema this test damaged: %v", herr)
+			return
+		}
+		_ = healed.Close()
+	})
+
 	// A separate session holds an exclusive lock on runs, standing in for the long read.
 	blocker, err := sql.Open("pgx", dsn)
 	if err != nil {
@@ -48,8 +77,12 @@ func TestMigrateFailsFastRatherThanQueueingBehindALock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTx() error = %v", err)
 	}
+	// Released on the way out however this test leaves. It was released by the last statement in the
+	// function instead, so any failure above that line skipped it: the transaction stayed open on a
+	// pooled connection that Close cannot reclaim, the exclusive lock on runs was never dropped, and
+	// every later test in the package blocked on it until the whole run timed out.
+	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, "LOCK TABLE runs IN ACCESS EXCLUSIVE MODE"); err != nil {
-		_ = tx.Rollback()
 		t.Fatalf("LOCK TABLE error = %v", err)
 	}
 
@@ -76,5 +109,18 @@ func TestMigrateFailsFastRatherThanQueueingBehindALock(t *testing.T) {
 		t.Error("the migration is still waiting for the lock, so a starting node stalls every " +
 			"reader queued behind it")
 	}
-	_ = tx.Rollback()
+}
+
+// anAddableColumnOn returns a column on the named table that the migration's ALTER statements can
+// add, which is what makes dropping it something the next Open has to repair.
+func anAddableColumnOn(t *testing.T, table string) string {
+	t.Helper()
+	for _, col := range sqlutil.ParseSchemaColumns(schema)[table] {
+		if col.Addable() {
+			return col.Name
+		}
+	}
+	t.Fatalf("the schema declares no column on %s that an ALTER can add, so the migration cannot "+
+		"be given work to do and this check cannot run", table)
+	return ""
 }

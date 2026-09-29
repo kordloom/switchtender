@@ -124,17 +124,13 @@ func scanSchedule(sc scanner) (*schedule.Schedule, error) {
 			return nil, err
 		}
 	}
-	t, err := sqlutil.ParseTime(created)
-	if err != nil {
-		return nil, err
-	}
-	out.CreatedAt = t
-	if out.NextRunAt, err = sqlutil.ParseNullTime(nextRun); err != nil {
-		return nil, err
-	}
-	if out.LastRunAt, err = sqlutil.ParseNullTime(lastRun); err != nil {
-		return nil, err
-	}
+	// A stamp that cannot be read is absent rather than fatal. Every schedule is read through one
+	// listing, so failing this row failed all of them and the install stopped firing anything. The
+	// steps above stay strict for the opposite reason: they say what the schedule runs, and a
+	// schedule that fires something other than what it was given is worse than one that errors.
+	out.CreatedAt = sqlutil.ParseTimeOrAbsent(created)
+	out.NextRunAt = sqlutil.ParseNullTimeOrAbsent(nextRun)
+	out.LastRunAt = sqlutil.ParseNullTimeOrAbsent(lastRun)
 	return &out, nil
 }
 

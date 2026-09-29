@@ -1,6 +1,9 @@
 package run
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // Reversibility grades whether a run can be taken back, so a policy can demand more of a change
 // that cannot be undone than of one that can. It is computed from the run and never stored, the way
@@ -81,6 +84,11 @@ func AssessReversibilityFrom(r *Run, ev ReversibilityEvidence) Reversibility {
 	if r.DryRun {
 		return Reversibility{Class: Reversible, Reasons: []string{"dry run, changes nothing to undo"}}
 	}
+	// A plan read before the apply says what it removes, which no command line naming a directory
+	// can. A destroyed resource comes back only as a new one, empty of whatever the old one held.
+	if reason := plannedDestroys(r); reason != "" {
+		return Reversibility{Class: Irreversible, Reasons: []string{reason}}
+	}
 	// Ansible is idempotent, and a finished run says how many tasks actually changed a host. None
 	// means nothing happened, and nothing that happened can need undoing. This is the strongest
 	// evidence there is, because it is the outcome rather than a prediction about it, and it is the
@@ -154,6 +162,21 @@ func AssessReversibilityFrom(r *Run, ev ReversibilityEvidence) Reversibility {
 		Class:   ReversibleCostly,
 		Reasons: []string{"changes state, so undoing it means running something else"},
 	}
+}
+
+// plannedDestroys says what the plan behind r removes, or returns the empty string when no plan was
+// read or it removes nothing. The reversibility and risk graders share it so a planned destroy
+// cannot grade permanent in one and routine in the other.
+func plannedDestroys(r *Run) string {
+	if r.PlanDestroys == nil || *r.PlanDestroys <= 0 {
+		return ""
+	}
+	n := *r.PlanDestroys
+	noun := "resources"
+	if n == 1 {
+		noun = "resource"
+	}
+	return fmt.Sprintf("its plan destroys %d %s, which cannot be undone from here", n, noun)
 }
 
 // permanentMarkers are command fragments whose effect this product cannot undo, matched case

@@ -20,6 +20,9 @@ The rule is one sentence: AI proposes, the control plane governs.
   faces. An admin reviews the exact generated command before anything moves.
 - Credential values are masked out of logs and events before any feature builds a prompt, so a
   model never sees a secret.
+- An explanation of a held run reads that run's plan, drift, or request, and a plan's output is
+  text the code under change can shape. The explanation is a summary to read beside the plan, never
+  a substitute for reading it.
 - Requests and decisions land in the tamper-evident audit trail, including the plain-language
   request a proposal was built from.
 
@@ -27,7 +30,7 @@ The rule is one sentence: AI proposes, the control plane governs.
 
 | Feature | Where | What it does |
 |---------|-------|--------------|
-| Run triage | A failed run's page, `POST /v1/runs/{id}/explain` | Explains the failure from the run's masked log and failed task events, on demand. |
+| Run triage | A failed or held run's page, `POST /v1/runs/{id}/explain` | Explains a failure from the run's masked log and failed task events, on demand. On a held run it explains what approving does: a terraform or opentofu apply from the plan it carries out, a reconcile from the drift it fixes, and a proposal against the request it came from. |
 | Step drafting | The workflow editor, `POST /v1/ai/draft` | Drafts a bash, python, powershell, or go step script from a description, for you to review, edit, and save. It never executes on its own. |
 | Fleet questions | The overview page, `POST /v1/ai/ask` | Answers a plain-language question from a bounded snapshot of run counts, recent runs, host health, and drift. Metadata only, rate limited. |
 | Run proposals | The runs page, `POST /v1/ai/propose-run` | Turns a plain-language request into a validated run the server builds, born held for approval and stamped with your exact words. |

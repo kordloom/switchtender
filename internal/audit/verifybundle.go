@@ -14,6 +14,7 @@ import (
 	"github.com/kordloom/loomseal/jcs"
 	"github.com/kordloom/loomseal/merkle"
 	"github.com/kordloom/loomseal/seal"
+
 	"github.com/kordloom/switchtender/identity"
 )
 

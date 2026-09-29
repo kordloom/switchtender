@@ -47,6 +47,13 @@ const proposalSystemPrompt = "You are a site reliability engineer reviewing a pr
 	"point out anything risky. Rely only on the details provided and do not invent hosts, files, " +
 	"or tasks that are not present."
 
+// planApplySystemPrompt frames the model as a reviewer of a terraform or opentofu apply held for
+// approval, weighing the plan the apply will carry out.
+const planApplySystemPrompt = "You are a site reliability engineer reviewing a Terraform or " +
+	"OpenTofu apply before it is approved. Given the plan it will carry out, summarize in two to " +
+	"four sentences what approving will create, change, and destroy, and point out anything risky " +
+	"or irreversible. Rely only on the plan provided and do not invent resources that are not in it."
+
 // intentProposalSystemPrompt frames the model as a reviewer of a run proposed from a plain-language
 // request, checking the generated run against what was asked.
 const intentProposalSystemPrompt = "You are a site reliability engineer reviewing a run that was " +
@@ -191,8 +198,20 @@ func explainRunHandler(store run.Store, provider ai.Provider, authz *authorizer,
 				respondError(w, log, http.StatusInternalServerError, "could not read the check run")
 				return
 			}
-			system = proposalSystemPrompt
-			prompt = buildProposalPrompt(rn, source, explainEvents(r.Context(), store, rn.ProposedFrom))
+			// A terraform or opentofu apply is held from a plan, by the plan gate or a drift reconcile,
+			// and the plan is what it will carry out. The reconcile prompt is written for Ansible
+			// drift, so it described the apply as an empty playbook against an empty host and never
+			// showed the plan that says what approving destroys.
+			tool := run.NormalizeTool(rn.Tool)
+			if tool == run.ToolTerraform || tool == run.ToolOpenTofu {
+				system = planApplySystemPrompt
+				prompt = buildPlanApplyPrompt(rn, source,
+					logTail(r.Context(), store, rn.ProposedFrom, explainLogTail))
+			} else {
+				system = proposalSystemPrompt
+				prompt = buildProposalPrompt(rn, source,
+					explainEvents(r.Context(), store, rn.ProposedFrom))
+			}
 		case intentProposal:
 			system = intentProposalSystemPrompt
 			prompt = buildIntentProposalPrompt(rn)
@@ -323,6 +342,35 @@ func buildProposalPrompt(rn, source *run.Run, events []event.Event) string {
 	if section := driftedTaskSection(events, rn.Limit); section != "" {
 		b.WriteString("\n\nDrifted tasks, which the check would change:\n")
 		b.WriteString(section)
+	}
+	return b.String()
+}
+
+// buildPlanApplyPrompt assembles the review prompt for a held terraform or opentofu apply: the
+// directory it applies, why it is held, and the end of the plan it was proposed from, which carries
+// the resources the apply will touch and the summary line counting them.
+func buildPlanApplyPrompt(rn, source *run.Run, plan []byte) string {
+	var b strings.Builder
+	b.WriteString("Proposal: ")
+	b.WriteString(run.NormalizeTool(rn.Tool))
+	b.WriteString(" apply of ")
+	b.WriteString(promptCommand(rn.Command, explainCommandCap))
+	b.WriteString(", run for real.")
+	if rn.HeldByPolicy != "" {
+		b.WriteString("\nHeld because: ")
+		b.WriteString(rn.HeldByPolicy)
+	}
+	b.WriteString("\nPlanned by run ")
+	b.WriteString(source.ID)
+	b.WriteString(" with status ")
+	b.WriteString(string(source.Status))
+	b.WriteString(".")
+	for len(plan) > 0 && !utf8.RuneStart(plan[0]) {
+		plan = plan[1:]
+	}
+	if len(plan) > 0 {
+		b.WriteString("\n\nPlan output:\n")
+		b.Write(plan)
 	}
 	return b.String()
 }

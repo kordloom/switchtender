@@ -2,13 +2,13 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/kordloom/switchtender/internal/license"
 	"os"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/kordloom/switchtender/internal/dossier"
+	"github.com/kordloom/switchtender/internal/license"
 )
 
 // auditCmd groups audit trail tools.

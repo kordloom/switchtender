@@ -3,12 +3,13 @@ package dispatch
 import (
 	"context"
 	"errors"
+	"maps"
 	"sort"
 	"time"
 
-	"github.com/kordloom/switchtender/internal/run"
 	"go.uber.org/zap"
-	"maps"
+
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // parentMayStart claims the parent for this coordinator and reports whether it may begin.
@@ -341,6 +342,10 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 		parent.Status = run.StatusPendingApproval
 	}
 	recordHold(parent, holdRequested)
+	// Pinned while it is held, like every other submit path. Each step copies the parent's pin, so
+	// without it an approved pipeline ran whatever the branch held when its steps started, which is
+	// code the approver never read.
+	d.pinHeldRunCommit(parent)
 	created, dup, err := d.idempotentSave(ctx, parent)
 	if err != nil {
 		return nil, err
@@ -351,6 +356,7 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 	}
 	if parent.Status == run.StatusPendingApproval {
 		// Held for an approver. Approve starts it, since no claim loop picks up a pipeline parent.
+		d.notifyHeld(parent)
 		return parent, nil
 	}
 

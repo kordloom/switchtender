@@ -12,8 +12,12 @@ breakage the simulated DOM cannot see.
 - **interactive** (`interactive.spec.mjs`) drives a writable `switchtender serve` instance: it launches
   a bash run and creates a project and an inventory through the real dialogs, then reloads to confirm
   each change persisted server-side.
+- **assess** (`assess.spec.mjs`) drives the browser assessment page, served statically from the site
+  directory with the reader built into it: it drops an export named and filled beyond Latin, then
+  the same export saved as UTF-16, and checks the page reads both in its worker, sets text from the
+  file in fonts already on the machine, and requests nothing once it has loaded.
 
-Both fail on any uncaught page error or console error.
+The first two fail on any uncaught page error or console error, and the third on any page error.
 
 ## Run them
 
@@ -24,10 +28,11 @@ npx playwright install --with-deps chromium
 npm test
 ```
 
-`npm test` builds the binary into `.bin/switchtender`, and Playwright starts both servers for the run: a
-`demo` on `127.0.0.1:18777` and a `serve` on `127.0.0.1:18778`. Seeding the demo runs a few real
-playbooks and takes a moment, so the readiness timeout is generous. Outside CI, a server already running
-on either port is reused.
+`npm test` builds the binary into `.bin/switchtender` and the page's reader into `site/assess`, and
+Playwright starts the servers for the run: a `demo` on `127.0.0.1:18777`, a `serve` on
+`127.0.0.1:18778`, and the site on `127.0.0.1:18779`. Seeding the demo runs a few real playbooks and
+takes a moment, so the readiness timeout is generous. Outside CI, a server already running on any of
+those ports is reused.
 
 On a machine whose Playwright browser download is flaky but that already has Chrome, run with
 `ST_E2E_CHANNEL=chrome` to drive the system browser instead of the bundled one.

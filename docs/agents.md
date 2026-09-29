@@ -172,6 +172,24 @@ The narrowness holds inside a template launch too, which is where it would other
 - An agent can read the evidence and the signed receipt for runs it proposed. Another actor's
   evidence needs an admin.
 
+## Waiting for a decision
+
+A held run does not block the agent. The submission answers at once with the run, and the run's
+`status` says where it stands: `pending_approval` until a person decides, then it runs and ends
+`succeeded` or `failed`, or it ends `rejected` with the reason the person gave in `error`. The agent
+learns the decision by reading the run again, with `GET /v1/runs/{id}` or the `get_run` tool, and
+`GET /v1/runs?status=pending_approval` lists everything still waiting. Reading is all it can do
+about the decision: an agent that tries to approve its own run is refused with 403.
+
+The person who decides is told when the run is held: the chat channels and webhooks the server
+sends finished runs to also carry each hold, naming the rule that held it and who asked, and so
+does email when `--notify-on` is `finish`, since an install set to email failures alone is not
+sent approval requests it never asked for.
+The same channels carry how it ended, whether it ran, was rejected, or was canceled while it waited.
+They decide on the run's page in the interface, or with `POST /v1/runs/{id}/approve` or
+`POST /v1/runs/{id}/reject` under an admin token, so a chat bot or a script can carry the decision
+to wherever the approver already is.
+
 ## What the record shows
 
 The actor on every chain entry the agent produces is its token's label, `agent-bot` above, and, for

@@ -13,7 +13,7 @@ require (
 	github.com/hashicorp/go-plugin v1.8.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/jimlambrt/gldap v0.1.14
-	github.com/kordloom/loomseal v1.5.1
+	github.com/kordloom/loomseal v1.5.3
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10

@@ -36,6 +36,13 @@ linters:
 formatters:
   enable:
     - gofmt
+    - gci
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/kordloom/switchtender)
   exclusions:
     generated: lax
     paths:

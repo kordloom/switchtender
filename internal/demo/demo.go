@@ -244,6 +244,9 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 	// have and "terraform" beside a TERRAFORM badge says nothing. Both configurations declare only
 	// variables, locals, and outputs, so either plans offline with no provider download.
 	tfDir := filepath.Join(dir, "repos", "database-ops", "infra", "network")
+	// The decommissioned network beside it, whose state still holds the subnets its configuration
+	// dropped, so a plan there destroys them and the plan gate has a real destroy to hold.
+	legacyDir := filepath.Join(dir, "repos", "database-ops", "infra", "legacy-network")
 
 	ids := seedConfig(ctx, d, log)
 
@@ -359,7 +362,12 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 		return err
 	}
 
-	seedGovernance(ctx, d, playbook, inv, tfDir, ids, log)
+	seedGovernance(ctx, d, playbook, inv, ids, log)
+	// Like every terraform run here it needs terraform on the host, and seedMultiTool has already
+	// said once, naming terraform, what a visitor will not see when it is missing.
+	if have("terraform") {
+		seedHeldDestroy(ctx, d, legacyDir, log)
+	}
 
 	normalizeClaimStamps(ctx, d, log)
 
@@ -424,30 +432,15 @@ func seedAnchors(ctx context.Context, d Deps, log *zap.Logger) {
 	}
 }
 
-// seedGovernance seeds the two runs that show the policy gate doing its job: one a rule is still
-// holding, and one that was held, decided on by a second person, and only then executed.
+// seedGovernance seeds the run that shows the policy gate carried all the way through: held by a
+// rule, decided on by a second person, and only then executed. The change the gate is still holding
+// is seedHeldDestroy's.
 //
 // Every other seeded run goes straight from submit to execution, so the demo showed the engine and it
 // showed the evidence but never the gate between them. A visitor reading that this is the boundary
 // every change comes through found the rules listed as configuration and not one run any of them had
 // ever stopped, which left the product's central claim as the one thing the demo could not show.
-func seedGovernance(ctx context.Context, d Deps, playbook, inv, tfDir string, ids seededIDs,
-	log *zap.Logger) {
-	// A production destroy, held and left that way, so the runs list always has a change the gate is
-	// refusing right now. It never executes, so it needs no terraform on the host.
-	held := seedOpts(ctx, d, "api", "", "deploy-bot",
-		map[string]string{"env": "prod", "ticket": "OPS-511"},
-		run.WithTool(run.ToolTerraform), run.WithCommand(tfDir),
-		run.WithRequireApproval(true), run.WithRequireDistinctApprover(true),
-		run.WithHeldByPolicy("irreversible needs a second approver"))
-	if _, err := d.Submitter.Submit(ctx, "", "", held...); err != nil {
-		log.Warn("demo: seed held run: " + err.Error())
-	} else if d.Clock != nil {
-		// There is nothing to settle: the run is held and reaches no terminal state, so the clock is
-		// stepped here instead of by settle, keeping the next run's window in order.
-		d.Clock.advance(seedRunGap)
-	}
-
+func seedGovernance(ctx context.Context, d Deps, playbook, inv string, ids seededIDs, log *zap.Logger) {
 	if d.Approver == nil {
 		return
 	}
@@ -468,6 +461,24 @@ func seedGovernance(ctx context.Context, d Deps, playbook, inv, tfDir string, id
 		return
 	}
 	settle(ctx, d, r.ID)
+}
+
+// seedHeldDestroy seeds the change the gate is refusing right now, produced the way the product
+// produces one. deploy-bot asks for an apply of the decommissioned legacy network, the terraform
+// rule's destroy limit sends it through the plan gate, the plan destroys three subnets, and the
+// apply the gate proposes waits for a second person. Nothing on it is set by hand, so the rule it
+// cites is a rule that holds it, and the plan an approver would read is in the plan run's log.
+func seedHeldDestroy(ctx context.Context, d Deps, legacyDir string, log *zap.Logger) {
+	plan, err := d.Submitter.Submit(ctx, "", "", seedOpts(ctx, d, "api", "", "deploy-bot",
+		map[string]string{"env": "prod", "ticket": "OPS-511"},
+		run.WithTool(run.ToolTerraform), run.WithCommand(legacyDir))...)
+	if err != nil {
+		log.Warn("demo: seed held destroy: " + err.Error())
+		return
+	}
+	// The plan run settles. The apply it proposes is held and never does, so settling the plan is
+	// what keeps the next run's window in order.
+	settle(ctx, d, plan.ID)
 }
 
 // normalizeClaimStamps pulls each seeded run's claimed_at back into its own window. The dispatcher's
@@ -1154,19 +1165,21 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) seededIDs {
 	}
 
 	if d.Policies != nil {
-		// The destroy rule demands a distinct approver, because the run it is holding does: seeded
+		// The destroy rule demands a distinct approver, because the apply it is holding does: seeded
 		// without it, the Second approver column read "any approver" on every row while the run
 		// linked from that same row carried require_distinct_approver. The page told a stranger
 		// that no rule here enforces separation of duties, which is the compliance story the
 		// Policies page exists to tell.
-		// Holds on the grade rather than on the word "destroy" in a command line. The string
-		// match was the wrong thing to show a visitor twice over: it misses the spelling a
-		// destroy usually reaches production as, which is an apply replaying a plan file, and it
-		// teaches that governing this product means keeping a list of dangerous words current.
-		// Grading is the answer to both, and it is the feature this page exists to demonstrate.
-		tfDestroy := policy.NewPolicy("irreversible needs a second approver")
-		tfDestroy.Tool, tfDestroy.Reversibility, tfDestroy.ExcludeDryRun, tfDestroy.CreatedAt =
-			run.ToolTerraform, run.Irreversible, true, ago(40)
+		// It holds on what the plan destroys rather than on the word "destroy" in a command line,
+		// which misses the spelling a destroy usually reaches production as, an apply replaying a
+		// plan file, and teaches that governing this product means keeping a list of dangerous
+		// words current.
+		//
+		// It carries no reversibility floor. A terraform apply is graded before its plan exists,
+		// and it grades costly, so a floor of irreversible would fail every apply before the
+		// destroy limit was weighed and the rule could never hold one.
+		tfDestroy := policy.NewPolicy("terraform destroys need a second approver")
+		tfDestroy.Tool, tfDestroy.ExcludeDryRun, tfDestroy.CreatedAt = run.ToolTerraform, true, ago(40)
 		// Zero holds a plan that would destroy anything at all. The default disables the check,
 		// which is safe for availability and not for change control, and leaving it disabled on
 		// the one policy demonstrating change control said the opposite of what was intended.

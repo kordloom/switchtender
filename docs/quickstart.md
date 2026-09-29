@@ -11,10 +11,12 @@ No install needed to look around. The [live demo](https://demo.switchtender.com)
 
 ## Requirements
 
-Ansible on the PATH: `ansible-playbook` and `ansible-inventory`. Nothing else for the default
-SQLite setup. Building from source instead of installing the release binary needs Go 1.26, and
-Docker Compose is an alternative, where `docker compose --profile stack up --build` builds the image from this
-repository.
+The tools your runs use, on the PATH: `ansible-playbook` and `ansible-inventory` for Ansible, and
+`terraform`, `tofu`, `python3`, `pwsh` (PowerShell 7), or `go` for the rest. Bash runs use the
+system shell. Nothing else for the default SQLite setup. Building from source instead of installing
+the release binary needs Go 1.26, and Docker Compose is an alternative, where
+`docker compose --profile stack up --build` builds the image from this repository. That image
+already carries Ansible, Python, Terraform, and OpenTofu.
 
 ## Install
 

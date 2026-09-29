@@ -186,6 +186,10 @@ func (n *rundeckInt) UnmarshalYAML(value *yaml.Node) error {
 // reach.
 func FromRundeck(inventory string) func([]byte, time.Time) (*Plan, error) {
 	return func(data []byte, now time.Time) (*Plan, error) {
+		data, err := textOf(data)
+		if err != nil {
+			return nil, err
+		}
 		if IsRundeckArchive(data) {
 			return fromRundeckArchive(data, inventory, now)
 		}

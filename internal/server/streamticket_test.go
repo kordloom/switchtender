@@ -1,10 +1,10 @@
 package server
 
 import (
-	"github.com/kordloom/switchtender/internal/run"
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/user"
 )
 

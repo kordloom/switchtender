@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
 // TestRedactAssignmentsNested pins that a secret is still masked when it is joined onto another
@@ -224,6 +225,92 @@ func TestRedactAssignmentsLeavesAnAdjacentQuoteAlone(t *testing.T) {
 				t.Errorf("%s: captured secret mismatch (-want +got):\n%s\nThe captured value is what "+
 					"scrubs the run's own output, so one carrying a stray quote scrubs nothing.",
 					test.Name, diff)
+			}
+		})
+	}
+}
+
+// TestRedactAssignmentsStopsAValueWhereItsSyntaxDoes covers the boundary the patterns cannot see.
+//
+// Each pattern reads a name and then takes a value, and neither knows what encloses the text: the
+// INI form runs to the next whitespace and the YAML form to the end of the line. Both run past the
+// real end of a value that a quote opened before the name is holding, or that a shell separator
+// closes, and that costs two things at once.
+//
+// The value handed back is longer than the secret. Callers match it literally against a run's output
+// to mask it, so a longer string never matches and a tool that echoed the credential put it in the
+// stored log and the live stream while the receipt showed it redacted. And the mask replaced text
+// that was not secret, so the command recorded in the signed evidence is not the command that ran:
+// case 0 lost the URL it deployed to, case 1 lost the playbook, and case 2 lost the separator that
+// made it two commands.
+func TestRedactAssignmentsStopsAValueWhereItsSyntaxDoes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// Name says which boundary the case is about.
+		Name string
+		// In is the text as an operator submits it.
+		In string
+		// WantText is the redaction, which must keep everything the value does not cover.
+		WantText string
+		// WantValues are the secrets reported, each exactly as it appears in In so a caller can
+		// match it in a run's output.
+		WantValues []string
+	}{{ // Test 0: A header value held open by a quote that opened before the name.
+		Name:       "quoted header",
+		In:         `curl -H "X-Api-Key: SUPERSECRET" https://api.example.com/deploy`,
+		WantText:   `curl -H "X-Api-Key: ***" https://api.example.com/deploy`,
+		WantValues: []string{"SUPERSECRET"},
+	}, { // Test 1: The same shape in single quotes, which is how -e carries a YAML scalar.
+		Name:       "single quoted scalar",
+		In:         `ansible-playbook -e 'vault_password: hunter2' site.yml`,
+		WantText:   `ansible-playbook -e 'vault_password: ***' site.yml`,
+		WantValues: []string{"hunter2"},
+	}, { // Test 2: A separator ends an unquoted value, and the shell would have ended the word there
+		// too. Reported with the semicolon, the masker searched the log for abc123; and a tool
+		// echoing abc123 left it in the clear.
+		Name:       "semicolon ends an unquoted value",
+		In:         `sh -c "export API_TOKEN=abc123; deploy"`,
+		WantText:   `sh -c "export API_TOKEN=***; deploy"`,
+		WantValues: []string{"abc123"},
+	}, { // Test 3: A pipe is a separator for the same reason, and written with no space around it
+		// the whitespace the INI form stops at is not there to save it.
+		Name:       "pipe ends an unquoted value",
+		In:         `token=abc123|tee out`,
+		WantText:   `token=***|tee out`,
+		WantValues: []string{"abc123"},
+	}, { // Test 4: A value that opens its own quote is delimited already, and a separator inside it
+		// is ordinary text rather than the end of the value. Cutting here would report a fragment,
+		// which is the leak in the other direction.
+		Name:       "a quote of its own holds a separator",
+		In:         `password="a;b" host=db`,
+		WantText:   `password=*** host=db`,
+		WantValues: []string{"a;b"},
+	}, { // Test 5: The value at the end of a quoted composite, where the closing quote is the last
+		// character of what the pattern took.
+		Name:       "closing quote at the end of the capture",
+		In:         `psql "host=db password=hunter2"`,
+		WantText:   `psql "host=db password=***"`,
+		WantValues: []string{"hunter2"},
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			got, found := RedactAssignments(test.In, "***")
+			if diff := cmp.Diff(test.WantText, got); diff != "" {
+				t.Errorf("redacted text mismatch (-want +got):\n%s", diff)
+			}
+			values := make([]string, 0, len(found))
+			for _, a := range found {
+				values = append(values, a.Value)
+			}
+			if diff := cmp.Diff(test.WantValues, values, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("reported values mismatch (-want +got):\n%s", diff)
+			}
+			for _, v := range test.WantValues {
+				if !strings.Contains(test.In, v) {
+					t.Errorf("reported %q, which is not in the text it came from, so nothing "+
+						"matching it will be found in the run's output either", v)
+				}
 			}
 		})
 	}

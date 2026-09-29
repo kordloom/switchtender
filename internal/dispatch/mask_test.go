@@ -523,3 +523,55 @@ func TestRunMasksSecretPassedAsExtraVar(t *testing.T) {
 		t.Errorf("masking swallowed ordinary output: %q", logStr)
 	}
 }
+
+// TestStreamMaskerReleasesASelfOverlappingSecretAsItGoes holds the release point to the reason it is
+// computed the way it is.
+//
+// A secret whose own prefix is also its own suffix occurs at every position of a long enough run of
+// one character, so a release point that asks "does an occurrence of a secret straddle here" has no
+// answer anywhere in such a buffer. The obvious repair is to keep moving the point until it clears,
+// and the direction decides which way that fails: forward eats the withheld remainder and leaks,
+// which the fuzz seed beside this covers, and backward reaches zero and releases nothing, which
+// holds the whole stream in memory and searches it again on every chunk.
+//
+// Neither is necessary, because redaction never replaces those overlapping occurrences: it takes one
+// and resumes after it, leaving a point behind each. The release point walks as redaction walks, so
+// this run releases as it arrives.
+//
+// What this asserts is the consequence, that holding is bounded by the secret and not by the stream.
+// A megabyte is three orders of magnitude past the bound, so a masker that accumulates fails here
+// rather than merely running slowly.
+func TestStreamMaskerReleasesASelfOverlappingSecretAsItGoes(t *testing.T) {
+	t.Parallel()
+	const secret = "0000"
+	m := &masker{}
+	m.set([]string{secret})
+	sm := &streamMasker{mask: m}
+	data := strings.Repeat("0", 1<<20)
+
+	var got strings.Builder
+	held := 0
+	for i := 0; i < len(data); i += 4096 {
+		end := min(i+4096, len(data))
+		got.Write(sm.next([]byte(data[i:end])))
+		held = max(held, len(sm.tail))
+	}
+	got.Write(sm.flush())
+
+	// What is withheld is bounded by the secret, not by the stream. next holds back one byte short of
+	// the longest secret, and the release point can move back by up to that again to clear a match it
+	// landed inside, so twice the secret bounds it however long the run gets. Accumulating past that
+	// is the release point going unfound.
+	if want := 2 * len(secret); held > want {
+		t.Errorf("withheld %d bytes at its peak, want no more than %d: what is held grows with the "+
+			"stream rather than staying bounded by the secret", held, want)
+	}
+	if strings.Contains(got.String(), secret) {
+		t.Errorf("the secret survived a run of its own character")
+	}
+	// Nothing lost either: every four characters became one mask token, and the last one is short of
+	// a match and stays as it is.
+	if want := (1<<20)/len(secret)*len(maskToken) + (1<<20)%len(secret); got.Len() != want {
+		t.Errorf("emitted %d bytes, want %d: output was dropped or duplicated", got.Len(), want)
+	}
+}

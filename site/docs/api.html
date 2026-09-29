@@ -10,11 +10,11 @@
 	<meta property="og:description" content="Every endpoint the server exposes. The API is served under the /v1 base path.">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/api">
-	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
 	<meta name="twitter:card" content="summary_large_image">
 	<meta name="twitter:title" content="HTTP API | SwitchTender docs">
 	<meta name="twitter:description" content="Every endpoint the server exposes. The API is served under the /v1 base path.">
-	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
 	<script type="application/ld+json">
 {
  "@context": "https://schema.org",
@@ -955,8 +955,11 @@ is refused rather than ignored, so a survey that almost parses is reported inste
 losing a field.</p>
 <h2 id="per-template-notifications">Per-template notifications</h2>
 <p>A template or a run submission may carry <code>notifications</code>, a list of targets that receive its
-terminal state in addition to the server-wide channels. Each target names a <code>kind</code> and the field
-that kind is addressed by, plus an optional <code>on_failure</code> that limits the target to failed runs.</p>
+terminal state in addition to the server-wide channels, and hear when a rule holds it for approval.
+Each target names a <code>kind</code> and the field that kind is addressed by, plus an optional <code>on_failure</code>
+that limits the target to failed runs, which also leaves it out of holds. A hold reaches webhook,
+chat, ntfy, and email targets, and never a PagerDuty, Grafana, or Twilio one: a hold asks for a
+decision, and those report incidents.</p>
 <table>
 <thead>
 <tr>
@@ -969,7 +972,7 @@ that kind is addressed by, plus an optional <code>on_failure</code> that limits 
 <tr>
 <td><code>webhook</code></td>
 <td><code>url</code></td>
-<td>The finished run as JSON, extra vars redacted.</td>
+<td>The run as JSON with its <code>event</code>, extra vars redacted.</td>
 </tr>
 <tr>
 <td><code>slack</code>, <code>mattermost</code>, <code>rocketchat</code></td>
@@ -1021,6 +1024,9 @@ that kind is addressed by, plus an optional <code>on_failure</code> that limits 
     ]
   }'
 </code></pre>
+<p>A webhook, a target or one named with <code>--notify-webhook</code>, receives one body shape:
+<code>{&quot;event&quot;: &quot;run.finished&quot;, &quot;run&quot;: {...}}</code> when a run reaches a terminal state, and the same with
+<code>&quot;event&quot;: &quot;run.held&quot;</code> when a rule holds it for a person to decide on.</p>
 <p>A malformed target is refused at create or update with the field it lacks, not dropped at
 delivery. A Twilio or email target names only a recipient. The account credentials stay in server
 flags, so a template never carries them. On read, webhook URLs, PagerDuty routing keys, and

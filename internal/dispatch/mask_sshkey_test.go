@@ -47,14 +47,10 @@ func TestUnlockedSSHKeyIsMasked(t *testing.T) {
 		t.Fatalf("UnlockSSHKey() error = %v", err)
 	}
 
-	// Registering only the stored form and the passphrase, the way it used to be.
-	old := &masker{}
-	old.set([]string{string(stored), passphrase})
-	if !strings.Contains(string(old.redact([]byte(unlocked))), "PRIVATE KEY") {
-		t.Skip("the stored form already covers the unlocked key, so this no longer applies")
-	}
-
-	// Registering the unlocked key too, the way it is now.
+	// Registering the unlocked key too, the way it is now. This is checked first and
+	// unconditionally. It sat behind a skip on the comparison below, so the day the old shape
+	// stopped being worse, the product's own property would have stopped being checked along with
+	// the point being made about it.
 	m := &masker{}
 	m.set([]string{string(stored), passphrase, unlocked})
 	got := string(m.redact([]byte(unlocked)))
@@ -62,7 +58,21 @@ func TestUnlockedSSHKeyIsMasked(t *testing.T) {
 		t.Errorf("a playbook reading the key file writes it into the stored log: %q",
 			got[:min(len(got), 120)])
 	}
-	if !strings.Contains(string(m.redact([]byte("pass="+passphrase))), "pass=") {
-		t.Error("the passphrase is no longer masked")
+	// The passphrase itself is what must not survive. Checking that the label around it survived
+	// passed whether or not the passphrase was masked.
+	if masked := string(m.redact([]byte("pass=" + passphrase))); strings.Contains(masked, passphrase) {
+		t.Errorf("the passphrase is no longer masked: %q", masked)
+	}
+
+	// Registering only the stored form and the passphrase, the way it used to be, which is the
+	// point rather than a requirement: it says why the unlocked key has to be registered at all. If
+	// the stored form ever covers the unlocked key on its own, that is worth knowing and is not a
+	// failure.
+	old := &masker{}
+	old.set([]string{string(stored), passphrase})
+	if !strings.Contains(string(old.redact([]byte(unlocked))), "PRIVATE KEY") {
+		t.Log("the stored form now covers the unlocked key on its own, so registering the unlocked " +
+			"key is no longer the only thing standing between a playbook that reads the key file " +
+			"and the stored log")
 	}
 }

@@ -20,6 +20,11 @@ import (
 // not silently dropped, so an operator can see a channel that could not fire.
 func (d *Dispatcher) notifyRicherTargets(r *run.Run, targets []run.NotifyTarget) {
 	for _, t := range targets {
+		// A hold asks for a decision rather than reporting an incident, so it reaches an email
+		// recipient and never pages, texts, or annotates a dashboard.
+		if r.Status == run.StatusPendingApproval && t.Kind != run.NotifyEmail {
+			continue
+		}
 		switch t.Kind {
 		case run.NotifyPagerDuty:
 			d.deliverPagerDutyTo(r, t.Key)
@@ -103,7 +108,7 @@ func (d *Dispatcher) deliverEmailTo(r *run.Run, to string) {
 	if len(recipients) == 0 {
 		return
 	}
-	subject := "SwitchTender run " + r.ID + " " + string(r.Status)
+	subject := emailSubject(r)
 	body := emailBody(r)
 	d.notifyWG.Add(1)
 	go func() {

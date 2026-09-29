@@ -202,6 +202,19 @@ func (unreachablePolicies) Save(context.Context, *policy.Policy) error { return 
 // Delete raises the fault.
 func (unreachablePolicies) Delete(context.Context, string) error { return errFaulty }
 
+// planGateRules returns a policy store holding one plan-content rule for terraform, the shape of an
+// install whose worker plans a terraform apply first and asks the control node for the apply.
+func planGateRules(t *testing.T) policy.Store {
+	t.Helper()
+	rules := policy.NewMemStore()
+	gate := policy.NewPolicy("terraform destroys need a person")
+	gate.Tool, gate.MaxDestroy = run.ToolTerraform, 0
+	if err := rules.Save(context.Background(), gate); err != nil {
+		t.Fatalf("Save policy: %v", err)
+	}
+	return rules
+}
+
 // relayFixture is a running relay server and the store behind it.
 type relayFixture struct {
 	// URL is the server's base URL.
@@ -210,8 +223,8 @@ type relayFixture struct {
 	Store run.Store
 }
 
-// newRelayFixture stands up a relay server over the given store, policy store, and pools, seeds one
-// claimed running run, and returns the fixture.
+// newRelayFixture stands up a relay server for one worker pool over the given store and policy
+// store. A nil store becomes an empty memory store, and each test seeds the runs it reports on.
 func newRelayFixture(t *testing.T, store run.Store, policies policy.Store) relayFixture {
 	t.Helper()
 	if store == nil {

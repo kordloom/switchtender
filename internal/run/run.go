@@ -268,10 +268,15 @@ type Run struct {
 	Image string `json:"image,omitempty"`
 	// PullCredentialID names a registry credential for pulling a private Image. Empty for public.
 	PullCredentialID string `json:"pull_credential_id,omitempty"`
-	// ProposedFrom names the drift check run this reconcile proposal was built from. A run carrying
-	// it was machine proposed and is born held for approval, so a person releases it or it never
-	// executes.
+	// ProposedFrom names the run this one was proposed from: the drift check a reconcile answers, or
+	// the plan a gated terraform or opentofu apply carries out. A run carrying it was built by the
+	// product rather than asked for directly, and it never passes through the plan gate again.
 	ProposedFrom string `json:"proposed_from,omitempty"`
+	// PlanDestroys is how many resources the plan behind a proposed apply said it would destroy, or
+	// nil when no plan summary was read. It is evidence the grade reads: a plan is the one place a
+	// terraform or opentofu change says what it removes, so the apply is graded from it rather than
+	// from a command line that names only a directory.
+	PlanDestroys *int `json:"plan_destroys,omitempty"`
 	// HeldByPolicy names the approval rule that held this run, as that rule was named when the hold
 	// happened. It is recorded at the hold rather than looked up later, because a policy can be
 	// renamed or deleted long before anyone reads the evidence, and "which rule stopped this
@@ -503,6 +508,10 @@ func (r *Run) Clone() *Run {
 	if r.ShardCount != nil {
 		c := *r.ShardCount
 		out.ShardCount = &c
+	}
+	if r.PlanDestroys != nil {
+		n := *r.PlanDestroys
+		out.PlanDestroys = &n
 	}
 	if r.StepIndex != nil {
 		i := *r.StepIndex
@@ -769,11 +778,19 @@ func cloneNonEmpty(in []string) []string {
 	return out
 }
 
-// WithProposedFrom marks the run as a machine-built reconcile proposal and records the drift check
-// run it was derived from.
-func WithProposedFrom(checkRunID string) SubmitOption {
+// WithProposedFrom records the run this one was proposed from: the drift check a reconcile answers,
+// or the plan a gated apply carries out.
+func WithProposedFrom(fromRunID string) SubmitOption {
 	return func(r *Run) {
-		r.ProposedFrom = checkRunID
+		r.ProposedFrom = fromRunID
+	}
+}
+
+// WithPlanDestroys records how many resources the plan behind a proposed apply said it would
+// destroy, which the grade reads.
+func WithPlanDestroys(destroys int) SubmitOption {
+	return func(r *Run) {
+		r.PlanDestroys = &destroys
 	}
 }
 

@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/user"
-
-	"go.uber.org/zap"
 )
 
 // TestInventoryUpdateResponseRedactsForNonAdmin proves the update handler's response never hands a

@@ -7,11 +7,11 @@ import (
 	"reflect"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/template"
-	"strings"
 )
 
 // awxWorkflow is an AWX workflow job template: a graph of nodes, each running a job template, wired
@@ -66,6 +66,56 @@ type awxWorkflowNode struct {
 	ExtraData json.RawMessage `json:"extra_data"`
 	// Credentials are credentials the node adds on top of its job template's, by natural key.
 	Credentials []awxRef `json:"credentials"`
+	// SummaryFields is the REST API's summary of what the node references. A node wired by id says
+	// only there what kind of object its unified_job_template is.
+	SummaryFields *awxNodeSummary `json:"summary_fields"`
+	// templateType is the kind of object the natural key in unified_job_template declares, such as
+	// job_template or workflow_job_template, or empty when the reference declared none.
+	templateType string
+}
+
+// awxNodeSummary is the part of a node's REST summary fields the importer reads.
+type awxNodeSummary struct {
+	// UnifiedJobTemplate describes the object the node runs.
+	UnifiedJobTemplate awxNodeSummaryTemplate `json:"unified_job_template"`
+}
+
+// awxNodeSummaryTemplate is the REST API's description of the object a node runs.
+type awxNodeSummaryTemplate struct {
+	// Name is the object's name.
+	Name string `json:"name"`
+	// UnifiedJobType is the kind of job the object launches, such as job, workflow_job, or
+	// workflow_approval.
+	UnifiedJobType string `json:"unified_job_type"`
+}
+
+// UnmarshalJSON decodes a node and records the kind of object its template reference declares.
+//
+// AWX keeps job templates, workflow job templates, projects, and inventory sources in separate
+// namespaces, so one name can mean several objects. The reference decodes to its name, which is all
+// the rest of the importer keys on, and a node running a nested workflow or a project sync resolved
+// by that name alone to any job template that shared it, so the import ran different work in its
+// place. The declared kind is kept beside the name so a node that runs anything but a job template
+// can be refused.
+func (n *awxWorkflowNode) UnmarshalJSON(b []byte) error {
+	type plain awxWorkflowNode
+	if err := json.Unmarshal(b, (*plain)(n)); err != nil {
+		return err
+	}
+	var typed struct {
+		UnifiedJobTemplate json.RawMessage `json:"unified_job_template"`
+	}
+	if err := json.Unmarshal(b, &typed); err != nil {
+		return err
+	}
+	// A reference spelled as a name or an id declares no kind, which is not an error.
+	var key struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(typed.UnifiedJobTemplate, &key) == nil {
+		n.templateType = key.Type
+	}
+	return nil
 }
 
 // awxWorkflowNodeRelated holds a node's nested outgoing edges.
@@ -74,6 +124,20 @@ type awxWorkflowNodeRelated struct {
 	SuccessNodes []awxNodeRef `json:"success_nodes"`
 	FailureNodes []awxNodeRef `json:"failure_nodes"`
 	AlwaysNodes  []awxNodeRef `json:"always_nodes"`
+	// CreateApprovalTemplate is where awxkit writes an approval node. AWX creates an approval
+	// through its own endpoint, so the node carries this in place of a template reference.
+	CreateApprovalTemplate *awxApprovalTemplate `json:"create_approval_template"`
+}
+
+// awxApprovalTemplate is an AWX approval node: the workflow stops there until a person approves or
+// denies, and only then do the nodes after it run.
+type awxApprovalTemplate struct {
+	// Name is what AWX shows the approver.
+	Name string `json:"name"`
+	// Description is the context the author gave the approver.
+	Description string `json:"description"`
+	// Timeout is how many seconds the node waits before it fails the workflow, or zero for no limit.
+	Timeout int64 `json:"timeout"`
 }
 
 // awxNodeRef references a workflow node by whichever key the export used.
@@ -111,6 +175,55 @@ func (r *awxNodeRef) UnmarshalJSON(b []byte) error {
 		}
 	}
 	return nil
+}
+
+// approvalGate returns the approval a node waits on, or nil when the node runs a template.
+//
+// awxkit writes an approval as the template to create in the node's place. A natural key can also
+// name an approval template outright, and the REST API writes the approval template's id and says
+// what it is only in the node's summary. Each is the same person the workflow waits for.
+func (n awxWorkflowNode) approvalGate() *awxApprovalTemplate {
+	if n.Related != nil && n.Related.CreateApprovalTemplate != nil {
+		return n.Related.CreateApprovalTemplate
+	}
+	if n.templateType == "workflow_approval_template" {
+		return &awxApprovalTemplate{Name: string(n.UnifiedJobTemplate)}
+	}
+	if s := n.SummaryFields; s != nil && s.UnifiedJobTemplate.UnifiedJobType == "workflow_approval" {
+		return &awxApprovalTemplate{Name: s.UnifiedJobTemplate.Name}
+	}
+	return nil
+}
+
+// otherWork names what a node runs when the export says it is not a job template, or returns the
+// empty string when it is one or the export does not say.
+func (n awxWorkflowNode) otherWork() string {
+	kind := n.templateType
+	if kind == "" && n.SummaryFields != nil {
+		kind = n.SummaryFields.UnifiedJobTemplate.UnifiedJobType
+	}
+	switch kind {
+	case "", "job_template", "job":
+		return ""
+	case "workflow_job_template", "workflow_job":
+		return "a nested workflow"
+	case "project", "project_update":
+		return "a project sync"
+	case "inventory_source", "inventory_update":
+		return "an inventory sync"
+	case "system_job_template", "system_job":
+		return "a system job"
+	}
+	return fmt.Sprintf("an AWX %s", kind)
+}
+
+// templateName is the name of what the node runs. The REST summary's name wins when there is one,
+// since a reference spelled as an id says nothing a reader can find.
+func (n awxWorkflowNode) templateName() string {
+	if n.SummaryFields != nil && n.SummaryFields.UnifiedJobTemplate.Name != "" {
+		return n.SummaryFields.UnifiedJobTemplate.Name
+	}
+	return string(n.UnifiedJobTemplate)
 }
 
 // nodeKeyForID spells a numeric node id as a graph key, kept in one place so the key a node
@@ -216,6 +329,9 @@ func (p *Plan) addWorkflows(export awxExport, now time.Time,
 	}
 	for _, wf := range export.Workflows {
 		id := p.addWorkflow(wf, jobs, now, projectIDs, inventoryIDs, credentialIDs)
+		if id == "" {
+			p.refused++
+		}
 		p.addWorkflowSchedules(wf, id, now)
 	}
 }
@@ -259,6 +375,35 @@ func (p *Plan) addWorkflow(wf awxWorkflow, jobs map[string]awxJobTemplate, now t
 	if len(nodes) == 0 {
 		p.warn("workflow %q carries no nodes, so there is nothing to import", name)
 		return ""
+	}
+
+	// An approval node is a person the workflow waits for partway through. Approval here is a policy
+	// that holds a run before it starts, and an import writes no policies, so bringing the other
+	// nodes across would run them with the gate gone. Checked first and named as a gate, because read
+	// as an ordinary node it looked like a step that runs nothing, which hid the one part of the
+	// workflow a reviewer most needs to know did not come across.
+	for _, n := range nodes {
+		if gate := n.approvalGate(); gate != nil {
+			p.gates = append(p.gates, name)
+			p.warn("workflow %q was not imported: node %s is an approval gate, %q. Approval here "+
+				"is a policy that holds a run before it starts, not a step partway through, so "+
+				"importing the rest would run it with no gate. Write a policy that holds its steps, "+
+				"then rebuild it on the Workflows page.", name, nodeLabel(n), oneLine(gate.Name))
+			return ""
+		}
+	}
+
+	// A step runs a playbook, so a node running anything else is refused before any node is looked
+	// up by name. A nested workflow, a project sync, or an inventory sync can share its name with a
+	// job template, and resolved by name it imported as that job template: the node ran some other
+	// playbook, and a nested workflow's own approval gates were dropped with it.
+	for _, n := range nodes {
+		if work := n.otherWork(); work != "" {
+			p.warn("workflow %q was not imported: node %s runs %s, %q, and a pipeline step runs a "+
+				"playbook. Rebuild it on the Workflows page with that work written as steps.",
+				name, nodeLabel(n), work, oneLine(n.templateName()))
+			return ""
+		}
 	}
 
 	// A failure edge runs work precisely because something failed. A pipeline step runs when its

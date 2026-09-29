@@ -8,6 +8,14 @@ on:
       - "go.mod"
       - "go.sum"
       - ".github/workflows/deploy-site.yml"
+      # The browser assessment is compiled from the importer and everything it imports, and checked
+      # against the command's own output, so a change to any Go file can change what the page says.
+      # Deploying on site changes alone would leave an importer fix live in the command and absent
+      # from the page, which is the disagreement the conformance check below exists to refuse.
+      - "**.go"
+      - "scripts/assess-conformance.cjs"
+      - "scripts/assess-worker-check.cjs"
+      - "test/supertest/manifests/awx-export.json"
   workflow_dispatch:
 
 permissions:
@@ -84,6 +92,38 @@ jobs:
           open(p, "w").write(new)
           print("stamped", ver)
           PY
+
+      # The browser assessment is built here, from this repository's own importer, for the same
+      # reason the verifier above is: a committed artifact is a promise that somebody remembered to
+      # rebuild it. This one matters more than most, because the page's entire argument is that its
+      # numbers cannot disagree with what a run later says, and a stale build is exactly that
+      # disagreement shipped to the person deciding whether to trust the product.
+      - name: Build the browser assessment
+        run: |
+          set -euo pipefail
+          GOOS=js GOARCH=wasm go build -ldflags="-s -w" -o site/assess/assess.wasm ./cmd/assessweb/
+          cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" site/assess/wasm_exec.js
+          ls -l site/assess/assess.wasm
+
+      # And it has to agree with the command. Two builds of one reader with nothing between them is
+      # how "they cannot disagree" quietly stops being true, so the report the browser produces for
+      # a real export is compared against the one the command prints for the same file.
+      - name: Check the browser assessment against the command
+        run: |
+          set -euo pipefail
+          go run . assess awx test/supertest/manifests/awx-export.json > /tmp/assess-expected.txt
+          node scripts/assess-conformance.cjs \
+            site/assess/assess.wasm site/assess/wasm_exec.js \
+            test/supertest/manifests/awx-export.json /tmp/assess-expected.txt
+
+      # The page runs the reader in a worker that replaces a Go program a file too large for it
+      # ended, without fetching anything again. Checked against the build about to be published.
+      - name: Check the browser assessment survives a file too large for it
+        run: |
+          set -euo pipefail
+          node --wasm-max-mem-pages=4096 scripts/assess-worker-check.cjs \
+            site/assess/assess-worker.js site/assess/assess.wasm site/assess/wasm_exec.js \
+            test/supertest/manifests/awx-export.json
 
       - name: Deploy site to Cloudflare Pages
         uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4

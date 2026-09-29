@@ -45,6 +45,23 @@ func chainOf(t *testing.T, entries []*audit.Entry) (*audit.BundleReport, []byte,
 	return rep, signed, id
 }
 
+// requireReencodedVerifies fails the test unless the decoded bundle, encoded again with nothing
+// changed, still verifies. The tamper cases here build every forgery by that same decode and encode
+// and count a refusal as the tamper being caught, so an encoding that broke every bundle would pass
+// all of them without a single tamper having been detected.
+func requireReencodedVerifies(t *testing.T, doc map[string]any, keyID string) {
+	t.Helper()
+	again, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	rep, err := audit.VerifyBundle(again, keyID)
+	if err != nil || !rep.OK() {
+		t.Fatalf("the bundle stopped verifying after a decode and encode with nothing changed "+
+			"(err = %v), so no tamper case could show the tamper is what broke it", err)
+	}
+}
+
 // linked assigns sequence and links across a run of entries.
 func linked(entries []*audit.Entry) []*audit.Entry {
 	var prev *audit.Entry
@@ -82,6 +99,7 @@ func TestEveryFieldTheChainShowsIsAlsoCommitted(t *testing.T) {
 	if len(claims) == 0 {
 		t.Fatal("the bundle carries no claims")
 	}
+	requireReencodedVerifies(t, doc, id.KeyID())
 
 	tampered := 0
 	for ci := range claims {
@@ -209,16 +227,25 @@ func TestDroppingAnyClaimBreaksTheChain(t *testing.T) {
 	}
 	_, signed, id := chainOf(t, linked(es))
 
-	for drop := range 5 {
+	// A bundle that moved its claims would leave every case below cutting nothing and skipping, so
+	// the count is required rather than checked case by case.
+	var whole map[string]any
+	if err := json.Unmarshal(signed, &whole); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if claims, _ := whole["claims"].([]any); len(claims) != len(es) {
+		t.Fatalf("the bundle carries %d claims, want %d, so the cases below would cut nothing",
+			len(claims), len(es))
+	}
+	requireReencodedVerifies(t, whole, id.KeyID())
+
+	for drop := range len(es) {
 		t.Run(fmt.Sprintf("drop_claim_%d", drop), func(t *testing.T) {
 			var doc map[string]any
 			if err := json.Unmarshal(signed, &doc); err != nil {
 				t.Fatalf("Unmarshal() error = %v", err)
 			}
 			claims, _ := doc["claims"].([]any)
-			if drop >= len(claims) {
-				t.Skip("fixture shorter than expected")
-			}
 			doc["claims"] = append(append([]any{}, claims[:drop]...), claims[drop+1:]...)
 			forged, err := json.Marshal(doc)
 			if err != nil {

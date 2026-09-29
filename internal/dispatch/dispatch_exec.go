@@ -8,11 +8,12 @@ import (
 	"os"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
-	"go.uber.org/zap"
 )
 
 // Close stops accepting new work, cancels in-flight runs, and waits for workers to drain. The
@@ -593,6 +594,31 @@ func (d *Dispatcher) Cancel(id string) bool {
 		cancel(nil)
 	}
 	return ok
+}
+
+// CancelWaiting cancels a run that is waiting unclaimed, pending or held for approval, and settles
+// it the way every other end of a run is settled. It reports false, with no error, for a run that
+// is not waiting unclaimed, which only the process executing it can stop.
+//
+// The store cancels the run in one statement, so no claim can land between the check and the write.
+// Canceling through the store alone skipped the rest of a run's end: no outcome reached the chain
+// and no channel heard about it, so a channel told that a run was waiting for approval never
+// learned that it had stopped waiting.
+func (d *Dispatcher) CancelWaiting(ctx context.Context, id string) (bool, error) {
+	done, err := d.store.CancelPending(ctx, id)
+	if err != nil || !done {
+		return false, err
+	}
+	r, err := d.storeGetWithRetries(ctx, id)
+	if err != nil {
+		// The cancel landed, and that is what the caller asked for. Only the settling is lost, so it
+		// is logged rather than reported as a cancel that failed.
+		d.log.Error("dispatch: read a canceled run to settle it: "+err.Error(), zap.String("run_id", id))
+		return true, nil
+	}
+	d.commitOutcome(r)
+	d.notify(r)
+	return true, nil
 }
 
 // finalize records the terminal status, exit code, failure detail, and end time of r, commits the

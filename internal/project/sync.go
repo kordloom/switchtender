@@ -14,14 +14,14 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/kordloom/switchtender/internal/util"
-
 	"github.com/go-git/go-git/v5"
 	gitconfig "github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	gitssh "github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	"gopkg.in/yaml.v3"
+
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // Syncer keeps local checkouts of project repositories, one per project under a cache directory.

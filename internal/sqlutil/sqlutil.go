@@ -124,6 +124,39 @@ func NullTime(t *time.Time) any {
 	return FormatTime(*t)
 }
 
+// ParseTimeOrAbsent parses a stored time and treats one it cannot read as absent, returning the zero
+// time.
+//
+// It exists for a stamp on a row that is listed alongside others, where refusing the row refuses
+// every row with it. A scan error becomes a query error, so one unreadable stamp took down the whole
+// listing: one schedule with a damaged next_run_at made the schedules page error and the scheduler
+// enumerate nothing, so no schedule in the install fired, not just the damaged one. The migration
+// that normalizes these stamps deliberately leaves one it cannot parse in place, reasoning that the
+// row is already broken, and this is what keeps the cost where that reasoning assumes it is.
+//
+// It is for stamps and for nothing else. A stamp says when, and a reader that does not know when is
+// a reader missing a detail; the fields that say what a row does are not eligible, because guessing
+// at those could run work nobody asked for. Audit chain stamps are not eligible either, for the
+// opposite reason: they are covered by the chain digest, so reading a damaged one as absent would
+// change what verification computes over.
+func ParseTimeOrAbsent(s string) time.Time {
+	t, err := ParseTime(s)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
+// ParseNullTimeOrAbsent parses an optional stored time and treats one it cannot read as absent,
+// returning nil. It carries the same reasoning and the same limits as ParseTimeOrAbsent.
+func ParseNullTimeOrAbsent(s sql.NullString) *time.Time {
+	t, err := ParseNullTime(s)
+	if err != nil {
+		return nil
+	}
+	return t
+}
+
 // ParseNullTime parses an optional stored time.
 func ParseNullTime(s sql.NullString) (*time.Time, error) {
 	if !s.Valid || s.String == "" {

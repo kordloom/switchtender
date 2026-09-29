@@ -106,6 +106,13 @@ type Policy struct {
 // Matches reports whether the policy's criteria match r. Every non-empty criterion must match,
 // so a policy narrows the runs it gates rather than widening them.
 func (p *Policy) Matches(r *run.Run) bool {
+	return p.matchesBeforeGrade(r) && p.meetsGradeFloors(r)
+}
+
+// matchesBeforeGrade reports whether every criterion but the risk and reversibility floors matches
+// r. Those two are grades computed from the run, and a terraform or opentofu apply has no honest
+// grade until its plan has said what it destroys, so the plan gate asks this question first.
+func (p *Policy) matchesBeforeGrade(r *run.Run) bool {
 	if p.ExcludeDryRun && r.DryRun {
 		return false
 	}
@@ -121,9 +128,12 @@ func (p *Policy) Matches(r *run.Run) bool {
 	if p.Queue != "" && p.Queue != r.Queue {
 		return false
 	}
-	if !p.matchesActor(r) {
-		return false
-	}
+	return p.matchesActor(r)
+}
+
+// meetsGradeFloors reports whether r's grade clears the policy's risk and reversibility floors. A
+// policy with neither floor has nothing to clear.
+func (p *Policy) meetsGradeFloors(r *run.Run) bool {
 	if p.MinRisk != "" && !meetsRiskFloor(run.AssessRisk(r).Level, p.MinRisk) {
 		return false
 	}
@@ -314,12 +324,27 @@ func (p *Policy) Label() string {
 	return p.ID
 }
 
-// PlanGated reports whether any plan-content policy scopes r, meaning r's apply must be planned and
-// checked before it runs. A policy is plan-content when its MaxDestroy is non-negative, and it scopes
-// r when it also matches r. This is separate from Matches, which is unchanged.
+// PlanGated reports whether r's apply must be planned and checked before it runs. A plan-content
+// policy, one with a non-negative MaxDestroy, sends r there when it matches r.
+//
+// So does a rule with a risk or reversibility floor that matches a terraform or opentofu apply on
+// every criterion but the grade, when the grade does not yet clear the floor. Such an apply is
+// graded from its command until a plan says what it destroys, which made every apply costly and
+// medium: a rule holding irreversible changes, or high risk ones, never matched an apply that
+// destroyed everything, and the apply ran. Planned first, the apply it proposes carries the plan's
+// destroy count, its grade says what the plan found, and the rule decides on that. A floor the
+// apply already clears held it at submission, so planning it would only ask the same question
+// twice.
 func PlanGated(policies []*Policy, r *run.Run) bool {
+	tool := run.NormalizeTool(r.Tool)
+	graded := (tool == run.ToolTerraform || tool == run.ToolOpenTofu) && !r.DryRun &&
+		r.ProposedFrom == ""
 	for _, p := range policies {
 		if p.MaxDestroy >= 0 && p.Matches(r) {
+			return true
+		}
+		if graded && (p.MinRisk != "" || p.Reversibility != "") && p.matchesBeforeGrade(r) &&
+			!p.meetsGradeFloors(r) {
 			return true
 		}
 	}

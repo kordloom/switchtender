@@ -10,11 +10,11 @@
 	<meta property="og:description" content="What SwitchTender does today. Almost all of it runs on Community, which needs no license.">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/features">
-	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
 	<meta name="twitter:card" content="summary_large_image">
 	<meta name="twitter:title" content="Features | SwitchTender docs">
 	<meta name="twitter:description" content="What SwitchTender does today. Almost all of it runs on Community, which needs no license.">
-	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
 	<script type="application/ld+json">
 {
  "@context": "https://schema.org",
@@ -164,7 +164,7 @@ creating a new PostgreSQL schema, and one-click drift reconcile are Team. Tiers 
 </tr>
 <tr>
 <td>Reversibility</td>
-<td>Every run is graded on whether it can be taken back: reversible, costly, or irreversible. It is a different question from risk, and the two come apart constantly: restarting a fleet is high risk and undoes itself, while deleting a backup set reads quietly and is permanent. An Ansible run is graded from its playbook's own text, walking plays, tasks, and blocks, and a finished run is graded from what it actually did, so a run that changed nothing has nothing to undo. An approval policy can hold on the grade, which is the rule most people want and could not write: a change nobody can take back needs a second person to agree to it.</td>
+<td>Every run is graded on whether it can be taken back: reversible, costly, or irreversible. It is a different question from risk, and the two come apart constantly: restarting a fleet is high risk and undoes itself, while deleting a backup set reads quietly and is permanent. An Ansible run is graded from its playbook's own text, walking plays, tasks, and blocks, a Terraform or OpenTofu apply from what its plan says it destroys, and a finished run from what it actually did, so a run that changed nothing has nothing to undo. An approval policy can hold on the grade, which is the rule most people want and could not write: a change nobody can take back needs a second person to agree to it. A rule with a risk or reversibility floor sends a Terraform or OpenTofu apply to be planned first, since its grade is only known once the plan has said what it destroys, and then holds or refuses the apply the plan proposes on that grade.</td>
 </tr>
 <tr>
 <td>Estate history</td>
@@ -180,7 +180,7 @@ creating a new PostgreSQL schema, and one-click drift reconcile are Team. Tiers 
 </tr>
 <tr>
 <td>Observability</td>
-<td>A Prometheus metrics endpoint, webhook notifications when runs finish, and an audit trail of every mutation.</td>
+<td>A Prometheus metrics endpoint, webhook notifications when runs finish or are held for approval, and an audit trail of every mutation.</td>
 </tr>
 <tr>
 <td>Tamper-evident audit</td>
@@ -296,7 +296,7 @@ creating a new PostgreSQL schema, and one-click drift reconcile are Team. Tiers 
 </tr>
 <tr>
 <td>Reach isolated networks (Team)</td>
-<td>A worker dials out to the control node over the mesh relay with a token and needs no inbound port, so it runs jobs inside an air-gapped segment, a DMZ, or a customer network the control node cannot reach directly. Point <code>switchtender worker --server</code> at the control node and set the worker token.</td>
+<td>A worker dials out to the control node over the mesh relay with a token and needs no inbound port, so it runs jobs inside an air-gapped segment, a DMZ, or a customer network the control node cannot reach directly. Point <code>switchtender worker --server</code> at the control node and set the worker token. The control node announces what the worker does on the channels it is configured with, the runs it finishes and the applies its plans leave held, since a worker in such a segment holds no channels of its own and could not reach them if it did.</td>
 </tr>
 <tr>
 <td>Backup and restore</td>
@@ -308,11 +308,11 @@ creating a new PostgreSQL schema, and one-click drift reconcile are Team. Tiers 
 </tr>
 <tr>
 <td>Email</td>
-<td>An SMTP notification on every finished run or on failures only, alongside the finish webhooks.</td>
+<td>An SMTP notification on every finished or held run, or on failures only, alongside the webhooks.</td>
 </tr>
 <tr>
 <td>Slack</td>
-<td>A formatted message posts to a Slack incoming webhook when a run finishes, with the run label, status, and elapsed time.</td>
+<td>A formatted message posts to a Slack incoming webhook when a run finishes, with the run label, status, and elapsed time, and when a run is held for approval, with the rule holding it and who asked.</td>
 </tr>
 <tr>
 <td>Mattermost and Rocket.Chat</td>
@@ -320,15 +320,15 @@ creating a new PostgreSQL schema, and one-click drift reconcile are Team. Tiers 
 </tr>
 <tr>
 <td>Discord</td>
-<td>A formatted message posts to a Discord incoming webhook when a run finishes, the same summary as Slack in Discord markdown.</td>
+<td>A formatted message posts to a Discord incoming webhook when a run finishes or is held for approval, the same summary as Slack in Discord markdown.</td>
 </tr>
 <tr>
 <td>Microsoft Teams</td>
-<td>An Adaptive Card posts to a Teams incoming webhook when a run finishes, colored by outcome with the status, elapsed time, and any error.</td>
+<td>An Adaptive Card posts to a Teams incoming webhook when a run finishes, colored by outcome with the status, elapsed time, and any error, and when a run is held for approval, naming the rule and the requester.</td>
 </tr>
 <tr>
 <td>ntfy</td>
-<td>A notification publishes to an ntfy topic when a run finishes, at raised priority for a failure, with optional token auth for a protected topic.</td>
+<td>A notification publishes to an ntfy topic when a run finishes or is held for approval, at raised priority for a failure or a hold, with optional token auth for a protected topic.</td>
 </tr>
 <tr>
 <td>PagerDuty</td>
@@ -388,7 +388,7 @@ creating a new PostgreSQL schema, and one-click drift reconcile are Team. Tiers 
 </tr>
 <tr>
 <td>Schedule overlap</td>
-<td>A schedule waits for its own previous run. A five-minute schedule whose playbook takes eight minutes skips the tick rather than stacking a second copy of the same work on the same hosts, and stays on its cadence rather than firing the moment the slow run ends. Each skip is logged.</td>
+<td>A schedule waits for every run it fired to finish, including the apply a scheduled plan proposed and a person has not yet decided on. A five-minute schedule whose playbook takes eight minutes skips the tick rather than stacking a second copy of the same work on the same hosts, and stays on its cadence rather than firing the moment the slow run ends. Each skip is logged with the run it waited on.</td>
 </tr>
 <tr>
 <td>Schedule timezones</td>

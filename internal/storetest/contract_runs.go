@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -505,6 +506,36 @@ func testSaveGet(t *testing.T, store run.Store) {
 	}
 	if again.Playbook != "play.yml" {
 		t.Error("mutating the returned run changed stored state")
+	}
+}
+
+// testPlanDestroysRoundTrip verifies a proposed apply's destroy count survives the store, and that
+// a count of zero stays zero rather than reading back as no plan at all.
+//
+// The count is what grades the apply. A store that dropped it would hand every reader an apply
+// graded from its command, costly and medium, so the grade an approver saw beside a plan that
+// destroys three resources would say the change can be taken back. A zero read back as nil would be
+// the opposite loss: a plan proven to destroy nothing indistinguishable from one nobody read.
+func testPlanDestroysRoundTrip(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	for _, want := range []*int{nil, intPtr(0), intPtr(3)} {
+		id := "run_destroys_nil"
+		if want != nil {
+			id = fmt.Sprintf("run_destroys_%d", *want)
+		}
+		if err := store.Save(ctx, &run.Run{
+			ID: id, Tool: run.ToolTerraform, Command: "infra", Status: run.StatusPendingApproval,
+			CreatedAt: time.Now(), PlanDestroys: want,
+		}); err != nil {
+			t.Fatalf("Save(%s) error = %v", id, err)
+		}
+		got, err := store.Get(ctx, id)
+		if err != nil {
+			t.Fatalf("Get(%s) error = %v", id, err)
+		}
+		if diff := cmp.Diff(want, got.PlanDestroys); diff != "" {
+			t.Errorf("%s PlanDestroys mismatch (-want +got):\n%s", id, diff)
+		}
 	}
 }
 

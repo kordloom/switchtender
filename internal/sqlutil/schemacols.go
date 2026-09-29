@@ -1,6 +1,9 @@
 package sqlutil
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // SchemaColumn is one column as a CREATE TABLE statement declares it: the name, and everything after
 // the name, which is exactly what an ALTER TABLE ADD COLUMN needs.
@@ -200,4 +203,36 @@ func (c SchemaColumn) Addable() bool {
 		return false
 	}
 	return true
+}
+
+// schemaIndexCreate and schemaIndexDrop read the index statements a schema declares. Both require
+// the statement to begin a line, for the same reason the table scan does: a phrase inside a comment
+// or a string is not a statement, and these names are compared against the live catalog.
+var (
+	schemaIndexCreate = regexp.MustCompile(`(?mi)^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+([a-z_][a-z0-9_]*)`)
+	schemaIndexDrop   = regexp.MustCompile(`(?mi)^\s*DROP\s+INDEX\s+IF\s+EXISTS\s+([a-z_][a-z0-9_]*)`)
+)
+
+// SchemaIndexes are the indexes a schema brings into being and the ones it takes away.
+type SchemaIndexes struct {
+	// Created are the indexes the schema declares, which must exist once it has been applied.
+	Created []string
+	// Dropped are the indexes it removes, which must not exist once it has been applied.
+	Dropped []string
+}
+
+// ParseSchemaIndexes reads the index names out of a schema, so a caller can ask the live catalog
+// whether applying the schema would change anything. It reads the same text the migration executes,
+// rather than a list kept by hand beside it, because a hand-kept list is one edit away from saying
+// the schema is current when it is not.
+func ParseSchemaIndexes(schema string) SchemaIndexes {
+	body := stripLineComments(schema)
+	var out SchemaIndexes
+	for _, m := range schemaIndexCreate.FindAllStringSubmatch(body, -1) {
+		out.Created = append(out.Created, strings.ToLower(m[1]))
+	}
+	for _, m := range schemaIndexDrop.FindAllStringSubmatch(body, -1) {
+		out.Dropped = append(out.Dropped, strings.ToLower(m[1]))
+	}
+	return out
 }

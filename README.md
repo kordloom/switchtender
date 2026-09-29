@@ -11,6 +11,9 @@
   <a href="https://switchtender.com"><img
     src="https://img.shields.io/badge/website-switchtender.com-0969da"
     alt="Website"></a>
+  <a href="https://demo.switchtender.com"><img
+    src="https://img.shields.io/badge/live%20demo-demo.switchtender.com-1f883d"
+    alt="Live demo"></a>
   <a href="https://github.com/kordloom/switchtender/actions/workflows/ci.yml"><img
     src="https://github.com/kordloom/switchtender/actions/workflows/ci.yml/badge.svg?branch=main"
     alt="CI status"></a>
@@ -27,12 +30,13 @@
     alt="License"></a>
 </p>
 
-Run everything. Watch every host. Prove every change. SwitchTender is the governed execution
-boundary between your operators, human or AI agent, and the systems they change. One Go binary runs
-Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go across your fleet, paints every run
-live as a host-by-task matrix instead of a text scroll, and splits big jobs across parallel shards.
-Every change walks one path through it, and comes out the other side as a signed receipt anyone can
-verify offline.
+**One control point for every way your infrastructure can change.** Terraform runs Terraform, AWX
+runs Ansible, a pipeline runs deploys, and somebody has an SSH session open right now. Each decides
+for itself who may run what, and afterward no two of them tell the same story about what happened.
+SwitchTender is one gate in front of all of them, with the same identity, policy, approval, and
+evidence whether a person or an AI agent asked. It runs Ansible, Terraform, OpenTofu, Bash,
+PowerShell, Python, and Go, paints every run live as a host-by-task matrix instead of a text scroll,
+and hands back a signed receipt anyone can verify offline.
 No Kubernetes operator, no Postgres, no Redis, no message bus. One process, one SQLite file.
 
 ## Contents
@@ -212,7 +216,10 @@ host, remembered across every run:
 
 ## Requirements
 
-- Ansible on the PATH: `ansible-playbook` and `ansible-inventory`.
+- The tools your runs use, on the PATH of the server or worker: `ansible-playbook` and
+  `ansible-inventory` for Ansible, and `terraform`, `tofu`, `python3`, `pwsh`, or `go` for the rest.
+  Bash runs use the system shell. The container image already carries Ansible, Python, Terraform,
+  and OpenTofu.
 - Go 1.26 to build from source, or Docker Compose and the Helm chart to deploy.
 - Nothing else for the default SQLite setup. PostgreSQL is optional, for running more than one
   instance.

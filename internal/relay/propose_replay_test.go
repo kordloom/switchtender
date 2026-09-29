@@ -55,14 +55,22 @@ func TestProposeApplyRefusesAnythingButALivePlan(t *testing.T) {
 		Run: &run.Run{
 			Tool: run.ToolTerraform, Playbook: "infra/", Status: run.StatusPendingApproval,
 		},
+	}, { // Test 4: A live dry run the worker is executing. It asked for a preview, and the gate never
+		// takes one, so an apply built from it would be a real change nobody asked for.
+		Name: "a live dry-run plan",
+		Run: &run.Run{
+			Tool: run.ToolTerraform, Playbook: "infra/", Status: run.StatusRunning, DryRun: true,
+		},
 	}}
 
 	for testNum, test := range cases {
 		t.Run(test.Name, func(t *testing.T) {
 			t.Parallel()
 			backing := run.NewMemStore()
-			ts := httptest.NewServer(
-				relay.NewHandler(backing, relay.SinglePool(testWorkerToken), nil, nil, nil))
+			// A rule that gates terraform, so a refusal here is the run's shape and never an install
+			// with nothing to gate.
+			ts := httptest.NewServer(relay.NewHandler(backing, relay.SinglePool(testWorkerToken), nil,
+				planGateRules(t), nil))
 			t.Cleanup(ts.Close)
 
 			claimed := time.Now().Add(-2 * time.Hour)
@@ -119,7 +127,7 @@ func TestProposeApplyDemandsTheClaimCapability(t *testing.T) {
 	// A live plan with no per-claim secret, the shape a run claimed before the capability existed has.
 	plan := &run.Run{
 		ID: "run_old", Tool: run.ToolTerraform, Playbook: "infra/", Status: run.StatusRunning,
-		DryRun: true, CreatedAt: claimed, ClaimedBy: "worker-a", ClaimedAt: &claimed,
+		CreatedAt: claimed, ClaimedBy: "worker-a", ClaimedAt: &claimed,
 	}
 	if err := backing.Save(ctx, plan); err != nil {
 		t.Fatalf("seed Save() error = %v", err)
@@ -146,13 +154,15 @@ func TestProposeApplyStillWorksForTheLivePlanItIsFor(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	backing := run.NewMemStore()
-	ts := httptest.NewServer(relay.NewHandler(backing, relay.SinglePool(testWorkerToken), nil, nil, nil))
+	ts := httptest.NewServer(relay.NewHandler(backing, relay.SinglePool(testWorkerToken), nil,
+		planGateRules(t), nil))
 	t.Cleanup(ts.Close)
 
 	claimed := time.Now()
+	// The run the gate plans is the apply someone asked for, not a dry run.
 	plan := &run.Run{
 		ID: "run_plan", Tool: run.ToolTerraform, Playbook: "infra/", Status: run.StatusRunning,
-		DryRun: true, CreatedAt: claimed, ClaimedBy: "worker-a", ClaimedAt: &claimed,
+		CreatedAt: claimed, ClaimedBy: "worker-a", ClaimedAt: &claimed,
 		ClaimSecret: "secret-a", Actor: "casey", ActorType: "session",
 	}
 	if err := backing.Save(ctx, plan); err != nil {

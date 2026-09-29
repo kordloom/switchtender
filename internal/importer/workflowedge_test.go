@@ -3,6 +3,7 @@ package importer
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -54,6 +55,8 @@ func TestWorkflowIsImportedWholeOrNotAtAll(t *testing.T) {
 		Nodes        string
 		WantImported bool
 		WantWarning  string
+		// WantGate reports whether the assessment must list the workflow as losing a gate.
+		WantGate bool
 	}{
 		{Name: "two nodes wired by id",
 			Nodes: `{"id": 1, "unified_job_template": "a", "success_nodes": [2]},
@@ -96,6 +99,59 @@ func TestWorkflowIsImportedWholeOrNotAtAll(t *testing.T) {
 		{Name: "self edge refused",
 			Nodes:       `{"id": 1, "unified_job_template": "a", "success_nodes": [1]}`,
 			WantWarning: "was not imported"}, // Test 10.
+		{Name: "approval node refused as a gate",
+			Nodes: `{"identifier": "build", "unified_job_template": "a",
+				"related": {"success_nodes": ["approve"]}},
+				{"identifier": "approve", "related": {"success_nodes": ["ship"],
+				"create_approval_template": {"name": "Approve prod", "description": "", "timeout": 0}}},
+				{"identifier": "ship", "unified_job_template": "b"}`,
+			WantWarning: `node approve is an approval gate, "Approve prod"`,
+			WantGate:    true}, // Test 11: awxkit writes the approval to create in the node's place.
+		{Name: "approval gate named ahead of its failure edge",
+			Nodes: `{"identifier": "approve", "related": {"failure_nodes": ["page"],
+				"create_approval_template": {"name": "Approve prod"}}},
+				{"identifier": "page", "unified_job_template": "b"}`,
+			WantWarning: "is an approval gate",
+			WantGate:    true}, // Test 12: A denial takes the failure edge.
+		{Name: "REST approval node wired by id",
+			Nodes: `{"id": 1, "unified_job_template": "a", "success_nodes": [2]},
+				{"id": 2, "unified_job_template": 7, "success_nodes": [3],
+				"summary_fields": {"unified_job_template": {"id": 7, "name": "Approve prod",
+				"unified_job_type": "workflow_approval"}}},
+				{"id": 3, "unified_job_template": "b"}`,
+			WantWarning: `node node-2 is an approval gate, "Approve prod"`,
+			WantGate:    true}, // Test 13: The REST API names an approval only in the summary.
+		{Name: "approval template named by natural key",
+			Nodes: `{"identifier": "approve",
+				"unified_job_template": {"name": "Approve prod", "type": "workflow_approval_template"}}`,
+			WantWarning: `node approve is an approval gate, "Approve prod"`,
+			WantGate:    true}, // Test 14: A natural key can name the approval template itself.
+		{Name: "nested workflow sharing a job template's name",
+			Nodes: `{"identifier": "build", "unified_job_template": "b",
+				"related": {"success_nodes": ["child"]}},
+				{"identifier": "child",
+				"unified_job_template": {"name": "a", "type": "workflow_job_template"}}`,
+			WantWarning: `node child runs a nested workflow, "a"`}, // Test 15: Not job template a.
+		{Name: "REST nested workflow",
+			Nodes: `{"id": 1, "unified_job_template": 9,
+				"summary_fields": {"unified_job_template": {"id": 9, "name": "child",
+				"unified_job_type": "workflow_job"}}}`,
+			WantWarning: `node node-1 runs a nested workflow, "child"`}, // Test 16: Named in the summary.
+		{Name: "project sync sharing a job template's name",
+			Nodes:       `{"identifier": "sync", "unified_job_template": {"name": "a", "type": "project"}}`,
+			WantWarning: `node sync runs a project sync, "a"`}, // Test 17: Not job template a either.
+		{Name: "inventory sync sharing a job template's name",
+			Nodes: `{"identifier": "sync",
+				"unified_job_template": {"name": "a", "type": "inventory_source"}}`,
+			WantWarning: `node sync runs an inventory sync, "a"`}, // Test 18: Nor this one.
+		{Name: "job template named by a typed natural key",
+			Nodes: `{"identifier": "one", "unified_job_template": {"name": "a", "type": "job_template",
+				"organization": {"name": "Default", "type": "organization"}}}`,
+			WantImported: true}, // Test 19: The ordinary awxkit shape still imports.
+		{Name: "REST job node",
+			Nodes: `{"id": 1, "unified_job_template": "a",
+				"summary_fields": {"unified_job_template": {"name": "a", "unified_job_type": "job"}}}`,
+			WantImported: true}, // Test 20: A REST job node still imports.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -104,6 +160,10 @@ func TestWorkflowIsImportedWholeOrNotAtAll(t *testing.T) {
 			if got := workflowWasImported(plan); got != test.WantImported {
 				t.Fatalf("workflow imported = %v, want %v.\nwarnings: %v",
 					got, test.WantImported, plan.Warnings)
+			}
+			if got := slices.Contains(plan.gates, "rollout"); got != test.WantGate {
+				t.Errorf("gate listed = %v, want %v: the assessment names every gate a move drops",
+					got, test.WantGate)
 			}
 			if test.WantWarning == "" {
 				return

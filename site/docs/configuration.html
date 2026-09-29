@@ -10,11 +10,11 @@
 	<meta property="og:description" content="SwitchTender is one binary with subcommands. This page lists every command, flag, and environment variable.">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/configuration">
-	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
 	<meta name="twitter:card" content="summary_large_image">
 	<meta name="twitter:title" content="Configuration | SwitchTender docs">
 	<meta name="twitter:description" content="SwitchTender is one binary with subcommands. This page lists every command, flag, and environment variable.">
-	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=10">
 	<script type="application/ld+json">
 {
  "@context": "https://schema.org",
@@ -447,37 +447,37 @@ that variable is unset.</p>
 <tr>
 <td><code>--notify-webhook</code></td>
 <td>none</td>
-<td>URL that receives a JSON notification when a run finishes. Repeatable.</td>
+<td>URL that receives a JSON notification when a run finishes or is held for approval. Repeatable.</td>
 </tr>
 <tr>
 <td><code>--notify-slack</code></td>
 <td>none</td>
-<td>Slack incoming webhook URL that receives a message when a run finishes. Repeatable.</td>
+<td>Slack incoming webhook URL that receives a message when a run finishes or is held for approval. Repeatable.</td>
 </tr>
 <tr>
 <td><code>--notify-mattermost</code></td>
 <td>none</td>
-<td>Mattermost incoming webhook URL that receives a message when a run finishes. Repeatable.</td>
+<td>Mattermost incoming webhook URL that receives a message when a run finishes or is held for approval. Repeatable.</td>
 </tr>
 <tr>
 <td><code>--notify-rocketchat</code></td>
 <td>none</td>
-<td>Rocket.Chat incoming webhook URL that receives a message when a run finishes. Repeatable.</td>
+<td>Rocket.Chat incoming webhook URL that receives a message when a run finishes or is held for approval. Repeatable.</td>
 </tr>
 <tr>
 <td><code>--notify-discord</code></td>
 <td>none</td>
-<td>Discord incoming webhook URL that receives a message when a run finishes. Repeatable.</td>
+<td>Discord incoming webhook URL that receives a message when a run finishes or is held for approval. Repeatable.</td>
 </tr>
 <tr>
 <td><code>--notify-teams</code></td>
 <td>none</td>
-<td>Microsoft Teams incoming webhook URL that receives an Adaptive Card when a run finishes. Repeatable.</td>
+<td>Microsoft Teams incoming webhook URL that receives an Adaptive Card when a run finishes or is held for approval. Repeatable.</td>
 </tr>
 <tr>
 <td><code>--notify-ntfy</code></td>
 <td>none</td>
-<td>ntfy topic URL that receives a notification when a run finishes, such as <a href="https://ntfy.sh/my-topic">https://ntfy.sh/my-topic</a>. Repeatable.</td>
+<td>ntfy topic URL that receives a notification when a run finishes or is held for approval, such as <a href="https://ntfy.sh/my-topic">https://ntfy.sh/my-topic</a>. Repeatable.</td>
 </tr>
 <tr>
 <td><code>--notify-ntfy-token</code></td>
@@ -692,7 +692,7 @@ that variable is unset.</p>
 <tr>
 <td><code>--notify-on</code></td>
 <td><code>failure</code></td>
-<td>When to email: <code>failure</code> for failed runs only, or <code>finish</code> for every terminal run.</td>
+<td>When to email: <code>failure</code> for failed runs only, or <code>finish</code> for every finished run and every run held for approval.</td>
 </tr>
 <tr>
 <td><code>--policy-file</code></td>
@@ -901,6 +901,8 @@ switchtender assess chef chef-nodes.json
 </code></pre>
 <p>Formats are <code>awx</code>, <code>semaphore</code>, <code>chef</code>, and <code>puppet</code>. An AWX-format export also covers Ansible
 Automation Platform, Tower, and Ascender.</p>
+<p>An export saved as UTF-8 with a byte order mark, or as UTF-16 the way Windows PowerShell writes a
+file by default, is read the same as plain UTF-8, here, by <code>import</code>, and by the assessment page.</p>
 <p>The output has three parts: what is in the export, what survives the move, and what changes about
 how it is governed. The third part names the templates that cannot be undone, the ones carrying a
 destructive signal, the credentials more than one template shares, and the templates targeting no
