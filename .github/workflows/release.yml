@@ -421,6 +421,7 @@ jobs:
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN != '' && secrets.HOMEBREW_TAP_TOKEN || secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
           # Which secret supplied it, so a refusal names the one to fix rather than the other one.
           TAP_TOKEN_NAME: ${{ secrets.HOMEBREW_TAP_TOKEN != '' && 'HOMEBREW_TAP_TOKEN' || 'HOMEBREW_TAP_GITHUB_TOKEN' }}
+          KORDLOOM_EMAIL: 328011957+kordloom-admin@users.noreply.github.com
         run: |
           set -euo pipefail
           if [ -z "${TAP_TOKEN:-}" ]; then
@@ -434,8 +435,11 @@ jobs:
           fi
           sha="$(GH_TOKEN="$TAP_TOKEN" gh api \
             repos/kordloom/homebrew-tap/contents/Casks/switchtender.rb -q .sha 2>/dev/null || true)"
+          # The tap commit is authored as KordLoom whichever account owns the token.
           args=(--method PUT repos/kordloom/homebrew-tap/contents/Casks/switchtender.rb
             -f message="Update switchtender to ${GITHUB_REF_NAME}"
+            -f "author[name]=KordLoom" -f "author[email]=${KORDLOOM_EMAIL}"
+            -f "committer[name]=KordLoom" -f "committer[email]=${KORDLOOM_EMAIL}"
             -f content="$(base64 -i "$cask" | tr -d '\n')")
           if [ -n "$sha" ]; then args+=(-f sha="$sha"); fi
           if ! GH_TOKEN="$TAP_TOKEN" gh api "${args[@]}" > /dev/null; then
