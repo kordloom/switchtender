@@ -139,12 +139,12 @@ func NewID() string {
 // hashed in the canonical form the stores persist, so a hash computed at append matches one
 // recomputed after a database round-trip.
 //
-// The input is the canonical JSON object of the entry's claim fields, not a fixed list of values in a
-// fixed order. That choice is what makes the record extensible: a verifier canonicalizes whatever
-// fields an entry carries, so an entry written before a field existed and one written after both
-// verify, and adding a field later is not a format change. The previous construction hashed six
-// values positionally, which meant every new field was a breaking revision of the profile and of
-// every verifier implementing it.
+// The input is the canonical JSON object of the entry's defined claim fields, empty ones omitted,
+// not a fixed list of values in a fixed order. An entry written before an optional field existed
+// therefore hashes identically to one that does not use it. The field set is closed for the
+// profile: a new bound field takes a successor profile name, which this construction makes cheap,
+// since entries lacking the field hash the same under both. The previous construction hashed six
+// values positionally, which made even the successor path a breaking revision of every verifier.
 //
 // A field that is empty is omitted rather than hashed as an empty string, so an entry that predates
 // a field is byte-identical to one that simply does not use it.

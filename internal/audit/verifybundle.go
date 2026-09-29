@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/kordloom/loomseal/jcs"
 	"github.com/kordloom/loomseal/merkle"
@@ -105,6 +106,23 @@ func (r *BundleReport) OK() bool {
 // signature is even checked, which is how a relying party ties trust to a key it obtained out of band
 // rather than to whatever key the file names.
 func VerifyBundle(signed []byte, pinnedKeyID string) (*BundleReport, error) {
+	return verifyBundle(signed, pinnedKeyID, "")
+}
+
+// VerifyBundleForInstall is VerifyBundle for a relying party that has explicitly accepted a key
+// rotation: the caller states, out loud, that bundles naming acceptedInstall are trusted from the
+// pinned key even though the key was not the one the id was born from. Requiring both parameters is
+// the point: rotation acceptance is a deliberate pairing of an install with its new key, never an
+// ambient effect of trusting the key alone.
+func VerifyBundleForInstall(signed []byte, pinnedKeyID, acceptedInstall string) (*BundleReport, error) {
+	if pinnedKeyID == "" || acceptedInstall == "" {
+		return nil, fmt.Errorf("%w: rotation acceptance requires both the pinned key and the install id",
+			ErrVerify)
+	}
+	return verifyBundle(signed, pinnedKeyID, acceptedInstall)
+}
+
+func verifyBundle(signed []byte, pinnedKeyID, acceptedInstall string) (*BundleReport, error) {
 	var b Bundle
 	if err := json.Unmarshal(signed, &b); err != nil {
 		return nil, fmt.Errorf("%w: parse bundle: %w", ErrVerify, err)
@@ -130,18 +148,22 @@ func VerifyBundle(signed []byte, pinnedKeyID string) (*BundleReport, error) {
 		return rep, fmt.Errorf("%w: bundle declares key %s but carries key %s",
 			ErrVerify, b.Producer.KeyID, actual)
 	}
-	// The install a bundle names has to be the install that key belongs to. The id is derived from
-	// the signing key, but nothing checked the two against each other, so the tie could be cut: keep
-	// somebody else's claims, leaves, and genuine anchors, swap the producer's public key and key id
-	// for your own, re-sign, and every remaining check still passed because the leaves keep hashing
-	// under the original install id the params still name. A relying party pinning the new key then
-	// read the original install's history as vouched for by a key that install never held.
+	// The install a bundle names has to be the install that key was born to, unless the caller
+	// explicitly accepted this key for this install. A bare key pin cannot stand in for that: it
+	// says "I trust this key as itself," never "this key may speak for install X," and the lift
+	// this check closes is exactly a genuine key presenting another install's claims, leaves, and
+	// anchors as its own. A legitimately rotated install is byte-identical to that lift from the
+	// bundle alone, so rotation is accepted only through acceptedInstall, the caller stating the
+	// pair out loud. The install id is a stable identifier that survives key changes; derivation
+	// is only its birth rule.
 	//
 	// A bundle naming no install predates the binding and is left alone, which is the same
 	// grandfathering the per-claim check applies.
-	if b.Producer.InstallID != "" && b.Producer.InstallID != identity.InstallIDFromKey(pub) {
-		return rep, fmt.Errorf("%w: bundle names install %s, which is not the install key %s belongs to",
-			ErrVerify, b.Producer.InstallID, b.Producer.KeyID)
+	if b.Producer.InstallID != "" && b.Producer.InstallID != acceptedInstall &&
+		b.Producer.InstallID != identity.InstallIDFromKey(pub) {
+		return rep, fmt.Errorf("%w: bundle names install %s, which is not the install key %s was born"+
+			" to; a rotated install verifies only with its install id explicitly accepted for the"+
+			" pinned key", ErrVerify, b.Producer.InstallID, b.Producer.KeyID)
 	}
 	if pinnedKeyID != "" && pinnedKeyID != b.Producer.KeyID {
 		return rep, fmt.Errorf("%w: bundle is signed by %s, not the pinned key %s",
@@ -164,6 +186,41 @@ func VerifyBundle(signed []byte, pinnedKeyID string) (*BundleReport, error) {
 	// A sparse receipt is a different construction, not a broken linear one. Recomputing the linear
 	// link over a tree claim always fails, so this command refused the output of its own
 	// "receipt --sparse", which prints "Verify it with: switchtender verify".
+	// Surfaces this product does not verify are refused by name, never silently skipped: a
+	// disclosure or attestation the mirror ignored would ride inside a green verdict unchecked,
+	// which is the exact rider problem the strip list exists to prevent. SwitchTender's own
+	// receipts carry neither, so nothing this product emits is affected.
+	if len(b.Attestations) > 0 {
+		return rep, fmt.Errorf("%w: bundle carries attestations: this product does not verify"+
+			" them; use the open loomseal verifier", ErrVerify)
+	}
+	for i := range b.Claims {
+		if len(b.Claims[i].Disclosures) > 0 || len(b.Claims[i].Attestations) > 0 {
+			return rep, fmt.Errorf("%w: claim %d carries disclosures or attestations: this"+
+				" product does not verify them; use the open loomseal verifier", ErrVerify, i)
+		}
+		// A payload with a redactable-field digest set follows LoomSwatch rules this product
+		// does not implement; passing it unexamined would grade a construction nobody checked.
+		if _, ok := b.Claims[i].Payload["_sd"]; ok {
+			return rep, fmt.Errorf("%w: claim %d carries redactable fields (_sd): this product"+
+				" does not verify them; use the open loomseal verifier", ErrVerify, i)
+		}
+	}
+	// The reference rule: a chain param naming an install must restate the producer, because a
+	// param that binds nothing must not be settable to someone else and assumed to bind.
+	if b.Chain != nil && b.Chain.Params["install_id"] != "" && b.Producer.InstallID != "" &&
+		b.Chain.Params["install_id"] != b.Producer.InstallID {
+		return rep, fmt.Errorf("%w: chain.params.install_id %s disagrees with producer install %s",
+			ErrVerify, b.Chain.Params["install_id"], b.Producer.InstallID)
+	}
+	// A profile this product does not implement is named as unsupported, never fed to the linear
+	// recompute: recomputing this profile's link over a foreign profile's claims always fails, so
+	// an unknown profile used to read as a broken chain, which is the one wording it must never
+	// wear. Fail closed, but say why.
+	if profile != TreeProfile && profile != ChainProfile {
+		return rep, fmt.Errorf("%w: chain profile %q: this product does not verify it; use the"+
+			" open loomseal verifier", ErrVerify, profile)
+	}
 	if profile == TreeProfile {
 		rep.ChainOK, rep.BrokeAtSeq = verifyBundleTree(&b)
 	} else {
@@ -310,9 +367,12 @@ func verifyOutcomeDisclosure(claims []BundleClaim, rep *BundleReport) {
 	}
 }
 
-// verifyBundleSignature reconstructs the exact bytes the producer signed, the canonical bundle with
-// its signatures emptied, and checks the ed25519 signature over them. It mirrors seal.SignBundle so
-// the two cannot disagree about what a signature covers.
+// verifyBundleSignature reconstructs the exact bytes the producer signed: the canonical bundle
+// with every unsigned surface stripped, which is the signatures array, head-level attestations,
+// and each claim's disclosures and claim-level attestations. The strip list is FORMAT.md's, and
+// the cross-verify gate runs this mirror against the reference corpus precisely because a mirror
+// CAN disagree with the reference; the earlier wording here claimed it could not, while this
+// function was quietly a release behind the list and refusing spec-valid bundles.
 func verifyBundleSignature(signed []byte, pub ed25519.PublicKey, keyID string) (bool, error) {
 	value, err := jcs.Parse(signed)
 	if err != nil {
@@ -347,6 +407,15 @@ func verifyBundleSignature(signed []byte, pub ed25519.PublicKey, keyID string) (
 		return false, nil
 	}
 	m["signatures"] = []any{}
+	delete(m, "attestations")
+	if claims, ok := m["claims"].([]any); ok {
+		for _, c := range claims {
+			if obj, ok := c.(map[string]any); ok {
+				delete(obj, "disclosures")
+				delete(obj, "attestations")
+			}
+		}
+	}
 	canonical, err := jcs.Serialize(m)
 	if err != nil {
 		return false, fmt.Errorf("%w: canonicalize bundle: %w", ErrVerify, err)
@@ -584,12 +653,32 @@ func verifyBundleAnchors(b *Bundle) bool {
 func verifyBundleProofs(b *Bundle) (int, []string) {
 	var verified int
 	var problems []string
+	// Claim times by seq, for the backdate rule: a token commits to a link that hashes a claim
+	// carrying its own time, so an authority cannot honestly have signed it earlier. Both clocks
+	// are real and neither is authoritative, so a few minutes of skew is allowed and a backdated
+	// month is not, the same allowance the reference verifier applies.
+	const anchorClockSkew = 5 * time.Minute
+	claimAt := make(map[int64]time.Time, len(b.Claims))
+	for i := range b.Claims {
+		if at, err := time.Parse(time.RFC3339, b.Claims[i].At); err == nil {
+			claimAt[b.Claims[i].Chain.Seq] = at
+		}
+	}
 	for _, a := range b.Anchors {
 		if a.Type != AnchorRFC3161 || a.Proof == "" {
 			continue
 		}
-		if err := VerifyTimestampProof(a.Link, a.Proof); err != nil {
+		genTime, err := VerifyTimestampProofTime(a.Link, a.Proof)
+		if err != nil {
 			problems = append(problems, fmt.Sprintf("anchor at %d: %v", a.Seq, err))
+			continue
+		}
+		if at, ok := claimAt[a.Seq]; ok && !genTime.IsZero() &&
+			genTime.Before(at.Add(-anchorClockSkew)) {
+			problems = append(problems, fmt.Sprintf(
+				"anchor at %d attests %s over an entry the bundle says happened at %s: a timestamp"+
+					" cannot precede the entry it covers", a.Seq,
+				genTime.UTC().Format(time.RFC3339), at.UTC().Format(time.RFC3339)))
 			continue
 		}
 		verified++

@@ -35,6 +35,11 @@ type Bundle struct {
 	BundleID string `json:"bundle_id"`
 	// CreatedAt is when the bundle was assembled.
 	CreatedAt string `json:"created_at"`
+	// Attestations are head-level counter-signatures other tools may attach. This product never
+	// emits them and does not verify them; the field exists so their presence is seen and refused
+	// by name rather than silently ignored, which would let an unchecked rider travel inside a
+	// green verdict.
+	Attestations []json.RawMessage `json:"attestations,omitempty"`
 	// Producer says who emitted the bundle and which key signed it.
 	Producer BundleProducer `json:"producer"`
 	// Subject says what the claims are about.
@@ -129,6 +134,11 @@ type BundleClaim struct {
 	Payload map[string]any `json:"payload"`
 	// Chain is the claim's position and links.
 	Chain BundleCoordLink `json:"chain"`
+	// Disclosures and Attestations are holder- and third-party members other tools may attach.
+	// This product never emits either and does not verify them; the fields exist so their
+	// presence is refused by name rather than silently ignored.
+	Disclosures  []json.RawMessage `json:"disclosures,omitempty"`
+	Attestations []json.RawMessage `json:"attestations,omitempty"`
 	// Inclusion is the audit path proving this claim belongs to the tree the head names. Tree
 	// profile only, and required on every claim there.
 	Inclusion *BundleInclusion `json:"inclusion,omitempty"`

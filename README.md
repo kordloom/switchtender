@@ -306,7 +306,7 @@ Business Source License 1.1. Read the source, run it, and use it in production. 
 binary ships every enterprise feature at no cost: single sign-on, role-based access control, the
 tamper-evident audit chain, approval gates, and active-active HA. The one reserved right is offering
 SwitchTender to others as a hosted or managed service that competes with the maintainer. Each version
-converts to Apache-2.0 four years after its release.
+converts to Apache-2.0 two years after its release.
 
 See `LICENSE` for the exact terms and [`LICENSING.md`](LICENSING.md) for what self-hosting grants,
 how a commercial license works, and how to ask about support or a hosted plan.

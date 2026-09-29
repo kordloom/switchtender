@@ -81,3 +81,43 @@ func TestIdentityRoundTripsThroughItsFile(t *testing.T) {
 		t.Errorf("stored seed is not hex: %v", err)
 	}
 }
+
+// TestEnvKeyOverExistingInstallIsARotation drives the stable-identifier rule: a new key supplied
+// over an existing install keeps the stored install id, because the id names the install, not the
+// key. Deriving a fresh id here is what silently turned a key change into a second install whose
+// history looked unrelated.
+func TestEnvKeyOverExistingInstallIsARotation(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SWITCHTENDER_AUDIT_KEY", "")
+	born, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	seed := make([]byte, 32)
+	for i := range seed {
+		seed[i] = byte(i + 1)
+	}
+	t.Setenv("SWITCHTENDER_AUDIT_KEY", hex.EncodeToString(seed))
+	rotated, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load() with env key error = %v", err)
+	}
+	if rotated.InstallID != born.InstallID {
+		t.Errorf("install id changed across a key rotation: born %s, rotated %s",
+			born.InstallID, rotated.InstallID)
+	}
+	if rotated.Seed == born.Seed {
+		t.Error("the env key was ignored; the rotation never happened")
+	}
+
+	// A first boot with only the env key still derives its id from the key it signs with.
+	fresh := t.TempDir()
+	first, err := Load(fresh)
+	if err != nil {
+		t.Fatalf("Load() fresh with env key error = %v", err)
+	}
+	if want := installIDFromKey(first.Public()); first.InstallID != want {
+		t.Errorf("first boot id = %s, want the key-derived %s", first.InstallID, want)
+	}
+}

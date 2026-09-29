@@ -145,3 +145,35 @@ func TestSemaphoreImportsAProjectBackup(t *testing.T) {
 		t.Errorf("cron = %q, want 0 2 * * *", got)
 	}
 }
+
+// TestSemaphoreImportsARealCurrentBackup reads a backup taken verbatim from a live current
+// Semaphore release (v2.16 era, sqlite dialect) whose top level carries fields older fixtures
+// never saw: workflows, integrations, integration_aliases, runners, roles, views, and
+// secret_storages. The importer must read through the unknown fields and land every object.
+// The two prior real-world failures were both fixture-shaped gaps; this fixture is the real shape.
+func TestSemaphoreImportsARealCurrentBackup(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile(filepath.Join("testdata", "semaphore_real_v2_backup.json"))
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	plan, err := importer.FromSemaphore(raw, fixedTime)
+	if err != nil {
+		t.Fatalf("FromSemaphore() error = %v", err)
+	}
+	if len(plan.Projects) != 1 || plan.Projects[0].RepoURL != "https://example.test/infra.git" {
+		t.Fatalf("projects = %+v, want the backup's one repository", plan.Projects)
+	}
+	if len(plan.Inventories) != 1 || !strings.Contains(plan.Inventories[0].Content, "web01 ansible_host=10.0.0.11") {
+		t.Fatalf("inventories lost content: %+v", plan.Inventories)
+	}
+	if len(plan.Templates) != 3 {
+		t.Fatalf("templates = %d, want the backup's three", len(plan.Templates))
+	}
+	if len(plan.Schedules) != 1 || plan.Schedules[0].Cron != "0 3 * * *" {
+		t.Fatalf("schedules = %+v, want the 3am cron", plan.Schedules)
+	}
+	if len(plan.Credentials) != 2 {
+		t.Errorf("credentials = %d, want both keys with re-enter warnings", len(plan.Credentials))
+	}
+}
