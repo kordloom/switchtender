@@ -3,8 +3,8 @@ package pgstore
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -162,32 +162,47 @@ func anAddableColumn(t *testing.T) (string, string) {
 	return "", ""
 }
 
-// freshDatabase creates a database of this test's own beside the one the DSN names and returns a DSN
-// for it, dropping it when the test ends.
+// freshDatabase creates a database of this test's own on the server the DSN names and returns a DSN
+// for it, dropping it when the test ends. It creates through the DSN's own connection, since CREATE
+// DATABASE works from any database, and swaps the name with url.Parse, so a DSN naming any database
+// works. Deriving an admin DSN by replacing "/switchtender?" skipped silently whenever the database
+// had another name, including under the ratchet that exists to refuse exactly that.
 func freshDatabase(t *testing.T, dsn string) string {
 	t.Helper()
-	admin := strings.Replace(dsn, "/switchtender?", "/postgres?", 1)
-	if admin == dsn {
-		t.Skipf("cannot derive an admin connection from %q", dsn)
+	u, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatalf("parse SWITCHTENDER_TEST_POSTGRES_DSN: %v", err)
 	}
-	conn, err := sql.Open("pgx", admin)
+	conn, err := sql.Open("pgx", dsn)
 	if err != nil {
 		t.Fatalf("connect to postgres: %v", err)
 	}
 	defer func() { _ = conn.Close() }()
 	name := fmt.Sprintf("st_skipcheck_%d", time.Now().UnixNano())
 	if _, err := conn.Exec("CREATE DATABASE " + name); err != nil {
-		t.Skipf("cannot create a database of this test's own: %v", err)
+		skipOrFail(t, "cannot create a database of this test's own: %v", err)
 	}
 	t.Cleanup(func() {
-		c, cerr := sql.Open("pgx", admin)
+		c, cerr := sql.Open("pgx", dsn)
 		if cerr != nil {
 			return
 		}
 		defer func() { _ = c.Close() }()
 		_, _ = c.Exec("DROP DATABASE IF EXISTS " + name + " WITH (FORCE)")
 	})
-	return strings.Replace(dsn, "/switchtender?", "/"+name+"?", 1)
+	u.Path = "/" + name
+	return u.String()
+}
+
+// skipOrFail skips the test, unless SWITCHTENDER_REQUIRE_FULL_SUITE demands the full suite, in
+// which case the condition that would have skipped it fails it: a gate that asked for everything
+// must not be satisfied by a test that quietly ran nothing.
+func skipOrFail(t *testing.T, format string, args ...any) {
+	t.Helper()
+	if os.Getenv("SWITCHTENDER_REQUIRE_FULL_SUITE") == "1" {
+		t.Fatalf(format, args...)
+	}
+	t.Skipf(format, args...)
 }
 
 // rawHandle opens a plain connection to the test's own database, for the DDL that breaks the schema

@@ -25,6 +25,7 @@ paths = [
   '''internal/dispatch/credentials_test\.go''',
   '''internal/dispatch/gcpmask_test\.go''',
   '''internal/dispatch/mask_test\.go''',
+  '''internal/dispatch/mask_encoded_test\.go''',
   '''internal/dispatch/notify_leak_test\.go''',
   '''internal/inventory/secrets_test\.go''',
   '''internal/secretsource/mutation_gaps_test\.go''',

@@ -507,13 +507,28 @@ function sealDialogSubmits() {
 	}
 }
 
+// readOnlyBanner builds the notice a read-only demo leads every page with. It says the demo resets
+// every night on purpose, so a visitor who finds yesterday's runs gone reads the design rather than
+// data loss; it starts them at the run a rule is holding, which is the product; and it names the
+// way to watch the evidence catch that nightly rewrite.
+function readOnlyBanner() {
+	const banner = document.createElement("div");
+	banner.className = "ro-banner";
+	const held = document.createElement("a");
+	held.href = "/ui/runs?status=pending_approval";
+	held.textContent = "the run a rule is holding";
+	const witness = document.createElement("a");
+	witness.href = "https://switchtender.com/#proof";
+	witness.textContent = "point a witness at it";
+	banner.append("Read-only demo, reset every night on purpose. Start with ", held, ". Then ",
+		witness, " today and again tomorrow, and watch it catch the rewrite.");
+	return banner;
+}
+
 function applyReadOnly() {
 	const main = document.querySelector(".content");
 	if (main && !main.querySelector(".ro-banner")) {
-		const banner = document.createElement("div");
-		banner.className = "ro-banner";
-		banner.textContent = "Read-only demo. Browse the data freely. Changes are disabled.";
-		main.insertBefore(banner, main.firstChild);
+		main.insertBefore(readOnlyBanner(), main.firstChild);
 	}
 	// Anything that would change state is disabled wherever it lives: rows, panels, drills, and
 	// page headers alike, each explaining itself rather than silently doing nothing.

@@ -107,8 +107,15 @@ tamper-evidence begins when the entry is written. Records forged at the source a
 consistent. Witnessing bounds when such a window could have begun; it does not prevent one.
 
 **Perfect secret masking.** Masking recognizes known secret shapes and the values of stored
-credentials. A tool that prints a secret in a form the masks do not recognize has leaked it to the
-log. Treat masking as a reduction, not a guarantee, and prefer tools that do not print secrets.
+credentials, in plain text and in the encodings tools commonly print them in: hex, base64, and URL
+and JSON escaping. A tool that transforms a secret some other way, or prints one the product never
+held, has leaked it to the log. Treat masking as a reduction, not a guarantee, and prefer tools
+that do not print secrets.
+
+**Isolation between runs on one executor.** A run without an execution image runs as the server's
+own user, so while two runs overlap, either one's code can read the other's materialized
+credentials. SwitchTender governs what runs. It does not sandbox mutually untrusted code on one
+executor. Give such work an execution image or a worker of its own.
 
 **Availability.** Fail-closed means exactly what it says: if the chain cannot be written or the
 policies cannot be read, changes stop. An attacker who can take down the database can halt

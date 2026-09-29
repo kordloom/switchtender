@@ -103,7 +103,7 @@ func runWitness(cmd *cobra.Command, _ []string) error {
 	// poll until the channel takes it.
 	var undelivered []witness.Finding
 	for {
-		_, findings, err := watcher.CheckOnce(cmd.Context())
+		cp, findings, err := watcher.CheckOnce(cmd.Context())
 		if witnessOnce {
 			printFindings(findings)
 			for _, f := range findings {
@@ -121,6 +121,7 @@ func runWitness(cmd *cobra.Command, _ []string) error {
 			if len(findings) > 0 {
 				return fmt.Errorf("%d finding(s); the record disagrees with this witness's memory", len(findings))
 			}
+			fmt.Fprintln(os.Stderr, witnessSummary(cp))
 			return nil
 		}
 		if err == nil || len(findings) > 0 {
@@ -212,4 +213,19 @@ func postWitnessFinding(ctx context.Context, client *http.Client, webhook, serve
 		return fmt.Errorf("the webhook answered %s", res.Status)
 	}
 	return nil
+}
+
+// witnessSummary is the line a clean --once check ends with: what this witness now holds. Without
+// it a first run printed only what it was watching, so a clean check and one that never looked read
+// the same, and a later run could not show how far the record had moved.
+func witnessSummary(cp *witness.Checkpoint) string {
+	if cp == nil {
+		return "witness: no findings."
+	}
+	head := cp.LastHead
+	if len(head) > 12 {
+		head = head[:12]
+	}
+	return fmt.Sprintf("witness: no findings. Checkpoint at beat %d, chain position %d, head %s.",
+		cp.LastBeat, cp.LastSeq, head)
 }

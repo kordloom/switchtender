@@ -80,8 +80,9 @@ func beginsWith(sec string, prefix []byte) bool {
 var maskBytes = []byte(maskToken)
 
 // set replaces the masker's secret values, expanding a multi-line secret into its lines as well so
-// output that streams a secret one line at a time is still redacted. A value shorter than minMaskLen
-// or blank is dropped so masking cannot swallow unrelated output.
+// output that streams a secret one line at a time is still redacted, and into its encoded forms so
+// output that prints it as hex, base64, or an escaped string is too. A value shorter than
+// minMaskLen or blank is dropped so masking cannot swallow unrelated output.
 func (m *masker) set(values []string) {
 	seen := make(map[string]struct{})
 	var out []string
@@ -100,6 +101,13 @@ func (m *masker) set(values []string) {
 		add(v)
 		for _, line := range strings.Split(v, "\n") {
 			add(line)
+		}
+		// A tool that re-encodes a secret prints none of the text above, so the encodings it prints
+		// the secret in are masked as well.
+		if s := strings.TrimRight(v, "\r\n"); utf8.RuneCountInString(strings.TrimSpace(s)) >= minMaskLen {
+			for _, form := range encodedForms(s) {
+				add(form)
+			}
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return len(out[i]) > len(out[j]) })

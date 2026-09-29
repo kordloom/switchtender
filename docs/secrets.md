@@ -81,7 +81,11 @@ Settings values are never added to the run's mask list, which is the point: mask
 ## What masking does not cover
 
 Masking redacts known values: everything a credential injects, and any inventory variable whose name
-looks secret, such as `ansible_password`, `ansible_become_pass`, or `api_token`. Two things sit
+looks secret, such as `ansible_password`, `ansible_become_pass`, or `api_token`. Each known value is
+also redacted in the forms tools commonly print it in: hex in either case, base64 in either alphabet
+whether alone or inside a longer blob such as a basic auth header, and URL and JSON escaping,
+including the `\u` escapes Python writes for accented letters. Inside a longer base64 blob, the few
+characters at the secret's edges also carry the bytes around it and stay visible. Two things sit
 outside that. A dynamic inventory source saves whatever its script emits into the inventory it
 maintains, because the synced host list is the data later runs depend on, so anyone who can read
 that inventory reads it as stored. And a secret under an ordinary name, say a `connection_string`

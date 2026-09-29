@@ -87,6 +87,14 @@ func TestReversibilityReadsEachCommandInALine(t *testing.T) {
 		{Command: `xcopy /q /e C:\src C:\dst`, WantClass: ReversibleCostly},
 		// Test 13: A path holding the letters r and f is not a flag.
 		{Command: "rm /srv/reports/draft.txt", WantClass: ReversibleCostly},
+		// Test 14: Recursive without force, since nothing in a run is there to be prompted.
+		{Command: "rm -r /var/lib/data", WantClass: Irreversible},
+		// Test 15: The capital spelling of the same flag.
+		{Command: "rm -R /srv/cache", WantClass: Irreversible},
+		// Test 16: The long spelling of the same flag.
+		{Command: "sudo rm --recursive /srv/cache", WantClass: Irreversible},
+		// Test 17: Force alone removes one file, which a floor rule would hold on every cleanup.
+		{Command: "rm -f /tmp/build.log", WantClass: ReversibleCostly},
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

@@ -250,9 +250,9 @@ func commandSegments(cmd string) [][]string {
 // "terraform plan -destroy" is somebody previewing a destroy, not running one.
 func segmentFindings(fields []string) []string {
 	var reasons []string
-	if removesRecursivelyByForce(fields) {
+	if removesRecursively(fields) {
 		reasons = append(reasons,
-			"command removes recursively and forcibly, which cannot be undone from here")
+			"command removes recursively, which cannot be undone from here")
 	}
 	if hasCommand(fields, "find") && hasToken(fields, "-delete") {
 		reasons = append(reasons,
@@ -276,33 +276,29 @@ func segmentFindings(fields []string) []string {
 	return reasons
 }
 
-// removesRecursivelyByForce reports whether this command runs rm both recursively and forcibly,
-// however the flags are spelled or split. Any token whose base name is rm counts as the command,
-// so /bin/rm, busybox rm, sudo rm, and xargs rm are all seen; flag reading stops at --, after
-// which everything is a path.
-func removesRecursivelyByForce(fields []string) bool {
+// removesRecursively reports whether this command runs rm recursively, however the flag is spelled
+// or split. Any token whose base name is rm counts as the command, so /bin/rm, busybox rm, sudo rm,
+// and xargs rm are all seen; flag reading stops at --, after which everything is a path.
+//
+// The force flag does not enter into it. It only silences the prompts rm puts to a person at a
+// terminal, and a run has no terminal to ask, so rm -r deletes a tree here exactly as permanently
+// as rm -rf does. Reading only rm -rf as permanent graded the same deletion two ways.
+func removesRecursively(fields []string) bool {
 	for i, field := range fields {
 		if baseName(field) != "rm" {
 			continue
 		}
-		var recursive, force bool
 		for _, arg := range fields[i+1:] {
 			if arg == "--" {
 				break
 			}
 			switch {
 			case arg == "--recursive":
-				recursive = true
-			case arg == "--force":
-				force = true
+				return true
 			case strings.HasPrefix(arg, "--"):
-			case strings.HasPrefix(arg, "-") && len(arg) > 1:
-				recursive = recursive || strings.ContainsAny(arg, "rR")
-				force = force || strings.Contains(arg, "f")
+			case strings.HasPrefix(arg, "-") && len(arg) > 1 && strings.ContainsAny(arg, "rR"):
+				return true
 			}
-		}
-		if recursive && force {
-			return true
 		}
 	}
 	return false

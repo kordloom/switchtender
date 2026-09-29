@@ -160,7 +160,7 @@
 				<ul class="gov-list">
 					<li><b>Tamper-evident, signed audit.</b> Alter one entry and the chain breaks. Prove the trail is intact, offline.</li>
 					<li><b>Change control by policy.</b> A prod <code>terraform destroy</code> holds for an admin's sign-off, automatically.</li>
-					<li><b>Secrets masked, sourced, sealed.</b> They never land in a log and never live in SwitchTender if you don't want them to.</li>
+					<li><b>Secrets masked, sourced, sealed.</b> Masked in run output even when a tool re-encodes them, fetched at run time from the vault they already live in, or sealed at rest here.</li>
 				</ul>
 			</div>
 			<div class="gov-visual reveal" aria-hidden="true">
@@ -188,7 +188,7 @@
 			<div class="section-head reveal">
 				<h2>Evidence you can <span class="grad">hand to an auditor.</span></h2>
 				<p class="proof-dare">Don't take the receipts on faith. Pull the live demo's signed history with <code>curl</code> and check it with LoomSeal: Apache-2.0, a published format with conformance vectors, and a second implementation in Python. We publish LoomSeal too, so what you are trusting is the format and the vectors, not our word.</p>
-				<p class="proof-dare">Or make it prove itself the hard way: <code>scripts/prove.sh</code> in <a href="https://github.com/kordloom/switchtender">the repository</a> starts a server, has an AI agent propose a real deletion, watches policy hold it, refuses the agent's own approval on a Team license and says plainly on Community that it could not, lets a person release it, performs the deletion for real, then verifies the receipt offline and requires verification to fail after altering one recorded byte. About a minute, and nothing in it is staged. The <a href="https://github.com/kordloom/switchtender/actions/workflows/supertest.yml">supertest</a> does the same and more against a fresh Kubernetes cluster on every push.</p>
+				<p class="proof-dare">Or make it prove itself the hard way: <code>scripts/prove.sh</code> in <a href="https://github.com/kordloom/switchtender">the repository</a> starts a server, has an AI agent propose a real deletion, watches policy hold it, refuses the agent's own approval on a Team license and says plainly on Community that it could not, lets a person release it, performs the deletion for real, then verifies the receipt offline and requires verification to fail after altering one recorded byte. About a minute, and nothing in it is staged. The <a href="https://github.com/kordloom/switchtender/actions/workflows/supertest.yml">supertest</a> does the same and more against a fresh Kubernetes cluster on every push to main.</p>
 				<p>Most controllers keep an activity log: rows in their own database, editable by whoever holds the database. SwitchTender writes every change into a hash chain, then gives you six ways to carry the proof out of the building. What changed, who asked, and who approved it become things you show, not things you say. Every claim on this page is defended adversary by adversary, limits included, in the <a href="/docs/threat-model">threat model</a>.</p>
 			</div>
 			<div class="cards cards-3">
@@ -276,25 +276,21 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 					<div class="ic ic-audit"></div>
 					<h3>Provable audit</h3>
 					<p>Every change links into a tamper-evident SHA-256 hash chain; a change that can't be recorded is refused rather than made quietly. Export the chain as a signed <a href="https://loomseal.com" rel="noopener">LoomSeal</a> bundle and verify it offline with an open, independent verifier, without trusting the server.</p>
-					<p class="card-bound">What it doesn't claim: the chain proves the record wasn't altered after writing, not that a compromised controller recorded everything, and not that every change went through us. Anyone holding their own SSH key can still change a host behind it. The full boundary statement is in <a href="/docs/concepts#provable-audit">the docs</a>.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-gate"></div>
 					<h3>Whether you get a second chance</h3>
 					<p>Risk says how bad a change is. It never says whether you can take it back, and the two come apart constantly: restarting a fleet is high risk and undoes itself, while deleting a backup set reads quietly and is permanent. Every run is graded reversible, costly, or irreversible, on every tier. A rule that holds a run on that grade is part of the full policy engine, which is Team. An Ansible run is graded from its playbook's own text, not guessed from a file name.</p>
-					<p class="card-bound">What it doesn't claim: roles and includes aren't followed, so the scan can only ever raise a grade, never lower one. Work it can't see makes a run look less safe, never more.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-memory"></div>
 					<h3>Your estate as it was</h3>
 					<p>One gather per host per day is kept rather than overwritten, about four hundred days deep by default, so you can ask what was running on the date of your last audit, and what has moved since: host by host, fact by fact, with the value at each end. Most tools answer only what is true now, because reconstructing the past needs an ordered history nobody can quietly edit.</p>
-					<p class="card-bound">What it doesn't claim: history starts the day you install, not before. Every answer reports how far back the records reach, so an empty one is never mistaken for an empty estate.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-lineage"></div>
 					<h3>The change, not just the run</h3>
 					<p>Nobody means a run. They mean "we rolled out the fix", which was four runs, a rollback and a fix-forward, across three days. Label them and read the whole arc as one thing, with its span, everyone who acted, and an outcome worked out from the runs rather than typed in by whoever closed it.</p>
-					<p class="card-bound">What it doesn't claim: the outcome is derived, so it can't disagree with the runs. It also can't record an intent nobody wrote down.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-matrix"></div>
@@ -379,8 +375,7 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 				<article class="card reveal">
 					<div class="ic ic-secret"></div>
 					<h3>Secrets kept out of the log</h3>
-					<p>Sealed at rest, sourced live from Vault, AWS, Google, Azure, CyberArk, or 1Password, and kept off the command line so nothing shows in the process table. A tool that prints a secret shows <code>***</code>. Typed cloud credentials inject the exact variables each tool expects.</p>
-					<p class="card-bound">What it doesn't claim: log masking matches the secret's literal text, so a value a tool re-encodes as base64 or hex, or one shorter than four characters, is not caught. Every tool in the field has the same limit; treat it as a safety net, not a boundary.</p>
+					<p>Sealed at rest, sourced live from Vault, AWS, Google, Azure, CyberArk, or 1Password, and kept off the command line so nothing shows in the process table. A tool that prints a secret shows <code>***</code>, even when it re-encodes it as base64, hex, or an escaped string. Typed cloud credentials inject the exact variables each tool expects.</p>
 				</article>
 			</div>
 		</section>

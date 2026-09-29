@@ -28,12 +28,8 @@ func TestOpenRefusesANewSchemaOnCommunity(t *testing.T) {
 	defer license.Set(team)
 
 	// The DSN's database already holds a schema from the suite around this test, so the refusal
-	// has to be proven against a database that does not: point at one that was never initialized.
-	fresh := strings.Replace(dsn, "/switchtender?", "/postgres?", 1)
-	if fresh == dsn {
-		t.Skipf("cannot derive a fresh database from %q", dsn)
-	}
-	db, err := Open(fresh)
+	// has to be proven against a database that does not: one of this test's own, created empty.
+	db, err := Open(freshDatabase(t, dsn))
 	if err == nil {
 		_ = db.Close()
 		t.Fatal("Open() initialized a new schema with no license")
