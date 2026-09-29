@@ -615,7 +615,7 @@ func TestStampApprovedSpecIsNarrowAndReportsAMissingRun(t *testing.T) {
 
 	t.Run("test 0", func(t *testing.T) { // Test 0: A missing run is refused, never silently ignored.
 		t.Parallel()
-		err := s.StampApprovedSpec(ctx, "run_no_such_stamp", "deadbeef")
+		err := s.StampApprovedSpec(ctx, "run_no_such_stamp", "deadbeef", "sha256:bind")
 		if !errors.Is(err, run.ErrNotFound) {
 			t.Errorf("StampApprovedSpec() on a missing run = %v, want run.ErrNotFound", err)
 		}
@@ -628,7 +628,7 @@ func TestStampApprovedSpecIsNarrowAndReportsAMissingRun(t *testing.T) {
 		r.CancelRequested = true
 		r.Warning = "keep me"
 		saveRun(t, ctx, s, r)
-		if err := s.StampApprovedSpec(ctx, r.ID, "sha256:abc"); err != nil {
+		if err := s.StampApprovedSpec(ctx, r.ID, "sha256:abc", "sha256:bind"); err != nil {
 			t.Fatalf("StampApprovedSpec() error = %v", err)
 		}
 		got, err := s.Get(ctx, r.ID)
@@ -656,7 +656,7 @@ func TestStampApprovedSpecIsNarrowAndReportsAMissingRun(t *testing.T) {
 		r := newPending(q+"_2", "stampempty")
 		r.ApprovedSpecDigest = "previous"
 		saveRun(t, ctx, s, r)
-		if err := s.StampApprovedSpec(ctx, r.ID, ""); err != nil {
+		if err := s.StampApprovedSpec(ctx, r.ID, "", ""); err != nil {
 			t.Fatalf("StampApprovedSpec() with an empty digest error = %v", err)
 		}
 		got, err := s.Get(ctx, r.ID)

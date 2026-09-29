@@ -200,7 +200,7 @@ func TestClientRefusesEveryControlNodeCall(t *testing.T) {
 			return zeroOr(err, ok, false)
 		},
 	}, { // Test 12: Stamping an approved spec is a decision, made where the approver is.
-		Name: "StampApprovedSpec", Call: func() error { return c.StampApprovedSpec(ctx, "run_1", "d") },
+		Name: "StampApprovedSpec", Call: func() error { return c.StampApprovedSpec(ctx, "run_1", "d", "b") },
 	}, { // Test 13: Finalizing is applied by the control node from a worker's report.
 		Name: "FinalizeRunning",
 		Call: func() error {

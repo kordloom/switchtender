@@ -15,6 +15,7 @@ import (
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/scrub"
 	"github.com/kordloom/switchtender/internal/template"
 )
 
@@ -212,7 +213,7 @@ func createTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 			respondError(w, log, http.StatusInternalServerError, "could not store template")
 			return
 		}
-		respondJSON(w, log, http.StatusCreated, maskTemplate(t), wantsPretty(r))
+		respondTemplate(w, r, log, http.StatusCreated, t)
 	}
 }
 
@@ -277,6 +278,26 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 				return
 			}
 			notifications = restored
+			// The read of a template scrubs its command, its launch variables and its steps for
+			// anyone below admin, and the only read of a template is that scrubbed list, so an
+			// ordinary edit from the UI submits the scrubbed form back. Without this the mask was
+			// stored over the real credential and every later launch ran the mask.
+			ctx := r.Context()
+			if req.Command, rerr = scrub.Restore(templateCommandScrubber(ctx), req.Command,
+				existing.Command, "command"); rerr != nil {
+				respondError(w, log, http.StatusConflict, rerr.Error())
+				return
+			}
+			if req.ExtraVars, rerr = scrub.Restore(templateVarsScrubber(ctx), req.ExtraVars,
+				existing.ExtraVars, "extra vars"); rerr != nil {
+				respondError(w, log, http.StatusConflict, rerr.Error())
+				return
+			}
+			if req.Steps, rerr = scrub.Restore(stepsScrubber(ctx), req.Steps, existing.Steps,
+				"steps"); rerr != nil {
+				respondError(w, log, http.StatusConflict, rerr.Error())
+				return
+			}
 			// Moving a template out of an organization is as much a change of who controls it as
 			// moving one in, and it is the direction a caller with a manage grant would take: clear
 			// the org and the org's admins lose management of it while its members lose sight of
@@ -333,7 +354,7 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 			respondError(w, log, http.StatusInternalServerError, "could not read template")
 			return
 		}
-		respondJSON(w, log, http.StatusOK, maskTemplate(updated), wantsPretty(r))
+		respondTemplate(w, r, log, http.StatusOK, updated)
 	}
 }
 
@@ -359,7 +380,7 @@ func listTemplatesHandler(store template.Store, authz *authorizer, log *zap.Logg
 			respondError(w, log, http.StatusInternalServerError, "could not list templates")
 			return
 		}
-		capped, total := cappedList(maskTemplates(visible))
+		capped, total := cappedList(scrubbedTemplates(r.Context(), maskTemplates(visible)))
 		respondJSON(w, log, http.StatusOK,
 			listTemplatesResponse{Templates: capped, Count: len(capped), Total: total}, wantsPretty(r))
 	}
@@ -445,13 +466,10 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 			return
 		}
 		id := r.PathValue("id")
-		if err := authz.authorize(r.Context(), id, grant.AccessUse); err != nil {
-			if errors.Is(err, errForbiddenGrant) {
-				forbidden(w)
-				return
-			}
-			log.Error("server: authorize launch: " + err.Error())
-			respondError(w, log, http.StatusInternalServerError, "could not authorize launch")
+		// Through the shared responder, so a launch refused for want of a grant says the same thing
+		// every other grant refusal says. It answered the bare one-word body while the rest of the
+		// product named the grant, and the interface shows that body to the operator verbatim.
+		if denyOnAuthzError(w, log, authz.authorize(r.Context(), id, grant.AccessUse)) {
 			return
 		}
 		t, err := store.Get(r.Context(), id)
@@ -596,7 +614,8 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 			errors.Is(err, dispatch.ErrUnknownDependency), errors.Is(err, dispatch.ErrDependencyCycle):
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
-		case errors.Is(err, dispatch.ErrPolicyDenied):
+		case errors.Is(err, dispatch.ErrPolicyDenied) ||
+			errors.Is(err, dispatch.ErrQueueUnlicensed):
 			respondError(w, log, http.StatusForbidden, err.Error())
 			return
 		case err != nil:
@@ -605,6 +624,6 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 			return
 		}
 		w.Header().Set("Location", "/v1/runs/"+created.ID)
-		respondJSON(w, log, http.StatusAccepted, maskRun(created), wantsPretty(r))
+		respondRun(w, r, log, http.StatusAccepted, created)
 	}
 }

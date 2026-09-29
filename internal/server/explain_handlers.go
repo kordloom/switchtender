@@ -16,6 +16,7 @@ import (
 	"github.com/kordloom/switchtender/internal/ai"
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/scrub"
 	"github.com/kordloom/switchtender/internal/util"
 )
 
@@ -499,7 +500,7 @@ func statsSection(events []event.Event) string {
 // assignment scrub is what the audit chain and the inventory reader already use: a value under a
 // secret-sounding name goes, everything else stays readable.
 func promptCommand(command string, limit int) string {
-	redacted, _ := util.RedactAssignments(command, "[redacted]")
+	redacted, _ := util.RedactAssignments(command, scrub.Marker)
 	return headBytes(redacted, limit)
 }
 

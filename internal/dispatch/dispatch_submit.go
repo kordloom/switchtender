@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -43,11 +44,45 @@ func (d *Dispatcher) resolveQueue(ctx context.Context, r *run.Run) {
 	r.Queue = inv.Queue
 }
 
+// allowResolvedQueue refuses a run pinned to a named queue on an install that cannot run a worker
+// to serve it. The default queue is the server's own pool and needs no worker, so it is always
+// allowed.
+//
+// The server gates the queue a request names, which is every door it can see. It is not every
+// door: a queue also arrives from the launched template and, after that, from the run's stored
+// inventory, and that last one is filled in here, after the handler has already looked at an empty
+// request field and waved it through. So a Community install with a queue on an inventory, or a
+// Team install that let its term lapse, accepted every run against that inventory and pinned each
+// one to a worker group that does not exist. Nothing could claim them and they sat pending
+// forever, which is the silently stranded run the request-side gate was written to stop.
+//
+// Refusing is the only safe answer of the three available. Dropping the queue and running the work
+// on the control node's own pool would quietly cross the boundary the queue was drawn for, and a
+// queue is usually drawn around a network somebody meant to keep separate.
+func (d *Dispatcher) allowResolvedQueue(r *run.Run) error {
+	if r.Queue == "" {
+		return nil
+	}
+	if err := license.Allow(license.FeatureWorkers); err != nil {
+		return fmt.Errorf("%w: %w", ErrQueueUnlicensed, err)
+	}
+	return nil
+}
+
 // requireToolInput checks that a run carries the input its tool needs: a playbook for Ansible, a
 // command for bash, terraform, and python. It also rejects a run naming an unsupported tool.
 func requireToolInput(r *run.Run) error {
 	if !run.ValidTool(r.Tool) {
 		return ErrUnknownTool
+	}
+	// An image is only honored for a tool the container runner can execute. A tool registered
+	// through the SDK or a plugin is run on the host by design, so accepting an image for one
+	// produced a run whose record, signed outcome and dossier all named a container it never
+	// entered. Refusing here says so at submit, where an operator can act on it, rather than
+	// leaving a false environment in the evidence.
+	if r.Image != "" && !run.IsBuiltinTool(r.Tool) {
+		return fmt.Errorf("%w: the %s tool is provided by a plugin and runs on the host, so it "+
+			"cannot execute in the image %q", ErrToolImage, run.NormalizeTool(r.Tool), r.Image)
 	}
 	if run.NormalizeTool(r.Tool) == run.ToolAnsible {
 		if r.Playbook == "" {
@@ -124,6 +159,9 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 		return nil, err
 	}
 	d.resolveQueue(ctx, r)
+	if err := d.allowResolvedQueue(r); err != nil {
+		return nil, err
+	}
 	// Deny is checked before the hold, and even for a run born held: a rule that refuses a
 	// submission outright must not be satisfied by parking the run in front of an approver.
 	if err := d.denied(ctx, r); err != nil {
@@ -223,6 +261,9 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		return nil, err
 	}
 	d.resolveQueue(ctx, parent)
+	if err := d.allowResolvedQueue(parent); err != nil {
+		return nil, err
+	}
 	// A split is submitted through a different path than a single run, so without this the same
 	// command an operator gated ran freely by being sharded: the identical playbook that Submit
 	// held for an approver executed on every host the moment it was split in two. A shard matches
@@ -356,7 +397,11 @@ func inheritExecution(child, parent *run.Run) {
 // finished split parent, keeping each failed shard's host group. Shards that succeeded do not run
 // again. The new parent links back to the run it retries through RetryOf. Retrying the same parent
 // twice inside the dedupe window returns the first retry, so a double click cannot fire two.
-func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*run.Run, error) {
+//
+// The options carry who asked for the retry. Without them the new run had no actor at all, so a
+// policy scoped to an actor could not match it and a rule written to hold a named agent's runs let
+// the retry of exactly such a run straight through.
+func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string, opts ...run.SubmitOption) (*run.Run, error) {
 	existing, key, err := run.ResolveDedupe(ctx, d.store, dedupeRetryShards, parentID, time.Now())
 	if err != nil {
 		return nil, err
@@ -422,6 +467,18 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 	}
 	inheritExecution(retry, parent)
 	retry.OrgID = parent.OrgID
+	// The caller's options are applied before the gate below, not after it, because the actor they
+	// carry is part of what the policy is deciding about.
+	for _, opt := range opts {
+		opt(retry)
+	}
+	// The parent's queue comes down with the rest of the spec, so the retry faces the same gate
+	// Submit, SubmitSplit and SubmitPipeline face. Skipping it here let a retry do what a fresh
+	// submission could not: pin work to a queue no worker on this install can serve, and sit
+	// pending forever with nothing to explain it.
+	if err := d.allowResolvedQueue(retry); err != nil {
+		return nil, err
+	}
 	// A retry is authorized by the retry request, not by whatever authorized the parent weeks ago.
 	stampReceipt(ctx, retry)
 	// A retry is a fourth way to submit a run, and it inherits the parent's entire execution spec,
@@ -438,6 +495,13 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 	if held {
 		retry.Status = run.StatusPendingApproval
 	}
+	recordHold(retry, holdRequested)
+	// Pinned while it is held, the same as the other submit paths. Without the pin, approving a
+	// retry released whatever the branch happened to hold when a claim finally picked it up, so
+	// the approver signed off on one change and a later one executed. A retry is exactly where
+	// that gap stays open longest, since it sits in front of an approver by the same rules that
+	// held the run it retries.
+	d.pinHeldRunCommit(retry)
 	saved, dup, err := d.idempotentSave(ctx, retry)
 	if err != nil {
 		return nil, err
@@ -464,6 +528,11 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 			Limit: shard.Limit,
 		}
 		inheritExecution(child, retry)
+		// A held child was held by whatever held its parent, so it says the same thing rather than
+		// reading as a change nothing stopped. The split path already does this; leaving it out
+		// here stored every shard of a held retry at pending_approval naming no rule, so the
+		// register showed them held by nothing.
+		child.HeldByPolicy = retry.HeldByPolicy
 		child.AuditReceipt = retry.AuditReceipt
 		child.OrgID = retry.OrgID
 		if err := d.store.Save(ctx, child); err != nil {
@@ -494,8 +563,13 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 // twice inside the dedupe window returns the first relaunch, so a double click cannot fire two.
 //
 // The actor is whoever asked for the relaunch, which is not necessarily whoever launched the run it
-// is built from.
-func (d *Dispatcher) RelaunchFailedHosts(ctx context.Context, runID, actor, actorType string) (*run.Run, error) {
+// is built from, and it arrives as options so the whole identity travels rather than part of it.
+// Taking the name and the authentication type as two loose strings meant the account behind the
+// credential was simply not passed, and the distinct-approver rule falls back to comparing names
+// when a run carries no account. A person's token and their browser session record different names,
+// so that fallback answers "is this the same person" wrongly in the direction that lets one of them
+// approve the other's run.
+func (d *Dispatcher) RelaunchFailedHosts(ctx context.Context, runID string, opts ...run.SubmitOption) (*run.Run, error) {
 	existing, key, err := run.ResolveDedupe(ctx, d.store, dedupeRelaunchHosts, runID, time.Now())
 	if err != nil {
 		return nil, err
@@ -526,7 +600,7 @@ func (d *Dispatcher) RelaunchFailedHosts(ctx context.Context, runID, actor, acto
 	if len(failed) == 0 {
 		return nil, ErrNoFailedHosts
 	}
-	opts := append(src.ExecutionOptions(),
+	launch := append(src.ExecutionOptions(),
 		// The same work, so the same labels: a relaunch of the hosts a run left failed belongs to
 		// the change that run belonged to. ExecutionOptions carries how a run executes and not what
 		// it is, so without this the fix drops out of the change it is fixing.
@@ -535,15 +609,15 @@ func (d *Dispatcher) RelaunchFailedHosts(ctx context.Context, runID, actor, acto
 		run.WithSource("relaunch", runID),
 		run.WithRetryOf(runID),
 		run.WithIdempotencyKey(key),
-		// The relaunch is a new launch by whoever asked for it, not by whoever ran the original.
-		// Stamping the source run's actor credited the relaunch to the wrong person, so asking
-		// what a given operator started missed the runs they started this way.
-		run.WithActor(actor),
-		run.WithActorType(actorType),
 		// The relaunch belongs to the same tenant as the run it fixes. A relaunch of an objectless
 		// run names no stored object, so without the source run's org it would be readable across
 		// every tenant.
 		run.WithOrgID(src.OrgID),
 	)
-	return d.Submit(ctx, src.Playbook, src.Inventory, opts...)
+	// Last, so the caller's identity wins over anything inherited from the run being fixed. The
+	// relaunch is a new launch by whoever asked for it, not by whoever ran the original: stamping
+	// the source run's actor credited the relaunch to the wrong person, so asking what a given
+	// operator started missed the runs they started this way.
+	launch = append(launch, opts...)
+	return d.Submit(ctx, src.Playbook, src.Inventory, launch...)
 }

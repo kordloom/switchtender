@@ -308,7 +308,7 @@ func TestRunReceiptHandlerAgreesWithTheSiblingEndpoints(t *testing.T) {
 	})
 
 	verify := httptest.NewRecorder()
-	auditVerifyHandler(tampered, id.InstallID, zap.NewNop()).
+	auditVerifyHandler(tampered, audit.Identity{InstallID: id.InstallID}, zap.NewNop()).
 		ServeHTTP(verify, httptest.NewRequest(http.MethodGet, "/v1/audit/verify", nil))
 	var report auditVerifyResponse
 	if err := json.Unmarshal(verify.Body.Bytes(), &report); err != nil {

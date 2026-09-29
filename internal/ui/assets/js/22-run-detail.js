@@ -133,8 +133,11 @@ function updateActions(run) {
 		!roleAtLeast("operator");
 	if (explain) {
 		const heldProposal = held && (run.proposed_from || run.intent);
-		explain.hidden = !(run.status === "failed" || run.status === "interrupted" || heldProposal) ||
-			!roleAtLeast("operator");
+		// No role term. The server grants this route to a viewer on purpose, because explaining a
+		// run is an advisory read, and the viewer role is the one an outside auditor is given: the
+		// session most likely to want to know why a run failed was the one the button was hidden
+		// from. What it is gated on is the run having something to explain.
+		explain.hidden = !(run.status === "failed" || run.status === "interrupted" || heldProposal);
 	}
 }
 

@@ -269,7 +269,7 @@ func TestCollectRegisterFailsRatherThanReportingAQuietPeriod(t *testing.T) {
 			if test.Audits != nil {
 				audits = test.Audits(audits)
 			}
-			in, err := CollectRegister(context.Background(), runs, audits, "",
+			in, err := CollectRegister(context.Background(), runs, audits, audit.Identity{},
 				base.Add(-time.Hour), base.Add(7*24*time.Hour), base, 0)
 			if err == nil {
 				t.Fatalf("CollectRegister over %s returned a register, want a refusal", test.Name)
@@ -307,7 +307,7 @@ func TestCollectRegisterBoundsEveryQueryItMakes(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			runs := seedOffsets(t, base, []time.Duration{0, time.Hour})
-			in, err := CollectRegister(context.Background(), runs, audit.NewMemStore(), "",
+			in, err := CollectRegister(context.Background(), runs, audit.NewMemStore(), audit.Identity{},
 				base.Add(-time.Hour), base.Add(24*time.Hour), base, test.Limit)
 			if err != nil {
 				t.Fatalf("CollectRegister() error = %v", err)
@@ -345,7 +345,7 @@ func TestRegisterPeriodBoundsAreHalfOpen(t *testing.T) {
 			t.Fatalf("Save() error = %v", err)
 		}
 	}
-	in, err := CollectRegister(ctx, runs, audit.NewMemStore(), "", base, base.Add(24*time.Hour),
+	in, err := CollectRegister(ctx, runs, audit.NewMemStore(), audit.Identity{}, base, base.Add(24*time.Hour),
 		base.Add(48*time.Hour), 0)
 	if err != nil {
 		t.Fatalf("CollectRegister() error = %v", err)
@@ -368,7 +368,7 @@ func TestRegisterPeriodBoundsAreHalfOpen(t *testing.T) {
 func TestRegisterOverAnEmptyPeriodSaysSoWithoutClaimingMore(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
-	in, err := CollectRegister(context.Background(), run.NewMemStore(), audit.NewMemStore(), "",
+	in, err := CollectRegister(context.Background(), run.NewMemStore(), audit.NewMemStore(), audit.Identity{},
 		base, base.Add(24*time.Hour), base, 0)
 	if err != nil {
 		t.Fatalf("CollectRegister() error = %v", err)
@@ -605,7 +605,7 @@ func TestRegisterAnchorsAreFoldedTheSameWayADossierFoldsThem(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SaveAnchor() error = %v", err)
 	}
-	in, err := CollectRegister(ctx, runs, audits, "", base.Add(-time.Hour),
+	in, err := CollectRegister(ctx, runs, audits, audit.Identity{}, base.Add(-time.Hour),
 		base.Add(7*24*time.Hour), base, 0)
 	if err != nil {
 		t.Fatalf("CollectRegister() error = %v", err)

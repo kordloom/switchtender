@@ -212,7 +212,8 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 			errors.Is(err, dispatch.ErrUnknownTool), errors.Is(err, dispatch.ErrToolCredential):
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
-		case errors.Is(err, dispatch.ErrPolicyDenied):
+		case errors.Is(err, dispatch.ErrPolicyDenied) ||
+			errors.Is(err, dispatch.ErrQueueUnlicensed):
 			respondError(w, log, http.StatusForbidden, err.Error())
 			return
 		case err != nil:
@@ -222,7 +223,7 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 		}
 
 		w.Header().Set("Location", "/v1/runs/"+created.ID)
-		respondJSON(w, log, http.StatusAccepted, maskRun(created), wantsPretty(r))
+		respondRun(w, r, log, http.StatusAccepted, created)
 	}
 }
 
@@ -315,7 +316,8 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 			errors.Is(err, dispatch.ErrUnknownTool), errors.Is(err, dispatch.ErrToolCredential):
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
-		case errors.Is(err, dispatch.ErrPolicyDenied):
+		case errors.Is(err, dispatch.ErrPolicyDenied) ||
+			errors.Is(err, dispatch.ErrQueueUnlicensed):
 			respondError(w, log, http.StatusForbidden, err.Error())
 			return
 		case err != nil:
@@ -324,7 +326,7 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 			return
 		}
 		w.Header().Set("Location", "/v1/runs/"+created.ID)
-		respondJSON(w, log, http.StatusAccepted, maskRun(created), wantsPretty(r))
+		respondRun(w, r, log, http.StatusAccepted, created)
 	}
 }
 
@@ -407,10 +409,14 @@ func retryRunHandler(store run.Store, retrier Retrier, authz *authorizer, log *z
 			respondError(w, log, http.StatusInternalServerError, "could not retry run")
 			return
 		}
-		if authorizeRunAccess(w, r, authz, log, rn) {
+		if authorizeReexecute(w, r, authz, log, rn) {
 			return
 		}
-		created, err := retrier.RetryFailedShards(r.Context(), id)
+		// The retry is submitted by whoever asked for it, and the policy gate inside reads that
+		// actor, so a rule scoped to an agent matches the retry the same way it matched the run.
+		created, err := retrier.RetryFailedShards(r.Context(), id,
+			run.WithActor(actorName(r)), run.WithActorAccount(actorAccount(r)),
+			run.WithActorType(actorType(r)))
 		switch {
 		case errors.Is(err, run.ErrNotFound):
 			respondError(w, log, http.StatusNotFound, "run not found")
@@ -424,7 +430,8 @@ func retryRunHandler(store run.Store, retrier Retrier, authz *authorizer, log *z
 		case errors.Is(err, dispatch.ErrNoFailedShards):
 			respondError(w, log, http.StatusConflict, "no failed shards to retry")
 			return
-		case errors.Is(err, dispatch.ErrPolicyDenied):
+		case errors.Is(err, dispatch.ErrPolicyDenied) ||
+			errors.Is(err, dispatch.ErrQueueUnlicensed):
 			respondError(w, log, http.StatusForbidden, err.Error())
 			return
 		case err != nil:
@@ -433,7 +440,7 @@ func retryRunHandler(store run.Store, retrier Retrier, authz *authorizer, log *z
 			return
 		}
 		w.Header().Set("Location", "/v1/runs/"+created.ID)
-		respondJSON(w, log, http.StatusAccepted, maskRun(created), wantsPretty(r))
+		respondRun(w, r, log, http.StatusAccepted, created)
 	}
 }
 
@@ -460,10 +467,14 @@ func relaunchFailedHandler(store run.Store, retrier Retrier, authz *authorizer, 
 			respondError(w, log, http.StatusInternalServerError, "could not relaunch run")
 			return
 		}
-		if authorizeRunAccess(w, r, authz, log, rn) {
+		if authorizeReexecute(w, r, authz, log, rn) {
 			return
 		}
-		created, err := retrier.RelaunchFailedHosts(r.Context(), id, actorName(r), actorType(r))
+		// The account travels with the name. Distinct-approver falls back to matching names when a
+		// run carries no account, and a token and a session for one person record different names.
+		created, err := retrier.RelaunchFailedHosts(r.Context(), id,
+			run.WithActor(actorName(r)), run.WithActorAccount(actorAccount(r)),
+			run.WithActorType(actorType(r)))
 		switch {
 		case errors.Is(err, run.ErrNotFound):
 			respondError(w, log, http.StatusNotFound, "run not found")
@@ -478,7 +489,8 @@ func relaunchFailedHandler(store run.Store, retrier Retrier, authz *authorizer, 
 		case errors.Is(err, dispatch.ErrNoFailedHosts):
 			respondError(w, log, http.StatusConflict, "no hosts failed, so there is nothing to relaunch")
 			return
-		case errors.Is(err, dispatch.ErrPolicyDenied):
+		case errors.Is(err, dispatch.ErrPolicyDenied) ||
+			errors.Is(err, dispatch.ErrQueueUnlicensed):
 			respondError(w, log, http.StatusForbidden, err.Error())
 			return
 		case err != nil:
@@ -487,7 +499,7 @@ func relaunchFailedHandler(store run.Store, retrier Retrier, authz *authorizer, 
 			return
 		}
 		w.Header().Set("Location", "/v1/runs/"+created.ID)
-		respondJSON(w, log, http.StatusAccepted, maskRun(created), wantsPretty(r))
+		respondRun(w, r, log, http.StatusAccepted, created)
 	}
 }
 
@@ -609,11 +621,11 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 			respondError(w, log, http.StatusConflict, reason)
 			return
 		}
-		// Access to the run is not enough to fire its spec again. Authorize every object the new
-		// run touches, mirroring a template launch, so a rerun cannot borrow a project,
-		// inventory, or credential the actor was never granted.
-		if denyOnAuthzError(w, log,
-			authz.authorizeAll(r.Context(), grant.AccessUse, runObjects(rn)...)) {
+		// Access to the run is not enough to fire its spec again, and what re-execution requires is
+		// decided in one place so the four paths that do it cannot answer differently. Composing
+		// the pieces here instead is how the registry pull credential came to be authorized on some
+		// of them and not others.
+		if authorizeReexecute(w, r, authz, log, rn) {
 			return
 		}
 		// Rerunning the same run twice inside the dedupe window is one request, not two, so a
@@ -626,7 +638,7 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 		}
 		if existing != nil {
 			w.Header().Set("Location", "/v1/runs/"+existing.ID)
-			respondJSON(w, log, http.StatusAccepted, maskRun(existing), wantsPretty(r))
+			respondRun(w, r, log, http.StatusAccepted, existing)
 			return
 		}
 		opts := append(rerunOptions(rn), run.WithSource("rerun", rn.ID), run.WithRerunOf(rn.ID),
@@ -639,7 +651,8 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 		} else {
 			created, err = submitter.Submit(r.Context(), rn.Playbook, rn.Inventory, opts...)
 		}
-		if errors.Is(err, dispatch.ErrPolicyDenied) {
+		if errors.Is(err, dispatch.ErrPolicyDenied) ||
+			errors.Is(err, dispatch.ErrQueueUnlicensed) {
 			respondError(w, log, http.StatusForbidden, err.Error())
 			return
 		}
@@ -649,6 +662,6 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 			return
 		}
 		w.Header().Set("Location", "/v1/runs/"+created.ID)
-		respondJSON(w, log, http.StatusAccepted, maskRun(created), wantsPretty(r))
+		respondRun(w, r, log, http.StatusAccepted, created)
 	}
 }

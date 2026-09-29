@@ -21,10 +21,12 @@ ships in the binary itself, so a countersigning witness can be run by anyone, in
 
 Three layers, strongest first:
 
-1. Every release attaches its own source tarball as a release asset, listed in the signed
+1. Every release from v1.72.0 onward attaches its own source tarball as a release asset, listed in the signed
    `SHA256SUMS` manifest beside the binaries. Keeping a release means keeping its exact source.
 2. The license converts. Each release becomes Apache 2.0 two years after it ships, automatically,
-   with no trigger event, agent, or dispute. The conversion is written into the license itself.
+   with no trigger event, agent, or dispute. The conversion is written into the license itself,
+   and into an irrevocable supplemental grant, `LICENSE-GRANT.md`, covering the versions
+   released before the license file carried the two-year wording.
 3. You can mirror the repository today, and you should if the software matters to you:
 
 ```sh

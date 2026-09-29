@@ -17,6 +17,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/scrub"
 	"github.com/kordloom/switchtender/internal/util"
 )
 
@@ -69,9 +70,10 @@ type Input struct {
 }
 
 // Collect gathers a run's evidence from the stores in one streaming pass over the chain. It
-// returns run.ErrNotFound when the run does not exist. installID is the install the tree
+// returns run.ErrNotFound when the run does not exist. producer is the install identity the tree
 // profile's leaves bind to, which checking a tree anchor requires.
-func Collect(ctx context.Context, runs run.Store, audits audit.Store, installID, id string,
+func Collect(ctx context.Context, runs run.Store, audits audit.Store, producer audit.Identity,
+	id string,
 	now time.Time) (*Input, error) {
 	r, err := runs.Get(ctx, id)
 	if err != nil {
@@ -138,7 +140,7 @@ func Collect(ctx context.Context, runs run.Store, audits audit.Store, installID,
 	// One pass gives the run's entries, the whole-chain verdict, the anchor verdicts, the head
 	// receipt, and where the chain stood when the run was recorded.
 	scan := audit.NewChainScanner(true)
-	anchorScan := audit.NewAnchorScanner(anchors, installID)
+	anchorScan := audit.NewAnchorScanner(anchors, producer)
 	// The receipt is parsed once and compared as two scalars, rather than formatting a string for
 	// every entry in a chain that can run to millions.
 	launchSeq, launchHash := parseReceipt(r.AuditReceipt)
@@ -583,7 +585,7 @@ func runMeta(r *run.Run) []metaRow {
 	// go run stores its whole script here, which can carry an inline token or a connection string.
 	// The receipt path already runs the same field through a redactor before disclosing it; this one
 	// rendered it verbatim, so exporting a run and mailing it published whatever the script held.
-	redactedCommand, _ := util.RedactAssignments(r.Command, "[redacted]")
+	redactedCommand, _ := util.RedactAssignments(r.Command, scrub.Marker)
 	add("Command", redactedCommand)
 	add("Inventory", r.Inventory)
 	add("Inventory id", r.InventoryID)

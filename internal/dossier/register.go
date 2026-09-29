@@ -12,6 +12,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/scrub"
 	"github.com/kordloom/switchtender/internal/util"
 )
 
@@ -58,6 +59,18 @@ type RegisterInput struct {
 	// covering. It is zero when Truncated is false. A caller writing consecutive registers resumes
 	// from here, since the changes at this instant are the ones the page cut through.
 	CoveredTo time.Time
+	// Pruned counts changes the chain records in this period that the run store no longer holds,
+	// because retention removed them. It is zero on a truncated register, which cannot tell a
+	// change the cap dropped from one retention removed, and which already says it is partial.
+	//
+	// It exists because their absence is otherwise indistinguishable from their never having
+	// happened. A register is read as the account of a period, and retention deletes runs while
+	// the chain keeps every entry, so a period whose runs have aged out rendered as a document
+	// listing nothing and still calling itself verified: an auditor reads a quiet quarter where
+	// there were forty changes, two of them failures and one refused by an approver. Saying how
+	// many are missing turns a false account into an incomplete one, which is the difference
+	// between misleading an auditor and telling them where to look.
+	Pruned int
 	// Decisions maps a run id to its approval or rejection, where the chain records one.
 	Decisions map[string]Decision
 	// ChainOK reports whether the whole chain verified during collection.
@@ -78,10 +91,11 @@ type RegisterInput struct {
 
 // CollectRegister gathers the period's change register: the window's top-level runs, the
 // chain-recorded decision over each, and the chain's own verdict, in one streaming pass.
-// installID is the install the tree profile's leaves bind to, which checking a tree anchor
+// producer is the install identity the tree profile's leaves bind to, which checking a tree anchor
 // requires. limit caps how many changes the document carries, defaulting to MaxRegisterRuns when
 // it is not positive, and a period holding more than that comes back marked truncated.
-func CollectRegister(ctx context.Context, runs run.Store, audits audit.Store, installID string,
+func CollectRegister(ctx context.Context, runs run.Store, audits audit.Store,
+	producer audit.Identity,
 	from, to, now time.Time, limit int) (*RegisterInput, error) {
 	if limit <= 0 {
 		limit = MaxRegisterRuns
@@ -122,12 +136,26 @@ func CollectRegister(ctx context.Context, runs run.Store, audits audit.Store, in
 		}
 	}
 
+	// What the store still holds for this period, so the walk below can tell a pruned change from
+	// one that is simply listed.
+	listed := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		listed[r.ID] = true
+	}
+	pruned := map[string]bool{}
+
 	scan := audit.NewChainScanner(true)
-	anchorScan := audit.NewAnchorScanner(anchors, installID)
+	anchorScan := audit.NewAnchorScanner(anchors, producer)
 	err = audits.ChainScan(ctx, 0, func(e *audit.Entry) error {
 		scan.Feed(e)
 		anchorScan.Feed(e)
 		in.Head = e
+		// A change the chain records inside this period whose run the store no longer holds has
+		// been pruned by retention. The chain is the durable half of the record, so it is what
+		// says the period was not empty.
+		if id := outcomeOf(e); id != "" && !e.At.Before(from) && e.At.Before(to) && !listed[id] {
+			pruned[id] = true
+		}
 		if id, verdict := decisionOf(e); id != "" {
 			// The newest decision wins: a rejection redone as an approval reads as the chain
 			// tells it, in order.
@@ -146,6 +174,19 @@ func CollectRegister(ctx context.Context, runs run.Store, audits audit.Store, in
 	holding, problems := foldAnchors(anchorScan, 1)
 	in.Anchored = len(holding)
 	in.AnchorProblems = problems
+	// Counted only when this document is the whole period. The membership set is built from the
+	// page the cap already cut, so on a truncated register every change the cap dropped looks
+	// exactly like one retention removed, and the banner then tells an auditor that runs still
+	// sitting in the store were destroyed. Distinguishing the two would mean asking the store about
+	// every change beyond the cap, which on the period that reaches the cap is the whole point of
+	// having one.
+	//
+	// So a truncated register says nothing here and says on its face that it is not the whole
+	// period, which is the honest pair. Under-reporting a pruned period is silence; over-reporting
+	// one is an accusation of data destruction that the store itself contradicts.
+	if !in.Truncated {
+		in.Pruned = len(pruned)
+	}
 	return in, nil
 }
 
@@ -231,6 +272,9 @@ type registerView struct {
 	CoveredTo string
 	// Failed tallies rows whose outcome is a failure.
 	Failed int
+	// Pruned counts changes the chain records in this period that the run store no longer holds,
+	// so the document says it is incomplete rather than reading as an account of a quiet period.
+	Pruned int
 	// ChainCount is the whole chain's entry count.
 	ChainCount int
 	// Receipt is the chain head's seq:link at collection.
@@ -252,6 +296,7 @@ func RenderRegister(in *RegisterInput) ([]byte, error) {
 		GeneratedAt: in.GeneratedAt.UTC().Format(time.RFC3339),
 		Total:       len(in.Runs),
 		Truncated:   in.Truncated,
+		Pruned:      in.Pruned,
 		Limit:       in.Limit,
 	}
 	// A truncated register that does not say so is the worst artifact this package can produce: it
@@ -337,7 +382,7 @@ func changeOf(r *run.Run) string {
 		// already runs this same field through the same redactor for the same reason; this is the
 		// derived document that skipped it. Redacted before the truncation, so a secret cannot
 		// survive as a fragment of a cut line.
-		what, _ = util.RedactAssignments(r.Command, "[redacted]")
+		what, _ = util.RedactAssignments(r.Command, scrub.Marker)
 	}
 	// The cut is counted in runes, not bytes. A byte cut split the last character of a script
 	// written in any non-ASCII alphabet, so the Change column and the CSV export beside it carried
@@ -347,4 +392,23 @@ func changeOf(r *run.Run) string {
 		what = string([]rune(what)[:77]) + "..."
 	}
 	return strings.TrimSpace(tool + " " + what)
+}
+
+// outcomeOf returns the run id an entry records the outcome of, or empty when it is not one.
+//
+// The outcome entry is used rather than the creation entry because it is the only one that names
+// its run: a creation is recorded before the run has an id. It is written once when the run
+// finishes, so counting them counts changes rather than chain entries, and the instant it carries
+// is the completion rather than the creation the period is otherwise measured by. For a run that
+// starts and finishes inside a period those agree, and for one that straddles a boundary the count
+// is off by that run in whichever direction it crossed, which is a better answer than silence.
+func outcomeOf(e *audit.Entry) string {
+	if e.Method != audit.MethodRun {
+		return ""
+	}
+	id, _, ok := strings.Cut(strings.TrimPrefix(e.Path, "/runs/"), "/outcome/")
+	if !ok {
+		return ""
+	}
+	return id
 }

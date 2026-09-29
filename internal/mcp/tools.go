@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -148,7 +149,10 @@ func Tools(c *Client, opts Options) []Tool {
 				}
 				// The log endpoint serves text/plain, so it is read as text rather than decoded as
 				// JSON. The server has already masked secret values before storing the log.
-				log, err := c.doText(ctx, "GET", "/v1/runs/"+escapeID(id)+"/logs")
+				// The end of the log, not the start. A run's failure and its recap are at the end,
+				// so a bounded read from the front returns the least useful megabyte of a long run.
+				log, err := c.doText(ctx, "GET",
+					"/v1/runs/"+escapeID(id)+"/logs?tail="+strconv.Itoa(maxResponseBytes))
 				if err != nil {
 					return "", err
 				}

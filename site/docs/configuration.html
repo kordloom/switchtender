@@ -694,6 +694,31 @@ that variable is unset.</p>
 <td><code>failure</code></td>
 <td>When to email: <code>failure</code> for failed runs only, or <code>finish</code> for every terminal run.</td>
 </tr>
+<tr>
+<td><code>--policy-file</code></td>
+<td>none</td>
+<td>YAML file holding the approval policies. When set, the file is the source of truth and the API refuses policy edits.</td>
+</tr>
+<tr>
+<td><code>--trusted-proxy</code></td>
+<td>none</td>
+<td>CIDR of a reverse proxy whose client IP header to believe, repeatable. Required behind a proxy: without it every request appears to come from the proxy itself, so the failed sign-in budget, the webhook rate limit, and the per-client stream budget all become one budget shared by everyone behind it, and one stranger's failed guesses can lock sign-in for the whole install.</td>
+</tr>
+<tr>
+<td><code>--client-ip-header</code></td>
+<td>none</td>
+<td>Header carrying the real client address from a trusted proxy. Defaults to the leftmost <code>X-Forwarded-For</code> entry.</td>
+</tr>
+<tr>
+<td><code>--span-cadence</code></td>
+<td><code>0</code></td>
+<td>Append a span beat to the audit chain this often, for example <code>60s</code>. Whole seconds only. Zero appends none.</td>
+</tr>
+<tr>
+<td><code>--anchor-tsa-url</code></td>
+<td>none</td>
+<td>RFC 3161 timestamp authority the chain anchors against. Empty anchors nothing.</td>
+</tr>
 </tbody>
 </table>
 <p>Retention windows accept a whole number of days with a <code>d</code> suffix, such as <code>30d</code>, or Go duration
@@ -821,6 +846,11 @@ node over the mesh relay, with no database access of its own.</p>
 <td>none</td>
 <td>Private Ansible Galaxy or Automation Hub URL for project collection installs. Token from <code>SWITCHTENDER_GALAXY_TOKEN</code>.</td>
 </tr>
+<tr>
+<td><code>--policy-file</code></td>
+<td>none</td>
+<td>YAML file holding the approval policies, the same file the control node reads.</td>
+</tr>
 </tbody>
 </table>
 <h2 id="token">token</h2>
@@ -924,6 +954,16 @@ chain.</li>
 <li><code>audit report</code> renders the period's change register as a self-contained HTML evidence report.</li>
 <li><code>audit run &lt;id&gt;</code> emits one run's evidence dossier as a self-contained HTML document.</li>
 </ul>
+<p>Flags on the subcommands:</p>
+<ul>
+<li><code>audit bundle --limit &lt;n&gt;</code> carries only the newest N entries. The default carries the whole chain.</li>
+<li><code>audit anchor --type &lt;kind&gt;</code> picks the anchor: <code>rfc3161</code> for a signed timestamp, or <code>git</code> or
+<code>https</code> for one checked by fetching it. <code>--ref</code> is the authority URL for <code>rfc3161</code>, otherwise the
+URL a verifier fetches. <code>--tree</code> anchors the Merkle root over the whole chain, which is the
+coordinate a sparse receipt proves membership against.</li>
+<li><code>audit report --from &lt;when&gt; --to &lt;when&gt;</code> bounds the change register's period. <code>--from</code> defaults to
+ninety days before <code>--to</code>, and <code>--to</code> defaults to now and is exclusive.</li>
+</ul>
 <h2 id="receipt">receipt</h2>
 <p>Writes a signed receipt for one finished run, which a third party verifies offline with <code>verify</code>. A
 receipt is the chain segment from the request that created the run through the entry recording what
@@ -1023,6 +1063,66 @@ back rewritten, or the head regresses. Run it where the server's operator has no
 attestations.</li>
 <li><code>witness verify-attestation</code> verifies an attestation offline against a pinned witness key.</li>
 </ul>
+<h2 id="witness-serve">witness serve</h2>
+<p>Runs the witness. Its flags are checked against that subcommand rather than <code>witness</code> itself.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--listen</code></td>
+<td><code>127.0.0.1:9440</code></td>
+<td>Address the witness API serves on.</td>
+</tr>
+<tr>
+<td><code>--state-dir</code></td>
+<td><code>switchtender-witness</code></td>
+<td>Directory holding the signed checkpoints and the findings record.</td>
+</tr>
+<tr>
+<td><code>--api-token</code></td>
+<td>none</td>
+<td>Bearer token the witness API requires.</td>
+</tr>
+<tr>
+<td><code>--watch</code></td>
+<td>none</td>
+<td>Span beat feed to watch, repeatable.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="witness-verify-attestation">witness verify-attestation</h2>
+<p>Verifies one attestation offline, for the relying party. It reads the JSON, recomputes the signature,
+and prints the verdict with the signer named in both published forms: <code>signed_by</code> is the raw hex
+public key the attestation carries, and <code>signed_by_key_id</code> is the sha256 key id the witness prints at
+startup and serves from its API.</p>
+<pre><code>switchtender witness verify-attestation attestation.json --pubkey sha256:...
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--pubkey</code></td>
+<td>none</td>
+<td>Pinned witness key, as either the sha256 key id or the raw hex public key.</td>
+</tr>
+</tbody>
+</table>
+<p>Pass <code>--pubkey</code> with the key you pinned out of band. Either form is accepted, since the key id is
+what the witness tells operators to publish and the hex key is what the document carries. Without it
+the check proves only that the attestation is internally consistent, which a forger with their own
+key satisfies trivially.</p>
 <h2 id="mcp">mcp</h2>
 <p>Serves the Model Context Protocol over stdio, so an agent can list templates, propose a run, and read
 what happened. Every tool call is an ordinary authenticated API request carrying the token given
@@ -1049,6 +1149,21 @@ reach.</p>
 <td><code>--allow-adhoc</code></td>
 <td>off</td>
 <td>Also expose the ad-hoc run tool, letting the agent compose a run rather than launch a template an operator defined. Approval policy still applies.</td>
+</tr>
+<tr>
+<td><code>--token</code></td>
+<td>none</td>
+<td>API token the agent presents.</td>
+</tr>
+<tr>
+<td><code>--timeout</code></td>
+<td><code>1m0s</code></td>
+<td>Bounds one API call.</td>
+</tr>
+<tr>
+<td><code>--allow-admin-token</code></td>
+<td><code>false</code></td>
+<td>Start even when the token has admin rights. An agent should hold an operator-bound token, so this is a deliberate override.</td>
 </tr>
 </tbody>
 </table>
@@ -1083,6 +1198,26 @@ instance is safe to expose. It needs ansible on the PATH to run the sample playb
 <td><code>--no-seed</code></td>
 <td>off</td>
 <td>Serve the database as it already stands instead of seeding it.</td>
+</tr>
+<tr>
+<td><code>--anchor-tsa</code></td>
+<td>a public authority</td>
+<td>RFC 3161 authority that anchors the seeded chain, so the demo shows a real anchor. Empty anchors nothing.</td>
+</tr>
+<tr>
+<td><code>--trusted-proxy</code></td>
+<td>none</td>
+<td>As <code>serve</code>.</td>
+</tr>
+<tr>
+<td><code>--client-ip-header</code></td>
+<td>none</td>
+<td>As <code>serve</code>.</td>
+</tr>
+<tr>
+<td><code>--span-cadence</code></td>
+<td><code>0</code></td>
+<td>As <code>serve</code>.</td>
 </tr>
 </tbody>
 </table>
@@ -1153,6 +1288,7 @@ backup was written with, and it never deletes objects absent from the file.</p>
 </table>
 <h2 id="version">version</h2>
 <p>Prints the SwitchTender version.</p>
+<p><code>--verify</code> fetches this version's published binary hashes and verifies the running executable.</p>
 <h2 id="help-and-completion">help and completion</h2>
 <p>Both are the standard Cobra built-ins. <code>help</code> prints usage for any command, and <code>completion</code> emits a
 shell completion script for bash, zsh, fish, or PowerShell.</p>
@@ -1185,6 +1321,48 @@ out of what they were already using.</p>
 on. If you are running work for more than one team, more than one customer, or anything where one
 group must not reach another's credentials, turn it on and grant deliberately. Objects created
 before you do carry no grants, so plan to assign them.</p>
+<p>A refusal from these rules says so: the body reads <code>forbidden: this object requires a grant you do not hold</code>, which is the same sentence whether the object is delegated elsewhere, ungranted under
+strict grants, or does not exist. It tells you a grant is what is missing rather than a role or an
+account, and nothing about the object itself.</p>
+<p>What <code>--strict-grants</code> decides is only the default for an object nobody has granted. An object that
+carries a grant is access-controlled in both modes: writing a grant on it is what declares it so,
+and a caller who does not hold one is denied whether or not strict grants are on. Every listing
+answers the same rule the by-id read does, so a run you are refused by name is also absent from the
+run list, the fleet and drift views, the host pages, and the change log.</p>
+<p>One consequence is worth knowing before you write your first grant. Install-wide figures that carry
+no per-row id are served whole only to a caller nothing is hidden from, because such a total is
+every other group's volume in one number. On an install with no grants at all that is everybody,
+which is the common case and is unaffected. It stays unaffected by a grant on a template or a worker
+queue, since neither can hide a run; what changes it is a grant on a project, an inventory, or a
+credential that the caller does not hold.</p>
+<p>For a caller in that position each surface answers differently, and the difference is worth knowing
+before you point a dashboard at one:</p>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>What a restricted caller gets</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The run-count cards on the run list</td>
+<td>Their own visible totals, with <code>summary.scope</code> reading <code>visible</code> rather than <code>install</code>.</td>
+</tr>
+<tr>
+<td>The task-duration table at <code>/v1/tasks</code></td>
+<td>No rows, and <code>withheld: true</code> beside them, so an empty table is not mistaken for a quiet install.</td>
+</tr>
+<tr>
+<td>The Prometheus exposition at <code>/metrics</code></td>
+<td>An empty body with status 200. Every series is absent rather than zero, so give the scrape an admin token if you want the install's counters.</td>
+</tr>
+</tbody>
+</table>
+<p>The empty <code>/metrics</code> body is deliberate: a scraper reads a 5xx as the install being down and pages
+somebody. It does mean an alert written against a series going to zero will not fire for a scrape
+token that has become restricted, because the series is gone rather than zero. Scrape with a token
+that holds everything, or alert on the scrape's own staleness as well as its values.</p>
 <h2 id="directory-sign-in-and-existing-accounts">Directory sign-in and existing accounts</h2>
 <p>An account records what created it: an administrator, or the directory that provisioned it. A
 directory identity signs in to an account only when that account is its own, so an identity provider

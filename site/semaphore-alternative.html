@@ -203,7 +203,7 @@
 				</article>
 				<article class="card reveal">
 					<h3>Can it read secrets from AWS Secrets Manager, Azure Key Vault, or Vault?</h3>
-					<p>All three, resolved at launch rather than copied into this database. Vault dynamic secrets go further: a short-lived credential is minted for each run and revoked when the run ends. AWS and Azure both authenticate from an instance role or managed identity with no stored key, and anything else resolves through a command whose output is the secret.</p>
+					<p>All three, resolved at launch rather than copied into this database. Vault dynamic secrets go further: a short-lived credential is minted for each run and revoked when the run ends. Azure authenticates from the attached managed identity with no stored key, AWS takes an access key from the credential or the standard AWS environment variables, and anything else resolves through a command whose output is the secret.</p>
 				</article>
 				<article class="card reveal">
 					<h3>Can I run a Terraform plan, hold it for approval, then run Ansible?</h3>
@@ -232,7 +232,7 @@
    "name": "Can it read secrets from AWS Secrets Manager, Azure Key Vault, or Vault?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "All three, resolved at launch rather than copied into this database. Vault dynamic secrets go further: a short-lived credential is minted for each run and revoked when the run ends. AWS and Azure both authenticate from an instance role or managed identity with no stored key, and anything else resolves through a command whose output is the secret."
+    "text": "All three, resolved at launch rather than copied into this database. Vault dynamic secrets go further: a short-lived credential is minted for each run and revoked when the run ends. Azure authenticates from the attached managed identity with no stored key, AWS takes an access key from the credential or the standard AWS environment variables, and anything else resolves through a command whose output is the secret."
    }
   },
   {

@@ -108,7 +108,7 @@ func runChangeRegister(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	in, err := dossier.CollectRegister(cmd.Context(), store.Runs(), store.Audits(), id.InstallID,
+	in, err := dossier.CollectRegister(cmd.Context(), store.Runs(), store.Audits(), id,
 		from, to, time.Now(), dossier.MaxRegisterRuns)
 	if err != nil {
 		return fmt.Errorf("collect change register: %w", err)

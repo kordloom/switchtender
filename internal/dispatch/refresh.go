@@ -76,20 +76,24 @@ func (d *Dispatcher) RefreshSource(ctx context.Context, id string) (*invsource.S
 func (d *Dispatcher) dumpSource(ctx context.Context, src *invsource.Source) ([]byte, error) {
 	var env []string
 	if src.CredentialID != "" {
-		if d.credentials == nil || d.sealer == nil {
-			return nil, credential.ErrNoKey
-		}
-		c, err := d.credentials.Get(ctx, src.CredentialID)
+		// Opened through the same path a run credential takes. Unsealing alone returned the source
+		// configuration rather than the environment lines for a credential backed by an external
+		// engine, and EnvLines keeps only lines holding an equals sign, so a single-line config
+		// yielded nothing at all: the dump ran with no credential and reported an empty inventory
+		// as though the source were empty.
+		c, plain, lease, err := d.openCredential(ctx, src.CredentialID)
 		if err != nil {
 			return nil, fmt.Errorf("source credential %s: %w", src.CredentialID, err)
 		}
-		plain, err := d.sealer.Open(c.Secret)
-		if err != nil {
-			return nil, fmt.Errorf("decrypt source credential: %w", err)
+		defer d.revokeLease(lease)
+		// A kind this dump cannot apply is refused rather than dropped. Silently ignoring it ran
+		// the source unauthenticated and called the empty result the truth, which is the same
+		// outcome as the bug above and just as quiet.
+		if c.Kind != credential.KindEnv {
+			return nil, fmt.Errorf("%w: inventory source %s carries a %s credential, and a source "+
+				"dump can only apply an env credential", credential.ErrBadKind, src.ID, c.Kind)
 		}
-		if c.Kind == credential.KindEnv {
-			env = credential.EnvLines(plain)
-		}
+		env = credential.EnvLines(plain)
 	}
 
 	sourcePath := src.Source

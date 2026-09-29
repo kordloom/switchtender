@@ -473,20 +473,27 @@ func runProcess(ctx context.Context, cmd *exec.Cmd, out io.Writer) (Result, erro
 // cleanup that removes it. The Python, Go, and PowerShell runners share it so a run's inline source
 // reaches a host process and a container mount the same way.
 func writeScriptFile(pattern, content string) (string, func(), error) {
+	noop := func() {}
 	f, err := os.CreateTemp("", pattern)
 	if err != nil {
-		return "", func() {}, fmt.Errorf("%w: %w", ErrLaunch, err)
+		return "", noop, fmt.Errorf("%w: %w", ErrLaunch, err)
 	}
 	path := f.Name()
-	cleanup := func() { _ = os.Remove(path) }
+	remove := func() { _ = os.Remove(path) }
+	// A failure below removes the file here rather than returning a cleanup for the caller to
+	// remember. Every caller returns on the error and drops the cleanup, so a failed write or
+	// close left the script on disk for good, and that script is the run's command verbatim with
+	// whatever credentials the operator inlined into it.
 	if _, err := f.WriteString(content); err != nil {
 		_ = f.Close()
-		return "", cleanup, fmt.Errorf("%w: %w", ErrLaunch, err)
+		remove()
+		return "", noop, fmt.Errorf("%w: %w", ErrLaunch, err)
 	}
 	if err := f.Close(); err != nil {
-		return "", cleanup, fmt.Errorf("%w: %w", ErrLaunch, err)
+		remove()
+		return "", noop, fmt.Errorf("%w: %w", ErrLaunch, err)
 	}
-	return path, cleanup, nil
+	return path, remove, nil
 }
 
 // varsEnv layers a Spec's credential env and, when it has extra vars, a JSON SWITCHTENDER_VARS of them

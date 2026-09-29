@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -222,6 +223,29 @@ func checkedLinkOf(claim map[string]any) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
+// MaxAssembledClaims is how many chain entries one signed document will assemble at once.
+//
+// A bundle and a receipt are each one signature over every claim they carry, so unlike a streamed
+// verification they hold them all in memory together. An audit chain grows for the life of an
+// install, a row per mutating request, per webhook fire and per span beat, so an unwindowed export
+// assembles the whole history, several times its stored size, on a single request.
+//
+// The number is what a small box survives, not what the format tolerates. Measured on this code:
+// 250,000 entries peak at about 1.7 GB resident and produce an 89 MB artifact, which is an
+// out-of-memory kill on the 1 and 2 GB instances this product is sold as running on, reachable by
+// one GET. The homepage teaches that exact request as the thing to run against any install, so the
+// ceiling has to be a size the advertised install can serve. 25,000 peaks around 243 MB and still
+// produces a 12.7 MB document, which is a real evidence artifact by any measure.
+//
+// It lives here, beside the format, because both documents are bound by it for the same reason and
+// both are reachable by a caller below admin. It was a literal retyped in each of them, held
+// together by a comment saying they matched, so a re-measurement that moved one would have left the
+// other where it was and the endpoint that kept the higher number would still be the kill.
+//
+// A chain longer than this is not refused, only windowed: the caller names a limit and takes the
+// newest slice.
+const MaxAssembledClaims = 25_000
+
 // MaxCanonicalDigestBytes is the largest body canonicalized before digesting. A larger body is
 // digested as its exact bytes, since parsing a multi-megabyte upload to normalize its key order
 // costs more than the comparison it buys.
@@ -294,8 +318,26 @@ func ContentDigestOf(body []byte) (digest, nonce string, err error) {
 // digest in this package commits to. It is exported for values that are disclosed beside their
 // digest, such as a run's spec in a receipt, so the discloser can never hand out bytes the
 // redaction did not pass over.
-func CanonicalRedacted(body []byte) []byte {
-	return canonicalForDigest(body)
+//
+// It carries no size bailout, and that is what separates it from the digest path below. Digesting
+// can afford one: committing to an enormous body whole discloses nothing about it. Disclosure
+// cannot. A body too large to canonicalize is a body the redaction never read, so handing it back
+// publishes in the clear the exact values the caller asked to have removed. Every failure here is
+// an error instead, and a caller that cannot prove a body was redacted withholds it.
+func CanonicalRedacted(body []byte) ([]byte, error) {
+	value, err := jcs.Parse(body)
+	if err != nil {
+		return nil, fmt.Errorf("%w: this body is not JSON, so no redaction passed over it", ErrRedactParse)
+	}
+	value = redactSecrets(value)
+	if canonical, err := jcs.Serialize(value); err == nil {
+		return canonical, nil
+	}
+	marshaled, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("%w: the redacted body will not re-encode", ErrRedactEncode)
+	}
+	return marshaled, nil
 }
 
 // UnkeyedDigestOf returns "sha256:" plus the hex SHA-256 of the canonical redacted body. It is for
@@ -306,27 +348,46 @@ func UnkeyedDigestOf(body []byte) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
+// UnkeyedDigestOfReduced returns "sha256:" plus the hex SHA-256 of body exactly as given. It is for
+// a body that is already the canonical redacted form CanonicalRedacted produces and is disclosed in
+// that same form, such as a run's spec: the digest then covers exactly the bytes a reader is shown.
+//
+// It exists because UnkeyedDigestOf reduces its input, and reducing an already-reduced body redacts
+// it a second time. Redaction is not idempotent: a value the first pass masks to a marker can leave
+// the second pass matching from the marker to the end of the line, so R2 = redact(redact(raw))
+// drops text that R1 = redact(raw) kept. Digesting R2 while disclosing R1 meant the digest did not
+// cover the disclosed bytes and, worse, two specs differing only in that dropped tail collapsed
+// onto one digest. That is a tamper gate a changed command walks straight through, so the spec is
+// digested by this function over the exact bytes it discloses instead.
+func UnkeyedDigestOfReduced(body []byte) string {
+	sum := sha256.Sum256(body)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
 // canonicalForDigest reduces a request body to the bytes the digest commits to: the redacted,
 // canonical JSON when it parses, or the raw body when it is too large to canonicalize economically.
 // A body that parses is never digested raw, so a secret the redaction removed is not committed by a
 // re-encoding failure falling back to the original bytes. A value JCS cannot canonicalize falls back
 // to a plain deterministic JSON encoding of the same redacted tree, and a tree that will not encode
 // at all reduces to the marker.
+//
+// The size bailout is safe here and only here: a digest of an oversized body discloses nothing,
+// while CanonicalRedacted, whose bytes are published, refuses rather than skipping the redaction.
 func canonicalForDigest(body []byte) []byte {
-	input := body
-	if len(body) <= MaxCanonicalDigestBytes {
-		if value, err := jcs.Parse(body); err == nil {
-			value = redactSecrets(value)
-			if canonical, err := jcs.Serialize(value); err == nil {
-				input = canonical
-			} else if marshaled, merr := json.Marshal(value); merr == nil {
-				input = marshaled
-			} else {
-				input = []byte(redactedMarker)
-			}
-		}
+	if len(body) > MaxCanonicalDigestBytes {
+		return body
 	}
-	return input
+	canonical, err := CanonicalRedacted(body)
+	switch {
+	case err == nil:
+		return canonical
+	case errors.Is(err, ErrRedactEncode):
+		// The tree was redacted and then would not encode. Falling back to the body it was parsed
+		// from would commit the secrets the redaction had just removed, so the marker stands in.
+		return []byte(redactedMarker)
+	default:
+		return body // Not JSON: there is no tree to redact and the digest discloses nothing.
+	}
 }
 
 // VerifyContentDigest reports whether body, under nonce, is the change committed by digest. It is how

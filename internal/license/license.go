@@ -261,15 +261,23 @@ func allowAt(l *License, f Feature, now time.Time) error {
 		return fmt.Errorf("%s requires a %s license; this install runs Community. "+
 			"https://switchtender.com/pricing", name, need)
 	}
-	if l.Expired(now) {
-		return fmt.Errorf("%s requires a %s license and this install's license for %s lapsed "+
-			"on %s; everything Community keeps working. https://switchtender.com/pricing",
-			name, need, l.Claims.Org, l.Claims.Expires)
-	}
+	// Coverage is settled before the clock, and the order is the whole meaning of ErrLapsed.
+	//
+	// ErrLapsed tells a caller that this install had the feature working yesterday, and callers
+	// act on that: the policy file keeps serving rules rather than taking the install offline.
+	// Reporting the lapse first made an expired license say "lapsed" about a feature its tier
+	// never included, so an expired Pro license was read as having lapsed out of the Team-only
+	// policy engine and was handed it. An expired license would then buy strictly more than the
+	// same license bought while it was live.
 	if !l.covers(f) {
 		return fmt.Errorf("%s requires a %s license; this install's %s license does not "+
 			"include it. https://switchtender.com/pricing",
 			name, need, tierLabel(normalizeTier(l.Claims.Tier)))
+	}
+	if l.Expired(now) {
+		return fmt.Errorf("%w: %s requires a %s license and this install's license for %s "+
+			"lapsed on %s; everything Community keeps working. https://switchtender.com/pricing",
+			ErrLapsed, name, need, l.Claims.Org, l.Claims.Expires)
 	}
 	return nil
 }
@@ -286,7 +294,8 @@ func AllowPolicies(total int) error {
 
 // allowPoliciesAt is AllowPolicies against an explicit license and clock, which makes it testable.
 func allowPoliciesAt(l *License, total int, now time.Time) error {
-	if l != nil && !l.Expired(now) {
+	lapsed := l != nil && l.Expired(now)
+	if l != nil && !lapsed {
 		tier := normalizeTier(l.Claims.Tier)
 		if tierRank(tier) >= tierRank(TierTeam) {
 			return nil
@@ -301,6 +310,22 @@ func allowPoliciesAt(l *License, total int, now time.Time) error {
 	}
 	if total <= 1 {
 		return nil
+	}
+	// A lapse is named as a lapse. A caller that must keep an install running needs to tell a term
+	// that ran out from a tier that never covered this, because only one of the two is something
+	// the customer had working yesterday.
+	// Named a lapse only when this license's tier, while live, would have held this many. A lapsed
+	// Pro asked to hold fifty policies never had that, so it gets the plain refusal: ErrLapsed
+	// means the term ran out on something the install actually had.
+	//
+	// The tier is asked directly rather than by calling back in with a time inside the term. A
+	// license whose Expires does not parse reads as expired at every instant, including that one,
+	// so the recursive form never reached a base case and a malformed license file took the process
+	// down with a stack overflow instead of refusing.
+	if lapsed && tierHoldsPolicies(l, total) {
+		return fmt.Errorf("%w: this install's license for %s lapsed on %s, and the Community tier "+
+			"holds one approval policy rather than %d. https://switchtender.com/pricing",
+			ErrLapsed, l.Claims.Org, l.Claims.Expires, total)
 	}
 	return fmt.Errorf("the Community tier holds one approval policy and this would make %d; "+
 		"Pro holds %d and Team removes the cap. https://switchtender.com/pricing",
@@ -333,4 +358,22 @@ func PathFor(db string) string {
 		dir = db[:i]
 	}
 	return dir + "/switchtender-license.json"
+}
+
+// tierHoldsPolicies reports whether this license's tier holds total approval policies, ignoring the
+// clock entirely. It answers "would this license have allowed this while it was live", which is what
+// decides whether a refusal counts as a lapse, without consulting the term that has already run out.
+func tierHoldsPolicies(l *License, total int) bool {
+	if l == nil {
+		return total <= 1
+	}
+	tier := normalizeTier(l.Claims.Tier)
+	switch {
+	case tierRank(tier) >= tierRank(TierTeam):
+		return true
+	case tier == TierPro:
+		return total <= proPolicyCap
+	default:
+		return total <= 1
+	}
 }

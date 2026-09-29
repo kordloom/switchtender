@@ -16,8 +16,15 @@ import (
 // dispatch switch. run.ValidTool gated submission on its copy while execution read these, so a
 // tool added to one and not the other passed validation and then died at dispatch, or classified
 // as an extension and skipped the container path. The classifier and the override guard now
-// consume run's set directly; the dispatch switch is the one restatement left, and this holds it:
-// every canonical tool must route to a real runner, not fall through to the extension map.
+// consume run's set directly; two restatements are left, and this holds both.
+//
+// The dispatch switch is one: every canonical tool must route to a real runner rather than fall
+// through to the extension map. The container plan is the other, and it was unguarded, which the
+// comment here used to deny by calling the dispatch switch the only one. A tool routed but not
+// planned is worse than one that is neither: submission accepts it, the classifier calls it
+// containerizable so it may pin an image, the run is claimed and transitioned to running and has
+// its credentials materialized, and only then does the plan refuse it. On any install with a
+// default image that is every run of the new tool.
 func TestEveryBuiltinToolClassifiesAndDispatches(t *testing.T) {
 	t.Parallel()
 	router := newToolRouter(false, "", "", false, ContainerLimits{})
@@ -32,6 +39,22 @@ func TestEveryBuiltinToolClassifiesAndDispatches(t *testing.T) {
 		if errors.Is(err, ErrUnknownTool) {
 			t.Errorf("the router does not dispatch the built-in tool %q: submission would accept "+
 				"a run the executor cannot run", tool)
+		}
+		// And it must be buildable into a container plan, since the classifier above just said it
+		// belongs on the container path. The tool's own minimal input is supplied, so a refusal
+		// here is about the tool being unknown to the plan rather than about a missing field.
+		planSpec := Spec{Tool: tool, Image: "registry.example/exec:1", Command: "true"}
+		if run.NormalizeTool(tool) == run.ToolAnsible {
+			planSpec.Playbook = "site.yml"
+		}
+		_, cleanup, perr := toolContainerPlan(planSpec)
+		if cleanup != nil {
+			cleanup()
+		}
+		if errors.Is(perr, ErrUnknownTool) {
+			t.Errorf("the container plan does not know the built-in tool %q, which the classifier "+
+				"just called containerizable: a run of it is accepted, claimed, moved to running "+
+				"and given its credentials, and then dies with no plan to execute", tool)
 		}
 	}
 }

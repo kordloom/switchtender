@@ -104,6 +104,11 @@ The Business Source License is time-limited. Each released version converts to t
 2.0 two years after that version's release, the Change Date recorded in `LICENSE`. After a version
 converts, the reserved right no longer applies to it.
 
+Versions before v1.72.0 shipped a `LICENSE` naming a fixed date in 2030 rather than the two-year
+span. `LICENSE-GRANT.md` sets their Change Date to two years after each of those versions was
+released, which is what the commitment always said. That grant is irrevocable and the set of
+versions it covers is closed.
+
 ## Getting in touch
 
 Email licensing@switchtender.com to start a conversation about a commercial license, support, or

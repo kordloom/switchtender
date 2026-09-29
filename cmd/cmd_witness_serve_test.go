@@ -17,9 +17,11 @@ import (
 	"github.com/kordloom/switchtender/witness"
 )
 
-// writeAttestation signs an attestation with a fresh identity and writes it, returning the path
-// and the signer's key.
-func writeAttestation(t *testing.T, mutate func(*witness.Attestation)) (path, signer string) {
+// writeAttestation signs an attestation with a fresh identity and writes it, returning the path and
+// both published names for the signer's key: the raw hex key the attestation carries and the sha256
+// key id the witness prints and tells operators to publish.
+func writeAttestation(t *testing.T,
+	mutate func(*witness.Attestation)) (path, signer, keyID string) {
 	t.Helper()
 	id, err := audit.LoadIdentity(t.TempDir())
 	if err != nil {
@@ -44,12 +46,12 @@ func writeAttestation(t *testing.T, mutate func(*witness.Attestation)) (path, si
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	return path, id.PublicKeyHex()
+	return path, id.PublicKeyHex(), id.KeyID()
 }
 
 func TestWitnessVerifyAttestation(t *testing.T) {
-	good, signer := writeAttestation(t, nil)
-	tampered, _ := writeAttestation(t, func(a *witness.Attestation) { a.FindingsTotal = 0 })
+	good, signer, keyID := writeAttestation(t, nil)
+	tampered, _, _ := writeAttestation(t, func(a *witness.Attestation) { a.FindingsTotal = 0 })
 
 	tests := []struct {
 		// Name says what the case proves.
@@ -62,6 +64,11 @@ func TestWitnessVerifyAttestation(t *testing.T) {
 		WantErr bool
 	}{{ // Test 0: A signed attestation with the right pin verifies.
 		Name: "right pin", Path: good, Pin: signer,
+	}, { // Test 1: The key id is the form the witness prints and the help says to publish, so a
+		// relying party who pinned exactly what they were told to pin must verify. It was compared
+		// against the raw hex key alone, so that relying party got a refusal on a sound attestation
+		// and the documented path to check a witness without trusting the operator always failed.
+		Name: "key id pin", Path: good, Pin: keyID,
 	}, { // Test 1: Without a pin the document is only checked for internal consistency.
 		Name: "no pin", Path: good,
 	}, { // Test 2: The pin is the trust decision; a different key is refused even when the

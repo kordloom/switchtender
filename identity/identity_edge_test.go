@@ -480,15 +480,15 @@ func TestInstallIDIsStableAndKeyBound(t *testing.T) {
 	}
 }
 
-// TestInstallIDFromKeyPanicsOnAKeyTooShortToDerive records what the exported derivation does with a
-// key that is not an ed25519 public key.
+// TestInstallIDFromKeyRefusesAKeyThatIsNotOne records what the exported derivation does with a key
+// that is not an ed25519 public key.
 //
-// It is exported for out-of-tree verifiers, and it indexes the first six bytes with no length check,
-// so a caller that hands it whatever a bundle decoded to takes a panic rather than a refusal. The
-// in-tree verifier checks the length first, so nothing ships broken today, but the exported
-// signature invites the mistake. This test states the current contract out loud: callers must
-// validate the length themselves.
-func TestInstallIDFromKeyPanicsOnAKeyTooShortToDerive(t *testing.T) {
+// It is exported for out-of-tree verifiers, and it used to index the first six bytes with no length
+// check, so a caller handing it whatever a bundle decoded to took a panic. The id is now a hash of
+// the whole key, which would accept any length and hand back a plausible looking id for a truncated
+// or empty one, so the length is checked instead. An empty answer can only fail the comparison it
+// feeds, which is the safe direction.
+func TestInstallIDFromKeyRefusesAKeyThatIsNotOne(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		Name string
@@ -503,19 +503,27 @@ func TestInstallIDFromKeyPanicsOnAKeyTooShortToDerive(t *testing.T) {
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			defer func() {
-				if recover() == nil {
-					t.Errorf("InstallIDFromKey(%s) returned rather than panicking; if it now "+
-						"refuses short keys that is an improvement and this test should say so",
-						test.Name)
-				}
-			}()
-			_ = InstallIDFromKey(test.Key)
+			if got := InstallIDFromKey(test.Key); got != "" {
+				t.Errorf("InstallIDFromKey(%s) = %q, want the empty string: a key that is not a "+
+					"key must not derive an id that looks real", test.Name, got)
+			}
 		})
 	}
-	// Exactly six bytes is the smallest input that derives, so the boundary is at six and not seven.
-	if got := InstallIDFromKey(ed25519.PublicKey{1, 2, 3, 4, 5, 6}); got != "in_010203040506" {
-		t.Errorf("InstallIDFromKey(six bytes) = %q, want in_010203040506", got)
+	// A real key derives, and the id is wide enough that grinding a keypair to be born to a chosen
+	// install id is not a practical attack. Six raw key bytes made that 48 bits, which is.
+	pub, _, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("GenerateKey() error = %v", err)
+	}
+	got := InstallIDFromKey(pub)
+	if !strings.HasPrefix(got, "in_") {
+		t.Fatalf("InstallIDFromKey(a real key) = %q, want an in_ prefix", got)
+	}
+	if hexLen := len(got) - len("in_"); hexLen < 32 {
+		t.Errorf("the install id carries %d hex characters, so it binds %d bits: a bundle's claims "+
+			"are tied to the signing key through this value, and an attacker who can grind a "+
+			"keypair born to a chosen id can re-sign another install's history as their own",
+			hexLen, hexLen*4)
 	}
 }
 

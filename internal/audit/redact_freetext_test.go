@@ -66,7 +66,11 @@ func TestCanonicalRedactedScansInsideStringValues(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Marshal() error = %v", err)
 			}
-			got := string(CanonicalRedacted(raw))
+			redacted, err := CanonicalRedacted(raw)
+			if err != nil {
+				t.Fatalf("CanonicalRedacted() error = %v", err)
+			}
+			got := string(redacted)
 			if test.Secret != "" && strings.Contains(got, test.Secret) {
 				t.Errorf("the redacted record still carries %q, so it would ship in the signed receipt "+
 					"a customer hands an auditor:\n%s", test.Secret, got)

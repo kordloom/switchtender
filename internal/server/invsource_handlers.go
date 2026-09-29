@@ -203,7 +203,7 @@ func listSourcesHandler(sources invsource.Store, authz *authorizer, log *zap.Log
 		// A source is visible on the same objects that govern writing one, its project and the
 		// credential it borrows. Reading was unauthorized, and a source carries last_error, which is
 		// verbatim plugin output and routinely names cloud accounts and endpoints.
-		restricted, err := grantsEnforced(r.Context(), authz)
+		restricted, err := restrictedReader(r.Context(), authz)
 		if err != nil {
 			log.Error("server: read filter: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not list sources")

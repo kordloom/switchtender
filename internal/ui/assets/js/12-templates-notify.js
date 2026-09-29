@@ -313,8 +313,14 @@ async function loadTemplates() {
 			tr.appendChild(td(String(t.shards || 1)));
 			tr.appendChild(tdTime(t.created_at));
 			const actions = document.createElement("td");
-			actions.appendChild(launchSplitButton(t));
-			actions.appendChild(document.createTextNode(" "));
+			// Launching is an operator action. A viewer reaches this page, because reading
+			// templates is a viewer read, and was drawn a live Launch control whose every click
+			// came back refused. The static controls on this page are already gated; this one is
+			// built per row and was not.
+			if (roleAtLeast("operator")) {
+				actions.appendChild(launchSplitButton(t));
+				actions.appendChild(document.createTextNode(" "));
+			}
 			const history = document.createElement("a");
 			history.className = "button";
 			history.href = "/ui/runs?q=" + encodeURIComponent("from:" + t.id);

@@ -57,7 +57,7 @@ func seedEvidence(t *testing.T) (run.Store, audit.Store, string) {
 func TestDossierCollectsDecisionsAndReceipts(t *testing.T) {
 	t.Parallel()
 	runs, audits, id := seedEvidence(t)
-	in, err := Collect(context.Background(), runs, audits, "", id, time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC))
+	in, err := Collect(context.Background(), runs, audits, audit.Identity{}, id, time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -93,7 +93,7 @@ func TestDossierReportsABrokenChain(t *testing.T) {
 	runs, audits, id := seedEvidence(t)
 	// A rewritten entry breaks verification; the dossier must lead with that, not bury it.
 	broken := &brokenChain{Store: audits}
-	in, err := Collect(context.Background(), runs, broken, "", id, time.Now())
+	in, err := Collect(context.Background(), runs, broken, audit.Identity{}, id, time.Now())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -131,7 +131,7 @@ func TestDossierAnchorsCoverTheRun(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SaveAnchor() error = %v", err)
 	}
-	in, err := Collect(ctx, runs, audits, "", id, time.Now())
+	in, err := Collect(ctx, runs, audits, audit.Identity{}, id, time.Now())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -169,7 +169,7 @@ func TestDossierAnchorsCoverTheRun(t *testing.T) {
 func TestDossierMissingRun(t *testing.T) {
 	t.Parallel()
 	runs, audits, _ := seedEvidence(t)
-	_, err := Collect(context.Background(), runs, audits, "", "run_ghost", time.Now())
+	_, err := Collect(context.Background(), runs, audits, audit.Identity{}, "run_ghost", time.Now())
 	if !errors.Is(err, run.ErrNotFound) {
 		t.Errorf("Collect(ghost) error = %v, want run.ErrNotFound", err)
 	}
@@ -212,7 +212,7 @@ func TestDossierRefusesARewrittenChainItsAnchorsDisown(t *testing.T) {
 	}
 	_ = chain
 
-	in, err := Collect(ctx, runs, audits, "", id, time.Now())
+	in, err := Collect(ctx, runs, audits, audit.Identity{}, id, time.Now())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -269,7 +269,7 @@ func TestDossierCoversARunWithNoEntriesNamingIt(t *testing.T) {
 		t.Fatalf("SaveAnchor() error = %v", err)
 	}
 
-	in, err := Collect(ctx, runs, audits, "", "run_plain", time.Now())
+	in, err := Collect(ctx, runs, audits, audit.Identity{}, "run_plain", time.Now())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -291,7 +291,7 @@ func TestDossierCoversARunWithNoEntriesNamingIt(t *testing.T) {
 func TestDossierFailsLoudlyWhenAStoreRead2Fails(t *testing.T) {
 	t.Parallel()
 	runs, audits, id := seedEvidence(t)
-	_, err := Collect(context.Background(), &eventsFail{Store: runs}, audits, "", id, time.Now())
+	_, err := Collect(context.Background(), &eventsFail{Store: runs}, audits, audit.Identity{}, id, time.Now())
 	if err == nil {
 		t.Fatal("Collect() rendered evidence over a failed event read, asserting by omission that nothing ran")
 	}
@@ -343,7 +343,7 @@ func TestDossierRedeemsTheRunReceiptForWhoAsked(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 
-	in, err := Collect(ctx, runs, audits, "", "run_receipted", time.Now())
+	in, err := Collect(ctx, runs, audits, audit.Identity{}, "run_receipted", time.Now())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -385,7 +385,7 @@ func TestDossierReportsACreationEntryTheChainNoLongerHolds(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	in, err := Collect(ctx, runs, audits, "", "run_orphan", time.Now())
+	in, err := Collect(ctx, runs, audits, audit.Identity{}, "run_orphan", time.Now())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -430,7 +430,7 @@ func TestDossierReportsAWipedChainForARunItRecordsNothingAbout(t *testing.T) {
 		t.Fatalf("SaveAnchor() error = %v", err)
 	}
 
-	in, err := Collect(ctx, runs, audits, "", "run_scheduled", time.Now())
+	in, err := Collect(ctx, runs, audits, audit.Identity{}, "run_scheduled", time.Now())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -484,7 +484,7 @@ func TestDossierDoesNotClaimAnchorsCoverARunTheChainNeverNamed(t *testing.T) {
 		t.Fatalf("SaveAnchor() error = %v", err)
 	}
 
-	in, err := Collect(ctx, runs, audits, "", "run_sched", time.Now())
+	in, err := Collect(ctx, runs, audits, audit.Identity{}, "run_sched", time.Now())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -536,7 +536,7 @@ func TestDossierCoverageNeedsAPositionToMeasureFrom(t *testing.T) {
 		t.Fatalf("SaveAnchor() error = %v", err)
 	}
 
-	in, err := Collect(ctx, runs, audits, "", "run_before", time.Now())
+	in, err := Collect(ctx, runs, audits, audit.Identity{}, "run_before", time.Now())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -573,7 +573,7 @@ func TestDossierSurfacesTheCommittedOutcome(t *testing.T) {
 		t.Fatalf("Append(outcome) error = %v", err)
 	}
 
-	in, err := Collect(ctx, runs, audits, "", id, time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC))
+	in, err := Collect(ctx, runs, audits, audit.Identity{}, id, time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}

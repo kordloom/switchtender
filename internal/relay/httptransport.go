@@ -161,6 +161,11 @@ func (t *httpTransport) Claim(ctx context.Context, owner string, queues []string
 			t.leases[leased.ID] = lease
 			t.mu.Unlock()
 		}
+		// The approved spec binding rides the same way and for the same reason, and is put back on
+		// the run so the executor checks the change an approver released rather than executing with
+		// nothing to compare against. A control node that predates the header sends none, and the
+		// run is judged on the digest alone, as it was before.
+		leased.ApprovedSpecBinding = resp.Header.Get(bindingHeader)
 		return leased, nil
 	case http.StatusNoContent:
 		return nil, run.ErrNonePending

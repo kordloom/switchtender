@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS runs (
 	diff_mode INTEGER NOT NULL DEFAULT 0,
 	actor_type TEXT NOT NULL DEFAULT '',
 	approved_spec_digest TEXT NOT NULL DEFAULT '',
+	approved_spec_binding TEXT NOT NULL DEFAULT '',
 	distinct_approver INTEGER NOT NULL DEFAULT 0,
 	pinned_commit TEXT NOT NULL DEFAULT '',
 	policy_set TEXT NOT NULL DEFAULT '',
@@ -703,7 +704,7 @@ func migrateRuns(db *sql.DB) error {
 		!strings.Contains(err.Error(), "duplicate column name") {
 		return fmt.Errorf("add notifications column: %w", err)
 	}
-	for _, column := range []string{"source", "source_id", "actor", "rerun_of", "labels", "steps", "warning", "audit_receipt", "held_by_policy", "tags", "skip_tags", "claim_secret", "actor_type", "approved_spec_digest", "pinned_commit", "policy_set", "actor_user_id"} {
+	for _, column := range []string{"source", "source_id", "actor", "rerun_of", "labels", "steps", "warning", "audit_receipt", "held_by_policy", "tags", "skip_tags", "claim_secret", "actor_type", "approved_spec_digest", "approved_spec_binding", "pinned_commit", "policy_set", "actor_user_id"} {
 		if _, err := db.Exec(
 			"ALTER TABLE runs ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''"); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {

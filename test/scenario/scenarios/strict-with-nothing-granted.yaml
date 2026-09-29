@@ -1,0 +1,57 @@
+name: strict grants turned on before anything was granted
+why: |
+  This is the state an operator is in for the minutes or days between deciding to separate their
+  install and finishing the work. The documentation is explicit that objects created beforehand
+  carry no grants and have to be assigned, so the lockout is correct behavior and not a defect.
+
+  What matters is that it is a lockout an operator can get out of. Every refusal has to say what is
+  wrong, the listings have to agree with the fetches rather than half-serving, and an administrator
+  has to still be able to see everything so there is somebody who can write the grants. A silent
+  empty list here reads as an install with no work in it, and an operator who believes that stops
+  looking for the cause.
+
+environment:
+  grants: strict
+  store: memory
+
+fixtures:
+  users:
+    - {id: user_ops, name: ops, role: operator}
+    - {id: user_admin, name: admin, role: admin}
+  projects:
+    - {id: proj_one, name: one}
+  runs:
+    - {id: run_first, project: proj_one, host: web1}
+    - {id: run_second, project: proj_one, host: web1}
+
+cases:
+  - name: the operator is refused, and told so
+    why: |
+      A refusal is the right answer here. An empty success is not: it is indistinguishable from an
+      install with nothing in it, and it sends the operator looking at the wrong thing.
+    steps:
+      - note: reading a run by id
+        as: user_ops
+        get: /v1/runs/run_first
+        expect:
+          status: 403
+          includes: ["grant"]
+
+  - name: an administrator can still see what needs granting
+    why: |
+      Strict grants must leave somebody able to fix it. An install where the lockout also locks out
+      the person who writes the grants is not separated, it is bricked, and the only way back would
+      be editing the database.
+    steps:
+      - note: the admin lists every run
+        as: user_admin
+        get: /v1/runs?limit=500
+        expect:
+          status: 200
+          includes: ["run_first", "run_second"]
+      - note: and the projects that need grants
+        as: user_admin
+        get: /v1/projects
+        expect:
+          status: 200
+          includes: ["proj_one"]

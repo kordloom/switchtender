@@ -62,10 +62,17 @@ func (d *Dispatcher) Approve(ctx context.Context, id, by, byType string) (*run.R
 		if derr != nil {
 			return nil, fmt.Errorf("record the approval decision: %w", derr)
 		}
-		if serr := d.store.StampApprovedSpec(ctx, id, specDigest); serr != nil {
+		// The binding covers the spec as written and is what execution is held to; the digest is
+		// the redacted form the receipt discloses. Both are stamped in one write.
+		binding, berr := outcome.SpecBinding(r)
+		if berr != nil {
+			return nil, fmt.Errorf("bind the approved spec: %w", berr)
+		}
+		if serr := d.store.StampApprovedSpec(ctx, id, specDigest, binding); serr != nil {
 			return nil, fmt.Errorf("stamp the approved spec: %w", serr)
 		}
 		r.ApprovedSpecDigest = specDigest
+		r.ApprovedSpecBinding = binding
 	}
 	// A parent goes straight to running, never through pending.
 	//

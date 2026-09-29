@@ -90,13 +90,19 @@ type fakeRetrier struct {
 	err error
 	// gotID is the id from the most recent retry call.
 	gotID string
-	// gotActor is the actor from the most recent relaunch call.
+	// gotActor is the actor name from the most recent retry or relaunch call.
 	gotActor string
+	// gotAccount is the actor's account from the most recent retry or relaunch call. It is
+	// recorded separately because the name alone is what the distinct-approver rule falls back to
+	// when the account is missing, and that fallback is the bug this fake is here to catch.
+	gotAccount string
 }
 
 // RetryFailedShards records the id and returns the configured run or error.
-func (f *fakeRetrier) RetryFailedShards(_ context.Context, parentID string) (*run.Run, error) {
+func (f *fakeRetrier) RetryFailedShards(_ context.Context, parentID string,
+	opts ...run.SubmitOption) (*run.Run, error) {
 	f.gotID = parentID
+	f.record(opts)
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -104,13 +110,25 @@ func (f *fakeRetrier) RetryFailedShards(_ context.Context, parentID string) (*ru
 }
 
 // RelaunchFailedHosts records the id and returns the configured run or error.
-func (f *fakeRetrier) RelaunchFailedHosts(_ context.Context, runID, actor, _ string) (*run.Run, error) {
+func (f *fakeRetrier) RelaunchFailedHosts(_ context.Context, runID string,
+	opts ...run.SubmitOption) (*run.Run, error) {
 	f.gotID = runID
-	f.gotActor = actor
+	f.record(opts)
 	if f.err != nil {
 		return nil, f.err
 	}
 	return f.run, nil
+}
+
+// record applies the submit options to a scratch run and keeps the identity they carried, which is
+// how this fake sees what the handler passed without depending on a real dispatcher.
+func (f *fakeRetrier) record(opts []run.SubmitOption) {
+	var probe run.Run
+	for _, opt := range opts {
+		opt(&probe)
+	}
+	f.gotActor = probe.Actor
+	f.gotAccount = probe.ActorUserID
 }
 
 // fakeSubmitter records the last submission and returns canned results.

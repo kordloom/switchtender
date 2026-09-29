@@ -10,7 +10,7 @@ KordLoom LLC, a United States company. SwitchTender is source-available under BS
 modify, self-host, and run it in production for your own organization, free. Each release
 converts to Apache 2.0 two years after it ships. The bus-factor question is answered in full on
 the [continuity page](continuity.md): the install keeps running, the evidence stays verifiable
-offline forever, and every release carries its own source tarball inside the signed manifest.
+offline forever, and every release from v1.72.0 onward carries its own source tarball inside the signed manifest.
 
 ## Where it runs and what data leaves
 

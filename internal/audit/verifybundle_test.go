@@ -158,22 +158,17 @@ func TestVerifyBundleChecksOutcomeDisclosure(t *testing.T) {
 	}
 	audit.Link(creation, outcomeE)
 
-	build := func(mutate func(m map[string]any)) []byte {
+	build := func(disclosed []byte) []byte {
 		doc, berr := audit.BuildBundle([]*audit.Entry{creation, outcomeE}, id, "v", at)
 		if berr != nil {
 			t.Fatalf("BuildBundle() error = %v", berr)
 		}
-		var bodyObj any
-		if uerr := json.Unmarshal(body, &bodyObj); uerr != nil {
-			t.Fatalf("Unmarshal() error = %v", uerr)
-		}
 		for i := range doc.Claims {
 			if doc.Claims[i].Chain.Seq == outcomeE.Seq {
-				doc.Claims[i].Payload["outcome_body"] = bodyObj
+				// Disclosed as the exact bytes the digest was taken over, the form a real receipt
+				// uses, so this test exercises the path production runs on.
+				doc.Claims[i].Payload["outcome_body"] = string(disclosed)
 				doc.Claims[i].Payload["outcome_nonce"] = nonce
-				if mutate != nil {
-					mutate(bodyObj.(map[string]any))
-				}
 			}
 		}
 		signed, serr := audit.SignBundleDoc(doc, id.Private())
@@ -184,7 +179,7 @@ func TestVerifyBundleChecksOutcomeDisclosure(t *testing.T) {
 	}
 
 	// Genuine: the disclosure is present and matches, and the whole receipt is OK.
-	rep, err := audit.VerifyBundle(build(nil), "")
+	rep, err := audit.VerifyBundle(build(body), "")
 	if err != nil {
 		t.Fatalf("VerifyBundle() error = %v", err)
 	}
@@ -195,7 +190,8 @@ func TestVerifyBundleChecksOutcomeDisclosure(t *testing.T) {
 
 	// Tampered body, re-signed: signature and chain still hold, but the disclosure does not, so the
 	// receipt is not OK.
-	rep, err = audit.VerifyBundle(build(func(m map[string]any) { m["status"] = "failed" }), "")
+	rep, err = audit.VerifyBundle(build([]byte(strings.Replace(string(body),
+		`"status":"succeeded"`, `"status":"failed"`, 1))), "")
 	if err != nil {
 		t.Fatalf("VerifyBundle() error = %v", err)
 	}
@@ -252,13 +248,21 @@ func TestVerifyBundleCatchesASpecInconsistency(t *testing.T) {
 		t.Fatalf("BuildBundle() error = %v", err)
 	}
 	attach := func(seq int64, key string, body []byte, nonceKey, nonce string) {
-		var obj any
-		if err := json.Unmarshal(body, &obj); err != nil {
-			t.Fatalf("Unmarshal() error = %v", err)
+		var payload any
+		if key == "outcome_body" {
+			// The outcome is disclosed as the exact bytes, the same as a real receipt. The decision
+			// is still a tree, which is faithful for its three small string fields.
+			payload = string(body)
+		} else {
+			var obj any
+			if err := json.Unmarshal(body, &obj); err != nil {
+				t.Fatalf("Unmarshal() error = %v", err)
+			}
+			payload = obj
 		}
 		for i := range doc.Claims {
 			if doc.Claims[i].Chain.Seq == seq {
-				doc.Claims[i].Payload[key] = obj
+				doc.Claims[i].Payload[key] = payload
 				doc.Claims[i].Payload[nonceKey] = nonce
 			}
 		}
@@ -336,13 +340,10 @@ func TestVerifyBundleChecksEveryDisclosedOutcome(t *testing.T) {
 		t.Fatalf("BuildBundle() error = %v", err)
 	}
 	attach := func(seq int64, body []byte, nonce string) {
-		var obj any
-		if err := json.Unmarshal(body, &obj); err != nil {
-			t.Fatalf("Unmarshal() error = %v", err)
-		}
 		for i := range doc.Claims {
 			if doc.Claims[i].Chain.Seq == seq {
-				doc.Claims[i].Payload["outcome_body"] = obj
+				// Exact bytes, the form a real receipt discloses.
+				doc.Claims[i].Payload["outcome_body"] = string(body)
 				doc.Claims[i].Payload["outcome_nonce"] = nonce
 			}
 		}

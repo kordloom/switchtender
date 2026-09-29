@@ -625,7 +625,7 @@ func (m *memStore) TransitionStatus(_ context.Context, id string, from, to Statu
 }
 
 // StampApprovedSpec records the spec digest an approver decided on, touching nothing else.
-func (m *memStore) StampApprovedSpec(_ context.Context, id, digest string) error {
+func (m *memStore) StampApprovedSpec(_ context.Context, id, digest, binding string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.runs[id]
@@ -633,6 +633,7 @@ func (m *memStore) StampApprovedSpec(_ context.Context, id, digest string) error
 		return ErrNotFound
 	}
 	r.ApprovedSpecDigest = digest
+	r.ApprovedSpecBinding = binding
 	return nil
 }
 

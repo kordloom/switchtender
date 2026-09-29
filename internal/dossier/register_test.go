@@ -55,7 +55,7 @@ func TestRegisterWindowsAndDecisions(t *testing.T) {
 	runs, audits, base := seedRegister(t)
 	from := base.Add(-time.Hour)
 	to := base.Add(7 * 24 * time.Hour)
-	in, err := CollectRegister(context.Background(), runs, audits, "", from, to, to, 0)
+	in, err := CollectRegister(context.Background(), runs, audits, audit.Identity{}, from, to, to, 0)
 	if err != nil {
 		t.Fatalf("CollectRegister() error = %v", err)
 	}
@@ -93,7 +93,7 @@ func TestRegisterWindowsAndDecisions(t *testing.T) {
 func TestRegisterTallies(t *testing.T) {
 	t.Parallel()
 	runs, audits, base := seedRegister(t)
-	in, err := CollectRegister(context.Background(), runs, audits, "",
+	in, err := CollectRegister(context.Background(), runs, audits, audit.Identity{},
 		base.Add(-time.Hour), base.Add(7*24*time.Hour), base, 0)
 	if err != nil {
 		t.Fatalf("CollectRegister() error = %v", err)
@@ -140,7 +140,7 @@ func TestRegisterRedactsAnInlineSecretInAScript(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 
-	in, err := CollectRegister(ctx, runs, audits, "", base.Add(-time.Hour), base.Add(time.Hour),
+	in, err := CollectRegister(ctx, runs, audits, audit.Identity{}, base.Add(-time.Hour), base.Add(time.Hour),
 		base.Add(time.Hour), 0)
 	if err != nil {
 		t.Fatalf("CollectRegister() error = %v", err)

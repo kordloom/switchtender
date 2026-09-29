@@ -1,0 +1,52 @@
+name: two organizations on one strict-grants install
+why: |
+  Strict grants is what a multi-tenant deployment turns on, and the whole of its promise is that one
+  organization's member sees their own work and nothing else. The failure it guards against is not a
+  wrong status on one endpoint: it is a run of one tenant surfacing in another tenant's list, host
+  page, or estate summary, which is the disclosure the tier is sold on preventing.
+
+environment:
+  grants: strict
+  store: memory
+
+fixtures:
+  orgs:
+    - {id: org_north, members: {user_north: member}}
+    - {id: org_south, members: {user_south: member}}
+  users:
+    - {id: user_north, name: north, role: operator}
+    - {id: user_south, name: south, role: operator}
+  projects:
+    - {id: proj_north, name: north, org: org_north}
+    - {id: proj_south, name: south, org: org_south}
+  runs:
+    - {id: run_north, project: proj_north, org: org_north, host: shared-host}
+    - {id: run_south, project: proj_south, org: org_south, host: shared-host, extra_vars: {api_key: SOUTHERN-TENANT-SECRET}}
+  secrets:
+    - {name: the other tenant's variable, value: SOUTHERN-TENANT-SECRET, on_run: run_south}
+
+cases:
+  - name: a member reads their own organization's run
+    why: |
+      Isolation that also refuses the owner is an outage. Membership in the owning organization is
+      what confers access here, with no grant written at all, so this is the path the tenancy model
+      rests on.
+    steps:
+      - note: the northern member reads the northern run
+        as: user_north
+        get: /v1/runs/run_north
+        expect: {status: 200}
+
+  - name: a member is refused the other organization's run
+    why: |
+      This is the disclosure strict grants exists to prevent, asked at the boundary rather than
+      through a listing, so the invariants can then hold every listing to this answer.
+    steps:
+      - note: the northern member is refused the southern run
+        as: user_north
+        get: /v1/runs/run_south
+        expect: {status: 403}
+      - note: and the southern member is refused the northern one
+        as: user_south
+        get: /v1/runs/run_north
+        expect: {status: 403}

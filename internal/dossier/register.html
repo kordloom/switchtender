@@ -151,6 +151,13 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13.5px; }
 
 		<div class="banner {{.Status}}"><span class="mark">{{if eq .Status "verified"}}&#10003;{{else if eq .Status "unanchored"}}&#9888;{{else}}&#10007;{{end}}</span><span>{{.StatusText}}</span></div>
 
+	{{if .Pruned}}
+	<div class="banner truncated"><span class="mark">&#9888;</span><span>This register is incomplete.
+	The chain records {{.Pruned}} further {{if eq .Pruned 1}}change{{else}}changes{{end}} in this
+	period whose runs this install no longer holds, because retention removed them. Their entries
+	remain in the chain and still verify; what they did is no longer readable here.</span></div>
+	{{end}}
+
 	{{if .Truncated}}
 	<div class="banner truncated"><span class="mark">&#9888;</span><span>This register is truncated and is not the
 	whole period. A register carries at most {{.Limit}} changes; this one carries the earliest

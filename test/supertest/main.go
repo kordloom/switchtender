@@ -90,6 +90,14 @@ func run() int {
 		{"cluster", h.phaseCluster},
 		{"fleet", h.phaseFleet},
 		{"community", h.phaseCommunity},
+		// Immediately after the run that just crossed three real machines, because the properties
+		// here are about what an install discloses of the work it has done and they hold over an
+		// empty set otherwise. Later phases upgrade, roll back and fail over the install, and the
+		// one this ends up pointed at after all that holds no runs at all, so placing this last
+		// traded away the only state it needs. The two accounts and the one grant it leaves behind
+		// are inert, and every phase after it runs with grants present, which is closer to a real
+		// install than without.
+		{"invariants", h.phaseInvariants},
 		{"upgrade", func() error { return h.phaseUpgrade(previous) }},
 		{"rollback", func() error { return h.phaseRollback(previous) }},
 		{"dr", h.phaseDR},

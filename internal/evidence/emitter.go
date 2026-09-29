@@ -17,6 +17,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/dossier"
+	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -38,8 +39,10 @@ type Emitter struct {
 	runs run.Store
 	// audits reads the chain the register is drawn from and verified against.
 	audits audit.Store
-	// installID is the install the tree profile's leaves bind to, needed to check a tree anchor.
-	installID string
+	// producer is the install identity the tree profile's leaves bind to, needed to check a tree
+	// anchor. It carries the key as well as the name, so an anchor taken under this install's
+	// earlier name recomputes instead of refusing.
+	producer audit.Identity
 	// dir is where packs are written, and is also where the emitter reads its own progress from.
 	dir string
 	// cadence is how long each pack covers and how often one is written.
@@ -63,6 +66,9 @@ type Emitter struct {
 	cancel context.CancelFunc
 	// wg waits for the loop to finish.
 	wg sync.WaitGroup
+	// lapsed makes the warning about a lapsed register license print once rather than on every
+	// tick, since the condition persists until somebody renews.
+	lapsed sync.Once
 }
 
 // Option configures an Emitter.
@@ -88,7 +94,8 @@ func WithMaxChanges(n int) Option {
 // NewEmitter returns an emitter writing a pack per cadence into dir. It panics on a nil store, an
 // empty directory, or a cadence under an hour, all of which are programming errors: a register
 // covering minutes is not the artifact this exists to produce.
-func NewEmitter(runs run.Store, audits audit.Store, installID, dir string, cadence time.Duration,
+func NewEmitter(runs run.Store, audits audit.Store, producer audit.Identity, dir string,
+	cadence time.Duration,
 	log *zap.Logger, opts ...Option) *Emitter {
 	if runs == nil || audits == nil {
 		panic("evidence: run and audit stores required")
@@ -103,7 +110,7 @@ func NewEmitter(runs run.Store, audits audit.Store, installID, dir string, caden
 		log = zap.NewNop()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	e := &Emitter{runs: runs, audits: audits, installID: installID, dir: dir, cadence: cadence,
+	e := &Emitter{runs: runs, audits: audits, producer: producer, dir: dir, cadence: cadence,
 		limit: dossier.MaxRegisterRuns, log: log, now: time.Now, ctx: ctx, cancel: cancel}
 	for _, opt := range opts {
 		opt(e)
@@ -155,7 +162,22 @@ func (e *Emitter) Start() error {
 }
 
 // emitDue writes a pack when a full cadence has elapsed since the archive's newest one.
+//
+// The license is checked on every tick, not only when the emitter was started. The register is a
+// paid feature and serve refuses to start one for an install that never bought it, but the gate ran
+// once at startup and this loop is a goroutine that outlives it, so a term that lapsed while the
+// process ran kept writing paid artifacts every cadence. That is the mirror of the bricking the
+// startup path was fixed to stop, and it is the same rule either way: the clock is read on every
+// call. Packs already written stay valid and keep verifying offline.
 func (e *Emitter) emitDue() {
+	if err := license.Allow(license.FeatureRegister); err != nil {
+		e.lapsed.Do(func() {
+			e.log.Warn("evidence: the license for the period change register is no longer valid, " +
+				"so no further packs are written. Every pack already written stays valid and " +
+				"verifies offline: " + err.Error())
+		})
+		return
+	}
 	now := e.now()
 	last, err := e.resume(now)
 	if err != nil {
@@ -255,7 +277,7 @@ func (e *Emitter) Emit(ctx context.Context, from, to time.Time) error {
 		return fmt.Errorf("evidence directory: %w", err)
 	}
 	for cur := from; ; {
-		in, err := dossier.CollectRegister(ctx, e.runs, e.audits, e.installID, cur, to, e.now(),
+		in, err := dossier.CollectRegister(ctx, e.runs, e.audits, e.producer, cur, to, e.now(),
 			e.limit)
 		if err != nil {
 			return fmt.Errorf("collect register: %w", err)

@@ -23,6 +23,9 @@ jobs:
           - { pkg: ./internal/importer, fn: FuzzFromJenkins }
           - { pkg: ./internal/importer, fn: FuzzFromRundeck }
           - { pkg: ./internal/importer, fn: FuzzRRULEToCron }
+          - { pkg: ./internal/importer, fn: FuzzFromChef }
+          - { pkg: ./internal/importer, fn: FuzzFromPuppet }
+          - { pkg: ./internal/importer, fn: FuzzFromCron }
           - { pkg: ./internal/event, fn: FuzzParse }
           - { pkg: ./internal/server, fn: FuzzParseProposedRun }
           - { pkg: ./internal/audit, fn: FuzzContentDigestOf }

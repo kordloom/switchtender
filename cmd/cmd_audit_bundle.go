@@ -106,7 +106,7 @@ func runAuditBundle(cmd *cobra.Command, _ []string) error {
 	// install, reporting that entries the anchor covers were missing when they were merely outside
 	// the window, and the workaround an operator would find is to delete the anchors, which is the
 	// one action that makes real truncation invisible.
-	if err := refuseUnpublishableChain(entries, recorded, id.InstallID, "a bundle"); err != nil {
+	if err := refuseUnpublishableChain(entries, recorded, id, "a bundle"); err != nil {
 		return err
 	}
 	if bundleLimit > 0 && len(entries) > bundleLimit {
@@ -239,14 +239,14 @@ func storedAnchors(ctx context.Context, audits audit.Store) ([]*audit.Anchor, er
 // Declining to sign is the only answer left that a relying party cannot be shown without, and the
 // operator loses nothing forensic: the entries and the position are still there to read.
 func refuseUnpublishableChain(entries []*audit.Entry, recorded []*audit.Anchor,
-	installID, artifact string) error {
+	producer audit.Identity, artifact string) error {
 	if walk := walkChain(entries); !walk.OK {
 		return chainBreakRefusal(artifact, walk)
 	}
 	if len(recorded) == 0 {
 		return nil
 	}
-	reachedAll, results := audit.CheckAnchors(entries, recorded, installID)
+	reachedAll, results := audit.CheckAnchors(entries, recorded, producer)
 	if reachedAll {
 		return nil
 	}

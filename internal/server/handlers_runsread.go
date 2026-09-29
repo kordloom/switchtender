@@ -3,7 +3,9 @@ package server
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -12,9 +14,8 @@ import (
 
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/run"
-	"github.com/kordloom/switchtender/internal/user"
-	"io"
-	"os"
+	"github.com/kordloom/switchtender/internal/schedule"
+	"github.com/kordloom/switchtender/internal/template"
 )
 
 // listRunsResponse wraps a run list. The envelope leaves room for pagination fields later.
@@ -255,11 +256,11 @@ func listRunsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.H
 		// which satisfied the test, and then received counts covering every organization on the
 		// install. One number is enough to publish another tenant's volume.
 		//
-		// The probe is the same one derivedReadFilter opens with, so this costs nothing: it asks
+		// This is the same question derivedReadFilter opens with, so it costs nothing: it asks
 		// whether grants restrict this caller at all, rather than walking rows through a filter,
 		// which at a thousand rows and ten thousand grants is the cost the filter's own comment
 		// warns about.
-		unrestricted, ferr := unrestrictedReader(r.Context(), authz)
+		restricted, ferr := restrictedReader(r.Context(), authz)
 		if ferr != nil {
 			log.Error("server: read filter: " + ferr.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not list runs")
@@ -267,7 +268,7 @@ func listRunsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.H
 		}
 		summary := runSummary{}
 		switch {
-		case unrestricted:
+		case !restricted:
 			summary = summarize(counts)
 			summary.Scope = "install"
 		case len(runs) > 0:
@@ -315,7 +316,7 @@ func getRunHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Han
 		got.Risk = &risk
 		undo := run.AssessReversibilityFrom(got, reversibilityEvidence(r.Context(), store, got))
 		got.Reversibility = &undo
-		respondJSON(w, log, http.StatusOK, scrubbedRun(r.Context(), maskRun(got)), wantsPretty(r))
+		respondRun(w, r, log, http.StatusOK, got)
 	}
 }
 
@@ -484,10 +485,95 @@ func runLogsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Ha
 // admin sees the original: they hold every credential on the install already, and redacting for the
 // person who maintains it only obstructs them, which is the reasoning redactInventories records.
 func scrubbedRun(ctx context.Context, rn *run.Run) *run.Run {
-	if actor, ok := actorFrom(ctx); ok && actor.Role == user.RoleAdmin {
+	if isAdmin(ctx) {
 		return rn
 	}
 	return redactRunCommand(rn)
+}
+
+// scrubbedTemplate masks secret-shaped assignments in a template's command, its launch variables
+// and each of its steps, for any caller below admin, the same rule scrubbedRun follows.
+//
+// A template is where a run's command comes from. LaunchOptions copies the command, the variables
+// and the steps verbatim onto every run it fires, so the bytes the run scrub hides were being
+// served unchanged from the template beside it: the viewer refused a password in a run read the
+// same password in the template that launches it, in the next request. Masking the notification
+// targets was the only scrub a template had.
+func scrubbedTemplate(ctx context.Context, t *template.Template) *template.Template {
+	if t == nil {
+		return nil
+	}
+	if t == nil || isAdmin(ctx) {
+		return t
+	}
+	cp := *t
+	cp.Command = templateCommandScrubber(ctx).Scrub(t.Command)
+	cp.ExtraVars = templateVarsScrubber(ctx).Scrub(t.ExtraVars)
+	cp.Steps = stepsScrubber(ctx).Scrub(t.Steps)
+	return &cp
+}
+
+// scrubbedTemplates applies scrubbedTemplate across a list response.
+func scrubbedTemplates(ctx context.Context, list []*template.Template) []*template.Template {
+	out := make([]*template.Template, len(list))
+	for i, t := range list {
+		out[i] = scrubbedTemplate(ctx, t)
+	}
+	return out
+}
+
+// respondTemplate writes one template back to a caller, masked and scrubbed for who they are.
+func respondTemplate(w http.ResponseWriter, r *http.Request, log *zap.Logger, code int,
+	t *template.Template) {
+	respondJSON(w, log, code, scrubbedTemplate(r.Context(), maskTemplate(t)), wantsPretty(r))
+}
+
+// scrubbedSchedule masks secret-shaped assignments in a schedule's pipeline steps for any caller
+// below admin, the same rule scrubbedRun and scrubbedTemplate follow.
+//
+// A schedule that fires a pipeline carries each step's whole script, and a crontab import produces
+// these by the hundred, each holding a command line somebody wrote. The run scrub and the template
+// scrub both reach those bytes; the schedule read did not, so the operator refused a command in a
+// run read the same command in the schedule that fires it.
+func scrubbedSchedule(ctx context.Context, sc *schedule.Schedule) *schedule.Schedule {
+	if sc == nil {
+		return nil
+	}
+	if sc == nil || isAdmin(ctx) {
+		return sc
+	}
+	cp := *sc
+	cp.Steps = stepsScrubber(ctx).Scrub(sc.Steps)
+	return &cp
+}
+
+// scrubbedSchedules applies scrubbedSchedule across a list response.
+func scrubbedSchedules(ctx context.Context, list []*schedule.Schedule) []*schedule.Schedule {
+	out := make([]*schedule.Schedule, len(list))
+	for i, sc := range list {
+		out[i] = scrubbedSchedule(ctx, sc)
+	}
+	return out
+}
+
+// respondSchedule writes one schedule back to a caller, scrubbed for who they are.
+func respondSchedule(w http.ResponseWriter, r *http.Request, log *zap.Logger, code int,
+	sc *schedule.Schedule) {
+	respondJSON(w, log, code, scrubbedSchedule(r.Context(), sc), wantsPretty(r))
+}
+
+// respondRun writes one run back to a caller, masked and scrubbed for who they are. Every handler
+// that returns a single run goes through it.
+//
+// The scrub reached the read handlers only. Every handler that creates a run returns the run as
+// well, and those returned it verbatim, so one run came back masked from a GET and in the clear
+// from the button that made it, to the same caller in the same session. Wherever the spec was not
+// the caller's to begin with that is the disclosure the scrub exists to stop: a retry, a relaunch,
+// a rerun, a template launch, a trigger fire and an approval all hand back a run somebody else
+// composed. It is one helper rather than a rule to remember, so the handler written next cannot be
+// the one that forgets.
+func respondRun(w http.ResponseWriter, r *http.Request, log *zap.Logger, code int, rn *run.Run) {
+	respondJSON(w, log, code, scrubbedRun(r.Context(), maskRun(rn)), wantsPretty(r))
 }
 
 // scrubbedRuns applies scrubbedRun across a list response.

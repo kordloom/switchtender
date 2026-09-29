@@ -205,8 +205,9 @@ Vault is read over its HTTP API and handles KV v1 and v2. Vault dynamic secrets 
 fresh, short-lived credential is minted for each run and revoked when the run ends, so nothing
 long-lived exists to leak. AWS STS is the same idea on AWS: it assumes a role and mints short-lived
 role credentials for each run. AWS Secrets Manager is read over a Signature Version 4 signed
-request, and credentials fall back to the standard AWS environment, so an instance role needs no
-stored key. Azure Key Vault authenticates with a service principal or, on Azure, the attached
+request with an access key taken from the credential's config or from `AWS_ACCESS_KEY_ID` and
+`AWS_SECRET_ACCESS_KEY`. It does not read the instance metadata service or walk the AWS credential
+chain, so an EC2 instance role alone does not authenticate it. Azure Key Vault authenticates with a service principal or, on Azure, the attached
 managed identity, again with no stored key. Google Secret Manager reads a secret version over the
 Secret Manager API with an access token from the config or, on GCP, from the metadata server, so an
 attached service account needs no stored key either. Conjur exchanges an API key for a short-lived

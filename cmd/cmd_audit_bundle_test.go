@@ -247,7 +247,7 @@ func TestRefuseUnpublishableChain(t *testing.T) {
 				entries = test.Edit(entries)
 			}
 
-			err := refuseUnpublishableChain(entries, anchors, "in_test", test.Artifact)
+			err := refuseUnpublishableChain(entries, anchors, audit.Identity{InstallID: "in_test"}, test.Artifact)
 			if test.WantReason == "" {
 				if err != nil {
 					t.Fatalf("refuseUnpublishableChain() error = %v, want it to publish", err)

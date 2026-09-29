@@ -83,7 +83,7 @@ func approveRunHandler(approver Approver, store run.Store, authz *authorizer,
 			respondError(w, log, http.StatusInternalServerError, "could not approve run")
 			return
 		}
-		respondJSON(w, log, http.StatusOK, maskRun(created), wantsPretty(r))
+		respondRun(w, r, log, http.StatusOK, created)
 	}
 }
 
@@ -139,6 +139,6 @@ func rejectRunHandler(approver Approver, store run.Store, authz *authorizer,
 			respondError(w, log, http.StatusInternalServerError, "could not reject run")
 			return
 		}
-		respondJSON(w, log, http.StatusOK, maskRun(created), wantsPretty(r))
+		respondRun(w, r, log, http.StatusOK, created)
 	}
 }

@@ -164,7 +164,7 @@ func refuseBrokenChain(w http.ResponseWriter, r *http.Request, audits audit.Stor
 		respondError(w, log, http.StatusInternalServerError, "could not read the anchors")
 		return chainVerdict{}, true
 	}
-	anchorScan := audit.NewAnchorScanner(recorded, producer.InstallID)
+	anchorScan := audit.NewAnchorScanner(recorded, *producer)
 	verdict, err := walkChain(r.Context(), audits, anchorScan)
 	if err != nil {
 		log.Error("server: chain audit entries: " + err.Error())

@@ -38,10 +38,13 @@ func (s *store) AppendLog(ctx context.Context, id string, p []byte) error {
 		if !ok {
 			return run.ErrNotFound
 		}
-		// The run is still live, so the cap is what refused the write. Say so on the run itself,
-		// once, or a reader sees a log that simply stops and reads it as a run that went quiet.
+		// The fence refuses for two reasons, and only one of them is the cap. A terminal run is a
+		// silent no-op by design, so stamping the warning without re-checking liveness told every
+		// reader that a run which simply finished had its log truncated, on a write that arrived
+		// from a reclaimed worker a moment late. The warning is stamped on a live run alone.
 		if _, err := s.db.ExecContext(ctx,
-			"UPDATE runs SET warning=$1 WHERE id=$2 AND (warning IS NULL OR warning='')",
+			"UPDATE runs SET warning=$1 WHERE id=$2 AND (warning IS NULL OR warning='') AND "+
+				nonTerminalRun,
 			run.LogTruncatedWarning, id); err != nil {
 			return fmt.Errorf("append log: %w", err)
 		}

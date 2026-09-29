@@ -57,6 +57,26 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 	// changed underneath the decision, so the run fails with that stated rather than executing
 	// something nobody approved. The chain catches the same tampering at verify time; this refuses
 	// to perform it in the first place.
+	//
+	// The binding is what this is judged on. It covers the spec as written, while the digest beside
+	// it covers the redacted spec, and redaction is lossy: an unquoted secret assignment is masked
+	// to the end of its line, so a command could be rewritten after the secret, from one host to
+	// the whole fleet with a destroy tag, and still reduce to the same digest. Checking the digest
+	// as well costs nothing and still catches a run stamped before the binding existed.
+	if r.ApprovedSpecBinding != "" {
+		got, serr := outcome.SpecBinding(r)
+		if serr != nil {
+			d.finalize(r, run.StatusFailed, nil, "could not recompute the approved spec: "+serr.Error())
+			d.publisher.CloseRun(r.ID)
+			return run.StatusFailed
+		}
+		if got != r.ApprovedSpecBinding {
+			d.finalize(r, run.StatusFailed, nil,
+				"refused: the spec changed after it was approved, so this is not the change the approver released")
+			d.publisher.CloseRun(r.ID)
+			return run.StatusFailed
+		}
+	}
 	if r.ApprovedSpecDigest != "" {
 		got, serr := outcome.SpecDigest(r)
 		if serr != nil {
@@ -233,7 +253,12 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 		DiffMode: r.DiffMode, Image: r.Image,
 	}
 	if r.Image != "" {
-		if err := d.resolvePullCredential(r.PullCredentialID, &spec); err != nil {
+		pullCleanup, perr := d.resolvePullCredential(ctx, r.PullCredentialID, &spec)
+		// Deferred here, beside the other execution credentials, so a minted login is live for the
+		// pull and released once the run is over. It is deferred before the error is checked, so a
+		// resolve that failed partway still hands back whatever it minted.
+		defer pullCleanup()
+		if err := perr; err != nil {
 			return fail(err)
 		}
 	}
@@ -252,7 +277,7 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	early = append(early, ownSecrets...)
 	mask.set(early)
 
-	projectCleanup, err := d.resolveProject(r, &spec)
+	projectCleanup, err := d.resolveProject(ctx, r, &spec)
 	defer projectCleanup()
 	if err != nil {
 		return fail(err)
@@ -262,7 +287,12 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	// ever filled when it was empty, so a run that pinned its own image sees no change, a run that
 	// took a project or server default now has that image on its record, and a host run stays empty.
 	// The evidence a run leaves must show which environment ran it, not only the one it asked for.
-	r.Image = spec.Image
+	// Stamped only for a tool the container runner can actually execute. A plugin tool runs on the
+	// host whatever the spec carries, so recording a server or project default image on one would
+	// put an environment in the evidence that the run never entered, and that record is signed.
+	if run.IsBuiltinTool(r.Tool) {
+		r.Image = spec.Image
+	}
 
 	credCleanup, secrets, err := d.materializeCredentials(ctx, r, &spec)
 	if err != nil {

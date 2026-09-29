@@ -35,7 +35,7 @@ func TestCheckAnchorsRecomputesTreeRootsAtEverySize(t *testing.T) {
 		anchors = append(anchors, treeAnchorAt(t, chain, size))
 	}
 
-	ok, results := CheckAnchors(chain, anchors, treeTestInstall)
+	ok, results := CheckAnchors(chain, anchors, Identity{InstallID: treeTestInstall})
 	if !ok {
 		for _, res := range results {
 			if !res.Reached {
@@ -46,7 +46,7 @@ func TestCheckAnchorsRecomputesTreeRootsAtEverySize(t *testing.T) {
 	}
 
 	// The streaming scanner is the form every server path uses, so it must agree entry for entry.
-	scan := NewAnchorScanner(anchors, treeTestInstall)
+	scan := NewAnchorScanner(anchors, Identity{InstallID: treeTestInstall})
 	for _, e := range chain {
 		scan.Feed(e)
 	}
@@ -87,7 +87,7 @@ func TestCheckAnchorsTreeVerdicts(t *testing.T) {
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			ok, results := CheckAnchors(test.Entries, []*Anchor{test.Anchor}, test.InstallID)
+			ok, results := CheckAnchors(test.Entries, []*Anchor{test.Anchor}, Identity{InstallID: test.InstallID})
 			if ok {
 				t.Fatal("CheckAnchors() passed a chain that cannot satisfy this anchor")
 			}
@@ -113,10 +113,10 @@ func TestCheckAnchorsMixedShapes(t *testing.T) {
 	}
 	tree := treeAnchorAt(t, chain, 5)
 
-	if ok, results := CheckAnchors(chain, []*Anchor{linear, tree}, treeTestInstall); !ok {
+	if ok, results := CheckAnchors(chain, []*Anchor{linear, tree}, Identity{InstallID: treeTestInstall}); !ok {
 		t.Fatalf("the intact chain fails its own anchors: %+v", results)
 	}
-	ok, results := CheckAnchors(chain[:3], []*Anchor{linear, tree}, treeTestInstall)
+	ok, results := CheckAnchors(chain[:3], []*Anchor{linear, tree}, Identity{InstallID: treeTestInstall})
 	if ok {
 		t.Fatal("a truncated chain satisfied anchors over its lost tail")
 	}

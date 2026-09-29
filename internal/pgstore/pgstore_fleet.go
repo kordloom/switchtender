@@ -262,6 +262,16 @@ DELETE FROM host_facts_history WHERE host = $1 AND bucket NOT IN (
 )`
 	interval := run.FactsInterval()
 	depth := run.FactsDepth()
+	// One transaction for the whole gather, the same as the SQLite store. Each host takes three
+	// statements, and run as autocommit a failure or a canceled context partway through left the
+	// estate half written: some hosts advanced to the new reading, the rest still showed the old
+	// one, and the history table carried rows the current table did not agree with. A gather is one
+	// observation of the fleet, so it lands whole or not at all on both backends.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("save host facts: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
 	for _, f := range facts {
 		if f.Host == "" || len(f.Facts) == 0 {
 			continue
@@ -274,19 +284,22 @@ DELETE FROM host_facts_history WHERE host = $1 AND bucket NOT IN (
 		if err != nil {
 			return fmt.Errorf("save host facts: %w", err)
 		}
-		if _, err := s.db.ExecContext(ctx, histQ, f.Host, run.FactsBucket(at, runID, interval),
+		if _, err := tx.ExecContext(ctx, histQ, f.Host, run.FactsBucket(at, runID, interval),
 			runID, string(blob), sqlutil.FormatTime(at)); err != nil {
 			return fmt.Errorf("save host facts history: %w", err)
 		}
 		if depth > 0 {
-			if _, err := s.db.ExecContext(ctx, pruneQ, f.Host, depth); err != nil {
+			if _, err := tx.ExecContext(ctx, pruneQ, f.Host, depth); err != nil {
 				return fmt.Errorf("trim host facts history: %w", err)
 			}
 		}
-		if _, err := s.db.ExecContext(ctx, q, f.Host, runID, string(blob),
+		if _, err := tx.ExecContext(ctx, q, f.Host, runID, string(blob),
 			sqlutil.FormatTime(at)); err != nil {
 			return fmt.Errorf("save host facts: %w", err)
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("save host facts: %w", err)
 	}
 	return nil
 }
@@ -346,7 +359,7 @@ FROM run_host_summary WHERE host = $1 ORDER BY ` + sqlutil.TimeOrder + ` DESC, r
 // RunHostSummaries returns one run's stored per host summaries, ordered by host.
 func (s *store) RunHostSummaries(ctx context.Context, runID string) ([]run.HostSummary, error) {
 	const q = `SELECT ` + hostSummaryColumns + `
-FROM run_host_summary WHERE run_id = $1 ORDER BY host ASC`
+FROM run_host_summary WHERE run_id = $1 ORDER BY host COLLATE "C" ASC`
 	rows, err := s.db.QueryContext(ctx, q, runID)
 	if err != nil {
 		return nil, fmt.Errorf("run host summaries: %w", err)
@@ -369,7 +382,7 @@ FROM run_host_summary WHERE run_id = $1 ORDER BY host ASC`
 // RunTaskSummaries returns one run's stored per task summaries, ordered by task.
 func (s *store) RunTaskSummaries(ctx context.Context, runID string) ([]run.TaskSummary, error) {
 	const q = `
-SELECT run_id, task, seconds, ran_at FROM run_task_summary WHERE run_id = $1 ORDER BY task ASC`
+SELECT run_id, task, seconds, ran_at FROM run_task_summary WHERE run_id = $1 ORDER BY task COLLATE "C" ASC`
 	rows, err := s.db.QueryContext(ctx, q, runID)
 	if err != nil {
 		return nil, fmt.Errorf("run task summaries: %w", err)
@@ -647,7 +660,7 @@ WHERE h.bucket = (
 	ORDER BY rtrim(b.gathered_at, 'Z') DESC, b.bucket COLLATE "C" DESC
 	LIMIT 1
 )
-ORDER BY h.host`
+ORDER BY h.host COLLATE "C"`
 	args := []any{sqlutil.FormatTime(at)}
 	if limit > 0 {
 		q += " LIMIT $2"

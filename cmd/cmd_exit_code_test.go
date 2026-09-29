@@ -31,16 +31,23 @@ func TestMain(m *testing.M) {
 		// Execute always ends the process, so nothing after this line runs.
 		Execute(nil)
 	}
-	// Walk the command tree once, single-threaded, before any parallel test runs. Cobra sorts a
-	// command's children on the first Commands() call and caches the result, so that first call is
-	// a write. Parallel tests reaching the tree at the same time raced on it, and the detector
-	// failed whichever test happened to be running, so the suite went red at random under load.
+	// Walk the command tree once, single-threaded, before any parallel test runs. Cobra builds
+	// several things on first access and caches them, so that first access is a write: the sorted
+	// child list, and each command's flag sets. Parallel tests reaching the tree at the same time
+	// raced on them, and the detector failed whichever test happened to be running, so the suite
+	// went red at random under load, in tests that had nothing to do with each other.
 	warmCommandTree(rootCmd)
 	os.Exit(m.Run())
 }
 
-// warmCommandTree forces cobra's lazy child sort for every command, so later reads are pure reads.
+// warmCommandTree forces cobra's lazy construction for every command, so later reads are pure
+// reads. Every accessor called here allocates on its first call and returns the cached value
+// afterward, which is what makes a read from two tests at once a race.
 func warmCommandTree(c *cobra.Command) {
+	c.Flags()
+	c.PersistentFlags()
+	c.LocalFlags()
+	c.InheritedFlags()
 	for _, kid := range c.Commands() {
 		warmCommandTree(kid)
 	}

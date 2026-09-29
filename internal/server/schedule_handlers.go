@@ -10,6 +10,7 @@ import (
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/schedule"
+	"github.com/kordloom/switchtender/internal/scrub"
 )
 
 // createScheduleRequest is the JSON body accepted by POST /schedules.
@@ -148,7 +149,7 @@ func createScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 			return
 		}
 		w.Header().Set("Location", "/v1/schedules/"+sc.ID)
-		respondJSON(w, log, http.StatusCreated, sc, wantsPretty(r))
+		respondSchedule(w, r, log, http.StatusCreated, sc)
 	}
 }
 
@@ -204,10 +205,19 @@ func updateScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 		if zone == "" {
 			zone = existing.Timezone
 		}
+		// A schedule's steps carry their own scripts, and the read scrubs them for anyone below
+		// admin, so an ordinary edit submits the scrubbed form back. Storing that verbatim writes
+		// the mask over the real command and the schedule fires the mask on its next tick.
+		restoredSteps, rerr := scrub.Restore(stepsScrubber(r.Context()),
+			scheduleSteps(req.Steps, existing.Steps), existing.Steps, "steps")
+		if rerr != nil {
+			respondError(w, log, http.StatusConflict, rerr.Error())
+			return
+		}
 		sc := &schedule.Schedule{
 			ID: id, Name: req.Name, Cron: req.Cron, Timezone: zone, Playbook: req.Playbook,
 			Inventory: req.Inventory, Shards: scheduleShards(req.Shards, existing.Shards),
-			Steps:      scheduleSteps(req.Steps, existing.Steps),
+			Steps:      restoredSteps,
 			TemplateID: req.TemplateID, OrgID: existing.OrgID,
 			Enabled: scheduleEnabled(req.Enabled, existing.Enabled), CreatedAt: existing.CreatedAt,
 			LastRunAt: existing.LastRunAt, LastRunID: existing.LastRunID,
@@ -246,7 +256,7 @@ func updateScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 			respondError(w, log, http.StatusInternalServerError, "could not save schedule")
 			return
 		}
-		respondJSON(w, log, http.StatusOK, sc, wantsPretty(r))
+		respondSchedule(w, r, log, http.StatusOK, sc)
 	}
 }
 
@@ -268,7 +278,7 @@ func listSchedulesHandler(store schedule.Store, authz *authorizer, log *zap.Logg
 			respondError(w, log, http.StatusInternalServerError, "could not list schedules")
 			return
 		}
-		restricted, err := grantsEnforced(r.Context(), authz)
+		restricted, err := restrictedReader(r.Context(), authz)
 		if err != nil {
 			log.Error("server: read filter: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not list schedules")
@@ -285,7 +295,8 @@ func listSchedulesHandler(store schedule.Store, authz *authorizer, log *zap.Logg
 		}
 		capped, total := cappedList(list)
 		respondJSON(w, log, http.StatusOK,
-			schedulesResponse{Schedules: capped, Count: len(capped), Total: total}, wantsPretty(r))
+			schedulesResponse{Schedules: scrubbedSchedules(r.Context(), capped), Count: len(capped),
+				Total: total}, wantsPretty(r))
 	}
 }
 
@@ -312,7 +323,7 @@ func getScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Logger
 		if denyOnAuthzError(w, log, authz.authorizeSchedule(r.Context(), grant.AccessUse, sc)) {
 			return
 		}
-		respondJSON(w, log, http.StatusOK, sc, wantsPretty(r))
+		respondSchedule(w, r, log, http.StatusOK, sc)
 	}
 }
 

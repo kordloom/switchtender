@@ -22,13 +22,10 @@ import (
 	"github.com/kordloom/switchtender/internal/run"
 )
 
-// maxReceiptEntries is how many chain entries one receipt will assemble at once. It matches the
-// bundle export's ceiling and moved down with it: a receipt is one signed document over the claims
-// it carries, so unlike a streamed verification it has to hold them together, and the endpoint that
-// serves it is reachable below admin. The old ceiling was a number the format tolerates rather than
-// one a 1 or 2 GB instance survives, which made a single request an out-of-memory kill on the box
-// this product is sold as running on. It is a var only so a test can shrink it to force the refusal.
-var maxReceiptEntries = 25_000
+// maxReceiptEntries is how many chain entries one receipt will assemble at once. It reads the one
+// ceiling both signed documents are bound by rather than restating it, so a re-measurement moves
+// both. It is a var only so a test can shrink it to force the refusal.
+var maxReceiptEntries = audit.MaxAssembledClaims
 
 // Options are the shapes a receipt can take.
 type Options struct {
@@ -94,7 +91,7 @@ func Build(ctx context.Context, runs run.Store, audits audit.Store, id audit.Ide
 		if recorded, aerr = anchorStore.Anchors(ctx, 0); aerr != nil {
 			return nil, fmt.Errorf("read anchors: %w", aerr)
 		}
-		anchorScan = audit.NewAnchorScanner(recorded, id.InstallID)
+		anchorScan = audit.NewAnchorScanner(recorded, id)
 	}
 	collectFrom := creationSeq
 	if opts.Sparse {
@@ -172,12 +169,25 @@ func Build(ctx context.Context, runs run.Store, audits audit.Store, id audit.Ide
 				"the chain committed, usually because retention has pruned this run's logs or "+
 				"summaries, so the receipt proves the chain but does not show what the run did")
 		default:
-			var bodyObj any
-			if json.Unmarshal(body, &bodyObj) == nil {
+			// Disclosed as the exact bytes the content digest was taken over, the same as spec_body.
+			// It used to be disclosed as a re-parsed tree, which a verifier had to marshal again to
+			// re-digest. That re-marshal does not reproduce the committed bytes: above the canonical
+			// size cap the digest is taken over the struct's field order while a tree re-marshals in
+			// key order, and a number wider than a float does not survive the round trip at any
+			// size. Either one made an honest receipt for a large or wide outcome report NOT
+			// VERIFIED. The exact bytes have neither problem.
+			if len(body) > 0 {
 				if claim := outcomeClaim(doc, outcomeEntry.Path); claim != nil {
-					claim.Payload["outcome_body"] = bodyObj
+					claim.Payload["outcome_body"] = string(body)
 					claim.Payload["outcome_nonce"] = outcomeEntry.Nonce
-					discloseSpec(claim, r)
+					// A spec that will not reduce to redacted bytes is withheld, never disclosed raw, and
+					// the receipt says so. Dropping it in silence shipped a signed receipt that looked
+					// whole while the section naming what was approved was simply absent.
+					if serr := discloseSpec(claim, r); serr != nil {
+						res.Notes = append(res.Notes, "the run's spec could not be reduced to "+
+							"redacted bytes, so the receipt proves the chain and shows what the run "+
+							"did but does not show what was approved: "+serr.Error())
+					}
 				}
 			}
 		}
@@ -277,12 +287,13 @@ func pathNamesRun(path, runID string) bool {
 // too wide for a float came back a different number, so the disclosed spec stopped matching the digest
 // the chain committed and the receipt read as tampered. The bytes have neither problem: a string is
 // representable whatever it holds, and it is what the digest already covers.
-func discloseSpec(claim *audit.BundleClaim, r *run.Run) {
+func discloseSpec(claim *audit.BundleClaim, r *run.Run) error {
 	spec, err := outcome.Spec(r)
 	if err != nil {
-		return
+		return err
 	}
 	claim.Payload["spec_body"] = string(spec)
+	return nil
 }
 
 // discloseDecisions attaches each approval decision's body and nonce to its claim, the same way the

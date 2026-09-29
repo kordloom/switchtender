@@ -7,6 +7,7 @@ package identity
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -277,6 +278,25 @@ func identityFromSeed(hexSeed, installID string) (Identity, error) {
 	return id, nil
 }
 
+// LegacyInstallIDFromKey returns the install id a key was born to before the id was widened: the
+// first six bytes of the public key.
+//
+// It exists for verification only, and only for a bundle that already carries that form. A receipt
+// is evidence, and the promise attached to it is that it verifies offline for as long as anybody
+// keeps it, so upgrading the binary that reads one must not stop it verifying. Widening the
+// derivation without this turned every receipt issued by an earlier release into a failure naming a
+// rotated install, which is the accusation of tampering the format exists to make meaningful.
+//
+// Minting still uses the wide form, so an install created from here on is bound at the full width
+// and cannot be ground out. What this accepts is only what was already issued, at the width it was
+// issued under, which is where that exposure already existed.
+func LegacyInstallIDFromKey(pub ed25519.PublicKey) string {
+	if len(pub) != ed25519.PublicKeySize {
+		return ""
+	}
+	return "in_" + hex.EncodeToString(pub[:6])
+}
+
 // InstallIDFromKey returns the install id that belongs to a public key. A verifier needs it to check
 // that a bundle naming an install was signed by that install's key rather than by whoever re-signed
 // it, which is the tie the id alone does not make.
@@ -284,6 +304,22 @@ func InstallIDFromKey(pub ed25519.PublicKey) string { return installIDFromKey(pu
 
 // installIDFromKey derives a stable install id from the public key, so the id needs no separate
 // management and always corresponds to the key that signs the bundles carrying it.
+//
+// It is a 128-bit hash of the whole key rather than a prefix of the key itself. The id is what ties
+// a bundle's claims to the key that signed them: a verifier accepts a bundle whose producer names
+// an install equal to this value for the signing key, which is what stops one install's history
+// being re-signed and presented as another's. Six raw key bytes made that binding 48 bits, so an
+// attacker could grind keypairs until one was born to a chosen install id and then lift an anchored
+// history onto their own key. Hashing the full key makes the id collision resistant to the same
+// degree the rest of the format assumes.
 func installIDFromKey(pub ed25519.PublicKey) string {
-	return "in_" + hex.EncodeToString(pub[:6])
+	// A key that is not one refuses rather than deriving. The old form indexed the first six bytes
+	// with no check, so an out-of-tree verifier handing over whatever a bundle decoded to took a
+	// panic; hashing accepts any length, which would be worse, since a truncated or empty key would
+	// produce a plausible looking id. An empty answer can only ever fail the comparison it feeds.
+	if len(pub) != ed25519.PublicKeySize {
+		return ""
+	}
+	sum := sha256.Sum256(pub)
+	return "in_" + hex.EncodeToString(sum[:16])
 }

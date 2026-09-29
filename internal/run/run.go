@@ -289,10 +289,25 @@ type Run struct {
 	// such as a seeded demo run.
 	AuditReceipt string `json:"audit_receipt,omitempty"`
 	// ApprovedSpecDigest is the digest of the run's spec at the moment an approver decided on it,
-	// stamped when the decision chain entry commits the same value. The executor recomputes the
-	// spec digest before running and refuses a mismatch, so an approval releases exactly the change
-	// that was decided on. Empty for a run that never needed a decision.
+	// stamped when the decision chain entry commits the same value. It is taken over the redacted
+	// spec, because the same value is disclosed in a receipt beside the spec it covers, so it is
+	// the digest an auditor correlates against. Empty for a run that never needed a decision.
 	ApprovedSpecDigest string `json:"approved_spec_digest,omitempty"`
+	// ApprovedSpecBinding is what the executor actually holds an approved run to. It covers the
+	// spec as written, with nothing redacted, so any change to what will execute moves it.
+	//
+	// It exists because the disclosed digest cannot do this job. Redaction is lossy by design: a
+	// secret assignment with no quotes is masked to the end of the line, since a scalar needs no
+	// quotes to contain spaces and stopping at the first space left the rest of a passphrase in the
+	// clear. That means two commands differing only after the secret reduce to the same bytes, so a
+	// run approved against one host could be rewritten to the whole fleet with a destroy tag and
+	// still match the digest the approver released.
+	//
+	// It is never serialized. A hash over the unredacted spec is an offline guessing target for
+	// anyone shown it: the redacted command tells them everything except the secret, so they can
+	// grind candidates against this value. It reaches a relay worker on a header instead, the same
+	// way the claim capability does.
+	ApprovedSpecBinding string `json:"-"`
 	// Intent is the plain-language request an AI turned into this proposed run. A run carrying it
 	// was proposed from a description and is born held for approval, so an approver can judge the
 	// generated run against what was asked before anything executes.

@@ -55,3 +55,12 @@ func (e *ClockBehindError) ClockBehind() (beat int64, last, clock time.Time) {
 
 // Behind reports how far the supplied time trails the last beat.
 func (e *ClockBehindError) Behind() time.Duration { return e.Prev.Sub(e.At) }
+
+// ErrRedactParse means a body handed to CanonicalRedacted is not JSON, so there was no tree for
+// the redaction to pass over and nothing can attest that the bytes are safe to disclose.
+var ErrRedactParse = errors.New("redaction cannot parse this body")
+
+// ErrRedactEncode means a body was parsed and redacted but the redacted tree would not re-encode.
+// It is distinct from ErrRedactParse because the difference decides what a digest may commit to:
+// a tree that was redacted and will not encode must never fall back to the bytes it came from.
+var ErrRedactEncode = errors.New("redacted body will not re-encode")

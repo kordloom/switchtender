@@ -404,7 +404,7 @@ func TestAuditVerifyHandlerReportsATamperAsAnAnswer(t *testing.T) {
 			t.Parallel()
 			store := newEditedChain(t, seedAuditChain(t, 5), test.Edit)
 			rec := httptest.NewRecorder()
-			auditVerifyHandler(store, "", zap.NewNop()).
+			auditVerifyHandler(store, audit.Identity{}, zap.NewNop()).
 				ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/audit/verify", nil))
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200; a tampered chain is an answer, not a fault "+

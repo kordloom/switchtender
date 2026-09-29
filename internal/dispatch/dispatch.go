@@ -126,6 +126,12 @@ type Dispatcher struct {
 	maxShards int
 	// queues names the queues this process serves; empty serves the default pool.
 	queues []string
+	// claimGate refuses new claims while it returns an error, for a process whose claiming is a
+	// licensed feature. Nil on a single node install, where claiming is not one.
+	claimGate func() error
+	// claimGateSaid makes the refusal print once rather than on every attempt, since the condition
+	// persists until somebody renews.
+	claimGateSaid sync.Once
 	// credentials resolves stored execution secrets, nil when the feature is off.
 	credentials credential.Store
 	// credentialTypes resolves operator-defined credential types, nil when none are configured.

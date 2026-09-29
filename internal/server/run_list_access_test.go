@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -32,6 +33,21 @@ import (
 // to read it by listing instead.
 func TestTheRunListAgreesWithFetchingARunByID(t *testing.T) {
 	t.Parallel()
+	// Both grant modes. What --strict-grants decides is the default for an object nobody granted;
+	// an object that carries a grant is access controlled either way, which is what the by-id fetch
+	// implements and what this guard is about. Pinning only the strict half let the two answers
+	// disagree on the default install, where the list returned records the fetch refused.
+	for _, strict := range []bool{true, false} {
+		t.Run(fmt.Sprintf("strict=%v", strict), func(t *testing.T) {
+			t.Parallel()
+			runListAgreesWithFetch(t, strict)
+		})
+	}
+}
+
+// runListAgreesWithFetch is the body of the guard, run once per grant mode.
+func runListAgreesWithFetch(t *testing.T, strict bool) {
+	t.Helper()
 	ctx := context.Background()
 	const secret = "EXTRA-VAR-MUST-NOT-BE-LISTED"
 
@@ -77,7 +93,7 @@ func TestTheRunListAgreesWithFetchingARunByID(t *testing.T) {
 	}
 
 	handler := New(runs, &fakeSubmitter{run: &run.Run{ID: "run_x"}}, zap.NewNop(),
-		WithGrants(grants, true), WithOrgs(orgs), WithProjects(projects), WithUsers(users)).Handler()
+		WithGrants(grants, strict), WithOrgs(orgs), WithProjects(projects), WithUsers(users)).Handler()
 
 	as := func(method, path string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, nil)

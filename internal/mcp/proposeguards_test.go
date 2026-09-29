@@ -31,8 +31,9 @@ func (l *launchRecorder) handler() http.Handler {
 	mux.HandleFunc("/v1/users", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 	})
-	mux.HandleFunc("/v1/templates/tpl_1", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, l.template)
+	// The listing, which is the only read of a template the API serves.
+	mux.HandleFunc("/v1/templates", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"templates":[`+l.template+`]}`)
 	})
 	mux.HandleFunc("/v1/templates/tpl_1/launch", func(w http.ResponseWriter, r *http.Request) {
 		l.launched = true

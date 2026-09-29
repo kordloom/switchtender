@@ -12,7 +12,10 @@ import (
 )
 
 // docsHeading matches a command section heading in the configuration reference.
-var docsHeading = regexp.MustCompile(`^## +([a-z][a-z-]*)\s*$`)
+// docsHeading matches a command section. A space is allowed in the name so a heading can address a
+// subcommand, such as "witness serve", whose flags are registered on the subcommand rather than on
+// its parent.
+var docsHeading = regexp.MustCompile(`^## +([a-z][a-z -]*?)\s*$`)
 
 // docsDefaultTable matches the header of a table whose second column holds flag defaults. Other
 // tables in the reference put something else there, so their rows are not defaults to check.
@@ -39,9 +42,16 @@ func TestDocumentedFlagDefaultsMatchTheBinary(t *testing.T) {
 		t.Fatalf("read the configuration reference: %v", err)
 	}
 
+	// Subcommands are keyed under "parent child" as well, so a section can document the flags of a
+	// nested command and have them checked. Keying only the top level meant a heading like
+	// "witness serve" resolved to nothing and every row under it was skipped in silence, which is
+	// the shape of a guard that reports success because it looked at nothing.
 	byName := map[string]*cobra.Command{}
 	for _, c := range rootCmd.Commands() {
 		byName[c.Name()] = c
+		for _, sub := range c.Commands() {
+			byName[c.Name()+" "+sub.Name()] = sub
+		}
 	}
 
 	var cmd *cobra.Command

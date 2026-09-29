@@ -2,15 +2,16 @@ package server
 
 import (
 	"errors"
-	"github.com/kordloom/switchtender/internal/license"
 	"net/http"
 	"strconv"
 	"strings"
-
-	"github.com/kordloom/switchtender/internal/grant"
-	"github.com/kordloom/switchtender/internal/run"
-	"go.uber.org/zap"
 	"time"
+
+	"go.uber.org/zap"
+
+	"github.com/kordloom/switchtender/internal/dispatch"
+	"github.com/kordloom/switchtender/internal/license"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // defaultFleetWindow is the number of recent runs per host considered when no window is given.
@@ -243,7 +244,10 @@ func reconcileDriftHandler(store run.Store, submitter Submitter, authz *authoriz
 		// inline inventory presents no objects, and authorizing no objects authorizes nothing, so any
 		// operator on the install could turn another organization's drift check into a real change on
 		// that organization's hosts.
-		if denyOnAuthzError(w, log, authz.authorizeRun(r.Context(), grant.AccessUse, check)) {
+		// A reconcile turns an observation into a real change, so it is authorized as the
+		// re-execution it is, through the one function that decides what that requires. Spelling
+		// the parts out here is what let this path authorize the check's objects and not its queue.
+		if authorizeReexecute(w, r, authz, log, check) {
 			return
 		}
 
@@ -267,12 +271,20 @@ func reconcileDriftHandler(store run.Store, submitter Submitter, authz *authoriz
 			opts = append(opts, run.WithLimit(host))
 		}
 		proposal, err := submitter.Submit(r.Context(), check.Playbook, check.Inventory, opts...)
-		if err != nil {
+		switch {
+		// A refusal is the operator's answer, not the server's failure. Both of these were logged
+		// and returned as a 500 saying the proposal could not be created, so the one person who
+		// needed to know which rule stopped them had to be handed a server log to find out.
+		case errors.Is(err, dispatch.ErrPolicyDenied) ||
+			errors.Is(err, dispatch.ErrQueueUnlicensed):
+			respondError(w, log, http.StatusForbidden, err.Error())
+			return
+		case err != nil:
 			log.Error("server: reconcile submit: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not create the proposal")
 			return
 		}
-		respondJSON(w, log, http.StatusAccepted, proposal, wantsPretty(r))
+		respondRun(w, r, log, http.StatusAccepted, proposal)
 	}
 }
 
@@ -332,7 +344,7 @@ func taskTrendsHandler(store run.Store, authz *authorizer, log *zap.Logger) http
 		// strength of being able to read one run of their own. Withheld beats leaked, and the
 		// response says which it is doing rather than serving an empty list that reads as a quiet
 		// install.
-		scoped, serr := scopedReader(r.Context(), authz)
+		scoped, serr := restrictedReader(r.Context(), authz)
 		if serr != nil {
 			log.Error("server: read filter: " + serr.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not read runs")

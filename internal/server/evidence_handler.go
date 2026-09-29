@@ -11,14 +11,16 @@ import (
 	"github.com/kordloom/switchtender/internal/dossier"
 	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/scrub"
 	"github.com/kordloom/switchtender/internal/util"
 )
 
 // runEvidenceHandler renders one run's evidence dossier as a self-contained HTML document, so the
 // run page answers an auditor's sample request with one export instead of five screenshots.
-// installID is the install the tree profile's leaves bind to, which checking a tree anchor
+// producer is the install identity the tree profile's leaves bind to, which checking a tree anchor
 // requires.
-func runEvidenceHandler(store run.Store, audits audit.Store, installID string, authz *authorizer,
+func runEvidenceHandler(store run.Store, audits audit.Store, producer audit.Identity,
+	authz *authorizer,
 	log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: runEvidenceHandler: Store required")
@@ -46,7 +48,7 @@ func runEvidenceHandler(store run.Store, audits audit.Store, installID string, a
 		if denyUnlessAdminOrActor(w, r, log, got) {
 			return
 		}
-		in, err := dossier.Collect(r.Context(), store, audits, installID, got.ID, time.Now())
+		in, err := dossier.Collect(r.Context(), store, audits, producer, got.ID, time.Now())
 		if err != nil {
 			log.Error("server: collect run evidence: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not collect the evidence")
@@ -83,10 +85,10 @@ func runEvidenceHandler(store run.Store, audits audit.Store, installID string, a
 }
 
 // auditRegisterHandler renders the period change register as a self-contained HTML document, the
-// change-management evidence a compliance review samples from. installID is the install the tree
+// change-management evidence a compliance review samples from. producer is the install identity the tree
 // profile's leaves bind to. from and to accept a date or an RFC 3339 time; the period defaults to
 // the last 90 days.
-func auditRegisterHandler(store run.Store, audits audit.Store, installID string,
+func auditRegisterHandler(store run.Store, audits audit.Store, producer audit.Identity,
 	log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: auditRegisterHandler: Store required")
@@ -127,7 +129,7 @@ func auditRegisterHandler(store run.Store, audits audit.Store, installID string,
 		}
 		// The period is caller controlled, so the bound is the store query's and not the reader's
 		// good manners. A truncated document says so on its face.
-		in, err := dossier.CollectRegister(r.Context(), store, audits, installID, from, to,
+		in, err := dossier.CollectRegister(r.Context(), store, audits, producer, from, to,
 			time.Now(), dossier.MaxRegisterRuns)
 		if err != nil {
 			log.Error("server: collect change register: " + err.Error())
@@ -155,16 +157,23 @@ func parseRegisterTime(raw string) (time.Time, error) {
 
 // redactRunCommand returns rn with any secret assigned inside its script masked, copied so the stored
 // record is left alone. A run whose script carries nothing to mask is returned untouched.
+//
+// A pipeline's steps are covered as well as the run's own command. Each step carries its own script
+// in Steps[].Command, which serializes beside the rest of the run, and the scrub read only the
+// top-level command: a pipeline was the shape that leaked through the very helper every response
+// now funnels through. The copy is shallow, so the steps have to be copied before they are edited,
+// or the scrub would rewrite the record it exists to protect.
 func redactRunCommand(rn *run.Run) *run.Run {
 	if rn == nil {
 		return rn
 	}
 	masked := rn.Command
 	if masked != "" {
-		masked, _ = util.RedactAssignments(masked, "[redacted]")
+		masked, _ = util.RedactAssignments(masked, scrub.Marker)
 	}
 	vars := redactVars(rn.ExtraVars)
-	if masked == rn.Command && vars == nil {
+	steps := redactSteps(rn.Steps)
+	if masked == rn.Command && vars == nil && steps == nil {
 		return rn
 	}
 	cp := *rn
@@ -172,7 +181,36 @@ func redactRunCommand(rn *run.Run) *run.Run {
 	if vars != nil {
 		cp.ExtraVars = vars
 	}
+	if steps != nil {
+		cp.Steps = steps
+	}
 	return &cp
+}
+
+// redactSteps masks secret-shaped assignments in each pipeline step's script, returning nil when
+// nothing changed so the caller can skip the copy. The steps are redacted rather than dropped, so
+// an operator still reads what each step of the pipeline did.
+func redactSteps(in []run.PipelineStep) []run.PipelineStep {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]run.PipelineStep, len(in))
+	copy(out, in)
+	changed := false
+	for i := range out {
+		if out[i].Command == "" {
+			continue
+		}
+		masked, _ := util.RedactAssignments(out[i].Command, scrub.Marker)
+		if masked != out[i].Command {
+			out[i].Command = masked
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return out
 }
 
 // redactVars masks secret-shaped assignments in the string leaves of a run's launch variables,
@@ -186,38 +224,15 @@ func redactVars(in map[string]any) map[string]any {
 	if len(in) == 0 {
 		return nil
 	}
-	var out map[string]any
-	for k, v := range in {
-		text, ok := v.(string)
-		if !ok {
-			continue
-		}
-		// The key alone can name a secret, as it does for -e db_password=x, and then the whole
-		// value is the secret rather than an assignment inside it.
-		if util.SecretKey(k) {
-			if out == nil {
-				out = cloneVars(in)
-			}
-			out[k] = "[redacted]"
-			continue
-		}
-		masked, _ := util.RedactAssignments(text, "[redacted]")
-		if masked != text {
-			if out == nil {
-				out = cloneVars(in)
-			}
-			out[k] = masked
-		}
+	// One shared walk, deep, rather than a second scrubber that knows less than the others. This
+	// one asserted a string and skipped every other type, so a secret one level down, a secret in
+	// an array, and a secret-named key holding a number all traveled intact through the surface
+	// every role reads most. It also copied shallowly, so recursing through the old copy would
+	// have edited the live record it was protecting.
+	out, changed := util.RedactDeep(in, scrub.Marker)
+	if !changed {
+		return nil
 	}
-	return out
-}
-
-// cloneVars copies a variable map so a redaction never mutates what the store handed back, which a
-// memory-backed store returns by pointer.
-func cloneVars(in map[string]any) map[string]any {
-	out := make(map[string]any, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
+	vars, _ := out.(map[string]any)
+	return vars
 }

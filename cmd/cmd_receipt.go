@@ -78,7 +78,7 @@ func runReceipt(cmd *cobra.Command, args []string) error {
 	// receipt and printed success while the endpoint was refusing the same database and GET
 	// /v1/audit/verify was reporting where the chain broke. The command is what an operator reaches
 	// for when they suspect something is wrong, so it was the worse of the two places to be silent.
-	if err := refuseUnpublishableReceipt(cmd.Context(), store.Audits(), id.InstallID); err != nil {
+	if err := refuseUnpublishableReceipt(cmd.Context(), store.Audits(), id); err != nil {
 		return err
 	}
 	res, err := receipt.Build(cmd.Context(), store.Runs(), store.Audits(), id, resolveVersion(),
@@ -128,7 +128,8 @@ func runReceipt(cmd *cobra.Command, args []string) error {
 //
 // The chain is read here and released when this returns, before the builder makes its own streaming
 // pass, so the command holds one copy of it at a time rather than one beside the builder's.
-func refuseUnpublishableReceipt(ctx context.Context, audits audit.Store, installID string) error {
+func refuseUnpublishableReceipt(ctx context.Context, audits audit.Store,
+	producer audit.Identity) error {
 	entries, err := audits.Chain(ctx)
 	if err != nil {
 		return fmt.Errorf("read audit chain: %w", err)
@@ -137,5 +138,5 @@ func refuseUnpublishableReceipt(ctx context.Context, audits audit.Store, install
 	if err != nil {
 		return err
 	}
-	return refuseUnpublishableChain(entries, recorded, installID, "a receipt")
+	return refuseUnpublishableChain(entries, recorded, producer, "a receipt")
 }
