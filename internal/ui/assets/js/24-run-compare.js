@@ -89,7 +89,8 @@ function renderCompare(c) {
 		const hostCell = document.createElement("td");
 		const hostLink = document.createElement("a");
 		hostLink.href = "/ui/hosts/" + encodeURIComponent(h.host);
-		hostLink.textContent = h.host;
+		hostLink.textContent = hostLabel(h.host);
+		hostLink.title = h.host;
 		hostCell.appendChild(hostLink);
 		row.appendChild(hostCell);
 		const verdict = COMPARE_VERDICTS[h.verdict] || { cls: "", label: h.verdict };

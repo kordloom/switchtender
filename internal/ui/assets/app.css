@@ -1499,3 +1499,18 @@ td.col-labels .label-wrap { flex-wrap: nowrap; }
 	.copy-btn { width: 34px; height: 34px; }
 	.modal-close, .drill-close { padding: 10px 12px; font-size: 22px; }
 }
+
+/* A phone-width run row cannot hold a status chip, a tool badge, a name, a duration, and a time
+   on one line; the name lost the squeeze and ellipsized to a letter or two. The name shares the
+   top line with the status chip and everything else drops to a second line, time pushed to the
+   right edge. The zero-height break sits between the two order groups; the chevron goes, since a
+   full-width tappable row already says it opens. Scoped to the recent-runs list: the fleet rows
+   hold one line fine. */
+@media (max-width: 520px) {
+	#recent .ov-row { flex-wrap: wrap; row-gap: 5px; }
+	#recent .ov-row::after { content: ""; flex-basis: 100%; height: 0; order: 1; }
+	#recent .ov-row .tool-badge, #recent .ov-row .ov-row-meta { order: 2; }
+	#recent .ov-row .tool-badge { flex: none; }
+	#recent .ov-row .ov-row-meta.reltime { margin-left: auto; }
+	#recent .ov-row .ov-row-go { display: none; }
+}

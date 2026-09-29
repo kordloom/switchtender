@@ -75,7 +75,8 @@ async function loadFleet() {
 			hostCell.className = "mono";
 			const hostLink = document.createElement("a");
 			hostLink.href = "/ui/hosts/" + encodeURIComponent(h.host);
-			hostLink.textContent = h.host;
+			hostLink.textContent = hostLabel(h.host);
+			hostLink.title = h.host;
 			hostCell.appendChild(hostLink);
 			tr.appendChild(hostCell);
 			const fails = document.createElement("td");
@@ -128,7 +129,8 @@ async function loadDrift() {
 			hostCell.className = "mono";
 			const hostLink = document.createElement("a");
 			hostLink.href = "/ui/hosts/" + encodeURIComponent(h.host);
-			hostLink.textContent = h.host;
+			hostLink.textContent = hostLabel(h.host);
+			hostLink.title = h.host;
 			hostCell.appendChild(hostLink);
 			tr.appendChild(hostCell);
 			const state = document.createElement("td");
