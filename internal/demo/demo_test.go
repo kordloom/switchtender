@@ -78,7 +78,7 @@ func TestSeedGovernanceShowsTheGateHoldingAndReleasing(t *testing.T) {
 	approver := &fakeApprover{store: store}
 	deps := Deps{Submitter: &fakeSubmitter{store: store}, Runs: store, Approver: approver}
 
-	seedGovernance(ctx, deps, "site.yml", "inv.ini", "infra/network", zap.NewNop())
+	seedGovernance(ctx, deps, "site.yml", "inv.ini", "infra/network", seededIDs{}, zap.NewNop())
 
 	all, err := store.List(ctx)
 	if err != nil {

@@ -842,7 +842,7 @@ func TestSeedMultiToolSkipsMissingToolsAndWarnsOnce(t *testing.T) {
 	deps.Submitter = &terminalSubmitter{runs: stores.Runs, audits: stores.Audit}
 
 	core, logs := observer.New(zapcore.WarnLevel)
-	if err := seedMultiTool(ctx, deps, "/srv/infra", "site.yml", "inv.ini", zap.New(core)); err != nil {
+	if err := seedMultiTool(ctx, deps, "/srv/infra", "site.yml", "inv.ini", seededIDs{}, zap.New(core)); err != nil {
 		t.Fatalf("seedMultiTool() error = %v", err)
 	}
 
@@ -883,7 +883,7 @@ func TestSeedMultiToolReportsASubmitFailure(t *testing.T) {
 	deps := stores.deps()
 	deps.Submitter = &refusingSubmitter{}
 
-	err := seedMultiTool(ctx, deps, "/srv/infra", "site.yml", "inv.ini", zap.NewNop())
+	err := seedMultiTool(ctx, deps, "/srv/infra", "site.yml", "inv.ini", seededIDs{}, zap.NewNop())
 	if err == nil {
 		t.Fatal("seedMultiTool() with a refusing submitter = nil error, want the failure returned")
 	}
@@ -1082,7 +1082,7 @@ func TestSeedGovernanceDegradesWithoutFailingTheSeed(t *testing.T) {
 	deps.Submitter = &refusingSubmitter{}
 	deps.Approver = &releasingApprover{runs: stores.Runs}
 	core, logs := observer.New(zapcore.WarnLevel)
-	seedGovernance(ctx, deps, "site.yml", "inv.ini", "/srv/infra", zap.New(core))
+	seedGovernance(ctx, deps, "site.yml", "inv.ini", "/srv/infra", seededIDs{}, zap.New(core))
 	if logs.FilterMessageSnippet("seed held run").Len() == 0 {
 		t.Error("a refused held run was not reported")
 	}
@@ -1093,7 +1093,7 @@ func TestSeedGovernanceDegradesWithoutFailingTheSeed(t *testing.T) {
 	deps.Submitter = &terminalSubmitter{runs: stores.Runs, audits: stores.Audit}
 	deps.Approver = sameActorApprover{}
 	core, logs = observer.New(zapcore.WarnLevel)
-	seedGovernance(ctx, deps, "site.yml", "inv.ini", "/srv/infra", zap.New(core))
+	seedGovernance(ctx, deps, "site.yml", "inv.ini", "/srv/infra", seededIDs{}, zap.New(core))
 	if logs.FilterMessageSnippet("approve seeded run").Len() == 0 {
 		t.Error("a refused approval was not reported")
 	}
@@ -1104,7 +1104,7 @@ func TestSeedGovernanceDegradesWithoutFailingTheSeed(t *testing.T) {
 	deps.Submitter = &terminalSubmitter{runs: stores.Runs, audits: stores.Audit}
 	deps.Clock = NewSeedClock()
 	before := deps.Clock.cursor
-	seedGovernance(ctx, deps, "site.yml", "inv.ini", "/srv/infra", zap.NewNop())
+	seedGovernance(ctx, deps, "site.yml", "inv.ini", "/srv/infra", seededIDs{}, zap.NewNop())
 	runs, err := stores.Runs.List(ctx)
 	if err != nil {
 		t.Fatalf("Runs.List() error = %v", err)
@@ -1133,7 +1133,7 @@ func TestSeedGovernanceHoldsATerraformDestroyWithoutRunningIt(t *testing.T) {
 	deps := stores.deps()
 	deps.Submitter = &terminalSubmitter{runs: stores.Runs, audits: stores.Audit}
 
-	seedGovernance(ctx, deps, "site.yml", "inv.ini", "/srv/infra/network", zap.NewNop())
+	seedGovernance(ctx, deps, "site.yml", "inv.ini", "/srv/infra/network", seededIDs{}, zap.NewNop())
 
 	runs, err := stores.Runs.List(ctx)
 	if err != nil {
@@ -1175,5 +1175,46 @@ func TestSeedReportsASubmitFailure(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "seed run") {
 		t.Errorf("Seed() error = %v, want the failing seed step named", err)
+	}
+}
+
+// TestSeededRunsNameTheTemplatesThatFiredThem pins the Templates page's History button.
+//
+// Runs used to record a hand-written origin like "tpl_deploy_web" while the template beside them
+// held a generated id. Nothing compared the two, so History, which searches runs by the template's
+// real id, found nothing on every row while its tooltip promised "See every run this template has
+// produced". A button that is wrong every time is worse than one that is absent.
+func TestSeededRunsNameTheTemplatesThatFiredThem(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	stores := newSeedStores()
+	ids := seedConfig(ctx, stores.deps(), zap.NewNop())
+
+	templates, err := stores.Templates.List(ctx)
+	if err != nil {
+		t.Fatalf("Templates.List() error = %v", err)
+	}
+	if len(templates) == 0 {
+		t.Fatal("seedConfig() stored no templates")
+	}
+	real := make(map[string]bool, len(templates))
+	for _, tpl := range templates {
+		real[tpl.ID] = true
+	}
+
+	// Every name the run seeding asks for must resolve to a template that was actually stored.
+	// Asking by a name nothing was seeded under silently falls back to the old placeholder, which
+	// is the defect: the fallback keeps the demo running and leaves History empty.
+	for _, name := range []string{"Deploy web", "Reconcile inventory", "Fleet capacity report",
+		"Provision network"} {
+		got := ids.id(ids.Templates, name, "tpl_placeholder")
+		if got == "tpl_placeholder" {
+			t.Errorf("no template was seeded under %q, so runs claiming it fall back to a "+
+				"placeholder id and its History button opens empty", name)
+			continue
+		}
+		if !real[got] {
+			t.Errorf("template %q resolved to %s, which no stored template holds", name, got)
+		}
 	}
 }
