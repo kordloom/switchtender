@@ -13,7 +13,7 @@ tool produces the evidence, and your assessor decides whether your program satis
 
 Every mapping below points at the tamper-evident chain and the change register
 `switchtender audit report` renders from it, all in the free core, shipping in the current
-download. Nothing here is a paid feature. The paid Governed tier (early access) adds
+download. Nothing here is a paid feature. The paid Assurance service (design partners) adds
 control-mapped evidence packs and auditor-facing attestation reports, assembled for you on the same
 cadence the free `--evidence-dir` registers already run on.
 
