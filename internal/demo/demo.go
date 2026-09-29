@@ -49,6 +49,12 @@ type Submitter interface {
 	SubmitPipeline(ctx context.Context, name, inventory string, steps []run.PipelineStep, opts ...run.SubmitOption) (*run.Run, error)
 }
 
+// Approver decides on a run the policy gate is holding. The dispatcher satisfies it.
+type Approver interface {
+	// Approve releases a held run for execution and records who decided.
+	Approve(ctx context.Context, id, by, byType string) (*run.Run, error)
+}
+
 // Deps are the stores and submitter the seeder writes through.
 type Deps struct {
 	// Submitter runs the demo runs through the engine.
@@ -63,6 +69,9 @@ type Deps struct {
 	// Policies and Users hold sample governance rules and accounts, so those pages show real data.
 	Policies policy.Store
 	Users    user.Store
+	// Approver decides on the held run the governance seed approves. Nil seeds the run the gate is
+	// still holding and skips the approved one, so a bare Deps still seeds.
+	Approver Approver
 	// InvSources holds sample dynamic inventory sources, so that page shows the relationship
 	// between a source and the inventory it refreshes.
 	InvSources invsource.Store
@@ -247,10 +256,57 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 		return err
 	}
 
+	seedGovernance(ctx, d, playbook, inv, tfDir, log)
+
 	normalizeClaimStamps(ctx, d, log)
 
 	log.Info("demo: seeded sample projects, templates, inventories, and runs")
 	return nil
+}
+
+// seedGovernance seeds the two runs that show the policy gate doing its job: one a rule is still
+// holding, and one that was held, decided on by a second person, and only then executed.
+//
+// Every other seeded run goes straight from submit to execution, so the demo showed the engine and it
+// showed the evidence but never the gate between them. A visitor reading that this is the boundary
+// every change comes through found the rules listed as configuration and not one run any of them had
+// ever stopped, which left the product's central claim as the one thing the demo could not show.
+func seedGovernance(ctx context.Context, d Deps, playbook, inv, tfDir string, log *zap.Logger) {
+	// A production destroy, held and left that way, so the runs list always has a change the gate is
+	// refusing right now. It never executes, so it needs no terraform on the host.
+	held := seedOpts(ctx, d, "api", "", "deploy-bot",
+		map[string]string{"env": "prod", "ticket": "OPS-511"},
+		run.WithTool(run.ToolTerraform), run.WithCommand(tfDir),
+		run.WithRequireApproval(true), run.WithRequireDistinctApprover(true),
+		run.WithHeldByPolicy("prod terraform destroy"))
+	if _, err := d.Submitter.Submit(ctx, "", "", held...); err != nil {
+		log.Warn("demo: seed held run: " + err.Error())
+	} else if d.Clock != nil {
+		// There is nothing to settle: the run is held and reaches no terminal state, so the clock is
+		// stepped here instead of by settle, keeping the next run's window in order.
+		d.Clock.advance(seedRunGap)
+	}
+
+	if d.Approver == nil {
+		return
+	}
+	// The same gate carried all the way through: held by the production rule, released by somebody
+	// other than the person who asked for it, then executed. This is the run whose evidence carries a
+	// decision and the digest of the exact spec that decision released.
+	opts := seedOpts(ctx, d, "template", "tpl_deploy_web", "deploy-bot",
+		map[string]string{"env": "prod", "ticket": "OPS-512"},
+		run.WithRequireApproval(true), run.WithRequireDistinctApprover(true),
+		run.WithHeldByPolicy("any production run"))
+	r, err := d.Submitter.Submit(ctx, playbook, inv, opts...)
+	if err != nil {
+		log.Warn("demo: seed approved run: " + err.Error())
+		return
+	}
+	if _, err := d.Approver.Approve(ctx, r.ID, "admin", "user"); err != nil {
+		log.Warn("demo: approve seeded run: " + err.Error())
+		return
+	}
+	settle(ctx, d, r.ID)
 }
 
 // normalizeClaimStamps pulls each seeded run's claimed_at back into its own window. The dispatcher's

@@ -146,6 +146,7 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 		Inventories: bundle.Inventories(), Templates: bundle.Templates(),
 		Credentials: bundle.Credentials(),
 		Policies:    bundle.Policies(), Users: bundle.Users(),
+		Approver:   disp,
 		InvSources: bundle.InventorySources(),
 		Audit:      bundle.Audits(),
 		Schedules:  bundle.Schedules(),
