@@ -104,3 +104,55 @@ func TestAPlaybookGradeSaysWhatItLookedAt(t *testing.T) {
 			"the grade is blind to what the playbook does: %v", got.Reasons)
 	}
 }
+
+// TestNothingIsIrreversibleAndLowRisk holds the one relationship between the two graders.
+//
+// They answer different questions on purpose: risk asks how bad it is if this goes wrong, and
+// reversibility asks whether you get a second chance. Those come apart in one direction only. A
+// reboot is high risk and fully reversible, which is fine and is why the lists differ. The other
+// direction is not fine: a command that cannot be undone has already gone as wrong as it can, so
+// grading it low risk tells an approver to relax about the one run they cannot take back.
+//
+// This drifted in exactly that direction twice. "drop schema" reached the risk list and never
+// reached the permanence list. "rm -r -f" was read as flags by one grader and matched as a string
+// by the other, so the same command was irreversible and low risk at once.
+func TestNothingIsIrreversibleAndLowRisk(t *testing.T) {
+	t.Parallel()
+	commands := []string{
+		"aws s3 rb s3://prod-backups --force", "kubectl delete namespace production",
+		"helm uninstall payments -n prod", "wipefs -a /dev/sdb", "shred -u /etc/keys/master.pem",
+		"psql -c \"DROP SCHEMA public CASCADE\"", "find /var/backups -mtime +30 -delete",
+		"rm -r -f /var/lib/data", "rm -f -r /var/lib/data", "rm --recursive --force /data",
+		"rm -rf /tmp/scratch", "tofu apply -destroy", "terraform apply -destroy tfplan",
+		"az group delete --name prod-rg --yes", "gcloud compute instances delete web-1 --quiet",
+		"aws rds delete-db-instance --db-instance-identifier prod",
+	}
+	for _, c := range commands {
+		r := &Run{Tool: ToolBash, Command: c}
+		rev := AssessReversibility(r)
+		risk := AssessRisk(r)
+		if rev.Class != Irreversible {
+			t.Errorf("%q graded %q, want irreversible", c, rev.Class)
+			continue
+		}
+		if risk.Level != RiskHigh {
+			t.Errorf("%q cannot be undone yet graded %q risk, so an approver is told to relax "+
+				"about the one run they cannot take back", c, risk.Level)
+		}
+	}
+}
+
+// TestAnOrdinaryCommandIsNotGradedPermanent keeps the markers from widening until the grade means
+// nothing. A rule that fires on everything gets switched off, and then it protects nothing.
+func TestAnOrdinaryCommandIsNotGradedPermanent(t *testing.T) {
+	t.Parallel()
+	for _, c := range []string{
+		"systemctl restart nginx", "ansible-playbook site.yml", "aws s3 ls",
+		"rm -i /tmp/one.txt", "kubectl get pods", "terraform plan", "apt-get install -y curl",
+		"kubectl delete deployment web", "helm upgrade payments ./chart",
+	} {
+		if got := AssessReversibility(&Run{Tool: ToolBash, Command: c}).Class; got == Irreversible {
+			t.Errorf("%q graded irreversible, which widens the rule until it is ignored", c)
+		}
+	}
+}

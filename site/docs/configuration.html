@@ -632,7 +632,7 @@ that variable is unset.</p>
 <tr>
 <td><code>--evidence-dir</code></td>
 <td>none</td>
-<td>Directory for periodic change registers. Set together with <code>--evidence-cadence</code>.</td>
+<td>Directory for periodic change registers. Set together with <code>--evidence-cadence</code>. Team: the server refuses to start with a cadence set on a Community license.</td>
 </tr>
 <tr>
 <td><code>--evidence-cadence</code></td>
@@ -861,14 +861,41 @@ each tier covers is listed at <a href="https://switchtender.com/pricing">https:/
 <p>A license is read from <code>SWITCHTENDER_LICENSE</code>, or from <code>switchtender-license.json</code> in the same
 directory as the database. A license this install cannot parse or that has lapsed reads as
 Community rather than failing the server, so an expiry never takes an install down.</p>
+<h2 id="assess">assess</h2>
+<p>Reports what an automation export holds and what governing it would change, without writing
+anything and without a database. It reads an export the same way <code>import</code> does, then grades every
+template it found through the same risk and reversibility graders the product uses at run time, so
+a number in an assessment cannot disagree with what a run would later say.</p>
+<pre><code>switchtender assess awx awx-export.json
+switchtender assess chef chef-nodes.json
+</code></pre>
+<p>Formats are <code>awx</code>, <code>semaphore</code>, <code>chef</code>, and <code>puppet</code>. An AWX-format export also covers Ansible
+Automation Platform, Tower, and Ascender.</p>
+<p>The output has three parts: what is in the export, what survives the move, and what changes about
+how it is governed. The third part names the templates that cannot be undone, the ones carrying a
+destructive signal, the credentials more than one template shares, and the templates targeting no
+stored inventory.</p>
+<p>Grades are a floor rather than a measurement. An Ansible template keeps its work in a playbook, and
+at assessment time that playbook is in a repository nothing has fetched, so reading one can only
+ever raise a grade. The report says how many templates that applies to rather than leaving the
+numbers looking more settled than they are.</p>
 <h2 id="import">import</h2>
-<p>Migrates from AWX, Semaphore, Rundeck, Jenkins, or cron. Which objects each one carries across is in
+<p>Migrates from AWX, Semaphore, Chef, Puppet, Rundeck, Jenkins, or cron. Which objects each one carries across is in
 <a href="/docs/migration#what-each-source-brings-over">what each source brings over</a>.</p>
 <ul>
 <li><code>import awx &lt;export.json&gt; [--apply]</code> brings projects, inventories static and dynamic, credential
 shells, job templates and workflows, surveys, and schedules.</li>
 <li><code>import semaphore &lt;export.json&gt; [--apply]</code> brings the same kinds from a Semaphore export, apart
 from the dynamic inventory sources AWX alone carries.</li>
+<li><code>import chef &lt;nodes.json&gt; [--apply]</code> brings one inventory of the fleet: every node a host,
+grouped by its <code>chef_environment</code> and by every <code>role[...]</code> in its run list, carrying the ohai
+facts that identify a machine, with <code>ipaddress</code> also set as <code>ansible_host</code>. Accepts an array of
+node documents, a single node, or an object keyed by node name. Cookbooks and recipes are not
+imported and the recipes seen are named in the report.</li>
+<li><code>import puppet &lt;nodes.json|facts.json|nodes.txt&gt; [--apply]</code> brings one inventory of the fleet,
+grouped by environment, from a PuppetDB nodes query, a PuppetDB facts query, or the plain
+certname list <code>puppet node list</code> prints. Deactivated and expired nodes are left out and counted.
+Manifests and modules are not imported.</li>
 <li><code>import rundeck &lt;jobs.yaml|project-archive.zip&gt; [--inventory &lt;name&gt;] [--apply]</code> brings templates,
 surveys, and schedules from either a job export or a project archive, told apart by content. An
 archive brings one project as well, but only when its source control configuration names a

@@ -4,16 +4,16 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Migrate your setup | SwitchTender docs</title>
-	<meta name="description" content="You do not rebuild your automation by hand. SwitchTender reads an AWX, Semaphore, Rundeck, or Jenkins export, a Rundeck project archive, or a plain crontab, and creates the equivalent objects in one">
+	<meta name="description" content="You do not rebuild your automation by hand. SwitchTender reads an AWX, Semaphore, Chef, Puppet, Rundeck, or Jenkins export, a Rundeck project archive, or a plain crontab, and creates the equivalent">
 	<link rel="canonical" href="https://switchtender.com/docs/tutorial-migrate">
 	<meta property="og:title" content="Migrate your setup | SwitchTender docs">
-	<meta property="og:description" content="You do not rebuild your automation by hand. SwitchTender reads an AWX, Semaphore, Rundeck, or Jenkins export, a Rundeck project archive, or a plain crontab, and creates the equivalent objects in one">
+	<meta property="og:description" content="You do not rebuild your automation by hand. SwitchTender reads an AWX, Semaphore, Chef, Puppet, Rundeck, or Jenkins export, a Rundeck project archive, or a plain crontab, and creates the equivalent">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/tutorial-migrate">
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
 	<meta name="twitter:card" content="summary_large_image">
 	<meta name="twitter:title" content="Migrate your setup | SwitchTender docs">
-	<meta name="twitter:description" content="You do not rebuild your automation by hand. SwitchTender reads an AWX, Semaphore, Rundeck, or Jenkins export, a Rundeck project archive, or a plain crontab, and creates the equivalent objects in one">
+	<meta name="twitter:description" content="You do not rebuild your automation by hand. SwitchTender reads an AWX, Semaphore, Chef, Puppet, Rundeck, or Jenkins export, a Rundeck project archive, or a plain crontab, and creates the equivalent">
 	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
 	<script type="application/ld+json">
 {
@@ -24,7 +24,7 @@
   "name": "SwitchTender",
   "url": "https://switchtender.com/"
  },
- "description": "You do not rebuild your automation by hand. SwitchTender reads an AWX, Semaphore, Rundeck, or Jenkins export, a Rundeck project archive, or a plain crontab, and creates the equivalent objects in one",
+ "description": "You do not rebuild your automation by hand. SwitchTender reads an AWX, Semaphore, Chef, Puppet, Rundeck, or Jenkins export, a Rundeck project archive, or a plain crontab, and creates the equivalent",
  "headline": "Migrate your setup",
  "isPartOf": {
   "@type": "WebSite",
@@ -65,7 +65,7 @@
 		</aside>
 		<main class="dcontent prose">
 			<h1 id="migrate-your-setup">Migrate your setup</h1>
-<p>You do not rebuild your automation by hand. SwitchTender reads an AWX, Semaphore, Rundeck, or
+<p>You do not rebuild your automation by hand. SwitchTender reads an AWX, Semaphore, Chef, Puppet, Rundeck, or
 Jenkins export, a Rundeck project archive, or a plain crontab, and creates the equivalent objects in
 one pass.</p>
 <p>The five sources do not carry the same things. AWX and Semaphore export a whole control plane, so
@@ -83,7 +83,7 @@ from its API into one JSON document. Rundeck exports a project's jobs as YAML or
 project as an archive from Project Settings; either one uploads and the importer tells them apart
 by content. Jenkins has no export file at all, so zip its <code>jobs</code> directory and upload that.</li>
 <li>Open Migrate from the top of the overview, or go to <code>/ui/migrate</code>.</li>
-<li>Choose the format: AWX, Semaphore, Rundeck, or Jenkins. Rundeck and Jenkins ask for the inventory
+<li>Choose the format: AWX, Semaphore, Chef, Puppet, Rundeck, or Jenkins. Rundeck and Jenkins ask for the inventory
 their templates should target, since neither names hosts of its own.</li>
 <li>Paste the export, or choose the file, and select Preview. Nothing is written yet. You get a
 report of exactly what would be created, with every warning.</li>

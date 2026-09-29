@@ -66,5 +66,6 @@ switchtender audit anchor
 ```
 
 The Assurance service (design partners) assembles these on a cadence, mapped to your controls and written
-to an archive, so the sample a review asks for exists before anyone asks. The report itself, the
-free `--evidence-dir` scheduling, and verifying it all offline stay free in the core.
+to an archive, so the sample a review asks for exists before anyone asks. Producing a dossier for one run, and verifying
+any of it offline, stay free in the core. Scheduling registers on a cadence with `--evidence-dir` is
+Team, as is the period report `switchtender audit report` renders.

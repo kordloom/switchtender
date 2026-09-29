@@ -36,6 +36,14 @@ type createPolicyRequest struct {
 	Actor string `json:"actor,omitempty"`
 	// MinRisk matches only runs assessed at least this risky: low, medium, or high. Empty for any.
 	MinRisk string `json:"min_risk,omitempty"`
+	// Reversibility matches only runs at least as hard to undo as this class: reversible, costly,
+	// or irreversible. Empty for any.
+	//
+	// Absent here until now, while the stored policy carried it, the engine evaluated it, and a
+	// YAML policy file could set it. So the one rule this product tells people to write, that a
+	// change nobody can take back needs a second person, could not be written through the API or
+	// the page. It worked only for somebody who hand-edited a file.
+	Reversibility string `json:"reversibility,omitempty"`
 	// Effect is what a match does: require_approval (the default) or deny.
 	Effect string `json:"effect,omitempty"`
 	// RequireDistinctApprover refuses a decision by the person who asked for the change.
@@ -54,11 +62,15 @@ type createPolicyRequest struct {
 // difference between one blanket gate and an authorization boundary around agents, which is the
 // thing being sold, so it belongs here and both handlers now read the same answer.
 func usesFullPolicyEngine(req createPolicyRequest) bool {
-	return req.Effect == policy.EffectDeny ||
-		req.MinRisk != "" ||
-		req.RequireDistinctApprover ||
-		req.ActorKind != "" ||
-		req.Actor != ""
+	// Delegates rather than repeating the condition. Three copies of this rule existed once and
+	// disagreed, which is how actor scoping shipped free; a fourth copy here would be the same
+	// mistake with the same consequence. Building the policy the request describes and asking it
+	// is the only form that cannot drift.
+	return (&policy.Policy{
+		Effect: req.Effect, MinRisk: req.MinRisk, Reversibility: req.Reversibility,
+		RequireDistinctApprover: req.RequireDistinctApprover,
+		ActorKind:               req.ActorKind, Actor: req.Actor,
+	}).Advanced()
 }
 
 // resolveMaxDestroy returns the request's max_destroy, defaulting a missing value to the disabled
@@ -121,7 +133,8 @@ func createPolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 			ID: policy.NewID(), Name: req.Name, Tool: req.Tool,
 			CommandContains: req.CommandContains, InventoryID: req.InventoryID, Queue: req.Queue,
 			ExcludeDryRun: req.ExcludeDryRun, MaxDestroy: resolveMaxDestroy(req.MaxDestroy),
-			ActorKind: req.ActorKind, Actor: req.Actor, MinRisk: req.MinRisk, Effect: req.Effect,
+			ActorKind: req.ActorKind, Actor: req.Actor, MinRisk: req.MinRisk,
+			Reversibility: req.Reversibility, Effect: req.Effect,
 			RequireDistinctApprover: req.RequireDistinctApprover,
 			CreatedAt:               time.Now(),
 		}
@@ -183,7 +196,8 @@ func updatePolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 			ID: id, Name: req.Name, Tool: req.Tool,
 			CommandContains: req.CommandContains, InventoryID: req.InventoryID, Queue: req.Queue,
 			ExcludeDryRun: req.ExcludeDryRun, MaxDestroy: resolveMaxDestroy(req.MaxDestroy),
-			ActorKind: req.ActorKind, Actor: req.Actor, MinRisk: req.MinRisk, Effect: req.Effect,
+			ActorKind: req.ActorKind, Actor: req.Actor, MinRisk: req.MinRisk,
+			Reversibility: req.Reversibility, Effect: req.Effect,
 			RequireDistinctApprover: req.RequireDistinctApprover,
 			CreatedAt:               existing.CreatedAt,
 		}

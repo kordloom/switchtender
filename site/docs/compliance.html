@@ -74,7 +74,9 @@ verifier are Community features and always will be. The period change register t
 <code>switchtender audit report</code> renders over a date range is a Team feature, so the evidence is
 yours for nothing and the report that assembles it for an auditor is what a license pays for. The paid Assurance service (design partners) adds
 control-mapped evidence packs and auditor-facing attestation reports, assembled for you on the same
-cadence the free <code>--evidence-dir</code> registers already run on.</p>
+cadence the <code>--evidence-dir</code> registers run on, which is itself a Team feature: the server refuses
+to start with <code>--evidence-cadence</code> set on a Community license rather than quietly writing a paid
+artifact every period.</p>
 <h2 id="what-the-record-holds">What the record holds</h2>
 <p>Every authenticated change is one entry in a SHA-256 hash chain. Each entry commits to:</p>
 <table>

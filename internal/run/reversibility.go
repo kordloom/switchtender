@@ -1,6 +1,9 @@
 package run
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // Reversibility grades whether a run can be taken back, so a policy can demand more of a change
 // that cannot be undone than of one that can. It is computed from the run and never stored, the way
@@ -97,12 +100,22 @@ func AssessReversibilityFrom(r *Run, ev ReversibilityEvidence) Reversibility {
 		}
 	}
 
-	cmd := strings.ToLower(r.Command)
+	// The same text the risk grader reads, for the same reason and with more at stake. A variable
+	// is string material a playbook splices into what it executes, so a destructive command riding
+	// in -e was graded fully reversible while the identical text on the command line was graded
+	// permanent. Reversibility is the grade an approval policy is told to hold on, so the grader
+	// that misses it is the one whose miss costs something.
+	var vars strings.Builder
+	writeVarText(&vars, r.ExtraVars, maxVarScanDepth)
+	cmd := strings.ToLower(r.Command + " " + r.Playbook + vars.String())
 	var reasons []string
 	for _, marker := range permanentMarkers {
 		if strings.Contains(cmd, marker) {
 			reasons = append(reasons, "command contains "+marker+", which cannot be undone from here")
 		}
+	}
+	if recursiveForceRemove(cmd) {
+		reasons = append(reasons, "command removes recursively and forcibly, which cannot be undone from here")
 	}
 	if len(reasons) > 0 {
 		return Reversibility{Class: Irreversible, Reasons: reasons}
@@ -161,8 +174,57 @@ func AssessReversibilityFrom(r *Run, ev ReversibilityEvidence) Reversibility {
 // table is destructive and permanent. Grading both the same way would make an irreversibility rule
 // fire on every restart and get switched off.
 var permanentMarkers = []string{
-	"terraform destroy", "tofu destroy", "destroy -", "rm -rf", "rm -fr", "mkfs", "dd if=",
-	"drop table", "drop database", "truncate ", "del /f", "remove-item", "format-volume",
+	// Infrastructure teardown. Both spellings: the subcommand, and the flag on apply, which is
+	// how a destroy usually reaches production because it is what a plan file replays.
+	"terraform destroy", "tofu destroy", "destroy -", "-destroy",
+	// Filesystem and block device.
+	"rm -rf", "rm -fr", "mkfs", "dd if=", "wipefs", "shred ", "blkdiscard", "sgdisk",
+	"lvremove", "vgremove", "pvremove", "del /f", "remove-item", "format-volume",
+	// A find that deletes what it matched, and an rsync that deletes what the source lacks. Both
+	// remove files chosen by a pattern, which is the shape that surprises people most.
+	"-delete",
+	// Databases. Dropping a schema loses what it held exactly as dropping a table does; it was
+	// absent here while the narrower two were present, so an estate's worst statement graded safe.
+	"drop table", "drop database", "drop schema", "drop keyspace", "truncate ", "flushall",
+	// Cloud object and instance deletion. An operator reaches for these far more often than for
+	// mkfs, and none of them was recognized at all.
+	"aws s3 rb", "s3 rm ", "delete-bucket", "delete-db-instance", "delete-db-cluster",
+	"terminate-instances", "delete-table", "instances delete", "group delete",
+	// Kubernetes objects whose removal takes the data with them. A deployment is a definition and
+	// comes back; a namespace and a volume claim do not.
+	"kubectl delete namespace", "kubectl delete ns ", "kubectl delete pvc", "kubectl delete pv ",
+	"helm uninstall", "helm delete",
+}
+
+// rmFlags matches an rm invocation and the run of flag tokens that follows it, stopping at the
+// first argument that is not a flag.
+var rmFlags = regexp.MustCompile(`(?:^|[;&|]|\s)rm((?:\s+-{1,2}[a-zA-Z-]+)+)`)
+
+// recursiveForceRemove reports whether a command runs rm recursively and forcibly, however the
+// flags were spelled.
+//
+// Matching the literal "rm -rf" caught the common spelling and missed every other one. "rm -r -f",
+// "rm -f -r", and "rm --recursive --force" do exactly the same thing and graded fully reversible,
+// which is the worst direction for this grade to be wrong in. The flags are read rather than the
+// string compared, so the arrangement stops mattering.
+func recursiveForceRemove(cmd string) bool {
+	for _, m := range rmFlags.FindAllStringSubmatch(cmd, -1) {
+		var recursive, force bool
+		for _, flag := range strings.Fields(m[1]) {
+			switch {
+			case strings.HasPrefix(flag, "--"):
+				recursive = recursive || flag == "--recursive"
+				force = force || flag == "--force"
+			default:
+				recursive = recursive || strings.ContainsAny(flag, "rR")
+				force = force || strings.Contains(flag, "f")
+			}
+		}
+		if recursive && force {
+			return true
+		}
+	}
+	return false
 }
 
 // MeetsReversibilityFloor reports whether a run graded class is at least as hard to undo as floor.

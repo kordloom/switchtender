@@ -18,7 +18,7 @@
  "@context": "https://schema.org",
  "@type": "SoftwareApplication",
  "applicationCategory": "DeveloperApplication",
- "description": "The control plane for infrastructure automation. Every change, whether it comes from a person, a schedule, or an AI agent, passes one governed path of request, policy, and approval, and leaves a cryptographically signed receipt that can be verified offline without the vendor. Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go from a single self-hosted Go binary, agentless over SSH.",
+ "description": "The control plane for infrastructure automation. Every change it runs, whether from a person, a schedule, or an AI agent, passes one governed path of request, policy, and approval, and leaves a cryptographically signed receipt that can be verified offline without the vendor. It does not claim every change to your infrastructure went through it: anyone holding their own SSH key can change a host behind it. Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go from a single self-hosted Go binary, agentless over SSH.",
  "featureList": [
   "Agentless: reaches managed hosts over SSH with nothing installed on them",
   "Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go",
@@ -234,7 +234,7 @@ switchtender witness --server https://demo.switchtender.com --once</code></pre>
 		<section class="section wrap" id="migrate">
 			<div class="section-head reveal">
 				<h2>Bring the whole thing<br>with you.</h2>
-				<p>A migration is one command, not a rebuild. AWX, Semaphore, Rundeck, and Jenkins each have an importer, and Ansible Automation Platform, Tower, and Ascender export through the same awxkit command with the same top-level keys, so the AWX importer reads them too. Even a crontab imports, line by line, into governed schedules. Export, preview exactly what will land, then apply. Projects, inventories with their hosts and groups, dynamic inventory sources, job templates, surveys, schedules, and credential shells all come across in one pass. A malformed asset is skipped with a warning instead of failing the import, so even a partial export migrates everything it can.</p>
+				<p>A migration is one command, not a rebuild. AWX, Semaphore, Chef, Puppet, Rundeck, and Jenkins each have an importer, and Ansible Automation Platform, Tower, and Ascender export through the same awxkit command with the same top-level keys, so the AWX importer reads them too. Even a crontab imports, line by line, into governed schedules. Export, preview exactly what will land, then apply. Projects, inventories with their hosts and groups, dynamic inventory sources, job templates, surveys, schedules, and credential shells all come across in one pass. A malformed asset is skipped with a warning instead of failing the import, so even a partial export migrates everything it can.</p>
 			</div>
 			<div class="code reveal">
 				<button class="copy" aria-label="Copy">Copy</button>
@@ -589,6 +589,8 @@ open http://localhost:8080/ui/</code></pre>
 				<a href="/jenkins-alternative">vs Jenkins</a>
 				<a href="/ascender-alternative">vs Ascender</a>
 				<a href="/rundeck-alternative">vs Rundeck</a>
+				<a href="/chef-eol">Off Chef</a>
+				<a href="/puppet-eol">Off Puppet</a>
 				<a href="/privacy">Privacy</a>
 				<a href="/terms">Terms</a>
 				<a href="/refund">Refunds</a>

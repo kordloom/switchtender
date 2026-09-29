@@ -146,7 +146,7 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--facts-interval` | `24h` | Minimum spacing between retained host state snapshots. The estate history keeps the newest gather in each period, which is what answers what a host looked like on a date. Zero keeps every gather, at roughly a hundred times the disk. |
 | `--retain-facts` | `400` | Keep only this many host state snapshots for each host. A fact set is hundreds of kilobytes, so unlike summaries this is bounded by default. Zero keeps every snapshot forever. |
 | `--retention-interval` | `1h` | How often the retention sweeper runs. |
-| `--evidence-dir` | none | Directory for periodic change registers. Set together with `--evidence-cadence`. |
+| `--evidence-dir` | none | Directory for periodic change registers. Set together with `--evidence-cadence`. Team: the server refuses to start with a cadence set on a Community license. |
 | `--evidence-cadence` | none | How long each change register covers and how often one is written, for example `2160h` for a quarter. Minimum `1h`. Zero writes none. Progress is read from the archive, so a restart resumes from the newest pack rather than starting the period again. |
 | `--forward-url` | none | HTTP endpoint audit events stream to as NDJSON, one JSON object per line, each carrying its `seq:link` receipt. Splunk HEC raw, Elastic, and log routers ingest it directly. |
 | `--forward-header` | none | Header set on every forwarded batch, as `Name: value`, for example an HEC token. Repeatable. |
@@ -255,15 +255,47 @@ A license is read from `SWITCHTENDER_LICENSE`, or from `switchtender-license.jso
 directory as the database. A license this install cannot parse or that has lapsed reads as
 Community rather than failing the server, so an expiry never takes an install down.
 
+## assess
+
+Reports what an automation export holds and what governing it would change, without writing
+anything and without a database. It reads an export the same way `import` does, then grades every
+template it found through the same risk and reversibility graders the product uses at run time, so
+a number in an assessment cannot disagree with what a run would later say.
+
+    switchtender assess awx awx-export.json
+    switchtender assess chef chef-nodes.json
+
+Formats are `awx`, `semaphore`, `chef`, and `puppet`. An AWX-format export also covers Ansible
+Automation Platform, Tower, and Ascender.
+
+The output has three parts: what is in the export, what survives the move, and what changes about
+how it is governed. The third part names the templates that cannot be undone, the ones carrying a
+destructive signal, the credentials more than one template shares, and the templates targeting no
+stored inventory.
+
+Grades are a floor rather than a measurement. An Ansible template keeps its work in a playbook, and
+at assessment time that playbook is in a repository nothing has fetched, so reading one can only
+ever raise a grade. The report says how many templates that applies to rather than leaving the
+numbers looking more settled than they are.
+
 ## import
 
-Migrates from AWX, Semaphore, Rundeck, Jenkins, or cron. Which objects each one carries across is in
+Migrates from AWX, Semaphore, Chef, Puppet, Rundeck, Jenkins, or cron. Which objects each one carries across is in
 [what each source brings over](migration.md#what-each-source-brings-over).
 
 - `import awx <export.json> [--apply]` brings projects, inventories static and dynamic, credential
   shells, job templates and workflows, surveys, and schedules.
 - `import semaphore <export.json> [--apply]` brings the same kinds from a Semaphore export, apart
   from the dynamic inventory sources AWX alone carries.
+- `import chef <nodes.json> [--apply]` brings one inventory of the fleet: every node a host,
+  grouped by its `chef_environment` and by every `role[...]` in its run list, carrying the ohai
+  facts that identify a machine, with `ipaddress` also set as `ansible_host`. Accepts an array of
+  node documents, a single node, or an object keyed by node name. Cookbooks and recipes are not
+  imported and the recipes seen are named in the report.
+- `import puppet <nodes.json|facts.json|nodes.txt> [--apply]` brings one inventory of the fleet,
+  grouped by environment, from a PuppetDB nodes query, a PuppetDB facts query, or the plain
+  certname list `puppet node list` prints. Deactivated and expired nodes are left out and counted.
+  Manifests and modules are not imported.
 - `import rundeck <jobs.yaml|project-archive.zip> [--inventory <name>] [--apply]` brings templates,
   surveys, and schedules from either a job export or a project archive, told apart by content. An
   archive brings one project as well, but only when its source control configuration names a

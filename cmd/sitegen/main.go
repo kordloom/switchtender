@@ -165,6 +165,7 @@ var landingURLs = []string{
 	"https://switchtender.com/semaphore-alternative", "https://switchtender.com/aap-alternative",
 	"https://switchtender.com/rundeck-alternative", "https://switchtender.com/jenkins-alternative",
 	"https://switchtender.com/migration",
+	"https://switchtender.com/chef-eol", "https://switchtender.com/puppet-eol",
 	"https://switchtender.com/privacy",
 	"https://switchtender.com/terms",
 	"https://switchtender.com/refund",
@@ -381,11 +382,18 @@ func switchtenderEntity() map[string]any {
 		"name": "SwitchTender", "url": "https://switchtender.com/",
 		"applicationCategory": "DeveloperApplication",
 		"operatingSystem":     "Linux, macOS, Windows",
-		"description": "The control plane for infrastructure automation. Every change, whether it " +
-			"comes from a person, a schedule, or an AI agent, passes one governed path of request, " +
-			"policy, and approval, and leaves a cryptographically signed receipt that can be " +
-			"verified offline without the vendor. Runs Ansible, Terraform, OpenTofu, Bash, " +
-			"PowerShell, Python, and Go from a single self-hosted Go binary, agentless over SSH.",
+		// Qualified deliberately. This is the machine-readable text answer engines ingest and
+		// quote, and the unqualified form asserted the one thing the compliance docs disclaim: that
+		// every change to an estate went through this. It never sat next to a boundary statement
+		// the way the page copy does, so it was the strongest claim on the site in the place
+		// nobody would see it corrected.
+		"description": "The control plane for infrastructure automation. Every change it runs, " +
+			"whether from a person, a schedule, or an AI agent, passes one governed path of " +
+			"request, policy, and approval, and leaves a cryptographically signed receipt that " +
+			"can be verified offline without the vendor. It does not claim every change to your " +
+			"infrastructure went through it: anyone holding their own SSH key can change a host " +
+			"behind it. Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go from " +
+			"a single self-hosted Go binary, agentless over SSH.",
 		"license":     "https://mariadb.com/bsl11/",
 		"featureList": switchtenderFeatures,
 		"offers": map[string]any{
