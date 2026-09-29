@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/relay"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -65,7 +66,7 @@ func TestWorkerTokenIsConfinedToItsQueues(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	ts := httptest.NewServer(relay.NewHandler(store, pools, nil, nil))
+	ts := httptest.NewServer(relay.NewHandler(store, pools, nil, nil, nil))
 	t.Cleanup(ts.Close)
 
 	// The DMZ token cannot name the production queue.
@@ -101,7 +102,7 @@ func TestWorkerTokenIsConfinedToItsQueues(t *testing.T) {
 func TestSinglePoolServesEveryQueue(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
-	ts := httptest.NewServer(relay.NewHandler(store, relay.SinglePool(testWorkerToken), nil, nil))
+	ts := httptest.NewServer(relay.NewHandler(store, relay.SinglePool(testWorkerToken), nil, nil, nil))
 	t.Cleanup(ts.Close)
 	for _, q := range [][]string{{"prod"}, {"dmz"}, nil} {
 		if code := claimAs(t, ts.URL, testWorkerToken, q); code >= 400 {
@@ -135,5 +136,72 @@ func TestLoadPoolsRefusesAFileItCannotTrust(t *testing.T) {
 					"believing it is confined when it is not")
 			}
 		})
+	}
+}
+
+// TestRelayRecordsWhatCrossesTheBoundary checks that work leaving for a segment the control node
+// cannot reach, and the outcome coming back, both land in the audit chain.
+//
+// The relay is mounted outside the API's own gate, so nothing a worker reported reached the trail at
+// all. For a product whose claim is that every change is provable, a run starting and finishing on a
+// machine nobody here can see is exactly the change worth recording. What is recorded is the
+// decision, not the stream: output, events, summaries, and heartbeats arrive several times a second
+// and would drown the record they are meant to make readable.
+func TestRelayRecordsWhatCrossesTheBoundary(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	audits := audit.NewMemStore()
+	if err := store.Save(ctx, &run.Run{
+		ID: "run_1", Playbook: "site.yml", Status: run.StatusPending, CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	ts := httptest.NewServer(relay.NewHandler(store, relay.SinglePool(testWorkerToken), nil, nil, audits))
+	t.Cleanup(ts.Close)
+	c := relay.NewClient(relay.NewHTTPTransport(ts.URL, testWorkerToken, ts.Client()))
+
+	leased, err := c.Claim(ctx, "worker-dmz", []string{""})
+	if err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+	// Output and heartbeats are the content of a run, not decisions about it.
+	if err := c.AppendLog(ctx, leased.ID, []byte("ok: [web01]\n")); err != nil {
+		t.Fatalf("AppendLog() error = %v", err)
+	}
+	if err := c.Heartbeat(ctx, leased.ID, "worker-dmz"); err != nil {
+		t.Fatalf("Heartbeat() error = %v", err)
+	}
+	leased.Status = run.StatusSucceeded
+	if err := c.Save(ctx, leased); err != nil {
+		t.Fatalf("Save(succeeded) error = %v", err)
+	}
+
+	chain, err := audits.Chain(ctx)
+	if err != nil {
+		t.Fatalf("Chain() error = %v", err)
+	}
+	var claimed, finished bool
+	for _, e := range chain {
+		switch {
+		case strings.Contains(e.Path, "/relay/claim/run_1"):
+			claimed = true
+		case strings.Contains(e.Path, "/relay/finished/run_1/succeeded"):
+			finished = true
+		}
+	}
+	if !claimed {
+		t.Error("a worker took a run onto a machine this node cannot reach and the trail says nothing")
+	}
+	if !finished {
+		t.Error("a run finished on a worker and the outcome is not in the trail")
+	}
+	// The stream is not in the chain, so a run cannot flood it.
+	if len(chain) > 4 {
+		t.Errorf("the chain holds %d entries for one run, so output or heartbeats are being "+
+			"recorded and will drown the record", len(chain))
+	}
+	if ok, at := audit.Verify(chain); !ok {
+		t.Errorf("the chain does not verify at entry %d", at)
 	}
 }

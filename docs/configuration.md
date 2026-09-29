@@ -276,3 +276,21 @@ names none, so confinement cannot be escaped by omission.
 Generate a digest with `printf %s "$TOKEN" | shasum -a 256`. A malformed file stops the server rather
 than falling back to no confinement, because an install that believes it is segmented and is not is
 worse than one that refuses to start.
+
+
+## What a relay worker writes into the audit trail
+
+A relay worker runs where the control node cannot see it, so two moments are recorded: the run
+leaving for that machine, and the outcome coming back.
+
+    RELAY  /relay/claim/run_4f21a9      worker:build-dmz-01
+    RELAY  /relay/finished/run_4f21a9/succeeded
+
+Captured output, structured events, per-host and per-task summaries, and heartbeats are not recorded.
+They are the content and liveness of a run that is already stored on the run itself, they arrive
+several times a second, and writing each into a hash chain would drown the record it exists to make
+readable.
+
+This append does not fail closed, unlike every mutation through the API. Refusing a worker's report
+because the audit store is unhealthy does not un-finish the run; it loses the outcome of work that
+already ran on real hosts. A failure to record is logged loudly instead.
