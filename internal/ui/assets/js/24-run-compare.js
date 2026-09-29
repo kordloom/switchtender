@@ -12,9 +12,13 @@ const COMPARE_VERDICTS = {
 	ok: { cls: "succeeded", label: "OK" },
 };
 
-// compareSeconds renders a task duration, with a dash for a run that lacked the task.
+// compareSeconds renders a task duration, with a dash for a run that lacked the task. Two decimals
+// under a minute, because a comparison is read for small differences, and the shared roll-up above
+// that, so a long task does not report itself as 2718.34s in a column beside one reading 0.41s.
 function compareSeconds(v) {
-	return v < 0 ? "-" : v.toFixed(2) + "s";
+	if (v < 0) return "-";
+	if (v < 60) return v.toFixed(2) + "s";
+	return fmtMs(v * 1000);
 }
 
 // compareWorst renders a host's outcome words for one side of the pair.
@@ -47,7 +51,9 @@ function renderCompareSummary(c) {
 	card(String(c.totals.added + c.totals.removed), "Hosts came or went", "");
 	if (typeof c.duration_delta_seconds === "number") {
 		const d = c.duration_delta_seconds;
-		card((d >= 0 ? "+" : "") + d.toFixed(1) + "s", "Duration vs baseline", d > 0 ? "bad" : "good");
+		// A delta keeps its sign, so it is formatted from its magnitude and the sign put back.
+		card((d >= 0 ? "+" : "-") + compareSeconds(Math.abs(d)), "Duration vs baseline",
+			d > 0 ? "bad" : "good");
 	}
 	box.hidden = false;
 }
@@ -119,7 +125,8 @@ function renderCompare(c) {
 		if (tk.a_seconds < 0 || tk.b_seconds < 0) {
 			delta.textContent = "-";
 		} else {
-			delta.textContent = (tk.delta_seconds >= 0 ? "+" : "") + tk.delta_seconds.toFixed(2) + "s";
+			delta.textContent = (tk.delta_seconds >= 0 ? "+" : "-") +
+				compareSeconds(Math.abs(tk.delta_seconds));
 			if (tk.delta_seconds > 0) delta.className = "bad";
 			if (tk.delta_seconds < 0) delta.className = "good";
 		}

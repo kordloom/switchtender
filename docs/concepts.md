@@ -82,6 +82,25 @@ upgrade until grants are added. Under strict grants a read grant also scopes wha
 a listing returns only the objects they are granted, closing the gap where the only way to give read
 access was the global viewer role over everything.
 
+### Organization roles are not global roles
+
+An organization owns objects, and membership in it carries its own role, separate from the account's
+global one. Read this part carefully, because the names invite the wrong reading.
+
+A member with organization role **admin** can manage that organization's projects, templates,
+inventories and credentials: edit them and delete them. That is how a tenant administers itself
+without anyone needing install-wide admin.
+
+The account's global role is still the ceiling. Organization admin on an account whose global role is
+viewer confers use, not manage: it can read and launch the organization's objects but not change
+them. So a read-only auditor stays read-only however you add them to an organization, and an
+organization's admins are operators. Membership is delegation inside what an account may already do,
+never a promotion past it, which is the same rule agent tokens follow.
+
+Organization admin also confers nothing over the organization *record* itself. Managing members, and
+the organization's own settings, is the install's global admin role, not this one. So an
+organization admin can rewrite that organization's credentials but cannot list its members.
+
 ## Queues and workers
 
 A worker is any process running the executor against the shared store. Every process, the server
@@ -242,6 +261,10 @@ Point `--policy-file` at a YAML file and that file becomes the source of truth:
       - name: large-teardown
         tool: opentofu
         max_destroy: 5
+
+That file holds two policies, so it needs Pro, which holds five; Team removes the cap. Community
+holds one, and a file carrying more is refused at startup naming the tier, rather than quietly
+enforcing a subset. Drop the second entry to run this example on Community.
 
 A change to what needs approval is then a diff. It goes through whatever review the repository
 holding it requires, it is attributable to a commit, and an auditor reads the policy that was in

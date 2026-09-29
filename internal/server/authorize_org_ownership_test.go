@@ -85,7 +85,19 @@ func TestAuthorizeOrgOwnership(t *testing.T) {
 	}{ // Test 0: A global admin bypasses object checks entirely.
 		{"admin bypass", Actor{UserID: "user_x", Role: user.RoleAdmin}, "proj_solo", grant.AccessManage, true, true},
 		// Test 1: An admin of the owning org manages its objects.
-		{"org admin manages", Actor{UserID: "user_admin_a", Role: user.RoleViewer}, "proj_solo", grant.AccessManage, true, true},
+		// An organization admin whose account is an operator manages the organization's objects.
+		{"org admin manages", Actor{UserID: "user_admin_a", Role: user.RoleOperator}, "proj_solo", grant.AccessManage, true, true},
+		// The same membership on a read-only account confers no manage, because the global role is
+		// the ceiling. This is the read-only auditor an operator adds to an organization as "admin"
+		// meaning "let them see all of this", who used to gain edit and delete on its credentials.
+		//
+		// Under strict grants, because that is the layer where this decision is final: without
+		// strict grants an ungranted object defers to the role gate in authmw, which is what stops
+		// a viewer there. The delegation path is covered by TestAuthorizeOrgManageDelegation.
+		{"org admin cannot exceed a viewer account", Actor{UserID: "user_admin_a", Role: user.RoleViewer}, "proj_solo", grant.AccessManage, true, false},
+		// A viewer in the organization still reads and uses its objects, which is the point of
+		// membership and must not be lost to the ceiling.
+		{"org admin still uses", Actor{UserID: "user_admin_a", Role: user.RoleViewer}, "proj_solo", grant.AccessUse, true, true},
 		// Test 2: A plain member of the owning org may use its objects.
 		{"member uses", Actor{UserID: "user_member_a", Role: user.RoleViewer}, "proj_solo", grant.AccessUse, true, true},
 		// Test 3: A plain member gets use, not manage.
@@ -124,7 +136,10 @@ func TestAuthorizeOrgManageDelegation(t *testing.T) {
 		Object string
 		WantOK bool
 	}{ // Test 0: An admin of the owning org may manage its object.
-		{"org admin", Actor{UserID: "user_admin_a", Role: user.RoleViewer}, "proj_solo", true},
+		// Manage delegation follows the same ceiling: an operator who is an organization admin
+		// manages, a viewer with the same membership does not.
+		{"org admin as operator", Actor{UserID: "user_admin_a", Role: user.RoleOperator}, "proj_solo", true},
+		{"org admin as viewer", Actor{UserID: "user_admin_a", Role: user.RoleViewer}, "proj_solo", false},
 		// Test 1: A plain member may not manage, so the gate falls back to the role.
 		{"org member", Actor{UserID: "user_member_a", Role: user.RoleViewer}, "proj_solo", false},
 		// Test 2: A member of another org may not manage.

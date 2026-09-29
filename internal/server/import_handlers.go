@@ -86,6 +86,14 @@ func importHandler(stores importStoresFunc, log *zap.Logger) http.HandlerFunc {
 			mapper = importer.FromRundeck(r.URL.Query().Get("inventory"))
 		case "jenkins":
 			mapper = importer.FromJenkins(r.URL.Query().Get("inventory"))
+		case "cron":
+			// Cron is absent from the list above on purpose, and a caller who read the migration
+			// guide knows it is a supported source. Left to the generic refusal they are told cron
+			// is not a format, which reads as the guide being wrong rather than this endpoint being
+			// narrower than the command line.
+			respondError(w, log, http.StatusBadRequest,
+				"a crontab imports from the command line only, with switchtender import cron")
+			return
 		default:
 			respondError(w, log, http.StatusBadRequest,
 				"format must be awx, semaphore, rundeck, or jenkins")

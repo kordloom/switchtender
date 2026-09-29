@@ -126,7 +126,13 @@ function applyRunsURLFilters() {
 	for (const id of ["runs-status", "runs-tool", "runs-order", "runs-pagesize"]) {
 		const el = document.getElementById(id);
 		const v = url.get(id.replace("runs-", ""));
-		if (el && v) el.value = v;
+		if (!el || !v) continue;
+		// Only a value the control actually offers. Assigning an unknown one to a select leaves it
+		// with nothing selected, so ?status=bogus rendered an empty box next to a full list and the
+		// reader could not tell whether the filter was off or broken. An unrecognized value now
+		// leaves the default showing, which is what the list is actually doing.
+		if (el.tagName === "SELECT" && !Array.from(el.options).some((o) => o.value === v)) continue;
+		el.value = v;
 	}
 }
 
@@ -299,6 +305,10 @@ function originCellEl(r) {
 		return cell;
 	}
 	const label = SOURCE_LABELS[source] || source;
+	// A chip reads as one word on screen and exported as the label alone, losing which template or
+	// schedule fired the run. The export carries both, separated, so a column of them can be sorted
+	// and grouped.
+	cell.dataset.export = r.source_id ? source + ":" + r.source_id : source;
 	let chip;
 	const href = originHref(r);
 	if (href) {
@@ -375,6 +385,10 @@ function labelCellEl(labels) {
 		cell.textContent = "\u2014";
 		return cell;
 	}
+	// Two chips are shown and the rest collapse into a "+3" button, which exported literally as the
+	// string "+3": the file then held a count where the labels should be. The export carries every
+	// label in a form another tool can split.
+	cell.dataset.export = keys.map((k) => k + "=" + labels[k]).join(";");
 	const wrap = document.createElement("span");
 	wrap.className = "label-wrap";
 	const shown = keys.slice(0, 2);
@@ -466,6 +480,9 @@ function appendRunRows(tbody, runs) {
 
 		const runCell = td(shortId(r.id), "mono");
 		runCell.title = r.id;
+		// The cell shows an abbreviation, so the export carries the id. A CSV of truncated run ids
+		// cannot be joined against anything, which is most of what an export is for.
+		runCell.dataset.export = r.id;
 		runCell.dataset.tip = "Open run details";
 		tr.appendChild(runCell);
 
@@ -554,7 +571,12 @@ function wireRunsMore(tbody, offset, hasMore) {
 function renderSummary(summary) {
 	const el = document.getElementById("summary");
 	el.innerHTML = "";
-	el.appendChild(statCard(summary.total || 0, "Total runs", ""));
+	// The server says what its counts cover. Grants can restrict a caller to one organization's
+	// runs, and quoting the install's totals to them published every other tenant's volume in one
+	// number, so the counts are now over what they can see and the card has to say so rather than
+	// calling a subset a total.
+	const scoped = summary.scope === "visible";
+	el.appendChild(statCard(summary.total || 0, scoped ? "Runs you can see" : "Total runs", ""));
 	el.appendChild(statCard(summary.succeeded || 0, "Succeeded", "ok"));
 	el.appendChild(statCard(summary.failed || 0, "Failed", "failed"));
 	el.appendChild(statCard(summary.active || 0, "Active", "running"));
@@ -567,7 +589,11 @@ function statCard(value, label, cls) {
 	card.className = "stat-card";
 	const v = document.createElement("div");
 	v.className = "stat-value" + (cls ? " " + cls : "");
-	v.textContent = value;
+	// Grouped, the way every other number in this interface is written. The card set the raw value
+	// and countUp finished by restoring that same raw text, so a five-figure run count read 12345
+	// here and 12,345 in the table underneath it, and with reduced motion the animation never ran
+	// to disagree with itself.
+	v.textContent = groupDigits(value);
 	countUp(v, value);
 	const l = document.createElement("div");
 	l.className = "stat-label";
@@ -580,6 +606,17 @@ function statCard(value, label, cls) {
 // countUp animates a metric from zero to its value, preserving any suffix such as a percent
 // sign. A value that is not a plain number, and a reader who asked for reduced motion, get the
 // final text immediately.
+// groupDigits writes a number with thousands separators, leaving anything that is not a plain
+// count, such as a percentage or a duration, exactly as it came.
+function groupDigits(value) {
+	const text = String(value);
+	const match = text.match(/^(\d[\d,]*)(\D*)$/);
+	if (!match) return text;
+	const n = parseInt(match[1].replace(/,/g, ""), 10);
+	if (!Number.isFinite(n)) return text;
+	return n.toLocaleString() + (match[2] || "");
+}
+
 function countUp(el, value) {
 	const text = String(value);
 	const match = text.match(/^(\d[\d,]*)(\D*)$/);
@@ -596,7 +633,7 @@ function countUp(el, value) {
 		const eased = 1 - Math.pow(1 - t, 3);
 		el.textContent = Math.round(target * eased).toLocaleString() + suffix;
 		if (t < 1) requestAnimationFrame(step);
-		else el.textContent = text;
+		else el.textContent = groupDigits(text);
 	};
 	requestAnimationFrame(step);
 }

@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/importer"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/run"
@@ -36,13 +37,13 @@ func TestImportHandler(t *testing.T) {
 			// ever reaches the question of which stores are enabled.
 			Target: "/v1/import/awx?apply=true", Body: "{}", WantStatus: http.StatusUnprocessableEntity,
 		},
-		{ // Test 4: A real export with no stores enabled is a conflict, not a crash.
+		{ // Test 3: A real export with no stores enabled is a conflict, not a crash.
 			Target: "/v1/import/semaphore?apply=true",
 			Body: `{"projects":[{"name":"acme","templates":[{"name":"deploy",` +
 				`"playbook":"site.yml"}]}]}`,
 			WantStatus: http.StatusConflict,
 		},
-		{ // Test 3: Malformed export is rejected.
+		{ // Test 4: Malformed export is rejected.
 			Target: "/v1/import/awx", Body: "{not json", WantStatus: http.StatusBadRequest,
 		},
 	}
@@ -159,5 +160,30 @@ func TestImportApplyReportsWarningsRaisedDuringApply(t *testing.T) {
 	if !found {
 		t.Errorf("the apply-time inventory fallback was not reported to the caller, warnings = %v",
 			resp.Warnings)
+	}
+}
+
+// TestImportCronSaysWhereCronImportsFrom covers the one documented asymmetry in the import surface.
+//
+// The command line imports five sources and this endpoint takes four. Cron used to fall to the
+// generic refusal, "format must be awx, semaphore, rundeck, or jenkins", which tells a caller who
+// just read the migration guide that cron is not a format at all. It is, on the command line, and
+// the refusal now says so rather than leaving them to conclude the guide is wrong.
+func TestImportCronSaysWhereCronImportsFrom(t *testing.T) {
+	t.Parallel()
+	handler := importHandler(func() (importer.ApplyStores, bool) { return importer.ApplyStores{}, false },
+		zap.NewNop())
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/import/cron", strings.NewReader("* * * * * id"))
+	req.SetPathValue("format", "cron")
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	// Naming the command is the whole point. Without it this is the generic refusal again.
+	if !strings.Contains(rec.Body.String(), "switchtender import cron") {
+		t.Errorf("refusal does not name the command that works: %s", rec.Body.String())
 	}
 }

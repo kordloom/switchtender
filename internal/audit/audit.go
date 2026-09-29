@@ -458,6 +458,32 @@ func Link(prev, e *Entry) {
 	e.Hash = EntryHash(e)
 }
 
+// StampAppendTime gives an entry its recorded time at the moment the chain assigns its position,
+// and keeps that time from going backwards against the entry before it.
+//
+// A caller that already chose a time keeps it: the demo backdates a whole seeded history on purpose,
+// and a span beat's time is a signed claim about when the clock was read. A zero time means "now",
+// which is what every server request passes, and stamping it here rather than in the handler is what
+// makes the recorded time and the sequence agree.
+//
+// They did not agree. The handler read the clock, then the store took its mutex and assigned the
+// sequence, so under ordinary concurrency two requests could be stamped in one order and sequenced
+// in the other: the trail held entries whose recorded time preceded the entry before them, on an
+// install where no clock moved and nothing was tampered with. The chain still recomputed, because
+// the link commits to the time it was given, so this never showed as a break. It showed as an audit
+// trail that reads as though it were edited.
+func StampAppendTime(prev, e *Entry, now time.Time) {
+	if !e.At.IsZero() {
+		return
+	}
+	e.At = now
+	// Equal times are fine and ordinary at clock granularity. Earlier is not, so it is pinned to the
+	// entry before rather than allowed to invert.
+	if prev != nil && e.At.Before(prev.At) {
+		e.At = prev.At
+	}
+}
+
 // Verify walks entries in chain order, oldest first, and reports whether the whole chain is intact.
 // When it is broken it returns the one-based position of the first entry whose sequence, link, or
 // hash does not check out. An entry with no hash breaks the chain, so a blanked entry cannot hide

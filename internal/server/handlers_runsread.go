@@ -1,14 +1,18 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/run"
-	"go.uber.org/zap"
+	"github.com/kordloom/switchtender/internal/user"
 )
 
 // listRunsResponse wraps a run list. The envelope leaves room for pagination fields later.
@@ -40,6 +44,10 @@ type runSummary struct {
 	// AwaitingApproval is how many are held at the approval gate, the number the overview leads
 	// with: it is the governance story in one figure.
 	AwaitingApproval int `json:"awaiting_approval"`
+	// Scope says what these numbers cover: "install" for every run on the install, "visible" when
+	// grants restrict this caller and the counts cover only the runs on this page. A caller who is
+	// shown a subset must not read it as a total, and the interface labels the cards from this.
+	Scope string `json:"scope,omitempty"`
 }
 
 // summarize folds status counts into the summary the runs view shows.
@@ -237,27 +245,41 @@ func listRunsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.H
 			respondError(w, log, http.StatusInternalServerError, "could not list runs")
 			return
 		}
-		// The status totals are an install-wide aggregate, so they are withheld from a caller who may
-		// read no runs at all, the same aggregate-withholding the drift and task views do. Otherwise
-		// a strict-grants viewer refused every run by name still learned how much activity the install
-		// had. A visible run on this page already proves the caller reads something, so the scan only
-		// runs when the page is empty of readable runs.
-		anyReadable := len(runs) > 0
-		if !anyReadable {
-			_, ar, ferr := derivedReadFilter(r.Context(), authz, store)
-			if ferr != nil {
-				log.Error("server: read filter: " + ferr.Error())
-				respondError(w, log, http.StatusInternalServerError, "could not list runs")
-				return
-			}
-			anyReadable = ar
+		// The status totals are an install-wide aggregate, so they go only to a caller grants place
+		// no read restriction on.
+		//
+		// Withholding them from a caller who can read NOTHING was the old rule, and it left the
+		// leak it was written to close: a viewer restricted to one organization could read some runs,
+		// which satisfied the test, and then received counts covering every organization on the
+		// install. One number is enough to publish another tenant's volume.
+		//
+		// The probe is the same one derivedReadFilter opens with, so this costs nothing: it asks
+		// whether grants restrict this caller at all, rather than walking rows through a filter,
+		// which at a thousand rows and ten thousand grants is the cost the filter's own comment
+		// warns about.
+		unrestricted, ferr := unrestrictedReader(r.Context(), authz)
+		if ferr != nil {
+			log.Error("server: read filter: " + ferr.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not list runs")
+			return
 		}
 		summary := runSummary{}
-		if anyReadable {
+		switch {
+		case unrestricted:
 			summary = summarize(counts)
+			summary.Scope = "install"
+		case len(runs) > 0:
+			// Restricted, but reading something. The cards stay populated from what this caller can
+			// actually see, rather than going blank or quoting the install's totals.
+			visible := make(map[run.Status]int, len(runs))
+			for _, rn := range runs {
+				visible[rn.Status]++
+			}
+			summary = summarize(visible)
+			summary.Scope = "visible"
 		}
 		respondJSON(w, log, http.StatusOK, listRunsResponse{
-			Runs:       maskRuns(runs),
+			Runs:       scrubbedRuns(r.Context(), maskRuns(runs)),
 			Count:      len(runs),
 			Summary:    summary,
 			HasMore:    storeFullPage,
@@ -288,7 +310,7 @@ func getRunHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Han
 		// Grade the run's blast radius so an approver sees the risk without opening the log.
 		risk := run.AssessRisk(got)
 		got.Risk = &risk
-		respondJSON(w, log, http.StatusOK, maskRun(got), wantsPretty(r))
+		respondJSON(w, log, http.StatusOK, scrubbedRun(r.Context(), maskRun(got)), wantsPretty(r))
 	}
 }
 
@@ -319,7 +341,8 @@ func runShardsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.
 			return
 		}
 		respondJSON(w, log, http.StatusOK,
-			shardsResponse{Shards: maskRuns(shards), Count: len(shards)}, wantsPretty(r))
+			shardsResponse{Shards: scrubbedRuns(r.Context(), maskRuns(shards)), Count: len(shards)},
+			wantsPretty(r))
 	}
 }
 
@@ -350,7 +373,8 @@ func runStepsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.H
 			return
 		}
 		respondJSON(w, log, http.StatusOK,
-			stepsResponse{Steps: maskRuns(steps), Count: len(steps)}, wantsPretty(r))
+			stepsResponse{Steps: scrubbedRuns(r.Context(), maskRuns(steps)), Count: len(steps)},
+			wantsPretty(r))
 	}
 }
 
@@ -374,14 +398,26 @@ func runLogsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Ha
 		if authorizeRunAccess(w, r, authz, log, rn) {
 			return
 		}
-		// The log streams to the client in chunk pages, so a multi-gigabyte log download never
-		// materializes in the control plane's memory.
+		// A caller that only wants the end of the log says so, and only the end crosses the network.
+		//
+		// The run detail pane shows the last 256 KB and got there by downloading the whole log into
+		// the browser and slicing it: a 213 MB log meant 213 MB over the wire and through the tab to
+		// display a quarter of a megabyte of it. The tail is accumulated in a bounded buffer here, so
+		// the control plane's memory stays bounded too, which is the property the chunked read was
+		// written for in the first place.
+		tail := tailBytes(r.URL.Query().Get("tail"))
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
+		if tail == 0 {
+			w.WriteHeader(http.StatusOK)
+		}
 		var (
 			after     int64
 			atLineEnd = true
+			ring      *tailBuffer
 		)
+		if tail > 0 {
+			ring = newTailBuffer(tail)
+		}
 		for {
 			chunks, err := store.LogAfter(r.Context(), id, after, streamBatch)
 			if err != nil {
@@ -401,7 +437,9 @@ func runLogsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Ha
 			}
 			for _, c := range chunks {
 				after = c.Seq
-				if _, err := w.Write(c.Data); err != nil {
+				if ring != nil {
+					ring.write(c.Data)
+				} else if _, err := w.Write(c.Data); err != nil {
 					log.Error("server: write run log: " + err.Error())
 					return
 				}
@@ -410,8 +448,99 @@ func runLogsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Ha
 				}
 			}
 			if len(chunks) < streamBatch {
+				if ring != nil {
+					// The reader is told what they are looking at rather than left to assume the
+					// log begins where the pane does.
+					if omitted := ring.omitted(); omitted > 0 {
+						w.Header().Set("Switchtender-Log-Truncated", "1")
+						w.Header().Set("Switchtender-Log-Omitted-Bytes", strconv.FormatInt(omitted, 10))
+					}
+					w.WriteHeader(http.StatusOK)
+					if _, err := w.Write(ring.bytes()); err != nil {
+						log.Error("server: write run log tail: " + err.Error())
+					}
+				}
 				return
 			}
 		}
 	}
 }
+
+// scrubbedRun masks secret-shaped assignments in a run's command and launch variables for any caller
+// below admin, the same rule the inventory list already follows.
+//
+// A run carried both verbatim on every read. The receipt scrubs them, the dossier scrubs them, the
+// change register scrubs them, the webhook notification scrubs them, and the inventory list scrubs
+// its own equivalents, so an operator reasonably concluded the product scrubs inline secrets. The
+// run record did not, which made the read-only viewer role, the one an outside auditor is given,
+// the single surface that showed a password in the clear.
+//
+// Only the assignments are masked, not the command, so an operator still reads what a run did. An
+// admin sees the original: they hold every credential on the install already, and redacting for the
+// person who maintains it only obstructs them, which is the reasoning redactInventories records.
+func scrubbedRun(ctx context.Context, rn *run.Run) *run.Run {
+	if actor, ok := actorFrom(ctx); ok && actor.Role == user.RoleAdmin {
+		return rn
+	}
+	return redactRunCommand(rn)
+}
+
+// scrubbedRuns applies scrubbedRun across a list response.
+func scrubbedRuns(ctx context.Context, list []*run.Run) []*run.Run {
+	out := make([]*run.Run, len(list))
+	for i, rn := range list {
+		out[i] = scrubbedRun(ctx, rn)
+	}
+	return out
+}
+
+// maxLogTail bounds what one request may ask to keep in memory while it finds the end of a log.
+const maxLogTail = 4 << 20
+
+// tailBytes reads the tail parameter, returning zero for a request that wants the whole log.
+func tailBytes(raw string) int {
+	if raw == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return min(n, maxLogTail)
+}
+
+// tailBuffer keeps the last n bytes written to it and counts what it dropped, so a caller asking
+// for the end of a very long log never holds more than n bytes anywhere.
+type tailBuffer struct {
+	// buf holds at most n bytes, the most recent ones.
+	buf []byte
+	// n is the cap.
+	n int
+	// dropped counts bytes discarded from the front.
+	dropped int64
+}
+
+// newTailBuffer returns a buffer keeping the last n bytes.
+func newTailBuffer(n int) *tailBuffer {
+	return &tailBuffer{buf: make([]byte, 0, n), n: n}
+}
+
+// write appends data, discarding from the front once the cap is reached.
+func (t *tailBuffer) write(data []byte) {
+	if len(data) >= t.n {
+		t.dropped += int64(len(t.buf)) + int64(len(data)-t.n)
+		t.buf = append(t.buf[:0], data[len(data)-t.n:]...)
+		return
+	}
+	if over := len(t.buf) + len(data) - t.n; over > 0 {
+		t.dropped += int64(over)
+		t.buf = append(t.buf[:0], t.buf[over:]...)
+	}
+	t.buf = append(t.buf, data...)
+}
+
+// bytes returns the kept tail.
+func (t *tailBuffer) bytes() []byte { return t.buf }
+
+// omitted reports how many bytes were dropped from the front.
+func (t *tailBuffer) omitted() int64 { return t.dropped }

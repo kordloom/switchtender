@@ -26,6 +26,11 @@ whole pipeline.
       -H 'content-type: application/json' \
       -d '{"cron":"0 2 * * *","template_id":"tpl_abc123"}'
 
+Use a real template id: the API stores the schedule either way, and one naming a template that does
+not exist fires nothing. `switchtender doctor`, and the Doctor panel on the overview, report a
+schedule in that state by id. A `name` is optional and worth setting, since it is what that report
+and the schedules list call it.
+
 To schedule without a template, send `playbook` and `inventory` inline, add `shards` for a split, or
 `steps` for a pipeline. A worker or the server must be running for a schedule to fire. Add capacity
 with `switchtender worker`.

@@ -62,7 +62,11 @@ func TestHotQueryPlans(t *testing.T) {
 		t.Fatalf("Close() error = %v", err)
 	}
 
-	raw, err := sql.Open("sqlite", path)
+	// The same pragmas the store's own read pool uses. Opened bare, this handle had no busy timeout,
+	// and the six subtests below read through it in parallel against a database with a live WAL, so
+	// EXPLAIN QUERY PLAN intermittently came back "database is locked" and the suite failed for a
+	// reason that was never about a query plan.
+	raw, err := sql.Open("sqlite", "file:"+path+"?_pragma=query_only(1)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		t.Fatalf("open raw: %v", err)
 	}

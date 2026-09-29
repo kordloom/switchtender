@@ -780,6 +780,33 @@ func jenkinsRange(s string) (int, int, bool) {
 	return a, b, true
 }
 
+// standardWeekdayField rewrites a whole day-of-week field so a 7 meaning Sunday is written the way
+// standard cron reads it, 0, including inside ranges and lists.
+//
+// Vixie cron accepts both 0 and 7 for Sunday and a great many crontabs use 7, but the parser this
+// product schedules with caps the field at 6 and refuses the line outright. The crontab importer
+// therefore dropped every Sunday job with a warning nobody reads as "your weekly backup did not
+// come across". The renumbering already existed for the Jenkins importer, which meets the same
+// disagreement; this shares it rather than writing it twice.
+func standardWeekdayField(field string) string {
+	terms := strings.Split(field, ",")
+	for i, term := range terms {
+		terms[i] = jenkinsWeekday(strings.TrimSpace(term), 4)
+	}
+	return strings.Join(terms, ",")
+}
+
+// StandardizeCron rewrites the day-of-week field of a five-field cron expression, leaving anything
+// that is not five fields, such as a named schedule like @daily, exactly as it came.
+func StandardizeCron(expr string) string {
+	fields := strings.Fields(expr)
+	if len(fields) != 5 {
+		return expr
+	}
+	fields[4] = standardWeekdayField(fields[4])
+	return strings.Join(fields, " ")
+}
+
 // jenkinsWeekday renumbers a weekday term where Jenkins and standard cron disagree.
 //
 // Jenkins numbers Sunday as both 0 and 7; the scheduler here accepts only 0 and rejects 7 outright,

@@ -257,10 +257,40 @@ function fmtDuration(startISO, endISO) {
 	return fmtMs(ms);
 }
 
-// fmtMs renders a millisecond duration.
+// fmtMs renders a millisecond duration in the largest unit that still reads precisely.
+//
+// It stopped at seconds, so every run longer than a minute reported itself in raw seconds: a
+// half-hour fleet play read "1800.0s", a long task average read "1234567.9s", and the reader had to
+// count digits to find out whether a run took ten minutes or three hours. The demo never showed it
+// because every seeded run finishes in under thirty seconds. Above an hour the seconds are dropped
+// rather than carried, since nobody reading "3h 14m" wants the remaining 7.3 seconds.
 function fmtMs(ms) {
+	if (!isFinite(ms) || ms < 0) return "";
 	if (ms < 1000) return Math.round(ms) + "ms";
-	return (ms / 1000).toFixed(1) + "s";
+	const total = ms / 1000;
+	if (total < 60) return total.toFixed(1) + "s";
+	const h = Math.floor(total / 3600);
+	const m = Math.floor((total % 3600) / 60);
+	const sec = Math.round(total % 60);
+	if (h > 0) return h + "h " + m + "m";
+	// A minute that rounds its seconds up to 60 reads as "4m 60s", so it carries.
+	if (sec === 60) return (m + 1) + "m 0s";
+	return m + "m " + sec + "s";
+}
+
+// fmtBytes renders a byte count in the largest unit that reads cleanly, so a log pane can say it is
+// showing the last 256 KB of 213 MB rather than two long strings of digits.
+function fmtBytes(n) {
+	if (!isFinite(n) || n < 0) return "";
+	if (n < 1024) return n + " B";
+	const units = ["KB", "MB", "GB", "TB"];
+	let v = n / 1024;
+	let i = 0;
+	while (v >= 1024 && i < units.length - 1) {
+		v /= 1024;
+		i++;
+	}
+	return (v >= 10 ? Math.round(v) : v.toFixed(1)) + " " + units[i];
 }
 
 // fmtTime renders an ISO time in the local locale.
@@ -291,6 +321,13 @@ function relTime(iso) {
 	const d = new Date(iso);
 	if (isNaN(d)) return iso;
 	const s = Math.round((Date.now() - d.getTime()) / 1000);
+	// A future time is not an age.
+	//
+	// Every case below assumed the instant had already passed, so a negative difference fell into
+	// "s < 5" and read "just now". That is where every unexpired token and every live browser
+	// session landed: an Expires column on the access page reading "just now" for a credential good
+	// for another thirty days, which is the opposite of what it says.
+	if (s < 0) return relAhead(-s, d);
 	if (s < 5) return "just now";
 	if (s < 60) return s + "s ago";
 	const m = Math.round(s / 60);
@@ -299,6 +336,19 @@ function relTime(iso) {
 	if (h < 24) return h + "h ago";
 	const days = Math.round(h / 24);
 	if (days < 30) return days + "d ago";
+	return d.toLocaleDateString();
+}
+
+// relAhead renders a time that has not arrived yet, in the same units and shape relTime uses for one
+// that has, so an Expires column reads the way a Created column does.
+function relAhead(s, d) {
+	if (s < 60) return "in " + s + "s";
+	const m = Math.round(s / 60);
+	if (m < 60) return "in " + m + "m";
+	const h = Math.round(m / 60);
+	if (h < 24) return "in " + h + "h";
+	const days = Math.round(h / 24);
+	if (days < 30) return "in " + days + "d";
 	return d.toLocaleDateString();
 }
 

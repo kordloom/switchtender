@@ -501,14 +501,27 @@ function wireLogDownload(runId) {
 // run's log can be far larger than that.
 async function loadStoredLog(runId) {
 	try {
-		const res = await fetchAuthed("/runs/" + runId + "/logs");
+		// Ask for the tail rather than the whole log. The pane caps itself at logCap anyway, and it
+		// used to get there by pulling the entire log into the browser and slicing it: a 213 MB log
+		// crossed the network and went through the tab to display a quarter of a megabyte of it.
+		const res = await fetchAuthed("/runs/" + runId + "/logs?tail=" + logCap);
 		if (!res.ok) return;
 		const text = await res.text();
 		if (!text.trim()) return;
 		detailState.logRaw = text.slice(-logCap);
+		// Say so when this is a tail, or the reader takes the first line on screen for the first
+		// line of the run.
+		const omitted = parseInt(res.headers && res.headers.get
+			? res.headers.get("Switchtender-Log-Omitted-Bytes") || "0" : "0", 10);
+		detailState.logOmitted = Number.isFinite(omitted) ? omitted : 0;
 		renderLogView();
 		const head = document.querySelector("#log-panel h2");
-		if (head) head.textContent = "Output";
+		if (head) {
+			head.textContent = detailState.logOmitted > 0
+				? "Output, last " + fmtBytes(detailState.logRaw.length) + " of " +
+					fmtBytes(detailState.logOmitted + detailState.logRaw.length)
+				: "Output";
+		}
 		document.getElementById("log-panel").hidden = false;
 		// A finished run is not live, so the pane opens at the end, where a failure is.
 		const pre = document.getElementById("log");
@@ -701,20 +714,29 @@ function renderFailureCallout(run) {
 		host.hidden = true;
 		return;
 	}
+	// run.error carries two different situations and they must not be described the same way. A
+	// launch failure means nothing ran, so the empty timeline and empty log need explaining. An
+	// interrupted, abandoned or orphaned run DID execute and does have output, and telling that
+	// reader "this run did not start" and "there is no log" contradicts the log sitting below it.
+	// The record already answers this, so no guessing from the error text: a run that was claimed or
+	// has a start time executed, whatever went wrong afterward.
+	const started = !!(run.started_at || run.claimed_by);
 	const head = document.createElement("div");
 	head.className = "risk-callout-head";
 	const label = document.createElement("strong");
-	label.textContent = "This run did not start";
+	label.textContent = started ? "This run did not finish" : "This run did not start";
 	head.appendChild(label);
 	host.appendChild(head);
 	const why = document.createElement("pre");
 	why.className = "drill-pre";
 	why.textContent = run.error;
 	host.appendChild(why);
-	const note = document.createElement("div");
-	note.className = "muted";
-	note.textContent = "Nothing executed, so there is no log or event stream for this run.";
-	host.appendChild(note);
+	if (!started) {
+		const note = document.createElement("div");
+		note.className = "muted";
+		note.textContent = "Nothing executed, so there is no log or event stream for this run.";
+		host.appendChild(note);
+	}
 	host.hidden = false;
 }
 

@@ -47,13 +47,22 @@ func metricsHandler(store run.Store, chain *chainHealth, authz *authorizer, log 
 	}
 	hist := newRunHistograms()
 	return func(w http.ResponseWriter, r *http.Request) {
-		_, anyReadable, ferr := derivedReadFilter(r.Context(), authz, store)
+		// Prometheus metrics are install-wide aggregates by their nature: a counter cannot be
+		// partially true. So they go only to a caller grants place no read restriction on.
+		//
+		// The old test was whether the caller could read ANY run, which a tenant-scoped viewer
+		// satisfies, and the scrape then reported the whole install's run counts and durations. A
+		// dashboard is a very comfortable place for another tenant's volume to end up.
+		//
+		// A restricted caller gets a valid, empty exposition rather than an error, because a
+		// scraper reads a 500 as the install being down and pages somebody.
+		unrestricted, ferr := unrestrictedReader(r.Context(), authz)
 		if ferr != nil {
 			log.Error("server: metrics read filter: " + ferr.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not compute metrics")
 			return
 		}
-		if !anyReadable {
+		if !unrestricted {
 			w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
 			return

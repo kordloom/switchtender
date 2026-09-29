@@ -425,8 +425,12 @@ func TestATimezoneMustBeABareZoneName(t *testing.T) {
 					t.Fatalf("a timezone of %q was accepted and fires at %v (%v), so the cadence on "+
 						"screen may not be the one it runs", test.Timezone, next, nerr)
 				}
-				if !errors.Is(err, ErrBadCron) {
-					t.Errorf("Validate() error = %v, want ErrBadCron", err)
+				// The sentinel is ErrBadTimezone: this is a fault in the zone field, and reporting
+				// it as a cron fault sent an operator to check an expression that was correct.
+				// What this test is about is the refusal, not which sentinel carries it, but the
+				// two must not drift.
+				if !errors.Is(err, ErrBadTimezone) {
+					t.Errorf("Validate() error = %v, want ErrBadTimezone", err)
 				}
 				return
 			}
@@ -448,9 +452,11 @@ func TestValidateRefusesBeforeItComputes(t *testing.T) {
 		Schedule Schedule
 		// Want is the error it must report.
 		Want error
-	}{{ // Test 0: A bad zone is a cron problem named as such, before the expression is even read.
+	}{{ // Test 0: Both fields are wrong, and the zone is checked first, so the zone is what is
+		// reported. Which one comes first matters: reporting the zone fault as a cron fault sent an
+		// operator to check an expression that was, in other cases, perfectly good.
 		Schedule: Schedule{Cron: "not a cron", Timezone: "Mars/Olympus", Playbook: "p"},
-		Want:     ErrBadCron,
+		Want:     ErrBadTimezone,
 	}, { // Test 1: A bad expression with a good zone is still a cron problem.
 		Schedule: Schedule{Cron: "not a cron", Timezone: "UTC", Playbook: "p"}, Want: ErrBadCron,
 	}, { // Test 2: A good expression with no target is a target problem, so the message points at

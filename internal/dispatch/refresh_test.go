@@ -29,6 +29,12 @@ func TestValidateBareSource(t *testing.T) {
 	if err := os.WriteFile(plainFile, []byte("[web]\nweb01\n"), 0o600); err != nil {
 		t.Fatalf("write plain file: %v", err)
 	}
+	// A second directory holding only ordinary inventory files, which is what an inventory directory
+	// legitimately is and must keep working.
+	plainDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(plainDir, "hosts.ini"), []byte("[web]\nweb01\n"), 0o600); err != nil {
+		t.Fatalf("write plain dir file: %v", err)
+	}
 
 	tests := []struct {
 		Name string
@@ -40,8 +46,14 @@ func TestValidateBareSource(t *testing.T) {
 		{Name: "traversal absolute", In: dir + "/../../etc", Want: invsource.ErrInvalidSource}, // Test 2.
 		{Name: "executable file", In: execFile, Want: invsource.ErrInvalidSource},              // Test 3.
 		{Name: "plain inventory file", In: plainFile, Want: nil},                               // Test 4.
-		{Name: "directory", In: dir, Want: nil},                                                // Test 5.
-		{Name: "nonexistent", In: filepath.Join(dir, "ghost"), Want: nil},                      // Test 6.
+		// Test 5: The parent of the executable Test 3 refuses. ansible-inventory treats a directory
+		// as an inventory directory and runs every executable in it, so allowing the directory ran
+		// the exact script the guard exists to stop, by naming it one level up. This case used to
+		// assert nil, which pinned the bypass rather than the guard.
+		{Name: "directory holding an executable", In: dir, Want: invsource.ErrInvalidSource},
+		// Test 6: A directory with nothing executable in it is a legitimate inventory directory.
+		{Name: "directory with no executable", In: plainDir, Want: nil},
+		{Name: "nonexistent", In: filepath.Join(dir, "ghost"), Want: nil}, // Test 7.
 	}
 	for i, test := range tests {
 		if err := validateBareSource(test.In); !errors.Is(err, test.Want) {

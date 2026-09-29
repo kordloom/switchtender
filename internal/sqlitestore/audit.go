@@ -55,6 +55,9 @@ func (s *auditStore) Append(ctx context.Context, e *audit.Entry) error {
 	}
 	cp := *e
 	audit.BindEntryInstall(&cp, s.installID)
+	// The time is stamped here, under the same lock that assigns the sequence, so the two can never
+	// disagree. A caller that set its own time keeps it.
+	audit.StampAppendTime(prev, &cp, time.Now())
 	audit.Link(prev, &cp)
 	const q = `INSERT INTO audit_entries (id, at, actor, actor_type, on_behalf_of, method, path, content_digest, seq, prev_hash, hash, nonce, install_id)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -266,5 +267,32 @@ func TestRestoreRecordsProvenance(t *testing.T) {
 	}
 	if !provenance {
 		t.Error("no restore provenance entry recorded")
+	}
+}
+
+// TestRestoreRefusesAPositionalFileWithAUsefulError covers the error a person meets while recovering.
+//
+// Naming the file positionally is refused on purpose: without that guard a forgotten --in would read
+// from an empty standard input and hang, which is worse. But the refusal was cobra's own, `unknown
+// command "backup.stbak" for "switchtender restore"`, which reads as the subcommand being wrong
+// rather than the argument. Somebody restoring a backup is usually already having a bad day.
+func TestRestoreRefusesAPositionalFileWithAUsefulError(t *testing.T) {
+	t.Parallel()
+	err := restoreCmd.Args(restoreCmd, []string{"backup.stbak"})
+	if err == nil {
+		t.Fatal("a positional file was accepted, so a forgotten --in can be mistaken for an empty " +
+			"standard input")
+	}
+	if !errors.Is(err, ErrUsage) {
+		t.Errorf("error = %v, want it to carry ErrUsage so the exit code says usage", err)
+	}
+	// The refusal has to name the flag that works, or it only tells the reader they are wrong.
+	if !strings.Contains(err.Error(), "--in backup.stbak") {
+		t.Errorf("error does not say what to type instead: %v", err)
+	}
+
+	// No argument at all stays valid, since the file may arrive on standard input.
+	if err := restoreCmd.Args(restoreCmd, nil); err != nil {
+		t.Errorf("restore with no argument was refused: %v", err)
 	}
 }

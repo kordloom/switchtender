@@ -23,14 +23,14 @@ with a message naming the feature rather than failing in some subtler way:
 
 | Endpoint | Tier | Note |
 |----------|------|------|
-| `GET /v1/audit/register` | Team | The period change register. Per-run dossiers, receipts, bundles, and `GET /v1/audit/verify` are free. |
+| `GET /v1/audit/register` | Team | The period change register, covering the last 90 days unless `from` and `to` name another period, each a date or an RFC 3339 timestamp. Per-run dossiers, receipts, bundles, and `GET /v1/audit/verify` are free. |
 | `POST /v1/drift/reconcile` | Team | One-click reconcile. Drift detection is free. |
-| `POST` and `PATCH /v1/policies` | Team, past the free set | Deny rules, risk floors, actor scoping, and distinct-approver separation of duties. One require-approval policy is Community, Pro holds five, Team is uncapped. |
+| `POST` and `PUT /v1/policies` | Team, past the free set | Deny rules, risk floors, actor scoping, and distinct-approver separation of duties. One require-approval policy is Community, Pro holds five, Team is uncapped. |
 
 Two more are enforced somewhere other than the request:
 
 - `/relay` is served whatever the license. The gate is on the other end: `switchtender worker
-  --server` refuses to start without Team. A worker sharing the database is not gated at all.
+  --server` refuses to start without Team, and so does a worker sharing the database: every worker process is gated.
 - The directory sign-in routes need Pro, enforced at startup rather than per request. Configuring any
   of OIDC, SAML, LDAP, or JWT without a license refuses the server at startup, so those routes are
   either licensed or absent.
@@ -38,7 +38,7 @@ Two more are enforced somewhere other than the request:
 | Method | Path                    | What                                                    |
 |--------|-------------------------|---------------------------------------------------------|
 | POST   | `/v1/runs`                 | Submit a run. `shards` of two or more splits it.        |
-| GET    | `/v1/runs`                 | Run history, newest first.                              |
+| GET    | `/v1/runs`                 | Run history, newest first. Pages with `limit` (default 200, maximum 1000) and `offset`; the response carries `has_more` and `next_offset`. Filters: `status`, `tool`, `order`, `task`, `after`, `before`, and `q` for a text search over the run. |
 | GET    | `/v1/runs/{id}`            | One run.                                                |
 | POST   | `/v1/runs/{id}/cancel`     | Cancel a pending or running run.                        |
 | POST   | `/v1/runs/{id}/retry`      | New split from only the failed shards of a finished one.|
@@ -47,12 +47,12 @@ Two more are enforced somewhere other than the request:
 | POST   | `/v1/runs/{id}/reject`     | Deny a run held for approval.                           |
 | GET    | `/v1/runs/{id}/shards`     | Shard runs of a split.                                  |
 | GET    | `/v1/runs/{id}/steps`      | Step runs of a pipeline.                                |
-| GET    | `/v1/runs/{id}/logs`       | Captured output as plain text.                          |
+| GET    | `/v1/runs/{id}/logs`       | Captured output as plain text, streamed. `?tail=<bytes>` returns only the end, capped at 4 MiB; when anything was dropped the response carries `Switchtender-Log-Truncated: 1` and `Switchtender-Log-Omitted-Bytes`. |
 | GET    | `/v1/runs/{id}/evidence`   | Self-contained HTML evidence document for one run. `?format=json` returns the same content as JSON. |
-| GET    | `/v1/runs/{id}/receipt`    | Signed LoomSeal receipt proving what this run did.      |
+| GET    | `/v1/runs/{id}/receipt`    | Signed LoomSeal receipt proving what this run did. `?sparse` discloses only this run's own entries, each proved to belong to the whole chain; `?from=<size>` adds a consistency proof that the log only appended since that size. The response carries the signing key's id in a `Switchtender-Key-Id` header. |
 | POST   | `/v1/runs/{id}/rerun`      | Submit a fresh run with this run's execution settings.  |
 | POST   | `/v1/runs/{id}/stream-ticket` | Mint a short-lived, single-use ticket for opening this run's event stream. |
-| GET    | `/v1/runs/{id}/events`     | Structured events as JSON.                              |
+| GET    | `/v1/runs/{id}/events`     | Structured events as JSON. `?after=<seq>` and `?limit` page them, and the response carries `next_after` to continue. `?download=1` streams the same events as newline-delimited JSON with a filename attachment. |
 | GET    | `/v1/runs/{id}/compare`    | What changed against a baseline run: host verdicts, task timing, duration. `with=` names the baseline or `prev` for the previous run of the same source. |
 | GET    | `/v1/runs/{id}/stream`     | Live events and log over Server-Sent Events. Opened with `?ticket=` from the endpoint above, since EventSource cannot set a header. |
 | POST   | `/v1/runs/{id}/explain`    | Advisory AI explanation of a run, when a provider is configured. |
@@ -123,7 +123,7 @@ Two more are enforced somewhere other than the request:
 | POST   | `/v1/orgs`                 | Create an organization.                                 |
 | GET    | `/v1/orgs`                 | List organizations.                                     |
 | DELETE | `/v1/orgs/{id}`            | Delete an organization and its memberships.             |
-| POST   | `/v1/orgs/{id}/members`    | Add a user to an organization with an organization role.|
+| POST   | `/v1/orgs/{id}/members`    | Add a user to an organization with an organization role. Organization admin grants manage over that organization's projects, templates, inventories and credentials, bounded by the account's global role: on a viewer account it confers use, not manage. See [concepts](concepts.md). |
 | GET    | `/v1/orgs/{id}/members`    | List an organization's members and their roles.         |
 | DELETE | `/v1/orgs/{id}/members/{userID}` | Remove a user from an organization.               |
 | POST   | `/v1/grants`               | Grant a user or team read, use, or manage on an object: a project, template, inventory, or credential id, or a worker queue as `queue:<name>`. |
@@ -324,6 +324,17 @@ curl -X POST https://switchtender.example.com/v1/templates   -H "Authorization: 
   }'
 ```
 
+## List responses
+
+Every list response is an envelope: the rows under a name, `count` for how many were returned, and
+`total` for how many exist. They agree on any ordinary install.
+
+The run list pages, because run history grows without bound: `limit` (default 200, maximum 1000) and
+`offset`, with `has_more` and `next_offset` to continue. The configuration lists, users, tokens,
+templates, schedules, triggers and organizations, return at most 1000 rows in one response. Past
+that, `total` exceeds `count` and the response is the first 1000. An install with more configuration
+than that should read it through the object endpoints rather than the list.
+
 ## Survey field constraints
 
 A template survey field accepts bounds beyond its type, checked at launch before any answer becomes
@@ -337,6 +348,29 @@ an extra var. A field also takes an optional `help` string shown beneath its pro
 | `choice` | The answer must be one of `choices`. |
 
 A launch that violates a constraint is refused with the field it failed, and no run is submitted.
+
+The shape itself, which strict decoding refuses to guess at:
+
+```json
+{
+  "survey": [
+    {"var": "release", "label": "Release tag", "type": "text",
+     "required": true, "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$",
+     "help": "The tag to deploy, such as v2.1.0"},
+    {"var": "batch", "label": "Hosts per batch", "type": "int",
+     "default": 5, "min": 1, "max": 50},
+    {"var": "environment", "label": "Environment", "type": "choice",
+     "required": true, "choices": ["staging", "production"]},
+    {"var": "notes", "label": "Change notes", "type": "multiline",
+     "max_length": 2000}
+  ]
+}
+```
+
+`type` is one of `text`, `multiline`, `int`, `choice`, or `bool`. `var` names the extra var the
+answer becomes, and it is the only field besides `type` that every entry must carry. An unknown key
+is refused rather than ignored, so a survey that almost parses is reported instead of silently
+losing a field.
 
 ## Per-template notifications
 

@@ -325,11 +325,13 @@ func TestToolArgsForEveryScriptEngine(t *testing.T) {
 		// WantArgs is the exact list expected.
 		WantArgs []string
 	}{
-		{"bash run", bashArgs(Spec{Command: "echo hi"}), []string{"-c", "echo hi"}}, // Test 0.
-		{"bash dry run", bashArgs(Spec{Command: "echo hi", DryRun: true}),
-			[]string{"-n", "-c", "echo hi"}}, // Test 1.
-		{"bash empty command", bashArgs(Spec{}), []string{"-c", ""}},      // Test 2.
-		{"python run", pythonArgs("/t/s.py", false), []string{"/t/s.py"}}, // Test 3.
+		// Bash takes a script path like the other three, rather than the script body on argv, so a
+		// running job's script is not readable from ps and does not persist in a container's
+		// recorded Config.Cmd.
+		{"bash run", bashArgs("/t/s.sh", false), []string{"/t/s.sh"}}, // Test 0.
+		{"bash dry run", bashArgs("/t/s.sh", true),
+			[]string{"-n", "/t/s.sh"}}, // Test 1.
+		{"python run", pythonArgs("/t/s.py", false), []string{"/t/s.py"}}, // Test 2.
 		{"python dry run", pythonArgs("/t/s.py", true),
 			[]string{"-m", "py_compile", "/t/s.py"}}, // Test 4.
 		{"go run", goArgs("/t/m.go", false), []string{"run", "/t/m.go"}},    // Test 5.

@@ -138,14 +138,22 @@ type Deps struct {
 // instant. The window opens seedRunWindow ago and closes no later than seedRunMargin before now, and
 // the seeder steps the clock seedRunGap forward once each run's record and outcome have landed.
 const (
-	seedRunWindow = 11 * time.Hour
+	// Wide enough that the gaps below cannot consume it. Sixteen runs at seedRunGap need 640
+	// minutes and the old 11 hour window offered 645, so the last runs seeded arrived at the ceiling
+	// with nothing left to spend: the clock then returned the same instant to every later read, and
+	// the governance showcase, seeded last, was created, approved and executed at one timestamp,
+	// which is precisely the story that run exists to tell.
+	seedRunWindow = 16 * time.Hour
 	seedRunMargin = 15 * time.Minute
 	seedRunGap    = 40 * time.Minute
 	// seedHistoryBackshiftHours pushes the seeded change history back so all of it predates the run
 	// window. The runs commit their outcomes to the same chain after this history is appended, so
 	// keeping the history older leaves the chain's times descending with its sequence, the way a live
 	// chain reads, rather than a run outcome from hours ago landing beneath a newer config change.
-	seedHistoryBackshiftHours = 12
+	// Derived from the window rather than written beside it. The two were independent constants that
+	// had to satisfy backshift > window, which nothing enforced, so widening the window silently put
+	// the seeded history inside it and the chain's times stopped descending with its sequence.
+	seedHistoryBackshiftHours = int(seedRunWindow/time.Hour) + 1
 	// seedScheduleZone is the zone every seeded cron expression is read in, and the one the schedules
 	// page names beside each cadence. Without it a schedule is read in whatever zone the server
 	// happens to sit in and the page shows the expression alone, so "0 2 * * *" tells a visitor that
@@ -175,6 +183,8 @@ type SeedClock struct {
 	realAt time.Time
 	// ceiling is the latest time the clock will ever return, holding every stamp safely before now.
 	ceiling time.Time
+	// last is the previous value handed out, so saturation is detectable rather than silent.
+	last time.Time
 }
 
 // NewSeedClock returns a clock whose cursor opens seedRunWindow before now.
@@ -202,6 +212,7 @@ func (c *SeedClock) Now() time.Time {
 	if c.cursor.After(c.ceiling) {
 		c.cursor = c.ceiling
 	}
+	c.last = c.cursor
 	return c.cursor
 }
 

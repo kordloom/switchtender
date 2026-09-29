@@ -214,11 +214,6 @@ Then serve:
 
     switchtender serve --addr :8080 --db switchtender.db
 
-Or run it as a local desktop app. On macOS open `SwitchTender.app`; otherwise one command picks a
-stable loopback port, keeps its data in a per-user directory, and opens the UI in your browser:
-
-    ./switchtender desktop
-
 The first start on an empty database mints an admin token and prints it once, so the API is
 authenticated from the first request. Export it, then submit a run:
 
@@ -238,6 +233,15 @@ relative to the server's working directory unless the run names a project:
 Add `"shards": 4` to split it across four slices of the inventory.
 
 Open http://localhost:8080 for the web UI and sign in with the same token.
+
+Or run it as a local desktop app. On macOS open `SwitchTender.app`; otherwise one command picks a
+stable loopback port, keeps its data in a per-user directory, and opens the UI for you:
+
+    ./switchtender desktop
+
+The desktop command binds loopback only and mints no token: it is the single-user shape, reachable
+from that machine and nowhere else. The token above belongs to `serve`, which is the shape that
+listens on a network.
 
 Migrating is one command. Point it at an export to see what it would create, then apply:
 

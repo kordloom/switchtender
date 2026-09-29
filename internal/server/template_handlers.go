@@ -92,6 +92,9 @@ type listTemplatesResponse struct {
 	Templates []*template.Template `json:"templates"`
 	// Count is the number returned.
 	Count int `json:"count"`
+	// Total is how many rows exist before the response cap, so a caller shown a prefix knows it is
+	// one. Equal to Count for every ordinary install.
+	Total int `json:"total"`
 }
 
 // templateToolError returns a client message when a template request lacks the input its tool
@@ -181,6 +184,12 @@ func createTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 		// every single launch instead of being refused at the point it was written.
 		if err := template.ValidateSurvey(req.Survey); err != nil {
 			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		}
+		// A template that targets a queue launches runs only a worker serving it can claim, and every
+		// worker is Team. Saved on Community it produced a template whose every launch stranded.
+		if qerr := allowQueue(req.Queue); qerr != nil {
+			respondError(w, log, http.StatusForbidden, qerr.Error())
 			return
 		}
 		t := &template.Template{
@@ -289,6 +298,11 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 				return
 			}
 		}
+		// Same gate on update, or the queue a create refuses can be added afterward.
+		if qerr := allowQueue(req.Queue); qerr != nil {
+			respondError(w, log, http.StatusForbidden, qerr.Error())
+			return
+		}
 		t := &template.Template{
 			ID: id, Name: req.Name, ProjectID: req.ProjectID,
 			Playbook: req.Playbook, Inventory: req.Inventory, InventoryID: req.InventoryID,
@@ -345,8 +359,9 @@ func listTemplatesHandler(store template.Store, authz *authorizer, log *zap.Logg
 			respondError(w, log, http.StatusInternalServerError, "could not list templates")
 			return
 		}
+		capped, total := cappedList(maskTemplates(visible))
 		respondJSON(w, log, http.StatusOK,
-			listTemplatesResponse{Templates: maskTemplates(visible), Count: len(visible)}, wantsPretty(r))
+			listTemplatesResponse{Templates: capped, Count: len(capped), Total: total}, wantsPretty(r))
 	}
 }
 
@@ -500,6 +515,19 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 
 		vars := map[string]any{}
 		maps.Copy(vars, t.ExtraVars)
+		// Answers to a template that asks nothing are refused rather than dropped.
+		//
+		// The branch below only runs for a template carrying a survey, so answers sent to one
+		// without became a silent no-op: the launch returned 201, the run started, and the values
+		// the caller believed they were passing were nowhere. A caller who mistakes answers for
+		// extra_vars, which is the natural mistake given both end up in the same place, got no
+		// signal at all. The message names the field that would have carried it.
+		if len(t.Survey) == 0 && len(launchReq.Answers) > 0 {
+			respondError(w, log, http.StatusBadRequest,
+				"this template asks no survey questions, so answers has nothing to fill. Send the "+
+					"values under extra_vars instead.")
+			return
+		}
 		if len(t.Survey) > 0 {
 			// A launch may not set a survey variable through extra vars. Overrides are merged last
 			// so a launch can add a variable the template does not set, which meant an extra var

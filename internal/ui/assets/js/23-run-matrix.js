@@ -113,9 +113,24 @@ function renderMatrixTooLarge(hostCount, taskCount, cellCount, cap) {
 	const tr = document.createElement("tr");
 	const cell = document.createElement("td");
 	cell.className = "matrix-too-large";
-	cell.textContent = "Host matrix is " + hostCount + " × " + taskCount + " = " +
-		cellCount.toLocaleString() + " cells, over the display cap of " + cap.toLocaleString() +
-		". Filter to fewer hosts or tasks, or open a shard, to see the grid.";
+	// The old text told the reader to "filter to fewer hosts or tasks, or open a shard". There
+	// is no host filter and no task filter anywhere on this page, and a run that was not split
+	// has no shards to open, so on the run that actually trips the cap every instruction it gave
+	// was impossible. It now names only what this page can do, and what prevents it next time.
+	const shardsPanel = document.getElementById("shards-panel");
+	const split = !!shardsPanel && !shardsPanel.hidden;
+	cell.textContent = "";
+	const lead = document.createElement("div");
+	lead.textContent = "This run covers " + hostCount.toLocaleString() + " hosts across " +
+		taskCount + " tasks, which is " + cellCount.toLocaleString() + " cells, past the " +
+		cap.toLocaleString() + " this page draws at once.";
+	cell.appendChild(lead);
+	const next = document.createElement("div");
+	next.className = "muted";
+	next.textContent = split
+		? "The shards below each draw their own grid. The timeline and the counts above cover the whole run, and Export events carries every host and task."
+		: "The timeline and the counts above still cover the whole run, and Export events carries every host and task in full. Splitting a run of this size with shards gives a grid per slice.";
+	cell.appendChild(next);
 	tr.appendChild(cell);
 	tbody.appendChild(tr);
 	table.appendChild(tbody);
@@ -171,6 +186,11 @@ function renderMatrix(model) {
 		const hostLink = document.createElement("a");
 		hostLink.href = "/ui/hosts/" + encodeURIComponent(host);
 		hostLink.textContent = host;
+		// The column is bounded in CSS so one long name cannot cover the grid, so the full name has
+		// to stay reachable: title for hover, and the accessible name for a screen reader, which
+		// would otherwise read only the truncated text.
+		hostLink.title = host;
+		hostLink.setAttribute("aria-label", host);
 		hostLink.dataset.tip = "Open this host's history";
 		rowTh.appendChild(hostLink);
 		rowTh.dataset.ri = ri;

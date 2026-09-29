@@ -82,6 +82,9 @@ type listUsersResponse struct {
 	Users []*user.User `json:"users"`
 	// Count is the number returned.
 	Count int `json:"count"`
+	// Total is how many rows exist before the response cap, so a caller shown a prefix knows it is
+	// one. Equal to Count for every ordinary install.
+	Total int `json:"total"`
 }
 
 // loginWindowLength and loginWindowMax bound sign-in attempts per client and username to a fixed
@@ -498,8 +501,9 @@ func listUsersHandler(users user.Store, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusInternalServerError, "could not list users")
 			return
 		}
+		capped, total := cappedList(list)
 		respondJSON(w, log, http.StatusOK,
-			listUsersResponse{Users: list, Count: len(list)}, wantsPretty(r))
+			listUsersResponse{Users: capped, Count: len(capped), Total: total}, wantsPretty(r))
 	}
 }
 

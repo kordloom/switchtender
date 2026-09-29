@@ -414,6 +414,12 @@ table.runs tbody tr.row-nav, table.runs tbody tr.row-inspect { cursor: pointer; 
 table.runs tbody tr.row-nav:hover, table.runs tbody tr.row-inspect:hover { background: var(--surface-2); }
 table.runs td button + button { margin-left: 8px; }
 table.runs td.mono { max-width: 118px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Every list table bounds its widest text cell the same way. Only the runs table did, so an
+   ordinary long name, a template called after a service and an environment or a host with a
+   full cloud DNS name, pushed the Edit, Delete and History buttons off the right edge and
+   there was no way to reach them. The full value stays in title= on the cell. */
+main.content table td.col-name, main.content table td.col-title,
+main.content table th[scope="row"] { max-width: 34ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Status badges */
 .badge { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 2px 9px; min-width: 96px; border-radius: 999px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.01em; line-height: 1.6; white-space: nowrap; border: 1px solid transparent; }
@@ -574,7 +580,13 @@ table.matrix { border-collapse: separate; border-spacing: 0; }
 table.matrix thead th { position: sticky; top: 0; z-index: 3; background: var(--surface-2); padding: 9px 12px; font-size: 12px; font-weight: 600; white-space: nowrap; text-align: left; color: var(--muted); border-bottom: 1px solid var(--border-muted); }
 table.matrix tbody th a { color: inherit; }
 table.matrix tbody th a:hover { color: var(--accent); text-decoration: none; }
-table.matrix tbody th { position: sticky; left: 0; z-index: 2; background: var(--surface-2); padding: 7px 14px; font-family: var(--mono); font-size: 12.5px; white-space: nowrap; text-align: left; border-right: 1px solid var(--border-muted); border-bottom: 1px solid var(--border-muted); }
+/* The host column is sticky and was unbounded, so one long host name, which is ordinary in a
+   cloud estate (ip-10-0-14-22.eu-west-1.compute.internal and longer), widened it until it
+   covered the grid it is a label for. The matrix is the view this product is sold on, and it
+   became permanently unreadable because of one row. Bounded and truncated, with the full name
+   still on the cell for hover and for a screen reader. */
+table.matrix tbody th { position: sticky; left: 0; z-index: 2; background: var(--surface-2); padding: 7px 14px; font-family: var(--mono); font-size: 12.5px; white-space: nowrap; text-align: left; border-right: 1px solid var(--border-muted); border-bottom: 1px solid var(--border-muted); max-width: 22ch; overflow: hidden; text-overflow: ellipsis; }
+table.matrix thead th.corner { max-width: 22ch; }
 table.matrix thead th.corner { position: sticky; left: 0; z-index: 4; border-right: 1px solid var(--border-muted); }
 table.matrix td { padding: 3px; text-align: center; }
 .cell { margin: 0 auto; }
@@ -1512,6 +1524,26 @@ td.col-labels .label-wrap { flex-wrap: nowrap; }
    right edge. The zero-height break sits between the two order groups; the chevron goes, since a
    full-width tappable row already says it opens. Scoped to the recent-runs list: the fleet rows
    hold one line fine. */
+/* Phones. About half the traffic an announcement brings arrives on one, and below 520px the app had
+   a single rule, for the overview's recent rows. Nothing here changes a desktop layout: each rule
+   only relaxes a fixed width that a narrow screen cannot afford.
+
+   The page padding is the largest of them. 36px a side is 72px of a 390px screen, 18% of the width,
+   spent on margin before any content is drawn. The dialogs are the other: a grid with a fixed 130px
+   label column plus fields has nowhere to go at that width, so the rows stack instead. */
+@media (max-width: 560px) {
+	.content { padding: 18px 14px 32px; }
+	.page-head h1 { font-size: 20px; }
+	.notify-row { grid-template-columns: 1fr; gap: 6px; }
+	.notify-fields { flex-wrap: wrap; }
+	.notify-fail { white-space: normal; }
+	.runs-toolbar { flex-wrap: wrap; row-gap: 8px; }
+	.runs-toolbar .list-filter { flex: 1 1 100%; min-width: 0; }
+	.list-filter-input { max-width: none; }
+	/* The toolbar's buttons wrap rather than pushing the row wider than the screen. */
+	.table-foot { flex-wrap: wrap; row-gap: 8px; }
+}
+
 @media (max-width: 520px) {
 	#recent .ov-row { flex-wrap: wrap; row-gap: 5px; }
 	#recent .ov-row::after { content: ""; flex-basis: 100%; height: 0; order: 1; }

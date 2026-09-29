@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 // testClient returns a Client pointed at ts.
@@ -373,4 +376,53 @@ func getRunLogTool(t *testing.T, c *Client) Tool {
 	}
 	t.Fatal("get_run_log tool not found")
 	return Tool{}
+}
+
+// TestTheToolSetIsExactlyThese pins the agent's whole surface by name, in both modes.
+//
+// TestToolSurfaceIsProposeAndRead names tools that must never appear, which catches a tool called
+// approve_run and misses one called release_run, commit_run, or set_credential. A denylist only ever
+// knows the names somebody already thought of. This is the other half: a tool added here fails until
+// it is written down, so widening what an agent can reach is a decision somebody made on purpose
+// rather than a line that went in with a feature and nobody weighed.
+//
+// Adding a tool? Add it below, and say in the commit why an agent holding only this may have it.
+func TestTheToolSetIsExactlyThese(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+
+	// Propose one run, and read runs and their evidence. Nothing writes anything else.
+	wantDefault := []string{
+		"get_run", "get_run_evidence", "get_run_log", "list_runs", "list_templates", "propose_run",
+	}
+	// The ad-hoc tool is the single opt-in addition, and it still only proposes.
+	wantAdhoc := append(append([]string{}, wantDefault...), "propose_adhoc_run")
+	sort.Strings(wantAdhoc)
+
+	tests := []struct {
+		Name      string
+		Opts      Options
+		WantTools []string
+	}{
+		{Name: "default", Opts: Options{}, WantTools: wantDefault},
+		{Name: "adhoc allowed", Opts: Options{AllowAdhoc: true}, WantTools: wantAdhoc},
+	}
+	for _, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Parallel()
+			var got []string
+			for _, tool := range Tools(testClient(t, ts), test.Opts) {
+				got = append(got, tool.Name)
+			}
+			sort.Strings(got)
+			if diff := cmp.Diff(test.WantTools, got); diff != "" {
+				t.Errorf("the agent's tool set changed (-want +got):\n%s\n"+
+					"An added tool widens what an agent can reach through the gate. If it belongs "+
+					"here, add it to this list deliberately.", diff)
+			}
+		})
+	}
 }

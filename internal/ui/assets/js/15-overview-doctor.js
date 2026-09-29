@@ -137,7 +137,7 @@ function renderOverviewMetrics(runs, hosts, summary, chain) {
 	const rate = finished ? Math.round((succeeded / finished) * 100) + "%" : "-";
 	const el = document.getElementById("ov-metrics");
 	el.innerHTML = "";
-	el.appendChild(statCard(total, "Total runs", ""));
+	el.appendChild(statCard(total, summary && summary.scope === "visible" ? "Runs you can see" : "Total runs", ""));
 	el.appendChild(statCard(rate, "Success rate", failed ? "failed" : ""));
 	if (chain && typeof chain.count === "number") {
 		// The two tiles no competitor can show: the tamper-evident record and the approval gate.

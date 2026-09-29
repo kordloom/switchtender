@@ -49,7 +49,18 @@ var restoreCmd = &cobra.Command{
 	Short: "Restore an encrypted backup, upserting its objects by id.",
 	Long: "Read a backup written by the backup command and upsert its objects into the store by id. It needs " +
 		"the same encryption key the backup was written with, and it never deletes objects absent from the file.",
-	Args:         cobra.NoArgs,
+	// Refusing a positional file is deliberate, per the comment above, but cobra's own refusal is
+	// `unknown command "backup.stbak" for "switchtender restore"`, which reads as the subcommand
+	// being wrong rather than the argument. This is the recovery path, and somebody reading that
+	// error is usually already having a bad day, so it says what to type instead.
+	Args: func(_ *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return nil
+		}
+		return fmt.Errorf("%w: name the backup with --in %s, or pipe it on standard input. It is "+
+			"not a positional argument, so that a forgotten file cannot be mistaken for a read "+
+			"from an empty standard input", ErrUsage, args[0])
+	},
 	SilenceUsage: true,
 	RunE:         runRestore,
 }

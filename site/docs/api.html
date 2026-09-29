@@ -87,7 +87,7 @@ with a message naming the feature rather than failing in some subtler way:</p>
 <tr>
 <td><code>GET /v1/audit/register</code></td>
 <td>Team</td>
-<td>The period change register. Per-run dossiers, receipts, bundles, and <code>GET /v1/audit/verify</code> are free.</td>
+<td>The period change register, covering the last 90 days unless <code>from</code> and <code>to</code> name another period, each a date or an RFC 3339 timestamp. Per-run dossiers, receipts, bundles, and <code>GET /v1/audit/verify</code> are free.</td>
 </tr>
 <tr>
 <td><code>POST /v1/drift/reconcile</code></td>
@@ -95,7 +95,7 @@ with a message naming the feature rather than failing in some subtler way:</p>
 <td>One-click reconcile. Drift detection is free.</td>
 </tr>
 <tr>
-<td><code>POST</code> and <code>PATCH /v1/policies</code></td>
+<td><code>POST</code> and <code>PUT /v1/policies</code></td>
 <td>Team, past the free set</td>
 <td>Deny rules, risk floors, actor scoping, and distinct-approver separation of duties. One require-approval policy is Community, Pro holds five, Team is uncapped.</td>
 </tr>
@@ -103,7 +103,7 @@ with a message naming the feature rather than failing in some subtler way:</p>
 </table>
 <p>Two more are enforced somewhere other than the request:</p>
 <ul>
-<li><code>/relay</code> is served whatever the license. The gate is on the other end: <code>switchtender worker --server</code> refuses to start without Team. A worker sharing the database is not gated at all.</li>
+<li><code>/relay</code> is served whatever the license. The gate is on the other end: <code>switchtender worker --server</code> refuses to start without Team, and so does a worker sharing the database: every worker process is gated.</li>
 <li>The directory sign-in routes need Pro, enforced at startup rather than per request. Configuring any
 of OIDC, SAML, LDAP, or JWT without a license refuses the server at startup, so those routes are
 either licensed or absent.</li>
@@ -125,7 +125,7 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/runs</code></td>
-<td>Run history, newest first.</td>
+<td>Run history, newest first. Pages with <code>limit</code> (default 200, maximum 1000) and <code>offset</code>; the response carries <code>has_more</code> and <code>next_offset</code>. Filters: <code>status</code>, <code>tool</code>, <code>order</code>, <code>task</code>, <code>after</code>, <code>before</code>, and <code>q</code> for a text search over the run.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -170,7 +170,7 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/runs/{id}/logs</code></td>
-<td>Captured output as plain text.</td>
+<td>Captured output as plain text, streamed. <code>?tail=&lt;bytes&gt;</code> returns only the end, capped at 4 MiB; when anything was dropped the response carries <code>Switchtender-Log-Truncated: 1</code> and <code>Switchtender-Log-Omitted-Bytes</code>.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -180,7 +180,7 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/runs/{id}/receipt</code></td>
-<td>Signed LoomSeal receipt proving what this run did.</td>
+<td>Signed LoomSeal receipt proving what this run did. <code>?sparse</code> discloses only this run's own entries, each proved to belong to the whole chain; <code>?from=&lt;size&gt;</code> adds a consistency proof that the log only appended since that size. The response carries the signing key's id in a <code>Switchtender-Key-Id</code> header.</td>
 </tr>
 <tr>
 <td>POST</td>
@@ -195,7 +195,7 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/runs/{id}/events</code></td>
-<td>Structured events as JSON.</td>
+<td>Structured events as JSON. <code>?after=&lt;seq&gt;</code> and <code>?limit</code> page them, and the response carries <code>next_after</code> to continue. <code>?download=1</code> streams the same events as newline-delimited JSON with a filename attachment.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -550,7 +550,7 @@ either licensed or absent.</li>
 <tr>
 <td>POST</td>
 <td><code>/v1/orgs/{id}/members</code></td>
-<td>Add a user to an organization with an organization role.</td>
+<td>Add a user to an organization with an organization role. Organization admin grants manage over that organization's projects, templates, inventories and credentials, bounded by the account's global role: on a viewer account it confers use, not manage. See <a href="/docs/concepts">concepts</a>.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -879,6 +879,14 @@ cycle or an unknown dependency is refused then rather than on every launch.</p>
     ]
   }'
 </code></pre>
+<h2 id="list-responses">List responses</h2>
+<p>Every list response is an envelope: the rows under a name, <code>count</code> for how many were returned, and
+<code>total</code> for how many exist. They agree on any ordinary install.</p>
+<p>The run list pages, because run history grows without bound: <code>limit</code> (default 200, maximum 1000) and
+<code>offset</code>, with <code>has_more</code> and <code>next_offset</code> to continue. The configuration lists, users, tokens,
+templates, schedules, triggers and organizations, return at most 1000 rows in one response. Past
+that, <code>total</code> exceeds <code>count</code> and the response is the first 1000. An install with more configuration
+than that should read it through the object endpoints rather than the list.</p>
 <h2 id="survey-field-constraints">Survey field constraints</h2>
 <p>A template survey field accepts bounds beyond its type, checked at launch before any answer becomes
 an extra var. A field also takes an optional <code>help</code> string shown beneath its prompt, and a
@@ -906,6 +914,25 @@ an extra var. A field also takes an optional <code>help</code> string shown bene
 </tbody>
 </table>
 <p>A launch that violates a constraint is refused with the field it failed, and no run is submitted.</p>
+<p>The shape itself, which strict decoding refuses to guess at:</p>
+<pre><code class="language-json">{
+  &quot;survey&quot;: [
+    {&quot;var&quot;: &quot;release&quot;, &quot;label&quot;: &quot;Release tag&quot;, &quot;type&quot;: &quot;text&quot;,
+     &quot;required&quot;: true, &quot;pattern&quot;: &quot;^v[0-9]+\\.[0-9]+\\.[0-9]+$&quot;,
+     &quot;help&quot;: &quot;The tag to deploy, such as v2.1.0&quot;},
+    {&quot;var&quot;: &quot;batch&quot;, &quot;label&quot;: &quot;Hosts per batch&quot;, &quot;type&quot;: &quot;int&quot;,
+     &quot;default&quot;: 5, &quot;min&quot;: 1, &quot;max&quot;: 50},
+    {&quot;var&quot;: &quot;environment&quot;, &quot;label&quot;: &quot;Environment&quot;, &quot;type&quot;: &quot;choice&quot;,
+     &quot;required&quot;: true, &quot;choices&quot;: [&quot;staging&quot;, &quot;production&quot;]},
+    {&quot;var&quot;: &quot;notes&quot;, &quot;label&quot;: &quot;Change notes&quot;, &quot;type&quot;: &quot;multiline&quot;,
+     &quot;max_length&quot;: 2000}
+  ]
+}
+</code></pre>
+<p><code>type</code> is one of <code>text</code>, <code>multiline</code>, <code>int</code>, <code>choice</code>, or <code>bool</code>. <code>var</code> names the extra var the
+answer becomes, and it is the only field besides <code>type</code> that every entry must carry. An unknown key
+is refused rather than ignored, so a survey that almost parses is reported instead of silently
+losing a field.</p>
 <h2 id="per-template-notifications">Per-template notifications</h2>
 <p>A template or a run submission may carry <code>notifications</code>, a list of targets that receive its
 terminal state in addition to the server-wide channels. Each target names a <code>kind</code> and the field

@@ -561,6 +561,17 @@ function mountFacet(wrap, table, tbody, name, index, onChange) {
 }
 
 // mountTablePager caps how many rows a list shows at once, with a footer for paging: a count, a
+// countMatched counts the rows neither filter has hidden, which is what a page size applies to.
+function countMatched(tbody) {
+	let n = 0;
+	for (const row of tbody.rows) {
+		if (row.classList.contains("skeleton-row")) continue;
+		if (row.dataset.fhide === "1" || row.dataset.xhide === "1") continue;
+		n++;
+	}
+	return n;
+}
+
 // rows-per-page choice, and Show all. Long fleets and logs stay wieldy, and the filter composes,
 // since it marks rows and the pager only pages the ones that match. The runs page pages on the
 // server and is left alone.
@@ -583,7 +594,7 @@ function mountTablePager() {
 	label.textContent = "Rows";
 	const sel = document.createElement("select");
 	sel.className = "input toolbar-select";
-	for (const n of [25, 50, 100, 0]) {
+	for (const n of [25, 50, 100, 500, 0]) {
 		const opt = document.createElement("option");
 		opt.value = String(n);
 		opt.textContent = n === 0 ? "All" : String(n);
@@ -599,6 +610,11 @@ function mountTablePager() {
 	foot.appendChild(label);
 	foot.appendChild(all);
 	let size = 25;
+	// Beyond this, showing everything at once is not a slow render, it is a frozen tab: a 5,000 host
+	// fleet took eleven seconds of unresponsive browser, and the only control that produced it was
+	// one the page itself offered. All stays available up to here and is refused above it, with the
+	// export named, because a reader who genuinely wants every row wants a file rather than a table.
+	const maxShowAll = 1000;
 	const apply = () => {
 		let shown = 0;
 		let matched = 0;
@@ -620,10 +636,26 @@ function mountTablePager() {
 		}
 		foot.hidden = matched <= 25 && size >= 25;
 		count.textContent = "Showing " + shown + " of " + matched;
-		all.hidden = shown >= matched;
+		all.hidden = shown >= matched || matched > maxShowAll;
 	};
-	sel.addEventListener("change", () => { size = parseInt(sel.value, 10) || 0; apply(); });
-	all.addEventListener("click", () => { size = 0; sel.value = "0"; apply(); });
+	// A request for every row is honored while it can be drawn, and refused with a reason when it
+	// cannot. Silently ignoring it would be worse than either.
+	const setSize = (want) => {
+		const matched = countMatched(tbody);
+		if (want === 0 && matched > maxShowAll) {
+			size = 500;
+			sel.value = "500";
+			apply();
+			count.textContent = "Showing 500 of " +
+				matched.toLocaleString() + ". Drawing them all at once locks the tab at this size; " +
+				"use Export for the full set.";
+			return;
+		}
+		size = want;
+		apply();
+	};
+	sel.addEventListener("change", () => setSize(parseInt(sel.value, 10) || 0));
+	all.addEventListener("click", () => { sel.value = "0"; setSize(0); });
 	table.addEventListener("rowsfiltered", apply);
 	new MutationObserver(apply).observe(tbody, { childList: true });
 	apply();

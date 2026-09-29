@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -86,11 +87,20 @@ func TestDesktopListener(t *testing.T) {
 	_ = l2.Close()
 
 	// Test 2: A taken saved port falls back to a fresh one.
+	//
+	// The precondition is that the saved port is occupied. Usually this test occupies it; sometimes
+	// another test in this package, all of which run in parallel and bind ports, already has. Both
+	// satisfy the precondition, so a bind that fails with the port already in use is the setup
+	// succeeding by another route rather than a reason to fail the test.
 	blocker, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(first))
-	if err != nil {
+	switch {
+	case err == nil:
+		defer func() { _ = blocker.Close() }()
+	case strings.Contains(err.Error(), "address already in use"):
+		t.Logf("port %d was already taken by another test, which is the state this case needs", first)
+	default:
 		t.Fatalf("Listen() blocker error = %v", err)
 	}
-	defer func() { _ = blocker.Close() }()
 	l3, err := desktopListener(dir)
 	if err != nil {
 		t.Fatalf("desktopListener() fallback error = %v", err)

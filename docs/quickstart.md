@@ -78,7 +78,11 @@ The response carries a run id. Fetch its status, its structured events, or its l
 Add `"shards": 4` to the body to split the run across four slices of the inventory, balanced by
 each host's measured duration in recent runs.
 
-## Add a worker
+## Add a worker (Team)
+
+Distributed execution is a Team feature, so every `switchtender worker` needs a license and refuses
+to start without one. Community runs everything on the server itself, which is the default and needs
+no extra process: this section is for when one machine is no longer enough.
 
 Point a worker at the same database and it competes for queued runs:
 
@@ -86,6 +90,10 @@ Point a worker at the same database and it competes for queued runs:
       switchtender worker --db switchtender.db --name laptop
 
 For more than one machine, use a PostgreSQL DSN as the `--db` value on every process.
+
+Queues are part of the same feature: naming one on a run, a template, or an inventory source routes
+it to a worker serving that name, so it is refused on Community rather than accepted and left with
+nothing able to claim it.
 
 ## Lock down the API
 
@@ -112,8 +120,11 @@ binary:
     export SWITCHTENDER_ENCRYPTION_SALT=change-me-too
     docker compose --profile stack up --build
 
-This starts a server, a PostgreSQL database, and a worker. The server listens on port 8080. Set
+This starts a server and a PostgreSQL database. The server listens on port 8080. Set
 `SWITCHTENDER_PORT` to change the host port.
+
+Workers are a separate profile because they are Team: `docker compose --profile stack --profile
+workers up --build` adds one, and it needs a license to start.
 
 ## Set up a production server
 
@@ -143,6 +154,13 @@ The chart is in the repository too, so clone it first if you installed the binar
     helm install switchtender ./deploy/helm/switchtender \
       --set encryptionKey=$(openssl rand -hex 32) \
       --set encryptionSalt=$(openssl rand -hex 16)
+
+Add `--set auditKey=$(openssl rand -hex 32)` too, a 32 byte ed25519 seed as hex, or that install
+cannot sign a receipt. A deployment that shares one database will not create a signing key by itself, because
+every server and worker has to sign as the same install, and a key minted inside one pod would be
+that pod's alone. Without it the chain still records and still verifies, but no receipt, signed
+bundle or trust document can be produced, which is most of why anyone runs this. Keep the seed where
+you can restore it.
 
 Both values are required, and the salt has to stay the same across upgrades: it is what every
 stored secret was sealed against, so a new salt makes the old ones unreadable. Keep them in a

@@ -90,15 +90,11 @@ func toolContainerPlan(spec Spec) (containerPlan, func(), error) {
 			mounts:  mounts,
 		}, varsCleanup, nil
 	case run.ToolBash:
-		if spec.Command == "" {
-			return containerPlan{}, noCleanup, ErrNoCommand
-		}
-		return containerPlan{
-			argv:     append([]string{"bash"}, bashArgs(spec)...),
-			workdir:  spec.Dir,
-			mounts:   []planMount{{path: spec.Dir}},
-			extraEnv: varsExtra(spec),
-		}, noCleanup, nil
+		// Same shape as the other three script tools, so the script is a mounted file rather than
+		// part of the container's recorded command line.
+		return scriptToolPlan(spec, "switchtender-sh-*.sh", func(p string) []string {
+			return append([]string{"bash"}, bashArgs(p, spec.DryRun)...)
+		})
 	case run.ToolTerraform, run.ToolOpenTofu:
 		if spec.Command == "" {
 			return containerPlan{}, noCleanup, ErrNoCommand

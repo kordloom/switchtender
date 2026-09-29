@@ -192,3 +192,29 @@ test("wireCronTips subscribes an input once however often it runs", () => {
 	assert.equal(input.listeners.length, 1);
 	assert.equal(input.dataset.tip, app.cronTip("0 9 * * 1"));
 });
+
+// TestCadenceNamesItsDayRestriction pins that a frequency does not describe itself as unrestricted.
+//
+// The frequency shapes read only the minute and hour fields, so "*/15 * * * 1-5" rendered as
+// "Every 15 minutes" in the schedules page's Cadence column, for a rule that does not fire at all on
+// a Saturday. An operator reading that column to answer "what runs at the weekend" got the wrong
+// answer from the product's own summary of their own rule.
+test("a frequency says which days it is restricted to", () => {
+	const tests = [
+		// Test 0: The reported case, every fifteen minutes but weekdays only.
+		{ In: "*/15 * * * 1-5", Want: "Every 15 minutes on weekdays" },
+		// Test 1: Unrestricted is unchanged, so the common case keeps its short sentence.
+		{ In: "*/15 * * * *", Want: "Every 15 minutes" },
+		// Test 2: Hourly steps carry the restriction too.
+		{ In: "0 */4 * * 1-5", Want: "Every 4 hours on weekdays" },
+		// Test 3: A single named day.
+		{ In: "*/30 * * * 1", Want: "Every 30 minutes on Mondays" },
+		// Test 4: Every minute, restricted.
+		{ In: "* * * * 1-5", Want: "Every minute on weekdays" },
+		// Test 5: A restriction that cannot be said in words is not described wrongly.
+		{ In: "*/15 * 1,15 * *", Want: "Custom schedule" },
+	];
+	for (const [i, tc] of tests.entries()) {
+		assert.equal(app.describeCron(tc.In), tc.Want, "test " + i + ": " + tc.In);
+	}
+});

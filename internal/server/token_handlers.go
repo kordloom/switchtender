@@ -55,6 +55,9 @@ type listTokensResponse struct {
 	Tokens []*auth.Token `json:"tokens"`
 	// Count is the number returned.
 	Count int `json:"count"`
+	// Total is how many rows exist before the response cap, so a caller shown a prefix knows it is
+	// one. Equal to Count for every ordinary install.
+	Total int `json:"total"`
 }
 
 // listTokensHandler returns every token, without secrets, so an admin can see what holds access to
@@ -72,8 +75,9 @@ func listTokensHandler(tokens auth.Store, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusInternalServerError, "could not list tokens")
 			return
 		}
+		capped, total := cappedList(list)
 		respondJSON(w, log, http.StatusOK,
-			listTokensResponse{Tokens: list, Count: len(list)}, wantsPretty(r))
+			listTokensResponse{Tokens: capped, Count: len(capped), Total: total}, wantsPretty(r))
 	}
 }
 

@@ -78,10 +78,17 @@ picks a loopback port, keeps its data in a per-user directory, and opens the UI.
 bundle and a <code>SwitchTender.dmg</code> are built by the release workflow and appear on releases it produces;
 releases assembled by hand carry the archives above and nothing else, so check the page for what is
 actually attached rather than assuming.</p>
-<p>The downloads are not yet signed with a developer certificate, so the operating system warns that
-the developer is unidentified on first launch. On macOS, right-click and choose Open, then Open
-again. On Windows, choose More info and then Run anyway. A signed release removes the warning and
-is planned.</p>
+<p>What is signed differs by artifact, so here it is per download rather than as one sentence.</p>
+<p>The macOS app inside the <code>.dmg</code> is signed with a Developer ID certificate issued to KordLoom LLC
+(team KD99L7BFM2) and notarized by Apple, so Gatekeeper accepts it and it opens with no warning.
+<code>spctl -a -vvv /Applications/SwitchTender.app</code> reports <code>source=Notarized Developer ID</code>, and
+<code>codesign -dv</code> names the same authority. The <code>.dmg</code> wrapper itself carries no signature, which is
+not what Gatekeeper judges: it assesses the app it contains.</p>
+<p>The Linux and Windows binaries in the tarballs and packages carry no code-signing certificate, so
+Windows shows the unidentified-developer prompt on first launch: choose More info, then Run anyway.
+Every archive is covered by the published <code>SHA256SUMS</code>, which CI signs with cosign, and
+<code>switchtender version --verify</code> checks the running binary against the release's hashes. Verifying a
+release is described in SECURITY.md.</p>
 <h2 id="run-it">Run it</h2>
 <p>From a download, open <code>SwitchTender.app</code> on macOS or run <code>switchtender.exe desktop</code> on Windows. From a
 binary or a source build, run:</p>

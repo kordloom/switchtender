@@ -408,7 +408,7 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 		oidcBrand = srv.oidc.Brand()
 	}
 	srv.web = ui.New(srv.log, srv.docs, srv.readOnly, srv.matrixCap, srv.oidc != nil, srv.saml != nil,
-		srv.ai != nil, oidcBrand, ui.WithAccountCheck(srv.anyAccount))
+		srv.ai != nil, oidcBrand, ui.WithAccountCheck(srv.anyAccount), ui.WithTokenCheck(srv.anyToken))
 	return srv
 }
 
@@ -424,6 +424,25 @@ func (s *Server) anyAccount() bool {
 		return true
 	}
 	return len(accounts) > 0
+}
+
+// canSign reports whether this install holds a producer identity, which is what a receipt, a signed
+// bundle and the trust document all require. A shared-database install without one is the case the
+// doctor exists to surface.
+func (s *Server) canSign() bool { return s.producer != nil }
+
+// anyToken reports whether this install holds an API token, for the sign-in page. An unreadable
+// token store counts as holding one, so a database problem never produces the claim that the install
+// is open.
+func (s *Server) anyToken() bool {
+	if s.tokens == nil {
+		return false
+	}
+	n, err := s.tokens.Count(context.Background())
+	if err != nil {
+		return true
+	}
+	return n > 0
 }
 
 // Handler returns the HTTP handler serving the SwitchTender API and web interface.
@@ -497,7 +516,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/runs/{id}/stream",
 		runStreamHandler(s.streamer, s.store, authz, s.log, s.shutdown))
 	mux.Handle("GET /v1/schedules/preview", previewScheduleHandler(s.log))
-	mux.Handle("GET /v1/doctor", doctorHandler(s.templates, s.schedules, s.credentials, s.inventories, s.projects, s.log))
+	mux.Handle("GET /v1/doctor", doctorHandler(s.templates, s.schedules, s.credentials, s.inventories, s.projects,
+		s.canSign, s.log))
 	mux.Handle("POST /v1/schedules", createScheduleHandler(s.schedules, authz, s.log))
 	mux.Handle("GET /v1/schedules", listSchedulesHandler(s.schedules, authz, s.log))
 	mux.Handle("GET /v1/schedules/{id}", getScheduleHandler(s.schedules, authz, s.log))
@@ -600,9 +620,15 @@ func (s *Server) Handler() http.Handler {
 			Credentials: s.credentials, Templates: s.templates, Schedules: s.schedules,
 		}, true
 	}, s.log))
+	// Every refusal this API makes is a JSON object with an "error" string, except the two the mux
+	// writes itself: an unrouted path and a wrong method came back as Go's plain-text "404 page not
+	// found" and "Method Not Allowed". A client that parses errors, which is every client, then met
+	// two responses it could not read, on the two mistakes a caller is most likely to make while
+	// learning the API. The shim below gives them the same shape as everything else.
+	handler := jsonNotFound(mux)
 	// Compression sits under the gate, so a refusal is written by the gate itself and only a
 	// response the handlers produced is ever encoded.
-	handler := compress(mux)
+	handler = compress(handler)
 	if s.tokens != nil {
 		gate := &authGate{tokens: s.tokens, users: s.users, jwt: s.jwt, audits: s.audits, log: s.log,
 			authz: authz, alwaysEnforce: s.enforceAuth, tickets: tickets}

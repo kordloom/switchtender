@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/grant"
+	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/org"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/schedule"
@@ -135,7 +136,23 @@ func (a *authorizer) orgAccess(ctx context.Context, actor Actor, object string) 
 		if m.OrgID != orgID {
 			continue
 		}
-		if m.Role == org.RoleAdmin {
+		// Organization admin confers manage over that organization's objects, but never above what
+		// the account's own global role allows.
+		//
+		// The ceiling is the point. Without it, an operator who created a read-only auditor and
+		// added it to an organization as "admin", meaning "let them see all of this", handed that
+		// account write on the organization's credentials, templates, projects and inventories. The
+		// name invites exactly that mistake, and nothing in the product corrected it.
+		//
+		// The global role is the account's ceiling everywhere else, including for agents one file
+		// away in authmw: an agent gets its role and nothing more. Membership is delegation within
+		// what an account may already do, not a promotion past it. An organization still administers
+		// itself without install-wide admin, because its admins are operators.
+		//
+		// An explicit per-object manage grant is deliberately left alone: that is an admin choosing
+		// to delegate one named object to one named subject, which is a decision somebody made,
+		// rather than a role name meaning more than it says.
+		if m.Role == org.RoleAdmin && roleAllows(actor.Role, user.RoleOperator) {
 			return grant.AccessManage, true, nil
 		}
 		return grant.AccessUse, true, nil
@@ -381,6 +398,22 @@ func queueObject(queue string) string {
 	return grant.QueueObject(queue)
 }
 
+// allowQueue refuses a named queue on an install that cannot run a worker to serve it.
+//
+// A queue restricts a run to workers serving that name, and every worker is Team. On Community
+// nothing can ever claim such a run: the field saved cleanly, the run was accepted, and it sat
+// pending forever with no error anywhere to explain it. The product sells queues as Team and did
+// not gate them, so the failure mode was a silently stranded run rather than a refusal naming the
+// tier, which is the opposite of how every other gate here behaves.
+//
+// The default queue is always allowed: that is the server's own pool, which needs no worker.
+func allowQueue(queue string) error {
+	if strings.TrimSpace(queue) == "" {
+		return nil
+	}
+	return license.Allow(license.FeatureWorkers)
+}
+
 // denyOnAuthzError writes the response for an authorization failure and reports whether the request
 // was denied. A forbidden grant becomes 403; any other error becomes 500. A nil error is not a
 // denial and returns false so the caller proceeds.
@@ -411,6 +444,20 @@ var derivedReadScan = 2000
 // governs these too; rows carrying a run id are checked against it, and an aggregate that names no
 // run is shown only to a caller who can read something, because otherwise it is a summary of work
 // they are not allowed to know about.
+// unrestrictedReader reports whether grants place no read restriction on this caller, using the same
+// probe derivedReadFilter opens with and costing nothing beyond it.
+//
+// It is what decides whether an install-wide aggregate may be shown. A restricted caller who can
+// read some runs still must not be told how many runs the whole install has, because that total is
+// every other organization's volume in one number.
+func unrestrictedReader(ctx context.Context, authz *authorizer) (bool, error) {
+	filter, err := authz.readFilter(ctx)
+	if err != nil {
+		return false, err
+	}
+	return filter("proj_probe", "") && filter("cred_probe", ""), nil
+}
+
 func derivedReadFilter(ctx context.Context, authz *authorizer,
 	store run.Store) (keep func(runID string) bool, anyReadable bool, err error) {
 	filter, err := authz.readFilter(ctx)

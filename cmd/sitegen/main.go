@@ -421,8 +421,8 @@ var landingFAQ = []landingQA{{
 	Question: "Does it need an agent on each host?",
 	Answer: "No. It reaches the machines it manages over SSH, the same way Ansible does, and " +
 		"installs nothing on them. There is no per-host daemon to deploy, patch, or account for. " +
-		"You run the one server binary, and optionally a few more worker processes against the " +
-		"same store for throughput, which are pool members rather than agents belonging to a host.",
+		"You run the one server binary. Worker processes for extra throughput are a Team feature, " +
+		"and they are pool members rather than agents belonging to a host.",
 }, {
 	Question: "Can it read secrets from AWS Secrets Manager, Azure Key Vault, or Vault?",
 	Answer: "All three, resolved at launch rather than copied into this database. Vault dynamic " +

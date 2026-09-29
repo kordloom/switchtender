@@ -32,7 +32,9 @@ test("the headline cards describe the install, not the page of runs returned", (
 	app.renderOverviewMetrics(page, [{ host: "web01" }], summary);
 	const got = cardValues(document);
 
-	assert.equal(got["Total runs"], "4823",
+	// Grouped, the way every other number in the interface is written. The value is what this test
+	// is about; the separators are the formatting the cards were missing.
+	assert.equal(got["Total runs"], "4,823",
 		"the total counted the returned page rather than the install");
 	assert.equal(got["Failed"], "223", "the failed count came from the page rather than the install");
 	assert.equal(got["Success rate"], "95%",

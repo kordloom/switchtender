@@ -328,6 +328,9 @@ document.addEventListener("DOMContentLoaded", () => {
 	mountTopbar();
 	mountLiveRegions();
 	explainReadOnly();
+	// Every queue routing control on whatever page this is, marked before it is used rather than
+	// met as a refusal afterward.
+	markQueueTiers();
 	if (LIST_PAGES.includes(document.body.dataset.page)) {
 		mountListFilter();
 		mountFacetFilters();

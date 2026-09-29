@@ -23,6 +23,7 @@ paths = [
   '''internal/credential/credential_test\.go''',
   '''internal/credential/sshkey_test\.go''',
   '''internal/dispatch/credentials_test\.go''',
+  '''internal/dispatch/gcpmask_test\.go''',
   '''internal/dispatch/mask_test\.go''',
   '''internal/dispatch/notify_leak_test\.go''',
   '''internal/inventory/secrets_test\.go''',

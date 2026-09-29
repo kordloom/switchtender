@@ -463,6 +463,36 @@ func ValidateRepoURL(raw string) error {
 	return checkRepoHost(host)
 }
 
+// dangerousSchemes are URI schemes that must never be read as an scp-shorthand hostname. Each is a
+// scheme a browser or a viewer may act on, and a repository URL is stored and rendered, so one
+// accepted here becomes an active link somewhere later.
+var dangerousSchemes = map[string]bool{
+	"javascript": true, "data": true, "vbscript": true, "blob": true, "about": true,
+	"jar": true, "view-source": true,
+}
+
+// checkSCPHost reports whether the text before the colon of an scp-shorthand URL can really be a
+// hostname, rather than a URI scheme wearing the same shape.
+func checkSCPHost(host string) error {
+	if host == "" {
+		return fmt.Errorf("%w: no host before the colon", ErrBadRepoURL)
+	}
+	if dangerousSchemes[strings.ToLower(host)] {
+		return fmt.Errorf("%w: %q is a URI scheme, not a host", ErrBadRepoURL, host)
+	}
+	// A hostname is letters, digits, dots and dashes. Anything else means this is not the shorthand
+	// and guessing that it is would hand the rest of the value to a transport as a path.
+	for _, r := range host {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '.' || r == '-' || r == '_':
+		default:
+			return fmt.Errorf("%w: %q is not a hostname", ErrBadRepoURL, host)
+		}
+	}
+	return nil
+}
+
 // checkRepoUserinfo rejects a repository URL that embeds credentials. A token or password in the
 // URL surfaces in clone and fetch errors and in stored project rows, so credentials belong in a
 // stored credential instead. An ssh username alone passes, since it names the login and carries no
@@ -542,6 +572,14 @@ func repoURLParts(raw string) (host, scheme string, err error) {
 	// one check that exists to refuse them.
 	rest := raw[scpUserinfoEnd(raw):]
 	if i := strings.IndexByte(rest, ':'); i >= 0 && !strings.Contains(rest[:i], "/") {
+		// The shorthand has no scheme, so anything shaped like word:rest lands here, and a URI
+		// scheme is shaped exactly like that. "javascript:alert(1)" was read as host "javascript"
+		// over ssh and accepted: the scheme allowlist never saw it, because the code had already
+		// decided the value had no scheme. The host has to look like a host for that reading to be
+		// the right one.
+		if err := checkSCPHost(rest[:i]); err != nil {
+			return "", "", err
+		}
 		return rest[:i], "ssh", nil
 	}
 	return "", "file", nil
