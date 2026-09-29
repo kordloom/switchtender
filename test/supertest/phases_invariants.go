@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -106,7 +108,7 @@ func (h *harness) phaseInvariants() error {
 	h.checkNoInternalErrors(phase, actors)
 	h.checkRefusalsExplainThemselves(phase, actors, refusedPaths)
 	h.checkUnauthenticatedReadsNothing(phase)
-	h.checkNoSigningSeedEchoed(phase, actors)
+	h.checkNoCredentialMaterialEchoed(phase, actors)
 	return nil
 }
 
@@ -223,7 +225,15 @@ func (h *harness) checkNoInternalErrors(phase string, actors []*actor) {
 	for _, who := range actors {
 		broke := ""
 		for _, path := range invariantPaths {
-			if status, body := h.rawGet(who, path); status >= 500 {
+			status, body := h.rawGet(who, path)
+			// Zero is not a status. It is the request never arriving, which the port forward this
+			// harness runs over can produce at any moment, and reading it as "not a server error"
+			// made this and three properties beside it report green over an install nobody reached.
+			if status == 0 {
+				broke = fmt.Sprintf("%s could not be reached at all: %s", path, oneLine(body))
+				break
+			}
+			if status >= 500 {
 				broke = fmt.Sprintf("%s answered %d: %s", path, status, oneLine(body))
 				break
 			}
@@ -250,6 +260,10 @@ func (h *harness) checkRefusalsExplainThemselves(phase string, actors []*actor, 
 		paths := append(append([]string{}, invariantPaths...), refused[who.Name]...)
 		for _, path := range paths {
 			status, body := h.rawGet(who, path)
+			if status == 0 {
+				silent = fmt.Sprintf("%s could not be reached at all: %s", path, oneLine(body))
+				break
+			}
 			if status < 400 || status >= 500 {
 				continue
 			}
@@ -276,7 +290,13 @@ func (h *harness) checkRefusalsExplainThemselves(phase string, actors []*actor, 
 func (h *harness) checkUnauthenticatedReadsNothing(phase string) {
 	served := ""
 	for _, path := range invariantPaths {
-		if status, body := h.rawGet(nil, path); status == http.StatusOK {
+		status, body := h.rawGet(nil, path)
+		if status == 0 {
+			served = fmt.Sprintf("%s could not be reached at all, so a refusal was never "+
+				"observed: %s", path, oneLine(body))
+			break
+		}
+		if status == http.StatusOK {
 			served = fmt.Sprintf("%s answered 200 with no credentials: %s", path, oneLine(body))
 			break
 		}
@@ -289,38 +309,121 @@ func (h *harness) checkUnauthenticatedReadsNothing(phase string) {
 		fmt.Sprintf("%d path(s)", len(invariantPaths)))
 }
 
-// checkNoSigningSeedEchoed requires no response to carry the install's audit signing seed.
+// checkNoCredentialMaterialEchoed requires no response to carry the private key the install was
+// given to keep.
 //
-// This replaced a hunt for the bearer tokens the install had minted, which could not fail: a token
-// is returned once when it is minted and only its hash is stored, so no read can return one and the
-// property passed over a string the install does not possess. A check that cannot fail is worse
-// than a missing one, because it reads as coverage.
+// This is the third shape of this property, and the first that is about a secret this install
+// actually holds. It hunted bearer tokens, which are returned once at mint and only hashed
+// afterward, so it scanned for a string the install does not possess and could never fail. It then
+// hunted the audit signing seed, which only the Team, HA and disaster-recovery installs are
+// configured with, so at this point in the run it was scanning for a string that install has never
+// seen either. Both read as coverage and were none.
 //
-// The seed is a secret the install does hold, in its environment and in its identity file, and it
-// is the one whose disclosure would be worst: whoever has it can sign a chain that verifies as this
-// install's. A configuration or diagnostic endpoint returning it is exactly the accident this
-// watches for.
-func (h *harness) checkNoSigningSeedEchoed(phase string, actors []*actor) {
-	seed := h.auditSeed()
-	if strings.TrimSpace(seed) == "" {
-		h.fail(phase, "the install has a signing seed to hunt for",
-			fmt.Errorf("no seed is configured, so this property would hold over nothing"))
+// The SSH private key is different: the harness wrote it, handed it over as a credential, and the
+// install sealed and kept it. Every run the fleet executes uses it. It is exactly the material the
+// product exists to hold without ever handing back, and the harness holds the plaintext to compare
+// against, which is what makes the question answerable at all.
+func (h *harness) checkNoCredentialMaterialEchoed(phase string, actors []*actor) {
+	key, err := os.ReadFile(filepath.Join(h.work, "fleet_ed25519"))
+	if err != nil {
+		h.fail(phase, "the install holds credential material to hunt for",
+			fmt.Errorf("the fleet key this install was given is unreadable here, so there is "+
+				"nothing to compare a response against: %w", err))
 		return
 	}
+	// The key's own base64 body, armour and line breaks removed, and a needle taken from its tail.
+	//
+	// The first attempt took "the longest non-armour line", which is wrong in a way that reads as
+	// right. Every base64 line of an unencrypted ed25519 key is exactly seventy characters, so a
+	// strict greater-than never advances past the first one, and that line is the OpenSSH container
+	// header: byte for byte identical in every such key ever generated, carrying nothing of this
+	// one. The check would have reported the same verdict whichever key the install held.
+	//
+	// The tail is past the header and the public half both, so it is this key's private scalar and
+	// its comment. Hunting the joined body as well as the file as written means a response that
+	// re-wraps the key at a different width, which is what any re-encoding produces, cannot slip
+	// through a line-oriented comparison.
+	// Two needles, because a leak can arrive in more than one shape and one needle cannot see both.
+	//
+	// The joined body, armour and line breaks removed, catches a response that re-encodes the key at
+	// a different wrapping. A whole line of that body, taken from past the container header, catches
+	// a response that carries the file verbatim, which is the likelier disclosure and is exactly
+	// what a single joined needle misses: the key's last body line is short, so a tail taken from
+	// the joined form spans a line break and appears nowhere in the file as written.
+	//
+	// The version before this used only the joined tail and its own self test caught that in CI.
+	var lines []string
+	for _, line := range strings.Split(strings.TrimSpace(string(key)), "\n") {
+		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "-----") {
+			lines = append(lines, line)
+		}
+	}
+	joined := strings.Join(lines, "")
+	// The container header and the public half occupy the first line and part of the second, so a
+	// needle taken from the last full-width line is this key's private material.
+	var lineNeedle string
+	for _, line := range lines[1:] {
+		if len(line) >= 64 {
+			lineNeedle = line
+		}
+	}
+	if len(joined) < 224 || lineNeedle == "" {
+		h.fail(phase, "the install holds credential material to hunt for",
+			fmt.Errorf("the key body is %d characters with no full-width line past its header, so "+
+				"no needle taken from it would be distinctive", len(joined)))
+		return
+	}
+	needles := []string{joined[len(joined)-64:], lineNeedle}
+
+	// A detector is shown to detect, against leaks this builds itself rather than against a value it
+	// read out of the response under test. Each shape must be caught by at least one needle.
+	for _, shape := range []struct{ name, body string }{
+		{"the key verbatim", `{"secret":"` + string(key) + `"}`},
+		{"the key with its line breaks removed", `{"secret":"` + joined + `"}`},
+	} {
+		seen := false
+		for _, needle := range needles {
+			if strings.Contains(shape.body, needle) {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			h.fail(phase, "the credential hunt can see a leak it is shown",
+				fmt.Errorf("a response carrying %s is not detected by any needle, so an absence "+
+					"this reports proves nothing", shape.name))
+			return
+		}
+	}
+	h.pass(phase, "the credential hunt can see a leak it is shown",
+		"verbatim and unwrapped, two needles from past the container header")
+
 	for _, who := range actors {
 		echoed := ""
 		for _, path := range invariantPaths {
-			if _, body := h.rawGet(who, path); strings.Contains(body, seed) {
-				echoed = fmt.Sprintf("%s returns the audit signing seed to %s", path, who.Name)
+			status, body := h.rawGet(who, path)
+			if status == 0 {
+				echoed = fmt.Sprintf("%s could not be reached at all (%s), so this reports an "+
+					"absence over a response nobody received", path, oneLine(body))
+				break
+			}
+			for _, needle := range needles {
+				if strings.Contains(body, needle) {
+					echoed = fmt.Sprintf("%s returns the fleet key's private material to %s",
+						path, who.Name)
+					break
+				}
+			}
+			if echoed != "" {
 				break
 			}
 		}
 		if echoed != "" {
-			h.fail(phase, "no response carries the signing seed to "+who.Name,
+			h.fail(phase, "no response carries credential material to "+who.Name,
 				fmt.Errorf("%s", echoed))
 			continue
 		}
-		h.pass(phase, "no response carries the signing seed to "+who.Name,
+		h.pass(phase, "no response carries credential material to "+who.Name,
 			fmt.Sprintf("%d path(s)", len(invariantPaths)))
 	}
 }
