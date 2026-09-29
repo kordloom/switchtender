@@ -117,7 +117,12 @@ func (d *Dispatcher) dumpSource(ctx context.Context, src *invsource.Source) ([]b
 // validateBareSource guards a non-project inventory source path. A bare source has no project repo
 // to contain it, so it is a raw host path handed to ansible-inventory, which executes it when it is
 // an executable file. It rejects directory traversal and executable files so a stored source cannot
-// run arbitrary code or reach outside its intended location as the executor.
+// run arbitrary code as the executor.
+//
+// An absolute path is deliberately allowed. Pointing at a file on the executor is what a bare source
+// is for, and writing one is an admin operation on a server where an admin can already submit a
+// playbook that reads any file. Refusing absolute paths would remove the feature without removing
+// the reach, so the guard here is against execution rather than against location.
 func validateBareSource(source string) error {
 	if source == "" {
 		return fmt.Errorf("%w: empty path", invsource.ErrInvalidSource)

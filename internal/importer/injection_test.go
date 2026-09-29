@@ -134,3 +134,60 @@ func TestImportedSchedulesAreUsable(t *testing.T) {
 		t.Errorf("warnings = %v, want one for each schedule that was refused", plan.Warnings)
 	}
 }
+
+// TestRRULECannotChooseTheCadence pins that an export cannot decide how often a schedule fires.
+//
+// The rule's fields were written into a cron expression unvalidated, so a schedule named "Nightly at
+// 2am" carrying BYMINUTE=* and BYHOUR=* imported as "* * * * *": a run every minute, enabled, with
+// no warning. Combined with a scheduler that reads an impossible expression as always due, an
+// import file was a run storm.
+func TestRRULECannotChooseTheCadence(t *testing.T) {
+	t.Parallel()
+	hostile := []string{
+		"DTSTART:20260101T020000Z RRULE:FREQ=DAILY;BYMINUTE=*;BYHOUR=*",
+		"DTSTART:20260101T020000Z RRULE:FREQ=DAILY;BYMINUTE=0,15,30,45",
+		"DTSTART:20260101T020000Z RRULE:FREQ=DAILY;BYHOUR=*/1",
+		"DTSTART:20260101T020000Z RRULE:FREQ=MONTHLY;BYMONTHDAY=*",
+		"DTSTART:20260101T020000Z RRULE:FREQ=DAILY;BYMINUTE=99",
+		"DTSTART:20260101T020000Z RRULE:FREQ=DAILY;BYHOUR=-1",
+	}
+	for _, rule := range hostile {
+		got, ok := RRULEToCron(rule)
+		if ok {
+			t.Errorf("RRULEToCron(%q) produced %q; the file being imported chose the cadence",
+				rule, got)
+		}
+	}
+
+	// A step that does not divide its range evenly is not the cadence it looks like: "*/45" fires
+	// at 0 and 45 past the hour, a 45 minute gap then a 15 minute one.
+	uneven := []string{
+		"DTSTART:20260101T000000Z RRULE:FREQ=MINUTELY;INTERVAL=45",
+		"DTSTART:20260101T000000Z RRULE:FREQ=MINUTELY;INTERVAL=7",
+		"DTSTART:20260101T000000Z RRULE:FREQ=HOURLY;INTERVAL=5",
+		"DTSTART:20260101T000000Z RRULE:FREQ=HOURLY;INTERVAL=7",
+	}
+	for _, rule := range uneven {
+		if got, ok := RRULEToCron(rule); ok {
+			t.Errorf("RRULEToCron(%q) produced %q, which does not fire at that interval", rule, got)
+		}
+	}
+
+	// Ordinary rules still convert, so the guard did not close the importer.
+	fine := map[string]string{
+		"DTSTART:20260101T020000Z RRULE:FREQ=DAILY":                      "0 2 * * *",
+		"DTSTART:20260101T023000Z RRULE:FREQ=DAILY;BYMINUTE=30;BYHOUR=2": "30 2 * * *",
+		"DTSTART:20260101T000000Z RRULE:FREQ=MINUTELY;INTERVAL=15":       "*/15 * * * *",
+		"DTSTART:20260101T000000Z RRULE:FREQ=HOURLY;INTERVAL=6":          "0 */6 * * *",
+	}
+	for rule, want := range fine {
+		got, ok := RRULEToCron(rule)
+		if !ok {
+			t.Errorf("RRULEToCron(%q) refused an ordinary rule", rule)
+			continue
+		}
+		if got != want {
+			t.Errorf("RRULEToCron(%q) = %q, want %q", rule, got, want)
+		}
+	}
+}

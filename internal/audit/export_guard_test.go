@@ -50,3 +50,32 @@ func TestVerifyExportRefusesAnAbsentChain(t *testing.T) {
 		t.Errorf("an honest export was refused: %v", err)
 	}
 }
+
+// TestVerifyDoesNotPanicOnAHostileBundle pins that a null entry is a broken chain rather than a
+// crash. These slices are decoded from a file handed over by whoever is being audited, and verify is
+// the one command whose entire purpose is reading one nobody trusts. It answered with a stack trace.
+func TestVerifyDoesNotPanicOnAHostileBundle(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
+	good := &Entry{ID: "aud_1", Seq: 1, At: at, Actor: "admin", Method: "POST", Path: "/v1/runs"}
+	good.Hash = EntryHash(good)
+
+	tests := [][]*Entry{
+		{nil},
+		{nil, good},
+		{good, nil},
+		{good, nil, nil},
+	}
+	for testNum, entries := range tests {
+		if ok, _ := Verify(entries); ok {
+			t.Errorf("test %d: a chain containing a null entry verified", testNum)
+		}
+		if ok, _ := VerifyRange(entries); ok {
+			t.Errorf("test %d: VerifyRange accepted a null entry", testNum)
+		}
+	}
+	// And an export carrying one is refused rather than crashing the command.
+	if _, err := VerifyExport(&Export{Entries: []*Entry{nil}, Count: 1, HeadHash: ""}); err == nil {
+		t.Error("an export holding a null entry verified")
+	}
+}
