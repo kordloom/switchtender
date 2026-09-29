@@ -70,6 +70,9 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("lease clock is one clock", func(t *testing.T) {
 		testLeaseClockIsOneClock(t, newStore())
 	})
+	t.Run("stores agree on edges", func(t *testing.T) {
+		testStoreAgreementOnEdges(t, newStore())
+	})
 	t.Run("transition status", func(t *testing.T) { testTransitionStatus(t, newStore()) })
 	t.Run("workers", func(t *testing.T) { testWorkers(t, newStore()) })
 	t.Run("retention purge", func(t *testing.T) { testPurge(t, newStore()) })
@@ -1974,6 +1977,90 @@ func testClaimSkipsChildrenOfSettledParents(t *testing.T, store run.Store) {
 	}
 	if !errors.Is(err, run.ErrNonePending) {
 		t.Fatalf("Claim() error = %v, want ErrNonePending", err)
+	}
+}
+
+// testStoreAgreementOnEdges pins the paging, label, and ordering answers the three implementations
+// used to disagree about.
+//
+// memStore is test-only, but every dispatch test runs against it, so dispatch was verified against a
+// store that behaved differently from both production ones. None of these disagreements produced an
+// error; each returned a plausible wrong answer.
+func testStoreAgreementOnEdges(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC)
+	for i := range 5 {
+		labels := map[string]string{"app.tier": "web", "env": "prod"}
+		if i == 4 {
+			labels = nil
+		}
+		if err := store.Save(ctx, &run.Run{
+			ID: fmt.Sprintf("run_edge_%d", i), Playbook: "site.yml", Status: run.StatusSucceeded,
+			CreatedAt: base.Add(time.Duration(i) * time.Minute), Labels: labels,
+		}); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+
+	// An offset with no limit is not a page. Both SQL stores emit OFFSET only alongside LIMIT.
+	all, err := store.ListPage(ctx, run.ListFilter{}, 0, 3)
+	if err != nil {
+		t.Fatalf("ListPage(limit 0) error = %v", err)
+	}
+	if len(all) < 5 {
+		t.Errorf("ListPage(limit=0, offset=3) returned %d rows; an offset without a limit must not "+
+			"skip, because that is what both SQL stores do", len(all))
+	}
+
+	// A dotted label key is an ordinary key, not a path.
+	dotted, err := store.ListPage(ctx, run.ListFilter{LabelKey: "app.tier", LabelValue: "web"}, 50, 0)
+	if err != nil {
+		t.Fatalf("ListPage(dotted label) error = %v", err)
+	}
+	if len(dotted) == 0 {
+		t.Error("a label key containing a dot matched nothing; keys like app.tier and k8s.io/name " +
+			"are ordinary and the list comes back empty with no error")
+	}
+
+	// An empty value matches a label that is present and empty, never a label that is absent.
+	absent, err := store.ListPage(ctx, run.ListFilter{LabelKey: "env", LabelValue: ""}, 50, 0)
+	if err != nil {
+		t.Fatalf("ListPage(empty label value) error = %v", err)
+	}
+	for _, rn := range absent {
+		if _, ok := rn.Labels["env"]; !ok {
+			t.Errorf("run %s carries no env label but matched a filter for one", rn.ID)
+		}
+	}
+
+	// Children with no shard index sort last. Indexed shards are the ordered fan-out; an unindexed
+	// child is the exception. All three stores say so explicitly, because SQLite orders nulls first
+	// and Postgres orders them last, so leaving it to the default made them disagree.
+	parent := "run_edge_parent"
+	idx := 0
+	if err := store.Save(ctx, &run.Run{
+		ID: parent, Playbook: "site.yml", Kind: run.KindSplit, Status: run.StatusRunning,
+		CreatedAt: base,
+	}); err != nil {
+		t.Fatalf("Save() parent error = %v", err)
+	}
+	count := 1
+	for _, c := range []*run.Run{
+		{ID: "run_edge_c1", ParentID: &parent, ShardIndex: &idx, ShardCount: &count},
+		{ID: "run_edge_cnil", ParentID: &parent},
+	} {
+		c.Playbook, c.Status, c.CreatedAt = "site.yml", run.StatusPending, base
+		if err := store.Save(ctx, c); err != nil {
+			t.Fatalf("Save(%s) error = %v", c.ID, err)
+		}
+	}
+	shards, err := store.Shards(ctx, parent)
+	if err != nil {
+		t.Fatalf("Shards() error = %v", err)
+	}
+	if len(shards) == 2 && shards[len(shards)-1].ID != "run_edge_cnil" {
+		t.Errorf("Shards() = [%s %s]; a child with no shard index sorts last on every backend",
+			shards[0].ID, shards[1].ID)
 	}
 }
 

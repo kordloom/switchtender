@@ -156,8 +156,14 @@ type Store interface {
 	// Counting the admins and then deleting is two statements, and between them another request can
 	// pass the same count. Two concurrent deletes of the last two admins both saw a survivor and
 	// both went through, leaving an install with nobody who can reach an admin-gated route and no
-	// way back in except a shell on the host. The count and the delete are one statement here so
-	// only one of them can win.
+	// way back in except a shell on the host.
+	//
+	// Folding the count into the statement is necessary and not sufficient. The two deletes target
+	// different rows, so they never contend for a row lock, and on a backend where readers do not
+	// block writers each predicate reads its own snapshot and still sees the other administrator.
+	// Measured on Postgres, that let 291 of 300 concurrent pairs empty the install. An implementation
+	// has to serialize these against each other by whatever means its engine provides; the shared
+	// contract tests it concurrently rather than taking the claim on trust.
 	DeleteUnlessLastAdmin(ctx context.Context, id string) (bool, error)
 	// UpdateUnlessLastAdmin applies Update unless it would demote the only administrator, reporting
 	// whether it applied. It exists for the same reason as DeleteUnlessLastAdmin: demoting is the

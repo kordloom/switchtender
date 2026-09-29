@@ -733,7 +733,7 @@ func (s *store) RunStatusCounts(ctx context.Context) (map[run.Status]int, error)
 
 // Shards returns the shard runs of a parent ordered by shard index.
 func (s *store) Shards(ctx context.Context, parentID string) ([]*run.Run, error) {
-	const q = "SELECT " + runColumns + " FROM runs WHERE parent_id=$1 ORDER BY shard_index"
+	const q = "SELECT " + runColumns + " FROM runs WHERE parent_id=$1 ORDER BY shard_index NULLS LAST"
 	return s.queryRuns(ctx, "list shards", q, parentID)
 }
 
