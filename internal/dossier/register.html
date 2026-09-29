@@ -72,7 +72,7 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
 	{{end}}
 
 	<div class="scroll"><table>
-		<tr><th>When (UTC)</th><th>Run</th><th>Change</th><th>Actor</th><th>Source</th><th>Risk</th><th>Decision</th><th>Outcome</th></tr>
+		<tr><th>When (UTC)</th><th>Run</th><th>Change</th><th>Actor</th><th>Source</th><th>Risk</th><th>Held by</th><th>Decision</th><th>Outcome</th></tr>
 		{{range .Rows}}<tr>
 			<td>{{.When}}</td>
 			<td class="mono">{{.Run}}</td>
@@ -80,6 +80,7 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
 			<td>{{.Actor}}</td>
 			<td>{{.Source}}</td>
 			<td>{{.Risk}}</td>
+			<td>{{if .Held}}{{.Held}}{{else}}&mdash;{{end}}</td>
 			<td>{{if .Decision}}{{.Decision}} <span class="mono">#{{.DecisionSeq}}</span>{{else}}&mdash;{{end}}</td>
 			<td><span class="pill {{if eq .Outcome "succeeded"}}ok{{else if eq .Outcome "failed"}}bad{{else}}warn{{end}}">{{.Outcome}}</span></td>
 		</tr>

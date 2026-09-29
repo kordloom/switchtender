@@ -665,6 +665,7 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 			r.Status = run.StatusPendingApproval
 		}
 	}
+	recordHold(r, holdRequested)
 	created, _, err := d.idempotentSave(ctx, r)
 	if err != nil {
 		return nil, err
@@ -754,6 +755,7 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 			parent.Status = run.StatusPendingApproval
 		}
 	}
+	recordHold(parent, holdRequested)
 	created, dup, err := d.idempotentSave(ctx, parent)
 	if err != nil {
 		return nil, err
@@ -784,6 +786,9 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		// a chosen few fields meant a split silently dropped the rest: extra vars vanished, shards
 		// ran outside the execution image the parent pinned, and the run timeout did not apply.
 		inheritExecution(child, parent)
+		// A held child was held by whatever held its parent, so it says the same thing rather than
+		// reading as a change nothing stopped.
+		child.HeldByPolicy = parent.HeldByPolicy
 		// A child belongs to its parent's authorization, whether it is built inside the request or
 		// after it returned. Inheriting is the one rule; re-deriving from context would make an
 		// in-request shard and a later step disagree about which receipt is truthful.
@@ -1247,6 +1252,7 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 			parent.Status = run.StatusPendingApproval
 		}
 	}
+	recordHold(parent, holdRequested)
 	created, dup, err := d.idempotentSave(ctx, parent)
 	if err != nil {
 		return nil, err

@@ -138,6 +138,9 @@ type registerRow struct {
 	Source string
 	// Risk is the graded blast radius.
 	Risk string
+	// Held names the approval rule that stopped this change, as it was named at the hold. Empty
+	// when nothing held it.
+	Held string
 	// Decision is the chain-recorded approval or rejection, or a dash when none was required.
 	Decision string
 	// DecisionSeq is the chain entry recording the decision, zero when none.
@@ -195,6 +198,7 @@ func RenderRegister(in *RegisterInput) ([]byte, error) {
 			Actor:   r.Actor,
 			Source:  strings.TrimSpace(r.Source + " " + r.SourceID),
 			Risk:    risk.Level,
+			Held:    r.HeldByPolicy,
 			Outcome: string(r.Status),
 			DryRun:  r.DryRun,
 		}

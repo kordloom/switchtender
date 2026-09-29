@@ -65,12 +65,31 @@ func (p *Policy) Matches(r *run.Run) bool {
 // the plan gate, which plans the run and holds the apply only when its plan destroys too much, so it
 // is skipped here.
 func Requires(policies []*Policy, r *run.Run) bool {
+	return Requiring(policies, r) != nil
+}
+
+// Requiring returns the first blanket policy requiring approval for r, or nil when none does. The
+// rule that held a run is evidence: an auditor asking why a change waited wants the rule named, and
+// the answer has to be recorded when the hold happens, since a policy can be renamed or deleted
+// long before anyone reads the register.
+func Requiring(policies []*Policy, r *run.Run) *Policy {
 	for _, p := range policies {
 		if p.MaxDestroy < 0 && p.Matches(r) {
-			return true
+			return p
 		}
 	}
-	return false
+	return nil
+}
+
+// Label returns how a policy should be named in evidence: its name, or its id when it has none.
+func (p *Policy) Label() string {
+	if p == nil {
+		return ""
+	}
+	if p.Name != "" {
+		return p.Name
+	}
+	return p.ID
 }
 
 // PlanGated reports whether any plan-content policy scopes r, meaning r's apply must be planned and
@@ -90,12 +109,18 @@ func PlanGated(policies []*Policy, r *run.Run) bool {
 // non-negative, and it matches r; it is violated when destroys is greater than its threshold. A run
 // whose plan exceeds a threshold is held for approval rather than applied.
 func PlanExceeds(policies []*Policy, r *run.Run, destroys int) bool {
+	return Exceeding(policies, r, destroys) != nil
+}
+
+// Exceeding returns the first plan-content policy a plan of this size violates, or nil when none
+// does, so the rule that held the apply can be recorded on it.
+func Exceeding(policies []*Policy, r *run.Run, destroys int) *Policy {
 	for _, p := range policies {
 		if p.MaxDestroy >= 0 && p.Matches(r) && destroys > p.MaxDestroy {
-			return true
+			return p
 		}
 	}
-	return false
+	return nil
 }
 
 // Store persists approval policies. Implementations must be safe for concurrent use.
