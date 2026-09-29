@@ -28,6 +28,14 @@ func WithCredentials(store credential.Store, sealer *credential.Sealer) Option {
 	}
 }
 
+// WithCredentialTypes gives the dispatcher the operator-defined credential types, so a credential
+// that names one is injected per its type rather than by a built-in kind.
+func WithCredentialTypes(types credential.TypeStore) Option {
+	return func(c *config) {
+		c.credentialTypes = types
+	}
+}
+
 // validateCredentials confirms every referenced credential exists and is decryptable before a run
 // is accepted, so a bad reference fails at submit time instead of execution time.
 func (d *Dispatcher) validateCredentials(ctx context.Context, tool string, ids []string) error {
@@ -99,6 +107,20 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 					secrets = append(secrets, val)
 				}
 			}
+		}
+		// A credential of a custom type carries its field values as a JSON object, not a single
+		// secret, and its type decides the injection. It contributes environment variables and, when
+		// the type declares them, an extra-vars file, and never a raw credential file, so it takes
+		// its own path and skips the per-kind switch below.
+		if c.TypeID != "" {
+			vf, err := d.injectTypedCredential(ctx, c, plain, spec, &secrets)
+			if err != nil {
+				return cleanup, secrets, err
+			}
+			if vf != "" {
+				paths = append(paths, vf)
+			}
+			continue
 		}
 		f, err := os.CreateTemp("", "switchtender-cred-*")
 		if err != nil {
@@ -279,6 +301,54 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 		}
 	}
 	return cleanup, secrets, nil
+}
+
+// injectTypedCredential applies a custom-typed credential to the spec, returning the path of any
+// extra-vars file it wrote so the caller can clean it up.
+//
+// The field values are the sealed JSON object; the type's injectors turn them into environment
+// variables and extra vars. Every value the type marks secret is added to the mask, so a field a
+// tool echoes is redacted the same as any built-in secret. Extra vars go through a private file so
+// they never land on argv, the way a become or network credential's variables do.
+func (d *Dispatcher) injectTypedCredential(ctx context.Context, c *credential.Credential, plain string,
+	spec *roundhouse.Spec, secrets *[]string) (string, error) {
+	if d.credentialTypes == nil {
+		return "", fmt.Errorf("materialize credential %s: it names a custom type but none are "+
+			"configured", c.ID)
+	}
+	typ, err := d.credentialTypes.Get(ctx, c.TypeID)
+	if err != nil {
+		return "", fmt.Errorf("materialize credential %s: read type %s: %w", c.ID, c.TypeID, err)
+	}
+	var values map[string]string
+	if err := json.Unmarshal([]byte(plain), &values); err != nil {
+		return "", fmt.Errorf("materialize credential %s: decode field values: %w", c.ID, err)
+	}
+	inj, err := typ.Inject(values)
+	if err != nil {
+		return "", fmt.Errorf("materialize credential %s: %w", c.ID, err)
+	}
+	spec.Env = append(spec.Env, inj.Env...)
+	*secrets = append(*secrets, inj.Secrets...)
+	if len(inj.ExtraVars) == 0 {
+		return "", nil
+	}
+	vf, err := os.CreateTemp("", "switchtender-cred-*")
+	if err != nil {
+		return "", fmt.Errorf("materialize credential %s: %w", c.ID, err)
+	}
+	if err := vf.Chmod(0o600); err != nil {
+		_ = vf.Close()
+		return vf.Name(), fmt.Errorf("materialize credential %s: %w", c.ID, err)
+	}
+	if err := vf.Close(); err != nil {
+		return vf.Name(), fmt.Errorf("materialize credential %s: %w", c.ID, err)
+	}
+	if err := writeAnsibleVarsFile(vf.Name(), inj.ExtraVars); err != nil {
+		return vf.Name(), fmt.Errorf("materialize credential %s: %w", c.ID, err)
+	}
+	spec.ExtraVarsFiles = append(spec.ExtraVarsFiles, vf.Name())
+	return vf.Name(), nil
 }
 
 // writeAnsibleVarsFile encodes vars as JSON into the private file at path, so a connection or become

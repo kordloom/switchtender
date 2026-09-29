@@ -304,6 +304,7 @@ func requiredRole(r *http.Request) user.Role {
 	// caller may use any of them.
 	if p == "/orgs" || strings.HasPrefix(p, "/orgs/") ||
 		p == "/teams" || strings.HasPrefix(p, "/teams/") ||
+		p == "/credential-types" || strings.HasPrefix(p, "/credential-types/") ||
 		p == "/doctor" {
 		return user.RoleAdmin
 	}

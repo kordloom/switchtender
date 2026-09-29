@@ -55,8 +55,12 @@ Every endpoint the server exposes. The API is served under the `/v1` base path. 
 | GET    | `/v1/triggers`             | List webhook triggers.                                  |
 | DELETE | `/v1/triggers/{id}`        | Delete a trigger, revoking its webhook.                 |
 | POST   | `/hooks/{token}`        | Fire a trigger from a git push. A required HMAC signature is checked first.|
-| POST   | `/v1/credentials`          | Store a credential, encrypted at rest. Thirteen kinds: ssh_key, ssh_password, vault_password, become_password, become, network, env, token, registry, aws, azure, gcp, vmware.|
+| POST   | `/v1/credentials`          | Store a credential, encrypted at rest. Thirteen built-in kinds, or a custom type via `type_id` and `fields`. |
 | GET    | `/v1/credentials`          | List credentials, secrets never included.               |
+| POST   | `/v1/credential-types`     | Define a custom credential type: fields and how they inject. Admin only. |
+| GET    | `/v1/credential-types`     | List custom credential types. Admin only.               |
+| PUT    | `/v1/credential-types/{id}` | Replace a custom credential type. Admin only.          |
+| DELETE | `/v1/credential-types/{id}` | Delete a custom credential type. Admin only.           |
 | PUT    | `/v1/credentials/{id}`     | Update a credential.                                    |
 | DELETE | `/v1/credentials/{id}`     | Delete a credential. 409 while an object still uses it. |
 | POST   | `/v1/auth/login`           | Sign in with username and password, returns a token.    |

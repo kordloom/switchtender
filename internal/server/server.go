@@ -269,6 +269,11 @@ func WithCredentials(store credential.Store, sealer *credential.Sealer) Option {
 	}
 }
 
+// WithCredentialTypes enables the operator-defined credential type endpoints.
+func WithCredentialTypes(store credential.TypeStore) Option {
+	return func(srv *Server) { srv.credTypes = store }
+}
+
 // Server wires the run store and submitter into an HTTP handler.
 type Server struct {
 	// store reads runs and their logs for the query endpoints.
@@ -295,6 +300,8 @@ type Server struct {
 	tokens auth.Store
 	// credentials backs the credential endpoints when configured.
 	credentials credential.Store
+	// credTypes backs the custom credential type endpoints when configured.
+	credTypes credential.TypeStore
 	// sealer encrypts credential secrets.
 	sealer *credential.Sealer
 	// syncer browses project checkouts for the file endpoints when configured.
@@ -455,7 +462,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /v1/users/{id}", updateUserHandler(s.users, s.log))
 	mux.Handle("GET /v1/users", listUsersHandler(s.users, s.log))
 	mux.Handle("DELETE /v1/users/{id}", deleteUserHandler(s.users, s.log))
-	mux.Handle("POST /v1/credentials", createCredentialHandler(s.credentials, s.sealer, authz, s.log))
+	mux.Handle("POST /v1/credential-types", createCredTypeHandler(s.credTypes, s.log))
+	mux.Handle("GET /v1/credential-types", listCredTypesHandler(s.credTypes, s.log))
+	mux.Handle("GET /v1/credential-types/{id}", getCredTypeHandler(s.credTypes, s.log))
+	mux.Handle("PUT /v1/credential-types/{id}", updateCredTypeHandler(s.credTypes, s.log))
+	mux.Handle("DELETE /v1/credential-types/{id}", deleteCredTypeHandler(s.credTypes, s.log))
+	mux.Handle("POST /v1/credentials", createCredentialHandler(s.credentials, s.credTypes, s.sealer, authz, s.log))
 	mux.Handle("PUT /v1/credentials/{id}", updateCredentialHandler(s.credentials, s.sealer, authz, s.log))
 	mux.Handle("GET /v1/credentials", listCredentialsHandler(s.credentials, authz, s.log))
 	// refs lets a credential or project delete refuse to orphan an object that still uses it.

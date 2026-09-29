@@ -180,6 +180,10 @@ type Credential struct {
 	Name string `json:"name"`
 	// Kind classifies the secret.
 	Kind Kind `json:"kind"`
+	// TypeID names a custom credential type this credential is an instance of, empty for a built-in
+	// kind. When set, the sealed Secret holds a JSON object of the type's field values rather than a
+	// single value, and injection is driven by the type rather than by Kind.
+	TypeID string `json:"type_id,omitempty"`
 	// Source is where the secret value comes from: empty or local means Secret holds the sealed value
 	// itself; command means Secret holds a command whose stdout is the secret, fetched at run time
 	// from an external store such as Vault or a cloud CLI.

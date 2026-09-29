@@ -274,7 +274,16 @@ CREATE TABLE IF NOT EXISTS credentials (
 	secret     TEXT NOT NULL,
 	created_at TEXT NOT NULL,
 	source     TEXT NOT NULL DEFAULT '',
-	org_id     TEXT NOT NULL DEFAULT ''
+	org_id     TEXT NOT NULL DEFAULT '',
+	type_id    TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS credential_types (
+	id         TEXT PRIMARY KEY,
+	name       TEXT NOT NULL,
+	fields     TEXT NOT NULL DEFAULT '[]',
+	env        TEXT NOT NULL DEFAULT '{}',
+	extra_vars TEXT NOT NULL DEFAULT '{}',
+	created_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS teams (
 	id         TEXT PRIMARY KEY,
@@ -379,6 +388,7 @@ type DB struct {
 	tokens *tokenStore
 	// credentials is the execution secret store.
 	credentials *credentialStore
+	credTypes   *credTypeStore
 	// projects is the git project store.
 	projects *projectStore
 	// templates is the job template store.
@@ -482,6 +492,7 @@ func Open(path string) (*DB, error) {
 	split := &splitDB{w: db, r: reader}
 	return &DB{db: split, runs: &store{db: split}, schedules: &scheduleStore{db: split}, tokens: &tokenStore{db: split},
 		credentials: &credentialStore{db: split},
+		credTypes:   &credTypeStore{db: split},
 		projects:    &projectStore{db: split},
 		templates:   &templateStore{db: split},
 		users:       &userStore{db: split},
@@ -666,10 +677,14 @@ func migrateUsers(db *sql.DB) error {
 // tenancy. Empty is the unowned default, so a credential made before this column stays global. Adding
 // a column that already exists is the ordinary case for a current database and is treated as success.
 func migrateCredentials(db *sql.DB) error {
-	if _, err := db.Exec(
-		"ALTER TABLE credentials ADD COLUMN org_id TEXT NOT NULL DEFAULT ''"); err != nil &&
-		!strings.Contains(err.Error(), "duplicate column name") {
-		return fmt.Errorf("migrate credentials: %w", err)
+	for _, col := range []string{
+		"ALTER TABLE credentials ADD COLUMN org_id TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE credentials ADD COLUMN type_id TEXT NOT NULL DEFAULT ''",
+	} {
+		if _, err := db.Exec(col); err != nil &&
+			!strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("migrate credentials: %w", err)
+		}
 	}
 	return nil
 }
@@ -716,6 +731,11 @@ func (d *DB) Tokens() auth.Store {
 // Credentials returns the execution secret store.
 func (d *DB) Credentials() credential.Store {
 	return d.credentials
+}
+
+// CredentialTypes returns the operator-defined credential type store.
+func (d *DB) CredentialTypes() credential.TypeStore {
+	return d.credTypes
 }
 
 // Projects returns the git project store.

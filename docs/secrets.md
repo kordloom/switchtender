@@ -68,3 +68,53 @@ Sealing needs a key. Set `SWITCHTENDER_ENCRYPTION_KEY` and a stable `SWITCHTENDE
 storing an externally sourced credential or inventory. The sealed value never leaves SwitchTender.
 
 See [Set a secret](tutorial-set-a-secret.md) for the step-by-step, including the API calls.
+
+## Custom credential types
+
+The built-in kinds cover the common providers. For one they do not, define a custom type: the fields
+it collects and how those fields are injected into a run. This is what AWX calls a custom credential
+type, and it needs no code change.
+
+A type is data, not code. An injector splices a field's value into a string literally, and nothing
+in it is executed, so a type cannot become a way to run something on the executor.
+
+Define a type, admin only:
+
+    POST /v1/credential-types
+    {
+      "name": "Datadog API",
+      "fields": [
+        {"name": "host",    "label": "API host"},
+        {"name": "api_key", "label": "API key", "secret": true}
+      ],
+      "env": {
+        "DD_HOST":    "{{host}}",
+        "DD_API_KEY": "{{api_key}}"
+      },
+      "extra_vars": {
+        "datadog_host": "{{host}}"
+      }
+    }
+
+A field marked `secret` is masked out of run output; a field left plain, such as a host or a region,
+is treated as configuration and is not masked. An injector value is literal text with `{{field}}`
+references, so `"Bearer {{api_key}}"` becomes the header with the key spliced in. A reference to a
+field the type does not declare is refused when the type is created, not left to expand to nothing at
+run time.
+
+Create a credential of that type:
+
+    POST /v1/credentials
+    {
+      "name": "prod-datadog",
+      "type_id": "ctype_...",
+      "fields": {"host": "api.datadoghq.com", "api_key": "the-secret-key"}
+    }
+
+The field values are sealed together as one encrypted object, the same as any other secret. At run
+time the type's injectors add the environment variables, and any extra vars go through a private file
+so they never reach the process argument list. A field the type does not declare is refused.
+
+A typed credential is recreated rather than updated, so its fields are changed by deleting it and
+creating a new one. This keeps the update path, which speaks a single secret, from reinterpreting the
+sealed field object.

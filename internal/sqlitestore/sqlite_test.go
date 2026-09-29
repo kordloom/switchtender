@@ -200,6 +200,14 @@ func TestCredentialStoreContract(t *testing.T) {
 		t.Cleanup(func() { _ = db.Close() })
 		return db.Credentials()
 	})
+	credtest.TypeContract(t, func() credential.TypeStore {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.CredentialTypes()
+	})
 }
 
 func TestProjectStoreContract(t *testing.T) {

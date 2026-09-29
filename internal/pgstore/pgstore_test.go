@@ -137,18 +137,27 @@ func TestCredentialStoreContract(t *testing.T) {
 		truncateCredentials(t, dsn)
 		return db.Credentials()
 	})
+	credtest.TypeContract(t, func() credential.TypeStore {
+		truncateTable(t, dsn, "credential_types")
+		return db.CredentialTypes()
+	})
 }
 
 // truncateCredentials clears the credentials table between contract subtests.
 func truncateCredentials(t *testing.T, dsn string) {
+	truncateTable(t, dsn, "credentials")
+}
+
+// truncateTable clears one table between contract subtests.
+func truncateTable(t *testing.T, dsn, table string) {
 	t.Helper()
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		t.Fatalf("open postgres: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	if _, err := db.Exec("TRUNCATE credentials"); err != nil {
-		t.Fatalf("truncate credentials: %v", err)
+	if _, err := db.Exec("TRUNCATE " + table); err != nil {
+		t.Fatalf("truncate %s: %v", table, err)
 	}
 }
 

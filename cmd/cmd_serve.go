@@ -564,6 +564,8 @@ type storeBundle interface {
 	Tokens() auth.Store
 	// Credentials returns the execution secret store.
 	Credentials() credential.Store
+	// CredentialTypes returns the operator-defined credential type store.
+	CredentialTypes() credential.TypeStore
 	// Projects returns the git project store.
 	Projects() project.Store
 	// Templates returns the job template store.
@@ -746,6 +748,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		dispatch.WithMaxShards(serveMaxShards),
 		dispatch.WithRunTimeout(serveRunTimeout),
 		dispatch.WithCredentials(bundle.Credentials(), sealer),
+		dispatch.WithCredentialTypes(bundle.CredentialTypes()),
 		dispatch.WithProjects(bundle.Projects(), syncer),
 		dispatch.WithDefaultImage(serveDefaultImage),
 		dispatch.WithWebhooks(notifyWebhooks),
@@ -860,6 +863,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			server.WithCanceler(disp), server.WithRetrier(disp), server.WithApprover(disp),
 			server.WithSchedules(schedules), server.WithTokens(bundle.Tokens()),
 			server.WithCredentials(bundle.Credentials(), sealer),
+			server.WithCredentialTypes(bundle.CredentialTypes()),
 			server.WithProjects(bundle.Projects()),
 			server.WithProjectFiles(syncer),
 			server.WithTemplates(bundle.Templates()),

@@ -44,6 +44,12 @@ type createCredentialRequest struct {
 	Passphrase string `json:"passphrase,omitempty"`
 	// OrgID names the owning organization. Empty leaves the credential unowned and global. Optional.
 	OrgID string `json:"org_id,omitempty"`
+	// TypeID names a custom credential type. When set, Fields carries the type's field values and
+	// Kind and Secret are not used.
+	TypeID string `json:"type_id,omitempty"`
+	// Fields holds a typed credential's field values, sealed together as one object. Every value is
+	// secret at rest; whether it is masked in run output is decided by the type's field definitions.
+	Fields map[string]string `json:"fields,omitempty"`
 }
 
 // listCredentialsResponse wraps the credential list, secrets excluded by the model's json tags.
@@ -65,8 +71,8 @@ type credentialView struct {
 }
 
 // createCredentialHandler seals and stores a new credential.
-func createCredentialHandler(store credential.Store, sealer *credential.Sealer, authz *authorizer,
-	log *zap.Logger) http.HandlerFunc {
+func createCredentialHandler(store credential.Store, types credential.TypeStore,
+	sealer *credential.Sealer, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil || sealer == nil {
 			respondError(w, log, http.StatusNotFound, "credentials not enabled")
@@ -82,8 +88,19 @@ func createCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 			respondError(w, log, http.StatusBadRequest, "invalid request body")
 			return
 		}
-		if req.Name == "" || req.Secret == "" {
-			respondError(w, log, http.StatusBadRequest, "name and secret are required")
+		if req.Name == "" {
+			respondError(w, log, http.StatusBadRequest, "name is required")
+			return
+		}
+		// A typed credential takes a different shape: its field values are sealed as one JSON object
+		// and its type drives injection, so kind and a single secret do not apply. It is handled
+		// here and the built-in path below is skipped.
+		if req.TypeID != "" {
+			createTypedCredential(w, r, store, types, sealer, authz, &req, log)
+			return
+		}
+		if req.Secret == "" {
+			respondError(w, log, http.StatusBadRequest, "secret is required")
 			return
 		}
 		if !credential.ValidKind(req.Kind) {
@@ -150,6 +167,66 @@ type updateCredentialRequest struct {
 	OrgID string `json:"org_id,omitempty"`
 }
 
+// createTypedCredential stores a credential of a custom type: its field values are validated against
+// the type, sealed together as one JSON object, and injection is driven by the type at run time.
+func createTypedCredential(w http.ResponseWriter, r *http.Request, store credential.Store,
+	types credential.TypeStore, sealer *credential.Sealer, authz *authorizer,
+	req *createCredentialRequest, log *zap.Logger) {
+	if types == nil {
+		respondError(w, log, http.StatusNotFound, "credential types not enabled")
+		return
+	}
+	typ, err := types.Get(r.Context(), req.TypeID)
+	if errors.Is(err, credential.ErrNotFound) {
+		respondError(w, log, http.StatusBadRequest, "no such credential type")
+		return
+	}
+	if err != nil {
+		log.Error("server: read credential type: " + err.Error())
+		respondError(w, log, http.StatusInternalServerError, "could not read credential type")
+		return
+	}
+	// Only fields the type declares are accepted, so a caller cannot smuggle a value under a name
+	// the injectors do not read and would not expect to be stored.
+	declared := make(map[string]bool, len(typ.Fields))
+	for _, f := range typ.Fields {
+		declared[f.Name] = true
+	}
+	for name := range req.Fields {
+		if !declared[name] {
+			respondError(w, log, http.StatusBadRequest,
+				"field "+name+" is not declared by this credential type")
+			return
+		}
+	}
+	values, err := json.Marshal(req.Fields)
+	if err != nil {
+		log.Error("server: encode credential fields: " + err.Error())
+		respondError(w, log, http.StatusInternalServerError, "could not store credential")
+		return
+	}
+	sealed, err := sealer.Seal(string(values))
+	req.Fields = nil
+	if err != nil {
+		log.Error("server: seal credential: " + err.Error())
+		respondError(w, log, http.StatusInternalServerError, "could not store credential")
+		return
+	}
+	if authz.denyForeignOrg(w, r, log, req.OrgID) {
+		return
+	}
+	c := &credential.Credential{
+		ID: credential.NewID(), Name: req.Name, TypeID: req.TypeID,
+		Secret: sealed, OrgID: req.OrgID, CreatedAt: time.Now(),
+	}
+	if err := store.Save(r.Context(), c); err != nil {
+		log.Error("server: save credential: " + err.Error())
+		respondError(w, log, http.StatusInternalServerError, "could not store credential")
+		return
+	}
+	respondJSON(w, log, http.StatusCreated, c, wantsPretty(r))
+}
+
 // updateCredentialHandler renames a credential and, only when a new secret is supplied, reseals it
 // with the new material and kind. Renaming never requires re-sending the secret.
 func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, authz *authorizer,
@@ -186,6 +263,14 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 		if err != nil {
 			log.Error("server: get credential: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not read credential")
+			return
+		}
+		// A typed credential is not updated through this path, which speaks kind and a single secret
+		// and would clear the type and reinterpret its sealed field object as a raw value. It is
+		// recreated instead, so the update cannot silently corrupt it.
+		if c.TypeID != "" {
+			respondError(w, log, http.StatusConflict,
+				"this credential belongs to a custom type; delete and recreate it to change its fields")
 			return
 		}
 
