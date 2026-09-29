@@ -911,3 +911,63 @@ func TestJenkinsZipCannotEscapeItsOwnNames(t *testing.T) {
 		}
 	}
 }
+
+// TestJenkinsAliasesExpandTheWayJenkinsExpandsThem pins the shorthand table against the real thing.
+//
+// Jenkins does not treat @daily as midnight. It expands each alias with H so jobs spread across the
+// period, and the expansions are not guessable: @midnight is not @daily, it is the same thing with
+// the hour confined to 0-2, and @monthly may not use a day past 28 or a job would skip February.
+//
+// The windows below were read off a running Jenkins 2 LTS by asking hudson.scheduler.CronTab for the
+// next firings of each alias, rather than from documentation. Observed, for one job name: @hourly at
+// :35 of every hour, @daily at 01:37, @midnight at 00:01, @weekly on a Saturday at 14:33, @monthly
+// on the 18th at 10:04, @yearly on June 15. Each sits inside the window asserted here.
+func TestJenkinsAliasesExpandTheWayJenkinsExpandsThem(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Alias string
+		// Field is the cron position that must hold a concrete value, and Lo and Hi the window
+		// Jenkins allows it to land in.
+		Field  int
+		Lo, Hi int
+		// WildFields are the positions that must stay open, which is what makes the cadence right.
+		WildFields []int
+	}{{ // Test 0: Hourly spreads the minute and leaves every other field open.
+		Alias: "@hourly", Field: 0, Lo: 0, Hi: 59, WildFields: []int{1, 2, 3, 4},
+	}, { // Test 1: Daily spreads the hour across the whole day.
+		Alias: "@daily", Field: 1, Lo: 0, Hi: 23, WildFields: []int{2, 3, 4},
+	}, { // Test 2: Midnight is daily with the hour confined, which is the pair most easily conflated.
+		Alias: "@midnight", Field: 1, Lo: 0, Hi: 2, WildFields: []int{2, 3, 4},
+	}, { // Test 3: Weekly pins a weekday and leaves the month and day of month open.
+		Alias: "@weekly", Field: 4, Lo: 0, Hi: 6, WildFields: []int{2, 3},
+	}, { // Test 4: Monthly pins a day of month, never past 28 or February would be skipped.
+		Alias: "@monthly", Field: 2, Lo: 1, Hi: 28, WildFields: []int{3, 4},
+	}, { // Test 5: Yearly pins a month as well.
+		Alias: "@yearly", Field: 3, Lo: 1, Hi: 12, WildFields: []int{4},
+	}, { // Test 6: The other spelling of yearly is the same schedule.
+		Alias: "@annually", Field: 3, Lo: 1, Hi: 12, WildFields: []int{4},
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			doc := freestyle(timer(test.Alias) + shellStep("echo hi"))
+			plan, err := importer.FromJenkins("")(
+				jenkinsBundle([2]string{"nightly-backup", doc}), fixedTime)
+			if err != nil {
+				t.Fatalf("FromJenkins() error = %v", err)
+			}
+			if len(plan.Schedules) != 1 {
+				t.Fatalf("%s produced %d schedules, warnings %v, want one",
+					test.Alias, len(plan.Schedules), plan.Warnings)
+			}
+			assertHashedInto(t, []string{plan.Schedules[0].Cron}, test.Field, test.Lo, test.Hi)
+			fields := strings.Fields(plan.Schedules[0].Cron)
+			for _, wild := range test.WildFields {
+				if fields[wild] != "*" {
+					t.Errorf("%s imported as %q, but field %d should stay open or the cadence "+
+						"is narrower than the alias meant", test.Alias, plan.Schedules[0].Cron, wild)
+				}
+			}
+		})
+	}
+}
