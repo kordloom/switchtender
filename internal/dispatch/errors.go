@@ -34,3 +34,8 @@ var (
 	// ErrNotPendingApproval is returned when approve or reject targets a run not awaiting approval.
 	ErrNotPendingApproval = errors.New("run is not awaiting approval")
 )
+
+// ErrPolicyUnavailable is returned when the approval policies cannot be read, so the dispatcher
+// cannot tell whether a run needs sign-off. The submission is refused rather than run: a gate that
+// cannot be evaluated has not been passed.
+var ErrPolicyUnavailable = errors.New("approval policies unavailable")

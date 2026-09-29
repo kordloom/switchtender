@@ -29,27 +29,28 @@ func parsePlanDestroys(out string) int {
 // plan-content policy scopes, so execute plans it before applying. It returns nil when r is not a
 // candidate: policies are off, the tool is not terraform or opentofu, the run is a dry run, the run
 // is itself a proposed apply, which must never re-gate and loop, or no plan-content policy matches. A
-// policy store failure is logged and treated as no gate.
-func (d *Dispatcher) planGatePolicies(ctx context.Context, r *run.Run) []*policy.Policy {
+// policy store failure is reported, not treated as no gate: a run that cannot be checked against the
+// plan-content policies must not apply as though it had been.
+func (d *Dispatcher) planGatePolicies(ctx context.Context, r *run.Run) ([]*policy.Policy, error) {
 	if d.policies == nil {
-		return nil
+		return nil, nil
 	}
 	tool := run.NormalizeTool(r.Tool)
 	if tool != run.ToolTerraform && tool != run.ToolOpenTofu {
-		return nil
+		return nil, nil
 	}
 	if r.DryRun || r.ProposedFrom != "" {
-		return nil
+		return nil, nil
 	}
 	policies, err := d.policies.List(ctx)
 	if err != nil {
 		d.log.Error("dispatch: list policies: " + err.Error())
-		return nil
+		return nil, fmt.Errorf("%w: %w", ErrPolicyUnavailable, err)
 	}
 	if !policy.PlanGated(policies, r) {
-		return nil
+		return nil, nil
 	}
-	return policies
+	return policies, nil
 }
 
 // executePlanGate runs r as a plan, then proposes an apply cloned from it instead of applying in

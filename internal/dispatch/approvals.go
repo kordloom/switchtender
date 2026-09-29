@@ -14,14 +14,27 @@ func (d *Dispatcher) Approve(ctx context.Context, id string) (*run.Run, error) {
 	if err != nil {
 		return nil, err
 	}
-	ok, err := d.store.TransitionStatus(ctx, id, run.StatusPendingApproval, run.StatusPending)
+	// A parent goes straight to running, never through pending.
+	//
+	// The abandoned-parent sweep interrupts a split or pipeline parent that is pending, unclaimed,
+	// and older than the cutoff, and it measures age from CreatedAt. For a run held for a person,
+	// CreatedAt is the submit time, so the moment an approval flipped it to pending it was already
+	// hours past the cutoff and the very next janitor tick interrupted it and canceled every shard.
+	// The approved run then executed nothing. Skipping the pending state removes the window rather
+	// than narrowing it: the sweep never sees a state it can act on, and a coordinator that dies
+	// later is still caught, by the lease sweep that already handles exactly that.
+	target := run.StatusPending
+	if r.Kind == run.KindSplit || r.Kind == run.KindPipeline {
+		target = run.StatusRunning
+	}
+	ok, err := d.store.TransitionStatus(ctx, id, run.StatusPendingApproval, target)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		return nil, ErrNotPendingApproval
 	}
-	r.Status = run.StatusPending
+	r.Status = target
 	// No claim loop picks up a parent run of either kind, so an approved one starts here or never
 	// runs at all.
 	switch r.Kind {
@@ -52,15 +65,17 @@ func (d *Dispatcher) startSplit(ctx context.Context, parent *run.Run) {
 		d.finalize(parent, run.StatusFailed, nil, "split has no stored shards to run")
 		return
 	}
+	// A shard that fails to release is logged and the rest proceed.
+	//
+	// Returning here instead left the shards already released claimable and running, under a parent
+	// marked failed that no coordinator was watching and that the orphan sweep does not cover, since
+	// that only fires for an interrupted parent. Part of the fan-out executed on real hosts while
+	// the API reported a failure. Starting the coordinator over whatever released is the outcome
+	// that keeps the rollup honest, and a shard left held is settled by the run's own cancel path.
 	for _, s := range shards {
-		// The swap reporting no change means the shard already moved on, which the parent's own
-		// compare-and-swap has already made impossible for a second approval. Only a real error
-		// stops the start.
 		if _, err := d.store.TransitionStatus(ctx, s.ID,
 			run.StatusPendingApproval, run.StatusPending); err != nil {
 			d.log.Error("dispatch: release shard " + s.ID + ": " + err.Error())
-			d.finalize(parent, run.StatusFailed, nil, "could not release the shards to run")
-			return
 		}
 	}
 	d.wake()
