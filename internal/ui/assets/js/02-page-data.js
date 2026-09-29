@@ -194,6 +194,14 @@ function mountTableExport() {
 		table.parentNode.insertBefore(host, table);
 	}
 	const stamp = () => new Date().toISOString().slice(0, 10);
+	// prepare completes the table before it is read. The runs page pages from the server, so its
+	// preparer pulls the rest of the current query in; every other page already renders whole.
+	const prepare = async () => {
+		if (page === "runs" && typeof runsExportPrepare === "function") {
+			return (await runsExportPrepare()) || "";
+		}
+		return "";
+	};
 	const make = (label, tip, fn) => {
 		const btn = document.createElement("button");
 		btn.type = "button";
@@ -206,21 +214,24 @@ function mountTableExport() {
 		btn.addEventListener("click", () => { if (!btn.disabled) fn(); });
 		host.appendChild(btn);
 	};
-	make("CSV", "Click to export the filtered rows as a CSV spreadsheet", () => {
+	make("CSV", "Click to export the filtered rows as a CSV spreadsheet", async () => {
+		const suffix = await prepare();
 		const { headers, rows } = tableRowsData(table);
 		const csv = [headers, ...rows].map((r) => r.map(csvCell).join(",")).join("\n") + "\n";
-		downloadBlob("switchtender-" + page + "-" + stamp() + ".csv", "text/csv", csv);
+		downloadBlob("switchtender-" + page + "-" + stamp() + suffix + ".csv", "text/csv", csv);
 	});
-	make("JSON", "Click to export the filtered rows as JSON", () => {
+	make("JSON", "Click to export the filtered rows as JSON", async () => {
+		const suffix = await prepare();
 		const { headers, rows } = tableRowsData(table);
 		const objs = rows.map((r) => Object.fromEntries(headers.map((h, i) => [h, r[i] ?? ""])));
-		downloadBlob("switchtender-" + page + "-" + stamp() + ".json", "application/json",
+		downloadBlob("switchtender-" + page + "-" + stamp() + suffix + ".json", "application/json",
 			JSON.stringify(objs, null, 2) + "\n");
 	});
-	make("YAML", "Click to export the filtered rows as YAML", () => {
+	make("YAML", "Click to export the filtered rows as YAML", async () => {
+		const suffix = await prepare();
 		const { headers, rows } = tableRowsData(table);
 		const objs = rows.map((r) => Object.fromEntries(headers.map((h, i) => [h, r[i] ?? ""])));
-		downloadBlob("switchtender-" + page + "-" + stamp() + ".yaml", "text/yaml", toYAML(objs));
+		downloadBlob("switchtender-" + page + "-" + stamp() + suffix + ".yaml", "text/yaml", toYAML(objs));
 	});
 }
 

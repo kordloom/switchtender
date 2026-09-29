@@ -360,7 +360,7 @@ function worstOutcome(task, cells, hosts) {
 
 // showDrill opens the side panel with details for a cell or bar.
 function showDrill(info) {
-	const body = document.getElementById("drill-body");
+	const body = ensureDrill();
 	body.innerHTML = "";
 	const h = document.createElement("h3");
 	h.textContent = info.host ? (info.host + " / " + info.task) : info.task;
@@ -389,6 +389,7 @@ function showDrill(info) {
 	}
 
 	document.getElementById("drill").hidden = false;
+	document.getElementById("drill-backdrop").hidden = false;
 }
 
 // drillBlock builds a labeled monospace block for multi line output.
@@ -422,17 +423,23 @@ function drillField(label, value, copy) {
 	return f;
 }
 
-// ensureDrill returns the shared inspect panel's body, creating the slide-in panel on pages that do
-// not declare it so any resource list can reuse the run-detail drawer.
+// ensureDrill returns the shared inspect panel's body, creating the panel and its backdrop on
+// pages that do not declare them, and wiring the exits exactly once either way. The wiring used to
+// live only in the creation branch, so the run detail page, which declares the panel in its
+// template, opened a drawer with no backdrop and no Escape: the exact dead end a failed run's
+// RETURN CODE pane became on a phone. Every drill now closes the same three ways on every page:
+// the close button, a click on the backdrop, and Escape.
 function ensureDrill() {
-	let drill = document.getElementById("drill");
-	if (!drill) {
-		const backdrop = document.createElement("div");
+	let backdrop = document.getElementById("drill-backdrop");
+	if (!backdrop) {
+		backdrop = document.createElement("div");
 		backdrop.id = "drill-backdrop";
 		backdrop.className = "drill-backdrop";
 		backdrop.hidden = true;
-		backdrop.addEventListener("click", closeDrill);
 		document.body.appendChild(backdrop);
+	}
+	let drill = document.getElementById("drill");
+	if (!drill) {
 		drill = document.createElement("aside");
 		drill.id = "drill";
 		drill.className = "drill";
@@ -442,12 +449,17 @@ function ensureDrill() {
 		close.id = "drill-close";
 		close.setAttribute("aria-label", "Close");
 		close.innerHTML = "&times;";
-		close.addEventListener("click", closeDrill);
 		const body = document.createElement("div");
 		body.id = "drill-body";
 		drill.appendChild(close);
 		drill.appendChild(body);
 		document.body.appendChild(drill);
+	}
+	if (!drill.dataset.exitsWired) {
+		drill.dataset.exitsWired = "true";
+		backdrop.addEventListener("click", closeDrill);
+		const close = document.getElementById("drill-close");
+		if (close) close.addEventListener("click", closeDrill);
 		document.addEventListener("keydown", (e) => {
 			if (e.key === "Escape" && !drill.hidden) closeDrill();
 		});

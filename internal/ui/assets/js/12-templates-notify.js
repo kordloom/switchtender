@@ -113,6 +113,14 @@ function collectNotifyTargets() {
 // openTemplateEdit fills the template dialog with an existing record and switches it to edit mode,
 // so the next save issues a PUT rather than a create.
 function openTemplateEdit(t) {
+	// The dialog edits single-run templates and writes the record whole, so opening it on a saved
+	// workflow could only end in the server refusing the save. The graph is rebuilt where it was
+	// built. The server refuses the erasure regardless, so this is the explanation, not the guard.
+	if (t.steps && t.steps.length) {
+		setStatus("This template is a saved workflow. This dialog edits single-run templates; " +
+			"rebuild the graph on the Workflows page and save it, then delete the old copy.");
+		return;
+	}
 	const form = document.getElementById("template-form");
 	form.dataset.editId = t.id;
 	form.dataset.inventoryId = t.inventory_id || "";
@@ -485,7 +493,9 @@ function openTemplateView(t) {
 		rows.appendChild(key);
 		rows.appendChild(val);
 	};
-	addRow("Tool", (t.tool || "ansible"));
+	addRow("Tool", t.steps && t.steps.length ? "workflow" : (t.tool || "ansible"));
+	addRow("Steps", t.steps && t.steps.length
+		? t.steps.map((st) => st.name || "step").join(" -> ") : "");
 	addRow("Playbook", t.playbook);
 	addRow("Inventory", t.inventory);
 	addRow("Shards", t.shards && t.shards > 1 ? t.shards : "");

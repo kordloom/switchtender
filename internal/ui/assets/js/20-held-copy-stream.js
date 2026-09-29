@@ -1,18 +1,29 @@
 // loadPolicies populates the policy table with edit and delete actions. Each empty criterion shows
 // as "any", so a reader sees exactly how wide a rule is.
-// heldRunCount returns how many runs are waiting for approval right now, so the policies list
-// shows live consequence rather than only configuration.
-async function heldRunCount() {
+// heldRuns returns the runs waiting for approval right now, so the policies list shows live
+// consequence rather than only configuration, attributed per rule through held_by_policy rather
+// than one global count stamped on every row.
+async function heldRuns() {
 	try {
 		const data = await getJSON("/runs?status=pending_approval&limit=200");
-		return (data.runs || []).length;
+		return data.runs || [];
 	} catch {
-		return 0;
+		return [];
 	}
 }
 
+// heldByRule counts the held runs a specific rule is holding. A run records the rule that held it
+// by the name that rule carried at the hold, falling back to its id.
+function heldByRule(held, p) {
+	let n = 0;
+	for (const r of held) {
+		if (r.held_by_policy && (r.held_by_policy === p.name || r.held_by_policy === p.id)) n++;
+	}
+	return n;
+}
+
 async function loadPolicies() {
-	const heldCount = await heldRunCount();
+	const held = await heldRuns();
 	try {
 		const invByID = await fillInventorySelect(null);
 		const data = await getJSON("/policies");
@@ -25,6 +36,55 @@ async function loadPolicies() {
 		for (const p of policies) {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(p.name));
+			const effectCell = document.createElement("td");
+			if (p.effect === "deny") {
+				const chip = document.createElement("span");
+				chip.className = "chip failed";
+				chip.textContent = "deny";
+				chip.dataset.tip = "A matching submission is refused outright and never created";
+				effectCell.appendChild(chip);
+			} else {
+				const span = document.createElement("span");
+				span.textContent = "hold";
+				span.dataset.tip = "A matching run waits for a person to approve or reject it";
+				effectCell.appendChild(span);
+			}
+			tr.appendChild(effectCell);
+			const whoCell = document.createElement("td");
+			if (p.actor) {
+				const span = document.createElement("span");
+				span.className = "mono";
+				span.textContent = p.actor;
+				span.dataset.tip = "Only this named actor's runs match";
+				whoCell.appendChild(span);
+			} else if (p.actor_kind === "agent" || p.actor_kind === "human") {
+				const span = document.createElement("span");
+				span.textContent = p.actor_kind === "agent" ? "agents" : "people";
+				span.dataset.tip = p.actor_kind === "agent"
+					? "Only runs an AI agent submitted match"
+					: "Only runs a person submitted match";
+				whoCell.appendChild(span);
+			} else {
+				const span = document.createElement("span");
+				span.className = "muted";
+				span.textContent = "any";
+				whoCell.appendChild(span);
+			}
+			tr.appendChild(whoCell);
+			const riskCell = document.createElement("td");
+			if (p.min_risk) {
+				const badge = document.createElement("span");
+				badge.className = "risk risk-" + p.min_risk;
+				badge.textContent = p.min_risk + "+";
+				badge.dataset.tip = "Only runs graded at least this risky match";
+				riskCell.appendChild(badge);
+			} else {
+				const span = document.createElement("span");
+				span.className = "muted";
+				span.textContent = "any";
+				riskCell.appendChild(span);
+			}
+			tr.appendChild(riskCell);
 			const toolCell = document.createElement("td");
 			if (p.tool) {
 				const badge = document.createElement("span");
@@ -41,6 +101,20 @@ async function loadPolicies() {
 			tr.appendChild(toolCell);
 			tr.appendChild(p.command_contains ? td(p.command_contains, "mono") : anyCell());
 			tr.appendChild(p.inventory_id ? td(invByID[p.inventory_id] || p.inventory_id) : anyCell());
+			const destroyCell = document.createElement("td");
+			if (p.max_destroy !== undefined && p.max_destroy !== null && p.max_destroy >= 0) {
+				const span = document.createElement("span");
+				span.className = "mono";
+				span.textContent = "> " + p.max_destroy;
+				span.dataset.tip = "A matching apply is held when its plan destroys more than this many resources";
+				destroyCell.appendChild(span);
+			} else {
+				const span = document.createElement("span");
+				span.className = "muted";
+				span.textContent = "off";
+				destroyCell.appendChild(span);
+			}
+			tr.appendChild(destroyCell);
 			const dry = document.createElement("td");
 			if (p.exclude_dry_run) {
 				const chip = document.createElement("span");
@@ -55,16 +129,17 @@ async function loadPolicies() {
 			}
 			tr.appendChild(dry);
 			const holding = document.createElement("td");
-			if (heldCount > 0) {
+			const ruleHeld = heldByRule(held, p);
+			if (ruleHeld > 0) {
 				const link = document.createElement("a");
 				link.href = "/ui/runs?q=" + encodeURIComponent("status:pending_approval");
-				link.textContent = heldCount === 1 ? "1 run waiting" : heldCount + " runs waiting";
+				link.textContent = ruleHeld === 1 ? "1 run waiting" : ruleHeld + " runs waiting";
 				link.dataset.tip = "Click to see the runs held for approval";
 				holding.appendChild(link);
 			} else {
 				holding.textContent = "nothing waiting";
 				holding.className = "muted";
-				holding.dataset.tip = "No run is currently held for approval";
+				holding.dataset.tip = "No run is currently held by this rule";
 			}
 			tr.appendChild(holding);
 			tr.appendChild(tdTime(p.created_at));

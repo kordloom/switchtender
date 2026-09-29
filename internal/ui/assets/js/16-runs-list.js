@@ -69,6 +69,19 @@ function wireRunsSearch() {
 	});
 }
 
+// runsFiltered reports whether a search, a status or tool filter, or a date window narrows the
+// table. An empty result then speaks about the query, not the instance, so the controls that
+// created it have to stay on screen to be revised.
+function runsFiltered() {
+	if (runsQuery()) return true;
+	for (const id of ["runs-status", "runs-tool"]) {
+		const el = document.getElementById(id);
+		if (el && el.value) return true;
+	}
+	const url = new URLSearchParams(location.search);
+	return !!(url.get("after") || url.get("before"));
+}
+
 // runsLoadGen counts run-table loads so a slow response from an earlier search or page size cannot
 // overwrite the table after a newer load has already rendered.
 let runsLoadGen = 0;
@@ -100,9 +113,11 @@ async function loadRuns() {
 		tbody.innerHTML = "";
 		if (runs.length === 0) {
 			table.hidden = true;
-			showEmpty(runsQuery() ? "No runs match your search." : "No runs yet.");
+			const filtered = runsFiltered();
+			showEmpty(filtered ? "No runs match your search." : "No runs yet.", filtered);
 			return;
 		}
+		showListControls();
 		renderSummary(data.summary || {});
 		appendRunRows(tbody, runs);
 		wireRunsMore(tbody, runs.length, data.has_more);
@@ -120,6 +135,11 @@ async function loadRuns() {
 // toolLabel returns a short label for what a run executed: its playbook file, or its command for a
 // non-Ansible tool, collapsed and truncated so a long command does not stretch the row.
 function toolLabel(r) {
+	// A saved workflow's identity is its graph, not a playbook it does not have. Without this a
+	// stepped template listed with a blank what-it-runs label and read as a broken ansible entry.
+	if (r.steps && r.steps.length) {
+		return "workflow, " + r.steps.length + (r.steps.length === 1 ? " step" : " steps");
+	}
 	if (r.playbook) return baseName(r.playbook) || r.playbook;
 	const cmd = (r.command || "").replace(/\s+/g, " ").trim();
 	return cmd.length > 48 ? cmd.slice(0, 47) + "…" : cmd;
@@ -259,14 +279,19 @@ function labelCellEl(labels) {
 // labeled, aligned column instead of floating beside names.
 function typeCellEl(r) {
 	const cell = td("");
-	const tool = (r.tool || "ansible").toLowerCase();
-	const chip = document.createElement("span");
-	chip.className = "tool-badge " + tool;
-	chip.dataset.tool = tool;
-	chip.textContent = tool;
-	if (KIND_TIPS[tool]) chip.dataset.tip = KIND_TIPS[tool];
-	cell.appendChild(chip);
-	for (const kind of [r.kind === "split" ? "split" : "", r.kind === "pipeline" ? "pipeline" : "", r.dry_run ? "dry" : ""]) {
+	// A stepped template names no tool of its own, each step does, so a tool chip here would
+	// claim ansible for a graph that may run none. The pipeline tag below is its identity.
+	const stepped = !r.tool && r.steps && r.steps.length;
+	if (!stepped) {
+		const tool = (r.tool || "ansible").toLowerCase();
+		const chip = document.createElement("span");
+		chip.className = "tool-badge " + tool;
+		chip.dataset.tool = tool;
+		chip.textContent = tool;
+		if (KIND_TIPS[tool]) chip.dataset.tip = KIND_TIPS[tool];
+		cell.appendChild(chip);
+	}
+	for (const kind of [r.kind === "split" ? "split" : "", (r.kind === "pipeline" || stepped) ? "pipeline" : "", r.dry_run ? "dry" : ""]) {
 		if (!kind) continue;
 		const tag = document.createElement("span");
 		tag.className = "run-kind " + kind;
@@ -325,6 +350,38 @@ function appendRunRows(tbody, runs) {
 	}
 }
 
+// runsHasMore remembers whether the server holds more rows than the table shows, which is what
+// an export has to know to avoid shipping a partial file that looks whole.
+let runsHasMore = false;
+
+// runsExportBound caps how many rows an export pulls in one click, ten server pages, so an export
+// cannot ask for an unbounded history. A pull cut at the bound says so instead of staying quiet.
+const runsExportBound = 10000;
+
+// runsExportPrepare pulls every remaining page of the current query into the table before an
+// export. The export reads the rendered table, so without this it silently carried only the rows
+// already scrolled into view: a file that reads as the record and quietly is not. It returns ""
+// when the table is complete and "-partial" with a page notice when the bound cut the pull short.
+async function runsExportPrepare() {
+	const tbody = document.getElementById("runs");
+	if (!tbody) return "";
+	while (runsHasMore) {
+		const offset = tbody.querySelectorAll("tr").length;
+		if (offset >= runsExportBound) {
+			setStatus("The export carries the first " + offset + " matching runs. Narrow the " +
+				"search or the date window to export the rest.");
+			return "-partial";
+		}
+		const data = await getJSON("/runs?limit=1000&offset=" + offset +
+			"&q=" + encodeURIComponent(runsQuery()) + runsFilterParams());
+		const runs = data.runs || [];
+		appendRunRows(tbody, runs);
+		runsHasMore = !!data.has_more && runs.length > 0;
+	}
+	wireRunsMore(tbody, tbody.querySelectorAll("tr").length, runsHasMore);
+	return "";
+}
+
 // wireRunsMore keeps a Load more control below the runs table. Each click fetches the next page
 // from the current offset and appends it, so the table grows a page at a time rather than
 // rendering every run at once.
@@ -338,6 +395,7 @@ function wireRunsMore(tbody, offset, hasMore) {
 		const table = document.querySelector("table.runs");
 		table.parentNode.insertBefore(btn, table.nextSibling);
 	}
+	runsHasMore = !!hasMore;
 	btn.hidden = !hasMore;
 	btn.onclick = async () => {
 		btn.disabled = true;

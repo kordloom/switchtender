@@ -389,3 +389,55 @@ func TestLaunchCannotWriteAroundTheSurvey(t *testing.T) {
 		t.Errorf("an unrelated extra var = %d, want 202 (body %s)", rec.Code, rec.Body.String())
 	}
 }
+
+// TestUpdateRefusesErasingAWorkflowGraph proves an edit of a saved workflow that carries no steps
+// is refused rather than silently replacing the pipeline with a single-playbook template. The
+// update writes the record whole, so without the refusal any dialog save destroyed the graph and
+// answered 200.
+func TestUpdateRefusesErasingAWorkflowGraph(t *testing.T) {
+	t.Parallel()
+	store := template.NewMemStore()
+	handler := New(run.NewMemStore(), &fakeSubmitter{run: &run.Run{ID: "run_x"}}, zap.NewNop(),
+		WithTemplates(store)).Handler()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/templates",
+		strings.NewReader(`{"name":"rollout","steps":[{"name":"plan","tool":"bash","command":"echo plan"},{"name":"apply","tool":"bash","command":"echo apply","depends_on":["plan"]}]}`)))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201 (body %s)", rec.Code, rec.Body.String())
+	}
+	var created template.Template
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created template: %v", err)
+	}
+
+	// A steps-less edit, exactly what the single-run dialog sends, must be refused whole.
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/v1/templates/"+created.ID,
+		strings.NewReader(`{"name":"rollout","playbook":"site.yml"}`)))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("steps-less update status = %d, want 409 (body %s)", rec.Code, rec.Body.String())
+	}
+	stored, err := store.Get(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if len(stored.Steps) != 2 {
+		t.Fatalf("graph after refused edit has %d steps, want the original 2", len(stored.Steps))
+	}
+
+	// An edit that carries the full graph still goes through.
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/v1/templates/"+created.ID,
+		strings.NewReader(`{"name":"rollout","steps":[{"name":"plan","tool":"bash","command":"echo plan"}]}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("stepped update status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+	stored, err = store.Get(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if len(stored.Steps) != 1 {
+		t.Errorf("graph after stepped edit has %d steps, want 1", len(stored.Steps))
+	}
+}
