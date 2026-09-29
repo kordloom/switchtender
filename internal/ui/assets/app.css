@@ -459,6 +459,9 @@ table.runs td.mono { max-width: 380px; overflow: hidden; text-overflow: ellipsis
 .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin: -16px -20px 14px; padding: 12px 20px; border-bottom: 1px solid var(--border-muted); background: color-mix(in srgb, var(--surface-2) 60%, transparent); border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
 .panel-head h2, .jump-title { font-family: var(--display); font-size: 15.5px; font-weight: 700; letter-spacing: -0.01em; color: var(--heading); }
 .legend { display: flex; gap: 6px; flex-wrap: wrap; }
+/* The activity chart legend sits under the plot rather than in a panel head, so it is spaced from
+   the line it explains and aligned to the right where the eye finishes reading the chart. */
+.activity-legend { justify-content: flex-end; margin-top: 6px; }
 .chip { font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 999px; color: #fff; line-height: 1.6; }
 .chip.ok { background: var(--ok); }
 .chip.changed { background: var(--changed); }

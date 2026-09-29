@@ -576,10 +576,20 @@ function smoothPath(pts, minY, maxY) {
 	return d.join(" ");
 }
 
-// renderActivitySvg draws the continuous view: a soft gradient area under the total line and a
-// failed line over it, both with dots, on a faint baseline grid. Each dot is a link into its span's
-// runs, so the line drills down the same way the bars do. The viewBox matches the element's measured
-// pixel size, so x and y scale together and the dots stay round.
+// renderActivitySvg draws the continuous view: succeeded and failed as two lines from the same
+// baseline, with dots, on a faint baseline grid. Each dot is a link into its span's runs, so the
+// line drills down the same way the bars do. The viewBox matches the element's measured pixel size,
+// so x and y scale together and the dots stay round.
+//
+// The green line was the total rather than the successes, which meant the red line was a part of it
+// and not a thing beside it. Two lines drawn from one baseline read as two series to compare, so a
+// reader compared them, and the comparison was meaningless: every failure was already counted in
+// the line above it. The bar view is the one that shows how a period divides up, stacked exactly
+// that way. This view answers the other question, whether failures track successes or move against
+// them, which needs the two plotted independently.
+//
+// The scale is the larger of the two series rather than the total, since the total is no longer
+// drawn and scaling to it would squash both lines into the bottom of the box.
 function renderActivitySvg(el, model) {
 	el.innerHTML = "";
 	const W = Math.max(320, Math.round(el.clientWidth) || 1000), H = 190, padX = 14, padTop = 16, padBot = 12;
@@ -587,7 +597,8 @@ function renderActivitySvg(el, model) {
 	const n = days.length;
 	const innerW = W - padX * 2;
 	const x = (i) => n <= 1 ? W / 2 : padX + (innerW * i) / (n - 1);
-	const y = (v) => padTop + (H - padTop - padBot) * (1 - v / model.max);
+	const plotMax = Math.max(1, ...days.map((d) => Math.max(d.succeeded, d.failed)));
+	const y = (v) => padTop + (H - padTop - padBot) * (1 - v / plotMax);
 
 	const svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, class: "activity-svg", role: "img", "aria-label": "Runs over time" });
 
@@ -603,28 +614,41 @@ function renderActivitySvg(el, model) {
 		svg.appendChild(svgEl("line", { x1: padX, y1: gy, x2: W - padX, y2: gy, class: "act-grid" }));
 	}
 
-	const totalPts = days.map((d, i) => [x(i), y(d.succeeded + d.failed + d.other)]);
+	const okPts = days.map((d, i) => [x(i), y(d.succeeded)]);
 	const failPts = days.map((d, i) => [x(i), y(d.failed)]);
 	const base = y(0);
-	const totalPath = smoothPath(totalPts, padTop, base);
+	const okPath = smoothPath(okPts, padTop, base);
 
-	const areaD = totalPath + " L " + x(n - 1).toFixed(1) + " " + base.toFixed(1) + " L " + x(0).toFixed(1) + " " + base.toFixed(1) + " Z";
+	const areaD = okPath + " L " + x(n - 1).toFixed(1) + " " + base.toFixed(1) + " L " + x(0).toFixed(1) + " " + base.toFixed(1) + " Z";
 	svg.appendChild(svgEl("path", { d: areaD, fill: "url(#actArea)", stroke: "none" }));
-	svg.appendChild(svgEl("path", { d: totalPath, class: "act-line ok" }));
+	svg.appendChild(svgEl("path", { d: okPath, class: "act-line ok" }));
 	if (days.some((d) => d.failed)) svg.appendChild(svgEl("path", { d: smoothPath(failPts, padTop, base), class: "act-line fail" }));
 
 	days.forEach((d, i) => {
-		const total = d.succeeded + d.failed + d.other;
-		const gx = x(i), gy = y(total);
+		const gx = x(i), gy = y(d.succeeded);
 		const a = svgEl("a", { href: drillHref(d), class: "act-dot-hit" });
 		a.dataset.tip = colTip(d);
 		a.appendChild(svgEl("circle", { cx: gx, cy: gy, r: 14, fill: "transparent" }));
-		a.appendChild(svgEl("circle", { cx: gx, cy: gy, r: total ? 3.5 : 2.2, class: "act-dot" + (total ? "" : " zero") }));
+		a.appendChild(svgEl("circle", { cx: gx, cy: gy, r: d.succeeded ? 3.5 : 2.2,
+			class: "act-dot" + (d.succeeded ? "" : " zero") }));
 		if (d.failed) a.appendChild(svgEl("circle", { cx: gx, cy: y(d.failed), r: 3, class: "act-dot fail" }));
 		svg.appendChild(a);
 	});
 
 	el.appendChild(svg);
+
+	// Two lines from one baseline need saying which is which. The bar view does not: its segments
+	// sit in one column in a fixed order, so the shape carries the meaning. Here the only difference
+	// between the series is colour.
+	const legend = document.createElement("div");
+	legend.className = "legend activity-legend";
+	for (const [cls, label] of [["ok", "succeeded"], ["failed", "failed"]]) {
+		const chip = document.createElement("span");
+		chip.className = "chip " + cls;
+		chip.textContent = label;
+		legend.appendChild(chip);
+	}
+	el.appendChild(legend);
 
 	const axis = document.createElement("div");
 	axis.className = "activity-axis";
