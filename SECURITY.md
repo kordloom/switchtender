@@ -45,13 +45,16 @@ Verify the signature over the checksums, then the archive against them:
       --certificate-identity-regexp '^https://github.com/kordloom/switchtender/.github/workflows/release.yml@.*' \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
+    grep -q '  BINARY_SHA256SUMS$' SHA256SUMS
     shasum -a 256 -c SHA256SUMS --ignore-missing
 
-`SHA256SUMS` covers `BINARY_SHA256SUMS` as well as the archives, so the two checks above also
-establish the manifest that `switchtender version --verify` reads. That matters because `--verify`
-fetches the manifest over HTTPS and compares the running executable against it: on its own that
-trusts whoever can write the release assets. Checking the signature once, out of band, is what turns
-it into a check on the build rather than a check on GitHub.
+The `grep` asserts the signed checksums actually cover `BINARY_SHA256SUMS`, the manifest that
+`switchtender version --verify` reads. If it fails, the manifest is outside the signature: the
+self-check then establishes nothing beyond TLS to GitHub, and the release should be treated as
+incompletely published. When it holds, the checks above establish the manifest too, which matters
+because `--verify` fetches it over HTTPS and compares the running executable against it: on its own
+that trusts whoever can write the release assets. Checking the signature once, out of band, is what
+turns it into a check on the build rather than a check on GitHub.
 
 ## Security posture
 

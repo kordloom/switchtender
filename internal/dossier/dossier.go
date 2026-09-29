@@ -450,6 +450,7 @@ func Render(in *Input) ([]byte, error) {
 			Unreachable: h.Unreachable, Skipped: h.Skipped,
 		})
 	}
+	refusedProofs := 0
 	for _, a := range in.Covering {
 		// An embedded token is read here rather than described. The row used to say an anchor
 		// "verifies offline" on the strength of a proof string being present, which is a claim about
@@ -462,10 +463,18 @@ func Render(in *Input) ([]byte, error) {
 			if err := audit.VerifyTimestampProof(a.Link, a.Proof); err != nil {
 				row.Offline = false
 				row.ProofProblem = err.Error()
+				refusedProofs++
 			}
 		}
 		v.Anchors = append(v.Anchors, row)
 	}
+	// An anchor whose token was refused does not fix anything outside this install, so it is not
+	// counted among the ones that do. The refusal was recorded on the row and then dropped on the
+	// floor: the banner still read "verified" and still counted the refused anchor in its total,
+	// while the table below it said the token does not match the link recorded beside it. A refused
+	// token is the one signal somebody who rewrote the anchors table cannot forge, so it is exactly
+	// the thing the headline must not talk over.
+	holding := len(v.Anchors) - refusedProofs
 	v.AnchorProblems = in.AnchorProblems
 	switch {
 	case !in.ChainOK:
@@ -497,11 +506,16 @@ func Render(in *Input) ([]byte, error) {
 		v.Status = "unanchored"
 		v.StatusText = fmt.Sprintf("The chain verifies and %d anchor(s) fix it outside this "+
 			"install, but it holds no entry naming this run, so they fix the history around it "+
-			"rather than a record of it.", len(v.Anchors))
+			"rather than a record of it.", holding)
+	case refusedProofs > 0:
+		v.Status = "broken"
+		v.StatusText = fmt.Sprintf("%d anchor(s) covering this run carry a timestamp token that does "+
+			"not fix the link recorded beside it, so an anchor row does not say what it appears to "+
+			"say. Nothing here rests on an outside authority until that is explained.", refusedProofs)
 	default:
 		v.Status = "verified"
 		v.StatusText = fmt.Sprintf("The chain verifies and %d anchor(s) fix history containing "+
-			"this run outside this install.", len(v.Anchors))
+			"this run outside this install.", holding)
 	}
 
 	var buf bytes.Buffer

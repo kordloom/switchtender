@@ -279,6 +279,33 @@ class STElement {
 	// outerHTML serializes the element itself along with its children.
 	get outerHTML() { return serialize(this); }
 
+	// insertAdjacentHTML parses markup and splices it in at one of the four standard positions.
+	// The facet menus build their chevron this way, so without it every facet control threw on
+	// construction and no test could reach the filter panels at all.
+	insertAdjacentHTML(position, markup) {
+		const nodes = parseHTML(String(markup), this.ownerDocument);
+		const where = String(position).toLowerCase();
+		if (where === "beforeend") {
+			for (const node of nodes) this.appendChild(node);
+			return;
+		}
+		if (where === "afterbegin") {
+			for (const node of nodes.reverse()) this.insertBefore(node, this.childNodes[0] || null);
+			return;
+		}
+		if (!this.parentNode) throw new Error("insertAdjacentHTML " + where + ": node has no parent");
+		if (where === "beforebegin") {
+			for (const node of nodes) this.parentNode.insertBefore(node, this);
+			return;
+		}
+		if (where === "afterend") {
+			const next = this.nextSibling;
+			for (const node of nodes) this.parentNode.insertBefore(node, next);
+			return;
+		}
+		throw new Error("insertAdjacentHTML: unknown position " + position);
+	}
+
 	// rows lists a table section's rows, which the row removal helper counts to spot an empty list.
 	get rows() {
 		return TABLE_TAGS.has(this.tagName) ? this.querySelectorAll("tr") : undefined;

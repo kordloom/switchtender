@@ -4,12 +4,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -84,13 +86,27 @@ func runVersionVerify(cmd *cobra.Command) error {
 	url := fmt.Sprintf("%s/v%s/%s", releaseDownloadBase, version, binarySumsAsset)
 	sums, err := fetchSums(cmd.Context(), url)
 	if err != nil {
+		// The old wording blamed every non-200 on the release predating the manifest, so a v1.69.0
+		// user whose release genuinely lacked it, or who hit a 403 or a 503, was told their release
+		// was simply old and sent away reassured. The age explanation is only offered to the
+		// releases it is true of; for the rest, a missing manifest on a release that should carry
+		// one is a defect in the release, and saying so is what gets it fixed.
+		if errors.Is(err, errSumsUnavailable) && versionPredatesManifest(version) {
+			return fmt.Errorf("fetch %s for v%s: %w; releases before v%s do not carry it",
+				binarySumsAsset, version, err, firstManifestVersion)
+		}
+		if errors.Is(err, errSumsUnavailable) {
+			return fmt.Errorf("fetch %s for v%s: %w; this release should carry its manifest, so "+
+				"either it was published incompletely, which is a defect in the release, or "+
+				"something between here and the release is interfering", binarySumsAsset, version, err)
+		}
 		return fmt.Errorf("fetch %s for v%s: %w", binarySumsAsset, version, err)
 	}
 
 	verdict := map[string]any{
 		"version": version, "binary": exe, "sha256": sum, "ok": false,
 	}
-	asset, expected := matchPlatformSum(sums, version, runtime.GOOS, runtime.GOARCH)
+	asset, expected := matchPlatformSum(sums, version, runtime.GOOS, runtime.GOARCH, exe)
 	switch expected {
 	case "":
 		verdict["problem"] = fmt.Sprintf("the release lists no binary for %s/%s",
@@ -140,8 +156,7 @@ func fetchSums(ctx context.Context, url string) (map[string]string, error) {
 	}
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("the release answered %s; releases before v1.61.0 do not carry %s",
-			res.Status, binarySumsAsset)
+		return nil, fmt.Errorf("%w: the release answered %s", errSumsUnavailable, res.Status)
 	}
 	data, err := io.ReadAll(io.LimitReader(res.Body, sumsBodyCap))
 	if err != nil {
@@ -165,10 +180,17 @@ func parseSums(body string) map[string]string {
 
 // matchPlatformSum returns the sums entry for the running platform. On macOS the universal binary
 // is preferred, since that is the file the release archives actually carry, whatever architecture
-// the kernel reports it running as.
-func matchPlatformSum(sums map[string]string, version, goos, goarch string) (asset, sum string) {
+// the kernel reports it running as. A binary running out of an app bundle tries the bundle's own
+// entry first: codesign rewrites the binary when the app is signed, so the shipped app can never
+// hash like the archive it was built beside, and without its own entry `version --verify` inside
+// the official dmg called the official artifact "not the released binary". The order matters,
+// because a release carries both keys.
+func matchPlatformSum(sums map[string]string, version, goos, goarch, exe string) (asset, sum string) {
 	var names []string
 	if goos == "darwin" {
+		if strings.Contains(exe, ".app/Contents/MacOS/") {
+			names = append(names, fmt.Sprintf("switchtender_%s_darwin_app", version))
+		}
 		names = append(names, fmt.Sprintf("switchtender_%s_darwin_all", version))
 	}
 	name := fmt.Sprintf("switchtender_%s_%s_%s", version, goos, goarch)
@@ -182,4 +204,46 @@ func matchPlatformSum(sums map[string]string, version, goos, goarch string) (ass
 		}
 	}
 	return "", ""
+}
+
+// errSumsUnavailable is returned when the release did not hand over its binary manifest, carrying
+// the literal status so the caller can pick the explanation that is actually true.
+var errSumsUnavailable = errors.New("could not fetch the binary manifest")
+
+// firstManifestVersion is the first release that published BINARY_SHA256SUMS. Only releases older
+// than this may honestly blame their age for lacking one.
+const firstManifestVersion = "1.61.0"
+
+// versionPredatesManifest reports whether a release version is older than the first one to carry
+// the binary manifest. An unparsable version is not called old: the reassuring explanation is the
+// one that must not be handed out on a guess.
+func versionPredatesManifest(version string) bool {
+	parse := func(v string) (nums [3]int, ok bool) {
+		if i := strings.IndexAny(v, "-+"); i >= 0 {
+			v = v[:i]
+		}
+		parts := strings.Split(v, ".")
+		if len(parts) != 3 {
+			return nums, false
+		}
+		for i, p := range parts {
+			n, err := strconv.Atoi(p)
+			if err != nil || n < 0 {
+				return nums, false
+			}
+			nums[i] = n
+		}
+		return nums, true
+	}
+	have, ok := parse(version)
+	if !ok {
+		return false
+	}
+	first, _ := parse(firstManifestVersion)
+	for i := range have {
+		if have[i] != first[i] {
+			return have[i] < first[i]
+		}
+	}
+	return false
 }

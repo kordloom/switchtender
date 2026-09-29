@@ -105,7 +105,15 @@ function tableRowsData(table) {
 	});
 	const rows = [];
 	for (const tr of table.tBodies[0].rows) {
-		if (tr.dataset.fhide === "1" || tr.classList.contains("skeleton-row")) continue;
+		// Both filters are honored, and the pager deliberately is not. The text box and the facet
+		// panel are the reader saying which rows they mean, so a file that carries rows they ticked
+		// away is not the thing the button offered: picking one tool out of the facet panel and
+		// exporting handed back every tool, which is worse than useless in an audit because it
+		// looks like the answer to the question that was asked. The pager is a different kind of
+		// thing, a limit on what fits the screen rather than on what was asked for, so the export
+		// runs past it on purpose and the file holds every matching row instead of the first page.
+		if (tr.dataset.fhide === "1" || tr.dataset.xhide === "1") continue;
+		if (tr.classList.contains("skeleton-row")) continue;
 		const row = [];
 		Array.from(tr.cells).forEach((cell, i) => {
 			if (skip.has(i)) return;

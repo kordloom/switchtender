@@ -81,7 +81,11 @@ func runAuditBundle(cmd *cobra.Command, _ []string) error {
 		entries = entries[len(entries)-bundleLimit:]
 	}
 
-	id, err := audit.LoadIdentityForStore(bundleDB, keyDir())
+	dir, err := keyDir()
+	if err != nil {
+		return err
+	}
+	id, err := audit.LoadIdentityForStore(bundleDB, dir)
 	if err != nil {
 		return err
 	}
@@ -181,9 +185,9 @@ func warnAnchorLag(entries []*audit.Entry, anchors []*audit.Anchor) {
 // publishes. For a SQLite file that is the directory beside the database, which an operator already
 // backs up and protects; for a postgres DSN it is a stable per-user directory rather than a path
 // built from the DSN.
-func keyDir() string {
+func keyDir() (string, error) {
 	if bundleKeyDir != "" {
-		return bundleKeyDir
+		return bundleKeyDir, nil
 	}
 	return identityDir(bundleDB)
 }

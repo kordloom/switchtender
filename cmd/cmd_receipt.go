@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/receipt"
 )
 
@@ -63,7 +62,7 @@ func runReceipt(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = store.Close() }()
 
-	id, err := audit.LoadIdentityForStore(receiptRunDB, identityDir(receiptRunDB))
+	id, err := loadProducerIdentity(receiptRunDB)
 	if err != nil {
 		return err
 	}

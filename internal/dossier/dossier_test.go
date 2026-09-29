@@ -140,17 +140,26 @@ func TestDossierAnchorsCoverTheRun(t *testing.T) {
 		t.Fatalf("Render() error = %v", err)
 	}
 	html := string(doc)
-	if !strings.Contains(html, "1 anchor(s) fix history") {
-		t.Error("dossier does not report the covering anchor in its banner")
-	}
-	// The proof on this fixture anchor is a placeholder, not a timestamp token, and the dossier now
-	// reads it rather than describing it. Saying "verifies offline" about bytes nobody parsed is the
-	// claim that used to be made here, and an auditor acting on it would have been acting on nothing.
+	// The proof on this fixture anchor is a placeholder, not a timestamp token, and the dossier reads
+	// it rather than describing it. Saying "verifies offline" about bytes nobody parsed is a claim an
+	// auditor would have been acting on for nothing.
 	if !strings.Contains(html, "timestamp token REFUSED") {
 		t.Errorf("dossier does not report that the anchor's proof failed to verify:\n%s", html)
 	}
 	if strings.Contains(html, "it fixes this link") {
 		t.Error("dossier claims a placeholder proof fixes the link")
+	}
+	// And the headline has to agree with the table under it. This asserted "1 anchor(s) fix history"
+	// beside the REFUSED row above, which is the contradiction an evidence document cannot ship: the
+	// banner is what a reader takes away, and it was crediting an anchor whose token does not match
+	// the link recorded beside it. A refused token is the one signal somebody who rewrote the anchors
+	// table cannot forge, so it is exactly what the headline must not talk over.
+	if strings.Contains(html, "1 anchor(s) fix history") {
+		t.Error("the banner credits an anchor whose timestamp token was refused, while the table " +
+			"below it reports that refusal")
+	}
+	if !strings.Contains(html, "does not fix the link recorded beside it") {
+		t.Errorf("the banner does not say why the anchor cannot be relied on:\n%s", html)
 	}
 }
 

@@ -22,14 +22,19 @@ var durationBuckets = []float64{1, 5, 10, 30, 60, 300, 600, 1800, 3600}
 // takes, so a rising queue wait is the early signal that the pool is undersized.
 var queueBuckets = []float64{0.5, 1, 2, 5, 10, 30, 60, 300, 1800}
 
-// metricsHistogramWindow caps how many recent runs feed the duration and queue-wait histograms,
-// so a scrape reads a bounded page instead of the whole run history.
+// metricsHistogramWindow caps how many recent runs a scrape reads to feed the duration and
+// queue-wait histograms, so it reads a bounded page instead of the whole run history. It is a page
+// size, not a window: runs are folded into cumulative counters once each, so the page only has to
+// reach back to the previous scrape rather than hold everything a histogram describes.
 const metricsHistogramWindow = 10000
 
 // metricsHandler serves run, fleet, queue, worker, and run-duration series in the Prometheus text
-// exposition format, computed from the store at scrape time so no counter state lives in the
-// process. The status gauges come from a grouped count, and the histograms are derived from the
-// most recent metricsHistogramWindow runs, so a scrape stays cheap however large history grows.
+// exposition format. The gauges are computed from the store at scrape time and hold no state. The
+// histograms cannot be: Prometheus reads their buckets as counters, and recomputing them from the
+// newest page made them fall whenever a run aged out of it, which reads as a counter reset rather
+// than as a smaller number. They are accumulated instead, each run folded in once when it reaches
+// a terminal state, so a scrape stays cheap however large history grows and the counters still
+// only climb.
 // The scrape is withheld entirely from a caller who may read no runs, rather than emitted with some
 // series dropped. Its equivalents on the API already do this: GET /v1/workers and GET /v1/fleet nil
 // their lists for such a caller. This endpoint took no authorizer at all, so under strict grants a
@@ -40,6 +45,7 @@ func metricsHandler(store run.Store, chain *chainHealth, authz *authorizer, log 
 	if store == nil {
 		panic("server: metricsHandler: Store required")
 	}
+	hist := newRunHistograms()
 	return func(w http.ResponseWriter, r *http.Request) {
 		_, anyReadable, ferr := derivedReadFilter(r.Context(), authz, store)
 		if ferr != nil {
@@ -81,8 +87,10 @@ func metricsHandler(store run.Store, chain *chainHealth, authz *authorizer, log 
 		writeQueueDepth(&b, store, r)
 		writeFleetHealth(&b, store, r)
 		writeWorkers(&b, store, r)
-		writeRunDurations(&b, runs)
-		writeQueueWait(&b, runs)
+		hist.fold(runs, len(runs) >= metricsHistogramWindow)
+		duration, queue, behind := hist.snapshot()
+		writeRunDurations(&b, duration)
+		writeQueueWait(&b, queue, behind)
 		writeSpanBeats(&b, time.Now())
 		if chain != nil {
 			writeChainHealth(&b, chain.snapshot(r.Context()), time.Now())
@@ -163,36 +171,18 @@ func writeWorkers(b *strings.Builder, store run.Store, r *http.Request) {
 	}
 }
 
-// writeRunDurations emits a histogram of run execution time from start to end over the terminal runs
-// that carry both timestamps, so scrape sees the fleet's latency distribution.
-func writeRunDurations(b *strings.Builder, runs []run.RunTiming) {
-	counts := make([]int, len(durationBuckets))
-	total := 0
-	sum := 0.0
-	for _, rn := range runs {
-		if rn.StartedAt == nil || rn.EndedAt == nil {
-			continue
-		}
-		d := rn.EndedAt.Sub(*rn.StartedAt).Seconds()
-		if d < 0 {
-			continue
-		}
-		total++
-		sum += d
-		for i, le := range durationBuckets {
-			if d <= le {
-				counts[i]++
-			}
-		}
-	}
+// writeRunDurations emits the cumulative histogram of run execution time from start to end. The
+// counts come from the accumulator rather than from the scrape's own page, so they climb for as
+// long as the process lives and Prometheus can rate them.
+func writeRunDurations(b *strings.Builder, h histogramCounts) {
 	b.WriteString("# HELP switchtender_run_duration_seconds Run execution time from start to end.\n")
 	b.WriteString("# TYPE switchtender_run_duration_seconds histogram\n")
 	for i, le := range durationBuckets {
-		fmt.Fprintf(b, "switchtender_run_duration_seconds_bucket{le=\"%g\"} %d\n", le, counts[i])
+		fmt.Fprintf(b, "switchtender_run_duration_seconds_bucket{le=\"%g\"} %d\n", le, h.counts[i])
 	}
-	fmt.Fprintf(b, "switchtender_run_duration_seconds_bucket{le=\"+Inf\"} %d\n", total)
-	fmt.Fprintf(b, "switchtender_run_duration_seconds_sum %g\n", sum)
-	fmt.Fprintf(b, "switchtender_run_duration_seconds_count %d\n", total)
+	fmt.Fprintf(b, "switchtender_run_duration_seconds_bucket{le=\"+Inf\"} %d\n", h.total)
+	fmt.Fprintf(b, "switchtender_run_duration_seconds_sum %g\n", h.sum)
+	fmt.Fprintf(b, "switchtender_run_duration_seconds_count %d\n", h.total)
 }
 
 // writeChainHealth emits the audit chain integrity gauges. Verification is incremental and
@@ -270,35 +260,25 @@ func writeSpanBeats(b *strings.Builder, now time.Time) {
 	fmt.Fprintf(b, "switchtender_span_beat_age_seconds %g\n", age)
 }
 
-// writeQueueWait emits a histogram of how long runs waited between submission and start, over the runs
-// that carry a start time, so scrape sees whether the pool keeps up with the backlog. A run held for
-// approval includes that wait, which is honest: it is time the submitter waited before work began.
-func writeQueueWait(b *strings.Builder, runs []run.RunTiming) {
-	counts := make([]int, len(queueBuckets))
-	total := 0
-	sum := 0.0
-	for _, rn := range runs {
-		if rn.StartedAt == nil {
-			continue
-		}
-		d := rn.StartedAt.Sub(rn.CreatedAt).Seconds()
-		if d < 0 {
-			continue
-		}
-		total++
-		sum += d
-		for i, le := range queueBuckets {
-			if d <= le {
-				counts[i]++
-			}
-		}
-	}
+// writeQueueWait emits the cumulative histogram of how long runs waited between submission and
+// start. A run held for approval includes that wait, which is honest: it is time the submitter
+// waited before work began. The wait is folded in when the run reaches a terminal state, the same
+// instant its duration is, so neither histogram can count a run twice.
+//
+// The companion counter says how many scrapes could not prove they saw every run that finished
+// since the previous one. It stays at zero unless more runs finish between two scrapes than a
+// single page holds, and an operator who sees it climbing is looking at series that undercount.
+func writeQueueWait(b *strings.Builder, h histogramCounts, behind int) {
 	b.WriteString("# HELP switchtender_run_queue_seconds Time a run waited from submission to start.\n")
 	b.WriteString("# TYPE switchtender_run_queue_seconds histogram\n")
 	for i, le := range queueBuckets {
-		fmt.Fprintf(b, "switchtender_run_queue_seconds_bucket{le=\"%g\"} %d\n", le, counts[i])
+		fmt.Fprintf(b, "switchtender_run_queue_seconds_bucket{le=\"%g\"} %d\n", le, h.counts[i])
 	}
-	fmt.Fprintf(b, "switchtender_run_queue_seconds_bucket{le=\"+Inf\"} %d\n", total)
-	fmt.Fprintf(b, "switchtender_run_queue_seconds_sum %g\n", sum)
-	fmt.Fprintf(b, "switchtender_run_queue_seconds_count %d\n", total)
+	fmt.Fprintf(b, "switchtender_run_queue_seconds_bucket{le=\"+Inf\"} %d\n", h.total)
+	fmt.Fprintf(b, "switchtender_run_queue_seconds_sum %g\n", h.sum)
+	fmt.Fprintf(b, "switchtender_run_queue_seconds_count %d\n", h.total)
+	b.WriteString("# HELP switchtender_run_timing_scrapes_behind_total Scrapes that could not read " +
+		"every run finished since the previous one.\n")
+	b.WriteString("# TYPE switchtender_run_timing_scrapes_behind_total counter\n")
+	fmt.Fprintf(b, "switchtender_run_timing_scrapes_behind_total %d\n", behind)
 }

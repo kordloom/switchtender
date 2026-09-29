@@ -916,7 +916,7 @@ WHERE id=? AND status=? AND claimed_by=?`,
 // together.
 func (s *store) RunTimings(ctx context.Context, limit int) ([]run.RunTiming, error) {
 	const q = `
-SELECT status, kind, queue, claimed_by, created_at, started_at, ended_at
+SELECT id, status, kind, queue, claimed_by, created_at, started_at, ended_at
 FROM runs WHERE parent_id IS NULL
 ORDER BY created_at DESC, id DESC LIMIT ?`
 	rows, err := s.db.QueryContext(ctx, q, limit)
@@ -937,7 +937,8 @@ func scanTimings(rows *sql.Rows) ([]run.RunTiming, error) {
 			created        string
 			started, ended sql.NullString
 		)
-		if err := rows.Scan(&status, &t.Kind, &t.Queue, &t.ClaimedBy, &created, &started, &ended); err != nil {
+		if err := rows.Scan(&t.ID, &status, &t.Kind, &t.Queue, &t.ClaimedBy, &created, &started,
+			&ended); err != nil {
 			return nil, fmt.Errorf("run timings: %w", err)
 		}
 		t.Status = run.Status(status)

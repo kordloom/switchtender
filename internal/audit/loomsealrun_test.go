@@ -59,6 +59,13 @@ func loomsealRepo(t *testing.T) string {
 		repo = filepath.Join(wd, "..", "..", "..", "loomseal")
 	}
 	if _, err := os.Stat(filepath.Join(repo, "go.mod")); err != nil {
+		// The release gate demands the full suite: without a checkout the strongest claim the
+		// product makes goes unchecked, and a gate that skips it is green on the smaller suite.
+		if os.Getenv("SWITCHTENDER_REQUIRE_FULL_SUITE") == "1" {
+			t.Fatalf("SWITCHTENDER_REQUIRE_FULL_SUITE is set and no loomseal checkout was found: "+
+				"the full suite was demanded and the cross-verification cannot run; set %s",
+				loomsealRepoEnv)
+		}
 		t.Skip("loomseal checkout not found beside this repository; set " + loomsealRepoEnv +
 			" to point at one")
 	}

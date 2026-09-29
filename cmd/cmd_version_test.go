@@ -59,9 +59,71 @@ func TestMatchPlatformSum(t *testing.T) {
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			asset, sum := matchPlatformSum(sums, "1.61.0", test.Goos, test.Goarch)
+			asset, sum := matchPlatformSum(sums, "1.61.0", test.Goos, test.Goarch,
+				"/usr/local/bin/switchtender")
 			if asset != test.WantAsset || sum != test.WantSum {
 				t.Errorf("match = %q, %q, want %q, %q", asset, sum, test.WantAsset, test.WantSum)
+			}
+		})
+	}
+}
+
+// TestAppBundlePrefersItsOwnEntry pins that a binary running out of the shipped app bundle is held
+// against the bundle's own manifest entry, not the archive's.
+//
+// codesign rewrites the binary when the app is signed, so the shipped app can never hash like the
+// archive it was built beside. Both keys exist on a release, and trying darwin_all first meant
+// `version --verify` inside the official dmg reported the official artifact as not the released
+// binary, on the exact artifact the README tells users to check.
+func TestAppBundlePrefersItsOwnEntry(t *testing.T) {
+	t.Parallel()
+	sums := map[string]string{
+		"switchtender_1.70.0_darwin_app": "aa",
+		"switchtender_1.70.0_darwin_all": "bb",
+	}
+	asset, sum := matchPlatformSum(sums, "1.70.0", "darwin", "arm64",
+		"/Applications/SwitchTender.app/Contents/MacOS/switchtender")
+	if asset != "switchtender_1.70.0_darwin_app" || sum != "aa" {
+		t.Errorf("match = %q, %q, want the app bundle's own entry first", asset, sum)
+	}
+	// The same binary outside a bundle still gets the universal entry.
+	asset, sum = matchPlatformSum(sums, "1.70.0", "darwin", "arm64", "/usr/local/bin/switchtender")
+	if asset != "switchtender_1.70.0_darwin_all" || sum != "bb" {
+		t.Errorf("match = %q, %q, want the universal entry outside a bundle", asset, sum)
+	}
+	// An old release without the app entry falls back rather than failing.
+	asset, _ = matchPlatformSum(map[string]string{"switchtender_1.70.0_darwin_all": "bb"},
+		"1.70.0", "darwin", "arm64", "/Applications/SwitchTender.app/Contents/MacOS/switchtender")
+	if asset != "switchtender_1.70.0_darwin_all" {
+		t.Errorf("match = %q, want the universal fallback when no app entry exists", asset)
+	}
+}
+
+// TestVersionPredatesManifest pins which releases may blame their age for a missing manifest. The
+// reassuring explanation used to be attached to every non-200, so a modern release published
+// without its manifest told its users the release was simply old.
+func TestVersionPredatesManifest(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// In is the version under test and Want whether it predates the manifest.
+		In   string
+		Want bool
+	}{{ // Test 0: Well before the manifest existed.
+		In: "1.60.9", Want: true,
+	}, { // Test 1: The first release to carry one.
+		In: "1.61.0", Want: false,
+	}, { // Test 2: A modern release.
+		In: "1.69.0", Want: false,
+	}, { // Test 3: A prerelease of a modern version.
+		In: "1.70.0-rc1", Want: false,
+	}, { // Test 4: An unparsable version is not called old on a guess.
+		In: "weird", Want: false,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			if got := versionPredatesManifest(test.In); got != test.Want {
+				t.Errorf("versionPredatesManifest(%q) = %v, want %v", test.In, got, test.Want)
 			}
 		})
 	}
@@ -70,7 +132,7 @@ func TestMatchPlatformSum(t *testing.T) {
 func TestMacUniversalFallsBackToTheArchEntry(t *testing.T) {
 	t.Parallel()
 	sums := map[string]string{"switchtender_1.61.0_darwin_arm64": "bb"}
-	asset, sum := matchPlatformSum(sums, "1.61.0", "darwin", "arm64")
+	asset, sum := matchPlatformSum(sums, "1.61.0", "darwin", "arm64", "/usr/local/bin/switchtender")
 	if asset != "switchtender_1.61.0_darwin_arm64" || sum != "bb" {
 		t.Errorf("match = %q, %q, want the arch entry when no universal exists", asset, sum)
 	}
@@ -106,7 +168,7 @@ func TestVersionVerify(t *testing.T) {
 	name, _ := matchPlatformSum(map[string]string{
 		fmt.Sprintf("switchtender_9.9.9_%s_%s", runtime.GOOS, runtime.GOARCH): "x",
 		"switchtender_9.9.9_darwin_all":                                       "x",
-	}, "9.9.9", runtime.GOOS, runtime.GOARCH)
+	}, "9.9.9", runtime.GOOS, runtime.GOARCH, exe)
 
 	Version = "9.9.9"
 	versionVerify = true

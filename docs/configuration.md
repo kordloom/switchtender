@@ -17,6 +17,7 @@ variable.
 | `SWITCHTENDER_ENCRYPTION_KEY` | serve, worker | Passphrase that seals stored credentials with AES-256-GCM. Credentials are disabled when unset. |
 | `SWITCHTENDER_ENCRYPTION_SALT` | serve, worker | Per-deployment salt for argon2id key derivation. Must be set alongside the key and stay stable across restarts, or stored credentials cannot be decrypted. Credentials are disabled when unset. |
 | `SWITCHTENDER_AUDIT_KEY` | serve | Hex-encoded ed25519 seed for the install's signing identity, which signs the LoomSeal bundles it emits and binds every audit entry to this install. Unset beside a local database, the install mints and stores its own key there. Unset against a shared database it mints nothing, since every process must sign as the same install, and the chain is recorded unattributed and unbound until a seed is supplied to all of them. A malformed value stops startup. |
+| `SWITCHTENDER_IDENTITY_DIR` | serve, audit, receipt | Directory holding the install's producer signing identity. A SQLite install keeps it beside the database and needs no setting. A postgres install has no filesystem home, so it uses a per-user configuration directory; when the account has no home, as in a container, there is nowhere durable to put a key and startup refuses rather than choosing a path a restart would empty. Point this at a durable path the server owns. |
 | `SWITCHTENDER_PASSWORD` | user new | Initial account password, read instead of prompting so it never lands on the command line. |
 | `SWITCHTENDER_SMTP_PASSWORD` | serve | Password for SMTP authentication when `--smtp-username` is set. |
 | `SWITCHTENDER_AI_KEY` | serve | API key for a cloud AI provider such as Anthropic or an OpenAI-compatible endpoint. A local Ollama needs none. |
@@ -38,7 +39,7 @@ environment file, and optionally a systemd unit. Run it once, then start `serve`
 |------|---------|---------|
 | `--db` | `switchtender.db` | SQLite database path. |
 | `--config` | `switchtender.env` | Environment file to write. |
-| `--addr` | `:8080` | Address the server listens on. |
+| `--addr` | `127.0.0.1:8080` | Address the server listens on. Loopback by default. |
 | `--admin` | `admin` | Username for the first admin account. |
 | `--systemd` | none | Path to write a systemd unit to, empty to skip. |
 | `--force` | `false` | Overwrite an existing config file. |
@@ -52,7 +53,7 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 
 | Flag | Default | Purpose |
 |------|---------|---------|
-| `--addr` | `:8080` | Address the server listens on. |
+| `--addr` | `127.0.0.1:8080` | Address the server listens on. Loopback by default. Set `0.0.0.0:8080` to expose it on the network. |
 | `--db` | `switchtender.db` | SQLite file path, or a `postgres://` DSN for the PostgreSQL backend. |
 | `--tls-cert` | none | TLS certificate file, to serve HTTPS directly with no reverse proxy. Requires `--tls-key`. |
 | `--tls-key` | none | TLS private key file. Requires `--tls-cert`. |
@@ -241,7 +242,7 @@ instance is safe to expose. It needs ansible on the PATH to run the sample playb
 
 | Flag | Default | Purpose |
 |------|---------|---------|
-| `--addr` | `:8080` | Address the demo listens on. |
+| `--addr` | `127.0.0.1:8080` | Address the demo listens on. Loopback by default. |
 | `--db` | temporary file | Database to seed and serve. Empty uses a fresh temporary SQLite file. |
 | `--seed-only` | off | Seed the database and exit without serving. |
 | `--no-seed` | off | Serve the database as it already stands instead of seeding it. |
