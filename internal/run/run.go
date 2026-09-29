@@ -452,6 +452,45 @@ func WithIntent(intent string) SubmitOption {
 	}
 }
 
+// ExecutionOptions returns the options that carry how r executes onto another run: the tool and its
+// command, the dry-run flag, the variables, the credentials, the project, the inventory, the queue,
+// the timeout, and the execution image with its pull credential.
+//
+// It is the one description of a run's execution spec. Every path that derives a run from another
+// run used to write its own list, and every one of those lists lost a field over time: a shard
+// dropped the parent's extra vars, image, and timeout, a pipeline step dropped its own set, and a
+// rerun dropped the timeout and notifications. A dry-run-only spec that loses its flag makes real
+// changes, so a dropped field here is not cosmetic.
+//
+// It deliberately excludes what belongs to one run rather than to the spec: Limit, which names a
+// shard's own hosts and must not be overwritten by the parent's, along with the labels,
+// notifications, and provenance a caller decides for itself.
+func (r *Run) ExecutionOptions() []SubmitOption {
+	opts := []SubmitOption{
+		WithTool(r.Tool),
+		WithCommand(r.Command),
+		WithDryRun(r.DryRun),
+		WithExtraVars(r.ExtraVars),
+		WithCredentialIDs(r.CredentialIDs),
+	}
+	if r.ProjectID != "" {
+		opts = append(opts, WithProject(r.ProjectID))
+	}
+	if r.InventoryID != "" {
+		opts = append(opts, WithInventory(r.InventoryID))
+	}
+	if r.Queue != "" {
+		opts = append(opts, WithQueue(r.Queue))
+	}
+	if r.Timeout > 0 {
+		opts = append(opts, WithTimeout(r.Timeout))
+	}
+	if r.Image != "" {
+		opts = append(opts, WithImage(r.Image, r.PullCredentialID))
+	}
+	return opts
+}
+
 // WithIdempotencyKey dedupes the submission under key so a retried submit returns the original run
 // rather than firing a second. An empty key is a no-op and never dedupes.
 func WithIdempotencyKey(key string) SubmitOption {

@@ -159,7 +159,7 @@ retry, then logged and dropped, and the run's extra vars are stripped from the p
 template values never leave the system. Notifications do not block a run from finishing, and shutdown
 waits for the deliveries already in flight. Treat a notification as a signal, and the store as the
 source of truth.</p>
-<h2 id="next-to-awx-and-semaphore">Next to AWX and Semaphore</h2>
+<h2 id="how-this-compares">How this compares</h2>
 <p>SwitchTender coordinates a fleet with database leasing, so the same one binary adds capacity without a
 separate mesh to stand up. It splits by measured duration rather than round-robin, so a run finishes
 on the slowest shard and not the unluckiest one. It retries only the shards that failed. It reads a

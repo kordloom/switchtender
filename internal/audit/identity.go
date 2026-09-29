@@ -34,11 +34,28 @@ type Identity struct {
 	// InstallID identifies this install in a bundle's producer member.
 	InstallID string `json:"install_id"`
 	// Seed is the hex ed25519 seed. Hex matches the encoding the existing signed export and the
-	// audit verify command already use for keys.
-	Seed string `json:"seed"`
+	// audit verify command already use for keys. It never serializes: writing the key file goes
+	// through storedIdentity, which names the seed deliberately, so no other encoder can emit it.
+	Seed string `json:"-"`
 
 	// priv is the parsed private key, not serialized.
 	priv ed25519.PrivateKey
+}
+
+// storedIdentity is the on-disk form of an Identity, and the only place the signing seed is
+// encoded.
+//
+// The seed used to carry a json tag on Identity itself, which made every handler holding an
+// identity one careless respondJSON away from publishing the install's private signing key on an
+// unauthenticated route. Nothing did that, and the trust handler is careful, but the whole value of
+// this key is that it never leaves the install, and a struct that serializes it by default puts
+// that one edit away at all times. Writing through a separate type means the seed is emitted only
+// where a reader can see it was meant to be.
+type storedIdentity struct {
+	// InstallID identifies this install in a bundle's producer member.
+	InstallID string `json:"install_id"`
+	// Seed is the hex ed25519 seed.
+	Seed string `json:"seed"`
 }
 
 // Public returns the identity's public key, the value a relying party pins by fingerprint.
@@ -97,11 +114,11 @@ func readIdentityFile(dir string) (Identity, error) {
 	if err != nil {
 		return Identity{}, err
 	}
-	var id Identity
-	if err := json.Unmarshal(raw, &id); err != nil {
+	var stored storedIdentity
+	if err := json.Unmarshal(raw, &stored); err != nil {
 		return Identity{}, fmt.Errorf("producer identity: parse %s: %w", IdentityFile, err)
 	}
-	return id, nil
+	return Identity{InstallID: stored.InstallID, Seed: stored.Seed}, nil
 }
 
 // createIdentity generates a new identity and writes it to dir with owner-only permissions.
@@ -119,7 +136,7 @@ func createIdentity(dir string) (Identity, error) {
 	}
 	id.InstallID = installIDFromKey(id.Public())
 
-	raw, err := json.MarshalIndent(id, "", "  ")
+	raw, err := json.MarshalIndent(storedIdentity{InstallID: id.InstallID, Seed: id.Seed}, "", "  ")
 	if err != nil {
 		return Identity{}, fmt.Errorf("producer identity: encode: %w", err)
 	}

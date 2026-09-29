@@ -155,7 +155,7 @@ template values never leave the system. Notifications do not block a run from fi
 waits for the deliveries already in flight. Treat a notification as a signal, and the store as the
 source of truth.
 
-## Next to AWX and Semaphore
+## How this compares
 
 SwitchTender coordinates a fleet with database leasing, so the same one binary adds capacity without a
 separate mesh to stand up. It splits by measured duration rather than round-robin, so a run finishes

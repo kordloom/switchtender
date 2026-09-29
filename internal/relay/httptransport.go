@@ -26,6 +26,16 @@ const (
 	// logBatchLimit caps the output held for one run while posts are failing, past which the oldest
 	// is dropped rather than grown against a relay that is not coming back.
 	logBatchLimit = 8 * logBatchBytes
+	// logRetryBase is how long a batch waits after a failed post before another is attempted.
+	//
+	// Without it a relay that is down is asked once per write. A batch sitting at or above
+	// logBatchBytes makes every subsequent append a size-triggered flush, so once the buffer is full
+	// and posts are failing, one hundred small writes became one hundred synchronous failing
+	// requests, each one paying a connection timeout on the execution path.
+	logRetryBase = 250 * time.Millisecond
+	// logRetryShift is how many times the retry wait doubles, so a relay that stays down is asked
+	// every logRetryBase<<logRetryShift rather than continuously.
+	logRetryShift = 5
 )
 
 // httpTransport carries a worker's execution-path calls to a relay server over authenticated HTTP.
@@ -54,6 +64,11 @@ type logBatch struct {
 	buf []byte
 	// timer fires the delayed flush of a partial batch, nil when no flush is pending.
 	timer *time.Timer
+	// nextRetry is when another post may be attempted after one failed. Zero means no failure is
+	// outstanding.
+	nextRetry time.Time
+	// fails counts consecutive failed posts, which sets how long nextRetry waits.
+	fails int
 }
 
 // compile-time proof that httpTransport is a Transport.
@@ -166,12 +181,23 @@ func (t *httpTransport) AppendLog(ctx context.Context, id string, p []byte) erro
 		t.batches[id] = b
 	}
 	b.buf = append(b.buf, p...)
-	full := len(b.buf) >= logBatchBytes
-	if !full && b.timer == nil {
-		b.timer = time.AfterFunc(logBatchDelay, func() { t.flushLogAsync(id) })
+	// A full batch posts at once, unless a post just failed. While a relay is down every append
+	// would otherwise be a size-triggered flush, since the buffer stays full once the bytes are put
+	// back, turning each write into its own failing request on the execution path.
+	now := time.Now()
+	backingOff := now.Before(b.nextRetry)
+	flushNow := len(b.buf) >= logBatchBytes && !backingOff
+	if !flushNow && b.timer == nil {
+		// Waiting out the backoff is itself a pending flush, so the batch is still posted once the
+		// relay is worth asking again even if no further output arrives.
+		delay := logBatchDelay
+		if backingOff {
+			delay = b.nextRetry.Sub(now)
+		}
+		b.timer = time.AfterFunc(delay, func() { t.flushLogAsync(id) })
 	}
 	t.mu.Unlock()
-	if full {
+	if flushNow {
 		// A failed flush has already put its bytes back at the front of the batch, so the next flush
 		// carries them. Reporting the failure here would be reported to a caller that wraps this in
 		// a retry, and that retry would append p a second time on top of output that was never lost.
@@ -216,9 +242,40 @@ func (t *httpTransport) flushLog(ctx context.Context, id string) error {
 	}
 	if err := t.postLog(ctx, id, out); err != nil {
 		t.requeue(id, out)
+		t.postFailed(id)
 		return err
 	}
+	t.postSucceeded(id)
 	return nil
+}
+
+// postFailed opens or widens the batch's retry backoff and makes sure something is scheduled to try
+// again, so a run that goes quiet after a failure still has its buffered output delivered once the
+// relay returns.
+func (t *httpTransport) postFailed(id string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	b := t.batches[id]
+	if b == nil {
+		return
+	}
+	b.fails++
+	wait := logRetryBase << min(b.fails-1, logRetryShift)
+	b.nextRetry = time.Now().Add(wait)
+	if b.timer == nil {
+		b.timer = time.AfterFunc(wait, func() { t.flushLogAsync(id) })
+	}
+}
+
+// postSucceeded clears the retry backoff, so a relay that comes back is not held off by the failures
+// that preceded it.
+func (t *httpTransport) postSucceeded(id string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if b := t.batches[id]; b != nil {
+		b.fails = 0
+		b.nextRetry = time.Time{}
+	}
 }
 
 // requeue puts unsent output back at the front of the batch so the next flush carries it, which is

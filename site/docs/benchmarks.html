@@ -124,10 +124,10 @@ encryption and 937 ms with it, showing that argon2id dominates startup on a slow
 came from an earlier release and are not re-derived here, so treat them as indicative of the shape
 rather than as current numbers. This row is due a re-run.</p>
 <h2 id="about-comparisons">About comparisons</h2>
-<p>We publish only numbers we measured ourselves, so there are no AWX or Semaphore columns above. What
-can be said factually: AWX requires a Kubernetes cluster, its operator, PostgreSQL, Redis, and
-Receptor before it runs a playbook, so a boot-time comparison is not even shaped the same, and that
-is the point. The <a href="/docs/comparison">comparison page</a> covers the feature-by-feature picture, including
+<p>We publish only numbers we measured ourselves, so there are no competitor columns above. What can be
+said factually is that SwitchTender boots from one binary and one file, while the AWX-lineage
+controllers stand up a Kubernetes cluster, an operator, PostgreSQL, Redis, and a mesh before they run
+a playbook. A boot-time comparison is not even shaped the same, and that is the point. The <a href="/docs/comparison">comparison page</a> covers the feature-by-feature picture, including
 where SwitchTender is still young. If you run these benchmarks and get materially different numbers,
 open an issue with your hardware and method and we will look.</p>
 

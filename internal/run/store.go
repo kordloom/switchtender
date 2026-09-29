@@ -20,6 +20,41 @@ const orphanError = "canceled: the parent run was interrupted"
 // sweep canceled it, so the SQL stores stamp the same reason the in-memory one does.
 func OrphanError() string { return orphanError }
 
+// abandonedParentError is stamped on a split or pipeline parent left pending with no coordinator.
+const abandonedParentError = "interrupted: no coordinator ever started this run"
+
+// AbandonedParentError returns the failure text an abandoned parent carries, so every store stamps
+// the same reason.
+func AbandonedParentError() string { return abandonedParentError }
+
+// AbandonedParent reports whether r is a split or pipeline parent that nothing will ever finish,
+// given the cutoff a sweep is using. It is the single statement of a rule the SQL stores each
+// express as a WHERE clause, so the four implementations can be read against one definition.
+//
+// A parent is abandoned when it is pending, unclaimed, and older than the cutoff. Each condition
+// carries weight:
+//
+//   - Claim excludes every run with a Kind, so no worker will ever pick a parent up. A parent that
+//     is not being coordinated in some process's memory is not waiting for anything.
+//   - A live coordinator saves its parent running, with a lease, as its first act. So a parent still
+//     pending well past the cutoff has no coordinator: the process that would have started one died
+//     between saving the parent and starting it, or a child save failed and the submit returned
+//     early leaving the children it had already written behind.
+//   - Held is not abandoned. A parent awaiting approval is resting, legitimately, for as long as it
+//     takes a person to decide, and Approve starts its coordinator. Sweeping those would cancel
+//     every gated split and workflow that outlived one sweep interval, which is why the status test
+//     is pending and not merely non-terminal.
+//
+// Interrupting the parent is what makes the sweep settle its children, since orphan resolution keys
+// off an interrupted parent. Without it the parent sits pending forever while its children stay
+// claimable and run with nothing to roll them up.
+func AbandonedParent(r *Run, cutoff time.Time) bool {
+	if r.Kind != KindSplit && r.Kind != KindPipeline {
+		return false
+	}
+	return r.Status == StatusPending && r.ClaimedBy == "" && r.CreatedAt.Before(cutoff)
+}
+
 // Store persists runs, their captured log output, and their structured events.
 // Implementations must be safe for concurrent use.
 type Store interface {
@@ -485,15 +520,28 @@ func (m *memStore) Heartbeat(_ context.Context, id, owner string) error {
 	return nil
 }
 
-// ReclaimStale requeues stale claimed pending runs and interrupts stale running runs. The lease was
-// stamped by this same process, so its own clock is the authoritative one. Interrupting a split or
-// pipeline parent orphans its children, so they are resolved in the same sweep.
+// ReclaimStale requeues stale claimed pending runs, interrupts stale running runs, and interrupts
+// split or pipeline parents left pending with no coordinator. The lease was stamped by this same
+// process, so its own clock is the authoritative one. Interrupting a parent orphans its children, so
+// they are resolved in the same sweep. See AbandonedParent for what makes a parent unrecoverable.
 func (m *memStore) ReclaimStale(_ context.Context, ttl time.Duration) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	cutoff := time.Now().Add(-ttl)
 	changed := 0
 	for _, r := range m.runs {
+		// An abandoned parent is interrupted before orphans are resolved, so its children settle in
+		// the same sweep rather than waiting for the next one.
+		if AbandonedParent(r, cutoff) {
+			now := time.Now()
+			r.Status = StatusInterrupted
+			r.EndedAt = &now
+			if r.Error == "" {
+				r.Error = abandonedParentError
+			}
+			changed++
+			continue
+		}
 		if r.ClaimedBy == "" || r.ClaimedAt == nil || !r.ClaimedAt.Before(cutoff) {
 			continue
 		}

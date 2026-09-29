@@ -1353,7 +1353,12 @@ func TestRetryShardsInheritExecution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}
-	// Fail every shard so there is something to retry, then finish the parent.
+	// Fail every shard so there is something to retry, then let the coordinator finish the parent.
+	//
+	// The parent is not saved failed here. Its coordinator is running concurrently and its first
+	// act is to save the parent running, so a hand-written terminal status races that write and
+	// loses often enough to fail the retry with "run not finished" about one run in eight. Waiting
+	// for the rollup is both race-free and closer to what actually happens.
 	shards, err := store.Shards(ctx, parent.ID)
 	if err != nil {
 		t.Fatalf("Shards() error = %v", err)
@@ -1364,10 +1369,7 @@ func TestRetryShardsInheritExecution(t *testing.T) {
 			t.Fatalf("Save(shard) error = %v", err)
 		}
 	}
-	parent.Status = run.StatusFailed
-	if err := store.Save(ctx, parent); err != nil {
-		t.Fatalf("Save(parent) error = %v", err)
-	}
+	waitForStatus(t, store, parent.ID, run.StatusFailed)
 
 	retry, err := d.RetryFailedShards(ctx, parent.ID)
 	if err != nil {
@@ -1645,5 +1647,69 @@ func TestPipelineStepsInheritExecution(t *testing.T) {
 	parent.DryRun = false
 	if got := stepRun(parent, run.PipelineStep{Name: "check", DryRun: true}, 0, 0, nil); !got.DryRun {
 		t.Error("a step that asks for dry run did not get it")
+	}
+}
+
+// startRecorder records when each run began executing, keyed by playbook name.
+type startRecorder struct {
+	// mu guards starts.
+	mu sync.Mutex
+	// starts maps a playbook name to the moment its run reached the runner.
+	starts map[string]time.Time
+}
+
+// Run records the start time and succeeds.
+func (s *startRecorder) Run(_ context.Context, spec roundhouse.Spec, _ io.Writer) (roundhouse.Result, error) {
+	s.mu.Lock()
+	s.starts[spec.Playbook] = time.Now()
+	s.mu.Unlock()
+	return roundhouse.Result{ExitCode: 0}, nil
+}
+
+// startedAt returns when the named run began, or the zero time.
+func (s *startRecorder) startedAt(playbook string) time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.starts[playbook]
+}
+
+// TestSubmitStartsWithoutWaitingOutTheBackoff pins that a run submitted to an idle dispatcher starts
+// promptly instead of waiting for the claim loop's backoff to expire.
+//
+// The backoff keeps idle dispatchers off the store's single writer, but nothing woke the loop when
+// work arrived, so its whole wait landed on the user: submit-to-start measured a mean of 1.74s and a
+// worst of 2.75s on an idle controller, against 250ms before the backoff existed. With the loop
+// woken on submit the same measurement is a mean of 2.6ms and a worst of 8.8ms. The bound below is
+// deliberately loose enough for a loaded CI machine and still far under a single backed-off wait.
+func TestSubmitStartsWithoutWaitingOutTheBackoff(t *testing.T) {
+	t.Parallel()
+	const base = 200 * time.Millisecond
+	rec := &startRecorder{starts: map[string]time.Time{}}
+	d := New(run.NewMemStore(), rec, nil, WithClaimInterval(base), WithNoJanitor())
+	defer d.Close()
+
+	// Let the loop back off to its ceiling, which is the state a quiet controller sits in.
+	time.Sleep(2 * time.Second)
+
+	sent := time.Now()
+	if _, err := d.Submit(context.Background(), "wake.yml", "inv"); err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	var started time.Time
+	for time.Now().Before(deadline) {
+		if started = rec.startedAt("wake.yml"); !started.IsZero() {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if started.IsZero() {
+		t.Fatal("the submitted run never started")
+	}
+	// A loop that waits out its backoff cannot beat the base interval, and at the ceiling it takes
+	// several times that. Anything under one base interval proves the submit woke it.
+	if latency := started.Sub(sent); latency >= base {
+		t.Errorf("submit-to-start = %v, want under the %v base interval: the claim loop waited out "+
+			"its idle backoff instead of being woken by the submit", latency, base)
 	}
 }

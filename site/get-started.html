@@ -63,7 +63,7 @@
 						<p>Pick the build for your platform: the <code>.dmg</code> or a <code>darwin</code> tarball on macOS, a <code>linux</code> tarball on Linux, or the <code>windows</code> zip. Verify it against the <code>SHA256SUMS</code> file on the same release.</p>
 						<p>Prefer to build from source? With the Go toolchain installed:</p>
 						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>go install github.com/kordloom/switchtender@latest</code></pre></div>
-						<p>To run Ansible you also need <code>ansible-playbook</code> on the box. Terraform, OpenTofu, Python, and Go runs each need their own toolchain; Bash and PowerShell use what the OS already provides.</p>
+						<p>To run Ansible you also need <code>ansible-playbook</code> on the box. Terraform, OpenTofu, Python, and Go runs each need their own toolchain. Bash and PowerShell use what the OS already provides.</p>
 					</div>
 				</li>
 				<li class="gs-step reveal">
@@ -106,7 +106,7 @@ switchtender serve --addr :8080 --db switchtender.db</code></pre></div>
 				</li>
 			</ol>
 			<div class="gs-callout reveal">
-				<p><strong>Coming from AWX or Semaphore?</strong> Import your projects, inventories, templates, and schedules in one command.</p>
+				<p><strong>Moving from another controller?</strong> AWX and Semaphore exports import your projects, inventories, templates, and schedules in one command. Ansible Automation Platform, Tower, and Ascender share the AWX export format. Rundeck is by hand for now.</p>
 				<a class="btn" href="/docs/switching-from-awx">Migration guide</a>
 			</div>
 		</section>
@@ -125,7 +125,7 @@ switchtender serve --addr :8080 --db switchtender.db</code></pre></div>
 		</section>
 
 		<section class="cta wrap reveal">
-			<h2>Put AWX and Semaphore to bed.</h2>
+			<h2>Run your first job.</h2>
 			<p>Structured runs, balanced splits, a fleet that remembers, and a control plane that proves itself, from one binary.</p>
 			<div class="hero-cta center">
 				<a class="btn big" href="https://github.com/kordloom/switchtender">★ Star on GitHub</a>

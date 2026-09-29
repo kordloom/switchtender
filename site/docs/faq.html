@@ -49,7 +49,7 @@
    "name": "How do I migrate from AWX?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "From the command line: switchtender import awx export.json # preview the plan, changes nothing switchtender import awx export.json --apply # import It maps projects, inventories, job templates with their surveys and schedules and job slicing, and credentials. See switching from AWX for the full mapping. Two things to know. AWX omits secret values on export for security, so credentials import without their secrets and you set those once after importing. Dynamic inventory sources import too, as sources that run their plugin and refresh the hosts into a stored inventory on a schedule or before a run; static inventories import fully. A Semaphore importer exists too, with switchtender import semaphore export.json."
+    "text": "From the command line: switchtender import awx export.json # preview the plan, changes nothing switchtender import awx export.json --apply # import It maps projects, inventories, job templates with their surveys and schedules and job slicing, and credentials. See switching from AWX for the full mapping. Two things to know. These exports omit secret values for security, so credentials import without their secrets and you set those once after importing. Dynamic inventory sources import too, as sources that run their plugin and refresh the hosts into a stored inventory on a schedule or before a run; static inventories import fully. A Semaphore importer exists too, with switchtender import semaphore export.json."
    }
   },
   {
@@ -176,7 +176,7 @@ switchtender import awx export.json --apply    # import
 </code></pre>
 <p>It maps projects, inventories, job templates with their surveys and schedules and job slicing, and
 credentials. See <a href="/docs/switching-from-awx">switching from AWX</a> for the full mapping.</p>
-<p>Two things to know. AWX omits secret values on export for security, so credentials import without
+<p>Two things to know. These exports omit secret values for security, so credentials import without
 their secrets and you set those once after importing. Dynamic inventory sources import too, as
 sources that run their plugin and refresh the hosts into a stored inventory on a schedule or before a
 run; static inventories import fully. A Semaphore importer exists too, with

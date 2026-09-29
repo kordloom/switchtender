@@ -127,7 +127,7 @@ want typed prompts at launch. Launch it with one click.
 ### 7. Watch the run
 
 The run detail page paints a host-by-task matrix live as the run executes, with per-task drill-down
-into stdout, stderr, return code, and diff. This is the part AWX does not do. A run is structure, not
+into stdout, stderr, return code, and diff. No other controller in the field does this. A run is structure, not
 a text scroll.
 
 ### 8. Add capacity and schedules
@@ -141,7 +141,7 @@ Add a schedule in Schedules with a cron expression to fire a template on a caden
 
 ## Where things live differently
 
-- There is no separate "launch" wizard the size of AWX's. A template launch is one request, a survey
+- There is no separate "launch" wizard. A template launch is one request, a survey
   renders as a small form.
 - Workflows are built on the canvas at Workflows: add steps, drag them into place, wire dependencies
   by dragging from a step's edge onto another, and run the graph as a pipeline.
@@ -160,4 +160,4 @@ Add a schedule in Schedules with a cron expression to fire a template on a caden
   page its own PagerDuty service the way an AWX notification template can.
 - Execution environments are a single pinned container image behind a flag, not a managed catalog.
 
-If something you rely on is missing, open an issue. The gap with AWX is being closed on purpose.
+If something you rely on is missing, open an issue. Import coverage is widened on purpose.
