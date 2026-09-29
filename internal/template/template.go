@@ -5,13 +5,12 @@ package template
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"slices"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/idgen"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -184,9 +183,5 @@ type Store interface {
 
 // NewID returns a random template identifier prefixed with "tpl_".
 func NewID() string {
-	var b [6]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		panic("template: read random: " + err.Error())
-	}
-	return "tpl_" + hex.EncodeToString(b[:])
+	return idgen.New("tpl_", 6)
 }

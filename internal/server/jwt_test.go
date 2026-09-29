@@ -22,6 +22,7 @@ import (
 )
 
 func TestJWTAuthenticate(t *testing.T) {
+	t.Parallel()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("key: %v", err)
@@ -85,6 +86,7 @@ func TestJWTAuthenticate(t *testing.T) {
 }
 
 func TestJWTMutationRecordsAudit(t *testing.T) {
+	t.Parallel()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("key: %v", err)

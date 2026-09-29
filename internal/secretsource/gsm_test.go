@@ -11,6 +11,7 @@ import (
 )
 
 func TestResolveGSM(t *testing.T) {
+	t.Parallel()
 	secretSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer access-tok" {
 			w.WriteHeader(http.StatusForbidden)

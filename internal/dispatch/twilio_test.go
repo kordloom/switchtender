@@ -19,6 +19,7 @@ import (
 // API with basic auth and the sender, recipient, and message body, and that a succeeded run texts no
 // one.
 func TestDispatcherNotifiesTwilio(t *testing.T) {
+	t.Parallel()
 	type capture struct {
 		path, auth string
 		form       url.Values

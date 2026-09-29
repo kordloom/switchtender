@@ -5,11 +5,10 @@ package policy
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"strings"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/idgen"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -120,9 +119,5 @@ func NewPolicy(name string) *Policy {
 
 // NewID returns a random policy identifier prefixed with "pol_".
 func NewID() string {
-	var b [6]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		panic("policy: read random: " + err.Error())
-	}
-	return "pol_" + hex.EncodeToString(b[:])
+	return idgen.New("pol_", 6)
 }

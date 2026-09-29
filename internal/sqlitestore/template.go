@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/kordloom/switchtender/internal/sqlutil"
 	"github.com/kordloom/switchtender/internal/template"
 )
 
@@ -52,9 +53,9 @@ ON CONFLICT(id) DO UPDATE SET
 	selectable_credential_ids=excluded.selectable_credential_ids`
 	_, err = s.db.ExecContext(ctx, q,
 		t.ID, t.Name, t.ProjectID, t.Playbook, t.Inventory, t.InventoryID, t.Shards,
-		joinIDs(t.CredentialIDs), string(vars), string(survey), t.Queue, formatTime(t.CreatedAt),
-		t.Tool, t.Command, boolToInt(t.DryRun), t.Image, t.PullCredentialID, t.OrgID, string(notifs),
-		joinIDs(t.SelectableCredentialIDs))
+		sqlutil.JoinIDs(t.CredentialIDs), string(vars), string(survey), t.Queue, sqlutil.FormatTime(t.CreatedAt),
+		t.Tool, t.Command, sqlutil.BoolToInt(t.DryRun), t.Image, t.PullCredentialID, t.OrgID, string(notifs),
+		sqlutil.JoinIDs(t.SelectableCredentialIDs))
 	if err != nil {
 		return fmt.Errorf("save template: %w", err)
 	}
@@ -82,9 +83,9 @@ func (s *templateStore) Update(ctx context.Context, t *template.Template) error 
 	WHERE id=?`
 	res, err := s.db.ExecContext(ctx, q,
 		t.Name, t.ProjectID, t.Playbook, t.Inventory, t.InventoryID, t.Shards,
-		joinIDs(t.CredentialIDs), string(vars), string(survey), t.Queue, t.Tool, t.Command,
-		boolToInt(t.DryRun), t.Image, t.PullCredentialID, t.OrgID, string(notifs),
-		joinIDs(t.SelectableCredentialIDs), t.ID)
+		sqlutil.JoinIDs(t.CredentialIDs), string(vars), string(survey), t.Queue, t.Tool, t.Command,
+		sqlutil.BoolToInt(t.DryRun), t.Image, t.PullCredentialID, t.OrgID, string(notifs),
+		sqlutil.JoinIDs(t.SelectableCredentialIDs), t.ID)
 	if err != nil {
 		return fmt.Errorf("update template: %w", err)
 	}
@@ -168,8 +169,8 @@ func scanTemplate(sc scanner) (*template.Template, error) {
 		return nil, err
 	}
 	t.DryRun = dryRun != 0
-	t.CredentialIDs = splitIDs(creds)
-	t.SelectableCredentialIDs = splitIDs(selectable)
+	t.CredentialIDs = sqlutil.SplitIDs(creds)
+	t.SelectableCredentialIDs = sqlutil.SplitIDs(selectable)
 	if vars != "" && vars != "null" {
 		if err := json.Unmarshal([]byte(vars), &t.ExtraVars); err != nil {
 			return nil, err
@@ -185,7 +186,7 @@ func scanTemplate(sc scanner) (*template.Template, error) {
 			return nil, err
 		}
 	}
-	at, err := parseTime(created)
+	at, err := sqlutil.ParseTime(created)
 	if err != nil {
 		return nil, err
 	}

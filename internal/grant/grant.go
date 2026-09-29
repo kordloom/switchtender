@@ -6,11 +6,11 @@ package grant
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/kordloom/switchtender/internal/idgen"
 )
 
 // ErrNotFound is returned when a grant does not exist in the store.
@@ -112,9 +112,5 @@ func hasAnyPrefix(s string, prefixes []string) bool {
 
 // NewID returns a random grant identifier prefixed with "grant_".
 func NewID() string {
-	var b [6]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		panic("grant: read random: " + err.Error())
-	}
-	return "grant_" + hex.EncodeToString(b[:])
+	return idgen.New("grant_", 6)
 }

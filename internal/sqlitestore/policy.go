@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/kordloom/switchtender/internal/policy"
+	"github.com/kordloom/switchtender/internal/sqlutil"
 )
 
 // policyStore is a policy.Store backed by the shared SQLite database.
@@ -29,7 +30,7 @@ ON CONFLICT(id) DO UPDATE SET
 	max_destroy=excluded.max_destroy`
 	_, err := s.db.ExecContext(ctx, q,
 		p.ID, p.Name, p.Tool, p.CommandContains, p.InventoryID,
-		boolToInt(p.ExcludeDryRun), p.MaxDestroy, formatTime(p.CreatedAt))
+		sqlutil.BoolToInt(p.ExcludeDryRun), p.MaxDestroy, sqlutil.FormatTime(p.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("save policy: %w", err)
 	}
@@ -99,7 +100,7 @@ func scanPolicy(sc scanner) (*policy.Policy, error) {
 		return nil, err
 	}
 	p.ExcludeDryRun = dry != 0
-	at, err := parseTime(created)
+	at, err := sqlutil.ParseTime(created)
 	if err != nil {
 		return nil, err
 	}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/kordloom/switchtender/internal/grant"
+	"github.com/kordloom/switchtender/internal/sqlutil"
 )
 
 // grantColumns is the shared select list for grant reads.
@@ -27,7 +28,7 @@ ON CONFLICT(id) DO UPDATE SET
 	subject=excluded.subject, object=excluded.object, access=excluded.access,
 	created_at=excluded.created_at`
 	_, err := s.db.ExecContext(ctx, q,
-		g.ID, g.Subject, g.Object, string(g.Access), formatTime(g.CreatedAt))
+		g.ID, g.Subject, g.Object, string(g.Access), sqlutil.FormatTime(g.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("save grant: %w", err)
 	}
@@ -108,7 +109,7 @@ func scanGrant(sc scanner) (*grant.Grant, error) {
 		return nil, err
 	}
 	g.Access = grant.Access(access)
-	at, err := parseTime(created)
+	at, err := sqlutil.ParseTime(created)
 	if err != nil {
 		return nil, err
 	}

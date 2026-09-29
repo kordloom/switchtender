@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/kordloom/switchtender/internal/inventory"
+	"github.com/kordloom/switchtender/internal/sqlutil"
 )
 
 // inventoryColumns is the shared select list for inventory reads.
@@ -28,8 +29,8 @@ ON CONFLICT(id) DO UPDATE SET
 	content_source=excluded.content_source, content_config=excluded.content_config,
 	queue=excluded.queue, org_id=excluded.org_id, created_at=excluded.created_at`
 	_, err := s.db.ExecContext(ctx, q,
-		i.ID, i.Name, i.Content, joinIDs(i.CredentialIDs), i.ContentSource, i.ContentConfig, i.Queue,
-		i.OrgID, formatTime(i.CreatedAt))
+		i.ID, i.Name, i.Content, sqlutil.JoinIDs(i.CredentialIDs), i.ContentSource, i.ContentConfig, i.Queue,
+		i.OrgID, sqlutil.FormatTime(i.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("save inventory: %w", err)
 	}
@@ -40,7 +41,7 @@ ON CONFLICT(id) DO UPDATE SET
 func (s *inventoryStore) Update(ctx context.Context, i *inventory.Inventory) error {
 	res, err := s.db.ExecContext(ctx,
 		"UPDATE inventories SET name=$1, content=$2, credential_ids=$3, content_source=$4, content_config=$5, queue=$6, org_id=$7 WHERE id=$8",
-		i.Name, i.Content, joinIDs(i.CredentialIDs), i.ContentSource, i.ContentConfig, i.Queue, i.OrgID, i.ID)
+		i.Name, i.Content, sqlutil.JoinIDs(i.CredentialIDs), i.ContentSource, i.ContentConfig, i.Queue, i.OrgID, i.ID)
 	if err != nil {
 		return fmt.Errorf("update inventory: %w", err)
 	}
@@ -116,8 +117,8 @@ func scanInventory(sc scanner) (*inventory.Inventory, error) {
 	if err := sc.Scan(&i.ID, &i.Name, &i.Content, &creds, &i.ContentSource, &i.ContentConfig, &i.Queue, &i.OrgID, &created); err != nil {
 		return nil, err
 	}
-	i.CredentialIDs = splitIDs(creds)
-	at, err := parseTime(created)
+	i.CredentialIDs = sqlutil.SplitIDs(creds)
+	at, err := sqlutil.ParseTime(created)
 	if err != nil {
 		return nil, err
 	}

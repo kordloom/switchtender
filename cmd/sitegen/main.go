@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"os"
@@ -60,6 +61,8 @@ type page struct {
 	Href string
 	// Description is the first prose paragraph, clipped for the meta description.
 	Description string
+	// HeadExtra is page-specific head markup, such as the FAQ page's structured data.
+	HeadExtra template.HTML
 	// Content is the rendered HTML body.
 	Content template.HTML
 }
@@ -113,6 +116,7 @@ func run() error {
 		if err := tmpl.Execute(&buf, map[string]any{
 			"Title": p.Title, "Content": p.Content, "Pages": sidebarFor(slug, slugs),
 			"Description": p.Description, "Canonical": canonicalFor(slug),
+			"HeadExtra": p.HeadExtra,
 		}); err != nil {
 			return err
 		}
@@ -244,10 +248,77 @@ func render(md goldmark.Markdown, slug string) (page, error) {
 		parts := mdLink.FindStringSubmatch(m)
 		return fmt.Sprintf("href=%q", hrefFor(filepath.Base(parts[1]))+parts[2])
 	})
-	return page{
+	p := page{
 		Slug: slug, Title: title(slug, src), Description: description(src),
 		Content: template.HTML(html), //nolint:gosec // trusted docs
-	}, nil
+	}
+	if slug == "faq" {
+		p.HeadExtra = faqSchema(src)
+	}
+	return p, nil
+}
+
+// faqQuestion is one question and answer pair in the FAQ structured data.
+type faqQuestion struct {
+	// Type is the schema.org type, always Question.
+	Type string `json:"@type"`
+	// Name is the question text.
+	Name string `json:"name"`
+	// AcceptedAnswer is the answer object.
+	AcceptedAnswer faqAnswer `json:"acceptedAnswer"`
+}
+
+// faqAnswer is the answer half of a FAQ pair.
+type faqAnswer struct {
+	// Type is the schema.org type, always Answer.
+	Type string `json:"@type"`
+	// Text is the plain-text answer.
+	Text string `json:"text"`
+}
+
+// inlineMarkdown strips the inline markdown that survives in plain answer text: links keep their
+// label, and code spans and emphasis keep their content.
+var inlineMarkdown = regexp.MustCompile(`\[([^\]]*)\]\([^)]*\)`)
+
+// faqSchema builds FAQPage structured data from the FAQ markdown, one entry per level-two heading
+// with the prose beneath it as the answer. Generating it from the same source as the page keeps the
+// structured data true to the content on every regeneration.
+func faqSchema(src []byte) template.HTML {
+	var questions []faqQuestion
+	sections := strings.Split("\n"+string(src), "\n## ")
+	for _, sec := range sections[1:] {
+		lines := strings.SplitN(sec, "\n", 2)
+		if len(lines) < 2 {
+			continue
+		}
+		name := strings.TrimSpace(lines[0])
+		answer := lines[1]
+		if at := strings.Index(answer, "\n# "); at >= 0 {
+			answer = answer[:at]
+		}
+		answer = inlineMarkdown.ReplaceAllString(answer, "$1")
+		answer = strings.NewReplacer("`", "", "**", "", "\n", " ").Replace(answer)
+		answer = strings.Join(strings.Fields(answer), " ")
+		if name == "" || answer == "" {
+			continue
+		}
+		questions = append(questions, faqQuestion{
+			Type: "Question", Name: name,
+			AcceptedAnswer: faqAnswer{Type: "Answer", Text: answer},
+		})
+	}
+	if len(questions) == 0 {
+		return ""
+	}
+	data, err := json.MarshalIndent(map[string]any{
+		"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": questions,
+	}, "", " ")
+	if err != nil {
+		// A struct of strings cannot fail to marshal; a failure here is a developer error.
+		panic("sitegen: marshal faq schema: " + err.Error())
+	}
+	//nolint:gosec // built from trusted docs and JSON-escaped
+	return template.HTML("<script type=\"application/ld+json\">\n" + string(data) + "\n</script>")
 }
 
 // sidebarFor builds the navigation for the page being rendered.
@@ -299,6 +370,9 @@ const layout = `<!DOCTYPE html>
 	<meta name="twitter:title" content="{{.Title}} · SwitchTender docs">
 	<meta name="twitter:description" content="{{.Description}}">
 	<meta name="twitter:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=7">
+{{- if .HeadExtra}}
+	{{.HeadExtra}}
+{{- end}}
 	<link rel="icon" href="/favicon.ico" sizes="any">
 	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
 	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">

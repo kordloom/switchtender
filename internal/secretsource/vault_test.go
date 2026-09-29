@@ -10,6 +10,7 @@ import (
 )
 
 func TestResolveVault(t *testing.T) {
+	// Serial: t.Setenv is incompatible with t.Parallel.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Vault-Token") != "hvs.test" {
 			w.WriteHeader(http.StatusForbidden)

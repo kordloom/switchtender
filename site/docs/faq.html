@@ -15,14 +15,7 @@
 	<meta name="twitter:title" content="FAQ · SwitchTender docs">
 	<meta name="twitter:description" content="Short answers to the questions teams ask when evaluating or adopting SwitchTender. New here? Start with the quickstart, or switching from AWX if you are migrating.">
 	<meta name="twitter:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=7">
-	<link rel="icon" href="/favicon.ico" sizes="any">
-	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
-	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
-	<link rel="preconnect" href="https://fonts.googleapis.com">
-	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-	<link rel="stylesheet" href="/docs.css?v=1">
-<script type="application/ld+json">
+	<script type="application/ld+json">
 {
  "@context": "https://schema.org",
  "@type": "FAQPage",
@@ -32,7 +25,7 @@
    "name": "What can SwitchTender run?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "Ansible playbooks, Bash scripts, Terraform, OpenTofu, Python, PowerShell, and Go, plus any tool you add through the Go SDK . A run, a saved template, or a single step of a pipeline picks its tool. A pipeline can mix them: Terraform to build infrastructure, Ansible to configure it, Bash to smoke-test it, as one dependency graph. Bash shells out to anything on the host, so kubectl, the cloud CLIs, and your own scripts all work."
+    "text": "Ansible playbooks, Bash scripts, Terraform, OpenTofu, Python, PowerShell, and Go, plus any tool you add through the Go SDK. A run, a saved template, or a single step of a pipeline picks its tool. A pipeline can mix them: Terraform to build infrastructure, Ansible to configure it, Bash to smoke-test it, as one dependency graph. Bash shells out to anything on the host, so kubectl, the cloud CLIs, and your own scripts all work."
    }
   },
   {
@@ -56,7 +49,7 @@
    "name": "How do I migrate from AWX?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "From the command line: switchtender import awx export.json # preview the plan, changes nothing switchtender import awx export.json --apply # import It maps projects, inventories, job templates with their surveys and schedules and job slicing, and credentials. See switching from AWX for the full mapping. Two things to know. AWX omits secret values on export for security, so credentials import without their secrets and you set those once after importing. Dynamic inventory…"
+    "text": "From the command line: switchtender import awx export.json # preview the plan, changes nothing switchtender import awx export.json --apply # import It maps projects, inventories, job templates with their surveys and schedules and job slicing, and credentials. See switching from AWX for the full mapping. Two things to know. AWX omits secret values on export for security, so credentials import without their secrets and you set those once after importing. Dynamic inventory sources import too, as sources that run their plugin and refresh the hosts into a stored inventory on a schedule or before a run; static inventories import fully. A Semaphore importer exists too, with switchtender import semaphore export.json."
    }
   },
   {
@@ -72,7 +65,7 @@
    "name": "How are secrets stored?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "Sealed with AES-256-GCM, the key derived from an operator passphrase through argon2id. Secrets decrypt only at execution, into a temporary file wiped when the run finishes, and never appear in API responses. Thirteen kinds cover SSH keys and SSH passwords, vault passwords, become passwords and full become settings, network device logins, environment bundles, API tokens, container registry logins, and typed AWS, Azure, GCP, and VMware credentials. Set…"
+    "text": "Sealed with AES-256-GCM, the key derived from an operator passphrase through argon2id. Secrets decrypt only at execution, into a temporary file wiped when the run finishes, and never appear in API responses. Thirteen kinds cover SSH keys and SSH passwords, vault passwords, become passwords and full become settings, network device logins, environment bundles, API tokens, container registry logins, and typed AWS, Azure, GCP, and VMware credentials. Set SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT to enable them. A credential can also be a command source, so the value lives in an external store instead of in SwitchTender. SwitchTender seals a command, for example vault kv get -field=password secret/prod or an aws secretsmanager get-secret-value call, and runs it at execution time. The command's output is the secret and is never stored. This works with any secret manager reachable from a command: Vault, AWS, GCP, 1Password, or your own script."
    }
   },
   {
@@ -134,6 +127,13 @@
  ]
 }
 </script>
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
 </head>
 <body>
 	<header class="dnav">

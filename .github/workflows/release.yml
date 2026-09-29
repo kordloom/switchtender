@@ -43,7 +43,9 @@ jobs:
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: "~> v2"
+          # Pinned exactly so a goreleaser release cannot change our pipeline under us. Bump
+          # deliberately.
+          version: v2.17.1
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -193,30 +194,10 @@ func workerSource() string {
 
 // redactDSN hides credentials in a database DSN for logging.
 func redactDSN(dsn string) string {
-	if at := lastAt(dsn); at != -1 {
-		if scheme := schemeEnd(dsn); scheme != -1 && scheme < at {
-			return dsn[:scheme] + "***" + dsn[at:]
+	if at := strings.LastIndexByte(dsn, '@'); at != -1 {
+		if scheme := strings.Index(dsn, "://"); scheme != -1 && scheme+3 < at {
+			return dsn[:scheme+3] + "***" + dsn[at:]
 		}
 	}
 	return dsn
-}
-
-// lastAt returns the index of the last @ in s, or -1.
-func lastAt(s string) int {
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == '@' {
-			return i
-		}
-	}
-	return -1
-}
-
-// schemeEnd returns the index just past "://" in s, or -1.
-func schemeEnd(s string) int {
-	for i := 0; i+2 < len(s); i++ {
-		if s[i] == ':' && s[i+1] == '/' && s[i+2] == '/' {
-			return i + 3
-		}
-	}
-	return -1
 }

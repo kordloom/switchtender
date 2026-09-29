@@ -6,12 +6,13 @@ package audit
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"strconv"
 	"time"
+
+	"github.com/kordloom/switchtender/internal/idgen"
 )
 
 // Entry is one recorded API mutation, linked into a tamper-evident hash chain.
@@ -48,11 +49,7 @@ type Store interface {
 
 // NewID returns a random audit entry identifier prefixed with "aud_".
 func NewID() string {
-	var b [6]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		panic("audit: read random: " + err.Error())
-	}
-	return "aud_" + hex.EncodeToString(b[:])
+	return idgen.New("aud_", 6)
 }
 
 // EntryHash returns the hex SHA-256 that commits to an entry's content and its PrevHash. The time is

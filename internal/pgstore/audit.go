@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/sqlutil"
 )
 
 // auditLockKey is the advisory-lock key that serializes audit appends. It is held for the life of
@@ -48,7 +49,7 @@ func (s *auditStore) Append(ctx context.Context, e *audit.Entry) error {
 	const q = `INSERT INTO audit_entries (id, at, actor, method, path, seq, prev_hash, hash)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
 	if _, err := tx.ExecContext(ctx, q,
-		cp.ID, formatTime(cp.At), cp.Actor, cp.Method, cp.Path, cp.Seq, cp.PrevHash, cp.Hash); err != nil {
+		cp.ID, sqlutil.FormatTime(cp.At), cp.Actor, cp.Method, cp.Path, cp.Seq, cp.PrevHash, cp.Hash); err != nil {
 		return fmt.Errorf("append audit entry: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -111,7 +112,7 @@ func scanAudit(rows *sql.Rows) ([]*audit.Entry, error) {
 			return nil, fmt.Errorf("scan audit entry: %w", err)
 		}
 		var err error
-		if e.At, err = parseTime(at); err != nil {
+		if e.At, err = sqlutil.ParseTime(at); err != nil {
 			return nil, fmt.Errorf("scan audit entry: %w", err)
 		}
 		out = append(out, &e)

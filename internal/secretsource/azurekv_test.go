@@ -14,6 +14,7 @@ import (
 // Instance Metadata Service servers, covering the config token, service principal, and managed
 // identity auth paths plus the version, error, and configuration cases.
 func TestResolveAzure(t *testing.T) {
+	t.Parallel()
 	var gotAuth string
 	vaultSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")

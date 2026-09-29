@@ -15,6 +15,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // awsService is the SigV4 service name for Secrets Manager.
@@ -139,10 +141,10 @@ func resolveAWS(ctx context.Context, config string) (string, error) {
 // the standard AWS environment variables for any empty field. It errors when the access key, secret
 // key, or region cannot be found, since none can be assumed.
 func awsResolveCredentials(cfg awsConfig) (awsCredentials, string, error) {
-	access := firstNonEmpty(cfg.AccessKeyID, os.Getenv("AWS_ACCESS_KEY_ID"))
-	secret := firstNonEmpty(cfg.SecretAccessKey, os.Getenv("AWS_SECRET_ACCESS_KEY"))
-	session := firstNonEmpty(cfg.SessionToken, os.Getenv("AWS_SESSION_TOKEN"))
-	region := firstNonEmpty(cfg.Region, os.Getenv("AWS_REGION"), os.Getenv("AWS_DEFAULT_REGION"))
+	access := util.FirstNonEmpty(cfg.AccessKeyID, os.Getenv("AWS_ACCESS_KEY_ID"))
+	secret := util.FirstNonEmpty(cfg.SecretAccessKey, os.Getenv("AWS_SECRET_ACCESS_KEY"))
+	session := util.FirstNonEmpty(cfg.SessionToken, os.Getenv("AWS_SESSION_TOKEN"))
+	region := util.FirstNonEmpty(cfg.Region, os.Getenv("AWS_REGION"), os.Getenv("AWS_DEFAULT_REGION"))
 
 	if access == "" || secret == "" {
 		return awsCredentials{}, "", fmt.Errorf(
@@ -154,16 +156,6 @@ func awsResolveCredentials(cfg awsConfig) (awsCredentials, string, error) {
 			"%w: aws needs region in the config or the AWS_REGION environment", ErrResolve)
 	}
 	return awsCredentials{AccessKeyID: access, SecretAccessKey: secret, SessionToken: session}, region, nil
-}
-
-// firstNonEmpty returns the first non-empty string, or empty when all are empty.
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 // signAWSV4 sets the X-Amz-Date, optional X-Amz-Security-Token, and Authorization headers on req using

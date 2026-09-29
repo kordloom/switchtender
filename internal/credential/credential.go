@@ -5,13 +5,12 @@ package credential
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/idgen"
 	"github.com/kordloom/switchtender/internal/secretsource"
 )
 
@@ -214,9 +213,5 @@ type Store interface {
 
 // NewID returns a random credential identifier prefixed with "cred_".
 func NewID() string {
-	var b [6]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		panic("credential: read random: " + err.Error())
-	}
-	return "cred_" + hex.EncodeToString(b[:])
+	return idgen.New("cred_", 6)
 }

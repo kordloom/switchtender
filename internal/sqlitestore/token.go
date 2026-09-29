@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/kordloom/switchtender/internal/auth"
+	"github.com/kordloom/switchtender/internal/sqlutil"
 )
 
 // tokenColumns is the shared select list for token reads.
@@ -28,8 +29,8 @@ ON CONFLICT(id) DO UPDATE SET
 	created_at=excluded.created_at, last_used_at=excluded.last_used_at,
 	expires_at=excluded.expires_at`
 	_, err := s.db.ExecContext(ctx, q,
-		t.ID, t.Name, t.Hash, t.UserID, formatTime(t.CreatedAt), nullTime(t.LastUsedAt),
-		nullTime(t.ExpiresAt))
+		t.ID, t.Name, t.Hash, t.UserID, sqlutil.FormatTime(t.CreatedAt), sqlutil.NullTime(t.LastUsedAt),
+		sqlutil.NullTime(t.ExpiresAt))
 	if err != nil {
 		return fmt.Errorf("save token: %w", err)
 	}
@@ -108,15 +109,15 @@ func scanToken(sc scanner) (*auth.Token, error) {
 	if err := sc.Scan(&t.ID, &t.Name, &t.Hash, &t.UserID, &created, &lastUsed, &expires); err != nil {
 		return nil, err
 	}
-	at, err := parseTime(created)
+	at, err := sqlutil.ParseTime(created)
 	if err != nil {
 		return nil, err
 	}
 	t.CreatedAt = at
-	if t.LastUsedAt, err = parseNullTime(lastUsed); err != nil {
+	if t.LastUsedAt, err = sqlutil.ParseNullTime(lastUsed); err != nil {
 		return nil, err
 	}
-	if t.ExpiresAt, err = parseNullTime(expires); err != nil {
+	if t.ExpiresAt, err = sqlutil.ParseNullTime(expires); err != nil {
 		return nil, err
 	}
 	return &t, nil

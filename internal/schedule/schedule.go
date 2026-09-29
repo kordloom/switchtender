@@ -4,24 +4,19 @@
 package schedule
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/robfig/cron/v3"
 
+	"github.com/kordloom/switchtender/internal/idgen"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
 // NewID returns a random schedule identifier prefixed with "sch_".
 func NewID() string {
-	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		panic("schedule: read random: " + err.Error())
-	}
-	return "sch_" + hex.EncodeToString(b[:])
+	return idgen.New("sch_", 8)
 }
 
 var (

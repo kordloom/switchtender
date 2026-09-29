@@ -3136,6 +3136,11 @@ function wireAsk() {
 	if (isReadOnly()) {
 		go.disabled = true;
 		input.disabled = true;
+		const status = document.getElementById("ask-status");
+		if (status) {
+			status.textContent = "Asking is off in this read-only demo. Self-host with your own AI provider, local Ollama included, and this box answers from your fleet's run, health, and drift data.";
+			status.hidden = false;
+		}
 		return;
 	}
 	go.addEventListener("click", askFleet);
@@ -4179,6 +4184,10 @@ async function loadDetail(runId) {
 	wireActions(runId);
 	try {
 		const run = await getJSON("/runs/" + runId);
+		// A split or pipeline parent has no output of its own; each shard or step carries its log.
+		// Hiding the link beats serving a blank page.
+		const isParent = !run.parent_id && (run.kind === "pipeline" || run.kind === "split" || run.shard_count);
+		if (fullLog && isParent) fullLog.hidden = true;
 		if (run.kind === "pipeline" && !run.parent_id) {
 			await loadPipeline(runId);
 		} else if ((run.kind === "split" || run.shard_count) && !run.parent_id) {

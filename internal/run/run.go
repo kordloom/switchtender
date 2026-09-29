@@ -3,11 +3,11 @@
 package run
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"maps"
 	"sort"
 	"time"
+
+	"github.com/kordloom/switchtender/internal/idgen"
 )
 
 // Status is the lifecycle state of a run.
@@ -431,9 +431,5 @@ func ApplyOptions(r *Run, opts []SubmitOption) {
 
 // NewID returns a random run identifier prefixed with "run_".
 func NewID() string {
-	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		panic("run: read random: " + err.Error())
-	}
-	return "run_" + hex.EncodeToString(b[:])
+	return idgen.New("run_", 8)
 }

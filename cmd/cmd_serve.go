@@ -52,8 +52,6 @@ const (
 	defaultServeAddr = "127.0.0.1:8080"
 	// defaultDBPath is the SQLite database file used when --db is not set.
 	defaultDBPath = "switchtender.db"
-	// defaultScheduleInterval is how often the scheduler checks for due schedules.
-	defaultScheduleInterval = 15 * time.Second
 	// shutdownTimeout bounds how long graceful HTTP shutdown waits for in-flight requests.
 	shutdownTimeout = 15 * time.Second
 	// readHeaderTimeout bounds how long the server waits to read request headers, closing a
@@ -373,7 +371,7 @@ func init() {
 		"TLS certificate file, to serve HTTPS directly. Requires --tls-key.")
 	serveCmd.Flags().StringVar(&serveTLSKey, "tls-key", "",
 		"TLS private key file, to serve HTTPS directly. Requires --tls-cert.")
-	serveCmd.Flags().DurationVar(&scheduleInterval, "schedule-interval", defaultScheduleInterval,
+	serveCmd.Flags().DurationVar(&scheduleInterval, "schedule-interval", schedule.DefaultInterval,
 		"How often the scheduler checks for due schedules.")
 	serveCmd.Flags().StringArrayVar(&notifyWebhooks, "notify-webhook", nil,
 		"URL that receives a JSON notification when a run finishes. Repeatable.")

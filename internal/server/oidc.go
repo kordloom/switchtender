@@ -20,6 +20,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/user"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // oidcStateTTL bounds how long a sign-in may take from the redirect to the callback.
@@ -149,7 +150,7 @@ func (o *OIDCAuth) callback(w http.ResponseWriter, r *http.Request) {
 		o.fail(w, r, "sign-in claims unreadable")
 		return
 	}
-	username := firstNonEmpty(claims.Email, claims.PreferredUsername, idToken.Subject)
+	username := util.FirstNonEmpty(claims.Email, claims.PreferredUsername, idToken.Subject)
 	u, err := o.provision(r.Context(), username)
 	if err != nil {
 		o.log.Error("oidc: provision account: " + err.Error())
@@ -267,14 +268,4 @@ func randToken() (string, error) {
 		return "", fmt.Errorf("random token: %w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(b[:]), nil
-}
-
-// firstNonEmpty returns the first non-empty string, or empty when all are empty.
-func firstNonEmpty(vs ...string) string {
-	for _, v := range vs {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
