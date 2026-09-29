@@ -337,6 +337,7 @@ function buildActivityControls() {
 	filter.className = "input activity-filter";
 	filter.placeholder = "Filter runs";
 	filter.setAttribute("aria-label", "Filter activity by name, host, or status");
+	filter.value = activityState.filter;
 	let t = null;
 	filter.addEventListener("input", () => {
 		clearTimeout(t);
@@ -371,8 +372,10 @@ async function loadActivityPage() {
 	const status = document.getElementById("status");
 	try {
 		const res = await getJSON("/runs");
+		applyActivityURLParams();
 		renderActivity((res && res.runs) || []);
 		wireActivityExport();
+		wireActivityShare();
 		if (status) status.hidden = true;
 	} catch (e) {
 		if (status) status.textContent = "Could not load activity: " + e.message;
@@ -439,6 +442,7 @@ function renderActivityView() {
 		else if (total >= 200) text += " · from the latest 200 runs";
 		note.textContent = text;
 	}
+	syncActivityURL();
 }
 
 // renderActivityBars draws the stacked outcome columns, each a link into the runs of its span, with
@@ -473,6 +477,71 @@ function renderActivityBars(el, model) {
 		el.appendChild(a);
 	}
 	thinActivityLabels(el, model.days.length);
+}
+
+// isActivityPage reports whether the current page is the full activity view, so the URL-syncing
+// share helpers stay inert on the overview, which carries the same chart but a different address.
+function isActivityPage() {
+	return !!(document.body && document.body.dataset && document.body.dataset.page === "activity");
+}
+
+// activityShareURL builds the link that reproduces the current window and filter. Absolute for the
+// clipboard, path-only for the address bar.
+function activityShareURL(absolute) {
+	const p = new URLSearchParams();
+	p.set("window", String(activityState.windowH));
+	if (activityState.filter.trim()) p.set("filter", activityState.filter.trim());
+	const path = "/ui/activity?" + p.toString();
+	return absolute ? (location.origin + path) : path;
+}
+
+// applyActivityURLParams seeds the window and filter from a shared link, so opening
+// /ui/activity?window=24&filter=failed lands on exactly that view. An unknown window is ignored so a
+// hand-edited link cannot wedge the chart.
+function applyActivityURLParams() {
+	const q = new URLSearchParams(location.search || "");
+	const w = Number(q.get("window"));
+	if (ACTIVITY_WINDOWS.some((x) => x.h === w)) activityState.windowH = w;
+	const f = q.get("filter");
+	if (f != null) activityState.filter = f;
+}
+
+// syncActivityURL rewrites the address bar to match the view, without a history entry, so the Share
+// button and a browser copy of the URL both carry the window and filter on screen. Only on the
+// activity page, where the URL is meant to describe the view.
+function syncActivityURL() {
+	if (!isActivityPage()) return;
+	try {
+		history.replaceState(null, "", activityShareURL(false));
+	} catch (e) {
+		// A sandboxed history is not fatal; the Share button still composes the link on demand.
+	}
+}
+
+// wireActivityShare copies a link to the current view to the clipboard, falling back to putting it in
+// the address bar when the clipboard is blocked, so there is always a link to hand to someone.
+function wireActivityShare() {
+	const btn = document.getElementById("activity-share");
+	if (!btn || btn.dataset.wired) return;
+	btn.dataset.wired = "1";
+	const label = btn.querySelector(".share-label");
+	btn.addEventListener("click", async () => {
+		try {
+			await navigator.clipboard.writeText(activityShareURL(true));
+			if (label) {
+				const prev = label.textContent;
+				label.textContent = "Link copied";
+				setTimeout(() => { label.textContent = prev; }, 1600);
+			}
+		} catch (e) {
+			syncActivityURL();
+			if (label) {
+				const prev = label.textContent;
+				label.textContent = "Link in address bar";
+				setTimeout(() => { label.textContent = prev; }, 1600);
+			}
+		}
+	});
 }
 
 // SVGNS is the namespace the line chart's elements are created in.
