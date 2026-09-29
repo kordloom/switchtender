@@ -170,6 +170,14 @@ func parseExtraVars(raw string) (map[string]any, error) {
 // and one named a\b is read as ab. That is the silent rename this refuses to perform. An odd quote
 // is worse still, since shlex then reads to the end of the line looking for its partner and the file
 // stops parsing, taking every host in it down with the one bad name.
+// safeIniGroupName is safeININame plus a refusal of the colon, for the names that open an INI
+// section. A host named web1:2222 is a host with a port; a GROUP named "all:vars" is a section
+// modifier that writes variables onto every machine in the inventory, and "web:children" splices
+// its members into somebody else's group. Only the section position makes the colon a weapon.
+func safeIniGroupName(s string) bool {
+	return safeININame(s) && !strings.ContainsRune(s, ':')
+}
+
 func safeININame(s string) bool {
 	if s == "" {
 		return false
@@ -246,10 +254,10 @@ func buildInventoryINI(plan *Plan, name string, hosts []importHost, groups []imp
 		b.WriteString("\n")
 	}
 	for _, g := range groups {
-		if !safeININame(g.Name) {
+		if !safeIniGroupName(g.Name) {
 			plan.warn("inventory %q: group %q was dropped because its name holds whitespace, a "+
-				"quote, or an inventory metacharacter, which Ansible would read as a new section "+
-				"or extra host variables", name, oneLine(g.Name))
+				"quote, a colon, or an inventory metacharacter, which Ansible would read as a new "+
+				"section, a section modifier, or extra host variables", name, oneLine(g.Name))
 			continue
 		}
 		fmt.Fprintf(&b, "[%s]\n", g.Name)
@@ -610,7 +618,7 @@ func childrenSection(plan *Plan, inv string, g importGroup) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[%s:children]\n", g.Name)
 	for _, child := range g.Children {
-		if !safeININame(child) {
+		if !safeIniGroupName(child) {
 			plan.warn("inventory %q: child group %q of %q was dropped because its name holds "+
 				"whitespace, a quote, or an inventory metacharacter", inv, oneLine(child), g.Name)
 			continue

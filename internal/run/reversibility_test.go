@@ -126,6 +126,12 @@ func TestNothingIsIrreversibleAndLowRisk(t *testing.T) {
 		"rm -rf /tmp/scratch", "tofu apply -destroy", "terraform apply -destroy tfplan",
 		"az group delete --name prod-rg --yes", "gcloud compute instances delete web-1 --quiet",
 		"aws rds delete-db-instance --db-instance-identifier prod",
+		// The spellings an adversarial review proved dodged the regex this used to be: a path
+		// prefix, a privilege or applet wrapper, flags after the operand, and a sequence operator
+		// in front. Each executed as root-level destruction and graded fully reversible.
+		"/bin/rm -rf /var/lib/data", "sudo rm -rf /var/lib/data", "busybox rm -rf /data",
+		"rm /var/lib/data -rf", "cd /srv && rm -rf ./releases",
+		"rsync -a --delete /empty/ /var/backups/",
 	}
 	for _, c := range commands {
 		r := &Run{Tool: ToolBash, Command: c}
@@ -150,6 +156,10 @@ func TestAnOrdinaryCommandIsNotGradedPermanent(t *testing.T) {
 		"systemctl restart nginx", "ansible-playbook site.yml", "aws s3 ls",
 		"rm -i /tmp/one.txt", "kubectl get pods", "terraform plan", "apt-get install -y curl",
 		"kubectl delete deployment web", "helm upgrade payments ./chart",
+		// The false positives the same review found: a read-only destroy preview, tokens that
+		// merely contain a marker's letters, and paths sitting safely after rm's -- terminator.
+		"terraform plan -destroy", "pip install pre-delete-hook",
+		"rm -- -rf", "informat -rf /data", "cp model /files/latest",
 	} {
 		if got := AssessReversibility(&Run{Tool: ToolBash, Command: c}).Class; got == Irreversible {
 			t.Errorf("%q graded irreversible, which widens the rule until it is ignored", c)

@@ -1096,7 +1096,14 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			return perr
 		}
 		policies = filePolicies
-		count, _ := filePolicies.List(cmd.Context())
+		// The error mattered and was dropped: List is where an unreadable file and the license
+		// refusals surface, so discarding it made the startup checks below run against an empty
+		// list and pass. A server given explicit policy it cannot read must not start, because
+		// what it would run is not what the operator wrote down.
+		count, lerr := filePolicies.List(cmd.Context())
+		if lerr != nil {
+			return fmt.Errorf("read --policy-file %s: %w", policyFile, lerr)
+		}
 		// The file is explicit configuration, so a license gap here is a misconfiguration worth
 		// one line at startup, the same treatment SSO gets.
 		needsFull := false

@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>The supertest | SwitchTender docs</title>
+	<meta name="description" content="Every push to main deploys SwitchTender into a Kubernetes cluster that has never seen it and proves the whole product against three real machines.">
+	<link rel="canonical" href="https://switchtender.com/docs/supertest">
+	<meta property="og:title" content="The supertest | SwitchTender docs">
+	<meta property="og:description" content="Every push to main deploys SwitchTender into a Kubernetes cluster that has never seen it and proves the whole product against three real machines.">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="https://switchtender.com/docs/supertest">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta name="twitter:card" content="summary_large_image">
+	<meta name="twitter:title" content="The supertest | SwitchTender docs">
+	<meta name="twitter:description" content="Every push to main deploys SwitchTender into a Kubernetes cluster that has never seen it and proves the whole product against three real machines.">
+	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "TechArticle",
+ "about": {
+  "@type": "SoftwareApplication",
+  "name": "SwitchTender",
+  "url": "https://switchtender.com/"
+ },
+ "description": "Every push to main deploys SwitchTender into a Kubernetes cluster that has never seen it and proves the whole product against three real machines.",
+ "headline": "The supertest",
+ "isPartOf": {
+  "@type": "WebSite",
+  "name": "SwitchTender docs",
+  "url": "https://switchtender.com/docs/"
+ },
+ "publisher": {
+  "@type": "Organization",
+  "name": "KordLoom LLC",
+  "url": "https://kordloom.com"
+ },
+ "url": "https://switchtender.com/docs/supertest"
+}
+</script>
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=2">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/kordloom/switchtender">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest" class="active">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="the-supertest">The supertest</h1>
+<p>Every push to main deploys SwitchTender into a Kubernetes cluster that has never seen it and
+proves the whole product against three real machines. Not a mock of a deployment: the Helm chart
+this repository ships, installed twice, driven over its own HTTP API, and checked in ways that
+never take the product's word for anything.</p>
+<p>The harness is <a href="../test/supertest"><code>test/supertest</code></a>, one standalone Go package. Run it yourself
+from the repository root with Docker, kind, kubectl, and helm installed:</p>
+<pre><code>go run ./test/supertest -skip-team          # the free tier alone
+go run ./test/supertest -license lic.json   # both tiers, the whole arc
+</code></pre>
+<p>The <a href="../.github/workflows/supertest.yml">supertest workflow</a> runs it on every push. The report
+lands in the job summary as one table of claims and evidence, and the screenshots of the deployed
+UI land in the run's artifacts.</p>
+<h2 id="what-a-run-proves">What a run proves</h2>
+<p><strong>The cluster is fresh and the images are built from the working tree.</strong> The product image comes
+from the repository's own Dockerfile at the commit under test, not from the last release. The
+fleet is three SSH servers with stable DNS names, keys only, built from
+<a href="../test/supertest/manifests/fleet.Dockerfile">one small Dockerfile</a> that is honestly a server:
+real sshd, real python, a real non-root account.</p>
+<p><strong>Community installs the way the chart installs it and does real work.</strong> No license, no external
+database: SQLite on a PersistentVolumeClaim, updating by Recreate because SQLite holds one writer.
+The harness adopts the initial admin token the server prints on first boot, exactly as an operator
+would, creates accounts, stores an SSH credential and an inventory, and runs a real Ansible
+playbook across all three machines. Then it reads the files that playbook wrote back through
+<code>kubectl exec</code>, because proof that comes from the product's own reporting is not proof.</p>
+<p><strong>Team initializes a PostgreSQL schema it has never seen, under a license, with a dedicated
+worker and a shared signing identity.</strong> Then it walks the arc the product exists for:</p>
+<ol>
+<li>A routine playbook runs ungated, because creating files grades reversible.</li>
+<li>A destructive playbook, submitted by an AI agent's token, is graded <strong>irreversible from its
+own text</strong>. Nothing in the file announces itself as dangerous; the scanner reads it.</li>
+<li>A policy holding on that grade holds the run. The data still exists, checked from outside.</li>
+<li>The agent tries to approve its own request and is refused.</li>
+<li>A person approves. The run executes, and the deletion is real: the directory is gone on all
+three machines, checked again through <code>kubectl exec</code>.</li>
+<li>The run's receipt is downloaded and verified <strong>offline by a local binary that never spoke to
+the cluster</strong>. Then one recorded name is rewritten and verification is required to refuse it.</li>
+<li>The estate answers with every machine the runs touched, and the two runs read back as one
+change whose outcome was derived rather than typed.</li>
+<li>A queue-pinned run is claimed by the dedicated worker, not the server.</li>
+</ol>
+<p><strong>The authorization model holds against the credentials that would abuse it.</strong> An agent token is
+refused account creation, token minting, and credential writes. A viewer reads history and is
+refused launching and approving. Every refusal is an HTTP request a real overreaching credential
+would make, answered by the deployed install.</p>
+<h2 id="why-the-checks-are-shaped-this-way">Why the checks are shaped this way</h2>
+<p>Three rules, applied everywhere:</p>
+<ul>
+<li><strong>Effects are verified outside the product.</strong> Files a playbook wrote are read over
+<code>kubectl exec</code>. Receipts are verified by a binary outside the cluster. A test that asks the
+product whether the product worked is a press release.</li>
+<li><strong>Negative checks must be able to fail.</strong> The tamper check asserts the edit changed bytes
+before it asserts the verifier refused them, because a tamper that silently misses reports the
+verifier sound while proving nothing.</li>
+<li><strong>Failures explain themselves.</strong> A run that fails brings its own event tail into the report; a
+failed install brings pod state and log tails. A test that says &quot;failed&quot; and nothing else makes
+somebody else do the investigating.</li>
+</ul>
+<h2 id="what-it-has-caught">What it has caught</h2>
+<p>The supertest earned its place before it was a day old: a chart whose default configuration could
+not boot on the free tier, a paid-tier install that looked healthy while unable to sign a single
+receipt, and an official image that advertised Bash as a first-class engine and did not contain
+it. Each is the kind of defect every unit test misses, because each lived in the seams between
+pieces that were individually correct.</p>
+
+		</main>
+	</div>
+	<div class="foot-legal" style="text-align:center;margin:26px auto 34px;font-size:12px;opacity:.75">SwitchTender&trade; is a trademark of KordLoom LLC. Copyright 2026 KordLoom LLC.</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

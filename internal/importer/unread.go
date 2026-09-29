@@ -59,6 +59,15 @@ func walkUnread(doc any, t reflect.Type, prefix string, found map[string]bool) {
 	}
 	switch value := doc.(type) {
 	case map[string]any:
+		// A map type means the keys are data rather than field names: a dump keyed by object name.
+		// Every value is walked against the element type, and the keys themselves are never
+		// reported, because a node named anything is still just a node.
+		if t.Kind() == reflect.Map {
+			for _, child := range value {
+				walkUnread(child, t.Elem(), prefix+"[]", found)
+			}
+			return
+		}
 		// An opaque field is read deliberately: the importer kept the bytes and decided about them
 		// elsewhere, so nothing under it is unread.
 		if t.Kind() != reflect.Struct || t == reflect.TypeOf(json.RawMessage{}) {

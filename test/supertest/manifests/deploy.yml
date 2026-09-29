@@ -1,0 +1,18 @@
+# The constructive run: leave a marker only a real execution can leave, and stock the data a
+# later irreversible change will destroy. Facts are gathered so the estate has something to say.
+- hosts: all
+  gather_facts: true
+  tasks:
+    - name: Leave a marker carrying this run's nonce
+      copy:
+        content: "{{ marker }}"
+        dest: /home/ops/supertest-marker
+    - name: Create the directory the destructive run will remove
+      file:
+        path: /home/ops/precious
+        state: directory
+        mode: "0755"
+    - name: Write the file whose loss the destructive run must be held for
+      copy:
+        content: "the quarterly backups nobody kept a second copy of"
+        dest: /home/ops/precious/backups.txt

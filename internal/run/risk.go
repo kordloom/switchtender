@@ -29,9 +29,10 @@ const (
 // that could not be undone has to be destructive, and keeping that true depended on somebody
 // remembering to edit both. Dropping a schema reached the risk list and never reached the
 // reversibility list, so the same statement was high risk and fully reversible at once.
-var destructiveMarkers = append([]string{
-	"reboot", "shutdown", "halt", "--force", "-force",
-}, permanentMarkers...)
+// disruptiveMarkers are destructive and recoverable: a reboot comes back, and a forced apply is
+// somebody skipping confirmation rather than destroying data. They raise risk and are deliberately
+// invisible to the reversibility grade, whose own comment explains why.
+var disruptiveMarkers = []string{"reboot", "shutdown", "halt", "--force", "-force"}
 
 // AssessRisk grades r from its tool, command, and blast radius. A dry run is always low since it
 // changes nothing. A destructive marker or a Terraform apply that is not a dry run is high; a state
@@ -56,11 +57,14 @@ func AssessRisk(r *Run) Risk {
 	var vars strings.Builder
 	writeVarText(&vars, r.ExtraVars, maxVarScanDepth)
 	lower := strings.ToLower(r.Command + " " + r.Playbook + vars.String())
-	if recursiveForceRemove(lower) {
-		reasons = append(reasons, "destructive command: recursive forced remove")
+	// The permanent scanner is shared with the reversibility grader, which is what keeps the one
+	// relationship between them true by construction: nothing can grade irreversible there and
+	// low risk here, because the same findings feed both.
+	if findings := permanentCommandFindings(lower); len(findings) > 0 {
+		reasons = append(reasons, "destructive "+findings[0])
 		level = RiskHigh
 	}
-	for _, m := range destructiveMarkers {
+	for _, m := range disruptiveMarkers {
 		if strings.Contains(lower, m) {
 			reasons = append(reasons, "destructive command: "+strings.TrimSpace(m))
 			level = RiskHigh

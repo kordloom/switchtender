@@ -122,13 +122,17 @@ func TestAFreshLeaseIsNotAgedByClockSkew(t *testing.T) {
 	// The store's clock runs well past the lease lifetime ahead of this process's.
 	store := &skewedClockStore{Store: base, skew: 3 * leaseTTL}
 
+	// The run finishes when the test says so, not when a wall clock does. The sweeps below are
+	// driven by the test while the runner is provably mid-execution, so a fixed sleep here added
+	// nothing but a floor on the test's duration, and under a loaded machine that floor plus the
+	// polling ceiling is exactly the gap this test kept flaking through.
 	running := make(chan struct{})
+	release := make(chan struct{})
 	runner := roundhouse.RunnerFunc(
 		func(ctx context.Context, _ roundhouse.Spec, out io.Writer) (roundhouse.Result, error) {
 			close(running)
-			// Long enough for several janitor sweeps to consider this run.
 			select {
-			case <-time.After(6 * time.Second):
+			case <-release:
 			case <-ctx.Done():
 				return roundhouse.Result{ExitCode: -1}, ctx.Err()
 			}
@@ -150,13 +154,16 @@ func TestAFreshLeaseIsNotAgedByClockSkew(t *testing.T) {
 		t.Fatal("the run never started")
 	}
 
-	// Sweep the way the janitor does, repeatedly, while the run is executing.
+	// Sweep the way the janitor does, repeatedly, while the run is provably executing: the runner
+	// has started and is held open until after the last sweep. The short sleeps let the lease
+	// watcher land a renewal or two between sweeps, which is the behavior under test.
 	for i := 0; i < 6; i++ {
 		if _, serr := store.ReclaimStale(ctx, leaseTTL); serr != nil {
 			t.Fatalf("ReclaimStale() error = %v", serr)
 		}
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
+	close(release)
 
 	deadline := time.Now().Add(30 * time.Second)
 	var got *run.Run

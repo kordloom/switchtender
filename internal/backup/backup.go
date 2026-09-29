@@ -641,6 +641,13 @@ func apply(ctx context.Context, s Stores, p *payload) (Summary, error) {
 
 	// Policies last among the access objects, and only when this install manages them in the
 	// database. A restore that silently dropped them left every gated change running unapproved.
+	//
+	// No license check runs here, and that is a decision rather than a gap. A backup is this
+	// install's own history, and a lapsed license must take nothing, so a Team install restoring
+	// after a lapse keeps the rules it wrote. The bypass this leaves open, hand-crafting a backup
+	// to smuggle Team policies onto a Community install, is the same act as editing the database
+	// file directly, which a self-hosted operator could always do: the license is a contract, and
+	// contracts are not enforced by making restore lose data.
 	if s.Policies != nil {
 		for _, pol := range p.Policies {
 			if err := s.Policies.Save(ctx, pol); err != nil {

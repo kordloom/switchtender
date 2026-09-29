@@ -182,6 +182,33 @@ func everyFieldSurvivesARoundTrip(t *testing.T, newStore func() policy.Store) {
 			t.Fatalf("the saved policy was not listed back")
 		}
 
+		update := &policy.Policy{ID: "pol_updatetrip", Name: "before", CreatedAt: want.CreatedAt}
+		if err := store.Save(ctx, update); err != nil {
+			t.Fatalf("save bare policy: %v", err)
+		}
+		after := *want
+		after.ID = "pol_updatetrip"
+		if err := store.Save(ctx, &after); err != nil {
+			t.Fatalf("update policy: %v", err)
+		}
+		updated, err := store.Get(ctx, after.ID)
+		if err != nil {
+			t.Fatalf("get updated policy: %v", err)
+		}
+		uv := reflect.ValueOf(updated).Elem()
+		av := reflect.ValueOf(&after).Elem()
+		for i := range rt.NumField() {
+			name, _, _ := strings.Cut(rt.Field(i).Tag.Get("json"), ",")
+			if name == "" || name == "-" || fixed[name] {
+				continue
+			}
+			if !reflect.DeepEqual(av.Field(i).Interface(), uv.Field(i).Interface()) {
+				t.Errorf("policy field %q was updated to %v and came back %v: the update path "+
+					"dropped what the insert path keeps, so an edited rule silently keeps its old "+
+					"meaning", name, av.Field(i).Interface(), uv.Field(i).Interface())
+			}
+		}
+
 		gv := reflect.ValueOf(got).Elem()
 		for i := range rt.NumField() {
 			name, _, _ := strings.Cut(rt.Field(i).Tag.Get("json"), ",")

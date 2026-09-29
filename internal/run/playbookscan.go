@@ -114,13 +114,11 @@ func scanTask(task map[string]any, out *PlaybookSignals) {
 			out.Deferred = true
 			continue
 		case "command", "shell", "raw", "script":
-			// The module's own text is a command, so the command markers apply to it.
+			// The module's own text is a command, so the shared command scanner judges it. A third
+			// private copy of that judgment is how the graders drifted apart the first time.
 			if text := rawParams(value); text != "" {
-				for _, marker := range permanentMarkers {
-					if strings.Contains(strings.ToLower(text), marker) {
-						out.Permanent = append(out.Permanent,
-							"a "+module+" task runs "+marker+", which cannot be undone from here")
-					}
+				for _, finding := range permanentCommandFindings(strings.ToLower(text)) {
+					out.Permanent = append(out.Permanent, "a "+module+" task: "+finding)
 				}
 			}
 			continue

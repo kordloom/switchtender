@@ -1,0 +1,45 @@
+# The database the Team tier coordinates through. One instance, no persistence: a supertest
+# cluster lives for minutes, and what matters is that SwitchTender initializes a schema it has
+# never seen, not that the schema survives the cluster.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: team
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: team
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - name: POSTGRES_USER
+              value: switchtender
+            - name: POSTGRES_PASSWORD
+              value: supertest-not-a-secret
+            - name: POSTGRES_DB
+              value: switchtender
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "switchtender"]
+            periodSeconds: 2

@@ -1,0 +1,51 @@
+# Three SSH-reachable machines with stable DNS names, which is what an inventory needs. A
+# StatefulSet rather than a Deployment because fleet-0 has to stay fleet-0: the assertions
+# read specific hosts back by name.
+apiVersion: v1
+kind: Service
+metadata:
+  name: fleet
+  namespace: fleet
+spec:
+  clusterIP: None
+  selector:
+    app: fleet
+  ports:
+    - port: 22
+      name: ssh
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: fleet
+  namespace: fleet
+spec:
+  serviceName: fleet
+  replicas: 3
+  selector:
+    matchLabels:
+      app: fleet
+  template:
+    metadata:
+      labels:
+        app: fleet
+    spec:
+      containers:
+        - name: sshd
+          image: supertest-fleet:local
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 22
+          readinessProbe:
+            tcpSocket:
+              port: 22
+            periodSeconds: 2
+          volumeMounts:
+            - name: authorized
+              mountPath: /etc/ssh/auth
+              readOnly: true
+      volumes:
+        - name: authorized
+          secret:
+            secretName: fleet-authorized
+            defaultMode: 0444
