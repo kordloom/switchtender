@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -38,12 +39,53 @@ var auditKeygenCmd = &cobra.Command{
 	RunE:  runAuditKeygen,
 }
 
+// auditReportOut holds the --out value for audit report.
+var auditReportOut string
+
+// auditReportCmd renders a signed export into a shareable HTML evidence report.
+var auditReportCmd = &cobra.Command{
+	Use:   "report <export.json>",
+	Short: "Render an audit export into a self-contained HTML evidence report, verifying it offline.",
+	Args:  cobra.ExactArgs(1),
+	// A broken or unsigned export still produces a report stating so, not a usage error.
+	SilenceUsage: true,
+	RunE:         runAuditReport,
+}
+
 // init registers the audit commands and flags.
 func init() {
 	auditVerifyCmd.Flags().StringVar(&auditExpectKey, "pubkey", "",
 		"Expected signer public key in hex; verification fails when the export's key differs.")
-	auditCmd.AddCommand(auditVerifyCmd, auditKeygenCmd)
+	auditReportCmd.Flags().StringVar(&auditReportOut, "out", "",
+		"File to write the HTML report to. Defaults to stdout.")
+	auditCmd.AddCommand(auditVerifyCmd, auditKeygenCmd, auditReportCmd)
 	rootCmd.AddCommand(auditCmd)
+}
+
+// runAuditReport reads an export, verifies it, and writes a self-contained HTML evidence report an
+// auditor or a customer can read without any tooling and re-verify against the export.
+func runAuditReport(_ *cobra.Command, args []string) error {
+	data, err := os.ReadFile(args[0])
+	if err != nil {
+		return fmt.Errorf("read export: %w", err)
+	}
+	var exp audit.Export
+	if err := json.Unmarshal(data, &exp); err != nil {
+		return fmt.Errorf("parse export: %w", err)
+	}
+	html, err := audit.Report(&exp, time.Now())
+	if err != nil {
+		return err
+	}
+	if auditReportOut == "" {
+		_, err := os.Stdout.Write(html)
+		return err
+	}
+	if err := os.WriteFile(auditReportOut, html, 0o600); err != nil {
+		return fmt.Errorf("write report: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "Wrote report to %s\n", auditReportOut)
+	return nil
 }
 
 // runAuditVerify reads an export file, recomputes the chain, and checks the signature, so an auditor

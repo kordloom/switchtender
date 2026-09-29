@@ -29,6 +29,7 @@ What SwitchTender does today.
 | Approvals    | Mark a run to require sign-off, or require it automatically by policy on tool, command, or target. A held run never executes until an admin approves or rejects it, and the request and decision land in the tamper-evident audit trail.|
 | Observability| A Prometheus metrics endpoint, webhook notifications when runs finish, and an audit trail of every mutation.|
 | Tamper-evident audit | Every mutation is linked into a SHA-256 hash chain. `GET /v1/audit/verify` flags the first altered or deleted entry, and a signed export verified with `switchtender audit verify` proves the whole chain offline.|
+| Evidence report | `switchtender audit report` renders a signed export into a self-contained HTML compliance report, verifying it offline in the same pass, so a vendor-security or SOC 2 reviewer reads the verdict and re-verifies it against the export with no tooling.|
 | Inventories  | Stored inventories referenced by id, materialized on whichever executor runs the play.|
 | Dynamic sources | Inventory plugins and scripts refreshed into stored inventories, with cloud auth from an env credential.|
 | Sourced inventories | An inventory's content can come from a command, Vault, or Google Secret Manager, resolved at launch, so the host list need not live in SwitchTender.|

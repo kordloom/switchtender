@@ -118,6 +118,10 @@
 <td>Every mutation is linked into a SHA-256 hash chain. <code>GET /v1/audit/verify</code> flags the first altered or deleted entry, and a signed export verified with <code>switchtender audit verify</code> proves the whole chain offline.</td>
 </tr>
 <tr>
+<td>Evidence report</td>
+<td><code>switchtender audit report</code> renders a signed export into a self-contained HTML compliance report, verifying it offline in the same pass, so a vendor-security or SOC 2 reviewer reads the verdict and re-verifies it against the export with no tooling.</td>
+</tr>
+<tr>
 <td>Inventories</td>
 <td>Stored inventories referenced by id, materialized on whichever executor runs the play.</td>
 </tr>
