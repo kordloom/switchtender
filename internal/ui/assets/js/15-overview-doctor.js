@@ -557,6 +557,25 @@ function svgEl(name, attrs) {
 	return e;
 }
 
+// smoothPath turns a run of points into a flowing SVG curve with a low-tension Catmull-Rom spline,
+// so the line reads as a gentle wave rather than a jagged set of segments. Control points are clamped
+// to the plot band, so a curve between two points never bulges past the top or below the baseline
+// into a shape that would imply a value the data does not hold.
+function smoothPath(pts, minY, maxY) {
+	if (pts.length < 2) return pts.length ? "M " + pts[0][0].toFixed(1) + " " + pts[0][1].toFixed(1) : "";
+	const t = 0.18;
+	const clamp = (v) => Math.max(minY, Math.min(maxY, v));
+	const d = ["M " + pts[0][0].toFixed(1) + " " + pts[0][1].toFixed(1)];
+	for (let i = 0; i < pts.length - 1; i++) {
+		const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+		const c1x = p1[0] + (p2[0] - p0[0]) * t, c1y = clamp(p1[1] + (p2[1] - p0[1]) * t);
+		const c2x = p2[0] - (p3[0] - p1[0]) * t, c2y = clamp(p2[1] - (p3[1] - p1[1]) * t);
+		d.push("C " + c1x.toFixed(1) + " " + c1y.toFixed(1) + " " + c2x.toFixed(1) + " " +
+			c2y.toFixed(1) + " " + p2[0].toFixed(1) + " " + p2[1].toFixed(1));
+	}
+	return d.join(" ");
+}
+
 // renderActivitySvg draws the continuous view: a soft gradient area under the total line and a
 // failed line over it, both with dots, on a faint baseline grid. Each dot is a link into its span's
 // runs, so the line drills down the same way the bars do. The viewBox matches the element's measured
@@ -586,12 +605,13 @@ function renderActivitySvg(el, model) {
 
 	const totalPts = days.map((d, i) => [x(i), y(d.succeeded + d.failed + d.other)]);
 	const failPts = days.map((d, i) => [x(i), y(d.failed)]);
-	const line = (pts) => pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+	const base = y(0);
+	const totalPath = smoothPath(totalPts, padTop, base);
 
-	const areaD = line(totalPts) + " L " + x(n - 1).toFixed(1) + " " + y(0).toFixed(1) + " L " + x(0).toFixed(1) + " " + y(0).toFixed(1) + " Z";
+	const areaD = totalPath + " L " + x(n - 1).toFixed(1) + " " + base.toFixed(1) + " L " + x(0).toFixed(1) + " " + base.toFixed(1) + " Z";
 	svg.appendChild(svgEl("path", { d: areaD, fill: "url(#actArea)", stroke: "none" }));
-	svg.appendChild(svgEl("path", { d: line(totalPts), class: "act-line ok" }));
-	if (days.some((d) => d.failed)) svg.appendChild(svgEl("path", { d: line(failPts), class: "act-line fail" }));
+	svg.appendChild(svgEl("path", { d: totalPath, class: "act-line ok" }));
+	if (days.some((d) => d.failed)) svg.appendChild(svgEl("path", { d: smoothPath(failPts, padTop, base), class: "act-line fail" }));
 
 	days.forEach((d, i) => {
 		const total = d.succeeded + d.failed + d.other;
@@ -636,8 +656,8 @@ function thinActivityLabels(container, n) {
 	const labels = container.classList && container.classList.contains("activity-axis")
 		? container.children
 		: container.querySelectorAll(".activity-label");
-	const step = Math.ceil(n / 8);
-	if (step <= 1) return;
+	if (n <= 24) return;
+	const step = Math.ceil(n / 15);
 	Array.prototype.forEach.call(labels, (lab, i) => {
 		if (i % step !== 0 && i !== n - 1) lab.classList.add("axis-thin");
 	});
