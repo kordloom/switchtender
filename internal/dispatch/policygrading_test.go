@@ -11,6 +11,10 @@ import (
 // policyCall matches a policy evaluation and captures the run expression it is given.
 var policyCall = regexp.MustCompile(`policy\.(Denying|Requiring|RequireDistinct)\(policies, ([^)]*)`)
 
+// gradedAssign matches the declaration of a local that holds a graded run, and captures what it is
+// assigned.
+var gradedAssign = regexp.MustCompile(`\b(gr|gp|gs)\s*:=\s*(.+)$`)
+
 // TestEveryPolicyEvaluationSeesTheGradedRun is a guard against the way this feature was nearly
 // shipped broken, twice.
 //
@@ -46,9 +50,15 @@ func TestEveryPolicyEvaluationSeesTheGradedRun(t *testing.T) {
 				arg := strings.TrimSpace(m[2])
 				// Either the graded copy inline, or a local holding one. A bare run expression is
 				// the bug: it is the ungraded original.
-				if strings.HasPrefix(arg, "graded(") || isGradedLocal(arg) {
+				if gradedExpr(name, arg) || isGradedLocal(arg) {
 					continue
 				}
+				ungraded = append(ungraded, name+": "+strings.TrimSpace(line))
+			}
+			// A local is only as good as what it was assigned, so its declaration is held to the
+			// same rule. Accepting the name alone let a local holding a run graded without the
+			// project checkout pass for a graded one.
+			if m := gradedAssign.FindStringSubmatch(line); m != nil && !gradedExpr(name, m[2]) {
 				ungraded = append(ungraded, name+": "+strings.TrimSpace(line))
 			}
 		}
@@ -70,3 +80,16 @@ var gradedLocals = map[string]bool{"gr": true, "gp": true, "gs": true, "gu": tru
 
 // isGradedLocal reports whether an argument names a local already holding a graded run.
 func isGradedLocal(arg string) bool { return gradedLocals[arg] }
+
+// gradedExpr reports whether expr grades a run the way the file it sits in must. A dispatcher
+// method grades through d.graded, which reads a project run's playbook from its checkout. Only the
+// plan gate's free functions may grade without a checkout, since their runs are Terraform or
+// OpenTofu applies that name no playbook: anywhere else, grading without the checkout is the
+// ungraded original under another name for every run drawn from a project.
+func gradedExpr(file, expr string) bool {
+	expr = strings.TrimSpace(expr)
+	if strings.HasPrefix(expr, "d.graded(") {
+		return true
+	}
+	return file == "plangate.go" && strings.HasPrefix(expr, "gradedLocally(")
+}

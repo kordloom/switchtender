@@ -45,13 +45,13 @@ func TestTheGateSeesWhatThePlaybookDoes(t *testing.T) {
 		Reversibility: run.Irreversible, MaxDestroy: policy.DisabledMaxDestroy}
 
 	wipe := &run.Run{Tool: run.ToolAnsible, Playbook: destructive}
-	if p := policy.Requiring([]*policy.Policy{gate}, graded(wipe)); p == nil {
+	if p := policy.Requiring([]*policy.Policy{gate}, gradedLocally(wipe)); p == nil {
 		t.Error("a playbook that deletes an archive was not held by an irreversible rule, so the " +
 			"gate is still blind to what an Ansible run actually does")
 	}
 
 	restart := &run.Run{Tool: run.ToolAnsible, Playbook: benign}
-	if p := policy.Requiring([]*policy.Policy{gate}, graded(restart)); p != nil {
+	if p := policy.Requiring([]*policy.Policy{gate}, gradedLocally(restart)); p != nil {
 		t.Error("a service restart was held by an irreversible rule. A gate that fires on " +
 			"recoverable work is one an operator switches off")
 	}

@@ -15,6 +15,7 @@ import (
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/importer"
 	"github.com/kordloom/switchtender/internal/inventory"
@@ -458,6 +459,16 @@ func (s *Server) anyToken() bool {
 	return n > 0
 }
 
+// checkouts returns the reader for project checkouts, nil when this server has none. The syncer is
+// returned through the interface only when it is set, so a server without one hands back a nil
+// reader rather than a non-nil interface holding a nil syncer.
+func (s *Server) checkouts() dispatch.CheckoutReader {
+	if s.syncer == nil {
+		return nil
+	}
+	return s.syncer
+}
+
 // Handler returns the HTTP handler serving the SwitchTender API and web interface.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -513,7 +524,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/runs/{id}/approve", approveRunHandler(s.approver, s.store, authz, s.log))
 	mux.Handle("POST /v1/runs/{id}/reject", rejectRunHandler(s.approver, s.store, authz, s.log))
 	mux.Handle("GET /v1/runs", listRunsHandler(s.store, authz, s.log))
-	mux.Handle("GET /v1/runs/{id}", getRunHandler(s.store, authz, s.log))
+	mux.Handle("GET /v1/runs/{id}", getRunHandler(s.store, s.checkouts(), authz, s.log))
 	mux.Handle("GET /v1/runs/{id}/compare", runCompareHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/runs/{id}/shards", runShardsHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/runs/{id}/steps", runStepsHandler(s.store, authz, s.log))

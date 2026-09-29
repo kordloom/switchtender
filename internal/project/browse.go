@@ -26,6 +26,11 @@ var (
 	ErrNotAFile = errors.New("path is not a file")
 	// ErrOutsideCheckout is returned when a path escapes the project's checkout directory.
 	ErrOutsideCheckout = errors.New("path is outside the project checkout")
+	// ErrNoCommit is returned when a commit asked for is not in the project's checkout, such as one
+	// a force push removed and a later sync pruned.
+	ErrNoCommit = errors.New("commit is not in the project checkout")
+	// errTooManyLinks is returned when a path passes through more symbolic links than it may.
+	errTooManyLinks = errors.New("too many symbolic links")
 )
 
 // TreeEntry is one file in a project's checkout.

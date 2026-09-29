@@ -280,7 +280,7 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 				<article class="card reveal">
 					<div class="ic ic-gate"></div>
 					<h3>Whether you get a second chance</h3>
-					<p>Risk says how bad a change is. It never says whether you can take it back, and the two come apart constantly: restarting a fleet is high risk and undoes itself, while deleting a backup set reads quietly and is permanent. Every run is graded reversible, costly, or irreversible, on every tier. A rule that holds a run on that grade is part of the full policy engine, which is Team. An Ansible run is graded from its playbook's own text, not guessed from a file name.</p>
+					<p>Risk says how bad a change is. It never says whether you can take it back, and the two come apart constantly: restarting a fleet is high risk and undoes itself, while deleting a backup set reads quietly and is permanent. Every run is graded reversible, costly, or irreversible, on every tier. A rule that holds a run on that grade is part of the full policy engine, which is Team. An Ansible run is graded from what it actually runs, every role and include read from the project at the commit that executes, not guessed from a file name.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-memory"></div>
@@ -290,7 +290,7 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 				<article class="card reveal">
 					<div class="ic ic-lineage"></div>
 					<h3>The change, not just the run</h3>
-					<p>Nobody means a run. They mean "we rolled out the fix", which was four runs, a rollback and a fix-forward, across three days. Label them and read the whole arc as one thing, with its span, everyone who acted, and an outcome worked out from the runs rather than typed in by whoever closed it.</p>
+					<p>Nobody means a run. They mean "we rolled out the fix", which was four runs, a rollback and a fix-forward, across three days. Label them and read the whole arc as one thing, with its span, everyone who acted, and an outcome worked out from the runs rather than typed in by whoever closed it. Make the label a ServiceNow change number or a Jira issue key, and the official plugin records each run on that ticket.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-matrix"></div>

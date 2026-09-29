@@ -58,8 +58,9 @@ Releases are built in CI from a tagged public tree. The checksums manifest is si
 cosign (keyless, verifiable against the repository identity), artifacts carry SLSA build
 provenance verifiable with `gh attestation verify`, archives include SBOMs, and the binary
 verifies itself against the signed manifest with `switchtender version --verify`. GitHub Actions
-are SHA-pinned. The release gate runs the full suite against both database backends and refuses
-to publish on any failure.
+are SHA-pinned. CI runs the full suite on every push, against both database backends and every
+supported engine, and the release refuses to publish unless that run and the Kubernetes supertest
+are green on the exact commit being released.
 
 ## Vulnerability management
 

@@ -153,6 +153,18 @@ credentials, in plain text and in the encodings tools commonly print them in: he
 and JSON escaping. A tool that transforms a secret some other way, or prints one the product never
 held, has leaked it to the log. Treat masking as a reduction, not a guarantee, and prefer tools
 that do not print secrets.</p>
+<p><strong>A grade is a reading of what will run, not a proof of it.</strong> The reversibility grade reads a
+playbook and everything it pulls in: roles, their dependencies, task includes, imported playbooks,
+and the Galaxy roles and collections a sync installs into the project. It reads them from the
+project at the commit the run executes, and the gate fetches the project before it grades, so a
+change pushed a moment before launch is the change that is graded. What it cannot read, it names in
+the grade: a role or include whose name is only computed at run time, one that lives outside the
+project, and a module this product does not know to be destructive. An unread include never lowers
+a grade, but a rule that holds only irreversible changes will not hold one whose destructive work
+sits somewhere the grade could not see. Where missing one is unacceptable, hold every change that
+alters state. And a run the gate lets through executes what the branch holds when it starts, a few
+seconds after the grade, so a push landing in that window runs on a grade of the commit before it.
+A held run has no such window, because it is pinned to the commit its approver was shown.</p>
 <p><strong>Isolation between runs on one executor.</strong> A run without an execution image runs as the server's
 own user, so while two runs overlap, either one's code can read the other's materialized
 credentials. SwitchTender governs what runs. It does not sandbox mutually untrusted code on one
@@ -166,6 +178,8 @@ loudly, and it is the right trade for a system whose product is the record.</p>
 <li><strong>Chain append fails.</strong> The mutation is refused with 503. Nothing executes off the record.</li>
 <li><strong>Policy store unreadable.</strong> Submission refused. A gate that cannot be evaluated has not passed.</li>
 <li><strong>Spec changed after approval.</strong> The run fails at claim time, naming the digest mismatch.</li>
+<li><strong>Project fetch fails at the gate.</strong> The grade reads the commit the last sync left and says which
+commit that was. The execution that follows syncs the same remote and fails on the same fault.</li>
 <li><strong>Database restored from an older backup.</strong> The head moves backward. A witness raises a finding,
 and bundles exported after the restore point no longer extend the ones exported before it.</li>
 <li><strong>Witness offline.</strong> The gap shows up as an unattested window in verification output, reported

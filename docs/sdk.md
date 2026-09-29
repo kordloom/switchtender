@@ -140,6 +140,13 @@ secret engines from a single `Extension`. The process speaks gRPC over a local s
 TLS, supervised by the server. It starts with the server and exits with it. The worker command
 takes the same flag, so a plugged-in tool runs wherever runs execute.
 
+A plugin starts with a deliberately small environment: `PATH`, `HOME`, the temporary directory and
+locale variables, `SYSTEMROOT` and `USERPROFILE` on Windows, and every variable named with the
+`SWITCHTENDER_PLUGIN_` prefix. Everything else the server holds is withheld, its encryption key and
+every secret it reads from its own environment included. Configure a plugin through
+`SWITCHTENDER_PLUGIN_` variables. A plugin that reads any other name finds it empty, and one that
+exits for want of configuration is skipped like any plugin that fails to launch.
+
 A plugin that fails to launch or describe itself is logged and skipped, so one broken binary does
 not take the server down. A name that collides with a built-in or with a plugin already loaded is
 refused the same way: the plugin is skipped whole, nothing it declared is registered, its process is
@@ -155,9 +162,12 @@ same at run time. Pick per extension: compile in for one static artifact, plug i
 release binary you did not build.
 
 Discord, ntfy, and Microsoft Teams are built-in notification channels, configured with the
-`--notify-discord`, `--notify-ntfy`, and `--notify-teams` flags, so they need no plugin. Write a
-channel of your own the same way the tool above is written: a `Notifier` on the same `Extension`,
-compiled in or dropped in.
+`--notify-discord`, `--notify-ntfy`, and `--notify-teams` flags, so they need no plugin. ServiceNow
+change requests and Jira issues are the official `switchtender-notify` plugin's, from
+[kordloom/switchtender-plugins](https://github.com/kordloom/switchtender-plugins): label a run with
+its change number or issue key, and when the run ends it is recorded on that ticket as a work note
+or a comment. Write a channel of your own the same way the tool above is written: a `Notifier` on
+the same `Extension`, compiled in or dropped in.
 
 ## The seams in detail
 

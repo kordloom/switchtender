@@ -11,19 +11,18 @@ import (
 // gatesRequiringEveryEngine are the workflows that run the suite with
 // SWITCHTENDER_REQUIRE_FULL_SUITE set, which turns an absent engine from a skip into a failure. A
 // workflow that demands an engine it does not install cannot pass, so each of these has to carry
-// every engine in enginesCIMustRun.
+// every engine in enginesCIMustRun. The release no longer reruns the suite: it requires ci green on
+// the commit it releases, so ci is the one gate that runs it.
 var gatesRequiringEveryEngine = []string{
 	".github/workflows/ci.yml",
-	".github/workflows/release.yml",
 }
 
 // TestEveryRequiredEngineIsInstalledByEveryGate stops the two halves of this rule drifting apart.
 //
 // Which engines CI must run is decided here, in Go. Which engines CI installs is decided in YAML,
-// in two files, by hand. Nothing connected them, so adding three engines to the list on one side
-// left the release gate demanding seven and shipping one. That is not a test failure anybody sees
-// until a release is cut: the ordinary test job does not set the variable that makes an absent tool
-// fatal, so every run was green and the tag was already pushed before the gate refused it.
+// by hand. Nothing connected them, so adding three engines to the list on one side once left the
+// release gate demanding seven and shipping one, found only when a tag was already pushed. The
+// suite now runs strictly in ci on every push, and this keeps its installs honest at desk speed.
 //
 // Each gate names every required binary in one loop, so this reads the workflow and requires the
 // name to be there. A binary absent from a gate fails here, at desk speed, instead of at release

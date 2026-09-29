@@ -114,14 +114,14 @@ func TestReversibilityReadsEachCommandInALine(t *testing.T) {
 // playbook read with nothing permanent says when includes went unread.
 func TestReversibilityWeighsWhatTheRunLeftBehind(t *testing.T) {
 	t.Parallel()
-	dropDB := []byte(`- hosts: db
+	dropDB := scanned(t, map[string]string{"maintenance.yml": `- hosts: db
   tasks:
     - name: drop the orders database
       community.postgresql.postgresql_db:
         name: orders
         state: absent
-`)
-	restartAndInclude := []byte(`- hosts: web
+`}, "maintenance.yml")
+	restartAndInclude := scanned(t, map[string]string{"web.yml": `- hosts: web
   tasks:
     - name: restart nginx
       ansible.builtin.service:
@@ -129,7 +129,7 @@ func TestReversibilityWeighsWhatTheRunLeftBehind(t *testing.T) {
         state: restarted
     - ansible.builtin.include_role:
         name: hardening
-`)
+`}, "web.yml")
 	quiet := []HostSummary{{Host: "web01"}, {Host: "web02"}}
 	tests := []struct {
 		Name       string
@@ -162,12 +162,12 @@ func TestReversibilityWeighsWhatTheRunLeftBehind(t *testing.T) {
 		Evidence:   ReversibilityEvidence{Playbook: dropDB},
 		WantClass:  Irreversible,
 		WantReason: "postgresql_db with state absent",
-	}, { // Test 5: A playbook read with nothing permanent says the includes it did not follow.
+	}, { // Test 5: A playbook read with nothing permanent names the role it could not follow.
 		Name:       "include not followed",
 		Run:        Run{Tool: ToolAnsible, Playbook: "web.yml"},
 		Evidence:   ReversibilityEvidence{Playbook: restartAndInclude},
 		WantClass:  ReversibleCostly,
-		WantReason: "roles and includes were not followed",
+		WantReason: `could not follow include_role "hardening" (not in the project)`,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {

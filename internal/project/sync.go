@@ -52,6 +52,9 @@ func WithGalaxy(server, token string) SyncerOption {
 	}
 }
 
+// galaxyDir is the directory inside a checkout that a sync installs its Ansible dependencies to.
+const galaxyDir = ".galaxy"
+
 // runsSubdir holds the per-run isolated worktrees, one directory per Sync call, kept apart from the
 // canonical per-project checkouts that live directly under the cache directory.
 const runsSubdir = ".runs"
@@ -123,60 +126,9 @@ func (s *Syncer) Sync(p *Project, sshKey string) (*Worktree, error) {
 	l.Lock()
 	defer l.Unlock()
 
-	auth, err := authFor(sshKey)
+	canonical, sha, wantRoles, wantCollections, err := s.update(p, sshKey)
 	if err != nil {
 		return nil, err
-	}
-	canonical := filepath.Join(s.cacheDir, p.ID)
-
-	repo, err := git.PlainOpen(canonical)
-	// A checkout that no longer matches the project it belongs to is discarded and taken again. The
-	// cached copy carries the remote and branch it was cloned with, and fetching only ever asks that
-	// remote for that branch, so an operator who repointed a project kept running the code it used to
-	// hold. That is the dangerous direction: the change is made precisely because the old source is
-	// wrong, and nothing in the run says it was ignored. Re-cloning costs one fetch on a change that
-	// is rare, and it is correct for a moved remote and a switched branch alike.
-	if err == nil && !matchesProject(repo, p) {
-		if rmErr := os.RemoveAll(canonical); rmErr != nil {
-			return nil, fmt.Errorf("discard stale checkout: %w", rmErr)
-		}
-		err = git.ErrRepositoryNotExists
-	}
-	if err != nil {
-		repo, err = git.PlainClone(canonical, false, &git.CloneOptions{
-			URL: p.RepoURL, Auth: auth, ReferenceName: branchRef(p.Branch), SingleBranch: true,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("clone %s: %w", redactRepoURL(p.RepoURL), err)
-		}
-		// A clone that pinned no branch is left tracking the branch it landed on, so the update path
-		// finds it. The checkout is discarded when that fails, because a checkout the next sync
-		// cannot update is worse than no checkout at all: it is kept, it never advances, and every
-		// run of the project executes the commit of the first clone.
-		if p.Branch == "" {
-			if err := trackClonedBranch(repo); err != nil {
-				_ = os.RemoveAll(canonical)
-				return nil, err
-			}
-		}
-	} else {
-		if err := fetchAndReset(repo, p, auth); err != nil {
-			return nil, err
-		}
-	}
-
-	head, err := repo.Head()
-	if err != nil {
-		return nil, fmt.Errorf("resolve head: %w", err)
-	}
-	sha := head.Hash().String()
-
-	var wantRoles, wantCollections bool
-	if p.InstallDeps {
-		wantRoles, wantCollections, err = s.installGalaxy(canonical)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	// Copy the canonical checkout to a private directory while the lock is held, so the copy is a
@@ -194,6 +146,82 @@ func (s *Syncer) Sync(p *Project, sshKey string) (*Worktree, error) {
 		GalaxyEnv: galaxyEnvIn(runDir, wantRoles, wantCollections),
 		cleanup:   func() { _ = os.RemoveAll(runDir) },
 	}, nil
+}
+
+// Fetch brings the project's canonical checkout up to date with its remote exactly as Sync does,
+// dependencies included, without copying it for a run, and returns the commit it now sits on. It
+// is for a caller that reads the checkout rather than executing in it.
+func (s *Syncer) Fetch(p *Project, sshKey string) (string, error) {
+	if err := ValidateRepoURL(p.RepoURL); err != nil {
+		return "", err
+	}
+	l := s.lock(p.ID)
+	l.Lock()
+	defer l.Unlock()
+	_, sha, _, _, err := s.update(p, sshKey)
+	return sha, err
+}
+
+// update brings the canonical checkout of p up to date with its remote, cloning it when there is
+// none or the one there no longer matches the project, installs its dependencies when the project
+// asks for that, and returns the checkout's path, the commit it sits on, and which kinds of
+// dependency were installed. The caller holds the project's lock.
+func (s *Syncer) update(p *Project, sshKey string) (canonical, sha string, wantRoles, wantCollections bool, err error) {
+	auth, err := authFor(sshKey)
+	if err != nil {
+		return "", "", false, false, err
+	}
+	canonical = filepath.Join(s.cacheDir, p.ID)
+
+	repo, err := git.PlainOpen(canonical)
+	// A checkout that no longer matches the project it belongs to is discarded and taken again. The
+	// cached copy carries the remote and branch it was cloned with, and fetching only ever asks that
+	// remote for that branch, so an operator who repointed a project kept running the code it used to
+	// hold. That is the dangerous direction: the change is made precisely because the old source is
+	// wrong, and nothing in the run says it was ignored. Re-cloning costs one fetch on a change that
+	// is rare, and it is correct for a moved remote and a switched branch alike.
+	if err == nil && !matchesProject(repo, p) {
+		if rmErr := os.RemoveAll(canonical); rmErr != nil {
+			return "", "", false, false, fmt.Errorf("discard stale checkout: %w", rmErr)
+		}
+		err = git.ErrRepositoryNotExists
+	}
+	if err != nil {
+		repo, err = git.PlainClone(canonical, false, &git.CloneOptions{
+			URL: p.RepoURL, Auth: auth, ReferenceName: branchRef(p.Branch), SingleBranch: true,
+		})
+		if err != nil {
+			return "", "", false, false, fmt.Errorf("clone %s: %w", redactRepoURL(p.RepoURL), err)
+		}
+		// A clone that pinned no branch is left tracking the branch it landed on, so the update path
+		// finds it. The checkout is discarded when that fails, because a checkout the next sync
+		// cannot update is worse than no checkout at all: it is kept, it never advances, and every
+		// run of the project executes the commit of the first clone.
+		if p.Branch == "" {
+			if err := trackClonedBranch(repo); err != nil {
+				_ = os.RemoveAll(canonical)
+				return "", "", false, false, err
+			}
+		}
+	} else {
+		if err := fetchAndReset(repo, p, auth); err != nil {
+			return "", "", false, false, err
+		}
+	}
+
+	head, err := repo.Head()
+	if err != nil {
+		return "", "", false, false, fmt.Errorf("resolve head: %w", err)
+	}
+	sha = head.Hash().String()
+
+	if p.InstallDeps {
+		wantRoles, wantCollections, err = s.installGalaxy(canonical)
+		if err != nil {
+			return "", "", false, false, err
+		}
+	}
+	return canonical, sha, wantRoles, wantCollections, nil
 }
 
 // isolate copies a project's canonical checkout to a fresh per-run directory and returns its path.
@@ -230,9 +258,8 @@ var requirementFiles = []string{
 // is a no-op; a galaxy failure is a real dependency problem and is returned so the run fails with the
 // galaxy output.
 func (s *Syncer) installGalaxy(checkout string) (wantRoles, wantCollections bool, err error) {
-	galaxyDir := filepath.Join(checkout, ".galaxy")
-	rolesPath := filepath.Join(galaxyDir, "roles")
-	collectionsPath := filepath.Join(galaxyDir, "collections")
+	rolesPath := filepath.Join(checkout, galaxyDir, "roles")
+	collectionsPath := filepath.Join(checkout, galaxyDir, "collections")
 
 	for _, name := range requirementFiles {
 		path := filepath.Join(checkout, name)
@@ -260,10 +287,10 @@ func (s *Syncer) installGalaxy(checkout string) (wantRoles, wantCollections bool
 func galaxyEnvIn(dir string, wantRoles, wantCollections bool) []string {
 	var env []string
 	if wantRoles {
-		env = append(env, "ANSIBLE_ROLES_PATH="+filepath.Join(dir, ".galaxy", "roles"))
+		env = append(env, "ANSIBLE_ROLES_PATH="+filepath.Join(dir, galaxyDir, "roles"))
 	}
 	if wantCollections {
-		env = append(env, "ANSIBLE_COLLECTIONS_PATH="+filepath.Join(dir, ".galaxy", "collections"))
+		env = append(env, "ANSIBLE_COLLECTIONS_PATH="+filepath.Join(dir, galaxyDir, "collections"))
 	}
 	return env
 }

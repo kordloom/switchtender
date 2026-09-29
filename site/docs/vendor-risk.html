@@ -139,8 +139,9 @@ itself.</p>
 cosign (keyless, verifiable against the repository identity), artifacts carry SLSA build
 provenance verifiable with <code>gh attestation verify</code>, archives include SBOMs, and the binary
 verifies itself against the signed manifest with <code>switchtender version --verify</code>. GitHub Actions
-are SHA-pinned. The release gate runs the full suite against both database backends and refuses
-to publish on any failure.</p>
+are SHA-pinned. CI runs the full suite on every push, against both database backends and every
+supported engine, and the release refuses to publish unless that run and the Kubernetes supertest
+are green on the exact commit being released.</p>
 <h2 id="vulnerability-management">Vulnerability management</h2>
 <p><code>govulncheck</code> runs in CI on every change, and the Go toolchain floor is raised when a stdlib
 CVE lands in the dependency path. Reports go to the address on the <a href="https://github.com/kordloom/switchtender/security">security policy</a>.

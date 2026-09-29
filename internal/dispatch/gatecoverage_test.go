@@ -57,7 +57,7 @@ func TestTheGateSeesEveryWayAPlaybookArrives(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.Name, func(t *testing.T) {
 			t.Parallel()
-			if p := policy.Requiring(rules, graded(test.Run)); p == nil {
+			if p := policy.Requiring(rules, gradedLocally(test.Run)); p == nil {
 				t.Errorf("a playbook that deletes an archive was not held when it arrived as %q. "+
 					"The gate can be walked around by choosing how to submit", test.Name)
 			}
@@ -68,7 +68,7 @@ func TestTheGateSeesEveryWayAPlaybookArrives(t *testing.T) {
 	// one. A step is built by stepRun, so it is graded through exactly what the dispatcher builds.
 	parent := &run.Run{Tool: run.ToolAnsible, Inventory: "hosts.ini", Kind: run.KindPipeline}
 	step := run.PipelineStep{Name: "wipe", Playbook: wipe}
-	if p := policy.Requiring(rules, graded(stepRun(parent, step, 0, 0, nil))); p == nil {
+	if p := policy.Requiring(rules, gradedLocally(stepRun(parent, step, 0, 0, nil))); p == nil {
 		t.Error("a destructive playbook wrapped in a pipeline step was not held. Wrapping a " +
 			"refused command in a one-step pipeline is the documented way around a gate, and this " +
 			"is the same door")

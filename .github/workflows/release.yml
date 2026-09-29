@@ -38,78 +38,10 @@ jobs:
     permissions:
       contents: read
       actions: read
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: switchtender
-          POSTGRES_PASSWORD: switchtender
-          POSTGRES_DB: switchtender
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U switchtender"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      SWITCHTENDER_TEST_POSTGRES_DSN: postgres://switchtender:switchtender@localhost:5432/switchtender?sslmode=disable
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
-        with:
-          go-version-file: go.mod
-      - name: Check out the loomseal version this module depends on
-        run: |
-          set -euo pipefail
-          version="$(go list -m -f '{{.Version}}' github.com/kordloom/loomseal)"
-          echo "cross-checking against loomseal $version"
-          git clone --quiet https://github.com/kordloom/loomseal.git "$RUNNER_TEMP/loomseal"
-          git -C "$RUNNER_TEMP/loomseal" checkout --quiet "$version"
-          echo "SWITCHTENDER_LOOMSEAL_REPO=$RUNNER_TEMP/loomseal" >> "$GITHUB_ENV"
-      # Pinned, because the drift contract executes real ansible and a floating version would let
-      # the gate's behavior change without a commit. The full-suite ratchet turns a missing
-      # toolchain into a failure, so this install is load-bearing, not a convenience.
-      - name: Install ansible for the drift contract
-        run: pipx install ansible-core==2.18.1
-      # The engine contract holds the real tools to what the runners believe about them, and the
-      # contract turns an absent tool into a failure rather than a skip, because a skip reports as a
-      # pass. That makes installing them part of the gate rather than a convenience: v1.96.0 was
-      # refused publication because this list named seven engines and the gate shipped one.
-      #
-      # Pinned for the same reason ansible is: a gate whose toolchain floats changes behavior with
-      # no commit. Installed only when absent, so a runner image that already carries one is not
-      # fought with, and named out loud at the end so a missing tool fails here rather than inside
-      # the suite.
-      - name: Install the engines this runner does not ship
-        env:
-          TOFU_VERSION: "1.8.7"
-          TERRAFORM_VERSION: "1.9.8"
-        run: |
-          set -euo pipefail
-          if ! command -v tofu >/dev/null 2>&1; then
-            curl -fsSL -o /tmp/tofu.zip \
-              "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip"
-            sudo unzip -qo /tmp/tofu.zip tofu -d /usr/local/bin
-          fi
-          if ! command -v terraform >/dev/null 2>&1; then
-            curl -fsSL -o /tmp/terraform.zip \
-              "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
-            sudo unzip -qo /tmp/terraform.zip terraform -d /usr/local/bin
-          fi
-          if ! command -v pwsh >/dev/null 2>&1; then
-            sudo snap install powershell --classic
-          fi
-          # Every engine the contract requires is named here, so a missing one fails at this step
-          # with the tool's name rather than deep inside the suite. A test reads both workflows and
-          # fails when this list and the contract's list drift apart, which is the drift that made
-          # a gate demand seven engines while installing one.
-          for binary in ansible-playbook bash python3 go pwsh terraform tofu; do
-            command -v "$binary" >/dev/null 2>&1 || { echo "missing engine binary: $binary" >&2; exit 1; }
-          done
-          tofu version && terraform version && pwsh --version
       - name: The chart must name the version being released
         run: |
           set -euo pipefail
@@ -130,15 +62,9 @@ jobs:
           fi
           echo "chart appVersion $chart matches the release"
 
-      - name: Build
-        run: go build ./...
-      - name: Vet
-        run: go vet ./...
-      - name: Test
-        env:
-          SWITCHTENDER_REQUIRE_FULL_SUITE: "1"
-        run: go test -race ./...
-
+      # The suite is not rerun here. ci runs it strictly, split four ways, with every engine
+      # installed and the full-suite ratchet on, and the step below requires that run green on
+      # this commit before anything is built.
       # A release waits for the ci and supertest workflows to have finished green on the exact
       # commit being released. v1.93.0 shipped while its supertest sat canceled, superseded by a
       # later push, and nothing noticed: the procurement page says upgrades are proven before we

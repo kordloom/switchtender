@@ -65,9 +65,10 @@ func AssessReversibility(r *Run) Reversibility {
 // information available allows. Every field is optional and an absent one only ever leaves the
 // grade less certain, never wrong in the safe direction.
 type ReversibilityEvidence struct {
-	// Playbook is the playbook's own text, when it could be read. It is what closes the gap for
-	// Ansible, whose destructive work lives in a file rather than in a command.
-	Playbook []byte
+	// Playbook is what a scan of the playbook and everything it pulls in found, nil when the
+	// playbook could not be read. It is what closes the gap for Ansible, whose destructive work
+	// lives in files rather than in a command.
+	Playbook *PlaybookSignals
 	// Hosts are the per host outcomes of a finished run. They answer the question no prediction
 	// can: whether anything actually changed.
 	Hosts []HostSummary
@@ -118,34 +119,28 @@ func AssessReversibilityFrom(r *Run, ev ReversibilityEvidence) Reversibility {
 	if len(reasons) > 0 {
 		return Reversibility{Class: Irreversible, Reasons: reasons}
 	}
-	// The playbook's own text, which is where an Ansible run keeps the work that a command line
-	// would otherwise show. Only ever raises the grade, so a file that could not be read or an
-	// include that was not followed leaves it where it was.
-	if len(ev.Playbook) > 0 {
-		signals, perr := ScanPlaybook(ev.Playbook)
-		if perr == nil && len(signals.Permanent) > 0 {
-			if signals.Deferred {
-				signals.Permanent = append(signals.Permanent,
-					"roles and includes were not followed, so there may be more")
+	// The playbook and everything it pulls in, which is where an Ansible run keeps the work that a
+	// command line would otherwise show. Only ever raises the grade, so a file that could not be
+	// read or a role that could not be followed leaves it where it was.
+	if pb := ev.Playbook; pb != nil {
+		if len(pb.Permanent) > 0 {
+			reasons := append([]string(nil), pb.Permanent...)
+			if len(pb.Unread) > 0 {
+				reasons = append(reasons, unreadReason(pb.Unread, "there may be more"))
 			}
-			return Reversibility{Class: Irreversible, Reasons: signals.Permanent}
+			return Reversibility{Class: Irreversible, Reasons: withSource(reasons, pb.Source)}
 		}
-		if perr == nil {
-			reasons := []string{"changes state, so undoing it means running something else",
-				"the playbook was read and holds nothing this grades as permanent"}
-			if signals.Deferred {
-				reasons = append(reasons,
-					"roles and includes were not followed, so this covers the playbook only")
-			}
-			return Reversibility{Class: ReversibleCostly, Reasons: reasons}
+		reasons := []string{"changes state, so undoing it means running something else",
+			readReason(pb.Files)}
+		if len(pb.Unread) > 0 {
+			reasons = append(reasons, unreadReason(pb.Unread, "the grade covers only what was read"))
 		}
+		return Reversibility{Class: ReversibleCostly, Reasons: withSource(reasons, pb.Source)}
 	}
 	if r.Command == "" {
-		// Nothing to read. An Ansible run carries a playbook path, and what the playbook does is
-		// inside a file this never opens: the content lives in a project, and may be fetched from
-		// Vault or produced by a command at launch, so it is not available to a grade computed on
-		// read. A playbook that drops every database grades exactly like one that restarts a
-		// service.
+		// Nothing to read. An Ansible run carries a playbook path rather than a command, and the
+		// playbook could not be read here: the project has no checkout on this server yet, the
+		// commit the run is tied to has left it, or the file is somewhere this server cannot see.
 		//
 		// The class stays costly rather than climbing, because guessing from a file name would be
 		// worse than saying nothing: it would put false confidence behind the word irreversible.
@@ -177,6 +172,42 @@ func plannedDestroys(r *Run) string {
 		noun = "resource"
 	}
 	return fmt.Sprintf("its plan destroys %d %s, which cannot be undone from here", n, noun)
+}
+
+// readReason says what a playbook scan that found nothing permanent read.
+func readReason(files int) string {
+	switch {
+	case files <= 1:
+		return "the playbook was read and holds nothing this grades as permanent"
+	case files == 2:
+		return "the playbook and the file it pulls in were read and hold nothing this grades as " +
+			"permanent"
+	default:
+		return fmt.Sprintf("the playbook and the %d files it pulls in were read and hold nothing this "+
+			"grades as permanent", files-1)
+	}
+}
+
+// unreadReason says what a playbook scan could not follow and what that means for the grade. It
+// names the first two, since a grade that says only a count sends the approver hunting.
+func unreadReason(unread []string, meaning string) string {
+	switch len(unread) {
+	case 1:
+		return "could not follow " + unread[0] + ", so " + meaning
+	case 2:
+		return "could not follow " + unread[0] + " or " + unread[1] + ", so " + meaning
+	default:
+		return fmt.Sprintf("could not follow %d roles and includes, among them %s and %s, so %s",
+			len(unread), unread[0], unread[1], meaning)
+	}
+}
+
+// withSource adds which version of the files was read, when there was a choice of versions.
+func withSource(reasons []string, source string) []string {
+	if source == "" {
+		return reasons
+	}
+	return append(reasons, source)
 }
 
 // permanentMarkers are command fragments whose effect this product cannot undo, matched case

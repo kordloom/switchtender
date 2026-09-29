@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	"go.uber.org/zap"
+
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -56,25 +59,10 @@ func (d *Dispatcher) resolveProject(ctx context.Context, r *run.Run, spec *round
 		return cleanup, fmt.Errorf("project %s: %w", r.ProjectID, err)
 	}
 
-	sshKey := ""
-	if p.CredentialID != "" {
-		if d.credentials == nil || d.sealer == nil {
-			return cleanup, credential.ErrNoKey
-		}
-		// The same two steps run materialization applies to this kind: resolve through the
-		// credential's source, then unlock the key. Handing the stored value straight to the SSH
-		// parser meant a passphrase-protected key arrived as the JSON wrapper it is stored in, and
-		// every sync of that project failed with an error naming the key rather than the omission.
-		_, plain, lease, cerr := d.openCredential(ctx, p.CredentialID)
-		if cerr != nil {
-			return cleanup, fmt.Errorf("project credential %s: %w", p.CredentialID, cerr)
-		}
-		defer d.revokeLease(lease)
-		unlocked, _, kerr := sshKeyFrom(plain)
-		if kerr != nil {
-			return cleanup, fmt.Errorf("project credential %s: %w", p.CredentialID, kerr)
-		}
-		sshKey = unlocked
+	sshKey, release, err := d.projectKey(ctx, p)
+	defer release()
+	if err != nil {
+		return cleanup, err
 	}
 
 	wt, err := d.syncer.Sync(p, sshKey)
@@ -162,27 +150,14 @@ func (d *Dispatcher) pinHeldRunCommit(r *run.Run) {
 		fail(err)
 		return
 	}
-	sshKey := ""
-	if p.CredentialID != "" {
-		if d.credentials == nil || d.sealer == nil {
-			fail(credential.ErrNoKey)
-			return
-		}
-		// Resolved and unlocked the same way the sync during execution does. Pinning the commit
-		// runs the identical git operation, so a credential that works for one and not the other
-		// would hold a run at approval time for a reason that disappears by execution.
-		_, plain, lease, cerr := d.openCredential(context.Background(), p.CredentialID)
-		if cerr != nil {
-			fail(cerr)
-			return
-		}
-		defer d.revokeLease(lease)
-		unlocked, _, kerr := sshKeyFrom(plain)
-		if kerr != nil {
-			fail(kerr)
-			return
-		}
-		sshKey = unlocked
+	// Resolved and unlocked the same way the sync during execution does. Pinning the commit runs the
+	// identical git operation, so a credential that works for one and not the other would hold a run
+	// at approval time for a reason that disappears by execution.
+	sshKey, release, err := d.projectKey(context.Background(), p)
+	defer release()
+	if err != nil {
+		fail(err)
+		return
 	}
 	wt, err := d.syncer.Sync(p, sshKey)
 	if err != nil {
@@ -191,6 +166,87 @@ func (d *Dispatcher) pinHeldRunCommit(r *run.Run) {
 	}
 	defer wt.Cleanup()
 	r.PinnedCommit = wt.SHA
+}
+
+// projectKey returns the SSH key the project's syncs authenticate with, empty for a remote that
+// needs none, and a release for the credential lease behind it, which the caller defers whether or
+// not an error came back. Execution, a held run's pin, and the gate's fetch all sync through it, so
+// a credential that works for one of them works for all three.
+//
+// It takes the same two steps run materialization applies to this kind: resolve through the
+// credential's source, then unlock the key. Handing the stored value straight to the SSH parser
+// meant a passphrase-protected key arrived as the JSON wrapper it is stored in, and every sync of
+// that project failed with an error naming the key rather than the omission.
+func (d *Dispatcher) projectKey(ctx context.Context, p *project.Project) (string, func(), error) {
+	release := func() {}
+	if p.CredentialID == "" {
+		return "", release, nil
+	}
+	if d.credentials == nil || d.sealer == nil {
+		return "", release, credential.ErrNoKey
+	}
+	_, plain, lease, err := d.openCredential(ctx, p.CredentialID)
+	if err != nil {
+		return "", release, fmt.Errorf("project credential %s: %w", p.CredentialID, err)
+	}
+	release = func() { d.revokeLease(lease) }
+	unlocked, _, err := sshKeyFrom(plain)
+	if err != nil {
+		return "", release, fmt.Errorf("project credential %s: %w", p.CredentialID, err)
+	}
+	return unlocked, release, nil
+}
+
+// refreshForGate brings the checkouts a submission draws its playbooks from up to date, once,
+// before the gate first grades them. Each submission path calls it from its first rule check, so
+// every later check in the same submission reads the commit it fetched.
+//
+// The gate reads a project run's playbook from the project's checkout, and the checkout holds
+// whatever the last sync fetched. Graded from that alone, a destructive role pushed a minute ago
+// and launched straight away was graded on the commit before it, and ran past a rule written to
+// hold exactly that change. Fetching first makes the grade describe the commit the run is about to
+// execute. A run tied to a fixed commit is read at that commit, which no fetch changes.
+//
+// It fetches only when a rule in force reads what a playbook does, which only a reversibility
+// floor does, so an install without one pays no fetch on the submit path. A failed fetch is logged
+// and the gate grades what the checkout already holds: the execution that follows syncs the same
+// remote and fails on the same fault, so it runs nothing the grade did not see.
+func (d *Dispatcher) refreshForGate(policies []*policy.Policy, units ...*run.Run) {
+	if d.projects == nil || d.syncer == nil || !gradesPlaybooks(policies) {
+		return
+	}
+	ctx := context.Background()
+	fetched := map[string]bool{}
+	for _, r := range units {
+		if r == nil || r.ProjectID == "" || r.Playbook == "" || fetched[r.ProjectID] ||
+			r.CommitSHA != "" || r.PinnedCommit != "" || run.NormalizeTool(r.Tool) != run.ToolAnsible {
+			continue
+		}
+		fetched[r.ProjectID] = true
+		p, err := d.projects.Get(ctx, r.ProjectID)
+		if err != nil {
+			continue
+		}
+		sshKey, release, err := d.projectKey(ctx, p)
+		if err == nil {
+			_, err = d.syncer.Fetch(p, sshKey)
+		}
+		release()
+		if err != nil {
+			d.log.Warn("dispatch: fetch project for the gate: "+err.Error(), zap.String("project", p.ID))
+		}
+	}
+}
+
+// gradesPlaybooks reports whether a rule in force decides on what a playbook does. Only a
+// reversibility floor does; nothing else in a rule reads a playbook's content.
+func gradesPlaybooks(policies []*policy.Policy) bool {
+	for _, p := range policies {
+		if p != nil && p.Reversibility != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // stampCommit records the commit a sync checked out and refuses a run pinned to a different one. The

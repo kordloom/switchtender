@@ -167,7 +167,7 @@ func ProposeApplyFor(ctx context.Context, store run.Store, policies []*policy.Po
 	// Graded like every other submission, for the reason above: this path faces the same rules, so
 	// it has to see what they see. A rule written on whether a change can be taken back would
 	// otherwise apply everywhere except here.
-	gp := graded(proposal)
+	gp := gradedLocally(proposal)
 	if p := policy.Denying(policies, gp); p != nil {
 		return nil, false, fmt.Errorf("%w: policy %q refuses this apply", ErrPolicyDenied, p.Label())
 	}
@@ -231,7 +231,7 @@ func applyOptions(r *run.Run, policies []*policy.Policy, destroys int, read bool
 		// as proposed, carrying the count, on a copy so the plan run keeps its own record. Weighed
 		// as the plan run, a rule pairing a destroy limit with a floor read the grade as costly and
 		// never held a plan past its limit.
-		gr := graded(r)
+		gr := gradedLocally(r)
 		if gr != nil {
 			apply := *gr
 			apply.PlanDestroys = &destroys
