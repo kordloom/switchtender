@@ -527,7 +527,7 @@ func testChain(t *testing.T, store audit.Store) {
 	// ChainScan streams the same entries in the same order Chain returns them, and a scanner fed
 	// from it reaches the same verdict.
 	var scanned []*audit.Entry
-	if err := store.ChainScan(ctx, func(e *audit.Entry) error {
+	if err := store.ChainScan(ctx, 0, func(e *audit.Entry) error {
 		scanned = append(scanned, e)
 		return nil
 	}); err != nil {
@@ -543,7 +543,7 @@ func testChain(t *testing.T, store audit.Store) {
 	// An error from fn stops the scan and comes back verbatim.
 	stop := errors.New("stop here")
 	calls := 0
-	err = store.ChainScan(ctx, func(*audit.Entry) error {
+	err = store.ChainScan(ctx, 0, func(*audit.Entry) error {
 		calls++
 		if calls == 2 {
 			return stop
@@ -552,6 +552,25 @@ func testChain(t *testing.T, store audit.Store) {
 	})
 	if !errors.Is(err, stop) {
 		t.Errorf("ChainScan() error = %v, want the fn error back", err)
+	}
+
+	// A cursor resumes exactly after the given sequence: no repeats, no gaps. An incremental
+	// reader that re-fed a boundary entry would break its own scanner's continuity check.
+	var resumed []*audit.Entry
+	if err := store.ChainScan(ctx, chain[0].Seq, func(e *audit.Entry) error {
+		resumed = append(resumed, e)
+		return nil
+	}); err != nil {
+		t.Fatalf("ChainScan(afterSeq) error = %v", err)
+	}
+	if diff := cmp.Diff(chain[1:], resumed); diff != "" {
+		t.Errorf("ChainScan(afterSeq) mismatch (-want +got):\n%s", diff)
+	}
+	if err := store.ChainScan(ctx, chain[len(chain)-1].Seq, func(e *audit.Entry) error {
+		t.Errorf("ChainScan() past the head streamed seq %d, want nothing", e.Seq)
+		return nil
+	}); err != nil {
+		t.Fatalf("ChainScan(head) error = %v", err)
 	}
 	if calls != 2 {
 		t.Errorf("ChainScan() called fn %d times after a stop at 2", calls)

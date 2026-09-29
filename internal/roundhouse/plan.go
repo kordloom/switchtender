@@ -52,7 +52,9 @@ func buildContainerPlan(spec Spec) (containerPlan, func(), error) {
 			{path: filepath.Dir(spec.Playbook)},
 			{path: spec.Inventory},
 			{path: spec.PrivateKeyPath},
-			{path: spec.VaultPasswordFile},
+		}
+		for _, vp := range spec.VaultPasswords {
+			mounts = append(mounts, planMount{path: vp.Path})
 		}
 		for _, f := range spec.ExtraVarsFiles {
 			mounts = append(mounts, planMount{path: f})

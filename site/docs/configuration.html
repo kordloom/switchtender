@@ -543,6 +543,36 @@ that variable is unset.</p>
 <td>How long each change register covers and how often one is written, for example <code>2160h</code> for a quarter. Minimum <code>1h</code>. Zero writes none. Progress is read from the archive, so a restart resumes from the newest pack rather than starting the period again.</td>
 </tr>
 <tr>
+<td><code>--forward-url</code></td>
+<td>none</td>
+<td>HTTP endpoint audit events stream to as NDJSON, one JSON object per line, each carrying its <code>seq:link</code> receipt. Splunk HEC raw, Elastic, and log routers ingest it directly.</td>
+</tr>
+<tr>
+<td><code>--forward-header</code></td>
+<td>none</td>
+<td>Header set on every forwarded batch, as <code>Name: value</code>, for example an HEC token. Repeatable.</td>
+</tr>
+<tr>
+<td><code>--forward-syslog</code></td>
+<td>none</td>
+<td>TCP syslog collector (<code>host:port</code>) audit events stream to as RFC 5424, octet-counted, one message per event with the JSON event as the body.</td>
+</tr>
+<tr>
+<td><code>--forward-syslog-tls</code></td>
+<td><code>false</code></td>
+<td>Wrap the syslog connection in TLS.</td>
+</tr>
+<tr>
+<td><code>--forward-state</code></td>
+<td><code>switchtender-forward.json</code></td>
+<td>Durable cursor recording the last position every sink accepted. The cursor advances only on delivery, so an outage delays events rather than dropping them, and a restart resumes without restreaming.</td>
+</tr>
+<tr>
+<td><code>--forward-interval</code></td>
+<td><code>5s</code></td>
+<td>How often the forwarder polls the chain when caught up. Minimum <code>1s</code>.</td>
+</tr>
+<tr>
 <td><code>--smtp-addr</code></td>
 <td>none</td>
 <td>SMTP server host:port for run notification emails. Empty disables email.</td>

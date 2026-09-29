@@ -84,7 +84,7 @@ function mountTopbar() {
 // Credentials stays out on purpose, so secret-adjacent data never leaves by accident.
 // Credentials are included on purpose: the API never returns a secret value, so an export lists
 // names, kinds, secret state, and what uses them, which is what an access review needs.
-const EXPORT_PAGES = ["runs", "fleet", "drift", "tasks", "workers", "schedules", "jobtemplates",
+const EXPORT_PAGES = ["runs", "fleet", "drift", "tasks", "compare", "workers", "schedules", "jobtemplates",
 	"users", "audit", "host", "projects", "inventories", "sources", "policies", "doctor",
 	"credentials"];
 

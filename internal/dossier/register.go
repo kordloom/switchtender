@@ -81,7 +81,7 @@ func CollectRegister(ctx context.Context, runs run.Store, audits audit.Store, fr
 
 	scan := audit.NewChainScanner(true)
 	anchorScan := audit.NewAnchorScanner(anchors)
-	err = audits.ChainScan(ctx, func(e *audit.Entry) error {
+	err = audits.ChainScan(ctx, 0, func(e *audit.Entry) error {
 		scan.Feed(e)
 		anchorScan.Feed(e)
 		in.Head = e

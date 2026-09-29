@@ -162,8 +162,8 @@ type brokenChain struct {
 }
 
 // ChainScan streams the wrapped chain with entry two rewritten.
-func (b *brokenChain) ChainScan(ctx context.Context, fn func(*audit.Entry) error) error {
-	return b.Store.ChainScan(ctx, func(e *audit.Entry) error {
+func (b *brokenChain) ChainScan(ctx context.Context, afterSeq int64, fn func(*audit.Entry) error) error {
+	return b.Store.ChainScan(ctx, afterSeq, func(e *audit.Entry) error {
 		if e.Seq == 2 {
 			e.Path = "/v1/rewritten"
 		}

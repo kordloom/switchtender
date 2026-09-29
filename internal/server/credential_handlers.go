@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -42,6 +43,9 @@ type createCredentialRequest struct {
 	// Passphrase unlocks a passphrase protected ssh_key at run time. It applies only to a locally
 	// stored ssh_key and is sealed alongside the key. Optional, never echoed back.
 	Passphrase string `json:"passphrase,omitempty"`
+	// VaultID labels an Ansible Vault password for --vault-id; only meaningful on the
+	// vault_password kind.
+	VaultID string `json:"vault_id"`
 	// OrgID names the owning organization. Empty leaves the credential unowned and global. Optional.
 	OrgID string `json:"org_id,omitempty"`
 	// TypeID names a custom credential type. When set, Fields carries the type's field values and
@@ -113,6 +117,18 @@ func createCredentialHandler(store credential.Store, types credential.TypeStore,
 				"source must be one of: "+credential.SourceList())
 			return
 		}
+		// Trimmed the same way the update handler trims, so one spelling of vault_id is not
+		// accepted by create and rejected by update, or the reverse.
+		vaultLabel := strings.TrimSpace(req.VaultID)
+		if vaultLabel != "" && req.Kind != credential.KindVaultPassword {
+			respondError(w, log, http.StatusBadRequest, "vault_id applies only to vault_password credentials")
+			return
+		}
+		if !credential.ValidVaultID(vaultLabel) {
+			respondError(w, log, http.StatusBadRequest,
+				"vault_id must be letters, digits, underscores, or hyphens")
+			return
+		}
 
 		secretPlain, err := sealableSecret(req.Kind, req.Source, req.Secret, req.Passphrase)
 		if err != nil {
@@ -136,7 +152,7 @@ func createCredentialHandler(store credential.Store, types credential.TypeStore,
 		c := &credential.Credential{
 			ID: credential.NewID(), Name: req.Name, Kind: req.Kind,
 			Source: credential.NormalizeSource(req.Source), Secret: sealed, OrgID: req.OrgID,
-			CreatedAt: time.Now(),
+			VaultID: vaultLabel, CreatedAt: time.Now(),
 		}
 		if err := store.Save(r.Context(), c); err != nil {
 			log.Error("server: save credential: " + err.Error())
@@ -165,6 +181,11 @@ type updateCredentialRequest struct {
 	// OrgID names the owning organization, replacing the stored owner. Empty leaves the credential
 	// unowned and global. Optional.
 	OrgID string `json:"org_id,omitempty"`
+	// VaultID relabels an Ansible Vault password; only meaningful on the vault_password kind. A
+	// pointer so an omitted field keeps the stored label rather than clearing it: a rename that
+	// sends only the name must not wipe the vault id a multi-vault run depends on. A present empty
+	// string clears the label.
+	VaultID *string `json:"vault_id"`
 }
 
 // createTypedCredential stores a credential of a custom type: its field values are validated against
@@ -282,6 +303,33 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 		}
 		if c.OrgID != req.OrgID && authz.denyForeignOrg(w, r, log, c.OrgID) {
 			return
+		}
+		// The kind only changes when a new secret is sent, since a kind change re-seals the secret
+		// in the new format. So the vault_id rules must be checked against the kind that will
+		// actually persist, not against req.Kind, or a kind change with no secret would land a
+		// label on a credential whose stored kind never moved.
+		finalKind := c.Kind
+		if secret != "" && req.Kind != "" {
+			finalKind = req.Kind
+		}
+		if req.VaultID != nil {
+			label := strings.TrimSpace(*req.VaultID)
+			if !credential.ValidVaultID(label) {
+				respondError(w, log, http.StatusBadRequest,
+					"vault_id must be letters, digits, underscores, or hyphens")
+				return
+			}
+			if label != "" && finalKind != credential.KindVaultPassword {
+				respondError(w, log, http.StatusBadRequest,
+					"vault_id applies only to vault_password credentials")
+				return
+			}
+			c.VaultID = label
+		}
+		// A label never outlives the vault kind: changing a labeled vault credential to another
+		// kind drops the now meaningless label rather than storing the state create forbids.
+		if finalKind != credential.KindVaultPassword {
+			c.VaultID = ""
 		}
 		c.Name = req.Name
 		c.OrgID = req.OrgID

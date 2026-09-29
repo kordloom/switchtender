@@ -166,7 +166,8 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 			}
 			spec.PrivateKeyPath = f.Name()
 		case credential.KindVaultPassword:
-			spec.VaultPasswordFile = f.Name()
+			spec.VaultPasswords = append(spec.VaultPasswords,
+				roundhouse.VaultPassword{Label: c.VaultID, Path: f.Name()})
 		case credential.KindEnv:
 			// Environment pairs go straight into the process; the temp file is not needed.
 			paths = paths[:len(paths)-1]
@@ -270,12 +271,8 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 			if err != nil {
 				return cleanup, secrets, err
 			}
-			for _, line := range inj.Env {
-				spec.Env = append(spec.Env, line)
-				if _, val, ok := strings.Cut(line, "="); ok {
-					secrets = append(secrets, val)
-				}
-			}
+			spec.Env = append(spec.Env, inj.Env...)
+			secrets = append(secrets, injectedMaskValues(inj)...)
 			for _, file := range inj.Files {
 				ff, err := os.CreateTemp("", "switchtender-cred-*")
 				if err != nil {
@@ -301,6 +298,23 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 		}
 	}
 	return cleanup, secrets, nil
+}
+
+// injectedMaskValues returns the values to redact from run output for one injection: the ones the
+// injector named secret, or, when it named none, every value it produced. An empty Secrets slice
+// is treated the same as a nil one, so an injector that names an empty set masks everything rather
+// than nothing and cannot leak its own values by accident.
+func injectedMaskValues(inj credential.Injection) []string {
+	if len(inj.Secrets) > 0 {
+		return inj.Secrets
+	}
+	var out []string
+	for _, line := range inj.Env {
+		if _, val, ok := strings.Cut(line, "="); ok {
+			out = append(out, val)
+		}
+	}
+	return out
 }
 
 // injectTypedCredential applies a custom-typed credential to the spec, returning the path of any

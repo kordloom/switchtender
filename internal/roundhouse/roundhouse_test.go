@@ -123,3 +123,48 @@ func TestArgsExtraVarsMarshalError(t *testing.T) {
 		t.Fatal("playbookArgs() with unmarshalable extra vars = nil error, want failure")
 	}
 }
+
+func TestArgsVaultPasswords(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// Name says what the case proves.
+		Name string
+		// Vaults are the passwords on the spec.
+		Vaults []VaultPassword
+		// WantArgs are the vault flags expected, in order, before the playbook separator.
+		WantArgs []string
+	}{{ // Test 0: An unlabeled password uses the classic flag.
+		Name:     "unlabeled",
+		Vaults:   []VaultPassword{{Path: "/t/vault-default"}},
+		WantArgs: []string{"--vault-password-file", "/t/vault-default"},
+	}, { // Test 1: A labeled password uses --vault-id so its label selects its secrets.
+		Name:     "labeled",
+		Vaults:   []VaultPassword{{Label: "prod", Path: "/t/vault-prod"}},
+		WantArgs: []string{"--vault-id", "prod@/t/vault-prod"},
+	}, { // Test 2: Several passwords on one run each pass their own flag, in order.
+		Name: "several",
+		Vaults: []VaultPassword{
+			{Label: "prod", Path: "/t/prod"},
+			{Path: "/t/plain"},
+			{Label: "dev", Path: "/t/dev"},
+		},
+		WantArgs: []string{
+			"--vault-id", "prod@/t/prod",
+			"--vault-password-file", "/t/plain",
+			"--vault-id", "dev@/t/dev",
+		},
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			args, err := playbookArgs(Spec{Playbook: "p.yml", VaultPasswords: test.Vaults})
+			if err != nil {
+				t.Fatalf("playbookArgs() error = %v", err)
+			}
+			want := append(append([]string{}, test.WantArgs...), "--", "p.yml")
+			if diff := cmp.Diff(want, args); diff != "" {
+				t.Errorf("args mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}

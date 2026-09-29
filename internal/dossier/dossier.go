@@ -136,7 +136,7 @@ func Collect(ctx context.Context, runs run.Store, audits audit.Store, id string,
 	// The receipt is parsed once and compared as two scalars, rather than formatting a string for
 	// every entry in a chain that can run to millions.
 	launchSeq, launchHash := parseReceipt(r.AuditReceipt)
-	err = audits.ChainScan(ctx, func(e *audit.Entry) error {
+	err = audits.ChainScan(ctx, 0, func(e *audit.Entry) error {
 		scan.Feed(e)
 		anchorScan.Feed(e)
 		in.Head = e

@@ -200,6 +200,12 @@ const CRED_KINDS = {
 		hint: "The service account JSON, written to a private file and bound to " +
 			"GOOGLE_APPLICATION_CREDENTIALS.",
 	},
+	openstack: {
+		placeholder: "auth_url=https://keystone.example:5000/v3\nusername=deploy\npassword=the password\nproject_name=prod",
+		hint: "Fields: auth_url, username, password, and project_name required; user_domain_name, " +
+			"project_domain_name (both default to Default), and region_name optional. Injects the " +
+			"OS_ variables.",
+	},
 	vmware: {
 		placeholder: "host=vcenter.example.com\nuser=administrator@vsphere.local\npassword=the password",
 		hint: "Fields: host, user, and password required, validate_certs optional. Injects the VMWARE_ " +
@@ -296,6 +302,8 @@ function openCredentialEdit(c) {
 	sec.value = "";
 	sec.required = false;
 	document.getElementById("cred-passphrase").value = "";
+	const vaultID = document.getElementById("cred-vault-id");
+	if (vaultID) vaultID.value = c.vault_id || "";
 	syncCredFields();
 	document.getElementById("cred-status").textContent = "";
 	setModalTitle("cred", "Edit credential");
@@ -311,6 +319,18 @@ function toggleCredPassphrase() {
 	const show = kind === "ssh_key" && source === "local";
 	field.hidden = !show;
 	if (!show) document.getElementById("cred-passphrase").value = "";
+	toggleCredVaultID();
+}
+
+// toggleCredVaultID shows the vault label field only for a vault password, the one kind the label
+// means anything to.
+function toggleCredVaultID() {
+	const kind = document.getElementById("cred-kind").value;
+	const field = document.getElementById("cred-vault-id-field");
+	if (!field) return;
+	const show = kind === "vault_password";
+	field.hidden = !show;
+	if (!show) document.getElementById("cred-vault-id").value = "";
 }
 
 // wireCredentialForm hooks the credential dialog up to POST /credentials for a new record and PUT
@@ -354,6 +374,9 @@ function wireCredentialForm() {
 		};
 		const secret = document.getElementById("cred-secret").value;
 		if (secret) payload.secret = secret;
+		if (payload.kind === "vault_password") {
+			payload.vault_id = document.getElementById("cred-vault-id").value.trim();
+		}
 		const passphrase = document.getElementById("cred-passphrase").value;
 		if (passphrase && payload.kind === "ssh_key" && payload.source === "local") {
 			payload.passphrase = passphrase;

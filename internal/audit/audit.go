@@ -63,10 +63,12 @@ type Store interface {
 	List(ctx context.Context, limit int) ([]*Entry, error)
 	// Chain returns every entry in chain order, oldest first, for verification.
 	Chain(ctx context.Context) ([]*Entry, error)
-	// ChainScan streams every entry in chain order, oldest first, calling fn once per entry, so a
-	// long trail can be verified without materializing it. A non-nil error from fn stops the scan
-	// and is returned. The entry passed to fn is fn's to keep.
-	ChainScan(ctx context.Context, fn func(*Entry) error) error
+	// ChainScan streams every entry with a sequence above afterSeq in chain order, oldest first,
+	// calling fn once per entry, so a long trail can be verified without materializing it and an
+	// incremental reader can resume from where it stopped. Zero streams the whole chain. A
+	// non-nil error from fn stops the scan and is returned. The entry passed to fn is fn's to
+	// keep.
+	ChainScan(ctx context.Context, afterSeq int64, fn func(*Entry) error) error
 }
 
 // Receipt returns the entry's redeemable seq:link pair, the value the Audit-Receipt header carries
