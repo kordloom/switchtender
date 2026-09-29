@@ -108,3 +108,4 @@ test("the credential form carries settings as a parsed map and edit prefills the
 	assert.equal(document.getElementById("cred-settings").value, "become_method=sudo\nuser=deploy");
 	net.assertClean();
 });
+

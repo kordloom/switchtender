@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/kordloom/switchtender/internal/event"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // maskToken replaces a redacted secret value in run output.
@@ -337,4 +338,58 @@ func (m *masker) redactValueLocked(v any) any {
 	default:
 		return v
 	}
+}
+
+// runOwnSecrets collects the secret values a run carries in its own request, so the log masker holds
+// back the same values the signed receipt redacts.
+//
+// The masker learned about secrets from two places, the credentials a run resolves and the inventory
+// it targets, and neither sees a value the operator passed straight to the run. An extra var named
+// db_password, a survey field collecting a token, or a bash command with an inline password are all
+// ordinary parts of a request, and the evidence layer already treats them as secret: the spec record
+// is redacted with this same key classifier and assignment scan before it is committed to the chain.
+// The log was not, so a playbook that echoed the variable, a run at -vvv, or a task failing and
+// printing its module arguments wrote the plaintext into the stored log, streamed it to every live
+// viewer, and carried it into every export, while the run's own receipt showed the value redacted.
+// The record and the log now read the same value the same way.
+func runOwnSecrets(vars map[string]any, command string) []string {
+	var out []string
+	var walk func(key string, value any)
+	walk = func(key string, value any) {
+		switch v := value.(type) {
+		case map[string]any:
+			for k, child := range v {
+				walk(k, child)
+			}
+		case []any:
+			for _, child := range v {
+				walk(key, child)
+			}
+		case string:
+			// A value under a secret-sounding name is the secret itself.
+			if util.SecretKey(key) {
+				out = append(out, v)
+				return
+			}
+			// A value under an ordinary name can still carry one inside it: a command line holds
+			// whatever that command line holds, which is the same reading the inventory redactor and
+			// the receipt already apply to free text.
+			_, found := util.RedactAssignments(v, "")
+			for _, a := range found {
+				out = append(out, a.Value)
+			}
+		}
+	}
+	for k, v := range vars {
+		walk(k, v)
+	}
+	// A script's own text is free text for the same reason, and a non-Ansible run carries its secret
+	// there rather than in a variable.
+	if command != "" {
+		_, found := util.RedactAssignments(command, "")
+		for _, a := range found {
+			out = append(out, a.Value)
+		}
+	}
+	return out
 }

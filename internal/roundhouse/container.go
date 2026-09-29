@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -20,6 +21,16 @@ import (
 const (
 	containerKillAttempts = 5
 	containerKillInterval = time.Second
+	// containerStopGrace is how long a canceled container gets to shut down before it is removed by
+	// force. It matches the grace a canceled tool gets on the host, and for the same reason: it is
+	// what lets terraform release its state lock and ansible stop between tasks rather than dying
+	// mid-write. Declared here rather than reused from the host path because that constant is built
+	// only on unix, while a container runs wherever the runtime does.
+	containerStopGrace = 10 * time.Second
+	// containerRemoveWait bounds how long a canceled run waits for its container to actually be gone
+	// before returning. It covers the stop grace plus a few removal attempts, so the ordinary case
+	// completes and a wedged daemon delays rather than hangs.
+	containerRemoveWait = containerStopGrace + containerKillAttempts*containerKillInterval + 5*time.Second
 )
 
 // containerRunner executes a tool inside a container image so each project can pin its own tool
@@ -123,25 +134,49 @@ func (c *containerRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Re
 	// under the daemon, so remove it by name. A cancel during a slow image pull can land before the
 	// daemon has created the container, so retry a few times to catch one that appears just after,
 	// using rm -f so a container in any state, created or running, is both killed and removed.
+	// Two channels rather than one. "killed" says the run finished on its own so the remover need
+	// never start; "removed" says the remover has finished. Closing a single channel in a defer meant
+	// the remover was told to stop the instant cmd.Run returned, and on a cancel that is immediate,
+	// because the client is SIGKILLed by the context: the loop below aborted after its first attempt
+	// and every retry was dead code. A transient failure then left the container running the playbook
+	// against production while the run was recorded as canceled, and --rm erased it afterward.
 	killed := make(chan struct{})
+	removed := make(chan struct{})
 	go func() {
+		defer close(removed)
 		select {
 		case <-ctx.Done():
 		case <-killed:
 			return
 		}
+		// A grace period first, so a tool holding a lock can put it down. The identical run on the
+		// host gets processKillGrace after SIGTERM; in a container it got none, so a canceled
+		// terraform died holding its state lock and every later plan or apply blocked until somebody
+		// ran force-unlock by hand. A stop that fails falls through to the removal below.
+		stop := exec.Command(c.runtime, "stop", "--time",
+			strconv.Itoa(int(containerStopGrace/time.Second)), name)
+		_ = stop.Run()
 		for attempt := 0; attempt < containerKillAttempts; attempt++ {
 			if err := exec.Command(c.runtime, "rm", "-f", name).Run(); err == nil {
 				return
 			}
+			// The wait is not interruptible by the run finishing: the container outlives the client,
+			// so a removal that has not succeeded yet still has to be retried.
+			time.Sleep(containerKillInterval)
+		}
+	}()
+	defer func() {
+		close(killed)
+		// On a cancel the remover is already working, so wait for it rather than returning while a
+		// container may still be running. Bounded, so a wedged daemon delays the result instead of
+		// parking this goroutine forever.
+		if ctx.Err() != nil {
 			select {
-			case <-time.After(containerKillInterval):
-			case <-killed:
-				return
+			case <-removed:
+			case <-time.After(containerRemoveWait):
 			}
 		}
 	}()
-	defer close(killed)
 
 	runErr := cmd.Run()
 	if runErr == nil {

@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -128,5 +130,63 @@ func TestOIDCHandshakeCookieIsTamperEvident(t *testing.T) {
 	}
 	if _, err := o.readHandshake(tampered); err == nil {
 		t.Error("a rewritten handshake cookie was accepted, so its state and nonce are attacker chosen")
+	}
+}
+
+// TestOIDCWillNotAdoptAnAccountAnotherSourceOwns pins that OIDC obeys the same source-ownership rule
+// the other three federated paths do.
+//
+// LDAP, JWT, and SAML all refuse an account another source created, because matching on username
+// alone hands an identity provider whatever account happens to carry that name. OIDC checked only
+// that the provider vouched for the address, which is a different question: it says the address was
+// verified, not that the account behind it was ever an OIDC account. On a store keyed by email, with
+// OIDC running beside a directory, a verified token for an administrator's address was enough to be
+// handed that administrator's account and role.
+func TestOIDCWillNotAdoptAnAccountAnotherSourceOwns(t *testing.T) {
+	t.Parallel()
+	o := oidcGuardAuth(t)
+	ctx := context.Background()
+
+	// An administrator provisioned by the directory, holding the address the token will assert.
+	admin, err := user.New("admin@example.com", "directory-password", user.RoleAdmin)
+	if err != nil {
+		t.Fatalf("user.New() error = %v", err)
+	}
+	admin.Source = "ldap"
+	if err := o.users.Save(ctx, admin); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	// A vouched sign-in for the same address must not become that administrator.
+	if _, err := o.provision(ctx, "admin@example.com", true); err == nil {
+		t.Fatal("a vouched OIDC sign-in adopted an account owned by the directory, taking its role")
+	} else if !errors.Is(err, errForeignAccount) {
+		t.Errorf("refusal did not name the reason: %v", err)
+	}
+
+	// An account OIDC itself provisioned is still its own to sign in as.
+	mine, err := user.New("self@example.com", "sso-password", user.RoleViewer)
+	if err != nil {
+		t.Fatalf("user.New() error = %v", err)
+	}
+	mine.Source = "oidc"
+	if err := o.users.Save(ctx, mine); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if _, err := o.provision(ctx, "self@example.com", true); err != nil {
+		t.Errorf("OIDC refused an account it provisioned itself: %v", err)
+	}
+
+	// An account predating the source field stays adoptable, or an upgrade locks everyone out.
+	legacy, err := user.New("legacy@example.com", "old-password", user.RoleOperator)
+	if err != nil {
+		t.Fatalf("user.New() error = %v", err)
+	}
+	legacy.Source = ""
+	if err := o.users.Save(ctx, legacy); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if _, err := o.provision(ctx, "legacy@example.com", true); err != nil {
+		t.Errorf("OIDC refused an account recorded before the source field existed: %v", err)
 	}
 }

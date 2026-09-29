@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -51,7 +52,7 @@ func TestImportedInventoryCannotWriteItsOwnDirectives(t *testing.T) {
 		t.Run(test.Name, func(t *testing.T) {
 			t.Parallel()
 			plan := &Plan{}
-			got := buildInventoryINI(plan, "prod fleet", test.Hosts, test.Group)
+			got := buildInventoryINI(plan, "prod fleet", test.Hosts, test.Group, nil)
 			if strings.Contains(got, interpreter) {
 				t.Errorf("the generated inventory sets %s, which points every play at an "+
 					"interpreter of the export's choosing on the executor:\n%s", interpreter, got)
@@ -119,7 +120,7 @@ func TestImportedInventoryCannotInjectViaWhitespace(t *testing.T) {
 		t.Run(test.Name, func(t *testing.T) {
 			t.Parallel()
 			plan := &Plan{}
-			got := buildInventoryINI(plan, "prod fleet", test.Hosts, test.Group)
+			got := buildInventoryINI(plan, "prod fleet", test.Hosts, test.Group, nil)
 			for key := range parseINIHostVars(t, got) {
 				if key == "ansible_connection" || key == "ansible_python_interpreter" {
 					t.Errorf("the generated inventory set %q as a live host variable, so the export "+
@@ -146,7 +147,7 @@ func TestLegitimateSpacedValueSurvivesAsOneValue(t *testing.T) {
 	plan := &Plan{}
 	got := buildInventoryINI(plan, "prod", []importHost{
 		{Name: "web1", Variables: map[string]any{"description": "two words"}},
-	}, nil)
+	}, nil, nil)
 
 	want := map[string]string{"description": "two words"}
 	if diff := cmp.Diff(want, parseINIHostVars(t, got)); diff != "" {
@@ -235,7 +236,7 @@ func TestOrdinaryInventoryStillImports(t *testing.T) {
 	got := buildInventoryINI(plan, "prod", []importHost{
 		{Name: "web1", Variables: map[string]any{"ansible_user": "deploy", "port": 22}},
 		{Name: "web2"},
-	}, []importGroup{{Name: "db", Hosts: []importHost{{Name: "db1"}}}})
+	}, []importGroup{{Name: "db", Hosts: []importHost{{Name: "db1"}}}}, nil)
 
 	for _, want := range []string{"web1 ansible_user=deploy port=22", "web2", "[db]", "db1"} {
 		if !strings.Contains(got, want) {
@@ -345,6 +346,98 @@ func TestRRULECannotChooseTheCadence(t *testing.T) {
 		}
 		if got != want {
 			t.Errorf("RRULEToCron(%q) = %q, want %q", rule, got, want)
+		}
+	}
+}
+
+// TestRRULEWeeklyAndDailyKeepTheirDaySet pins that a converted rule fires on the days the rule names
+// and no others.
+//
+// Two shapes widened silently. A weekly rule that names no BYDAY repeats on its DTSTART's weekday,
+// but the empty day set became cron's "*", so a weekly patch or reboot window imported as a nightly
+// one and fired seven times a week. A daily rule that names BYDAY is a weekday-only job, but BYDAY
+// was ignored, so it fired on Saturday and Sunday too. Both reported a clean conversion with no
+// warning, which is the worst way to be wrong: the operator sees a schedule that looks right.
+func TestRRULEWeeklyAndDailyKeepTheirDaySet(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name   string
+		In     string
+		Want   string
+		WantOK bool
+	}{{ // Test 0: A weekly rule with no BYDAY repeats on its DTSTART's weekday. 2026-01-01 is a Thursday.
+		Name: "weekly without byday follows dtstart",
+		In:   "DTSTART:20260101T020000Z RRULE:FREQ=WEEKLY;INTERVAL=1",
+		Want: "0 2 * * 4", WantOK: true,
+	}, { // Test 1: A weekly rule naming its days is unchanged.
+		Name: "weekly with byday",
+		In:   "DTSTART:20260101T020000Z RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=MO",
+		Want: "0 2 * * 1", WantOK: true,
+	}, { // Test 2: A daily rule naming weekdays stays weekday-only.
+		Name: "daily with byday is weekdays only",
+		In:   "DTSTART:20260101T020000Z RRULE:FREQ=DAILY;INTERVAL=1;BYDAY=MO,TU,WE,TH,FR",
+		Want: "0 2 * * 1,2,3,4,5", WantOK: true,
+	}, { // Test 3: A plain daily rule still fires every day.
+		Name: "daily without byday",
+		In:   "DTSTART:20260101T020000Z RRULE:FREQ=DAILY;INTERVAL=1",
+		Want: "0 2 * * *", WantOK: true,
+	}, { // Test 4: A weekly rule with neither BYDAY nor a usable DTSTART is refused, not widened.
+		Name: "weekly with no day and no dtstart is refused",
+		In:   "RRULE:FREQ=WEEKLY;INTERVAL=1",
+		Want: "", WantOK: false,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			got, ok := RRULEToCron(test.In)
+			if ok != test.WantOK {
+				t.Fatalf("RRULEToCron(%q) ok = %v, want %v (got %q)", test.In, ok, test.WantOK, got)
+			}
+			if got != test.Want {
+				t.Errorf("RRULEToCron(%q) = %q, want %q", test.In, got, test.Want)
+			}
+		})
+	}
+}
+
+// TestAWXInventoryKeepsGroupVarsAndChildren pins that an inventory's own variables, a group's
+// variables, and the groups nested under it survive the import.
+//
+// Only host-level variables were modeled, so an export carrying all-group variables, group
+// variables, and a child group imported with all three silently gone and nothing warned. A playbook
+// reading a group variable then ran with the wrong value or none at all, and a play targeting a
+// parent group reached none of the child group's hosts, which is the failure that looks like the
+// migration worked until a run does the wrong thing on real machines.
+func TestAWXInventoryKeepsGroupVarsAndChildren(t *testing.T) {
+	t.Parallel()
+	export := []byte(`{
+	  "inventories": [{
+	    "name": "production",
+	    "variables": {"ntp_server": "10.0.0.1"},
+	    "groups": [
+	      {"name": "web", "hosts": [{"name": "web01"}],
+	       "variables": {"http_port": 8080}, "children": ["web_canary"]},
+	      {"name": "web_canary", "hosts": [{"name": "web99"}]}
+	    ]
+	  }]
+	}`)
+
+	plan, err := FromAWX(export, time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatalf("FromAWX() error = %v", err)
+	}
+	if len(plan.Inventories) != 1 {
+		t.Fatalf("inventories = %d, want 1", len(plan.Inventories))
+	}
+	got := plan.Inventories[0].Content
+
+	for _, want := range []string{
+		"[all:vars]", "ntp_server=10.0.0.1", // the inventory's own variables
+		"[web:vars]", "http_port=8080", // the group's variables
+		"[web:children]", "web_canary", // the nested group
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("imported inventory is missing %q:\n%s", want, got)
 		}
 	}
 }

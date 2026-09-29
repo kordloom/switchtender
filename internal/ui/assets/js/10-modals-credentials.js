@@ -295,6 +295,9 @@ function syncCredFields() {
 function openCredentialEdit(c) {
 	const form = document.getElementById("cred-form");
 	form.dataset.editId = c.id;
+	// What the stored record is, so a submit can tell a real change from leaving the fields alone.
+	form.dataset.editKind = c.kind;
+	form.dataset.editSource = c.source || "local";
 	document.getElementById("cred-name").value = c.name;
 	document.getElementById("cred-kind").value = c.kind;
 	document.getElementById("cred-source").value = c.source || "local";
@@ -369,6 +372,8 @@ function wireCredentialForm() {
 	document.getElementById("cred-kind").addEventListener("change", syncCredFields);
 	const resetToCreate = () => {
 		delete form.dataset.editId;
+		delete form.dataset.editKind;
+		delete form.dataset.editSource;
 		document.getElementById("cred-name").value = "";
 		document.getElementById("cred-source").value = "local";
 		const sec = document.getElementById("cred-secret");
@@ -409,6 +414,18 @@ function wireCredentialForm() {
 		const passphrase = document.getElementById("cred-passphrase").value;
 		if (passphrase && payload.kind === "ssh_key" && payload.source === "local") {
 			payload.passphrase = passphrase;
+		}
+		// A kind or source change re-seals the secret in a different form, so the server only applies
+		// one when a new secret comes with it. The dialog sent the change anyway and reported "Saved",
+		// which is the one answer that is not true: an admin moving a credential from local storage to
+		// a secrets manager, with the secret box left blank as its placeholder invites, was told it had
+		// moved while the plaintext key stayed sealed locally and kept being injected. Say what is
+		// actually required instead of reporting a change that did not happen.
+		if (editId && !secret &&
+			(payload.kind !== form.dataset.editKind || payload.source !== form.dataset.editSource)) {
+			status.textContent = "Changing the kind or source re-seals the secret, so enter the " +
+				"secret again to make that change.";
+			return;
 		}
 		// On edit the form state is the whole truth: sending the parsed map replaces the stored
 		// settings, and an emptied textarea sends {} which clears them. On create an empty map is

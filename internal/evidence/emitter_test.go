@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -228,5 +229,74 @@ func TestPackNameRoundTripsItsPeriod(t *testing.T) {
 	}
 	if _, _, ok := parsePeriod("notes.txt"); ok {
 		t.Error("parsePeriod accepted a file that is not a pack")
+	}
+}
+
+// TestEmitterWritesItsFirstPackFromAnEmptyArchive pins the bootstrap, which nothing exercised.
+//
+// Every other test in this file calls Emit directly, which seeds the archive before the scheduler is
+// ever consulted, so none of them crossed the path a real install takes. From a clean directory
+// resume answered with the caller's own clock and emitDue compared that instant against itself, so
+// the elapsed time was zero on every tick and the first pack was never due. The feature was inert for
+// the life of the install while the server logged that periodic change registers were enabled: no
+// error, no warning, and an empty evidence directory a year later, by which time retention may have
+// trimmed the runs the packs would have covered.
+func TestEmitterWritesItsFirstPackFromAnEmptyArchive(t *testing.T) {
+	t.Parallel()
+	runs, audits, base := seedPeriod(t)
+	dir := t.TempDir()
+
+	// The emitter's own loop reads the clock and reports packs from its goroutine while this test
+	// drives emitDue from another, so both are guarded rather than raced.
+	var mu sync.Mutex
+	clock := base
+	var written []string
+	now := func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		return clock
+	}
+	advance := func(d time.Duration) {
+		mu.Lock()
+		defer mu.Unlock()
+		clock = base.Add(d)
+	}
+	count := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(written)
+	}
+
+	e := NewEmitter(runs, audits, "", dir, time.Hour, nil,
+		WithClock(now),
+		WithNotify(func(p string, _, _ time.Time) {
+			mu.Lock()
+			defer mu.Unlock()
+			written = append(written, p)
+		}))
+	defer e.Close()
+
+	if err := e.Start(); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	// Start stamps the period's origin and runs one immediate check, which must not emit: no cadence
+	// has passed yet.
+	if n := count(); n != 0 {
+		t.Fatalf("a pack was written before a cadence elapsed: %d", n)
+	}
+
+	// Walk past one cadence and ask again, the way the loop's ticker does.
+	advance(90 * time.Minute)
+	e.emitDue()
+	if n := count(); n < 1 {
+		t.Fatalf("packs after one elapsed cadence = %d, want at least 1: an empty archive never "+
+			"becomes due, so the archive stays empty for the life of the install", n)
+	}
+
+	// And it keeps going rather than emitting once and stalling.
+	advance(3 * time.Hour)
+	e.emitDue()
+	if n := count(); n < 2 {
+		t.Errorf("packs after a second cadence = %d, want at least 2", n)
 	}
 }

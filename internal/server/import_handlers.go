@@ -130,6 +130,13 @@ func importHandler(stores importStoresFunc, log *zap.Logger) http.HandlerFunc {
 			}
 			resp.Applied = true
 			resp.Created = created
+			// Apply resolves template inventory names against what is stored and warns about the ones
+			// it could not find, which it does after this response was assembled. Snapshotting the
+			// warnings before the write meant the "no stored inventory is named X, so it is used as a
+			// path on the server's filesystem" line never reached anybody: the caller saw a clean
+			// import and found out only when a run failed on a path that does not exist.
+			resp.Warnings = plan.Warnings
+			resp.SuppressedWarnings = plan.Suppressed()
 		}
 		respondJSON(w, log, http.StatusOK, resp, wantsPretty(r))
 	}

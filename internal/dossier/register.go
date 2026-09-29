@@ -11,6 +11,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // registerTemplateSource is the self-contained HTML change register.
@@ -318,7 +319,14 @@ func changeOf(r *run.Run) string {
 	}
 	what := r.Playbook
 	if what == "" {
-		what = r.Command
+		// A bash, python, powershell, or go run keeps its whole script here, and a script carries
+		// whatever it was written with: an inline password, a connection string, a token on a command
+		// line. The register is the one document built to be mailed to an outside auditor, so it
+		// published them verbatim in the Change column and in the CSV export beside it. The dossier
+		// already runs this same field through the same redactor for the same reason; this is the
+		// derived document that skipped it. Redacted before the truncation, so a secret cannot
+		// survive as a fragment of a cut line.
+		what, _ = util.RedactAssignments(r.Command, "[redacted]")
 	}
 	if len(what) > 80 {
 		what = what[:77] + "..."

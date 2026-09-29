@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,7 +10,12 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/inventory"
+	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/schedule"
+	"github.com/kordloom/switchtender/internal/template"
 )
 
 func TestImportHandler(t *testing.T) {
@@ -96,5 +102,60 @@ func TestImportRundeckFormat(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "rundeck") {
 		t.Errorf("the error does not name rundeck as accepted: %s", rec.Body.String())
+	}
+}
+
+// TestImportApplyReportsWarningsRaisedDuringApply pins that a warning produced while the import is
+// written reaches the caller.
+//
+// The response was assembled from the plan before Apply ran, so every warning Apply raises had
+// nowhere to go. The one that matters is the inventory fallback: a Rundeck import names its target
+// inventory rather than carrying one, and if this install has no inventory by that name the templates
+// are pointed at a path on the server's filesystem instead. The operator saw a clean import reporting
+// objects created, and found out when a run failed on a path that does not exist.
+func TestImportApplyReportsWarningsRaisedDuringApply(t *testing.T) {
+	t.Parallel()
+	export := `
+- name: Nightly
+  sequence:
+    commands:
+      - exec: nightly.sh
+`
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
+		WithProjects(project.NewMemStore()),
+		WithInventories(inventory.NewMemStore()),
+		WithCredentials(credential.NewMemStore(), nil),
+		WithTemplates(template.NewMemStore()),
+		WithSchedules(schedule.NewMemStore()),
+	).Handler()
+
+	// No inventory named prod-hosts is stored, so Apply falls back to treating it as a path.
+	req := httptest.NewRequest(http.MethodPost,
+		"/v1/import/rundeck?apply=true&inventory=prod-hosts", strings.NewReader(export))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Applied  bool     `json:"applied"`
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.Applied {
+		t.Fatalf("import did not apply: %s", rec.Body.String())
+	}
+	var found bool
+	for _, w := range resp.Warnings {
+		if strings.Contains(w, "prod-hosts") && strings.Contains(w, "filesystem") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the apply-time inventory fallback was not reported to the caller, warnings = %v",
+			resp.Warnings)
 	}
 }

@@ -43,7 +43,25 @@ func Blocked(address string) error {
 	if ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
 		return fmt.Errorf("resolved address %q is not allowed", host)
 	}
+	// Not every cloud puts its metadata service on a link-local address. Alibaba answers on
+	// 100.100.100.200 and AWS serves an IPv6 endpoint at fd00:ec2::254, neither of which is
+	// link-local, so both were reachable on those platforms while the package documented blocking
+	// the metadata endpoint. They are named individually rather than by their surrounding ranges
+	// because 100.64.0.0/10 is ordinary carrier space and fc00::/7 is the IPv6 equivalent of the
+	// private ranges this function deliberately allows.
+	for _, meta := range metadataIPs {
+		if ip.Equal(meta) {
+			return fmt.Errorf("resolved address %q is a cloud metadata endpoint", host)
+		}
+	}
 	return nil
+}
+
+// metadataIPs are the cloud metadata endpoints that sit outside link-local space, which the
+// link-local test above does not reach.
+var metadataIPs = []net.IP{
+	net.ParseIP("100.100.100.200"),
+	net.ParseIP("fd00:ec2::254"),
 }
 
 // Control is the dialer hook that applies Blocked, suitable for net.Dialer.Control.
@@ -105,6 +123,19 @@ func BlockedOffHost(address string) error {
 // ControlOffHost is the dialer hook that applies [BlockedOffHost].
 func ControlOffHost(_, address string, _ syscall.RawConn) error {
 	return BlockedOffHost(address)
+}
+
+// OffHostTransport returns a transport that refuses an unsafe address and this server itself at the
+// dial, for a caller that supplies its own client. A git remote needs one: the library dials on its
+// own schedule and takes a transport rather than a client with a redirect policy.
+func OffHostTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.DialContext = (&net.Dialer{
+		Timeout:   dialTimeout,
+		KeepAlive: dialTimeout,
+		Control:   ControlOffHost,
+	}).DialContext
+	return t
 }
 
 // OffHostClient returns an HTTP client for a caller-supplied URL: it refuses an unsafe address,

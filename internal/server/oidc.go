@@ -250,6 +250,22 @@ func (o *OIDCAuth) provision(ctx context.Context, username string, vouched bool)
 		if !vouched {
 			return nil, errOIDCUnverified
 		}
+		// An account another source owns is not this one's to sign in as. Vouching says the provider
+		// checked the address; it says nothing about whether the account behind that name was
+		// created by LDAP, a JWT issuer, SAML, or by hand. Without this an operator running OIDC
+		// beside one of those, on a store keyed by email, let a token asserting a verified address
+		// take over the account of the administrator who holds it at the other source, along with
+		// its role. The other three federated paths already refuse it in provisionFromDirectory,
+		// and this is the same rule on the fourth.
+		//
+		// An account with no source predates the field and stays adoptable, as it does there, since
+		// refusing it would lock out every account provisioned before the field existed.
+		switch u.Source {
+		case "oidc", "":
+		default:
+			return nil, fmt.Errorf("%w: account %q belongs to %q, not %q", errForeignAccount,
+				username, accountSource(u.Source), "oidc")
+		}
 		return u, nil
 	}
 	if !errors.Is(err, user.ErrNotFound) {

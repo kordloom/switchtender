@@ -59,6 +59,8 @@ type awxInventory struct {
 	Hosts []awxHost `json:"hosts"`
 	// Groups are the named host groups.
 	Groups []awxGroup `json:"groups"`
+	// Variables holds inventory-wide variables as a map or a YAML string, which become [all:vars].
+	Variables json.RawMessage `json:"variables"`
 	// Related carries dynamic inventory sources when the export nests them under the inventory.
 	Related *awxInventoryRelated `json:"related"`
 }
@@ -134,6 +136,10 @@ type awxGroup struct {
 	Hosts []awxHost `json:"hosts"`
 	// Related carries the group's members when the export nests them, which awxkit does.
 	Related *awxGroupRelated `json:"related"`
+	// Variables holds the group's variables as a map or a YAML string, which become [name:vars].
+	Variables json.RawMessage `json:"variables"`
+	// Children names the groups nested under this one, which become [name:children].
+	Children []string `json:"children"`
 }
 
 // awxGroupRelated holds a group's nested related assets.
@@ -358,7 +364,8 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 		}
 		obj := &inventory.Inventory{
 			ID: inventory.NewID(), Name: inv.Name,
-			Content:   buildInventoryINI(plan, inv.Name, convertHosts(hosts), convertGroups(groups)),
+			Content: buildInventoryINI(plan, inv.Name, convertHosts(hosts), convertGroups(groups),
+				decodeVars(inv.Variables)),
 			CreatedAt: now,
 		}
 		if _, dup := inventoryIDs[inv.Name]; dup {
@@ -628,7 +635,10 @@ func convertHosts(hosts []awxHost) []importHost {
 func convertGroups(groups []awxGroup) []importGroup {
 	out := make([]importGroup, 0, len(groups))
 	for _, g := range groups {
-		out = append(out, importGroup{Name: g.Name, Hosts: convertHosts(g.hosts())})
+		out = append(out, importGroup{
+			Name: g.Name, Hosts: convertHosts(g.hosts()),
+			Variables: decodeVars(g.Variables), Children: g.Children,
+		})
 	}
 	return out
 }

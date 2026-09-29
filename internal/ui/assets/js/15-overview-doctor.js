@@ -92,7 +92,10 @@ async function loadOverview() {
 		}
 		const runs = runsRes.status === "fulfilled" ? (runsRes.value.runs || []) : [];
 		const hosts = fleetRes.status === "fulfilled" ? (fleetRes.value.hosts || []) : [];
-		renderOverviewMetrics(runs, hosts);
+		// The headline cards describe the whole install, so they are drawn from the summary the
+		// response carries rather than counted off the page of runs beside it.
+		const summary = runsRes.status === "fulfilled" ? (runsRes.value.summary || null) : null;
+		renderOverviewMetrics(runs, hosts, summary);
 		renderActivity(runs);
 		renderRecentRuns(runs.slice(0, 8));
 		renderFleetSnapshot(hosts);
@@ -105,17 +108,30 @@ async function loadOverview() {
 }
 
 // renderOverviewMetrics fills the headline metric strip from the run and fleet data.
-function renderOverviewMetrics(runs, hosts) {
-	let succeeded = 0;
-	let failed = 0;
-	for (const r of runs) {
-		if (r.status === "succeeded") succeeded++;
-		else if (r.status === "failed") failed++;
+function renderOverviewMetrics(runs, hosts, summary) {
+	// The cards say "Total runs", so they have to mean it. Counting the page the API returned made
+	// them describe the newest page instead: on any install past that page size the total was flatly
+	// wrong and the success rate was computed over a sample, while the correct install-wide numbers
+	// sat unused in the same response. The page is still the fallback for a server that sends no
+	// summary, which is the only case that ever needed counting.
+	let total, succeeded, failed;
+	if (summary && typeof summary.total === "number") {
+		total = summary.total;
+		succeeded = summary.succeeded || 0;
+		failed = summary.failed || 0;
+	} else {
+		total = runs.length;
+		succeeded = 0;
+		failed = 0;
+		for (const r of runs) {
+			if (r.status === "succeeded") succeeded++;
+			else if (r.status === "failed") failed++;
+		}
 	}
-	const rate = runs.length ? Math.round((succeeded / runs.length) * 100) + "%" : "-";
+	const rate = total ? Math.round((succeeded / total) * 100) + "%" : "-";
 	const el = document.getElementById("ov-metrics");
 	el.innerHTML = "";
-	el.appendChild(statCard(runs.length, "Total runs", ""));
+	el.appendChild(statCard(total, "Total runs", ""));
 	el.appendChild(statCard(rate, "Success rate", ""));
 	el.appendChild(statCard(failed, "Failed", failed ? "failed" : ""));
 	el.appendChild(statCard(hosts.length, "Hosts tracked", ""));

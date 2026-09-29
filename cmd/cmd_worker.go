@@ -16,6 +16,7 @@ import (
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/extplugin"
 	"github.com/kordloom/switchtender/internal/logutil"
+	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/relay"
 	"github.com/kordloom/switchtender/internal/run"
@@ -25,6 +26,16 @@ import (
 // path calls are short: claim, heartbeat, save, and the log and event appends, none of them a long
 // poll, so a modest timeout keeps a stalled control node from wedging the worker.
 const relayClientTimeout = 30 * time.Second
+
+// workerPolicyFile names a YAML file holding the approval policies, the same source of truth the
+// control node reads with its own --policy-file.
+//
+// The plan-content gate is enforced by whichever process claims the run, and a worker read the
+// policies only from the database. An install that pins its policies to a file leaves that table
+// empty, so a worker that won the claim race applied a destroy with no plan, no hold, and no error,
+// while the same run was held whenever the control node claimed it instead. Enforcement of the
+// product's central control became a coin flip decided by which process happened to be free.
+var workerPolicyFile string
 
 // workerDB holds the value of the worker --db flag.
 var workerDB string
@@ -92,6 +103,11 @@ func init() {
 	workerCmd.Flags().DurationVar(&workerRunTimeout, "run-timeout", 0,
 		"Default cap on how long a run may execute before it is canceled and failed, for example 1h. "+
 			"A run may set a shorter timeout. Zero leaves runs uncapped.")
+	workerCmd.Flags().StringVar(&workerPolicyFile, "policy-file", "",
+		"YAML file holding the approval policies, the same file the control node reads. Set it "+
+			"wherever the control node runs with one: on a file-pinned install the policy table is "+
+			"empty, so without this a worker enforces nothing and the gate depends on which process "+
+			"claims the run.")
 	workerCmd.Flags().StringVar(&workerPluginsDir, "plugins-dir", "",
 		"Directory of extension plugin binaries to load at startup. Empty loads none. Also SWITCHTENDER_PLUGINS_DIR.")
 	registerContainerFlags(workerCmd)
@@ -173,6 +189,18 @@ func workerStore(log *zap.Logger) (run.Store, []dispatch.Option, func(), error) 
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("open store: %w", err)
 	}
+	// The policies come from the file when one is configured, exactly as the control node reads them,
+	// so both processes weigh the same rules. A malformed file stops the worker rather than letting it
+	// start enforcing nothing, which is the choice serve makes for the same reason.
+	policies := bundle.Policies()
+	if workerPolicyFile != "" {
+		filePolicies, perr := policy.NewFileStore(workerPolicyFile)
+		if perr != nil {
+			_ = bundle.Close()
+			return nil, nil, nil, perr
+		}
+		policies = filePolicies
+	}
 	sealer := newSealerFromEnv(log)
 	syncer, err := project.NewSyncer(projectCacheDir(), galaxySyncerOpts()...)
 	if err != nil {
@@ -193,8 +221,8 @@ func workerStore(log *zap.Logger) (run.Store, []dispatch.Option, func(), error) 
 		// on; SQLite is a single-process deployment by design.
 		dispatch.WithAudits(bundle.Audits()),
 		// The plan-content gate is enforced by whichever process claims the run, so a worker needs
-		// the policies as much as the control node does.
-		dispatch.WithPolicies(bundle.Policies()),
+		// the policies as much as the control node does, and from the same place it does.
+		dispatch.WithPolicies(policies),
 	)
 	return bundle.Runs(), opts, func() { _ = bundle.Close() }, nil
 }

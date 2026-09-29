@@ -722,7 +722,14 @@ func TestRunStreamDrainsStore(t *testing.T) {
 	// the deadline passes makes the blocked read fail, which turns a hung test into a reported one.
 	// Left unbounded this ran until the package timeout and took the whole suite down with it.
 	reader := bufio.NewReader(res.Body)
-	deadline := time.Now().Add(5 * time.Second)
+	// What is being asserted is that store rows reach the stream at all, not that they arrive within
+	// any particular second. The drain ticks once a second, and under the full suite with the race
+	// detector on and a database engine running beside it, five seconds is a handful of ticks on a
+	// saturated machine: this failed there while passing ten times out of ten on its own, which is a
+	// flaky test rather than a slow stream. The bound is generous enough to survive a loaded run and
+	// still far short of the reader timeout below, so a stream that genuinely never delivers is still
+	// reported here rather than hanging.
+	deadline := time.Now().Add(20 * time.Second)
 	// Well above the five second deadline that is the real assertion. This only has to stop a
 	// stream that never delivers from hanging the whole suite, which it used to do for fifteen
 	// minutes. Set close to the deadline it fired on a stream that was merely slow, because the

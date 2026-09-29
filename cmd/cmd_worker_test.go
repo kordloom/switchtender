@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -45,5 +46,29 @@ func TestWorkerSourceRedactsDSNPassword(t *testing.T) {
 				t.Errorf("workerSource() mismatch (-want +got):\n%s", diff)
 			}
 		})
+	}
+}
+
+// TestWorkerReadsPoliciesFromTheSameFileTheControlNodeDoes pins that a worker can be pointed at the
+// policy file, so the plan-content gate does not depend on which process claims the run.
+//
+// The gate is enforced wherever the run executes, and a worker read the policies only from the
+// database. An install that pins its policies to a file leaves that table empty, so a worker that won
+// the claim race applied a destroy with no plan, no hold, and no error, while the identical run was
+// held whenever the control node claimed it. Enforcement of the product's central control was a coin
+// flip decided by which process happened to be free, contradicting the two-process topology the
+// reliability documentation describes.
+func TestWorkerReadsPoliciesFromTheSameFileTheControlNodeDoes(t *testing.T) {
+	flag := workerCmd.Flags().Lookup("policy-file")
+	if flag == nil {
+		t.Fatal("worker has no --policy-file, so a file-pinned install cannot give it the rules and " +
+			"the gate applies only when the control node claims the run")
+	}
+	if !strings.Contains(flag.Usage, "policies") {
+		t.Errorf("--policy-file usage does not say what it is for: %q", flag.Usage)
+	}
+	// The control node's own flag is the thing it has to agree with.
+	if serveCmd.Flags().Lookup("policy-file") == nil {
+		t.Fatal("serve has no --policy-file, so this test is pinned to the wrong name")
 	}
 }

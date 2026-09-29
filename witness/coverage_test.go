@@ -113,3 +113,53 @@ func TestAFrozenFeedIsReported(t *testing.T) {
 		t.Errorf("a feed that advanced produced %s, want nothing", kinds(findings))
 	}
 }
+
+// TestAFrozenFeedIsReportedWhenTheWitnessPolls pins the stalled check under the way a witness is
+// actually run: on a loop, feeding each checkpoint into the next.
+//
+// The existing frozen-feed test makes one twenty-six hour leap from the first observation, which
+// passes whether or not the elapsed time accumulates. A real witness polls every few minutes and
+// carries its checkpoint forward, and there the observation time was re-stamped on every poll that
+// found the feed unmoved, so the comparison measured the gap between two consecutive polls rather
+// than how long the head had stood still. That is always far below the staleness bound, so a frozen
+// chain, a stopped beat writer, or a server replaying one fixed answer was signed as healthy for as
+// long as anyone cared to look.
+func TestAFrozenFeedIsReportedWhenTheWitnessPolls(t *testing.T) {
+	t.Parallel()
+	start := time.Now().Add(-72 * time.Hour)
+	head := strings.Repeat("b", 64)
+	beats := []witness.Beat{beat(7, 42, head, start)}
+	const server = "https://switchtender.example.com"
+
+	cp, findings, err := witness.Check(nil, server, beats, start)
+	if err != nil {
+		t.Fatalf("Check() error = %v", err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("the first watch produced %s, want nothing", kinds(findings))
+	}
+
+	// Poll every five minutes for two days against a feed that never moves, carrying the checkpoint
+	// forward exactly as the witness loop does.
+	var sawStalled bool
+	at := start
+	for i := 0; i < 576 && !sawStalled; i++ {
+		at = at.Add(5 * time.Minute)
+		cp, findings, err = witness.Check(cp, server, beats, at)
+		if err != nil {
+			t.Fatalf("Check() at %v error = %v", at.Sub(start), err)
+		}
+		if strings.Contains(kinds(findings), "stalled_feed") {
+			sawStalled = true
+		}
+	}
+	if !sawStalled {
+		t.Errorf("a feed frozen for %v across polling never raised stalled_feed, so a frozen or "+
+			"replayed feed is attested healthy", at.Sub(start))
+	}
+	// And it fired once the feed had genuinely been still longer than the bound, not before.
+	if elapsed := at.Sub(start); elapsed < witness.StaleAfter {
+		t.Errorf("stalled_feed fired after only %v, under the %v bound: a quiet chain would be "+
+			"reported as frozen", elapsed, witness.StaleAfter)
+	}
+}

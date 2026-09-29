@@ -60,3 +60,43 @@ func TestAssessRisk(t *testing.T) {
 		})
 	}
 }
+
+// TestRiskGradesAWholeInventoryLimitAsWide pins that writing the target out does not grade a run down.
+//
+// The blast radius test read whether a limit was set, not what it selected, so "--limit all" -- the
+// same instruction as no limit at all -- came back low risk with "no elevated signal" and slipped
+// under every policy keyed on a minimum risk. Naming the target explicitly is an ordinary habit, so
+// the widest run a person can ask for was the one least likely to be held.
+func TestRiskGradesAWholeInventoryLimitAsWide(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name  string
+		Limit string
+		Wide  bool
+	}{
+		{Name: "no limit", Limit: "", Wide: true},
+		{Name: "the word all", Limit: "all", Wide: true},
+		{Name: "the star form", Limit: "*", Wide: true},
+		{Name: "colon separated all", Limit: "all:all", Wide: true},
+		{Name: "comma separated all", Limit: "all,all", Wide: true},
+		{Name: "star pair", Limit: "*:*", Wide: true},
+		{Name: "all with an exclusion", Limit: "all:!nogroup", Wide: true},
+		{Name: "only an exclusion still starts from everything", Limit: "!web", Wide: true},
+		{Name: "uppercase", Limit: "ALL", Wide: true},
+		{Name: "a real group narrows", Limit: "web", Wide: false},
+		{Name: "several real groups narrow", Limit: "web:db", Wide: false},
+		{Name: "a pattern narrows", Limit: "web-*", Wide: false},
+		{Name: "all beside a real group narrows to that group", Limit: "all:&web", Wide: true},
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			got := AssessRisk(&Run{Tool: ToolAnsible, Playbook: "site.yml", Limit: test.Limit})
+			wide := got.Level != RiskLow
+			if wide != test.Wide {
+				t.Errorf("AssessRisk(limit=%q) level = %q (wide=%v), want wide=%v; reasons %v",
+					test.Limit, got.Level, wide, test.Wide, got.Reasons)
+			}
+		})
+	}
+}

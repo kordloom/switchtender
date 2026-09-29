@@ -133,9 +133,19 @@ func runImport(cmd *cobra.Command, path string, mapper mapFunc) error {
 		fmt.Fprintln(os.Stderr, "\nRun again with --apply to create these objects.")
 		return nil
 	}
+	before := len(plan.Warnings)
 	created, err := applyPlan(cmd.Context(), plan)
 	if err != nil {
 		return err
+	}
+	// Apply raises its own warnings, most importantly that a template names an inventory this install
+	// does not have and will be treated as a filesystem path. The plan was printed before apply ran,
+	// so those lines had nowhere to appear and the operator learned about it from a failed run.
+	if len(plan.Warnings) > before {
+		fmt.Fprintf(os.Stderr, "\n  Warnings from the import (%d):\n", len(plan.Warnings)-before)
+		for _, w := range plan.Warnings[before:] {
+			fmt.Fprintf(os.Stderr, "    - %s\n", w)
+		}
 	}
 	fmt.Fprintf(os.Stderr,
 		"\nCreated %d objects. Re-enter credential secrets before running templates that need them.\n",

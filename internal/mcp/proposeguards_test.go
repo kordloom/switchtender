@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // launchRecorder answers a template read and a launch, recording the launch body so a test can see
@@ -162,5 +164,30 @@ func TestUnknownToolArgumentIsRefused(t *testing.T) {
 	}
 	if rec.launched {
 		t.Error("a run executed for real from a call that meant to preview")
+	}
+}
+
+// TestMCPRefusesEveryWideningLimitSpelling pins that the guard reads what a pattern selects, not which
+// of four literal strings it happens to be.
+//
+// The refusal was a map of "all", "*", "all:*" and "*:all", so an agent reached every host in the
+// inventory by writing a fifth spelling. Worse than widening: the risk grade is computed partly from
+// how wide a run reaches, so the widest possible run also graded itself down and fell under the
+// threshold that would otherwise have held it for approval. Both sides now ask the same function.
+func TestMCPRefusesEveryWideningLimitSpelling(t *testing.T) {
+	t.Parallel()
+	wide := []string{"all", "*", "all:*", "*:all", "all:all", "all,all", "*:*", "all:!nogroup", "ALL"}
+	for _, limit := range wide {
+		if err := checkLimit(context.Background(), nil, "tpl_1", limit); err == nil {
+			t.Errorf("checkLimit(%q) allowed a pattern that reaches every host", limit)
+		}
+	}
+	// Narrowing is the useful case and must not be refused. checkLimit goes on to fetch the template
+	// once a pattern passes this gate, so the classifier is asked directly rather than driving the
+	// whole call with no server behind it.
+	for _, limit := range []string{"web", "web:db", "web-*"} {
+		if run.WholeInventoryLimit(limit) {
+			t.Errorf("limit %q was read as reaching every host, so a narrowing pattern is refused", limit)
+		}
 	}
 }

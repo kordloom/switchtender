@@ -36,17 +36,31 @@ func runLoomSealVerify(t *testing.T, signed []byte) []byte {
 	return out
 }
 
+// loomsealRepoEnv points the cross-check at a loomseal checkout other than the sibling directory.
+const loomsealRepoEnv = "SWITCHTENDER_LOOMSEAL_REPO"
+
 // loomsealRepo locates the loomseal checkout beside this one, skipping the test when it is absent so
 // the suite still runs for someone who cloned only this repository.
+//
+// A sibling checkout is the ordinary case but not the only one. The checkout has to sit at the exact
+// tag go.mod names for the cross-check to prove anything, so a developer whose loomseal work is ahead
+// of the released tag could not run this suite at all: the cross-verification stopped being exercised
+// on the machine most likely to be changing the format, which is the one place it matters most.
+// Pointing this at a worktree parked on the pinned tag keeps the check runnable while the sibling
+// moves ahead.
 func loomsealRepo(t *testing.T) string {
 	t.Helper()
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
+	repo := os.Getenv(loomsealRepoEnv)
+	if repo == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			t.Fatalf("getwd: %v", err)
+		}
+		repo = filepath.Join(wd, "..", "..", "..", "loomseal")
 	}
-	repo := filepath.Join(wd, "..", "..", "..", "loomseal")
 	if _, err := os.Stat(filepath.Join(repo, "go.mod")); err != nil {
-		t.Skip("loomseal checkout not found beside this repository")
+		t.Skip("loomseal checkout not found beside this repository; set " + loomsealRepoEnv +
+			" to point at one")
 	}
 	requireCheckoutMatchesModule(t, repo)
 	return repo

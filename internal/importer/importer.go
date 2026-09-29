@@ -223,7 +223,8 @@ func quoteINIValue(v string) string {
 //
 // Anything that cannot be written as itself is dropped and reported, because an inventory is the
 // list of machines a play will reach and a silently altered one is worse than a refused import.
-func buildInventoryINI(plan *Plan, name string, hosts []importHost, groups []importGroup) string {
+func buildInventoryINI(plan *Plan, name string, hosts []importHost, groups []importGroup,
+	allVars map[string]any) string {
 	var b strings.Builder
 	if len(hosts) > 0 {
 		for _, h := range hosts {
@@ -243,7 +244,15 @@ func buildInventoryINI(plan *Plan, name string, hosts []importHost, groups []imp
 			b.WriteString(hostLine(plan, name, h))
 		}
 		b.WriteString("\n")
+		// A group's own variables and the groups nested under it are part of what the inventory
+		// means. Dropping them left a playbook reading a group variable running with the wrong value
+		// and a play targeting a parent group reaching none of its children's hosts, both silently.
+		b.WriteString(varsSection(plan, name, g.Name+":vars", g.Variables))
+		b.WriteString(childrenSection(plan, name, g))
 	}
+	// Inventory-wide variables belong to every host in it, so they are written last, where a reader
+	// expects them and where they cannot be mistaken for a group's.
+	b.WriteString(varsSection(plan, name, "all:vars", allVars))
 	return strings.TrimRight(b.String(), "\n") + "\n"
 }
 
@@ -301,6 +310,12 @@ type importGroup struct {
 	Name string
 	// Hosts are the group's members.
 	Hosts []importHost
+	// Variables are the group's own variables, rendered as a [name:vars] section. A playbook reading
+	// a group variable gets the wrong value, or none, when these are dropped.
+	Variables map[string]any
+	// Children names the groups nested under this one, rendered as a [name:children] section. A play
+	// targeting a parent group reaches no child host when the relationship is dropped.
+	Children []string
 }
 
 // mapSurveyType converts an AWX survey field type to a SwitchTender field type, reporting whether the
@@ -531,4 +546,55 @@ func choicesFrom(v any) []string {
 	default:
 		return nil
 	}
+}
+
+// varsSection renders one INI variable section, or nothing when there are no variables. A name or
+// key an inventory parser would read as something else is dropped and reported, the same rule the
+// host and group lines already apply.
+func varsSection(plan *Plan, inv, section string, vars map[string]any) string {
+	if len(vars) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(vars))
+	for k := range vars {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	fmt.Fprintf(&b, "[%s]\n", section)
+	for _, k := range keys {
+		if !safeININame(k) {
+			plan.warn("inventory %q: variable %q in [%s] was dropped because its name holds "+
+				"whitespace or an inventory metacharacter", inv, oneLine(k), section)
+			continue
+		}
+		value, ok := renderINIValue(jsonScalarString(vars[k]))
+		if !ok {
+			plan.warn("inventory %q: variable %q in [%s] was dropped because its value carries a "+
+				"control character, which cannot be written on a single inventory line", inv, k, section)
+			continue
+		}
+		fmt.Fprintf(&b, "%s=%s\n", k, value)
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// childrenSection renders a group's nested groups, or nothing when it has none.
+func childrenSection(plan *Plan, inv string, g importGroup) string {
+	if len(g.Children) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "[%s:children]\n", g.Name)
+	for _, child := range g.Children {
+		if !safeININame(child) {
+			plan.warn("inventory %q: child group %q of %q was dropped because its name holds "+
+				"whitespace or an inventory metacharacter", inv, oneLine(child), g.Name)
+			continue
+		}
+		b.WriteString(child + "\n")
+	}
+	b.WriteString("\n")
+	return b.String()
 }

@@ -29,7 +29,7 @@ func TestProposedApplyCarriesItsOriginAndItsCommit(t *testing.T) {
 	}
 	plan := &run.Run{
 		ID: "run_plan", Tool: run.ToolTerraform, Command: "infra/prod", DryRun: true,
-		Actor: "casey", ActorType: "session", CommitSHA: "abc123def456",
+		Actor: "casey", ActorType: "session", ActorUserID: "usr_casey", CommitSHA: "abc123def456",
 		OrgID: "org_1", ProjectID: "prj_1",
 	}
 
@@ -44,6 +44,16 @@ func TestProposedApplyCarriesItsOriginAndItsCommit(t *testing.T) {
 	}
 	if proposal.ActorType != "session" {
 		t.Errorf("proposed apply actor type = %q, want session", proposal.ActorType)
+	}
+	// And the account behind the name. Separation of duties compares accounts and falls back to the
+	// display name only when one side has none, so an apply carrying a name alone let the person who
+	// submitted the plan release the apply that destroys the infrastructure: the fallback compared a
+	// browser session's username against the plan's credential label, which never match. This is the
+	// highest blast radius run the gate governs.
+	if proposal.ActorUserID != "usr_casey" {
+		t.Errorf("proposed apply ActorUserID = %q, want usr_casey: without it the distinct-approver "+
+			"rule cannot compare accounts and the requester can release their own destroy",
+			proposal.ActorUserID)
 	}
 	if proposal.PinnedCommit != plan.CommitSHA {
 		t.Errorf("proposed apply PinnedCommit = %q, want the plan's commit %q: the approval of one "+
