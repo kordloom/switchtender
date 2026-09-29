@@ -131,7 +131,7 @@ func buildFleetSnapshot(ctx context.Context, store run.Store) string {
 		}
 	}
 
-	if runs, err := store.ListPage(ctx, "", askSnapshotRuns, 0); err == nil && len(runs) > 0 {
+	if runs, err := store.ListPage(ctx, run.ListFilter{}, askSnapshotRuns, 0); err == nil && len(runs) > 0 {
 		b.WriteString("\nRecent runs, newest first:\n")
 		for _, r := range runs {
 			target := r.Playbook

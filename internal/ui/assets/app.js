@@ -1,5 +1,39 @@
 "use strict";
 
+// A stored flat theme is stamped before anything renders, so a forced theme never flashes the
+// signature default. The script sits at the end of body, so document.body exists.
+(function () {
+	let theme = null;
+	try { theme = localStorage.getItem("st_theme"); } catch { /* storage may be unavailable */ }
+	if (theme === "light" || theme === "dark") document.body.dataset.theme = theme;
+	syncBrandLogos();
+})();
+
+// syncBrandLogos points every brand picture at artwork the active theme can show: a forced light
+// theme needs the ink logo and a forced dark theme the light one. A forced theme removes the
+// media-driven source and sets the image directly, since Safari does not reliably re-evaluate a
+// picture whose source attributes change; the default restores the source to follow the OS.
+function syncBrandLogos() {
+	const theme = document.body.dataset.theme;
+	for (const pic of document.querySelectorAll(".brand picture, .side-brand picture")) {
+		const img = pic.querySelector("img");
+		if (!img) continue;
+		const source = pic.querySelector("source");
+		// The removed source is kept on the picture so the default theme can restore it.
+		if (source && !pic.stSource) pic.stSource = source;
+		if (theme === "light" || theme === "dark") {
+			if (source) source.remove();
+			const want = theme === "dark"
+				? "/ui/assets/logo-train-tracks-dark.png"
+				: "/ui/assets/logo-train-tracks.png";
+			if (img.getAttribute("src") !== want) img.src = want;
+		} else if (pic.stSource && !source) {
+			pic.insertBefore(pic.stSource, img);
+			img.src = "/ui/assets/logo-train-tracks.png";
+		}
+	}
+}
+
 // API is the versioned base path every server call is made under. Infrastructure routes such as
 // the UI shell and the sign-on redirect are served unversioned and are not reached through this.
 const API = "/v1";
@@ -64,6 +98,7 @@ const NAV_ICONS = {
 	migrate: '<path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
 	credentials: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
 	users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+	audit: '<path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="m9 14 2 2 4-4"/>',
 	policies: '<path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><polyline points="9 12 11 14 15 10"/>',
 	docs: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
 };
@@ -73,6 +108,19 @@ const NAV_ICONS = {
 function mountTopbar() {
 	const bar = document.querySelector(".topbar");
 	if (!bar || bar.querySelector(".topbar-links")) return;
+	if (document.body.dataset.page !== "login" && !bar.querySelector(".search-btn")) {
+		const search = document.createElement("button");
+		search.type = "button";
+		search.className = "search-btn";
+		const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+		search.innerHTML = svgIcon('<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>') +
+			"<span>Search</span>" + '<span class="kbd">' + (mac ? "⌘K" : "Ctrl K") + "</span>";
+		search.setAttribute("aria-label", "Search pages and actions");
+		search.setAttribute("aria-haspopup", "dialog");
+		search.addEventListener("click", openPalette);
+		const brand = bar.querySelector(".brand");
+		if (brand) brand.after(search); else bar.appendChild(search);
+	}
 	const nav = document.createElement("nav");
 	nav.className = "topbar-links";
 	if (document.body.dataset.page !== "login") {
@@ -103,6 +151,43 @@ function mountTopbar() {
 	gh.innerHTML = '<svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.02-1.49-2.01.44-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 012-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>';
 	nav.appendChild(gh);
 	bar.appendChild(nav);
+}
+
+// PAGE_DOCS maps each page to its most relevant guide, linked from the page header.
+const PAGE_DOCS = {
+	overview: { slug: "quickstart", label: "Quickstart" },
+	runs: { slug: "tutorial-run-a-job", label: "Run a job" },
+	fleet: { slug: "reliability", label: "Reliability" },
+	drift: { slug: "drift", label: "Drift detection" },
+	tasks: { slug: "concepts", label: "Concepts" },
+	workers: { slug: "reliability", label: "Reliability" },
+	projects: { slug: "concepts", label: "Concepts" },
+	inventories: { slug: "concepts", label: "Concepts" },
+	sources: { slug: "concepts", label: "Concepts" },
+	jobtemplates: { slug: "tutorial-save-a-template", label: "Save a template" },
+	workflows: { slug: "concepts", label: "Concepts" },
+	schedules: { slug: "tutorial-schedule-a-job", label: "Schedule a job" },
+	migrate: { slug: "tutorial-migrate", label: "Migrate your setup" },
+	credentials: { slug: "tutorial-set-a-secret", label: "Set a secret" },
+	users: { slug: "configuration", label: "Configuration" },
+	audit: { slug: "features", label: "Features" },
+	policies: { slug: "features", label: "Features" },
+};
+
+// mountPageDocs adds a small guide link to the page header, so every page points at its docs.
+function mountPageDocs() {
+	const ref = PAGE_DOCS[document.body.dataset.page];
+	const head = document.querySelector(".page-head");
+	if (!ref || !head) return;
+	const a = document.createElement("a");
+	a.className = "docs-link";
+	a.href = "/ui/docs/" + ref.slug;
+	a.dataset.tip = "Open the " + ref.label + " guide";
+	a.innerHTML = svgIcon(NAV_ICONS.docs);
+	a.appendChild(document.createTextNode(ref.label));
+	const actions = head.querySelector(".head-actions");
+	if (actions) actions.appendChild(a);
+	else head.appendChild(a);
 }
 
 // LIST_PAGES are the pages whose main table is a searchable list.
@@ -152,9 +237,9 @@ const TOURS = [
 			{ title: "Welcome to SwitchTender", body: "One binary runs Ansible, Terraform, Bash, Python, and Go, with no Kubernetes. Here is the sixty-second tour." },
 			{ sel: ".page-head .button.primary", title: "Launch any tool", body: "Start a run with Ansible, Bash, Terraform, or Python, each with a dry run, and mix them in a single pipeline." },
 			{ sel: ".panel-runs", title: "Watch every run", body: "Runs stream live here, with a host matrix, sharded splits, and multi-step pipelines all in one place." },
-			{ sel: ".migrate-callout", title: "Bring your work with you", body: "Migrating from another tool? Import projects, inventories, templates, and schedules in a few clicks." },
+			{ sel: "#tiles a[href='/ui/migrate']", title: "Bring your work with you", body: "Migrating from another tool? Import projects, inventories, templates, and schedules in a few clicks." },
 			{ sel: ".tile-search", title: "Find anything fast", body: "This search filters instantly, and every list in SwitchTender is searchable the same way." },
-			{ sel: ".nav-toggle", title: "The rest of the yard", body: "Job templates, credentials with external secrets, schedules, and fleet analytics all live in this menu." },
+			{ sel: ".side|.nav-toggle", title: "The rest of the yard", body: "Job templates, credentials with external secrets, schedules, and fleet analytics all live in the navigation." },
 			{ title: "You are set", body: "Explore the demo freely. Nothing here can be broken. Replay this tour anytime from Tour in the top bar." },
 		],
 	},
@@ -168,7 +253,7 @@ const TOURS = [
 			{ page: "workflows", path: "/ui/workflows", sel: "#wf-canvas", title: "Drag a pipeline together", body: "Wire all seven tools, and any tool you plug in, into one graph with per-step retries. AWX's signature feature, without the Kubernetes bill.", hold: 7500 },
 			{ page: "policies", path: "/ui/policies", sel: "#policy-open", title: "The gate nobody skips", body: "Policy holds a prod terraform destroy for an admin's sign-off, automatically. Approvals are enforced, not suggested.", hold: 7000 },
 			{ page: "audit", path: "/ui/audit", sel: "#audit-verify", title: "Prove every change", body: "Every change links into a tamper-evident hash chain. One click verifies it here, and a signed export verifies offline.", hold: 7000 },
-			{ page: "overview", path: "/ui/", sel: ".migrate-callout", title: "Switching is one command", body: "Projects, inventories, templates, surveys, and schedules import from AWX or Semaphore in a single pass.", hold: 6500 },
+			{ page: "overview", path: "/ui/", sel: "#tiles a[href='/ui/migrate']", title: "Switching is one command", body: "Projects, inventories, templates, surveys, and schedules import from AWX or Semaphore in a single pass.", hold: 6500 },
 			{ title: "That is the moat", body: "Running many tools is table stakes. A control plane that proves itself is not. Press Explore and try anything, nothing here can break.", hold: 8000 },
 		],
 	},
@@ -444,7 +529,7 @@ function showTourStep() {
 		tourState.timer = window.setTimeout(() => moveTour(1, true), hold);
 	}
 
-	const el = step.sel ? document.querySelector(step.sel) : null;
+	const el = tourTarget(step);
 	if (el) el.scrollIntoView({ block: "center", inline: "nearest" });
 	renderTourPosition();
 	(tourState.auto ? play : pop.querySelector(".tour-next")).focus();
@@ -455,12 +540,24 @@ function showTourStep() {
 function renderTourPosition() {
 	if (!tourState) return;
 	const step = tourState.steps[tourState.step];
-	const el = step.sel ? document.querySelector(step.sel) : null;
+	const el = tourTarget(step);
 	if (el) {
 		placeTourAt(el.getBoundingClientRect());
 	} else {
 		placeTourCentered();
 	}
+}
+
+// tourTarget resolves a step's selector to the first visible match. A selector can list
+// alternatives separated by a pipe, so one step can point at the docked sidebar on wide viewports
+// and the drawer toggle on narrow ones.
+function tourTarget(step) {
+	if (!step.sel) return null;
+	for (const sel of step.sel.split("|")) {
+		const el = document.querySelector(sel.trim());
+		if (el && el.getClientRects().length) return el;
+	}
+	return null;
 }
 
 // placeTourAt cuts the spotlight hole to a target rect and floats the popover below it, or above when
@@ -1457,6 +1554,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	consumeSSOFragment();
 	mountTopbar();
 	mountLiveRegions();
+	explainReadOnly();
 	if (LIST_PAGES.includes(document.body.dataset.page)) mountListFilter();
 	const close = document.getElementById("drill-close");
 	if (close) {
@@ -1471,6 +1569,7 @@ document.addEventListener("DOMContentLoaded", () => {
 		if (!isReadOnly()) wireLaunchForm();
 		wirePropose();
 		wireRunsSearch();
+		wireRunsFilters();
 		loadRuns();
 	} else if (page === "detail") {
 		loadDetail(document.body.dataset.runId);
@@ -1527,6 +1626,9 @@ document.addEventListener("DOMContentLoaded", () => {
 		wireMigrate();
 	}
 	buildNav();
+	wirePalette();
+	wireHinttips();
+	mountPageDocs();
 	if (isReadOnly()) applyReadOnly();
 	setInterval(refreshRelTimes, 20000);
 	mountTour();
@@ -1603,29 +1705,51 @@ function buildNav() {
 	drawer.hidden = true;
 	drawer.setAttribute("aria-label", "Main navigation");
 
-	for (const group of NAV_GROUPS) {
-		const items = group.items.filter((it) => showAdmin || !it.admin);
-		if (!items.length) continue;
-		const g = document.createElement("div");
-		g.className = "nav-group";
-		const gl = document.createElement("div");
-		gl.className = "nav-group-label";
-		gl.textContent = group.label;
-		g.appendChild(gl);
-		for (const it of items) {
-			const a = document.createElement("a");
-			a.className = "nav-item" + (it.key === activeKey ? " active" : "");
-			a.href = it.href;
-			a.innerHTML = svgIcon(NAV_ICONS[it.key] || "");
-			a.appendChild(document.createTextNode(it.label));
-			if (it.key === activeKey) a.setAttribute("aria-current", "page");
-			g.appendChild(a);
+	// fillGroups renders the grouped nav links into a container, shared by the drawer and the
+	// docked sidebar so the two never drift apart.
+	const fillGroups = (root) => {
+		for (const group of NAV_GROUPS) {
+			const items = group.items.filter((it) => showAdmin || !it.admin);
+			if (!items.length) continue;
+			const g = document.createElement("div");
+			g.className = "nav-group";
+			const gl = document.createElement("div");
+			gl.className = "nav-group-label";
+			gl.textContent = group.label;
+			g.appendChild(gl);
+			for (const it of items) {
+				const a = document.createElement("a");
+				a.className = "nav-item" + (it.key === activeKey ? " active" : "");
+				a.href = it.href;
+				a.innerHTML = svgIcon(NAV_ICONS[it.key] || "");
+				a.appendChild(document.createTextNode(it.label));
+				if (it.key === activeKey) a.setAttribute("aria-current", "page");
+				g.appendChild(a);
+			}
+			root.appendChild(g);
 		}
-		drawer.appendChild(g);
-	}
+	};
+	fillGroups(drawer);
+	drawer.appendChild(themeGroup());
+
+	const side = document.createElement("aside");
+	side.className = "side";
+	const sideBrand = document.createElement("a");
+	sideBrand.className = "side-brand";
+	sideBrand.href = "/ui/";
+	sideBrand.innerHTML = '<picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img src="/ui/assets/logo-train-tracks.png" alt=""></picture>SwitchTender';
+	side.appendChild(sideBrand);
+	const sideNav = document.createElement("nav");
+	sideNav.setAttribute("aria-label", "Primary navigation");
+	fillGroups(sideNav);
+	side.appendChild(sideNav);
+	side.appendChild(themeGroup());
 
 	document.body.appendChild(backdrop);
 	document.body.appendChild(drawer);
+	document.body.appendChild(side);
+	syncThemeButtons();
+	syncBrandLogos();
 
 	// Pin the drawer directly under the top bar, tracking its height across zoom and resize.
 	const syncHeight = () => document.documentElement.style
@@ -1655,6 +1779,301 @@ function buildNav() {
 function svgIcon(inner) {
 	return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" ' +
 		'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + inner + '</svg>';
+}
+
+// THEMES lists the selectable appearances: the signature look, then the flat family themes.
+const THEMES = [
+	{ key: "signature", label: "Stitch", desc: "The signature glow", tip: "Stitch, the default theme", icon: '<path d="M3 16c3.5-4 9-4 12.5-1" stroke-dasharray="3.2 2.6"/><line x1="14" y1="16.5" x2="21" y2="9.5"/>' },
+	{ key: "light", label: "Kord", desc: "Clean white, the kordloom.com style", tip: "Kord, the white theme", icon: '<circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/><line x1="4.9" y1="4.9" x2="7" y2="7"/><line x1="17" y1="17" x2="19.1" y2="19.1"/><line x1="4.9" y1="19.1" x2="7" y2="17"/><line x1="17" y1="7" x2="19.1" y2="4.9"/>' },
+	{ key: "dark", label: "Seal", desc: "Warm ink black, the loomseal.com style", tip: "Seal, the dark theme", icon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>' },
+];
+
+// currentTheme returns the active theme key, defaulting to the signature look.
+function currentTheme() {
+	const t = document.body.dataset.theme;
+	return t === "light" || t === "dark" ? t : "signature";
+}
+
+// setTheme applies and persists a theme choice, then refreshes every switcher control.
+function setTheme(key) {
+	if (key === "light" || key === "dark") document.body.dataset.theme = key;
+	else delete document.body.dataset.theme;
+	try {
+		if (key === "light" || key === "dark") localStorage.setItem("st_theme", key);
+		else localStorage.removeItem("st_theme");
+	} catch { /* storage may be unavailable */ }
+	syncThemeButtons();
+	syncBrandLogos();
+}
+
+// syncThemeButtons marks the active theme on every switcher segment.
+function syncThemeButtons() {
+	const active = currentTheme();
+	for (const btn of document.querySelectorAll(".theme-btn")) {
+		const on = btn.dataset.themeKey === active;
+		btn.classList.toggle("active", on);
+		btn.setAttribute("aria-pressed", on ? "true" : "false");
+	}
+}
+
+// themeGroup builds the compact appearance row used at the bottom of the drawer and the
+// sidebar: a muted gear hint and one icon button per theme, named by tooltip.
+function themeGroup() {
+	const g = document.createElement("div");
+	g.className = "theme-group";
+	const row = document.createElement("div");
+	row.className = "theme-row";
+	const hint = document.createElement("span");
+	hint.className = "theme-hint";
+	hint.textContent = "Theme";
+	row.appendChild(hint);
+	for (const t of THEMES) {
+		const btn = document.createElement("button");
+		btn.type = "button";
+		btn.className = "theme-btn";
+		btn.dataset.themeKey = t.key;
+		btn.dataset.tip = t.tip;
+		btn.setAttribute("aria-label", t.tip);
+		btn.setAttribute("aria-pressed", "false");
+		btn.innerHTML = svgIcon(t.icon);
+		btn.appendChild(document.createTextNode(t.label));
+		btn.addEventListener("click", () => setTheme(t.key));
+		row.appendChild(btn);
+	}
+	g.appendChild(row);
+	return g;
+}
+
+// paletteState holds the command palette's elements once built, plus the filtered entries and the
+// highlighted index.
+let paletteState = null;
+
+// paletteEntries returns everything the palette can jump to: each nav destination the current role
+// can see, then a few direct actions.
+function paletteEntries() {
+	const role = localStorage.getItem("st_role");
+	const showAdmin = !role || role === "admin";
+	const out = [];
+	for (const group of NAV_GROUPS) {
+		for (const it of group.items) {
+			if (it.admin && !showAdmin) continue;
+			out.push({ label: it.label, desc: it.desc || "", group: group.label, icon: NAV_ICONS[it.key] || "", href: it.href });
+		}
+	}
+	out.push({ label: "Launch a run", desc: "Open the launch panel on the runs page", group: "Action", icon: NAV_ICONS.runs, href: "/ui/runs" });
+	out.push({
+		label: "View the source", desc: "github.com/kordloom/switchtender", group: "Action",
+		icon: '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>',
+		href: "https://github.com/kordloom/switchtender", external: true,
+	});
+	for (const t of THEMES) {
+		out.push({ label: "Theme: " + t.label, desc: t.desc, group: "Theme", icon: t.icon, action: () => setTheme(t.key) });
+	}
+	return out;
+}
+
+// paletteScore ranks an entry against a query: label prefix beats label substring beats
+// description, and zero filters the entry out.
+function paletteScore(entry, q) {
+	if (!q) return 1;
+	const label = entry.label.toLowerCase();
+	if (label.startsWith(q)) return 4;
+	if (label.includes(q)) return 3;
+	if (entry.desc.toLowerCase().includes(q)) return 2;
+	if (entry.group.toLowerCase().includes(q)) return 1;
+	return 0;
+}
+
+// buildPalette constructs the palette dialog once and wires its input and keyboard handling.
+function buildPalette() {
+	if (paletteState) return paletteState;
+	const overlay = document.createElement("div");
+	overlay.className = "cmdk";
+	overlay.hidden = true;
+	overlay.setAttribute("role", "dialog");
+	overlay.setAttribute("aria-modal", "true");
+	overlay.setAttribute("aria-label", "Command palette");
+	const card = document.createElement("div");
+	card.className = "cmdk-card";
+	const head = document.createElement("div");
+	head.className = "cmdk-head";
+	head.innerHTML = svgIcon('<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>');
+	const input = document.createElement("input");
+	input.className = "cmdk-input";
+	input.placeholder = "Jump to a page or action…";
+	input.setAttribute("aria-label", "Search pages and actions");
+	head.appendChild(input);
+	const list = document.createElement("div");
+	list.className = "cmdk-list";
+	list.setAttribute("role", "listbox");
+	const foot = document.createElement("div");
+	foot.className = "cmdk-foot";
+	foot.innerHTML = '<span><span class="kbd">↑↓</span> navigate</span>' +
+		'<span><span class="kbd">↵</span> open</span><span><span class="kbd">esc</span> close</span>';
+	card.appendChild(head);
+	card.appendChild(list);
+	card.appendChild(foot);
+	overlay.appendChild(card);
+	document.body.appendChild(overlay);
+	overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) closePalette(); });
+	input.addEventListener("input", () => renderPalette(input.value));
+	input.addEventListener("keydown", (e) => {
+		if (e.key === "ArrowDown") { e.preventDefault(); movePaletteActive(1); }
+		else if (e.key === "ArrowUp") { e.preventDefault(); movePaletteActive(-1); }
+		else if (e.key === "Enter") { e.preventDefault(); openPaletteActive(); }
+		else if (e.key === "Escape") { e.preventDefault(); closePalette(); }
+	});
+	paletteState = { overlay, input, list, active: 0, shown: [] };
+	return paletteState;
+}
+
+// renderPalette filters the entries for a query and redraws the result list.
+function renderPalette(query) {
+	const st = paletteState;
+	const q = (query || "").trim().toLowerCase();
+	st.shown = paletteEntries()
+		.map((entry) => ({ entry, score: paletteScore(entry, q) }))
+		.filter((r) => r.score > 0)
+		.sort((a, b) => b.score - a.score)
+		.map((r) => r.entry);
+	st.active = 0;
+	st.list.innerHTML = "";
+	if (!st.shown.length) {
+		const none = document.createElement("div");
+		none.className = "cmdk-empty";
+		none.textContent = "No matches.";
+		st.list.appendChild(none);
+		return;
+	}
+	st.shown.forEach((entry, i) => {
+		const item = document.createElement("div");
+		item.className = "cmdk-item" + (i === st.active ? " active" : "");
+		item.setAttribute("role", "option");
+		item.setAttribute("aria-selected", i === st.active ? "true" : "false");
+		item.innerHTML = svgIcon(entry.icon) +
+			'<span class="cmdk-item-label"></span><span class="cmdk-item-desc"></span><span class="cmdk-item-group"></span>';
+		item.querySelector(".cmdk-item-label").textContent = entry.label;
+		item.querySelector(".cmdk-item-desc").textContent = entry.desc;
+		item.querySelector(".cmdk-item-group").textContent = entry.group;
+		item.addEventListener("mouseenter", () => setPaletteActive(i));
+		item.addEventListener("click", () => { st.active = i; openPaletteActive(); });
+		st.list.appendChild(item);
+	});
+}
+
+// setPaletteActive moves the highlight to the given index.
+function setPaletteActive(i) {
+	const st = paletteState;
+	st.active = i;
+	st.list.querySelectorAll(".cmdk-item").forEach((el, j) => {
+		el.classList.toggle("active", j === i);
+		el.setAttribute("aria-selected", j === i ? "true" : "false");
+	});
+}
+
+// movePaletteActive steps the highlight up or down, wrapping, and keeps it scrolled into view.
+function movePaletteActive(delta) {
+	const st = paletteState;
+	if (!st.shown.length) return;
+	const next = (st.active + delta + st.shown.length) % st.shown.length;
+	setPaletteActive(next);
+	const el = st.list.querySelectorAll(".cmdk-item")[next];
+	if (el) el.scrollIntoView({ block: "nearest" });
+}
+
+// openPaletteActive navigates to the highlighted entry.
+function openPaletteActive() {
+	const st = paletteState;
+	const entry = st.shown[st.active];
+	if (!entry) return;
+	closePalette();
+	if (entry.action) entry.action();
+	else if (entry.external) window.open(entry.href, "_blank", "noopener");
+	else location.href = entry.href;
+}
+
+// openPalette shows the palette with a fresh query and focuses its input.
+function openPalette() {
+	const st = buildPalette();
+	st.overlay.hidden = false;
+	st.input.value = "";
+	renderPalette("");
+	st.input.focus();
+}
+
+// closePalette hides the palette.
+function closePalette() {
+	if (paletteState) paletteState.overlay.hidden = true;
+}
+
+// wireHinttips shows a floating tip above any element carrying data-tip, on hover and keyboard
+// focus. One shared element rides document.body, so no scroll container can clip it, and it is
+// clamped to the viewport.
+function wireHinttips() {
+	const tip = document.createElement("div");
+	tip.className = "hinttip";
+	tip.hidden = true;
+	document.body.appendChild(tip);
+	let linkTimer = 0;
+	const place = (target, text) => {
+		tip.textContent = text;
+		tip.hidden = false;
+		tip.style.left = "0px";
+		tip.style.top = "0px";
+		const r = target.getBoundingClientRect();
+		const x = Math.min(Math.max(8, r.left), window.innerWidth - tip.offsetWidth - 8);
+		let y = r.top - tip.offsetHeight - 8;
+		if (y < 8) y = r.bottom + 8;
+		tip.style.left = x + "px";
+		tip.style.top = y + "px";
+	};
+	// linkDest turns a link's destination into a short readable label.
+	const linkDest = (a) => {
+		const href = a.getAttribute("href");
+		if (!href || href === "#" || href.startsWith("javascript")) return "";
+		try {
+			const u = new URL(href, location.href);
+			const path = u.pathname + (u.search || "") + (u.hash || "");
+			return u.origin === location.origin ? "Go to " + path : "Opens " + u.hostname + u.pathname;
+		} catch { return ""; }
+	};
+	const show = (e) => {
+		if (!e.target.closest) return;
+		const target = e.target.closest("[data-tip]");
+		if (target) { clearTimeout(linkTimer); place(target, target.dataset.tip); return; }
+		// Plain links reveal their destination after a beat, so casual mouse travel stays quiet.
+		const a = e.target.closest("a[href]");
+		if (!a || a.closest(".cmdk")) return;
+		const dest = linkDest(a);
+		if (!dest) return;
+		clearTimeout(linkTimer);
+		linkTimer = window.setTimeout(() => place(a, dest), 450);
+	};
+	const hide = (e) => {
+		if (!e.target.closest) return;
+		if (e.target.closest("[data-tip]") || e.target.closest("a[href]")) {
+			clearTimeout(linkTimer);
+			tip.hidden = true;
+		}
+	};
+	document.addEventListener("mouseover", show);
+	document.addEventListener("mouseout", hide);
+	document.addEventListener("focusin", show);
+	document.addEventListener("focusout", hide);
+	document.addEventListener("scroll", () => { clearTimeout(linkTimer); tip.hidden = true; }, true);
+}
+
+// wirePalette registers the platform search shortcut that toggles the palette, on every page but
+// sign in.
+function wirePalette() {
+	if (document.body.dataset.page === "login") return;
+	document.addEventListener("keydown", (e) => {
+		if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "k") {
+			e.preventDefault();
+			if (paletteState && !paletteState.overlay.hidden) closePalette();
+			else openPalette();
+		}
+	});
 }
 
 // apiToken returns the stored API token, empty when the server runs open.
@@ -2223,7 +2642,12 @@ function renderNeedsSecret(creds) {
 	setTitle(pending.length);
 	const sub = document.createElement("span");
 	sub.className = "cred-needs-sub";
-	sub.textContent = "Set a secret on each to make it usable. Imported credentials arrive this way.";
+	sub.textContent = "Set a secret on each to make it usable. Imported credentials arrive this way. ";
+	const guide = document.createElement("a");
+	guide.href = "/ui/docs/tutorial-set-a-secret";
+	guide.textContent = "How secrets work";
+	guide.dataset.tip = "Open the Set a secret guide";
+	sub.appendChild(guide);
 	head.appendChild(title);
 	head.appendChild(sub);
 	panel.appendChild(head);
@@ -2387,7 +2811,21 @@ async function loadProjects() {
 		for (const p of projects) {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(p.name));
-			tr.appendChild(td(p.repo_url, "mono"));
+			// The repository is a real link when it is https, so a reader can jump straight to the
+			// source; ssh and scp-style remotes stay plain text.
+			const repoCell = td("", "mono");
+			if (/^https?:\/\//.test(p.repo_url || "")) {
+				const a = document.createElement("a");
+				a.href = p.repo_url;
+				a.target = "_blank";
+				a.rel = "noopener";
+				a.textContent = p.repo_url;
+				a.addEventListener("click", (e) => e.stopPropagation());
+				repoCell.appendChild(a);
+			} else {
+				repoCell.textContent = p.repo_url;
+			}
+			tr.appendChild(repoCell);
 			tr.appendChild(td(p.branch || "default", "mono"));
 			tr.appendChild(tdTime(p.created_at));
 			const actions = deleteCell("/projects/" + p.id, "project " + p.name, tr, "No projects yet.");
@@ -2654,7 +3092,17 @@ async function loadTemplates() {
 		for (const t of templates) {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(t.name));
-			tr.appendChild(td(t.playbook, "mono"));
+			tr.appendChild(typeCellEl(t));
+			// The playbook cell opens a read-only view of everything the template runs.
+			const whatCell = td("", "mono");
+			const view = document.createElement("button");
+			view.type = "button";
+			view.className = "linkish mono";
+			view.textContent = toolLabel(t);
+			view.dataset.tip = "View what this template runs";
+			view.addEventListener("click", (e) => { e.preventDefault(); openTemplateView(t); });
+			whatCell.appendChild(view);
+			tr.appendChild(whatCell);
 			tr.appendChild(td(String(t.shards || 1)));
 			tr.appendChild(tdTime(t.created_at));
 			const actions = document.createElement("td");
@@ -2690,6 +3138,49 @@ async function loadTemplates() {
 	} catch (e) {
 		setStatus("Failed to load templates: " + e.message);
 	}
+}
+
+// openTemplateView shows everything a template runs in a read-only dialog: its full command or
+// playbook, tool, shards, and the rest, since list cells truncate.
+function openTemplateView(t) {
+	let overlay = document.getElementById("view-modal");
+	if (!overlay) {
+		overlay = document.createElement("div");
+		overlay.id = "view-modal";
+		overlay.className = "modal";
+		overlay.hidden = true;
+		overlay.innerHTML = '<div class="modal-card wide"><div class="modal-head"><h2 id="view-title"></h2>' +
+			'<button type="button" class="modal-close" aria-label="Close">\u00d7</button></div>' +
+			'<div class="view-rows" id="view-rows"></div><pre class="log view-code" id="view-code"></pre></div>';
+		document.body.appendChild(overlay);
+		overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) overlay.hidden = true; });
+		overlay.querySelector(".modal-close").addEventListener("click", () => { overlay.hidden = true; });
+		document.addEventListener("keydown", (e) => { if (e.key === "Escape") overlay.hidden = true; });
+	}
+	document.getElementById("view-title").textContent = t.name;
+	const rows = document.getElementById("view-rows");
+	rows.innerHTML = "";
+	const addRow = (k, v) => {
+		if (!v && v !== 0) return;
+		const key = document.createElement("span");
+		key.className = "view-k";
+		key.textContent = k;
+		const val = document.createElement("span");
+		val.className = "view-v";
+		val.textContent = String(v);
+		rows.appendChild(key);
+		rows.appendChild(val);
+	};
+	addRow("Tool", (t.tool || "ansible"));
+	addRow("Playbook", t.playbook);
+	addRow("Inventory", t.inventory);
+	addRow("Shards", t.shards && t.shards > 1 ? t.shards : "");
+	addRow("Limit", t.limit);
+	addRow("Created", t.created_at ? fmtTime(t.created_at) : "");
+	const code = document.getElementById("view-code");
+	code.hidden = !t.command;
+	if (t.command) code.textContent = t.command;
+	overlay.hidden = false;
 }
 
 // openSurvey renders a template's survey as a form and launches with the collected answers.
@@ -3110,13 +3601,26 @@ async function loadWorkers() {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(w.owner, "mono"));
 			const health = document.createElement("td");
+			// An executor with no active leases has nothing to renew, so silence means idle, not
+			// broken. Stale is reserved for a held lease whose renewals have stopped.
 			const fresh = Date.now() - new Date(w.last_seen).getTime() < 30000;
 			const chip = document.createElement("span");
-			chip.className = fresh ? "chip ok" : "chip none";
-			chip.textContent = fresh ? "alive" : "stale";
+			if (w.active > 0 && fresh) {
+				chip.className = "chip ok";
+				chip.textContent = "active";
+			} else if (w.active > 0) {
+				chip.className = "chip failed";
+				chip.textContent = "stale";
+				chip.title = "Holds runs but has stopped renewing its lease.";
+			} else {
+				chip.className = "chip none";
+				chip.textContent = "idle";
+			}
 			health.appendChild(chip);
 			tr.appendChild(health);
 			tr.appendChild(td(String(w.active)));
+			tr.appendChild(td(String(w.completed || 0)));
+			tr.appendChild(td(String(w.failed || 0)));
 			tr.appendChild(tdTime(w.last_seen));
 			tbody.appendChild(tr);
 		}
@@ -3129,6 +3633,16 @@ async function loadWorkers() {
 
 // wireAsk hooks the fleet question box up to the ask endpoint. Advisory only: the answer comes
 // from run, health, and drift metadata the viewer can already see, and asking changes nothing.
+// explainReadOnly gives every dimmed table action a tooltip in read-only mode, so a disabled
+// Launch or Delete reads as policy, not breakage.
+function explainReadOnly() {
+	if (!isReadOnly()) return;
+	document.addEventListener("mouseover", (e) => {
+		const b = e.target.closest && e.target.closest("table .button");
+		if (b && !b.title) b.title = "Disabled in this read-only demo. Self-host to use it.";
+	});
+}
+
 function wireAsk() {
 	const go = document.getElementById("ask-go");
 	const input = document.getElementById("ask-input");
@@ -3297,10 +3811,13 @@ function renderOverviewMetrics(runs, hosts) {
 	el.hidden = false;
 }
 
-// renderRecentRuns lists the latest runs, each a link to its detail page.
+// renderRecentRuns lists the latest runs, each a link to its detail page, under a labeled header
+// row that only shows when there are rows to label.
 function renderRecentRuns(runs) {
 	const el = document.getElementById("recent");
 	el.innerHTML = "";
+	const head = document.getElementById("ov-head");
+	if (head) head.hidden = !runs.length;
 	if (!runs.length) { el.appendChild(emptyLine("No runs yet.")); return; }
 	for (const r of runs) {
 		const row = document.createElement("a");
@@ -3322,56 +3839,59 @@ function renderRecentRuns(runs) {
 			meta.classList.add("reltime");
 		}
 		row.appendChild(meta);
+		const go = document.createElement("span");
+		go.className = "ov-row-go";
+		go.innerHTML = svgIcon('<polyline points="9 18 15 12 9 6"/>');
+		row.appendChild(go);
 		el.appendChild(row);
 	}
 }
 
-// renderJumpTiles draws the navigation tiles for every section but the overview itself, sorted
-// alphabetically, each with an icon chip, a label, and a one-line description.
+// renderJumpTiles draws every section but the overview as three group cards, each a titled list
+// of compact icon rows. Group cards cannot strand an orphan the way a flat tile wall does.
 function renderJumpTiles() {
 	const el = document.getElementById("tiles");
 	if (!el) return;
 	const role = localStorage.getItem("st_role");
 	const showAdmin = !role || role === "admin";
-	const items = [];
-	for (const group of NAV_GROUPS) {
-		for (const it of group.items) {
-			if (it.key === "overview") continue;
-			if (it.admin && !showAdmin) continue;
-			items.push(it);
-		}
-	}
-	items.sort((a, b) => a.label.localeCompare(b.label));
 
 	el.innerHTML = "";
-	for (const it of items) {
-		const tile = document.createElement("a");
-		tile.className = "tile";
-		tile.href = it.href;
-
-		const icon = document.createElement("span");
-		icon.className = "tile-icon";
-		icon.innerHTML = svgIcon(NAV_ICONS[it.key] || "");
-		tile.appendChild(icon);
-
-		const text = document.createElement("span");
-		text.className = "tile-text";
-		const label = document.createElement("span");
-		label.className = "tile-label";
-		label.textContent = it.label;
-		text.appendChild(label);
-		if (it.desc) {
-			const desc = document.createElement("span");
-			desc.className = "tile-desc";
-			desc.textContent = it.desc;
-			text.appendChild(desc);
+	for (const group of NAV_GROUPS) {
+		const items = group.items.filter((it) =>
+			it.key !== "overview" && it.key !== "docs" && (showAdmin || !it.admin));
+		if (!items.length) continue;
+		const card = document.createElement("section");
+		card.className = "jump-group";
+		const head = document.createElement("h3");
+		head.className = "jump-group-title";
+		head.textContent = group.label;
+		card.appendChild(head);
+		for (const it of items) {
+			const row = document.createElement("a");
+			row.className = "jump-row";
+			row.href = it.href;
+			const icon = document.createElement("span");
+			icon.className = "jump-icon";
+			icon.innerHTML = svgIcon(NAV_ICONS[it.key] || "");
+			row.appendChild(icon);
+			const label = document.createElement("span");
+			label.className = "jump-label";
+			label.textContent = it.label;
+			row.appendChild(label);
+			if (it.desc) {
+				const desc = document.createElement("span");
+				desc.className = "jump-desc";
+				desc.textContent = it.desc;
+				row.appendChild(desc);
+			}
+			card.appendChild(row);
 		}
-		tile.appendChild(text);
-		el.appendChild(tile);
+		el.appendChild(card);
 	}
 }
 
-// wireTileFilter filters the jump tiles as the user types and jumps to the first match on Enter.
+// wireTileFilter filters the jump rows as the user types, hides groups that empty out, and jumps
+// to the first match on Enter.
 function wireTileFilter() {
 	const input = document.getElementById("tile-filter");
 	const el = document.getElementById("tiles");
@@ -3385,16 +3905,19 @@ function wireTileFilter() {
 	input.addEventListener("input", () => {
 		const q = input.value.trim().toLowerCase();
 		let shown = 0;
-		for (const tile of el.querySelectorAll(".tile")) {
-			const match = tile.textContent.toLowerCase().includes(q);
-			tile.hidden = !match;
+		for (const row of el.querySelectorAll(".jump-row")) {
+			const match = row.textContent.toLowerCase().includes(q);
+			row.hidden = !match;
 			if (match) shown++;
+		}
+		for (const card of el.querySelectorAll(".jump-group")) {
+			card.hidden = !card.querySelector(".jump-row:not([hidden])");
 		}
 		empty.hidden = shown > 0;
 	});
 	input.addEventListener("keydown", (e) => {
 		if (e.key === "Enter") {
-			const first = el.querySelector(".tile:not([hidden])");
+			const first = el.querySelector(".jump-row:not([hidden])");
 			if (first) first.click();
 		}
 	});
@@ -3422,6 +3945,25 @@ function runsQuery() {
 	return el ? el.value.trim() : "";
 }
 
+// runsFilterParams reads the status, tool, and order dropdowns into query parameters, so the server
+// filters the whole run history, not just the loaded page.
+function runsFilterParams() {
+	let params = "";
+	for (const id of ["runs-status", "runs-tool", "runs-order"]) {
+		const el = document.getElementById(id);
+		if (el && el.value) params += "&" + id.replace("runs-", "") + "=" + encodeURIComponent(el.value);
+	}
+	return params;
+}
+
+// wireRunsFilters reloads the table when a filter or order dropdown changes.
+function wireRunsFilters() {
+	for (const id of ["runs-status", "runs-tool", "runs-order"]) {
+		const el = document.getElementById(id);
+		if (el) el.addEventListener("change", loadRuns);
+	}
+}
+
 // wireRunsSearch reloads the runs table from the server as the search box changes, debounced so a
 // burst of keystrokes issues one request. The server searches every run, not just the loaded page.
 function wireRunsSearch() {
@@ -3446,10 +3988,10 @@ async function loadRuns() {
 	if (sizeEl) sizeEl.onchange = () => loadRuns();
 	const gen = ++runsLoadGen;
 	setStatus("");
-	showSkeletonRows(tbody, 6, 5);
+	showSkeletonRows(tbody, 6, 7);
 	table.hidden = false;
 	try {
-		const data = await getJSON("/runs?limit=" + runsPageSize() + "&offset=0&q=" + encodeURIComponent(runsQuery()));
+		const data = await getJSON("/runs?limit=" + runsPageSize() + "&offset=0&q=" + encodeURIComponent(runsQuery()) + runsFilterParams());
 		if (gen !== runsLoadGen) return;
 		const runs = data.runs || [];
 		tbody.innerHTML = "";
@@ -3476,6 +4018,42 @@ function toolLabel(r) {
 	return cmd.length > 48 ? cmd.slice(0, 47) + "…" : cmd;
 }
 
+// KIND_TIPS explains each run kind and tool chip on hover.
+const KIND_TIPS = {
+	pipeline: "A multi-step pipeline: each step runs after the one before it and can pass outputs on",
+	split: "Split into shards across the inventory, balanced by each host's measured duration",
+	dry: "A dry run: reports what would change without applying anything",
+	ansible: "Runs an Ansible playbook",
+	bash: "Runs a Bash script",
+	terraform: "Runs Terraform",
+	opentofu: "Runs OpenTofu",
+	python: "Runs a Python script",
+	powershell: "Runs a PowerShell script",
+	go: "Runs a Go program",
+};
+
+// typeCellEl fills a table cell with the run's tool chip and any kind tags, so type lives in one
+// labeled, aligned column instead of floating beside names.
+function typeCellEl(r) {
+	const cell = td("");
+	const tool = (r.tool || "ansible").toLowerCase();
+	const chip = document.createElement("span");
+	chip.className = "tool-badge " + tool;
+	chip.textContent = tool;
+	if (KIND_TIPS[tool]) chip.dataset.tip = KIND_TIPS[tool];
+	cell.appendChild(chip);
+	for (const kind of [r.kind === "split" ? "split" : "", r.kind === "pipeline" ? "pipeline" : "", r.dry_run ? "dry" : ""]) {
+		if (!kind) continue;
+		const tag = document.createElement("span");
+		tag.className = "run-kind " + kind;
+		tag.textContent = kind;
+		tag.dataset.tip = KIND_TIPS[kind];
+		cell.appendChild(document.createTextNode(" "));
+		cell.appendChild(tag);
+	}
+	return cell;
+}
+
 // toolBadgeEl returns a small tool badge for a non-Ansible run, or null for Ansible so the common
 // case stays uncluttered.
 function toolBadgeEl(r) {
@@ -3489,6 +4067,8 @@ function toolBadgeEl(r) {
 // appendRunRows appends one table row per run, so a page can be added without rebuilding the
 // rows already shown.
 function appendRunRows(tbody, runs) {
+	// Continue numbering from the rows already shown, so a loaded next page extends the sequence.
+	let num = tbody.querySelectorAll("tr:not(.skeleton-row)").length;
 	for (const r of runs) {
 		const tr = document.createElement("tr");
 		tr.className = "row-nav";
@@ -3499,34 +4079,19 @@ function appendRunRows(tbody, runs) {
 		tr.addEventListener("keydown", (e) => {
 			if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openRun(); }
 		});
+		num++;
+		tr.appendChild(td(String(num), "col-num"));
 		tr.appendChild(tdBadge(r.status));
 
 		const runCell = td(shortId(r.id), "mono");
 		runCell.title = r.id;
-		if (r.kind === "split" || r.kind === "pipeline") {
-			const tag = document.createElement("span");
-			tag.className = "run-kind " + r.kind;
-			tag.textContent = r.kind;
-			runCell.appendChild(document.createTextNode(" "));
-			runCell.appendChild(tag);
-		}
+		runCell.dataset.tip = "Open run details";
 		tr.appendChild(runCell);
 
-		const pbCell = td("");
-		const badge = toolBadgeEl(r);
-		if (badge) {
-			pbCell.appendChild(badge);
-			pbCell.appendChild(document.createTextNode(" "));
-		}
-		pbCell.appendChild(document.createTextNode(toolLabel(r)));
+		tr.appendChild(typeCellEl(r));
+
+		const pbCell = td(toolLabel(r));
 		pbCell.title = r.playbook || r.command || "";
-		if (r.dry_run) {
-			const dry = document.createElement("span");
-			dry.className = "run-kind dry";
-			dry.textContent = "dry";
-			pbCell.appendChild(document.createTextNode(" "));
-			pbCell.appendChild(dry);
-		}
 		tr.appendChild(pbCell);
 
 		tr.appendChild(tdTime(r.started_at || r.created_at));
@@ -3670,6 +4235,8 @@ async function loadDrift() {
 			showEmpty("No drift checks yet. Run a dry run to detect drift from the desired state.");
 			return;
 		}
+		renderDriftSummary(hosts);
+		const maxDrift = Math.max(1, ...hosts.map((h) => h.drifted_tasks));
 		const tbody = document.getElementById("drift");
 		for (const h of hosts) {
 			const tr = document.createElement("tr");
@@ -3686,7 +4253,15 @@ async function loadDrift() {
 			chip.textContent = h.drifted_tasks > 0 ? "drifted" : "in sync";
 			state.appendChild(chip);
 			tr.appendChild(state);
-			tr.appendChild(td(String(h.drifted_tasks)));
+			const driftCell = td(String(h.drifted_tasks));
+			const bar = document.createElement("span");
+			bar.className = "mini-bar" + (h.drifted_tasks > 0 ? "" : " ok");
+			const fill = document.createElement("i");
+			fill.style.width = h.drifted_tasks > 0 ? Math.max(8, (h.drifted_tasks / maxDrift) * 100) + "%" : "100%";
+			bar.appendChild(fill);
+			bar.title = h.drifted_tasks > 0 ? h.drifted_tasks + " drifted" : "in sync";
+			driftCell.appendChild(bar);
+			tr.appendChild(driftCell);
 			tr.appendChild(tdTime(h.checked_at));
 			const runCell = document.createElement("td");
 			const runLink = document.createElement("a");
@@ -3791,6 +4366,9 @@ async function loadTasks() {
 			const trend = document.createElement("td");
 			trend.appendChild(trendChip(t.avg_seconds, t.last_seconds, t.runs));
 			tr.appendChild(trend);
+			const spark = document.createElement("td");
+			spark.appendChild(durationSpark(t.recent));
+			tr.appendChild(spark);
 			tr.appendChild(td(String(t.runs)));
 			tr.appendChild(td(fmtSeconds(t.avg_seconds)));
 			tr.appendChild(td(fmtSeconds(t.last_seconds)));
@@ -3802,6 +4380,76 @@ async function loadTasks() {
 	} catch (e) {
 		setStatus("Failed to load task trends: " + e.message);
 	}
+}
+
+// renderDriftSummary fills the drift page's stat strip: how many hosts drifted, how many are in
+// sync, and when the newest check ran.
+function renderDriftSummary(hosts) {
+	const box = document.getElementById("drift-summary");
+	if (!box) return;
+	const drifted = hosts.filter((h) => h.drifted_tasks > 0).length;
+	const clean = hosts.length - drifted;
+	let newest = "";
+	for (const h of hosts) {
+		if (!newest || h.checked_at > newest) newest = h.checked_at;
+	}
+	box.innerHTML = "";
+	const card = (value, label, cls) => {
+		const c = document.createElement("div");
+		c.className = "stat-card";
+		const v = document.createElement("span");
+		v.className = "stat-value" + (cls ? " " + cls : "");
+		v.textContent = value;
+		const l = document.createElement("span");
+		l.className = "stat-label";
+		l.textContent = label;
+		c.appendChild(v);
+		c.appendChild(l);
+		return c;
+	};
+	box.appendChild(card(String(hosts.length), "hosts checked"));
+	box.appendChild(card(String(drifted), "drifted", drifted > 0 ? "changed" : ""));
+	box.appendChild(card(String(clean), "in sync", "ok"));
+	box.appendChild(card(newest ? relTime(newest) : "never", "last check"));
+	box.hidden = false;
+}
+
+// durationSpark draws a task's recent durations as a small line, oldest to newest, so the shape of
+// a trend is visible at a glance. The numbers stay in the table; the mark carries only shape.
+function durationSpark(values) {
+	if (!values || values.length < 2) {
+		const dash = document.createElement("span");
+		dash.className = "muted";
+		dash.textContent = "\u2013";
+		return dash;
+	}
+	const w = 96, h = 22, pad = 3;
+	const min = Math.min(...values), max = Math.max(...values);
+	const span = (max - min) || 1;
+	const step = (w - pad * 2) / (values.length - 1);
+	const pts = values.map((v, i) => {
+		const x = pad + i * step;
+		const y = h - pad - ((v - min) / span) * (h - pad * 2);
+		return x.toFixed(1) + "," + y.toFixed(1);
+	});
+	const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+	svg.setAttribute("class", "duration-spark");
+	svg.setAttribute("viewBox", "0 0 " + w + " " + h);
+	svg.setAttribute("width", w);
+	svg.setAttribute("height", h);
+	const title = document.createElementNS(svg.namespaceURI, "title");
+	title.textContent = values.map(fmtSeconds).join(" \u2192 ");
+	svg.appendChild(title);
+	const line = document.createElementNS(svg.namespaceURI, "polyline");
+	line.setAttribute("points", pts.join(" "));
+	svg.appendChild(line);
+	const end = pts[pts.length - 1].split(",");
+	const dot = document.createElementNS(svg.namespaceURI, "circle");
+	dot.setAttribute("cx", end[0]);
+	dot.setAttribute("cy", end[1]);
+	dot.setAttribute("r", "2.5");
+	svg.appendChild(dot);
+	return svg;
 }
 
 // trendChip labels how a task's latest duration compares to its own recent average.
@@ -4181,13 +4829,16 @@ let detailState = null;
 async function loadDetail(runId) {
 	const fullLog = document.getElementById("full-log");
 	if (fullLog) fullLog.href = streamURL("/runs/" + runId + "/logs");
+	const exportEvents = document.getElementById("export-events");
+	if (exportEvents) exportEvents.href = streamURL("/runs/" + runId + "/events?download=1");
 	wireActions(runId);
 	try {
 		const run = await getJSON("/runs/" + runId);
-		// A split or pipeline parent has no output of its own; each shard or step carries its log.
-		// Hiding the link beats serving a blank page.
+		// A split or pipeline parent has no output of its own; each shard or step carries its log
+		// and events. Hiding the links beats serving blanks.
 		const isParent = !run.parent_id && (run.kind === "pipeline" || run.kind === "split" || run.shard_count);
 		if (fullLog && isParent) fullLog.hidden = true;
+		if (exportEvents && isParent) exportEvents.hidden = true;
 		if (run.kind === "pipeline" && !run.parent_id) {
 			await loadPipeline(runId);
 		} else if ((run.kind === "split" || run.shard_count) && !run.parent_id) {

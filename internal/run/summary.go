@@ -89,6 +89,10 @@ type WorkerInfo struct {
 	Owner string `json:"owner"`
 	// Active is how many runs the executor holds right now.
 	Active int `json:"active"`
+	// Completed is how many of its runs in the window finished succeeded.
+	Completed int `json:"completed"`
+	// Failed is how many of its runs in the window finished failed.
+	Failed int `json:"failed"`
 	// LastSeen is the freshest lease renewal from this executor.
 	LastSeen time.Time `json:"last_seen"`
 }
@@ -105,6 +109,9 @@ type TaskTrend struct {
 	LastSeconds float64 `json:"last_seconds"`
 	// LastRun is when the task most recently ran.
 	LastRun time.Time `json:"last_run"`
+	// Recent is the task's duration in each of those runs, oldest first, so a caller can draw the
+	// trend rather than infer it from two numbers.
+	Recent []float64 `json:"recent,omitempty"`
 }
 
 // HostSummariesFromStats builds per host summaries from the recap stats event. It returns nil when

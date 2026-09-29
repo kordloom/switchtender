@@ -7,6 +7,8 @@
 
 # Quickstart
 
+No install needed to look around: the [live demo](https://demo.switchtender.com) is a seeded, read-only instance of exactly what you get.
+
 ## Requirements
 
 Ansible on the PATH: `ansible-playbook` and `ansible-inventory`. Nothing else for the default

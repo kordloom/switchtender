@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -26,10 +27,9 @@ type Store interface {
 	ByIdempotencyKey(ctx context.Context, key string) (*Run, error)
 	// List returns top-level runs, excluding shard runs, ordered by creation time, newest first.
 	List(ctx context.Context) ([]*Run, error)
-	// ListPage returns top-level runs newest first, capped at limit and skipping offset, so the
-	// runs view loads a page at a time. A limit of zero or less returns all of them. A non-empty
-	// query filters to runs matching it, case-insensitively, across the fields the runs view shows.
-	ListPage(ctx context.Context, query string, limit, offset int) ([]*Run, error)
+	// ListPage returns top-level runs matching filter, capped at limit and skipping offset, so the
+	// runs view loads a page at a time. A limit of zero or less returns all of them.
+	ListPage(ctx context.Context, filter ListFilter, limit, offset int) ([]*Run, error)
 	// RunStatusCounts returns the number of top-level runs in each status. The runs view uses it
 	// for the summary cards without loading every run.
 	RunStatusCounts(ctx context.Context) (map[Status]int, error)
@@ -129,6 +129,20 @@ type LogChunk struct {
 	Seq int64
 	// Data is the chunk's raw bytes.
 	Data []byte
+}
+
+// ListFilter narrows and orders a runs listing. Zero values apply no constraint, so the empty
+// filter lists everything newest first.
+type ListFilter struct {
+	// Query is a free-text term matched case-insensitively across the fields the runs view shows.
+	Query string
+	// Status keeps only runs with exactly this status when set.
+	Status string
+	// Tool keeps only runs of this normalized tool when set. Ansible matches runs stored with an
+	// empty tool, its historical form.
+	Tool string
+	// OldestFirst flips the newest-first default ordering.
+	OldestFirst bool
 }
 
 // memStore is an in-memory Store backed by maps guarded by a read-write mutex.
@@ -238,19 +252,28 @@ func (m *memStore) List(_ context.Context) ([]*Run, error) {
 
 // ListPage returns a page of top-level runs newest first, capped at limit and skipping offset,
 // optionally filtered by a case-insensitive search term.
-func (m *memStore) ListPage(ctx context.Context, query string, limit, offset int) ([]*Run, error) {
+func (m *memStore) ListPage(ctx context.Context, filter ListFilter, limit, offset int) ([]*Run, error) {
 	all, err := m.List(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if term := strings.ToLower(strings.TrimSpace(query)); term != "" {
-		matched := make([]*Run, 0, len(all))
-		for _, r := range all {
-			if matchesQuery(r, term) {
-				matched = append(matched, r)
-			}
+	term := strings.ToLower(strings.TrimSpace(filter.Query))
+	matched := make([]*Run, 0, len(all))
+	for _, r := range all {
+		if term != "" && !matchesQuery(r, term) {
+			continue
 		}
-		all = matched
+		if filter.Status != "" && string(r.Status) != filter.Status {
+			continue
+		}
+		if filter.Tool != "" && NormalizeTool(r.Tool) != filter.Tool {
+			continue
+		}
+		matched = append(matched, r)
+	}
+	all = matched
+	if filter.OldestFirst {
+		slices.Reverse(all)
 	}
 	if offset >= len(all) {
 		return []*Run{}, nil
@@ -479,8 +502,13 @@ func (m *memStore) Workers(_ context.Context) ([]WorkerInfo, error) {
 			w = &WorkerInfo{Owner: r.ClaimedBy}
 			byOwner[r.ClaimedBy] = w
 		}
-		if r.Status == StatusRunning {
+		switch r.Status {
+		case StatusRunning:
 			w.Active++
+		case StatusSucceeded:
+			w.Completed++
+		case StatusFailed:
+			w.Failed++
 		}
 		if r.ClaimedAt.After(w.LastSeen) {
 			w.LastSeen = *r.ClaimedAt
@@ -675,12 +703,15 @@ func (m *memStore) TaskTrends(_ context.Context, window int) ([]TaskTrend, error
 			recent = recent[:window]
 		}
 		total := 0.0
-		for _, ts := range recent {
+		series := make([]float64, len(recent))
+		for i, ts := range recent {
 			total += ts.Seconds
+			// recent is newest first; the series reads oldest first.
+			series[len(recent)-1-i] = ts.Seconds
 		}
 		out = append(out, TaskTrend{
 			Task: task, Runs: len(recent), AvgSeconds: total / float64(len(recent)),
-			LastSeconds: recent[0].Seconds, LastRun: recent[0].RanAt,
+			LastSeconds: recent[0].Seconds, LastRun: recent[0].RanAt, Recent: series,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Task < out[j].Task })

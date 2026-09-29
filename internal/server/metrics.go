@@ -39,7 +39,7 @@ func metricsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusInternalServerError, "could not compute metrics")
 			return
 		}
-		runs, err := store.ListPage(r.Context(), "", metricsHistogramWindow, 0)
+		runs, err := store.ListPage(r.Context(), run.ListFilter{}, metricsHistogramWindow, 0)
 		if err != nil {
 			log.Error("server: metrics: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not compute metrics")

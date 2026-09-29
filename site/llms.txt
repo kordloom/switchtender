@@ -14,6 +14,7 @@ Quickstart: run `switchtender serve`, open the browser UI. Try `switchtender dem
 seeded read-only tour.
 
 ## Start here
+- Live demo, read-only and seeded with real runs, nothing to install: https://demo.switchtender.com
 
 - [Homepage](https://switchtender.com/): what it is and the live matrix
 - [Get started](https://switchtender.com/get-started): install and first run

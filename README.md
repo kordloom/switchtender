@@ -63,6 +63,8 @@ The full head-to-head, including where SwitchTender is behind, is in the
 
 ## See it
 
+Poke at the [live demo](https://demo.switchtender.com), read-only and seeded with real runs, nothing to install.
+
 A two-shard split executing live: the merged host matrix fills in as hosts report, one shard
 fails on the broken database host while the other lands clean, and the timeline draws itself:
 
@@ -81,6 +83,8 @@ host, remembered across every run:
   instance.
 
 ## Quick start
+
+Try the [live demo](https://demo.switchtender.com) without installing anything, or run it yourself.
 
 One line with a Go toolchain installed:
 

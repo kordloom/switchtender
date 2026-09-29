@@ -76,7 +76,7 @@ func (c *Client) ByIdempotencyKey(context.Context, string) (*run.Run, error) {
 func (c *Client) List(context.Context) ([]*run.Run, error) { return nil, ErrUnsupported }
 
 // ListPage is a control-node query and is not served to workers.
-func (c *Client) ListPage(context.Context, string, int, int) ([]*run.Run, error) {
+func (c *Client) ListPage(context.Context, run.ListFilter, int, int) ([]*run.Run, error) {
 	return nil, ErrUnsupported
 }
 

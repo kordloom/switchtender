@@ -797,13 +797,27 @@ func (s *store) List(ctx context.Context) ([]*run.Run, error) {
 }
 
 // ListPage returns a page of top-level runs newest first, capped at limit and skipping offset.
-func (s *store) ListPage(ctx context.Context, query string, limit, offset int) ([]*run.Run, error) {
+func (s *store) ListPage(ctx context.Context, filter run.ListFilter, limit, offset int) ([]*run.Run, error) {
 	q := "SELECT " + runColumns + " FROM runs WHERE parent_id IS NULL"
-	clause, args := runSearchClause(query)
+	clause, args := runSearchClause(filter.Query)
 	if clause != "" {
 		q += " AND " + clause
 	}
-	q += " ORDER BY created_at DESC, id DESC"
+	if filter.Status != "" {
+		q += " AND status = ?"
+		args = append(args, filter.Status)
+	}
+	if filter.Tool != "" {
+		// An Ansible run may be stored with an empty tool, its historical form, so normalize in the
+		// comparison rather than trusting the column.
+		q += " AND COALESCE(NULLIF(tool, ''), 'ansible') = ?"
+		args = append(args, filter.Tool)
+	}
+	order := "DESC"
+	if filter.OldestFirst {
+		order = "ASC"
+	}
+	q += " ORDER BY created_at " + order + ", id " + order
 	if limit > 0 {
 		q += " LIMIT ? OFFSET ?"
 		args = append(args, limit, offset)
@@ -1107,21 +1121,15 @@ func (s *store) TaskTrends(ctx context.Context, window int) ([]run.TaskTrend, er
 	if window < 1 {
 		window = 1
 	}
+	// Rows come back per task oldest first and fold in Go, so the trend series needs no
+	// dialect-specific aggregate.
 	const q = `
 WITH ranked AS (
 	SELECT task, seconds, ran_at,
 		ROW_NUMBER() OVER (PARTITION BY task ORDER BY ran_at DESC) AS rn
 	FROM run_task_summary
 )
-SELECT task,
-	COUNT(*) AS runs,
-	AVG(seconds) AS avg_seconds,
-	MAX(CASE WHEN rn = 1 THEN seconds END) AS last_seconds,
-	MAX(ran_at) AS last_run
-FROM ranked
-WHERE rn <= ?
-GROUP BY task
-ORDER BY task`
+SELECT task, seconds, ran_at FROM ranked WHERE rn <= ? ORDER BY task, ran_at`
 
 	rows, err := s.db.QueryContext(ctx, q, window)
 	if err != nil {
@@ -1132,19 +1140,32 @@ ORDER BY task`
 	var out []run.TaskTrend
 	for rows.Next() {
 		var (
-			t       run.TaskTrend
-			lastRun string
+			task    string
+			seconds float64
+			ranAt   string
 		)
-		if err := rows.Scan(&t.Task, &t.Runs, &t.AvgSeconds, &t.LastSeconds, &lastRun); err != nil {
+		if err := rows.Scan(&task, &seconds, &ranAt); err != nil {
 			return nil, fmt.Errorf("task trends: %w", err)
 		}
-		if t.LastRun, err = sqlutil.ParseTime(lastRun); err != nil {
+		at, err := sqlutil.ParseTime(ranAt)
+		if err != nil {
 			return nil, fmt.Errorf("task trends: %w", err)
 		}
-		out = append(out, t)
+		if len(out) == 0 || out[len(out)-1].Task != task {
+			out = append(out, run.TaskTrend{Task: task})
+		}
+		t := &out[len(out)-1]
+		t.Runs++
+		t.Recent = append(t.Recent, seconds)
+		t.AvgSeconds += seconds
+		t.LastSeconds = seconds
+		t.LastRun = at
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("task trends: %w", err)
+	}
+	for i := range out {
+		out[i].AvgSeconds /= float64(out[i].Runs)
 	}
 	return out, nil
 }
@@ -1192,6 +1213,8 @@ func (s *store) Workers(ctx context.Context) ([]run.WorkerInfo, error) {
 	const q = `
 SELECT claimed_by,
 	SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS active,
+	SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS completed,
+	SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
 	MAX(claimed_at) AS last_seen
 FROM runs
 WHERE claimed_by != '' AND claimed_at IS NOT NULL AND claimed_at >= ?
@@ -1210,7 +1233,7 @@ ORDER BY last_seen DESC, claimed_by`
 			w    run.WorkerInfo
 			seen string
 		)
-		if err := rows.Scan(&w.Owner, &w.Active, &seen); err != nil {
+		if err := rows.Scan(&w.Owner, &w.Active, &w.Completed, &w.Failed, &seen); err != nil {
 			return nil, fmt.Errorf("list workers: %w", err)
 		}
 		if w.LastSeen, err = sqlutil.ParseTime(seen); err != nil {

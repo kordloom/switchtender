@@ -745,12 +745,24 @@ func listRunsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		limit := queryInt(r, "limit")
 		if limit <= 0 {
+			// An explicit zero asks for everything, capped at the hard page bound so the promise
+			// stays honest; an absent limit gets the smaller default.
 			limit = defaultRunsPage
+			if r.URL.Query().Get("limit") != "" {
+				limit = maxRunsPage
+			}
 		}
 		limit = min(limit, maxRunsPage)
 		offset := queryInt(r, "offset")
-		query := r.URL.Query().Get("q")
-		runs, err := store.ListPage(r.Context(), query, limit, offset)
+		filter := run.ListFilter{
+			Query:       r.URL.Query().Get("q"),
+			Status:      r.URL.Query().Get("status"),
+			OldestFirst: r.URL.Query().Get("order") == "oldest",
+		}
+		if tool := r.URL.Query().Get("tool"); tool != "" {
+			filter.Tool = run.NormalizeTool(tool)
+		}
+		runs, err := store.ListPage(r.Context(), filter, limit, offset)
 		if err != nil {
 			log.Error("server: list runs: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not list runs")
@@ -929,6 +941,25 @@ func runEventsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.
 			return
 		}
 		if authorizeRunAccess(w, r, authz, log, rn) {
+			return
+		}
+		// download=1 streams every event as a named NDJSON attachment, the export form tooling
+		// consumes line by line; the paged JSON form below serves the UI.
+		if r.URL.Query().Get("download") == "1" {
+			events, err := store.Events(r.Context(), id)
+			if err != nil {
+				log.Error("server: export run events: " + err.Error())
+				respondError(w, log, http.StatusInternalServerError, "could not export run events")
+				return
+			}
+			w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
+			w.Header().Set("Content-Disposition", `attachment; filename="`+id+`-events.ndjson"`)
+			enc := json.NewEncoder(w)
+			for i := range events {
+				if err := enc.Encode(&events[i]); err != nil {
+					return
+				}
+			}
 			return
 		}
 		after := queryInt64(r, "after")
