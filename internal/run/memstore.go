@@ -164,7 +164,7 @@ func (m *memStore) ListPage(ctx context.Context, filter ListFilter, limit, offse
 		// such label against an empty value, which neither SQL store does.
 		if filter.LabelKey != "" {
 			got, ok := r.Labels[filter.LabelKey]
-			if !ok || got != filter.LabelValue {
+			if !ok || (filter.LabelValue != "" && got != filter.LabelValue) {
 				continue
 			}
 		}

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Changes - SwitchTender</title>
+	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="changes"{{if .ReadOnly}} data-readonly="true"{{end}}>
+	<header class="topbar">
+		<div class="brand"><a href="/ui/"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="SwitchTender"></picture>SwitchTender</a></div>
+	</header>
+
+	<main class="content">
+		<a class="back" href="/ui/">Back to overview</a>
+		<h1>Changes</h1>
+		<p class="muted">What somebody set out to do, and every run it took. Label a run with a change and the whole arc reads as one thing: a failure and the fix that followed are one change, not two unrelated rows. The outcome is worked out from the runs rather than typed in, so it cannot disagree with what happened.</p>
+		<div id="changes-note" class="muted" hidden></div>
+		<div id="status" class="muted">Loading changes.</div>
+		<div class="list-scroll">
+		<table class="runs" id="changes-table" hidden>
+			<thead>
+				<tr>
+					<th>Change</th>
+					<th>Outcome</th>
+					<th>Runs</th>
+					<th>Who</th>
+					<th>Opened</th>
+					<th>Closed</th>
+				</tr>
+			</thead>
+			<tbody id="changes"></tbody>
+		</table>
+		</div>
+	</main>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>

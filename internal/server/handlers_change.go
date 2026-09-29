@@ -23,8 +23,10 @@ type changeResponse struct {
 	ClosedAt time.Time `json:"closed_at,omitempty"`
 	// Actors names everyone who fired a run in this change, ordered.
 	Actors []string `json:"actors,omitempty"`
-	// Runs are the member runs, newest first.
-	Runs []*run.Run `json:"runs"`
+	// Runs are the member runs, newest first. Omitted by the index, which carries a summary per
+	// change and would otherwise make one request as large as the whole history. The single change
+	// view always has members, because a change with none is a 404 rather than an empty answer.
+	Runs []*run.Run `json:"runs,omitempty"`
 	// Total is how many member runs there are before the response was capped.
 	Total int `json:"total"`
 	// Truncated reports that Runs holds fewer than Total.
@@ -144,4 +146,85 @@ func summarizeChange(name string, runs []*run.Run) changeResponse {
 		out.Outcome = changeFailed
 	}
 	return out
+}
+
+// changeListResponse is every change the caller can see, newest first.
+type changeListResponse struct {
+	// Changes are the changes, each summarized without its member runs.
+	Changes []changeResponse `json:"changes"`
+	// Total is how many changes were found before the response was capped.
+	Total int `json:"total"`
+	// Truncated reports that Changes holds fewer than Total.
+	Truncated bool `json:"truncated,omitempty"`
+	// Scanned is how many runs were read to build this, and Partial reports that the scan hit its
+	// own cap. A change whose every run is older than that cap is not listed, and saying so is the
+	// difference between "these are your changes" and "these are the changes we could see".
+	Scanned int `json:"scanned"`
+	// Partial reports that the run scan was capped, so older changes may be missing.
+	Partial bool `json:"partial,omitempty"`
+}
+
+// changesHandler lists the changes the caller can see.
+//
+// Built by scanning recent runs for the change label rather than by asking the store for distinct
+// values, which no store can do. That has a real consequence and the response states it: the scan
+// is capped, so a change whose every run predates the cap does not appear. For a browsing surface
+// that is the right trade, and the period change register is the instrument for an exhaustive
+// answer over a date range.
+func changesHandler(store run.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+	if store == nil {
+		panic("server: changesHandler: Store required")
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		const scanCap = maxListRows * 2
+		runs, err := store.ListPage(r.Context(), run.ListFilter{LabelKey: run.ChangeLabel},
+			scanCap+1, 0)
+		if err != nil {
+			log.Error("server: changes: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read changes")
+			return
+		}
+		partial := len(runs) > scanCap
+		if partial {
+			runs = runs[:scanCap]
+		}
+		keep, _, ferr := derivedReadFilter(r.Context(), authz, store)
+		if ferr != nil {
+			log.Error("server: read filter: " + ferr.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read changes")
+			return
+		}
+
+		// Grouped in the order the runs arrive, which is newest first, so the listing leads with
+		// what somebody is most likely looking for.
+		members := map[string][]*run.Run{}
+		var order []string
+		for _, rn := range runs {
+			if !keep(rn.ID) {
+				continue
+			}
+			name := rn.Labels[run.ChangeLabel]
+			if name == "" {
+				continue
+			}
+			if _, seen := members[name]; !seen {
+				order = append(order, name)
+			}
+			members[name] = append(members[name], rn)
+		}
+
+		out := make([]changeResponse, 0, len(order))
+		for _, name := range order {
+			summary := summarizeChange(name, members[name])
+			// The members themselves are left out: this is an index, and carrying every run of
+			// every change would make one request as large as the whole history.
+			summary.Total = len(members[name])
+			out = append(out, summary)
+		}
+		shown, total := cappedList(out)
+		respondJSON(w, log, http.StatusOK, changeListResponse{
+			Changes: shown, Total: total, Truncated: len(shown) < total,
+			Scanned: len(runs), Partial: partial,
+		}, wantsPretty(r))
+	}
 }

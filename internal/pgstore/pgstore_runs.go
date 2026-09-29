@@ -169,8 +169,16 @@ func (s *store) ListPage(ctx context.Context, filter run.ListFilter, limit, offs
 		q += fmt.Sprintf(" AND source_id = $%d", len(args))
 	}
 	if filter.LabelKey != "" {
-		args = append(args, filter.LabelKey, filter.LabelValue)
-		q += fmt.Sprintf(" AND NULLIF(labels, '')::jsonb ->> $%d = $%d", len(args)-1, len(args))
+		if filter.LabelValue == "" {
+			args = append(args, filter.LabelKey)
+			// jsonb_exists rather than the ? operator. They mean the same thing, and ? is also a
+			// placeholder in several drivers, so the operator form is the kind of query that works
+			// against one driver and breaks against another with an error about parameter counts.
+			q += fmt.Sprintf(" AND jsonb_exists(NULLIF(labels, '')::jsonb, $%d)", len(args))
+		} else {
+			args = append(args, filter.LabelKey, filter.LabelValue)
+			q += fmt.Sprintf(" AND NULLIF(labels, '')::jsonb ->> $%d = $%d", len(args)-1, len(args))
+		}
 	}
 	if filter.Host != "" {
 		args = append(args, filter.Host)

@@ -476,6 +476,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/hosts/{host}/facts", hostFactsHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/estate", estateHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/estate/diff", estateDiffHandler(s.store, authz, s.log))
+	mux.Handle("GET /v1/changes", changesHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/changes/{change}", changeHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/tasks", taskTrendsHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/workers", workersHandler(s.store, authz, s.log))

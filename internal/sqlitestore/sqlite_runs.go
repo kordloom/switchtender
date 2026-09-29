@@ -168,9 +168,15 @@ func (s *store) ListPage(ctx context.Context, filter run.ListFilter, limit, offs
 		// The key is looked up literally rather than compiled into a JSON path. A path treats a dot
 		// as a step, so an ordinary key like app.tier or k8s.io/name matched nothing here and
 		// matched correctly on Postgres, and the list came back empty with no error.
-		q += " AND EXISTS (SELECT 1 FROM json_each(COALESCE(NULLIF(labels, ''), '{}'))" +
-			" WHERE json_each.key = ? AND json_each.value = ?)"
-		args = append(args, filter.LabelKey, filter.LabelValue)
+		if filter.LabelValue == "" {
+			q += " AND EXISTS (SELECT 1 FROM json_each(COALESCE(NULLIF(labels, ''), '{}'))" +
+				" WHERE json_each.key = ?)"
+			args = append(args, filter.LabelKey)
+		} else {
+			q += " AND EXISTS (SELECT 1 FROM json_each(COALESCE(NULLIF(labels, ''), '{}'))" +
+				" WHERE json_each.key = ? AND json_each.value = ?)"
+			args = append(args, filter.LabelKey, filter.LabelValue)
+		}
 	}
 	if filter.Host != "" {
 		q += " AND EXISTS (SELECT 1 FROM run_host_summary hs WHERE hs.run_id = runs.id AND hs.host = ?)"
