@@ -651,6 +651,7 @@ table.matrix.dense .cell { width: 30px; height: 24px; border-radius: 4px; }
 .drill-close { position: absolute; top: 14px; right: 14px; background: none; border: none; color: var(--muted); font-size: 18px; cursor: pointer; line-height: 1; padding: 4px; border-radius: var(--radius); }
 .drill-close:hover { background: var(--surface-2); color: var(--text); }
 .drill h3 { margin: 0 0 16px; font-size: 15px; font-weight: 600; padding-right: 24px; }
+.drill-actions { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 10px 16px; }
 .drill .field { margin-bottom: 13px; }
 .drill .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 600; }
 .drill .value { font-family: var(--mono); font-size: 13px; word-break: break-word; margin-top: 3px; }
