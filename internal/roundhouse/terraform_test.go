@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -53,9 +52,7 @@ func TestTerraformRunnerDrift(t *testing.T) {
 	// A stub standing in for terraform: init succeeds, and plan exits 2, the detailed-exit-code
 	// signal for pending changes.
 	stub := filepath.Join(t.TempDir(), "tf")
-	if err := os.WriteFile(stub, []byte("#!/bin/sh\ncase \"$1\" in\nplan) exit 2 ;;\n*) exit 0 ;;\nesac\n"), 0o700); err != nil {
-		t.Fatalf("write stub: %v", err)
-	}
+	writeStub(t, stub, "#!/bin/sh\ncase \"$1\" in\nplan) exit 2 ;;\n*) exit 0 ;;\nesac\n")
 	drifted := &terraformRunner{binary: stub}
 	res, err := drifted.Run(context.Background(),
 		Spec{Tool: run.ToolTerraform, Command: ".", DryRun: true}, io.Discard)
@@ -68,9 +65,7 @@ func TestTerraformRunnerDrift(t *testing.T) {
 
 	// A clean plan exits 0 and reports no drift.
 	clean := filepath.Join(t.TempDir(), "tf")
-	if err := os.WriteFile(clean, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatalf("write clean stub: %v", err)
-	}
+	writeStub(t, clean, "#!/bin/sh\nexit 0\n")
 	res, err = (&terraformRunner{binary: clean}).Run(context.Background(),
 		Spec{Tool: run.ToolTerraform, Command: ".", DryRun: true}, io.Discard)
 	if err != nil || res.ExitCode != 0 || res.Drift {

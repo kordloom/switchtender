@@ -463,6 +463,10 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=raw,value=latest,enable=${{ steps.newest.outputs.move }}
+          # GitHub cannot classify the Business Source License, so the action's derived label says
+          # NOASSERTION and every published image looked unlicensed to anything reading its metadata.
+          labels: |
+            org.opencontainers.image.licenses=BUSL-1.1
 
       - name: Build and push the images
         id: build

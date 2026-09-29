@@ -20,6 +20,7 @@ func fakeRuntime(t *testing.T, rmFailures int) (logPath string) {
 	logPath = filepath.Join(dir, "calls.log")
 	countPath := filepath.Join(dir, "rmcount")
 	script := `#!/bin/sh
+[ "$1" = stub-warmup ] && exit 0
 echo "$@" >> ` + logPath + `
 case "$1" in
   run)
@@ -41,9 +42,7 @@ esac
 exit 0
 `
 	bin := filepath.Join(dir, "docker")
-	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
-		t.Fatalf("write fake runtime: %v", err)
-	}
+	writeStub(t, bin, script)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return logPath
 }

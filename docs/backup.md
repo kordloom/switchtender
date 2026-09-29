@@ -73,3 +73,24 @@ never deletes objects that are absent from the file, so restoring into a live de
 than replaces. Without `--in` the backup is read from standard input. Nothing is applied until the
 whole file has decrypted and decoded, so a corrupt or truncated file cannot leave a half-applied
 restore.
+
+## Moving from SQLite to PostgreSQL
+
+Backup and restore are also the growth path. An install that started on SQLite moves to
+PostgreSQL with the same two commands, because both accept either a file path or a
+`postgres://` DSN:
+
+    switchtender license install team.json
+    SWITCHTENDER_ENCRYPTION_KEY=... SWITCHTENDER_ENCRYPTION_SALT=... \
+      switchtender backup --db switchtender.db --out move.stbak
+    SWITCHTENDER_ENCRYPTION_KEY=... SWITCHTENDER_ENCRYPTION_SALT=... \
+      switchtender restore --db "postgres://user:pass@host/db" --in move.stbak
+    switchtender serve --db "postgres://user:pass@host/db"
+
+The restore initializes the PostgreSQL schema, which requires a Team license, so install the
+license first. Use the same encryption key and salt on both sides, since they seal the file and
+the stored secrets.
+
+Two things stay behind by design. Run history and the audit chain remain in the SQLite file,
+which stays valid evidence: keep the file, and every receipt minted from it verifies offline
+exactly as before. New history accrues on PostgreSQL from the first run there.

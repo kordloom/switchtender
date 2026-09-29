@@ -10,6 +10,7 @@
   <url><loc>https://switchtender.com/aap-alternative</loc></url>
   <url><loc>https://switchtender.com/rundeck-alternative</loc></url>
   <url><loc>https://switchtender.com/jenkins-alternative</loc></url>
+  <url><loc>https://switchtender.com/migration</loc></url>
   <url><loc>https://switchtender.com/privacy</loc></url>
   <url><loc>https://switchtender.com/verify</loc></url>
   <url><loc>https://switchtender.com/docs/</loc></url>
@@ -39,6 +40,7 @@
   <url><loc>https://switchtender.com/docs/drift</loc></url>
   <url><loc>https://switchtender.com/docs/compliance</loc></url>
   <url><loc>https://switchtender.com/docs/threat-model</loc></url>
+  <url><loc>https://switchtender.com/docs/agent-red-team</loc></url>
   <url><loc>https://switchtender.com/docs/sample-evidence-pack</loc></url>
   <url><loc>https://switchtender.com/docs/api</loc></url>
   <url><loc>https://switchtender.com/docs/comparison</loc></url>
@@ -47,6 +49,7 @@
   <url><loc>https://switchtender.com/docs/backup</loc></url>
   <url><loc>https://switchtender.com/docs/benchmarks</loc></url>
   <url><loc>https://switchtender.com/docs/continuity</loc></url>
+  <url><loc>https://switchtender.com/docs/roadmap</loc></url>
   <url><loc>https://switchtender.com/docs/sdk</loc></url>
   <url><loc>https://switchtender.com/docs/vendor-risk</loc></url>
 </urlset>

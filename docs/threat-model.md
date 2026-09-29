@@ -130,3 +130,6 @@ loudly, and it is the right trade for a system whose product is the record.
 
 If a claim on the homepage is not defended on this page, report it as a bug: either the page is
 missing an argument or the homepage is overclaiming, and both deserve a fix.
+
+For the agent boundary specifically, [the red team transcript](/docs/agent-red-team) is the
+attempt to break it in practice rather than defend it in prose.

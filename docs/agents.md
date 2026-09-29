@@ -235,3 +235,8 @@ The advisory AI is a feature you switch on; an agent is a client you let in.
 
 **Can the agent approve its own runs?** No. Approving a held run is admin-only, and the agent's
 token is operator-bound. A held run the agent submits waits for a human admin.
+
+That answer is a claim, so it is also tested. [Red team: can an agent get a change past the
+gate?](/docs/agent-red-team) is the transcript of an agent holding an admin-role token trying
+thirteen ways through, including approving its own work, minting itself a wider token, and
+rewriting the specification while it waited.
