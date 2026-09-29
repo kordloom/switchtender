@@ -49,7 +49,8 @@ async function loadInventories() {
 					try { await navigator.clipboard.writeText(i.content || ""); } catch { /* denied */ }
 				} },
 				{ label: "Download", tip: "Download the inventory as a file", onClick: () =>
-					downloadBlob(i.name.replace(/\s+/g, "-") + ".ini", "text/plain", i.content || "") },
+					downloadBlob(i.name.replace(/\s+/g, "-") + (parsed.format === "yaml" ? ".yml" : ".ini"),
+						"text/plain", i.content || "") },
 			]);
 			tbody.appendChild(tr);
 		}
@@ -180,7 +181,8 @@ async function loadSources() {
 		const data = await getJSON("/inventory-sources");
 		const sources = data.sources || [];
 		if (sources.length === 0) {
-			showEmpty("No inventory sources yet.");
+			showEmpty("No inventory sources yet. Add one to run an inventory plugin or script and keep a "
+				+ "stored inventory fresh.");
 			return;
 		}
 		const tbody = document.getElementById("sources");
@@ -273,7 +275,8 @@ async function loadWorkers() {
 		const data = await getJSON("/workers");
 		const workers = data.workers || [];
 		if (workers.length === 0) {
-			showEmpty("No executors seen yet. Run something.");
+			showEmpty("No runs have executed yet, so no executor has claimed a lease. Launch a run and the "
+				+ "worker that picks it up, the server itself if nothing else, appears here.");
 			return;
 		}
 		const tbody = document.getElementById("workers");

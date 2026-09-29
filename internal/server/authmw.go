@@ -660,6 +660,13 @@ func requiredRole(r *http.Request) user.Role {
 		// Proposing a run is operator work, the same role that launches one. The proposal is held
 		// for approval, so releasing it stays admin work.
 		return user.RoleOperator
+	case strings.HasPrefix(p, "/runs/") && strings.HasSuffix(p, "/stream-ticket"):
+		// Minting a ticket to open a run's event stream grants nothing by itself: the stream
+		// handler re-runs the run's own authorization when the ticket is redeemed, and reading a
+		// run's live events is a viewer read. Falling to the admin default killed the live run view
+		// for every viewer and operator, who could read the stream but could not mint the ticket an
+		// EventSource needs, since an EventSource cannot carry an auth header.
+		return user.RoleViewer
 	case strings.HasPrefix(p, "/runs/") &&
 		(strings.HasSuffix(p, "/cancel") || strings.HasSuffix(p, "/retry") ||
 			strings.HasSuffix(p, "/relaunch-failed")):

@@ -71,3 +71,32 @@ func TestReadRolesBoundManagementData(t *testing.T) {
 		})
 	}
 }
+
+// TestStreamTicketMintIsAViewerRead pins that minting a ticket to open a run's live event stream
+// takes the viewer role, not the admin default.
+//
+// The ticket grants nothing on its own: the stream handler re-runs the run's own authorization when
+// the ticket is redeemed, and reading a run's live events is a viewer read. The mint route is a POST
+// with no explicit case, so it fell to the admin default, and on every auth-enforcing install a
+// viewer or operator could read the stream but not mint the ticket an EventSource needs, since an
+// EventSource cannot carry an auth header. The live run view was dead for every non-admin.
+func TestStreamTicketMintIsAViewerRead(t *testing.T) {
+	t.Parallel()
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost,
+		"http://example.test/v1/runs/run_1/stream-ticket", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	if got := requiredRole(req); got != user.RoleViewer {
+		t.Errorf("minting a stream ticket needs %q, want %q: the live run view is gated behind it "+
+			"for every non-admin", got, user.RoleViewer)
+	}
+	// The state-changing routes on a run stay operator, so lowering the ticket did not lower them.
+	for _, suffix := range []string{"/cancel", "/retry", "/relaunch-failed"} {
+		r, _ := http.NewRequestWithContext(context.Background(), http.MethodPost,
+			"http://example.test/v1/runs/run_1"+suffix, nil)
+		if got := requiredRole(r); got != user.RoleOperator {
+			t.Errorf("%s needs %q, want operator", suffix, got)
+		}
+	}
+}

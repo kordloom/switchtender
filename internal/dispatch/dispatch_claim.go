@@ -147,7 +147,13 @@ func (d *Dispatcher) settleOverrunning() {
 	}
 	now := d.now()
 	for _, r := range running {
-		if r.Timeout <= 0 || r.StartedAt == nil {
+		// A split or pipeline parent's running spans the whole fan-out, and it inherits the request
+		// timeout the same as any run, so a fan-out that runs longer than one child's timeout used to
+		// settle the parent as failed while its children were progressing: a successful change
+		// permanently attested as timed out, with pending children left stranded under it. Each child
+		// carries the timeout and is swept on its own, and the lease sweep settles a dead coordinator,
+		// so the parent must be skipped here.
+		if r.Kind != "" || r.Timeout <= 0 || r.StartedAt == nil {
 			continue
 		}
 		deadline := r.StartedAt.Add(time.Duration(r.Timeout)*time.Second + overrunGrace)

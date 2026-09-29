@@ -347,9 +347,21 @@ function tdTime(iso, empty) {
 }
 
 // refreshRelTimes rewrites every relative-age cell so ages stay current without a reload.
+//
+// Only the leading age text is rewritten, not the whole cell. Setting textContent replaced every
+// child, which removed the copy-timestamp button tdTime appends beside the age, so on the first
+// twenty-second tick every timestamp across the fleet, drift, tasks, host, audit, and other tables
+// silently lost its copy control. Updating the text node in place leaves the button, and any other
+// element child, untouched.
 function refreshRelTimes() {
 	for (const el of document.querySelectorAll(".reltime[data-time]")) {
-		el.textContent = relTime(el.dataset.time);
+		const text = relTime(el.dataset.time);
+		const first = el.firstChild;
+		if (first && first.nodeType === 3) {
+			first.nodeValue = text;
+		} else {
+			el.insertBefore(document.createTextNode(text), el.firstChild);
+		}
 	}
 }
 

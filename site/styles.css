@@ -367,12 +367,22 @@ h1 {
 }
 @media (max-width: 1100px) {
 	.nav-links, .nav-cta { display: none; }
-	.nav-toggle { display: block; }
-	.nav.open .nav-links {
-		display: flex; flex-direction: column; position: absolute; top: 68px; left: 0; right: 0;
-		background: rgba(8, 11, 16, 0.96); backdrop-filter: blur(14px); padding: 16px 24px; gap: 16px;
-		border-bottom: 1px solid var(--border);
+	.nav-toggle { display: block; margin-left: auto; }
+	/* The open menu stacks the links and the call-to-action buttons in one panel below the bar. The
+	   CTA used to be left out of the drawer, so on a phone Get started and GitHub were unreachable,
+	   and on a subpage that carries only the CTA there was no path to the install at all. Both are
+	   full-width rows now, and the bar grows to hold them rather than clipping at its fixed height. */
+	.nav.open .nav-inner { flex-wrap: wrap; height: auto; }
+	.nav.open .nav-links,
+	.nav.open .nav-cta {
+		display: flex; flex-direction: column; width: 100%; margin: 0; gap: 16px;
+		background: rgba(8, 11, 16, 0.96); backdrop-filter: blur(14px); padding: 16px 24px;
 	}
+	.nav.open .nav-links { padding-top: 20px; border-top: 1px solid var(--border); }
+	.nav.open .nav-cta {
+		padding-bottom: 20px; border-bottom: 1px solid var(--border); align-items: stretch;
+	}
+	.nav.open .nav-cta .btn, .nav.open .nav-cta .ghost { text-align: center; }
 }
 @media (max-width: 900px) {
 	.hero { grid-template-columns: 1fr; padding-top: 56px; gap: 44px; }

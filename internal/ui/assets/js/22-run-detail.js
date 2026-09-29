@@ -677,6 +677,21 @@ function renderHeader(run) {
 		el.appendChild(field(run.tool === "terraform" || run.tool === "opentofu" ? "Directory" : "Command",
 			toolLabel(run), null, run.command || ""));
 	}
+	if (run.commit_sha) {
+		// The exact revision the run executed, the anchor of "prove every change": show it short with
+		// the full value on hover and a copy control, the way the run id and spec digest are shown.
+		const commit = field("Commit", run.commit_sha.slice(0, 12), null, run.commit_sha);
+		commit.querySelector(".value").appendChild(copyButton(run.commit_sha, "Copy the full commit"));
+		el.appendChild(commit);
+	}
+	if (run.queue) {
+		el.appendChild(field("Queue", run.queue));
+	}
+	if (run.image) {
+		const image = field("Image", run.image, null, run.image);
+		image.querySelector(".value").appendChild(copyButton(run.image, "Copy the image reference"));
+		el.appendChild(image);
+	}
 	if (run.dry_run) {
 		el.appendChild(field("Mode", "dry run"));
 	}
@@ -744,6 +759,17 @@ function renderHeader(run) {
 		const inv = field("Inventory", baseName(run.inventory), null, run.inventory);
 		inv.querySelector(".value").appendChild(copyButton(run.inventory, "Copy the inventory path"));
 		el.appendChild(inv);
+	} else if (run.inventory_id) {
+		// A run launched from a stored inventory carries the id, not a path, so the header showed no
+		// inventory at all and the run dead-ended. Link to the inventory list rather than leaving it
+		// blank, and carry the id for copy.
+		const link = document.createElement("a");
+		link.href = "/ui/inventories";
+		link.textContent = "stored inventory";
+		link.dataset.tip = "This run ran against a stored inventory. Open inventories";
+		const inv = field("Inventory", null, link);
+		inv.querySelector(".value").appendChild(copyButton(run.inventory_id, "Copy the inventory id"));
+		el.appendChild(inv);
 	}
 	if (run.shard_count) {
 		el.appendChild(field("Shards", String(run.shard_count)));
@@ -758,6 +784,13 @@ function renderHeader(run) {
 	if (run.exit_code !== undefined && run.exit_code !== null) {
 		el.appendChild(field("Exit", String(run.exit_code)));
 	}
+	if (run.started_at) {
+		// When the run actually began, absolute for a ticket with the readable form on hover. The
+		// header showed only a computed duration before, never the wall-clock time it ran.
+		const started = field("Started", relTime(run.started_at), null, run.started_at);
+		started.querySelector(".value").dataset.tip = exactTime(run.started_at);
+		el.appendChild(started);
+	}
 	if (run.status === "running" && run.started_at) {
 		const dur = field("Duration", fmtDuration(run.started_at, new Date().toISOString()));
 		const val = dur.querySelector(".value");
@@ -765,7 +798,12 @@ function renderHeader(run) {
 		val.dataset.started = run.started_at;
 		el.appendChild(dur);
 	} else {
-		el.appendChild(field("Duration", fmtDuration(run.started_at, run.ended_at)));
+		// A run that never started, rejected or canceled before a worker took it, has no duration, and
+		// the field rendered blank. Show it only when there is one.
+		const dur = fmtDuration(run.started_at, run.ended_at);
+		if (dur) {
+			el.appendChild(field("Duration", dur));
+		}
 	}
 	el.hidden = false;
 	updateActions(run);

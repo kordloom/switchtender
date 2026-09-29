@@ -20,6 +20,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/identity"
 	"github.com/kordloom/switchtender/internal/ai"
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
@@ -745,6 +746,14 @@ const identityDirEnv = "SWITCHTENDER_IDENTITY_DIR"
 func identityDir(db string) (string, error) {
 	if dir := strings.TrimSpace(os.Getenv(identityDirEnv)); dir != "" {
 		return dir, nil
+	}
+	// A seed supplied in SWITCHTENDER_AUDIT_KEY signs directly: that path neither reads nor writes
+	// the key file, so it needs no durable directory. Refusing below broke the documented way to
+	// sign a shared postgres chain, since a keyed container with no home was turned away over a
+	// directory its key never touches, and serve then ran with an unattributed chain and unsigned
+	// bundles while an audit anchor job hard-failed.
+	if os.Getenv(identity.KeyEnv) != "" {
+		return ".", nil
 	}
 	if strings.HasPrefix(db, "postgres://") || strings.HasPrefix(db, "postgresql://") {
 		base, err := os.UserConfigDir()
