@@ -23,7 +23,7 @@ const policyColumns = `id, name, tool, command_contains, inventory_id, exclude_d
 func (s *policyStore) Save(ctx context.Context, p *policy.Policy) error {
 	const q = `
 INSERT INTO policies (id, name, tool, command_contains, inventory_id, exclude_dry_run, max_destroy, actor_kind, actor, min_risk, effect, distinct_approver, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 ON CONFLICT (id) DO UPDATE SET
 	name=EXCLUDED.name, tool=EXCLUDED.tool, command_contains=EXCLUDED.command_contains,
 	inventory_id=EXCLUDED.inventory_id, exclude_dry_run=EXCLUDED.exclude_dry_run,

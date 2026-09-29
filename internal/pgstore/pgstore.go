@@ -203,7 +203,13 @@ CREATE TABLE IF NOT EXISTS users (
 	username      TEXT NOT NULL,
 	password_hash TEXT NOT NULL,
 	role          TEXT NOT NULL,
-	created_at    TEXT NOT NULL
+	created_at    TEXT NOT NULL,
+	full_name     TEXT NOT NULL DEFAULT '',
+	email         TEXT NOT NULL DEFAULT '',
+	phone         TEXT NOT NULL DEFAULT '',
+	title         TEXT NOT NULL DEFAULT '',
+	links         TEXT NOT NULL DEFAULT '',
+	notes         TEXT NOT NULL DEFAULT ''
 );
 -- The profile columns are added rather than declared above, so a database created before them is
 -- migrated by the same statement that creates a fresh one. Empty is the default everywhere, so an
@@ -268,7 +274,8 @@ CREATE TABLE IF NOT EXISTS templates (
 	verbosity      INTEGER NOT NULL DEFAULT 0,
 	forks          INTEGER NOT NULL DEFAULT 0,
 	diff_mode      INTEGER NOT NULL DEFAULT 0,
-	steps          TEXT NOT NULL DEFAULT ''
+	steps          TEXT NOT NULL DEFAULT '',
+	limit_pattern  TEXT NOT NULL DEFAULT ''
 );
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS notifications TEXT NOT NULL DEFAULT '';
@@ -341,9 +348,6 @@ ALTER TABLE audit_anchors ADD COLUMN IF NOT EXISTS shape TEXT NOT NULL DEFAULT '
 -- And which install computed the value it fixes, so a chain read under a different identity, which is
 -- what every replica minting its own key produces, is diagnosed rather than called a rewrite.
 ALTER TABLE audit_anchors ADD COLUMN IF NOT EXISTS install_id TEXT NOT NULL DEFAULT '';
--- A policy can demand that the approver be someone other than the requester. Without the column the
--- rule loaded back with the requirement off, so the requester could approve their own run.
-ALTER TABLE policies ADD COLUMN IF NOT EXISTS distinct_approver INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_audit_anchor_seq ON audit_anchors(seq);
 CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_entries(at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_seq ON audit_entries(seq);
@@ -365,6 +369,12 @@ CREATE TABLE IF NOT EXISTS policies (
 	distinct_approver INTEGER NOT NULL DEFAULT 0,
 	created_at       TEXT NOT NULL
 );
+-- A policy can demand that the approver be someone other than the requester. The column rides an
+-- ALTER for databases from before it; without it the rule loaded back with the requirement off, so
+-- the requester could approve their own run. It sits after the CREATE it amends, because this blob
+-- executes top to bottom and an ALTER naming a table that does not exist yet fails the whole
+-- migration on a fresh database, which is exactly what it did.
+ALTER TABLE policies ADD COLUMN IF NOT EXISTS distinct_approver INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE policies ADD COLUMN IF NOT EXISTS max_destroy INTEGER NOT NULL DEFAULT -1;
 ALTER TABLE policies ADD COLUMN IF NOT EXISTS actor_kind TEXT NOT NULL DEFAULT '';
 ALTER TABLE policies ADD COLUMN IF NOT EXISTS actor TEXT NOT NULL DEFAULT '';
@@ -389,7 +399,10 @@ CREATE TABLE IF NOT EXISTS credentials (
 	secret     TEXT NOT NULL,
 	created_at TEXT NOT NULL,
 	source     TEXT NOT NULL DEFAULT '',
-	org_id     TEXT NOT NULL DEFAULT ''
+	org_id     TEXT NOT NULL DEFAULT '',
+	type_id    TEXT NOT NULL DEFAULT '',
+	vault_id   TEXT NOT NULL DEFAULT '',
+	settings   TEXT NOT NULL DEFAULT ''
 );
 ALTER TABLE credentials ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE credentials ADD COLUMN IF NOT EXISTS type_id TEXT NOT NULL DEFAULT '';
@@ -567,6 +580,36 @@ func migrate(db *sql.DB) error {
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.Exec("SELECT pg_advisory_xact_lock($1)", migrateLockKey); err != nil {
 		return fmt.Errorf("migration lock: %w", err)
+	}
+	// Healing runs BEFORE the schema blob, on every table that already exists. The blob's own CREATE
+	// INDEX statements reference columns only the heal would add: idx_runs_pending_claim covers queue,
+	// and a database from before the queue column, which the deleted hand ALTERs prove exists, failed
+	// the blob with "column does not exist" and aborted the transaction before the heal it needed ever
+	// ran. The SQLite store orders these the same way for the same reason. A table the database does
+	// not have yet is skipped here and created whole by the blob.
+	//
+	// The statements are derived from the schema itself rather than from the hand-kept ALTER list in
+	// the blob. That list drifted once on the SQLite side, where runs.org_id reached the CREATE and
+	// the shared select list and never the migrations, and every database from before it failed every
+	// read of the runs table after an upgrade. The hand list stays because it is idempotent and
+	// documents when each column arrived.
+	for table, cols := range sqlutil.ParseSchemaColumns(schema) {
+		var exists bool
+		if err := tx.QueryRow("SELECT to_regclass($1) IS NOT NULL", table).Scan(&exists); err != nil {
+			return fmt.Errorf("heal %s: %w", table, err)
+		}
+		if !exists {
+			continue
+		}
+		for _, col := range cols {
+			if !col.Addable() {
+				continue
+			}
+			if _, err := tx.Exec("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS " +
+				col.Name + " " + col.Clause); err != nil {
+				return fmt.Errorf("heal %s.%s: %w", table, col.Name, err)
+			}
+		}
 	}
 	if _, err := tx.Exec(schema); err != nil {
 		return fmt.Errorf("migrate schema: %w", err)
