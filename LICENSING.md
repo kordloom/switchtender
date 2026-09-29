@@ -29,11 +29,20 @@ operate: no license server, no online activation, no phone-home:
 Internal production use by a company, on its own hosts, for its own infrastructure, is fully covered
 at no cost.
 
-Two commitments follow from this, and they are permanent. Nothing that ships free today ever becomes
-paid: whatever KordLoom sells is never carved back out of the binary you already run, so what
-shipped free stays free in that release and every release after it. And the verifier stays open: the LoomSeal library that checks a
-receipt is Apache 2.0 and independent of this project, so your evidence remains verifiable offline
-whatever happens to KordLoom.
+The commercial model is open core. The Community tier is free and complete for leaving AWX and
+running governed automation. Team features in the same binary unlock with a license that is a
+small signed file verified offline against a key compiled into the binary: no license server, no
+activation, no phone-home, no seat counting, and fleet bands that are self-reported and never
+audited. Enterprise adds services that by definition come from outside your install, such as the
+hosted witness and evidence custody.
+
+Seven commitments, held for every user from day one. What is free today stays free, and the
+Community tier never shrinks. A lapsed license takes nothing: data, evidence, receipts, and every
+Community feature keep working, and only paid features stop. No phone-home, no seat counting, no
+audits, ever. Every receipt verifies without us, forever, with the open verifier. Your price is
+fixed for the term, with 60 days notice before any renewal change. Every release converts to
+Apache 2.0 two years after it ships. And pricing is flat per organization within a band, never per
+seat and never per run.
 
 ## The one reserved right
 

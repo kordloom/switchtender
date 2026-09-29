@@ -4,10 +4,10 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Pricing | SwitchTender</title>
-	<meta name="description" content="SwitchTender is free to self-host forever: the complete platform, not a trial. SSO, RBAC, approvals, Postgres and HA, agent policy gates, and the provable audit chain, with no seat caps, no license keys, and no phone-home. KordLoom sells services around it: a $25,000 founder-led migration off AWX, plus approval coordination and long-term evidence custody for design partners.">
+	<meta name="description" content="Community is free forever: leave AWX in one command with the proofs included. Team is a flat per-org license by fleet band, verified offline with no phone-home. Enterprise adds the hosted witness, custody, and evidence operations.">
 	<link rel="canonical" href="https://switchtender.com/pricing">
 	<meta property="og:title" content="Pricing | SwitchTender">
-	<meta property="og:description" content="The complete controller is free forever. Paid tiers add SCIM, external approvers, control-mapped evidence packs, and direct support from the engineers who built it. Flat per-org pricing.">
+	<meta property="og:description" content="Community is free forever: leave AWX in one command with the proofs included. Team is a flat per-org license by fleet band, verified offline with no phone-home. Enterprise adds the hosted witness, custody, and evidence operations.">
 	<meta property="og:type" content="website">
 	<meta property="og:url" content="https://switchtender.com/pricing">
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
@@ -192,98 +192,86 @@
 	<main>
 		<section class="wrap gs-hero reveal">
 			<span class="eyebrow">Pricing</span>
-			<h1>The software is free forever.<br><span class="grad">You pay us for what we do, never for permission to run it.</span></h1>
+			<h1>Community is free.<br><span class="grad">Team is a signed file. Nothing ever phones home.</span></h1>
 			<p class="lede">
-				SwitchTender itself is the free product. Every feature ships in the one self-hosted
-				binary, with no seat caps, no host caps, no license keys, and no phone-home. An agent
-				can propose a production change, the same policy gates that hold a human hold it, a
-				person authorizes the exact digest that then runs, and the receipt proves all of it
-				offline. That is the free tier, complete.
-				<br><br>
-				KordLoom sells the work around it: we move you off AWX, we coordinate the people who
-				sign off, and we stay accountable for your evidence over the years an auditor asks
-				about. Flat per org, never per seat, never per node, never per run.
+				One binary, three tiers. Community is everything you need to leave AWX and run governed
+				automation, free forever. Team unlocks the org-scale features with a license that is
+				just a signed file the binary verifies offline: no license server, no activation, no
+				seat counting, no call home, ever. Enterprise adds the things we operate for you.
+				Fleet bands are self-reported and we will never ask to check.
 			</p>
 		</section>
 
 		<section class="section wrap" style="padding-top: 24px;">
 			<div class="cards-3 tiers reveal">
 
-				<article class="card tier tier-featured">
-					<div class="tier-name">Free</div>
-					<p class="tier-for">Everything AWX does, in one binary, still maintained.</p>
+				<article class="card tier">
+					<div class="tier-name">Community</div>
+					<p class="tier-for">Leave AWX today. Try real governance.</p>
 					<div class="tier-price"><b>$0</b><span class="cadence">forever</span></div>
-					<p class="tier-sub">Self-hosted, single binary, no cluster.</p>
-					<div class="tier-payoff">The <b>complete platform</b>, not a trial and not a crippled edition. No seat cap, no host cap, no execution cap, no license key, no phone-home. Nothing here is held back to sell you later.</div>
+					<p class="tier-sub">Self-hosted, single binary, no cluster, no license key.</p>
+					<div class="tier-payoff">Not a trial and not a crippled edition. Everything here works with no seat cap, no host cap, no expiry, and the <b>proofs are free forever</b>: the audit chain, anchoring, receipts, and the open verifier.</div>
 					<a class="btn" href="/get-started">Get started</a>
 					<ul class="tier-list">
-						<li>Full orchestration: inventory, projects, job templates, schedules, ad hoc runs</li>
-						<li>Single binary with an embedded <b>SQLite</b> store; <b>Postgres and HA</b> when you outgrow it</li>
 						<li>All seven tools: Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</li>
-						<li><b>SSO login</b> (OIDC, SAML, and LDAP), RBAC, organizations and teams</li>
-						<li>The <b>whole policy engine</b>: approval gates, per-agent rules, risk floors, outright denials, separation of duties, and N-of-M sign-off, with every approval bound to the exact content digest and pinned commit the approver saw</li>
-						<li><b>SCIM</b> provisioning alongside SSO, so access ends the day someone leaves</li>
-						<li>REST API, webhooks, and per-template notifications</li>
-						<li><b>Secrets masking</b> in run logs</li>
-						<li>Hash-chain generation, signed <a href="https://loomseal.com" rel="noopener">LoomSeal</a> bundles, per-run receipts, and offline verification with an open verifier, free forever</li>
-						<li><b>Advisory AI</b>, read-only: triage, fleet answers, and drafts. It never executes, and nothing else depends on it</li>
-						<li>Community support via GitHub issues</li>
-						<li>No node limits, no seat limits, no execution limits, no license server, no activation, no phone-home</li>
+						<li>One-command importers: AWX, AAP, Tower, Ascender, Semaphore, Rundeck, Jenkins, and crontabs</li>
+						<li>Live host-by-task matrix, balanced splits, fleet memory, and drift detection</li>
+						<li>Drag-and-drop workflow editor, pipelines, schedules, webhooks, notifications</li>
+						<li>Local users with roles, organizations, and teams</li>
+						<li><b>One approval policy</b>, digest-bound: a held run is approved as the exact content the approver saw</li>
+						<li>The full evidence engine: hash chain, RFC 3161 anchoring, signed per-run receipts, the run dossier, and offline verification with the open verifier</li>
+						<li>Sealed credentials with secrets masking in logs</li>
+						<li>Advisory AI, read-only; community support on GitHub</li>
 					</ul>
 				</article>
 
-				<article class="card tier">
-					<div class="tier-name">Governance</div>
-					<p class="tier-for">Control who is allowed to authorize a change.</p>
-					<div class="tier-price"><b>Design partners</b></div>
-					<p class="tier-sub">Priced from your scope, in conversation. Flat per organization when it lands. Never per seat, per node, or per run.</p>
-					<div class="tier-payoff">Your binary already enforces the rules. We run the parts that reach <b>outside</b> it: the people who must sign off but should never have access to the automation platform, the images your fleet executes, and a private line to the person who wrote the software.</div>
-					<a class="ghost" href="mailto:hello@kordloom.com?subject=SwitchTender%20Governance">Talk to us</a>
-					<span class="tier-badge">Design partners</span>
-					<p class="tier-inherit">Services we operate. The free binary keeps working without any of them:</p>
+				<article class="card tier tier-featured">
+					<div class="tier-name">Team</div>
+					<p class="tier-for">The features an organization needs the week it grows.</p>
+					<div class="tier-price"><b>$4,800</b><span class="cadence">per year, flat per org</span></div>
+					<p class="tier-sub">By fleet band: <b>$4,800</b> to 250 hosts &middot; <b>$12,000</b> to 1,000 &middot; <b>$30,000</b> unlimited. Bands are self-reported, and we never audit them.</p>
+					<div class="tier-payoff">A signed license file, verified offline by the binary you already run. Thirty-day trial from an email, no card. <b>A lapsed license takes nothing</b>: paid features stop, and your data, evidence, and every Community feature keep working.</div>
+					<a class="btn" href="mailto:hello@kordloom.com?subject=SwitchTender%20Team%20trial&body=Org%20name%3A%0AFleet%20band%20(250%2F1000%2Funlimited)%3A%0A">Start a 30-day trial</a>
+					<a class="ghost" href="mailto:hello@kordloom.com?subject=Buy%20SwitchTender%20Team">Buy Team</a>
+					<p class="tier-inherit">Everything in Community, plus:</p>
 					<ul class="tier-list">
-						<li><b>External approver coordination</b>: an approver signs a specific change from a link, with no seat and no access to your install. Our service sees only the digest and the summary, never your diff, your inventory, or your secrets</li>
-						<li>The same approval, <b>as a signed file</b>, for air-gapped sites. Nothing leaves your network and the signature still binds the exact change</li>
-						<li><b>Managed execution environments</b>: pinned, scanned run images with SBOMs, maintained and rolled forward by us, so what executes is reproducible</li>
-						<li>Private support channel to the engineer who wrote it, with a response time in writing, business hours, and a stated limit on what a year includes rather than an open-ended claim on one person</li>
+						<li><b>SSO</b>: OIDC, SAML, and LDAP directory sign-in with just-in-time provisioning</li>
+						<li><b>The full policy engine</b>: unlimited policies, outright denials, risk floors, separation of duties, and agent-scoped rules</li>
+						<li><b>PostgreSQL</b> for new installs, and active-active <b>HA</b></li>
+						<li><b>Distributed workers</b> and queues, for fleets one machine cannot reach</li>
+						<li><b>One-click drift reconcile</b>, from detection to a held, approvable fix</li>
+						<li><b>The period change register</b>: the SOC 2 CC8.1 / ISO 27001 A.8.32 evidence export, assembled from your real run history</li>
 					</ul>
+					<p class="fineprint" style="margin-top:12px;">Card checkout is on the way. Today the trial and the purchase are an email, and the signed license usually lands within hours.</p>
 				</article>
 
 				<article class="card tier">
-					<div class="tier-name">Assurance</div>
-					<p class="tier-for">Stay able to prove your controls operated, years later.</p>
-					<div class="tier-price"><b>Design partners</b></div>
-					<p class="tier-sub">Priced from your scope, in conversation. Migration priced separately.</p>
-					<div class="tier-payoff">Your install already writes the evidence and anyone can verify it offline, free. What you are buying here is <b>a company on the hook</b> for keeping it current, keeping it retrievable, and keeping it verifiable long after the timestamp authority that signed it has gone away.</div>
-					<a class="ghost" href="mailto:hello@kordloom.com?subject=SwitchTender%20Assurance">Talk to us</a>
-					<span class="tier-badge">Design partners</span>
-					<p class="tier-inherit">Everything in Governance, plus the work we take responsibility for:</p>
+					<div class="tier-name">Enterprise</div>
+					<p class="tier-for">Independent verification, custody, and hands.</p>
+					<div class="tier-price"><b>$50,000</b><span class="cadence">and up, per year</span></div>
+					<p class="tier-sub">Negotiated. Includes Team for the whole organization.</p>
+					<div class="tier-payoff">Everything in Team, plus the things that require <b>someone outside your install</b>: an independent witness countersigning your history, custody that keeps a seven-year-old receipt verifiable, and people on the hook on your audit calendar.</div>
+					<a class="ghost" href="mailto:hello@kordloom.com?subject=SwitchTender%20Enterprise">Talk to us</a>
 					<ul class="tier-list">
-						<li><b>Evidence operations on your audit calendar</b>: we assemble the mapped pack for each period and deliver it when your auditors ask, instead of you building it</li>
-						<li><b>Control mappings we maintain</b> as SOC 2, ISO, and HIPAA guidance shifts, so the pack still lands in the shape your auditors accept next year</li>
-						<li><b>Long-term custody and re-anchoring</b>: we retain the chain and re-anchor it as timestamp authorities come and go, so a seven-year-old receipt still verifies</li>
-						<li><b>KordLoom evidence statements</b>: we state what SwitchTender observed and how the pack was assembled. We never certify that your organization satisfies a control; that is your auditor's job, not ours</li>
-						<li>Priority support with a real SLA, and air-gapped deployment assistance</li>
+						<li><b>Hosted witness</b>: an independent party watches your chain feed and countersigns what it saw, the one property an operator cannot self-provide</li>
+						<li><b>Evidence custody and re-anchoring</b> as timestamp authorities come and go</li>
+						<li><b>External approver coordination</b>: sign-off from a link, or as a signed file for air-gapped sites, with no access to your install</li>
+						<li><b>Evidence operations</b> on your audit calendar: the mapped pack assembled and delivered each period</li>
+						<li>Air-gapped deployment assistance, hardened builds, and LTS lines</li>
+						<li>A named engineer and a security questionnaire pack</li>
 					</ul>
 				</article>
 
 			</div>
 
 			<p class="pricing-note">
-				<strong>Free ships today, complete.</strong> Governance and Assurance are services we are
-				building with our first design partners, which is why they say talk to us instead of
-				checkout, and why you are not billed until the thing you signed up for is actually
-				running. Neither carries a
-				number yet, and that is deliberate: nobody has bought one, so any figure printed here would
-				be invented, and an invented figure is worse than an honest blank. We would rather agree a
-				price against your actual scope than anchor you to a guess and then revise it. What we can
-				commit to now is the shape. Flat per organization, never per seat, per node, or per run.
-				The lever is the size of the fleet we cover, and separately operated business units bring
-				their own approvers and their own evidence calendar, so those get scoped rather than ridden
-				free. Whatever we agree is fixed for your term. Want the migration done now, on the free tier, without
-				waiting for either service? That is the
-				<a href="#sprint" style="color: var(--accent);">Migration Program</a> below, and you can
-				start it today.
+				<strong>Where the line sits, in one sentence:</strong> the proofs are free and the
+				packaging is paid. Anyone can verify a SwitchTender receipt offline forever, on any tier,
+				because evidence you cannot check is not evidence. What Team buys is the org-scale
+				machinery around it, and what Enterprise buys is independence and custody that by
+				definition cannot come from your own install. Prefer the move done for you? The
+				<a href="#sprint" style="color: var(--accent);">Migration Program</a> below is fixed-price
+				and you can start it today.
 			</p>
 
 			<div class="sprint reveal" id="sprint">
@@ -346,7 +334,7 @@
 				existing content. We flag whatever we find early and quote it separately if you want it
 				fixed. Work runs under a mutual NDA and a fixed-price statement of work with the
 				milestones above. Founder-led and limited to one active migration at a time. A portion
-				credits toward your first year of Assurance if you want us to keep the evidence running
+				credits toward your first year of Enterprise if you want us to keep the evidence running
 				afterward.</p>
 
 				<div class="sprint-cta">
@@ -358,29 +346,45 @@
 
 		<section class="section wrap" style="padding-top: 0;">
 			<div class="section-head reveal">
-				<h2>What we promise, permanently</h2>
-				<p>These are commitments, not marketing. We are publishing them before we have a single
-				customer precisely so they are hard to walk back later.</p>
+				<h2>What we promise</h2>
+				<p>Seven commitments, published before we have a single customer, every one enforceable
+				by us alone and none of them a constraint on what we may build and sell next.</p>
 			</div>
 			<div class="assurance reveal">
 				<div>
-					<h3>The binary is complete, and free for self-hosted use</h3>
-					<p>Every feature SwitchTender ships is in the binary you download, and nothing in it is
-					unlocked with a license key. You never pay us for permission to run the software you
-					already have.</p>
+					<h3>What is free today stays free</h3>
+					<p>The Community tier as published at launch never shrinks. We add paid features; we
+					never move a Community feature behind the key.</p>
 				</div>
 				<div>
-					<h3>Nothing that is free today ever becomes paid</h3>
-					<p>Whatever we sell later, it is never carved back out of the binary you already run. If
-					we shipped it free, it is yours, in that release and every release after it. We can only
-					ever add, and you can always keep running exactly what you have.</p>
+					<h3>A lapsed license takes nothing</h3>
+					<p>Data, evidence, receipts, and every Community feature keep working. Paid features
+					stop. Nothing is deleted, exported, or locked, and dropping to Community needs no
+					restart.</p>
 				</div>
 				<div>
-					<h3>It never needs us to keep running</h3>
-					<p>The self-hosted platform never requires KordLoom infrastructure to operate. No license
-					server, no online activation, no phone-home. Every service on this page is optional, and
-					if we vanished tomorrow your install and your evidence keep working. The verifier stays
-					open source and your receipts stay verifiable offline, forever.</p>
+					<h3>No phone-home, no seat counting, no audits</h3>
+					<p>The license is a signed file the binary verifies offline. Fleet bands are
+					self-reported, and we will never ask to check.</p>
+				</div>
+				<div>
+					<h3>Every receipt verifies without us, forever</h3>
+					<p>The verifier is open source, the format is published with conformance vectors, and
+					a receipt issued this year verifies in ten, whether KordLoom exists or not.</p>
+				</div>
+				<div>
+					<h3>Your price is fixed for the term</h3>
+					<p>And you hear about any change at least 60 days before renewal, not on the invoice.</p>
+				</div>
+				<div>
+					<h3>Every release converts to Apache 2.0</h3>
+					<p>Two years after it ships, automatically, under BSL 1.1. The escape hatch is in the
+					license text, not in our goodwill.</p>
+				</div>
+				<div>
+					<h3>Flat per org within a band</h3>
+					<p>Never per seat, never per run. A controller gets more valuable as more people route
+					work through it, and we refuse to price against adoption.</p>
 				</div>
 			</div>
 		</section>
@@ -391,53 +395,71 @@
 			</div>
 			<div class="faq reveal">
 				<details>
-					<summary>Is it really free, or free-until-you-need-it?</summary>
-					<p>Really free, and complete. No seat cap, no host cap, no execution cap, no expiry, and that includes SSO, SCIM, RBAC, the whole policy engine, Postgres with HA, and the audit chain. Nothing is unlocked with a license key, because there are no license keys. What we charge for today is work we do around the software: migrating you onto it, coordinating approvers outside it, and staying accountable for your evidence. Whatever we add later, nothing that is free today ever becomes paid.</p>
+					<summary>What exactly is the license file?</summary>
+					<p>A small signed JSON document. The binary carries our public key and verifies the
+					signature offline; nothing is fetched, ever. Install it with
+					<code>switchtender license install</code>, see where you stand with
+					<code>switchtender license status</code>. No license server, no activation, no
+					phone-home, and losing internet changes nothing.</p>
 				</details>
 				<details>
-					<summary>What is actually built today?</summary>
-					<p>Everything in the Free column ships in the current release, today. The Migration Program is available now and you can start one this week. Governance and Assurance are services we are building with our first design partners, which is why they say talk to us instead of checkout. You are not billed until the capability you signed up for is running, and early partners get a direct say in what we build first.</p>
+					<summary>What happens when a license lapses?</summary>
+					<p>Paid features stop; nothing else changes. Your data, your evidence, your receipts,
+					and every Community feature keep working, the running server drops to Community
+					without a restart, and a database you initialized on PostgreSQL stays fully usable
+					forever. We built the gate so that it cannot hold your data hostage even if we
+					wanted it to.</p>
 				</details>
 				<details>
-					<summary>What happens at renewal?</summary>
-					<p>The price we agree is fixed for your term, and we tell you before it changes at a
-					renewal. You can cancel at the end of a term. For the design-partner services, billing
-					starts when the first capability you signed for is actually running, not at signature.
-					Cancelling stops the service; it never touches your install, your data, or your
-					evidence, all of which keep working without us.</p>
+					<summary>Do you count my hosts?</summary>
+					<p>No. Bands are self-reported at purchase, the binary counts nothing and reports
+					nothing, and we will never ask to audit. If your fleet grows past your band, we trust
+					you to move up at renewal, and that trust is priced in.</p>
+				</details>
+				<details>
+					<summary>Why is the change register paid when receipts are free?</summary>
+					<p>Because proofs and packaging are different things. Anyone must be able to verify
+					what your install did, on any tier, forever, or the evidence story is worthless, so
+					the chain, anchors, receipts, dossiers, and verifier are all Community. The period
+					change register is the assembled compliance deliverable an auditor consumes, and
+					assembling deliverables is a thing organizations pay for.</p>
+				</details>
+				<details>
+					<summary>How do I buy or trial today?</summary>
+					<p>Email <a href="mailto:hello@kordloom.com?subject=SwitchTender%20Team%20trial" style="color: var(--accent);">hello@kordloom.com</a>
+					with your org name and band. A signed 30-day trial license usually lands within
+					hours, no card. Buying works the same way with an invoice until card checkout ships.
+					Enterprise starts with a conversation.</p>
 				</details>
 				<details>
 					<summary>What happens to paid features if you disappear?</summary>
-					<p>Nothing stops. Every feature is in the one self-hosted binary, with no license
-					server, no online activation, and no phone-home, so the platform never needs us to run.
-					Your chain and receipts stay verifiable offline with the open verifier, which is a
-					separate Apache-2.0 library that does not depend on us either. Each release carries its
-					own source tarball inside its signed manifest, the source is BSL 1.1, and every release
-					converts to Apache 2.0 two years after it ships. What you would lose is the work we do:
-					approver coordination, maintained mappings, custody, and support.</p>
-				</details>
-				<details>
-					<summary>Why flat per org instead of per seat?</summary>
-					<p>A controller gets more valuable the more people route work through it, so charging per seat punishes exactly the adoption we want, and per-node metering is the thing people are leaving. One org, one flat price, however many operators, however many runs. The only input is the size of the fleet we are covering.</p>
+					<p>Your license keeps verifying, because verification is offline, so everything works
+					through the end of your term, and nothing you produced is ever lost: Community, your
+					data, and your receipts work forever, and the open verifier does not depend on us.
+					Each release also converts to Apache 2.0 two years after it ships, so the code
+					itself outlives the company.</p>
 				</details>
 				<details>
 					<summary>What does the license allow?</summary>
-					<p>SwitchTender is source-available under BSL 1.1. You can read the source, modify it, self-host it, and run it in production for your own organization, free, forever. The only restriction is offering it as a competing hosted service. Each release converts to Apache 2.0 two years after it ships. See the <a href="https://github.com/kordloom/switchtender/blob/main/LICENSE" style="color: var(--accent);">LICENSE</a> for the exact terms.</p>
+					<p>SwitchTender is source-available under BSL 1.1. You can read the source, modify it,
+					self-host it, and run it in production for your own organization. The restriction is
+					offering it as a competing hosted service. Each release converts to Apache 2.0 two
+					years after it ships. See the <a href="https://github.com/kordloom/switchtender/blob/main/LICENSE" style="color: var(--accent);">LICENSE</a> for the exact terms.</p>
 				</details>
 				<details>
 					<summary>Can I move from AWX?</summary>
-					<p>Yes. Your AWX export imports in one command on the free tier, and the Semaphore importer is verified against a real backup from a current release. For a large or regulated move, the <a href="#sprint" style="color: var(--accent);">Migration Program</a> does it for you. Start with the <a href="/docs/switching-from-awx" style="color: var(--accent);">switching guide</a>.</p>
-				</details>
-				<details>
-					<summary>How do I actually buy Governance or Assurance?</summary>
-					<p>Email <a href="mailto:hello@kordloom.com?subject=SwitchTender%20pricing" style="color: var(--accent);">hello@kordloom.com</a>. There is no checkout because these are services we operate, and because we are building them with the first few organizations rather than shipping a menu. We will talk through the control problem you are actually trying to solve first. If you want something you can buy outright today, that is the Migration Program.</p>
+					<p>Yes, on Community, in one command, and the same goes for Semaphore, Rundeck,
+					Jenkins freestyle jobs, and plain crontabs. AAP, Tower, and Ascender share the AWX
+					export format. For a large or regulated move, the
+					<a href="#sprint" style="color: var(--accent);">Migration Program</a> does it for you.
+					Start with the <a href="/docs/switching-from-awx" style="color: var(--accent);">switching guide</a>.</p>
 				</details>
 			</div>
 		</section>
 
 		<section class="cta wrap reveal">
-			<h2>Start free. Bring us in when it stops being just your team.</h2>
-			<p>Run the complete platform from one binary today, forever. Hire us when you need to get off AWX in a hurry, when someone outside the tool has to sign off, or when an auditor needs evidence that still verifies years from now.</p>
+			<h2>Leave AWX on Community. License Team the week the org grows into it.</h2>
+			<p>One binary either way, and the proofs are free forever. Team is an email and a signed file away; Enterprise is a conversation. If you need off AWX in a hurry, the Migration Program starts this week.</p>
 			<div class="hero-cta center">
 				<a class="btn big" href="/get-started">Get started</a>
 				<a class="ghost big" href="https://demo.switchtender.com">Live demo</a>

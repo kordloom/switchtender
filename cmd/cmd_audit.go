@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"github.com/kordloom/switchtender/internal/license"
 	"os"
 	"time"
 
@@ -62,6 +63,14 @@ func init() {
 
 // runAuditReport renders the period's change register from the database.
 func runAuditReport(cmd *cobra.Command, _ []string) error {
+	// The per-run dossier, receipts, anchoring, and verification are Community: proofs are free.
+	// The period register is the compliance packaging, and packaging is what Team buys.
+	if lic, lerr := license.Load(license.PathFor(auditReportDB)); lerr == nil && lic != nil {
+		license.Set(lic)
+	}
+	if err := license.Allow(license.FeatureRegister); err != nil {
+		return err
+	}
 	return runChangeRegister(cmd)
 }
 

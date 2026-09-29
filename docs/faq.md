@@ -191,4 +191,8 @@ than a hope. The continuity and vendor risk pages set out what happens if this g
 ## What is the license?
 
 Business Source License 1.1: free to self-host and modify, with a restriction on offering it as a
-competing hosted service, and it converts to Apache 2.0 two years after each release.
+competing hosted service, and it converts to Apache 2.0 two years after each release. The
+Community tier is free and complete; Team features unlock with a signed license file the binary
+verifies offline, flat per organization by fleet band, and a lapsed license takes nothing: paid
+features stop while your data, evidence, and every Community feature keep working. There is no
+license server and nothing ever phones home.
