@@ -319,7 +319,9 @@ async function loadSingle(run) {
 	setStatus("");
 	if (!isTerminal(run.status)) {
 		await openStream(run.id, detailState.lastSeq);
+		return;
 	}
+	await loadStoredLog(run.id);
 }
 
 // loadParent renders a split run by merging every shard's events into one matrix. While the parent
@@ -337,7 +339,11 @@ async function loadParent(parentId) {
 
 	if (!isTerminal(run.status)) {
 		await openParentStream(parentId);
+		return;
 	}
+	// A parent's own log carries the shard fan-out rather than a play's output, and each shard has
+	// its own page, so this is the tail of what the parent itself did.
+	await loadStoredLog(parentId);
 }
 
 // mergedShardEvents reads every shard's event history and merges it into one list for the matrix.
@@ -447,6 +453,37 @@ function renderDetail() {
 	}
 	renderMatrix(detailState.model);
 	renderTimeline(detailState.model);
+}
+
+// loadStoredLog fills the log pane for a run that has already finished.
+//
+// The pane, its filter, and its cap were only ever fed by the live stream, so a run still going
+// showed its output and a run that had ended showed nothing. For an Ansible play that was survivable
+// because the host matrix and the timeline say what happened. For a script there is no matrix and no
+// timeline, because a script has no hosts and no tasks, so the page was a header, a row of buttons,
+// and empty space where the only thing the run produced should be. The output was always one click
+// away under "View full log", which is one click too many for the thing you came to see.
+//
+// It reads the tail rather than the whole log. The pane caps itself at logCap anyway, and a finished
+// run's log can be far larger than that.
+async function loadStoredLog(runId) {
+	try {
+		const res = await fetchAuthed("/runs/" + runId + "/logs");
+		if (!res.ok) return;
+		const text = await res.text();
+		if (!text.trim()) return;
+		detailState.logRaw = text.slice(-logCap);
+		renderLogView();
+		const head = document.querySelector("#log-panel h2");
+		if (head) head.textContent = "Output";
+		document.getElementById("log-panel").hidden = false;
+		// A finished run is not live, so the pane opens at the end, where a failure is.
+		const pre = document.getElementById("log");
+		pre.scrollTop = pre.scrollHeight;
+	} catch {
+		// A log that cannot be read leaves the pane hidden rather than showing an empty box: the
+		// full log button is still there and says the same thing more honestly.
+	}
 }
 
 // GRID_COALESCE_MS is how long a burst of structural events is allowed to gather before the grid is

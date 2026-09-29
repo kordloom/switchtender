@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { ALL_PARTS } from "./loader.mjs";
-import { reply } from "./net.mjs";
+import { reply, textReply } from "./net.mjs";
 import { loadPage } from "./pages.mjs";
 
 // EVENTS is one ordinary run's history: two tasks on one host, the second of which failed.
@@ -53,6 +53,7 @@ function statusOf(document) {
 test("an ordinary run loads its header, matrix, and downloads", async () => {
 	const { app, document, net, clock } = openDetail("run_1", [
 		[/^\/v1\/runs\/run_1\/events\?/, reply({ events: EVENTS })],
+		[/^\/v1\/runs\/run_1\/logs$/, textReply("ok: web01\nfailed: web02\n")],
 		[/^\/v1\/runs\/run_1$/, reply(runOf("run_1"))],
 	]);
 
@@ -74,8 +75,11 @@ test("an ordinary run loads its header, matrix, and downloads", async () => {
 	assert.equal(document.getElementById("export-events").hidden, false,
 		"the event export was hidden on a run that has events");
 	assert.equal(document.getElementById("audit-link").getAttribute("href"), "/ui/audit?q=run_1");
-	// A finished run has nothing to stream.
-	assert.equal(net.calls.length, 2);
+	// A finished run has nothing to stream, but it does read back the output it produced, so the
+	// page shows what the run did rather than only that it ran.
+	assert.equal(net.calls.length, 3);
+	assert.ok(net.calls.some((c) => String(c.url || c).includes("/runs/run_1/logs")),
+		"a finished run should read its stored output");
 	net.assertClean();
 });
 
@@ -89,6 +93,7 @@ test("a split parent loads its shards and hides the links it has no bytes for", 
 			events: req.url.includes("/s0/") ? EVENTS : [],
 		})],
 		[/^\/v1\/runs\/p1\/shards$/, reply({ shards })],
+		[/^\/v1\/runs\/p1\/logs$/, textReply("")],
 		[/^\/v1\/runs\/p1$/, reply(runOf("p1", { kind: "split", shard_count: 2, playbook: "plays/site.yml" }))],
 	]);
 

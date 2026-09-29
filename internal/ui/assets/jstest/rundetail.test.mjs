@@ -3,6 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadParts } from "./loader.mjs";
+import { mountPage } from "./pages.mjs";
 
 // mountDetail loads the run detail parts against a stubbed page: the stream is a recorder rather
 // than an EventSource, and every render and fetch outside the code under test is replaced. The
@@ -78,4 +79,63 @@ test("a split parent reconciles its matrix from a fresh shard read when the stre
 	// The folded model is discarded, or the fresh events would never reach the matrix.
 	assert.equal(handle.page.detailState.model, null);
 	assert.equal(handle.page.detailState.events.length, 2);
+});
+
+// mountForLog loads the detail parts against the real detail template and drives the real entry
+// point, loadSingle, so the test exercises the wiring rather than the helper it calls.
+function mountForLog(logBody, ok = true) {
+	const app = loadParts(["01-boot.js", "20-held-copy-stream.js", "22-run-detail.js"]);
+	const document = mountPage(app, "detail", { vars: { RunID: "run_1", MatrixCap: 20000 } });
+	app.loadAllEvents = () => Promise.resolve([]);
+	app.renderDetail = () => {};
+	app.setStatus = () => {};
+	app.fetchAuthed = () => Promise.resolve({ ok, text: () => Promise.resolve(logBody) });
+	return { app, document };
+}
+
+// TestLoadStoredLog pins that a run which has already finished shows the output it produced.
+//
+// The pane was fed only by the live stream, so a running job showed its output and a finished one
+// showed nothing. An Ansible play survived that because its matrix and timeline say what happened.
+// A script has neither, since it has no hosts and no tasks, so the page was a header, a row of
+// buttons, and empty space where the only thing the run produced should have been.
+test("a finished run shows the output it produced", async () => {
+	const { app, document } = mountForLog("Fleet capacity report\nweb01 ok\ndb01 hot\n");
+	await app.loadSingle({ id: "run_1", status: "succeeded" });
+	assert.equal(document.getElementById("log-panel").hidden, false,
+		"the output panel stayed hidden for a finished run");
+	assert.match(document.getElementById("log").textContent, /Fleet capacity report/);
+	assert.equal(document.querySelector("#log-panel h2").textContent, "Output",
+		"a finished run's record should not be labelled live");
+});
+
+test("an empty or unreadable log leaves the panel hidden rather than showing an empty box", async () => {
+	for (const [body, ok, why] of [
+		["", true, "an empty log"],
+		["   \n\n  ", true, "a log of only whitespace"],
+		["anything", false, "a log the server refused"],
+	]) {
+		const { app, document } = mountForLog(body, ok);
+		await app.loadSingle({ id: "run_1", status: "failed" });
+		assert.equal(document.getElementById("log-panel").hidden, true,
+			why + " should leave the panel hidden");
+	}
+});
+
+test("only the tail of a long log is loaded, so the pane cannot be flooded", async () => {
+	const { app, document } = mountForLog("x".repeat(400000) + "\nLAST LINE\n");
+	await app.loadSingle({ id: "run_1", status: "succeeded" });
+	const shown = document.getElementById("log").textContent;
+	assert.ok(shown.length <= 262144, "loaded " + shown.length + " characters, past the pane's cap");
+	assert.match(shown, /LAST LINE/, "the tail is the part worth keeping");
+});
+
+test("a run still going is left to the live stream rather than loaded from storage", async () => {
+	const { app, document } = mountForLog("stored output that should not appear\n");
+	let opened = false;
+	app.openStream = () => { opened = true; return Promise.resolve(); };
+	await app.loadSingle({ id: "run_1", status: "running" });
+	assert.ok(opened, "a live run should open its stream");
+	assert.equal(document.getElementById("log-panel").hidden, true,
+		"a live run's pane is filled by the stream, not by a stored copy");
 });
