@@ -45,6 +45,13 @@ func seedFilterRuns(t *testing.T) Store {
 	}); err != nil {
 		t.Fatalf("SaveHostSummary() error = %v", err)
 	}
+	// A task name lives only here, never on the run row, which is why free text search could never
+	// reach one and the Task trends page's per-row link opened an empty list on every row.
+	if err := store.SaveTaskSummary(ctx, "run_c", []TaskSummary{
+		{Task: "Apply configuration", Seconds: 1.5, RanAt: filterBase},
+	}); err != nil {
+		t.Fatalf("SaveTaskSummary() error = %v", err)
+	}
 	return store
 }
 
@@ -130,7 +137,13 @@ func TestListPageFiltersReadTheFieldTheyName(t *testing.T) {
 		Name: "host", Filter: ListFilter{Host: "web01"}, WantIDs: []string{"run_c"},
 	}, { // Test 26: A host nothing touched matches nothing.
 		Name: "unknown host", Filter: ListFilter{Host: "db99"}, WantIDs: nil,
-	}, { // Test 27: Filters combine, and a combination nothing satisfies returns nothing.
+	}, { // Test 27: The task filter resolves through the stored task summaries.
+		Name: "task", Filter: ListFilter{Task: "Apply configuration"}, WantIDs: []string{"run_c"},
+	}, { // Test 28: A task nothing ran matches nothing.
+		Name: "unknown task", Filter: ListFilter{Task: "Nothing ran this"}, WantIDs: nil,
+	}, { // Test 29: A task name is exact, not a substring, so it cannot quietly match a neighbor.
+		Name: "task is not a prefix match", Filter: ListFilter{Task: "Apply"}, WantIDs: nil,
+	}, { // Test 30: Filters combine, and a combination nothing satisfies returns nothing.
 		Name:   "combined and contradictory",
 		Filter: ListFilter{Status: string(StatusFailed), Tool: ToolTerraform}, WantIDs: nil,
 	}, { // Test 28: A combination one run satisfies returns it.

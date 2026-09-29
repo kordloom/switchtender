@@ -174,7 +174,9 @@ test("a run that cannot be read says so instead of rendering a blank page", asyn
 	await app.loadDetail("run_1");
 	await clock.flush();
 
-	assert.equal(statusOf(document), "Failed to load run: /runs/run_1 returned 404");
+	// The server's own sentence, not the internal path and a status code. Readers were being
+	// shown developer strings like "/runs/run_1 returned 404" on every failing surface.
+	assert.equal(statusOf(document), "Failed to load run: no such run");
 	assert.equal(document.getElementById("run-header").hidden, true);
 	net.assertClean();
 });

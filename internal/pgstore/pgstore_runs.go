@@ -176,6 +176,10 @@ func (s *store) ListPage(ctx context.Context, filter run.ListFilter, limit, offs
 		args = append(args, filter.Host)
 		q += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM run_host_summary hs WHERE hs.run_id = runs.id AND hs.host = $%d)", len(args))
 	}
+	if filter.Task != "" {
+		args = append(args, filter.Task)
+		q += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM run_task_summary ts WHERE ts.run_id = runs.id AND ts.task = $%d)", len(args))
+	}
 	if filter.ClaimedBy != "" {
 		args = append(args, filter.ClaimedBy)
 		q += fmt.Sprintf(" AND claimed_by = $%d", len(args))

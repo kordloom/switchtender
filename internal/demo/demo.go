@@ -22,12 +22,17 @@
 // seeder performed directly rather than over HTTP. Their times are chosen too. The seed clock parks
 // the runs across the recent past so the history reads like a fleet that has been working, while
 // each run's duration stays the real elapsed time of the process that produced it. A run's origin
-// is declared as well: the source and source identifier it carries, such as sch_drift_check on the
-// drift check, are fixed strings chosen here rather than the identifiers the seeded templates and
-// schedules were minted with, so nothing in this store answers to them and the origin chip on the
-// runs list opens the templates or schedules page rather than the record it names.
+// is declared as well, and it names the record that really fired it: seedConfig returns the ids it
+// minted and the run seeding asks for them by name.
 //
-// The line sits there because moving it either way costs more than it buys. Gathering the truth
+// It did not always. The origins used to be fixed strings like "tpl_deploy_web" chosen here, which
+// nothing in the store answered to. That was harmless while the origin chip only opened a list
+// page, and it stopped being harmless the day the Templates page grew a History button that
+// searches runs by the template's real id: the button was wrong on every row while promising "See
+// every run this template has produced". A seeded record that names a record nothing stored is a
+// dead end waiting for a feature to find it.
+//
+// Where no record exists to name, the origin is the API rather than an invented id. Gathering the truth
 // about the one box reports that box once per host, which leaves the fleet, host, and drift pages
 // showing one machine six times and publishes the demo server's own hostname and address to anyone
 // who loads a page. Staging the runs, their results, or the chain would fake the evidence this
@@ -284,7 +289,10 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 	// One fact-gathering play, so every host page shows its distribution, kernel, and the rest
 	// rather than an empty panel.
 	factsPlay := filepath.Join(dir, "facts.yml")
-	factsOpts := seedOpts(ctx, d, "schedule", "sch_facts", "deploy-bot", map[string]string{"env": "prod"})
+	// No schedule is seeded for fact gathering, so this records the API as its origin rather than
+	// naming a schedule nothing stored. A run whose origin names a record that does not exist is
+	// how the Templates History button came to be wrong on every row.
+	factsOpts := seedOpts(ctx, d, "api", "", "deploy-bot", map[string]string{"env": "prod"})
 	if factsRun, err := d.Submitter.Submit(ctx, factsPlay, inv, factsOpts...); err == nil {
 		settle(ctx, d, factsRun.ID)
 	} else {
@@ -293,8 +301,8 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 
 	// A dry run of a check playbook surfaces configuration drift per host on the Drift page.
 	driftPlay := filepath.Join(dir, "drift.yml")
-	driftOpts := seedOpts(ctx, d, "schedule", "sch_drift_check", "deploy-bot",
-		map[string]string{"env": "prod"}, run.WithDryRun(true))
+	driftOpts := seedOpts(ctx, d, "schedule", ids.id(ids.Schedules, "Hourly drift check",
+		"sch_drift_check"), "deploy-bot", map[string]string{"env": "prod"}, run.WithDryRun(true))
 	if driftRun, err := d.Submitter.Submit(ctx, driftPlay, inv, driftOpts...); err == nil {
 		settle(ctx, d, driftRun.ID)
 	} else {
@@ -476,7 +484,9 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, ids
 	// rather than leaving three skips in the log for somebody to notice.
 	var missing []string
 	bash, err := d.Submitter.Submit(ctx, "", "",
-		seedOpts(ctx, d, "schedule", ids.id(ids.Schedules, "Rotate logs", "sch_log_rotate"), "deploy-bot", map[string]string{"env": "prod"},
+		// No schedule is seeded for log rotation, so the origin is the API rather than a schedule
+		// id nothing answers to. The Rotate logs template exists; the cron entry does not.
+		seedOpts(ctx, d, "api", "", "deploy-bot", map[string]string{"env": "prod"},
 			run.WithTool(run.ToolBash), run.WithCommand(scriptLogRotate))...)
 	if err != nil {
 		return fmt.Errorf("seed bash run: %w", err)

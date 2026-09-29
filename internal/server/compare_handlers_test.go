@@ -152,3 +152,104 @@ func TestCompareDoesNotReadThroughTheBaseline(t *testing.T) {
 		t.Fatalf("comparison quoted a run the caller cannot read: %s", rec.Body.String())
 	}
 }
+
+// TestCompareRollsUpASplitBaseline pins the comparison against a split run.
+//
+// A parent run stores no summaries of its own: the work happened in its shards, and each shard
+// holds the rows for the hosts it covered. Reading the parent alone returned nothing, so every host
+// came back "new in this run" and every task showed a dash for its baseline. On the demo that was
+// the newest run in the list, two clicks from the front page, and the run's own detail page
+// rendered the full matrix beside it because it merges the children's events instead.
+func TestCompareRollsUpASplitBaseline(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	at := func(m int) *time.Time {
+		v := time.Date(2026, 1, 1, 0, m, 0, 0, time.UTC)
+		return &v
+	}
+
+	// The baseline is a three way split. Its hosts and tasks live on the shards.
+	shardCount := 3
+	parentID := "run_split"
+	parent := &run.Run{ID: parentID, Playbook: "site.yml", Status: run.StatusSucceeded,
+		Kind: run.KindSplit, ShardCount: &shardCount, Source: "template", SourceID: "tpl_1",
+		CreatedAt: *at(5), StartedAt: at(5), EndedAt: at(6)}
+	shards := []*run.Run{
+		{ID: "run_s0", ParentID: &parentID, Playbook: "site.yml", CreatedAt: *at(5)},
+		{ID: "run_s1", ParentID: &parentID, Playbook: "site.yml", CreatedAt: *at(5)},
+		{ID: "run_s2", ParentID: &parentID, Playbook: "site.yml", CreatedAt: *at(5)},
+	}
+	later := &run.Run{ID: "run_after", Playbook: "site.yml", Status: run.StatusFailed,
+		Source: "template", SourceID: "tpl_1", CreatedAt: *at(10), StartedAt: at(10), EndedAt: at(13)}
+
+	shardHosts := map[string][]run.HostSummary{
+		"run_s0": {{Host: "web01", Worst: "ok", OK: 3}, {Host: "web02", Worst: "ok", OK: 3}},
+		"run_s1": {{Host: "web03", Worst: "ok", OK: 3}, {Host: "db01", Worst: "ok", OK: 3}},
+		"run_s2": {{Host: "db02", Worst: "ok", OK: 3}, {Host: "edge01", Worst: "ok", OK: 3}},
+	}
+	// Each shard runs the same task, so the roll up has to fold them into one row.
+	shardTasks := []run.TaskSummary{{Task: "deploy", Seconds: 4}}
+
+	save := func(r *run.Run, hosts []run.HostSummary, tasks []run.TaskSummary) {
+		t.Helper()
+		final := r.Status
+		r.Status = run.StatusRunning
+		if err := store.Save(ctx, r); err != nil {
+			t.Fatalf("Save(%s) error = %v", r.ID, err)
+		}
+		if len(hosts) > 0 {
+			if err := store.SaveHostSummary(ctx, r.ID, hosts); err != nil {
+				t.Fatalf("SaveHostSummary(%s) error = %v", r.ID, err)
+			}
+		}
+		if len(tasks) > 0 {
+			if err := store.SaveTaskSummary(ctx, r.ID, tasks); err != nil {
+				t.Fatalf("SaveTaskSummary(%s) error = %v", r.ID, err)
+			}
+		}
+		r.Status = final
+		if err := store.Save(ctx, r); err != nil {
+			t.Fatalf("Save(%s) error = %v", r.ID, err)
+		}
+	}
+
+	save(parent, nil, nil)
+	for _, sh := range shards {
+		save(sh, shardHosts[sh.ID], shardTasks)
+	}
+	save(later, []run.HostSummary{
+		{Host: "web01", Worst: "failed", Failures: 1}, {Host: "web02", Worst: "ok", OK: 3},
+		{Host: "web03", Worst: "ok", OK: 3}, {Host: "db01", Worst: "ok", OK: 3},
+		{Host: "db02", Worst: "ok", OK: 3}, {Host: "edge01", Worst: "ok", OK: 3},
+	}, []run.TaskSummary{{Task: "deploy", Seconds: 18}})
+
+	handler := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
+		"/v1/runs/run_after/compare?with=run_split", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
+	}
+	var c run.Comparison
+	if err := json.Unmarshal(rec.Body.Bytes(), &c); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+
+	if c.Totals.Added != 0 {
+		t.Errorf("comparison says %d hosts are new against a baseline that ran all six, so the "+
+			"shards were never read", c.Totals.Added)
+	}
+	if c.Totals.Broke != 1 || c.Totals.OK != 5 {
+		t.Errorf("totals = %+v, want the one broken host named and the other five steady", c.Totals)
+	}
+	// The three shards each reported deploy, and the fold has to sum them into the one task the
+	// run actually ran. Left unmerged the page listed deploy three times at a third of its work.
+	if len(c.Tasks) != 1 {
+		t.Fatalf("tasks = %+v, want one folded deploy row", c.Tasks)
+	}
+	if c.Tasks[0].DeltaSeconds != 6 {
+		t.Errorf("deploy delta = %v, want 6 (18 now against 12 across three shards)",
+			c.Tasks[0].DeltaSeconds)
+	}
+}

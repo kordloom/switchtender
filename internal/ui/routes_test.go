@@ -129,3 +129,31 @@ func TestEveryNavLinkResolves(t *testing.T) {
 	}
 	t.Logf("followed %d distinct in-app links across %d pages", len(seen), len(pages))
 }
+
+// TestUnknownDocsSlugIsAPageNotBareText pins the other half of the not-found fix.
+//
+// /ui/workflow was fixed to render the app's own page, but docsPage called http.NotFound directly,
+// so a stale or guessed docs address still dropped the reader onto Go's bare text with no nav and
+// no way back. Docs is linked from the topbar and the drawer, which makes it the likeliest address
+// for a stranger to get wrong.
+func TestUnknownDocsSlugIsAPageNotBareText(t *testing.T) {
+	t.Parallel()
+	handler := ui.New(zap.NewNop(), nil, false, 50000, false, false, false, "").Handler()
+
+	for _, path := range []string{"/ui/docs/install", "/ui/docs/nosuchpage", "/ui/docs/..%2fetc"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("GET %s status = %d, want %d", path, rec.Code, http.StatusNotFound)
+			continue
+		}
+		if strings.Contains(rec.Body.String(), "404 page not found") {
+			t.Errorf("GET %s answered with Go's stock bare text rather than the app's page", path)
+		}
+		if !strings.Contains(rec.Body.String(), "/ui/runs") {
+			t.Errorf("GET %s offered no way onward", path)
+		}
+	}
+}

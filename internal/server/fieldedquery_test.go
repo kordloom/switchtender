@@ -32,6 +32,13 @@ func TestParseFieldedQuery(t *testing.T) {
 		Want: run.ListFilter{Status: "failed", Actor: "root", Query: "deploy"},
 	}, { // Test 5: An unterminated quote degrades to taking the rest of the string, not a panic.
 		In: `held_by:"half open`, Want: run.ListFilter{HeldBy: "half open"},
+	}, { // Test 6: A prose task name, quoted, fills Task rather than becoming free text.
+		In: `task:"Apply configuration"`, Want: run.ListFilter{Task: "Apply configuration"},
+	}, { // Test 7: The task term composes with the others rather than replacing them.
+		In:   `task:"Apply configuration" status:failed`,
+		Want: run.ListFilter{Task: "Apply configuration", Status: "failed"},
+	}, { // Test 8: A task name left unfielded is free text, which is what could never match it.
+		In: "Apply configuration", Want: run.ListFilter{Query: "Apply configuration"},
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

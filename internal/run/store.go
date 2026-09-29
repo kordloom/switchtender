@@ -403,6 +403,10 @@ type ListFilter struct {
 	SourceID string
 	// Host keeps only runs that touched this host, resolved through the stored host summaries.
 	Host string
+	// Task keeps only runs that ran this task, resolved through the stored task summaries. The
+	// task name lives nowhere on the run row, so free text search can never find it: the Task
+	// trends page's per-row link promised exactly that search and returned nothing on every row.
+	Task string
 	// LabelKey with LabelValue keeps only runs carrying that label pair.
 	LabelKey string
 	// LabelValue is the value LabelKey must hold.
