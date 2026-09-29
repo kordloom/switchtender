@@ -32,9 +32,12 @@ From the UI, select the template and confirm the survey if it has one. From the 
 
     curl -s -X POST localhost:8080/v1/templates/{id}/launch \
       -H 'content-type: application/json' \
-      -d '{"environment":"staging"}'
+      -d '{"answers":{"environment":"staging"},"credential_ids":["cred_prod_key"]}'
 
-The body is the survey answers themselves, one key per field. Send an empty body when the template
-has no required survey fields.
+The body carries the survey answers under `answers`, one key per field, and an optional
+`credential_ids` list choosing from the template's selectable credentials. Both are optional, so an
+empty body launches a template that has no required survey fields and no selectable credentials. A
+chosen credential must be in the template's selectable set, and it applies on top of the credentials
+the template always uses.
 
 Next: run it on a cadence with [schedule a job](tutorial-schedule-a-job.md).

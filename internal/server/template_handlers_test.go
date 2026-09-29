@@ -1,9 +1,76 @@
 package server
 
 import (
+	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
+	"go.uber.org/zap"
+
+	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/template"
 )
+
+// TestLaunchTemplateCredentialSelection verifies prompt-on-launch credential selection: a chosen
+// credential from the selectable set is merged onto the always-on set, a choice outside the set is
+// rejected, and an empty body launches with only the always-on credentials.
+func TestLaunchTemplateCredentialSelection(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name      string
+		Body      string
+		WantCode  int
+		WantCreds []string
+	}{{ // Test 0: A chosen selectable credential is merged onto the fixed set.
+		Name: "valid selection", Body: `{"credential_ids":["cred_a"]}`,
+		WantCode: http.StatusAccepted, WantCreds: []string{"cred_fixed", "cred_a"},
+	}, { // Test 1: A choice outside the selectable set is rejected.
+		Name: "not selectable", Body: `{"credential_ids":["cred_x"]}`,
+		WantCode: http.StatusBadRequest,
+	}, { // Test 2: An empty body launches with only the always-on credentials.
+		Name: "no selection", Body: "",
+		WantCode: http.StatusAccepted, WantCreds: []string{"cred_fixed"},
+	}}
+	for i, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", i, test.Name), func(t *testing.T) {
+			t.Parallel()
+			store := template.NewMemStore()
+			if err := store.Save(context.Background(), &template.Template{
+				ID: "tpl_1", Name: "deploy", Playbook: "site.yml",
+				CredentialIDs:           []string{"cred_fixed"},
+				SelectableCredentialIDs: []string{"cred_a", "cred_b"},
+				CreatedAt:               time.Now(),
+			}); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+			sub := &fakeSubmitter{run: &run.Run{ID: "run_x"}}
+			handler := New(run.NewMemStore(), sub, zap.NewNop(), WithTemplates(store)).Handler()
+			var body io.Reader
+			if test.Body != "" {
+				body = strings.NewReader(test.Body)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/v1/templates/tpl_1/launch", body)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != test.WantCode {
+				t.Fatalf("status = %d, want %d (body %s)", rec.Code, test.WantCode, rec.Body.String())
+			}
+			if test.WantCode != http.StatusAccepted {
+				return
+			}
+			if diff := cmp.Diff(test.WantCreds, sub.gotRun.CredentialIDs, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("submitted credential IDs mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
 
 // TestTemplateToolError checks template input validation per tool, including that any tool, not
 // just Ansible, may pin an execution image now that the container runner plans all seven.

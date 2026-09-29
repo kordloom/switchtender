@@ -24,6 +24,7 @@ func NewMemStore() Store {
 func clone(t *Template) *Template {
 	cp := *t
 	cp.CredentialIDs = append([]string(nil), t.CredentialIDs...)
+	cp.SelectableCredentialIDs = append([]string(nil), t.SelectableCredentialIDs...)
 	cp.ExtraVars = maps.Clone(t.ExtraVars)
 	cp.Survey = append([]SurveyField(nil), t.Survey...)
 	return &cp
