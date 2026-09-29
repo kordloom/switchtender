@@ -76,6 +76,10 @@ func (m *memStore) Delete(_ context.Context, id string) error {
 func (m *memStore) AddMember(_ context.Context, teamID, userID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// The team has to exist, the way both SQL backends require on a foreign key.
+	if _, ok := m.teams[teamID]; !ok {
+		return ErrNotFound
+	}
 	if m.members[teamID] == nil {
 		m.members[teamID] = make(map[string]bool)
 	}

@@ -18,6 +18,37 @@ func Contract(t *testing.T, newStore func() org.Store) {
 	t.Helper()
 	t.Run("lifecycle", func(t *testing.T) { testLifecycle(t, newStore()) })
 	t.Run("membership", func(t *testing.T) { testMembership(t, newStore()) })
+	t.Run("list and missing parent", func(t *testing.T) { testListAndMissingParent(t, newStore()) })
+}
+
+// testListAndMissingParent covers the two answers the backends disagreed about: what List returns,
+// which had no test at all, and what happens when a membership names an organization that does not
+// exist. Both SQL backends refuse the second on a foreign key while the in-memory store accepted it,
+// and the in-memory store is the one every server and dispatch test runs against.
+func testListAndMissingParent(t *testing.T, store org.Store) {
+	ctx := context.Background()
+	for _, name := range []string{"beta", "alpha"} {
+		if err := store.Save(ctx, &org.Org{ID: "org_" + name, Name: name, CreatedAt: time.Now()}); err != nil {
+			t.Fatalf("Save(%s) error = %v", name, err)
+		}
+	}
+	list, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("List() returned %d organizations, want 2", len(list))
+	}
+	for _, o := range list {
+		if o.ID == "" || o.Name == "" {
+			t.Errorf("List() returned an incomplete organization: %+v", o)
+		}
+	}
+
+	if err := store.AddMember(ctx, "org_missing", "user_1", org.RoleMember); err == nil {
+		t.Error("a membership was accepted for an organization that does not exist, so it hangs " +
+			"off nothing; both SQL backends refuse this on a foreign key")
+	}
 }
 
 // testLifecycle verifies an organization round trips and deletes, and unknown ids report ErrNotFound.
