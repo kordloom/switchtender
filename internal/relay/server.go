@@ -175,6 +175,38 @@ func (s *relayServer) record(ctx context.Context, pool *Pool, owner, path string
 	}
 }
 
+// maxOwnerLen bounds the lease name a worker asserts. A lease name identifies one worker process,
+// so this is far above any real one.
+const maxOwnerLen = 128
+
+// normalizeOwner constrains the lease name a worker asserts, because the name is not the product's
+// own and reaches two places that cannot take arbitrary text.
+//
+// It is recorded as the actor on an audit entry, where the pool proven by the token is written first
+// and the asserted name after it. Unbounded, one claim wrote a two hundred thousand character actor
+// into the chain, which is hashed into a link and carried in every bundle exported afterwards.
+// Unconstrained, the name could hold the separators the actor is built from, so a worker could
+// assert "w1 pool:production worker:release-admin" and a reader scanning the field would find a
+// second identity in it that no token ever proved.
+//
+// It is also the value the lease is matched on. Normalizing it here, at both endpoints that accept
+// one, is what keeps a claim and the heartbeat that renews it agreeing on the same name.
+func normalizeOwner(s string) string {
+	if len(s) > maxOwnerLen {
+		s = s[:maxOwnerLen]
+	}
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			return r
+		case r == '-', r == '_', r == '.':
+			return r
+		default:
+			return '_'
+		}
+	}, s)
+}
+
 // claim leases the oldest pending run the owner's queues serve, returning it as JSON, or 204 when
 // nothing is pending.
 func (s *relayServer) claim(w http.ResponseWriter, r *http.Request) {
@@ -194,7 +226,8 @@ func (s *relayServer) claim(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	leased, err := s.store.Claim(r.Context(), body.Owner, body.Queues)
+	owner := normalizeOwner(body.Owner)
+	leased, err := s.store.Claim(r.Context(), owner, body.Queues)
 	switch {
 	case errors.Is(err, run.ErrNonePending):
 		w.WriteHeader(http.StatusNoContent)
@@ -203,7 +236,7 @@ func (s *relayServer) claim(w http.ResponseWriter, r *http.Request) {
 	default:
 		// A worker took a run onto a machine the control node cannot reach. That is the moment the
 		// work left this side of the boundary, so it is the moment worth recording.
-		s.record(r.Context(), poolFrom(r.Context()), body.Owner, "/relay/claim/"+leased.ID)
+		s.record(r.Context(), poolFrom(r.Context()), owner, "/relay/claim/"+leased.ID)
 		// The capability travels in a header, not the body. The field is json:"-", so it is not in
 		// the body a worker can log, cache, or forward, and this claim response is the one place it
 		// crosses the wire. The transport reads it once and keeps it only in memory, presenting it on
@@ -241,7 +274,7 @@ func (s *relayServer) heartbeat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "run not found")
 		return
 	}
-	err := s.store.Heartbeat(r.Context(), body.ID, body.Owner)
+	err := s.store.Heartbeat(r.Context(), body.ID, normalizeOwner(body.Owner))
 	switch {
 	case errors.Is(err, run.ErrNotFound):
 		writeErr(w, http.StatusNotFound, "run not found")

@@ -32,7 +32,8 @@ func TestPerTemplatePagerDutyUsesTargetKey(t *testing.T) {
 	d := New(store, roundhouse.RunnerFunc(
 		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
 			return roundhouse.Result{ExitCode: 2}, nil
-		}), nil)
+		}), nil,
+		WithNotifyClient(http.DefaultClient))
 	d.pagerDutyEndpoint = srv.URL
 	defer d.Close()
 
@@ -70,7 +71,8 @@ func TestPerTemplatePagerDutySilentOnSuccess(t *testing.T) {
 	d := New(store, roundhouse.RunnerFunc(
 		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
 			return roundhouse.Result{ExitCode: 0}, nil
-		}), nil)
+		}), nil,
+		WithNotifyClient(http.DefaultClient))
 	d.pagerDutyEndpoint = srv.URL
 	defer d.Close()
 
@@ -108,7 +110,8 @@ func TestPerTemplateGrafanaUsesTargetURLAndToken(t *testing.T) {
 	d := New(store, roundhouse.RunnerFunc(
 		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
 			return roundhouse.Result{ExitCode: 0}, nil
-		}), nil)
+		}), nil,
+		WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	created, err := d.Submit(context.Background(), "play.yml", "inv",
@@ -154,7 +157,8 @@ func TestPerTemplateTwilioTextsTargetRecipient(t *testing.T) {
 	d := New(store, roundhouse.RunnerFunc(
 		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
 			return roundhouse.Result{ExitCode: 2}, nil
-		}), nil, WithTwilio("AC123", "tok", "+15550000", nil))
+		}), nil, WithTwilio("AC123", "tok", "+15550000", nil),
+		WithNotifyClient(http.DefaultClient))
 	d.twilioBaseURL = srv.URL
 	defer d.Close()
 
@@ -193,7 +197,8 @@ func TestPerTemplateTwilioSkippedWithoutAccount(t *testing.T) {
 	d := New(store, roundhouse.RunnerFunc(
 		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
 			return roundhouse.Result{ExitCode: 2}, nil
-		}), nil)
+		}), nil,
+		WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	created, err := d.Submit(context.Background(), "play.yml", "inv",
@@ -215,7 +220,8 @@ func TestPerTemplateEmailReachesTargetRecipient(t *testing.T) {
 	d := New(store, roundhouse.RunnerFunc(
 		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
 			return roundhouse.Result{ExitCode: 0}, nil
-		}), nil, WithEmail(emailer, false))
+		}), nil, WithEmail(emailer, false),
+		WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	created, err := d.Submit(context.Background(), "play.yml", "inv",

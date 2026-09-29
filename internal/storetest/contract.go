@@ -3,6 +3,7 @@
 package storetest
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -39,6 +40,9 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("pagination at volume", func(t *testing.T) { testPaginationAtVolume(t, newStore()) })
 	t.Run("log append and read", func(t *testing.T) { testLog(t, newStore()) })
 	t.Run("log after cursor", func(t *testing.T) { testLogAfter(t, newStore()) })
+	t.Run("log stops at the capture limit and says so", func(t *testing.T) {
+		testLogCap(t, newStore())
+	})
 	t.Run("events append and read", func(t *testing.T) { testEvents(t, newStore()) })
 	t.Run("events after cursor", func(t *testing.T) { testEventsAfter(t, newStore()) })
 	t.Run("shards excluded from list", func(t *testing.T) { testShards(t, newStore()) })
@@ -3575,5 +3579,50 @@ func testReclaimAttribution(t *testing.T, store run.Store) {
 		if err != nil || got.Status != run.StatusInterrupted {
 			t.Errorf("%s = %v/%v, want interrupted by the sweep", id, got.Status, err)
 		}
+	}
+}
+
+// testLogCap pins that captured output stops at run.MaxLogBytes and that the run says it was cut.
+//
+// The request carrying one chunk is capped by middleware, but the accumulated total was not, so a
+// run printing in a loop grew the database until the disk was full. The audit chain lives in the
+// same database, so this took the evidence down with the product, and it was reachable by accident
+// from an ordinary playbook. Truncating without saying so would be its own fault: a log that simply
+// stops reads as a run that went quiet.
+func testLogCap(t *testing.T, store run.Store) {
+	t.Helper()
+	ctx := context.Background()
+	r := &run.Run{ID: "run_cap", Playbook: "p.yml", Status: run.StatusRunning, CreatedAt: time.Now()}
+	if err := store.Save(ctx, r); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	// Chunked rather than one huge write, since chunks are how a run actually produces output and
+	// the cap has to hold across them rather than inside one.
+	chunk := bytes.Repeat([]byte("x"), 1<<20)
+	for written := 0; written < run.MaxLogBytes+(4<<20); written += len(chunk) {
+		if err := store.AppendLog(ctx, "run_cap", chunk); err != nil {
+			t.Fatalf("AppendLog() error = %v", err)
+		}
+	}
+	got, err := store.Log(ctx, "run_cap")
+	if err != nil {
+		t.Fatalf("Log() error = %v", err)
+	}
+	// One chunk of overshoot is allowed: the write that crosses the line is admitted whole rather
+	// than split, which keeps the fence a single statement.
+	if len(got) > run.MaxLogBytes+len(chunk) {
+		t.Errorf("stored log is %d bytes, want no more than %d",
+			len(got), run.MaxLogBytes+len(chunk))
+	}
+	if len(got) == 0 {
+		t.Error("the cap swallowed the whole log, so nothing was captured at all")
+	}
+	after, err := store.Get(ctx, "run_cap")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if after.Warning != run.LogTruncatedWarning {
+		t.Errorf("run warning = %q, want the truncation notice so a reader knows the log is "+
+			"incomplete", after.Warning)
 	}
 }

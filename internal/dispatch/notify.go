@@ -130,16 +130,27 @@ func (d *Dispatcher) deliver(url, runID string, body []byte) {
 	d.deliverWithHeaders(url, runID, body, map[string]string{"Content-Type": "application/json"})
 }
 
+// notifyClient returns the client used to deliver a notification. The default refuses an address
+// that is link-local, unspecified, or this server itself, since the target is named by whoever
+// started the run rather than by an administrator. A test that serves on loopback replaces it.
+func (d *Dispatcher) notifyClient() *http.Client {
+	if d.notifyHTTP != nil {
+		return d.notifyHTTP
+	}
+	return safedial.OffHostClient(webhookTimeout)
+}
+
 // deliverWithHeaders posts one notification with the given request headers, retrying transient
 // failures once. The JSON channels use deliver; a channel like ntfy that sends a text body and
 // custom headers uses this directly.
 func (d *Dispatcher) deliverWithHeaders(url, runID string, body []byte, headers map[string]string) {
-	// A notification target is an operator-supplied URL the server fetches on its own network, the
-	// same shape as a secret source or a project remote, so it gets the same refusal: a resolved
-	// address that is link-local or unspecified is not dialed. Without it a per-run notification
-	// target pointed at the cloud metadata endpoint turned every finished run into a request for
-	// instance credentials, delivered by the server to whoever set the target.
-	client := safedial.Client(webhookTimeout)
+	// A notification target is a URL the server fetches on its own network, and unlike a secret
+	// source or a project remote it is not an administrator's: notification targets ride along with a
+	// run, so anyone who may start one may name the address. Without a refusal a target pointed at
+	// the cloud metadata endpoint turned every finished run into a request for instance credentials,
+	// delivered by the server to whoever set the target. The refusal also covers this server itself,
+	// which is where the services that assume only local processes reach them are listening.
+	client := d.notifyClient()
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
 		req, err := http.NewRequestWithContext(context.Background(),

@@ -191,6 +191,11 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 			server.WithInventorySources(bundle.InventorySources(), disp),
 			server.WithTriggers(bundle.Triggers(), sealer),
 			server.WithTeams(bundle.Teams()),
+			// The users page asks for organizations, so without this the demo answered 404 on a
+			// page a visitor is invited to open, and showed no organizations at all. Serve wires
+			// this; the demo did not, which made a shipped feature invisible in the one place it
+			// is being shown off.
+			server.WithOrgs(bundle.Orgs()),
 			server.WithGrants(bundle.Grants(), false),
 			server.WithAudit(bundle.Audits()),
 			server.WithProducerIdentity(demoProducer, resolveVersion()),

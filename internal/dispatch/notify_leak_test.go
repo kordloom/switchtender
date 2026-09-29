@@ -50,7 +50,8 @@ func TestNotifyExtraRedactsNotificationTargets(t *testing.T) {
 	d := New(store, roundhouse.RunnerFunc(
 		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
 			return roundhouse.Result{ExitCode: 0}, nil
-		}), nil)
+		}), nil,
+		WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	d.notifyExtra(&run.Run{
@@ -97,7 +98,8 @@ func TestNotifyExtraRedactsCommand(t *testing.T) {
 	d := New(store, roundhouse.RunnerFunc(
 		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
 			return roundhouse.Result{ExitCode: 0}, nil
-		}), nil)
+		}), nil,
+		WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	d.notifyExtra(&run.Run{
@@ -139,7 +141,8 @@ func TestNotifyWebhooksRedactsNotificationTargets(t *testing.T) {
 	d := New(store, roundhouse.RunnerFunc(
 		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
 			return roundhouse.Result{ExitCode: 0}, nil
-		}), nil, WithWebhooks([]string{srv.URL}))
+		}), nil, WithWebhooks([]string{srv.URL}),
+		WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	d.notifyWebhooks(&run.Run{

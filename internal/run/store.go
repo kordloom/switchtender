@@ -315,6 +315,22 @@ type SummaryAppender interface {
 // workers dead for months.
 const WorkerWindow = 48 * time.Hour
 
+// MaxLogBytes is the most captured output one run may accumulate.
+//
+// Nothing bounded it. Output is appended in chunks and the request that carries one is capped, but
+// the total was not, so a run that prints without stopping grew the database until the disk did not
+// take another byte. That is reachable by accident, from a playbook in a loop, and deliberately by
+// anyone who can start a run or hold a worker token. The audit chain lives in the same database, so
+// filling it takes the evidence down with the product.
+//
+// The bound is generous because a real run's output is evidence and truncating it costs something.
+// A run that reaches this has stopped saying anything a reader will use.
+const MaxLogBytes = 64 << 20
+
+// LogTruncatedWarning is set on a run whose output stopped being captured at MaxLogBytes, so a
+// reader is told the log is incomplete rather than left to think the run went quiet.
+const LogTruncatedWarning = "output passed the capture limit and was truncated; the run continued"
+
 // Summary window bounds. The window on the fleet and task trend views and the limit on host
 // history are caller supplied, and every row a window admits becomes an element of the answer, so
 // without a cap one request asks the store to rank, concatenate and serialize every summary ever
@@ -1447,6 +1463,14 @@ func (m *memStore) AppendLog(_ context.Context, id string, p []byte) error {
 	}
 	if r.Status.Terminal() {
 		// Fence a terminal run so a reclaimed-but-alive worker cannot append to a run that has ended.
+		return nil
+	}
+	// Fence the accumulated size for the same reason the request body is capped: the total is what
+	// fills a disk, and one chunk at a time is how it gets there.
+	if len(m.logs[id]) >= MaxLogBytes {
+		if r.Warning == "" {
+			r.Warning = LogTruncatedWarning
+		}
 		return nil
 	}
 	m.logs[id] = append(m.logs[id], p...)

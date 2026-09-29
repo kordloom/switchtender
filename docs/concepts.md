@@ -99,7 +99,8 @@ against it lands there, no matter how it was launched.
 
 Every authenticated mutation is recorded in the audit trail, and each entry is linked into a SHA-256
 hash chain. Each entry commits to who acted, how they authenticated, the account whose authority
-they used, the method and path, a digest of the change payload, and the previous entry's hash.
+they used, the method and path, a digest of the change payload, the install that wrote it, and the
+previous entry's hash.
 Altering,
 reordering, or deleting an entry breaks the chain, which `GET /v1/audit/verify` detects. `GET /v1/audit/bundle`
 seals the chain into a signed LoomSeal bundle, so the open `loomseal` verifier proves the trail is
@@ -113,6 +114,20 @@ it proves the shape and non-secret content of a change without becoming a way to
 secret the request carried. Each entry also records how the caller authenticated and, for a token
 bound to an account, the account it acted on behalf of, so a change an AI agent made under an
 operator's authority is attributable to both and cannot later be presented as a person's.
+
+**A receipt names the install that wrote it.** The install's identity takes part in every chain
+link, and a verifier checks each claim against the identity the bundle advertises. Without this a
+published receipt could be lifted whole: keep the claims and the genuine third-party anchor, rewrite
+the producer, re-sign with a second key, and a relying party pinning that key reads somebody else's
+history as its own. Rewriting the producer alone now contradicts the claims, and rewriting both
+stops the links recomputing, so neither survives a verifier.
+
+This depends on the install having a signing identity. Beside a local database one is created on
+first start. A deployment sharing a database between processes is different: every process writing
+that chain has to sign as the same install, so none of them will mint a key on its own, and until
+one is supplied the server runs with the chain unattributed and unbound. It still records and still
+verifies, but its receipts name no install and can be lifted. Set `SWITCHTENDER_AUDIT_KEY` to one
+seed on every process, or place the same `producer-key.json` in each host's identity directory.
 
 A chain proves that what it holds was not altered. On its own it cannot prove that nothing is
 missing, because the same server decides both what happens and what gets written down, and because a

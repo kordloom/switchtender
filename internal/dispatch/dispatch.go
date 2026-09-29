@@ -10,6 +10,7 @@ import (
 	"io"
 	"maps"
 	"math/rand/v2"
+	"net/http"
 	"os"
 	"sort"
 	"strings"
@@ -106,6 +107,8 @@ type Dispatcher struct {
 	// notifyWG tracks in-flight webhook and email deliveries so Close waits for them to finish
 	// instead of cutting them off mid-send.
 	notifyWG sync.WaitGroup
+	// notifyHTTP dials notification targets, nil for the guarded default.
+	notifyHTTP *http.Client
 	// ctx is canceled by Close to stop in-flight and pending runs.
 	ctx context.Context
 	// cancel cancels ctx.
@@ -212,6 +215,9 @@ type Option func(*config)
 
 // config holds optional Dispatcher settings before construction.
 type config struct {
+	// notifyClient dials notification targets. Nil uses the guarded default, which refuses this
+	// server itself; a test serving on loopback sets its own.
+	notifyClient *http.Client
 	// audits commits each run's outcome to the audit chain, nil when no trail is kept.
 	audits audit.Store
 	// workers is the worker pool size.
@@ -355,6 +361,15 @@ func WithNoJanitor() Option {
 	return func(c *config) { c.noJanitor = true }
 }
 
+// WithNotifyClient replaces the client that delivers notifications.
+//
+// The default refuses to dial this server itself, because a notification target is named by whoever
+// started the run. A test serving its own receiver on the loopback interface is the case that needs
+// to opt out, and it opts out explicitly rather than the guard being loosened for everybody.
+func WithNotifyClient(c *http.Client) Option {
+	return func(cfg *config) { cfg.notifyClient = c }
+}
+
 // New returns a Dispatcher. It panics if store or runner is nil; a nil logger becomes a no-op.
 func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Option) *Dispatcher {
 	if store == nil {
@@ -399,6 +414,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 	d := &Dispatcher{
 		store:              store,
 		audits:             cfg.audits,
+		notifyHTTP:         cfg.notifyClient,
 		runner:             runner,
 		log:                log,
 		sem:                make(chan struct{}, cfg.workers),

@@ -196,6 +196,16 @@ func (p *Plan) addSemaphoreProject(proj semaphoreProject, now time.Time) {
 			p.warn("inventory %q in project %q is type %q; only static content imports",
 				inv.Name, proj.Name, inv.Type)
 		}
+		// An inventory that arrives with nothing in it is reported, on the same terms as the AWX
+		// importer: this format has more than one shape, and one that carries its content somewhere
+		// this reader does not look produces an inventory targeting no hosts while the import still
+		// reports success. Only for the static type, since the others are already reported above and
+		// are expected to carry no inline content.
+		if (inv.Type == "" || inv.Type == "static") && strings.TrimSpace(inv.Inventory) == "" {
+			p.warn("inventory %q in project %q imported with no content. If it is not empty in "+
+				"Semaphore, this export carries it somewhere this importer does not read, and the "+
+				"inventory will target nothing", inv.Name, proj.Name)
+		}
 		obj := &inventory.Inventory{
 			ID: inventory.NewID(), Name: inv.Name, Content: inv.Inventory, CreatedAt: now,
 		}

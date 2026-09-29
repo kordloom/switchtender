@@ -19,6 +19,13 @@ const (
 	// streamTicketMax bounds how many live tickets are held, so a caller looping the mint endpoint
 	// cannot grow the map without limit. The oldest are dropped once the bound is passed.
 	streamTicketMax = 4096
+	// streamTicketPerActor bounds how many one caller may hold, so filling the table is not something
+	// a single caller can do. Without it the eviction below is reachable by one account: a viewer,
+	// the lowest role that can read a run, could loop the mint endpoint and drop tickets belonging to
+	// everyone else, in any organization. A caller at this bound evicts only its own oldest ticket,
+	// which keeps the reason the eviction exists, that a caller who cannot get a ticket cannot watch
+	// its own run, without letting one caller spend everybody else's.
+	streamTicketPerActor = 64
 )
 
 // streamTicket is one minted permission to open one run's event stream.
@@ -44,13 +51,46 @@ type streamTickets struct {
 	mu sync.Mutex
 	// live holds unredeemed tickets by their secret value.
 	live map[string]streamTicket
+	// byActor is how many live tickets each caller holds, keyed the way the stream limiter keys one.
+	byActor map[string]int
 	// now reads the clock, replaced in tests.
 	now func() time.Time
 }
 
 // newStreamTickets returns an empty ticket store.
 func newStreamTickets() *streamTickets {
-	return &streamTickets{live: make(map[string]streamTicket), now: time.Now}
+	return &streamTickets{
+		live: make(map[string]streamTicket), byActor: make(map[string]int), now: time.Now,
+	}
+}
+
+// ticketActorKey identifies the caller a ticket is counted against, on the same terms the live
+// stream limiter counts one, so the two bounds describe the same caller.
+func ticketActorKey(a Actor) string {
+	switch {
+	case a.UserID != "":
+		return "user:" + a.UserID
+	case a.Name != "":
+		return "name:" + a.Name
+	default:
+		return "anon"
+	}
+}
+
+// drop removes one ticket and keeps the per-caller count with it. Every removal goes through here,
+// so the count cannot drift from the table it describes.
+func (s *streamTickets) drop(value string) {
+	t, ok := s.live[value]
+	if !ok {
+		return
+	}
+	delete(s.live, value)
+	key := ticketActorKey(t.actor)
+	if s.byActor[key] <= 1 {
+		delete(s.byActor, key)
+		return
+	}
+	s.byActor[key]--
 }
 
 // mint records a ticket for actor to open runID and returns its secret.
@@ -64,22 +104,41 @@ func (s *streamTickets) mint(actor Actor, runID string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
-	if len(s.live) >= streamTicketMax {
+	key := ticketActorKey(actor)
+	if len(s.live) >= streamTicketMax || s.byActor[key] >= streamTicketPerActor {
 		for k, t := range s.live {
 			if now.After(t.expires) {
-				delete(s.live, k)
+				s.drop(k)
 			}
-		}
-		// Still full of live tickets: drop arbitrary ones rather than refuse to mint, since a caller
-		// who cannot get a ticket cannot watch their own run.
-		for k := range s.live {
-			if len(s.live) < streamTicketMax {
-				break
-			}
-			delete(s.live, k)
 		}
 	}
+	// A caller at its own bound gives up its oldest rather than anyone else's, so looping the
+	// endpoint costs the caller its own tickets and nobody else theirs.
+	for s.byActor[key] >= streamTicketPerActor {
+		oldest, found := "", time.Time{}
+		for k, t := range s.live {
+			if ticketActorKey(t.actor) != key {
+				continue
+			}
+			if found.IsZero() || t.expires.Before(found) {
+				oldest, found = k, t.expires
+			}
+		}
+		if oldest == "" {
+			break
+		}
+		s.drop(oldest)
+	}
+	// The table as a whole can still fill when many callers each hold a legitimate share, and a
+	// caller who cannot get a ticket cannot watch their own run, so the last resort is unchanged.
+	for k := range s.live {
+		if len(s.live) < streamTicketMax {
+			break
+		}
+		s.drop(k)
+	}
 	s.live[value] = streamTicket{actor: actor, runID: runID, expires: now.Add(streamTicketTTL)}
+	s.byActor[key]++
 	return value, nil
 }
 
@@ -95,7 +154,7 @@ func (s *streamTickets) redeem(value, runID string) (Actor, bool) {
 	if !ok {
 		return Actor{}, false
 	}
-	delete(s.live, value)
+	s.drop(value)
 	if s.now().After(t.expires) {
 		return Actor{}, false
 	}

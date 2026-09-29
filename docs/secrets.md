@@ -52,6 +52,8 @@ A credential's source decides where its value comes from at run time.
 | CyberArk CCP | A Central Credential Provider URL, app id, and account locator, read over the AIMWebService REST API at launch. Authenticates the application with a client certificate or a CCP allowed-machine rule, so no long-lived credential is stored. |
 | 1Password | A 1Password Connect URL, token, vault, item, and field, read over the Connect REST API at launch. The vault and item may be names or ids, and the field defaults to the item's password. |
 
+A source that authenticates with an attached managed identity holds no stored key, which is the point of using one, but it does mean the host's identity is a credential reachable from anything running on that host. A containerized run with network access can read it from the cloud metadata service the same way this server does. Run with `--container-network none` where a run does not need the network, and block the link-local metadata address at the host firewall where it does. This bounds what the identity can reach as well: give it access to the secrets this install reads and nothing more.
+
 ## Ephemeral secrets
 
 A Vault dynamic source mints a new credential for each run and revokes it the moment the run ends, so

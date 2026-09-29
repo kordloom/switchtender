@@ -762,7 +762,8 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger, assetDir string) {
 
 // scriptLogRotate is the Bash job for the standalone bash run and the Rotate logs template. It runs
 // cleanly under set -e on any host, printing lifelike operations output.
-const scriptLogRotate = `set -euo pipefail
+const scriptLogRotate = `# Rotate and archive application logs on every web host
+set -euo pipefail
 echo "Rotating application logs on $(hostname)"
 for svc in web api worker scheduler; do
   echo "  archived and truncated ${svc}.log"
@@ -773,7 +774,8 @@ echo "Log rotation complete"
 `
 
 // scriptSmoke is the Bash step that verifies the mixed pipeline after the Ansible configure step.
-const scriptSmoke = `set -euo pipefail
+const scriptSmoke = `# Smoke test the deployed release before traffic is shifted
+set -euo pipefail
 echo "Running post-deploy smoke checks"
 for ep in / /healthz /metrics; do
   echo "  GET ${ep} -> 200 OK"
@@ -783,7 +785,8 @@ echo "All endpoints healthy"
 
 // scriptReconcile is the Python job for the standalone python run and the Reconcile inventory
 // template. It reports inventory drift as JSON and exits zero.
-const scriptReconcile = `import json
+const scriptReconcile = `# Reconcile the inventory against the hosts that actually answered
+import json
 
 want = {"web01", "web02", "web03", "db01", "db02", "edge01"}
 present = {"web01", "web02", "web03", "db01", "edge01"}
@@ -797,7 +800,8 @@ if missing:
 
 // scriptFleetGo is the Go job for the standalone go run and the Fleet capacity report template. It
 // summarizes host capacity as JSON and exits zero, using only the standard library so it runs offline.
-const scriptFleetGo = `package main
+const scriptFleetGo = `// Report spare capacity per host from the fleet summary
+package main
 
 import (
 	"encoding/json"
@@ -830,7 +834,8 @@ func main() {
 
 // scriptProvisionPy is the mixed pipeline's provisioning step when Terraform is absent but Python is
 // present, so the pipeline still leads with a distinct infrastructure tool.
-const scriptProvisionPy = `import json
+const scriptProvisionPy = `# Provision the network plan and write it out for the next step
+import json
 
 plan = {
     "network": "10.0.0.0/16",
@@ -844,7 +849,8 @@ print(f"Would create {len(plan['subnets'])} subnets for {len(plan['web_hosts'])}
 
 // scriptProvisionSh is the mixed pipeline's provisioning step when neither Terraform nor Python is
 // present, keeping the pipeline runnable on a bare host.
-const scriptProvisionSh = `set -euo pipefail
+const scriptProvisionSh = `# Provision the host and hand its address to the next step
+set -euo pipefail
 echo "Planning infrastructure"
 echo "  network: 10.0.0.0/16"
 echo "  subnets: 10.0.1.0/24, 10.0.2.0/24"

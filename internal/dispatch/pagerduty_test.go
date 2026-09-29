@@ -33,7 +33,7 @@ func TestDispatcherNotifiesPagerDuty(t *testing.T) {
 		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
 			return roundhouse.Result{ExitCode: 2}, nil
 		})
-	d := New(store, runner, nil, WithPagerDuty([]string{"rk-1"}))
+	d := New(store, runner, nil, WithPagerDuty([]string{"rk-1"}), WithNotifyClient(http.DefaultClient))
 	d.pagerDutyEndpoint = srv.URL
 	defer d.Close()
 

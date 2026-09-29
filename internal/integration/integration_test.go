@@ -437,6 +437,30 @@ func TestRealSSHFailureIsolation(t *testing.T) {
 // so a run inside it proves execution is isolated from the host's ansible.
 const eeImage = "willhallonline/ansible:2.15-alpine-3.19"
 
+// requireHostBindMounts skips when the docker daemon cannot bind mount a path from this machine.
+//
+// A containerized run hands the daemon host paths: the project checkout, the playbook's directory,
+// the inventory. When the daemon runs in a virtual machine that does not share this filesystem, and
+// colima on macOS is the common case, those mounts land as empty directories and the run fails
+// looking for a playbook that is right there. That is a property of the developer's docker, not of
+// the product, and a gate that can never pass locally is a gate people learn to skip.
+//
+// It is a skip and not a pass, and it says why, because the alternative is a green run that quietly
+// proves nothing about the one thing this test exists to cover.
+func requireHostBindMounts(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "probe"), []byte("visible"), 0o600); err != nil {
+		t.Fatalf("write bind mount probe: %v", err)
+	}
+	out, err := exec.Command("docker", "run", "--rm", "-v", dir+":"+dir+":ro",
+		"alpine:3.22", "cat", filepath.Join(dir, "probe")).CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "visible") {
+		t.Skipf("this docker cannot bind mount a host path, so container execution cannot be "+
+			"exercised here; run it where the daemon shares this filesystem: %v\n%s", err, out)
+	}
+}
+
 // TestContainerExecutionEnvironment runs a playbook inside a pinned container image and confirms the
 // ansible-core reported by the play is the image's, not the host's, proving execution isolation.
 func TestContainerExecutionEnvironment(t *testing.T) {
@@ -446,6 +470,7 @@ func TestContainerExecutionEnvironment(t *testing.T) {
 	if err := exec.Command("docker", "info").Run(); err != nil {
 		t.Skip("docker daemon not running")
 	}
+	requireHostBindMounts(t)
 	pull, cancelPull := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancelPull()
 	if out, err := exec.CommandContext(pull, "docker", "pull", eeImage).CombinedOutput(); err != nil {

@@ -312,7 +312,9 @@ func registerContainerFlags(cmd *cobra.Command) {
 	cmd.Flags().IntVar(&containerPidsLimit, "container-pids-limit", d.PidsLimit,
 		"Process cap for containerized runs, as docker --pids-limit. Zero removes the cap.")
 	cmd.Flags().StringVar(&containerNetwork, "container-network", d.Network,
-		"Network mode for containerized runs, as docker --network, for example bridge or none.")
+		"Network mode for containerized runs, as docker --network, for example bridge or none. "+
+			"With network access a run can reach the host's cloud metadata service and read the "+
+			"instance identity, so prefer none for runs that do not need the network.")
 	cmd.Flags().StringVar(&containerRuntime, "container-runtime", "docker",
 		"Container CLI for containerized runs: docker or podman.")
 	cmd.Flags().StringVar(&containerPullPolicy, "container-pull-policy", "missing",
@@ -891,11 +893,18 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	// The producer identity signs LoomSeal bundles and is published so a relying party can pin its
 	// fingerprint. It is created on first start in the install's identity directory, the same one the
 	// bundle command reads, so a bundle is signed with the key serve publishes. A failure to create
-	// it is not fatal: the server still runs and still records the audit chain, it just cannot
-	// attribute a bundle, which is better than refusing to start over an export feature.
+	// it is not fatal: the server still runs and still records the audit chain, and refusing to start
+	// would take an install offline over evidence it may not be exporting yet.
+	//
+	// It does cost more than attribution. Without an identity there is no install to bind entries to,
+	// so the chain commits to no producer and its receipts can be lifted onto another install. The
+	// warning says so rather than naming only the export, because a shared database reaches this path
+	// by design and an operator reading about bundles would not know the binding went with it. The
+	// error it carries already ends with the remedy and the path to put the key in.
 	var producer *audit.Identity
 	if id, err := audit.LoadIdentityForStore(serveDB, identityDir(serveDB)); err != nil {
-		log.Warn("producer identity unavailable, bundles cannot be attributed: " + err.Error())
+		log.Warn("producer identity unavailable, so bundles cannot be attributed and entries are not " +
+			"bound to this install, which lets a receipt be lifted onto another one: " + err.Error())
 	} else {
 		producer = &id
 		log.Info("producer identity ready", zap.String("key_id", id.KeyID()),
@@ -1136,8 +1145,33 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
+	// Organizations without separation are a shape somebody gets wrong quietly. Grants default open,
+	// so an object nobody has granted falls back to the caller's global role, and an operator who
+	// created a second organization and assumed it was a boundary has none: every tenant reads and
+	// cancels every other tenant's runs. That is documented, and a default is stronger than a
+	// document, so an install that has more than one organization and has not turned separation on
+	// is told at startup rather than finding out from a customer.
+	if !serveStrictGrants {
+		if orgs, err := bundle.Orgs().List(cmd.Context()); err == nil && len(orgs) > 1 {
+			log.Warn("this install has more than one organization and separation between them is "+
+				"off, so a member of one can read and cancel another's runs: pass --strict-grants "+
+				"to deny access to an object that has no grant instead of falling back to the "+
+				"caller's global role", zap.Int("organizations", len(orgs)))
+		}
+	}
+
 	var jwtAuth *server.JWTAuth
 	if serveJWTJWKSURL != "" {
+		// An issuer usually mints tokens for more than one application, and the audience claim is
+		// what says which one a token was for. Without it every token that issuer signs is accepted
+		// here, including one minted for a different application entirely, so a service holding a
+		// token for something else at the same provider can sign in as whatever its claims map to.
+		// The check is optional because a single-application issuer does not need it, not because
+		// leaving it off is equivalent.
+		if serveJWTAudience == "" {
+			log.Warn("jwt sign-in accepts any audience: set --jwt-audience so a token minted for " +
+				"another application at the same issuer is not accepted here")
+		}
 		jwtAuth, err = server.NewJWTAuth(cmd.Context(), serveJWTJWKSURL, serveJWTIssuer,
 			serveJWTAudience, serveJWTUsernameClaim, serveJWTGroupsClaim,
 			user.Role(serveJWTDefaultRole), parseRoleMap(serveJWTRoleMap), bundle.Users(), log)

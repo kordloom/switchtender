@@ -75,7 +75,7 @@ func TestDispatcherNotifiesSlack(t *testing.T) {
 		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
 			return roundhouse.Result{ExitCode: 0}, nil
 		})
-	d := New(store, runner, nil, WithSlack([]string{hook.URL}))
+	d := New(store, runner, nil, WithSlack([]string{hook.URL}), WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	created, err := d.Submit(context.Background(), "play.yml", "inv")
