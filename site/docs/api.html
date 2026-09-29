@@ -741,7 +741,7 @@ signed over a window sitting past a break would attest to entries this install c
 <p><code>EventSource</code> cannot set a header, so <code>GET /v1/runs/{id}/stream</code> takes a short-lived ticket in the
 query string instead of a bearer token. Mint one over the ordinary authenticated route and open the
 stream with it:</p>
-<pre><code>curl -X POST -H &quot;Authorization: Bearer $TOKEN&quot; \
+<pre><code>curl -X POST -H &quot;Authorization: Bearer $ST_TOKEN&quot; \
   localhost:8080/v1/runs/run_abc/stream-ticket
 # {&quot;ticket&quot;:&quot;...&quot;,&quot;expires_in&quot;:30}
 </code></pre>
@@ -755,7 +755,7 @@ string reaches every access log downstream. A ticket in the same place is worth 
 single sign-on stays valid with none of them set. <code>title</code> is descriptive and grants nothing; <code>role</code>
 alone decides what an account may do.</p>
 <pre><code class="language-bash">curl -X PUT https://switchtender.example.com/v1/users/user_9f2c \
-  -H &quot;Authorization: Bearer $SWITCHTENDER_TOKEN&quot; \
+  -H &quot;Authorization: Bearer $ST_TOKEN&quot; \
   -H 'Content-Type: application/json' \
   -d '{
     &quot;username&quot;: &quot;ada&quot;,
@@ -780,7 +780,7 @@ or <code>https</code> address; any other scheme is refused, because the admin pa
 seconds. It is accepted on create and update, and every launch of the template carries it onto the
 run, whether the launch came from the API, a schedule, or a webhook trigger.</p>
 <pre><code class="language-bash">curl -X POST https://switchtender.example.com/v1/templates \
-  -H &quot;Authorization: Bearer $SWITCHTENDER_TOKEN&quot; \
+  -H &quot;Authorization: Bearer $ST_TOKEN&quot; \
   -H 'Content-Type: application/json' \
   -d '{
     &quot;name&quot;: &quot;nightly database backup&quot;,
@@ -845,7 +845,7 @@ retry keeps them.</p>
 </tbody>
 </table>
 <pre><code class="language-bash">curl -X POST https://switchtender.example.com/v1/runs \
-  -H &quot;Authorization: Bearer $SWITCHTENDER_TOKEN&quot; \
+  -H &quot;Authorization: Bearer $ST_TOKEN&quot; \
   -H 'Content-Type: application/json' \
   -d '{
     &quot;playbook&quot;: &quot;plays/deploy.yml&quot;,
@@ -870,7 +870,7 @@ trigger, runs the graph as a pipeline, and the template's survey answers and ext
 step. A workflow template sets no top-level <code>playbook</code>, <code>command</code>, <code>tool</code>, <code>shards</code>, or Ansible
 controls, since each step names its own; the graph is validated when the template is saved, so a
 cycle or an unknown dependency is refused then rather than on every launch.</p>
-<pre><code class="language-bash">curl -X POST https://switchtender.example.com/v1/templates   -H &quot;Authorization: Bearer $SWITCHTENDER_TOKEN&quot;   -H 'Content-Type: application/json'   -d '{
+<pre><code class="language-bash">curl -X POST https://switchtender.example.com/v1/templates   -H &quot;Authorization: Bearer $ST_TOKEN&quot;   -H 'Content-Type: application/json'   -d '{
     &quot;name&quot;: &quot;build and ship&quot;,
     &quot;inventory_id&quot;: &quot;inv_3f9c1b7a2e04&quot;,
     &quot;steps&quot;: [
@@ -962,7 +962,7 @@ that kind is addressed by, plus an optional <code>on_failure</code> that limits 
 </tbody>
 </table>
 <pre><code class="language-bash">curl -X POST https://switchtender.example.com/v1/templates \
-  -H &quot;Authorization: Bearer $SWITCHTENDER_TOKEN&quot; \
+  -H &quot;Authorization: Bearer $ST_TOKEN&quot; \
   -H 'Content-Type: application/json' \
   -d '{
     &quot;name&quot;: &quot;prod deploy&quot;,
@@ -985,7 +985,7 @@ in that zone and follows its daylight-saving shifts, so a nightly window stays p
 The field is accepted on create and update and applies to the same expression the preview endpoint
 renders.</p>
 <pre><code class="language-bash">curl -X POST https://switchtender.example.com/v1/schedules \
-  -H &quot;Authorization: Bearer $SWITCHTENDER_TOKEN&quot; \
+  -H &quot;Authorization: Bearer $ST_TOKEN&quot; \
   -H 'Content-Type: application/json' \
   -d '{&quot;cron&quot;:&quot;0 2 * * *&quot;,&quot;timezone&quot;:&quot;America/New_York&quot;,&quot;template_id&quot;:&quot;tpl_abc123&quot;}'
 </code></pre>
@@ -1001,7 +1001,7 @@ summaries for each host and each task and drops the rest, so a host's outcome hi
 outlives its runs without the tables growing forever. N is never allowed below 500, the deepest
 window these endpoints will answer, so trimmed history is history no request could have reached.</p>
 <pre><code class="language-bash">curl -s &quot;https://switchtender.example.com/v1/fleet?window=30&quot; \
-  -H &quot;Authorization: Bearer $SWITCHTENDER_TOKEN&quot;
+  -H &quot;Authorization: Bearer $ST_TOKEN&quot;
 </code></pre>
 <h2 id="relay-endpoints">Relay endpoints</h2>
 <p>With <code>--worker-token</code> set, the server also serves the mesh relay under <code>/relay</code>: the execution

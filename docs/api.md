@@ -191,7 +191,7 @@ signed over a window sitting past a break would attest to entries this install c
 query string instead of a bearer token. Mint one over the ordinary authenticated route and open the
 stream with it:
 
-    curl -X POST -H "Authorization: Bearer $TOKEN" \
+    curl -X POST -H "Authorization: Bearer $ST_TOKEN" \
       localhost:8080/v1/runs/run_abc/stream-ticket
     # {"ticket":"...","expires_in":30}
 
@@ -210,7 +210,7 @@ alone decides what an account may do.
 
 ```bash
 curl -X PUT https://switchtender.example.com/v1/users/user_9f2c \
-  -H "Authorization: Bearer $SWITCHTENDER_TOKEN" \
+  -H "Authorization: Bearer $ST_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{
     "username": "ada",
@@ -241,7 +241,7 @@ run, whether the launch came from the API, a schedule, or a webhook trigger.
 
 ```bash
 curl -X POST https://switchtender.example.com/v1/templates \
-  -H "Authorization: Bearer $SWITCHTENDER_TOKEN" \
+  -H "Authorization: Bearer $ST_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{
     "name": "nightly database backup",
@@ -283,7 +283,7 @@ retry keeps them.
 
 ```bash
 curl -X POST https://switchtender.example.com/v1/runs \
-  -H "Authorization: Bearer $SWITCHTENDER_TOKEN" \
+  -H "Authorization: Bearer $ST_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{
     "playbook": "plays/deploy.yml",
@@ -314,7 +314,7 @@ controls, since each step names its own; the graph is validated when the templat
 cycle or an unknown dependency is refused then rather than on every launch.
 
 ```bash
-curl -X POST https://switchtender.example.com/v1/templates   -H "Authorization: Bearer $SWITCHTENDER_TOKEN"   -H 'Content-Type: application/json'   -d '{
+curl -X POST https://switchtender.example.com/v1/templates   -H "Authorization: Bearer $ST_TOKEN"   -H 'Content-Type: application/json'   -d '{
     "name": "build and ship",
     "inventory_id": "inv_3f9c1b7a2e04",
     "steps": [
@@ -357,7 +357,7 @@ that kind is addressed by, plus an optional `on_failure` that limits the target 
 
 ```bash
 curl -X POST https://switchtender.example.com/v1/templates \
-  -H "Authorization: Bearer $SWITCHTENDER_TOKEN" \
+  -H "Authorization: Bearer $ST_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{
     "name": "prod deploy",
@@ -385,7 +385,7 @@ renders.
 
 ```bash
 curl -X POST https://switchtender.example.com/v1/schedules \
-  -H "Authorization: Bearer $SWITCHTENDER_TOKEN" \
+  -H "Authorization: Bearer $ST_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"cron":"0 2 * * *","timezone":"America/New_York","template_id":"tpl_abc123"}'
 ```
@@ -406,7 +406,7 @@ window these endpoints will answer, so trimmed history is history no request cou
 
 ```bash
 curl -s "https://switchtender.example.com/v1/fleet?window=30" \
-  -H "Authorization: Bearer $SWITCHTENDER_TOKEN"
+  -H "Authorization: Bearer $ST_TOKEN"
 ```
 
 ## Relay endpoints

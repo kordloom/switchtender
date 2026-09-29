@@ -347,7 +347,7 @@ what happened. Every tool call is an ordinary authenticated API request carrying
 here, so it passes the same authorization, the same approval policy, and the same fail-closed audit
 append as a request from a person. See [Agents](agents.md).
 
-    export SWITCHTENDER_MCP_TOKEN=ymt_...
+    export SWITCHTENDER_MCP_TOKEN=swt_...
     switchtender mcp --server https://switchtender.internal
 
 The token is read from `SWITCHTENDER_MCP_TOKEN`, falling back to `SWITCHTENDER_TOKEN`. Prefer the
@@ -494,7 +494,7 @@ That confines the lease side. The submit side is confined by granting the queue,
 object named `queue:<name>`:
 
     curl -X POST localhost:8080/v1/grants \
-      -H "Authorization: Bearer $TOKEN" \
+      -H "Authorization: Bearer $ST_TOKEN" \
       -d '{"subject": "team_sre", "object": "queue:prod", "access": "use"}'
 
 A queue nobody has granted follows the same rule every other object does: the global role decides,

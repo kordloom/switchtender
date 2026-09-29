@@ -28,7 +28,11 @@ carries a real share of the work, sized by measured cost rather than a flat coun
 
 ## Do it from the API
 
+Send the same launch with your API token, the one serve printed on first start or one minted with
+`switchtender token new`:
+
     curl -s -X POST localhost:8080/v1/runs \
+      -H "Authorization: Bearer $ST_TOKEN" \
       -H 'content-type: application/json' \
       -d '{"tool":"bash","command":"echo hello from switchtender"}'
 

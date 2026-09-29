@@ -58,7 +58,7 @@ func TestWorkerReportsInBatchesTheControlNodeAccepts(t *testing.T) {
 	srv := httptest.NewServer(rec.handler())
 	t.Cleanup(srv.Close)
 
-	tr := NewHTTPTransport(srv.URL, "ymt_worker", nil)
+	tr := NewHTTPTransport(srv.URL, "swt_worker", nil)
 
 	// A 250-host playbook running 30 tasks reports 7500 results, which is over the cap.
 	events := make([]event.Event, 7500)

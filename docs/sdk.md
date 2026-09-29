@@ -82,14 +82,17 @@ Build it, run it, and submit a run that names the new tool:
     go mod tidy && go build -o switchtender-hello .
     ./switchtender-hello serve --addr :8080 --db switchtender.db
 
+The first start mints an admin token and prints it once; send it as the bearer token:
+
     curl -s -X POST localhost:8080/v1/runs \
+      -H "Authorization: Bearer $ST_TOKEN" \
       -H 'Content-Type: application/json' \
       -d '{"tool":"hello","command":"world"}'
 
 The run is accepted, executed, and audited like any built-in tool, and its log holds the runner's
 output:
 
-    curl -s localhost:8080/v1/runs/<id>/logs
+    curl -s -H "Authorization: Bearer $ST_TOKEN" localhost:8080/v1/runs/<id>/logs
     hello from an external plugin: world
 
 The binary keeps every stock command: `serve`, `worker`, `desktop`, `demo`, `import`, `token`,

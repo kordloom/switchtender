@@ -71,7 +71,7 @@ agent its own token rather than reusing an operator's: the trail names whoever t
 An environment variable is preferred to the flag because a flag value is
 visible in the host's process list.
 
-    export ` + mcpTokenEnv + `=ymt_...
+    export ` + mcpTokenEnv + `=swt_...
     switchtender mcp --server https://switchtender.internal`,
 	Args:         cobra.NoArgs,
 	SilenceUsage: true,

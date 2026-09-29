@@ -37,9 +37,9 @@ func planFixture(t *testing.T) (client *Client, store run.Store, baseURL string)
 		t.Fatalf("Save run: %v", err)
 	}
 
-	srv := httptest.NewServer(NewHandler(store, SinglePool("ymt_worker"), zap.NewNop(), policies, nil))
+	srv := httptest.NewServer(NewHandler(store, SinglePool("swt_worker"), zap.NewNop(), policies, nil))
 	t.Cleanup(srv.Close)
-	tr := NewHTTPTransport(srv.URL, "ymt_worker", nil)
+	tr := NewHTTPTransport(srv.URL, "swt_worker", nil)
 	// The worker claims the plan the way it would in service, which is what issues the per-claim
 	// capability every later call presents.
 	if _, err := tr.Claim(ctx, "worker-1", []string{"default"}); err != nil {
@@ -121,7 +121,7 @@ func TestAWorkerCanProposeTheApplyItsPlanGated(t *testing.T) {
 
 	// Test 3: A worker without the run's lease cannot propose anything for it.
 	_, _, bareURL := planFixture(t)
-	bare := NewClient(NewHTTPTransport(bareURL, "ymt_worker", nil))
+	bare := NewClient(NewHTTPTransport(bareURL, "swt_worker", nil))
 	if _, err := bare.ProposeApply(ctx, "run_plan", 3, true); err == nil {
 		t.Error("a worker with no lease proposed an apply for somebody else's run")
 	}

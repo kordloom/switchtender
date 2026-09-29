@@ -22,6 +22,7 @@ whole pipeline.
 ## From the API
 
     curl -s -X POST localhost:8080/v1/schedules \
+      -H "Authorization: Bearer $ST_TOKEN" \
       -H 'content-type: application/json' \
       -d '{"cron":"0 2 * * *","template_id":"tpl_abc123"}'
 
@@ -34,6 +35,7 @@ as `America/New_York`, to pin it to a zone and let it follow that zone's dayligh
 nightly window stays put across the year.
 
     curl -s -X POST localhost:8080/v1/schedules \
+      -H "Authorization: Bearer $ST_TOKEN" \
       -H 'content-type: application/json' \
       -d '{"cron":"0 2 * * *","timezone":"America/New_York","template_id":"tpl_abc123"}'
 

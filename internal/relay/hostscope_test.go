@@ -37,10 +37,10 @@ func TestFactsAreBoundToTheHostsTheRunRecorded(t *testing.T) {
 		t.Fatalf("Save run: %v", err)
 	}
 
-	handler := NewHandler(store, SinglePool("ymt_worker"), zap.NewNop(), nil, nil)
+	handler := NewHandler(store, SinglePool("swt_worker"), zap.NewNop(), nil, nil)
 	post := func(path, body string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
-		r.Header.Set("Authorization", "Bearer ymt_worker")
+		r.Header.Set("Authorization", "Bearer swt_worker")
 		r.Header.Set(leaseHeader, "lease-1")
 		r.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()

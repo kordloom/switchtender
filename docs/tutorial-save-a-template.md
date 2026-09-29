@@ -39,6 +39,7 @@ refused with the field it failed, and no run starts.
 From the UI, select the template and confirm the survey if it has one. From the API:
 
     curl -s -X POST localhost:8080/v1/templates/{id}/launch \
+      -H "Authorization: Bearer $ST_TOKEN" \
       -H 'content-type: application/json' \
       -d '{"answers":{"environment":"staging"},"credential_ids":["cred_prod_key"]}'
 

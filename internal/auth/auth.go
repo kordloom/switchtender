@@ -13,7 +13,7 @@ import (
 )
 
 // tokenPrefix marks SwitchTender API tokens so leaked strings are recognizable in scanners.
-const tokenPrefix = "ymt_"
+const tokenPrefix = "swt_"
 
 // ErrNotFound is returned when a token does not exist in the store.
 var ErrNotFound = errors.New("token not found")

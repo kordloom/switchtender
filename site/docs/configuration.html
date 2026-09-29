@@ -981,7 +981,7 @@ attestations.</li>
 what happened. Every tool call is an ordinary authenticated API request carrying the token given
 here, so it passes the same authorization, the same approval policy, and the same fail-closed audit
 append as a request from a person. See <a href="/docs/agents">Agents</a>.</p>
-<pre><code>export SWITCHTENDER_MCP_TOKEN=ymt_...
+<pre><code>export SWITCHTENDER_MCP_TOKEN=swt_...
 switchtender mcp --server https://switchtender.internal
 </code></pre>
 <p>The token is read from <code>SWITCHTENDER_MCP_TOKEN</code>, falling back to <code>SWITCHTENDER_TOKEN</code>. Prefer the
@@ -1175,7 +1175,7 @@ worse than one that refuses to start.</p>
 <p>That confines the lease side. The submit side is confined by granting the queue, which is a grantable
 object named <code>queue:&lt;name&gt;</code>:</p>
 <pre><code>curl -X POST localhost:8080/v1/grants \
-  -H &quot;Authorization: Bearer $TOKEN&quot; \
+  -H &quot;Authorization: Bearer $ST_TOKEN&quot; \
   -d '{&quot;subject&quot;: &quot;team_sre&quot;, &quot;object&quot;: &quot;queue:prod&quot;, &quot;access&quot;: &quot;use&quot;}'
 </code></pre>
 <p>A queue nobody has granted follows the same rule every other object does: the global role decides,

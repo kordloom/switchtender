@@ -34,7 +34,12 @@ The key and salt together seal stored credentials at rest with argon2id and AES-
 both the server still runs, but credential features stay off. Keep the salt stable across restarts
 or existing credentials cannot be decrypted.
 
-Open http://localhost:8080 for the web UI, or use the API directly.
+The first start on an empty database mints an initial admin token and prints it once, so the API
+is authenticated from the first request. Export it for the commands below:
+
+    export ST_TOKEN=<the token serve printed>
+
+Open http://localhost:8080 for the web UI and sign in with that token, or use the API directly.
 
 A fresh install opens with an empty templates list. `switchtender examples --db switchtender.db`
 seeds a handful of starter templates that run with no project, inventory, or credential, so a first
@@ -47,13 +52,14 @@ loopback port, keeps its data in a per-user directory, and opens the UI. The
 ## Submit a run
 
     curl -X POST localhost:8080/v1/runs \
+      -H "Authorization: Bearer $ST_TOKEN" \
       -d '{"playbook": "site.yml", "inventory": "hosts.ini"}'
 
 The response carries a run id. Fetch its status, its structured events, or its log:
 
-    curl localhost:8080/v1/runs/<id>
-    curl localhost:8080/v1/runs/<id>/events
-    curl localhost:8080/v1/runs/<id>/logs
+    curl -H "Authorization: Bearer $ST_TOKEN" localhost:8080/v1/runs/<id>
+    curl -H "Authorization: Bearer $ST_TOKEN" localhost:8080/v1/runs/<id>/events
+    curl -H "Authorization: Bearer $ST_TOKEN" localhost:8080/v1/runs/<id>/logs
 
 Add `"shards": 4` to the body to split the run across four slices of the inventory, balanced by
 each host's measured duration in recent runs.
@@ -69,8 +75,8 @@ For more than one machine, use a PostgreSQL DSN as the `--db` value on every pro
 
 ## Lock down the API
 
-The first start on an empty database mints an initial admin token and prints it once, so the API
-is authenticated from the first request. Keep that token or replace it with named ones:
+The initial admin token from the first start is yours to keep, but a shared install deserves named
+tokens so the audit trail says who did what. Mint one per person and per CI job:
 
     switchtender token new --db switchtender.db --name ci
 

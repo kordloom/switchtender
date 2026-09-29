@@ -1333,7 +1333,7 @@ func TestAuthGate(t *testing.T) {
 	if code := get("/v1/runs", ""); code != http.StatusUnauthorized {
 		t.Errorf("no token = %d, want 401", code)
 	}
-	if code := get("/v1/runs", "ymt_wrong"); code != http.StatusUnauthorized {
+	if code := get("/v1/runs", "swt_wrong"); code != http.StatusUnauthorized {
 		t.Errorf("wrong token = %d, want 401", code)
 	}
 	if code := get("/v1/runs", plain); code != http.StatusOK {
