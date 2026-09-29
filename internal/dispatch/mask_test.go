@@ -8,8 +8,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/event"
@@ -375,4 +377,74 @@ func TestStreamMaskerNoSecrets(t *testing.T) {
 	if extra := sm.flush(); len(extra) != 0 {
 		t.Errorf("flush() = %q, want nothing withheld", extra)
 	}
+}
+
+// TestStreamMaskerOverlappingSecrets covers a shorter secret contained inside a longer one, which
+// happens by construction: an env credential registers the whole KEY=VALUE bundle and each value,
+// and a multi-line secret registers the whole blob and each line.
+//
+// Redacting the withheld tail replaced the shorter secret with the mask token and destroyed the
+// bytes the longer one needed once the rest of it arrived, so the stream masked less than redacting
+// the whole buffer at once would have.
+func TestStreamMaskerOverlappingSecrets(t *testing.T) {
+	t.Parallel()
+	const long = "postgres://svc:hunter2@db.internal:5432/prod"
+	const short = "hunter2"
+	text := "connecting to " + long + " now\n"
+
+	for cutAt := 1; cutAt < len(text); cutAt++ {
+		m := &masker{}
+		m.set([]string{long, short})
+		sm := &streamMasker{mask: m}
+		var got strings.Builder
+		got.Write(sm.next([]byte(text[:cutAt])))
+		got.Write(sm.next([]byte(text[cutAt:])))
+		got.Write(sm.flush())
+
+		whole := string(m.redact([]byte(text)))
+		if got.String() != whole {
+			t.Fatalf("split at %d gave %q, want %q, the same as redacting the whole buffer",
+				cutAt, got.String(), whole)
+		}
+		if strings.Contains(got.String(), short) || strings.Contains(got.String(), long) {
+			t.Fatalf("split at %d leaked a secret: %q", cutAt, got.String())
+		}
+	}
+}
+
+// TestLogSinkReleasesHeldOutput covers a run that writes a little and then goes quiet. The masker
+// withholds as many bytes as the longest secret, and a whole SSH key is registered as one secret, so
+// a slow run showed a blank live log for its entire duration. The hold is released once output stops.
+func TestLogSinkReleasesHeldOutput(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	ctx := context.Background()
+	r := &run.Run{ID: "run_hold", Status: run.StatusRunning}
+	if err := store.Save(ctx, r); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	m := &masker{}
+	// A long secret, as a private key credential produces.
+	m.set([]string{strings.Repeat("k", 1600)})
+	sink := &logSink{store: store, id: r.ID, log: zap.NewNop(), publisher: &capturingPublisher{}, mask: m}
+
+	if _, err := sink.Write([]byte("starting up\n")); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	// Nothing is visible yet: the write is far shorter than the hold.
+	if got, _ := store.Log(ctx, r.ID); len(got) != 0 {
+		t.Fatalf("log = %q, want it still held", got)
+	}
+	// After the run goes quiet the held output is released rather than waiting for more.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if got, _ := store.Log(ctx, r.ID); len(got) > 0 {
+			if string(got) != "starting up\n" {
+				t.Errorf("log = %q, want the written output", got)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("held output was never released, so a slow run shows a blank log")
 }

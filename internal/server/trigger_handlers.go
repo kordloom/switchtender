@@ -262,7 +262,8 @@ func deleteTriggerHandler(triggers trigger.Store, log *zap.Logger) http.HandlerF
 // requires a signature, the body's X-Hub-Signature-256 must verify against the sealed per-trigger
 // secret before anything launches. The launched template syncs its project fresh, so the run
 // executes the commit that was just pushed.
-func hookHandler(triggers trigger.Store, templates template.Store, submitter Submitter, sealer *credential.Sealer, log *zap.Logger) http.HandlerFunc {
+func hookHandler(triggers trigger.Store, templates template.Store, submitter Submitter,
+	store run.Store, sealer *credential.Sealer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if triggers == nil || templates == nil {
 			respondError(w, log, http.StatusNotFound, "triggers not enabled")
@@ -283,6 +284,21 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 		}
 
 		opts := t.LaunchOptions()
+		// A webhook is delivered at least once. GitHub and its peers redeliver on a timeout or a
+		// non-2xx, and without a key a redelivery of the same event fires a second real run. The
+		// trigger is the thing being repeated, so it names the action.
+		existing, key, err := run.ResolveDedupe(r.Context(), store, "trigger", tg.ID, time.Now())
+		if err != nil {
+			log.Error("server: resolve trigger dedupe: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not fire the trigger")
+			return
+		}
+		if existing != nil {
+			respondJSON(w, log, http.StatusAccepted, existing, wantsPretty(r))
+			return
+		}
+		opts = append(opts, run.WithIdempotencyKey(key),
+			run.WithSource("trigger", tg.ID), run.WithActor("trigger "+tg.Name))
 		var created *run.Run
 		if t.Shards >= 2 {
 			created, err = submitter.SubmitSplit(r.Context(), t.Playbook, t.Inventory, t.Shards, opts...)

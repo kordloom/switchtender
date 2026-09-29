@@ -1597,3 +1597,53 @@ func TestEventCaptureFailureWarnsOnRun(t *testing.T) {
 		t.Errorf("warning = %q, want it to explain the empty matrix", got.Warning)
 	}
 }
+
+// TestPipelineStepsInheritExecution pins what a pipeline step carries from the pipeline. The most
+// important line is dry run: a pipeline submitted to make no changes had steps that executed for
+// real unless every step also set the flag, so check mode was a promise the run did not keep.
+func TestPipelineStepsInheritExecution(t *testing.T) {
+	t.Parallel()
+	parent := &run.Run{
+		ID: "run_p", Inventory: "inv.ini", DryRun: true, Timeout: 900,
+		Image: "ghcr.io/acme/ee:9", PullCredentialID: "cred_pull", InventoryID: "inv_1",
+		ProjectID: "proj_1", Queue: "gpu", Actor: "ada",
+		CredentialIDs: []string{"cred_a"},
+		Labels:        map[string]string{"env": "prod"},
+	}
+	// A step that does not set dry run itself. Under a dry-run pipeline it must still be dry.
+	step := run.PipelineStep{Name: "deploy", Tool: "ansible", Playbook: "site.yml"}
+	child := stepRun(parent, step, 0, 0, map[string]any{"k": "v"})
+
+	if !child.DryRun {
+		t.Error("a step under a dry-run pipeline would make real changes")
+	}
+	if child.Timeout != 900 {
+		t.Errorf("Timeout = %d, want the pipeline's 900", child.Timeout)
+	}
+	if child.Image != "ghcr.io/acme/ee:9" || child.PullCredentialID != "cred_pull" {
+		t.Errorf("step runs outside the pipeline's image: %q / %q", child.Image, child.PullCredentialID)
+	}
+	if child.InventoryID != "inv_1" || child.ProjectID != "proj_1" || child.Queue != "gpu" {
+		t.Errorf("step lost inventory, project, or queue: %+v", child)
+	}
+	if child.Actor != "ada" {
+		t.Errorf("Actor = %q, want the pipeline's actor for the audit trail", child.Actor)
+	}
+	if child.Labels["env"] != "prod" {
+		t.Errorf("Labels = %v, want the pipeline's", child.Labels)
+	}
+	// The step still owns what it names.
+	if child.Tool != "ansible" || child.Playbook != "site.yml" {
+		t.Errorf("step lost its own tool or playbook: %+v", child)
+	}
+	// Notifications stay on the parent so a pipeline pages once, not once per step.
+	if len(child.Notifications) != 0 {
+		t.Errorf("Notifications = %v, want none on a step", child.Notifications)
+	}
+
+	// A step may still opt in to dry run under a normal pipeline.
+	parent.DryRun = false
+	if got := stepRun(parent, run.PipelineStep{Name: "check", DryRun: true}, 0, 0, nil); !got.DryRun {
+		t.Error("a step that asks for dry run did not get it")
+	}
+}

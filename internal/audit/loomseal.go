@@ -152,6 +152,12 @@ func BuildBundle(entries []*Entry, id Identity, version string, at time.Time) (*
 		})
 	}
 	head := entries[len(entries)-1]
+	// A blank head hash is exactly the tamper the chain exists to catch, so it must not take the
+	// export down on the way to reporting it. Slicing a hash that was blanked out panicked instead.
+	if len(head.Hash) < 12 {
+		return nil, fmt.Errorf("%w: entry %d has no hash, so the chain is broken and cannot be "+
+			"bundled. Run audit verify to see where", ErrExport, head.Seq)
+	}
 	return &Bundle{
 		LoomSeal:  loomsealVersion,
 		BundleID:  "lsb_" + head.Hash[:12],

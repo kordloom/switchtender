@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -163,5 +165,69 @@ func TestBundleRefusesUnverifiableEntry(t *testing.T) {
 	e.Hash = audit.EntryHash(e)
 	if _, err := audit.BuildBundle([]*audit.Entry{e}, id, "test", time.Now()); err == nil {
 		t.Fatal("BuildBundle accepted an entry no third party can verify")
+	}
+}
+
+// TestIdentityConcurrentFirstStart covers several processes starting against a fresh state directory
+// at once. Each wrote the same fixed temporary file and renamed over the others, so they handed out
+// different in-memory keys and none matched what was finally on disk. An install has one identity;
+// two would mean two producers claiming to be the same install.
+func TestIdentityConcurrentFirstStart(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SWITCHTENDER_AUDIT_KEY", "")
+	const racers = 12
+	keys := make([]string, racers)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := range racers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			id, err := audit.LoadIdentity(dir)
+			if err != nil {
+				t.Errorf("LoadIdentity() error = %v", err)
+				return
+			}
+			keys[i] = id.KeyID()
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	onDisk, err := audit.LoadIdentity(dir)
+	if err != nil {
+		t.Fatalf("LoadIdentity() after the race error = %v", err)
+	}
+	for i, k := range keys {
+		if k != onDisk.KeyID() {
+			t.Fatalf("racer %d got key %s, but the install's key is %s: two producers would claim "+
+				"to be the same install", i, k, onDisk.KeyID())
+		}
+	}
+}
+
+// TestIdentityEnvKeyDerivesItsOwnInstallID covers an operator setting the documented environment
+// key over an install that already has a file. The id used to come from the file while the key came
+// from the environment, so bundles were signed by one key and attributed to another install.
+func TestIdentityEnvKeyDerivesItsOwnInstallID(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SWITCHTENDER_AUDIT_KEY", "")
+	fromFile, err := audit.LoadIdentity(dir)
+	if err != nil {
+		t.Fatalf("LoadIdentity() error = %v", err)
+	}
+	// A different key, supplied the documented way.
+	t.Setenv("SWITCHTENDER_AUDIT_KEY", strings.Repeat("ab", 32))
+	fromEnv, err := audit.LoadIdentity(dir)
+	if err != nil {
+		t.Fatalf("LoadIdentity() with the environment key error = %v", err)
+	}
+	if fromEnv.KeyID() == fromFile.KeyID() {
+		t.Fatal("the environment key was ignored")
+	}
+	if fromEnv.InstallID == fromFile.InstallID {
+		t.Error("the environment key kept the file's install id, so a bundle would be signed by " +
+			"one key and attributed to another install")
 	}
 }
