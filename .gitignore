@@ -72,3 +72,9 @@ __pycache__/
 
 # Internal campaign hold records, never published.
 campaigns/
+
+# Built at deploy from the LoomSeal the module pins, never committed. A committed verifier is a
+# promise that somebody remembered to rebuild it, and site/verify shipped one five releases behind
+# for exactly that reason.
+site/verify/loomseal.wasm
+site/verify/wasm_exec.js

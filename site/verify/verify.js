@@ -25,16 +25,49 @@
 
 	// render turns the verifier's report into the verdict block and a details table. The wording
 	// mirrors the command line so the two never drift in a reader's memory.
-	function render(report, name) {
+	function render(report, name, pinned) {
 		var ok = report.ok === true;
-		var html = '<div class="verdict ' + (ok ? "ok" : "no") + '">' +
-			(ok ? "VERIFIED" : "NOT VERIFIED") + "   " + esc(report.level || "") + "</div>";
+		// A signature proves a bundle was signed. It does not prove who signed it, because any key
+		// signs its own bundle. Without a pin this page can say the chain is intact and cannot say
+		// whose chain it is, and the visitor who leaves the box blank is exactly the one who will not
+		// know that. So an unpinned pass is its own verdict rather than a quiet VERIFIED.
+		var unpinned = ok && !pinned;
+		// SwitchTender never emits head attestations. Its own bundle builder refuses to write them
+		// and its own verify command refuses to read them, by name. So one appearing in a receipt
+		// means a holder attached it after the fact, and this page cannot check who: the browser
+		// verifier takes a producer fingerprint and has no way to pin a counter-signer, so anyone
+		// can sign a rider under any role they like and it verifies.
+		var riders = ok && (report.head_attestors || []).length > 0;
+		var soft = unpinned || riders;
+		var cls = ok ? (soft ? "part" : "ok") : "no";
+		var word = ok ? (riders ? "INTACT, WITH AN UNVERIFIABLE RIDER"
+			: (unpinned ? "INTACT, BUT UNIDENTIFIED" : "VERIFIED")) : "NOT VERIFIED";
+		var html = '<div class="verdict ' + cls + '">' + word + "   " + esc(report.level || "") + "</div>";
+		if (riders) {
+			html += '<p class="unpinned">This receipt carries ' + (report.head_attestors || []).length +
+				' counter-signature(s). SwitchTender never adds them, so somebody attached these after ' +
+				'the receipt was produced. This page cannot check who: it can pin the producing key and ' +
+				'has no way to pin a counter-signer, and any key signs under any role it chooses. ' +
+				'Treat them as unverified until you have checked them with <code>loomseal verify ' +
+				'--attestor</code> against a key you obtained yourself.</p>';
+		}
+		if (unpinned) {
+			html += '<p class="unpinned">Nothing here was altered after it was signed. Who signed it is ' +
+				'unchecked, because no fingerprint was pinned, and any key signs its own bundle. ' +
+				'Pin the fingerprint the producing install publishes at ' +
+				'<code>/.well-known/loomseal.json</code> and run it again.</p>';
+		}
 		var rows = [];
 		if (report.bundle_id) rows.push(["bundle", report.bundle_id + " from " + (report.producer || "")]);
 		if (report.subject) rows.push(["subject", report.subject]);
 		if (report.key_id) rows.push(["signature", (report.signature_ok ? "ok, key " : "failed, key ") + report.key_id]);
-		if (report.fingerprint_match === true) rows.push(["pin", "matches the fingerprint you pinned"]);
-		if (report.fingerprint_match === false) rows.push(["pin", "DOES NOT match the fingerprint you pinned"]);
+		if (report.fingerprint_match === true) {
+			rows.push(["pin", "matches the fingerprint you pinned, so this is that install's key"]);
+		} else if (report.fingerprint_match === false) {
+			rows.push(["pin", "DOES NOT match the fingerprint you pinned"]);
+		} else {
+			rows.push(["pin", "NONE, so this says the bundle was signed, not who signed it"]);
+		}
 		if (report.chain_present) {
 			rows.push(["chain", (report.chain_profile || "") + ", " + (report.chain_mode || "") +
 				", " + (report.claims_checked || 0) + " claims, head matched " + !!report.head_matched]);
@@ -44,7 +77,13 @@
 				(report.anchor_proofs_carried || 0) + " proof(s) carried, " +
 				(report.anchor_proofs_verified || 0) + " verified"]);
 		}
-		(report.anchor_attestations || []).forEach(function (a) { rows.push(["attested", a]); });
+		(report.anchor_attestations || []).forEach(function (a) { rows.push(["timestamped", a]); });
+		(report.head_attestors || []).forEach(function (a) { rows.push(["rider", a]); });
+		if ((report.head_attestors || []).length > 0) {
+			rows.push(["attestors", report.attestors_pinned === true
+				? "checked against the keys you pinned"
+				: "NOT CHECKED, and this page has no way to check them"]);
+		}
 		if (report.anchored_through_seq) {
 			var line = "through seq " + report.anchored_through_seq;
 			if (report.unanchored_claims) {
@@ -73,8 +112,9 @@
 			var bytes = new Uint8Array(reader.result);
 			var pin = fp.value.trim();
 			var raw = pin ? loomsealVerify(bytes, pin) : loomsealVerify(bytes);
+			var pinned = pin !== "";
 			try {
-				render(JSON.parse(raw), f.name);
+				render(JSON.parse(raw), f.name, pinned);
 			} catch (e) {
 				out.innerHTML = '<div class="verdict no">NOT VERIFIED   report could not be read</div>';
 			}
