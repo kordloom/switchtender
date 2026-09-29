@@ -244,7 +244,12 @@ async function fetchAuthed(path) {
 		// pricing link, and "HTTP 403" threw away both the reason and the one upsell this page
 		// exists to make.
 		const data = await res.clone().json().catch(() => ({}));
-		throw new Error(data.error || ("the server refused with HTTP " + res.status));
+		const err = new Error(data.error || ("the server refused with HTTP " + res.status));
+		// A caller that wants to tell a licensing refusal apart from a real failure needs the
+		// status. Without it the one upsell the audit page exists to make rendered as "Could not
+		// build the evidence pack".
+		err.status = res.status;
+		throw err;
 	}
 	return res;
 }

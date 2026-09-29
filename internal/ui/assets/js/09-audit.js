@@ -8,8 +8,15 @@ const auditCollections = {
 	hooks: "webhook", restore: "restore", backup: "backup", import: "import",
 };
 
-// auditVerbs maps an HTTP method to what it did, in the words somebody reading an audit uses.
-const auditVerbs = { POST: "Created", PUT: "Updated", PATCH: "Updated", DELETE: "Deleted" };
+// auditVerbs maps an HTTP method to what was asked for, in the words somebody reading an audit uses.
+//
+// The verbs are attempt-shaped because the entry is. The chain records the request before the
+// handler runs, deliberately, so a refusal is on the record rather than vanishing. Past-tense verbs
+// described that as an accomplished fact: a fresh install whose first requests were refused with 409
+// and 400 read "Created credential, Created project, Created inventory" on the evidence page while
+// the credentials, projects and inventories pages each said there were none. The two surfaces
+// contradicted each other on the install where it is easiest to notice.
+const auditVerbs = { POST: "Create", PUT: "Update", PATCH: "Update", DELETE: "Delete" };
 
 // auditActions names the trailing path segments that are the change itself rather than a field of
 // one, so a release reads as a release instead of as an update to the run it released.
@@ -201,7 +208,7 @@ async function loadAudit() {
 				{ label: "Actor", value: e.actor },
 				{ label: "Actor type", value: e.actor_type },
 				{ label: "On behalf of", value: e.on_behalf_of },
-				{ label: "Change", value: auditChange(e.method, e.path) },
+				{ label: "Request", value: auditChange(e.method, e.path) },
 				{ label: "Method", value: e.method },
 				{ label: "Path", value: e.path, block: true },
 				{ label: "Content digest", value: e.content_digest, block: true },
@@ -236,6 +243,30 @@ async function loadAudit() {
 	}
 }
 
+// renderLicensedFeature reports a paid feature as an offer rather than as a breakage, with the
+// pricing link as a link.
+//
+// A Community reader pressing Evidence pack got a muted line reading "Could not build the evidence
+// pack:" followed by the licensing sentence and a bare pricing URL they had to select and copy.
+// The feature worked exactly as designed; only the rendering said otherwise, and it turned the one
+// upsell on this page into a bug report.
+function renderLicensedFeature(message) {
+	const el = document.getElementById("status");
+	if (!el) return;
+	el.className = "muted";
+	el.textContent = "";
+	const url = "https://switchtender.com/pricing";
+	const text = String(message || "").replace(url, "").trim();
+	el.appendChild(document.createTextNode(text.endsWith(".") ? text + " " : text + ". "));
+	const link = document.createElement("a");
+	link.href = url;
+	link.target = "_blank";
+	link.rel = "noopener";
+	link.textContent = "See what Team includes";
+	el.appendChild(link);
+	el.hidden = false;
+}
+
 // renderVerifyVerdict states what the verify pass actually found. The server checks two independent
 // things and the badge used to report one of them: whether every link recomputes, and whether the
 // chain still satisfies the anchors recorded over it.
@@ -248,6 +279,16 @@ async function loadAudit() {
 // nothing outside this install fixes its position. A hash chain cannot detect its own truncation: a
 // prefix of a valid chain is a valid chain. Saying so is the difference between evidence and a claim.
 function renderVerifyVerdict(badge, r) {
+	// Zero entries recompute trivially. Reporting that as a verification handed a reader on a fresh
+	// install the product's headline claim, proven, about an empty chain, and the prose overwrote
+	// the "No audit entries yet" card that was the page's only guidance.
+	if (r.count === 0) {
+		badge.className = "chip warn";
+		badge.textContent = "Nothing on the chain yet";
+		setStatus("The chain is empty, so there is nothing to verify. The first change this install " +
+			"is asked to make lands here, and verifying then says something.");
+		return;
+	}
 	if (r.ok && r.anchored > 0) {
 		badge.className = "chip ok";
 		badge.textContent = "Chain verified: " + r.count + " entries, " + r.anchored +
@@ -346,14 +387,20 @@ function wireAudit() {
 	}
 	const reg = document.getElementById("audit-register");
 	if (reg) {
-		reg.dataset.tip = "Click to download the last 90 days as a change register, the evidence a compliance review samples from";
+		markTier(reg, "Team", "The last 90 days as a change register, the evidence a compliance " +
+			"review samples from. Per-run proofs, anchoring and verification stay free; this " +
+			"packaging is Team.");
 		reg.addEventListener("click", async () => {
 			reg.disabled = true;
 			try {
 				const text = await (await fetchAuthed("/audit/register")).text();
 				downloadBlob("switchtender-change-register.html", "text/html", text);
 			} catch (err) {
-				setStatus("Could not build the evidence pack: " + err.message);
+				if (err.status === 403) {
+					renderLicensedFeature(err.message);
+				} else {
+					setStatus("Could not build the evidence pack: " + err.message);
+				}
 			} finally {
 				reg.disabled = false;
 			}

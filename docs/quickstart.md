@@ -13,7 +13,7 @@ No install needed to look around. The [live demo](https://demo.switchtender.com)
 
 Ansible on the PATH: `ansible-playbook` and `ansible-inventory`. Nothing else for the default
 SQLite setup. Building from source instead of installing the release binary needs Go 1.26, and
-Docker Compose is an alternative, where `docker compose up --build` builds the image from this
+Docker Compose is an alternative, where `docker compose --profile stack up --build` builds the image from this
 repository.
 
 ## Install
@@ -21,7 +21,10 @@ repository.
     curl -fsSL https://switchtender.com/install.sh | sh
 
 The script downloads the release binary for your platform, checks it against the published
-checksums, and puts `switchtender` on your PATH. Running in about a minute. Prefer to build it
+checksums, and installs it. It writes to `/usr/local/bin` when it can and to `~/.local/bin`
+otherwise, which is what happens on a stock Mac and on any Linux install without root. That second
+directory is often not on PATH, so the script says so and prints its closing commands with the full
+path; add the line it gives you to run `switchtender` by name. Running in about a minute. Prefer to build it
 yourself, or want to hack on it? `go build -o switchtender .` from a clone produces the same
 binary; the commands below assume it is on your PATH, so prefix a locally built binary with `./`.
 
@@ -50,6 +53,17 @@ loopback port, keeps its data in a per-user directory, and opens the UI. The
 [desktop guide](desktop.md) covers it, including packaging.
 
 ## Submit a run
+
+The first one needs nothing on disk, so it succeeds on an install that is minutes old:
+
+    curl -X POST localhost:8080/v1/runs \
+      -H "Authorization: Bearer $ST_TOKEN" \
+      -d '{"tool": "bash", "command": "echo hello from switchtender"}'
+
+An Ansible run takes a playbook and an inventory. The server resolves both relative to its own
+working directory, so `site.yml` and `hosts.ini` have to exist there, or the run names a
+[project](concepts.md) and they are resolved inside that checkout instead. Without either the run
+is submitted, accepted, and then fails with "the playbook: site.yml could not be found":
 
     curl -X POST localhost:8080/v1/runs \
       -H "Authorization: Bearer $ST_TOKEN" \
@@ -89,9 +103,14 @@ Create user accounts with roles for sign-in:
 
 ## Run with Docker
 
+The compose file lives in the repository, so this one needs a checkout rather than the installed
+binary:
+
+    git clone https://github.com/kordloom/switchtender
+    cd switchtender
     export SWITCHTENDER_ENCRYPTION_KEY=change-me
     export SWITCHTENDER_ENCRYPTION_SALT=change-me-too
-    docker compose up --build
+    docker compose --profile stack up --build
 
 This starts a server, a PostgreSQL database, and a worker. The server listens on port 8080. Set
 `SWITCHTENDER_PORT` to change the host port.
@@ -117,7 +136,18 @@ Serve HTTPS directly, with no reverse proxy in front, by pointing the server at 
 SwitchTender needs no operator. A Helm chart installs the server and a worker as ordinary pods sharing a
 database:
 
-    helm install switchtender ./deploy/helm/switchtender
+The chart is in the repository too, so clone it first if you installed the binary alone:
+
+    git clone https://github.com/kordloom/switchtender
+    cd switchtender
+    helm install switchtender ./deploy/helm/switchtender \
+      --set encryptionKey=$(openssl rand -hex 32) \
+      --set encryptionSalt=$(openssl rand -hex 16)
+
+Both values are required, and the salt has to stay the same across upgrades: it is what every
+stored secret was sealed against, so a new salt makes the old ones unreadable. Keep them in a
+secret manager and pass `--set existingSecret=<name>` instead once you have one. The chart pulls
+`ghcr.io/kordloom/switchtender`.
 
 ## Try the demo
 
@@ -127,4 +157,4 @@ pipeline, then serves it read-only so it is safe to expose:
 
     switchtender demo --addr :8080
 
-Or with Docker: `docker compose --profile demo up --build`.
+Or with Docker, from a checkout: `docker compose --profile demo up --build`.

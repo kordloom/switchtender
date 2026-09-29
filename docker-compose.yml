@@ -1,8 +1,19 @@
-# A full SwitchTender deployment: the server, a PostgreSQL database, and one worker sharing it.
-# Set SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT in the environment before running,
-# then: docker compose up --build.
+# Two deployments in one file, each behind its own profile so neither drags the other in.
+#
+#   The full stack:  docker compose --profile stack up --build
+#   The seeded demo: docker compose --profile demo up --build
+#
+# The stack needs SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT set. The demo needs
+# neither: it holds no credentials. They used to share the default profile, so the documented demo
+# command started the server too and both bound the same host port, and the demo also inherited the
+# stack's secret requirements.
+#
+# The two secrets are read without a hard guard. Compose interpolates every service in the file no
+# matter which profile is selected, so a required-variable guard on the stack refused to start the
+# demo, which uses neither. Unset, the server says so on boot and runs with credentials disabled.
 services:
   postgres:
+    profiles: ["stack"]
     image: postgres:16
     environment:
       POSTGRES_USER: switchtender
@@ -17,11 +28,12 @@ services:
       retries: 10
 
   server:
+    profiles: ["stack"]
     build: .
     command: ["serve", "--addr", ":8080", "--db", "postgres://switchtender:switchtender@postgres:5432/switchtender?sslmode=disable"]
     environment:
-      SWITCHTENDER_ENCRYPTION_KEY: ${SWITCHTENDER_ENCRYPTION_KEY:?set SWITCHTENDER_ENCRYPTION_KEY}
-      SWITCHTENDER_ENCRYPTION_SALT: ${SWITCHTENDER_ENCRYPTION_SALT:?set SWITCHTENDER_ENCRYPTION_SALT}
+      SWITCHTENDER_ENCRYPTION_KEY: ${SWITCHTENDER_ENCRYPTION_KEY:-}
+      SWITCHTENDER_ENCRYPTION_SALT: ${SWITCHTENDER_ENCRYPTION_SALT:-}
     ports:
       - "${SWITCHTENDER_PORT:-8080}:8080"
     depends_on:
@@ -29,22 +41,24 @@ services:
         condition: service_healthy
 
   worker:
+    profiles: ["stack"]
     build: .
     command: ["worker", "--db", "postgres://switchtender:switchtender@postgres:5432/switchtender?sslmode=disable", "--name", "worker-1"]
     environment:
-      SWITCHTENDER_ENCRYPTION_KEY: ${SWITCHTENDER_ENCRYPTION_KEY:?set SWITCHTENDER_ENCRYPTION_KEY}
-      SWITCHTENDER_ENCRYPTION_SALT: ${SWITCHTENDER_ENCRYPTION_SALT:?set SWITCHTENDER_ENCRYPTION_SALT}
+      SWITCHTENDER_ENCRYPTION_KEY: ${SWITCHTENDER_ENCRYPTION_KEY:-}
+      SWITCHTENDER_ENCRYPTION_SALT: ${SWITCHTENDER_ENCRYPTION_SALT:-}
     depends_on:
       postgres:
         condition: service_healthy
 
   # A seeded, read-only demo on its own. Start it with: docker compose --profile demo up --build.
+  # Its own port variable, so the demo and the stack can run side by side.
   demo:
     build: .
     profiles: ["demo"]
     command: ["demo", "--addr", ":8080"]
     ports:
-      - "${SWITCHTENDER_PORT:-8080}:8080"
+      - "${SWITCHTENDER_DEMO_PORT:-8081}:8080"
 
 volumes:
   pgdata:

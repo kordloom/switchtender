@@ -630,6 +630,26 @@ function ensureDrill() {
 		document.addEventListener("keydown", (e) => {
 			if (e.key === "Escape" && !drill.hidden) closeDrill();
 		});
+		// aria-modal hides everything behind this panel from a screen reader, so Tab must not lead
+		// there. It did: four stops through the panel's own actions and then out into the brand
+		// link and the whole sidebar, while the panel still covered the screen and an assistive
+		// reader reported those controls as not existing. The tour traps focus the same way.
+		drill.addEventListener("keydown", (e) => {
+			if (e.key !== "Tab" || drill.hidden) return;
+			const focusable = Array.from(drill.querySelectorAll(
+				'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])'))
+				.filter((el) => !el.disabled && !el.hidden && el.offsetParent !== null);
+			if (focusable.length === 0) return;
+			const first = focusable[0];
+			const last = focusable[focusable.length - 1];
+			if (e.shiftKey && document.activeElement === first) {
+				e.preventDefault();
+				last.focus();
+			} else if (!e.shiftKey && document.activeElement === last) {
+				e.preventDefault();
+				first.focus();
+			}
+		});
 	}
 	return document.getElementById("drill-body");
 }

@@ -1,0 +1,43 @@
+# Secret scanning configuration.
+#
+# This product's pitch is evidence, so `gitleaks detect --log-opts="--all"` returning findings is
+# something a skeptic will run and quote. It returned thirteen on 2026-09-14, every one a fixture in
+# a redaction test: PEM headers whose body is "abc", AWS's own documentation example key, tokens
+# like "tok_abcdef123456". Those files have to contain secret-shaped strings, because what they
+# prove is that the redactor catches them.
+#
+# The allowlist names those files one by one rather than exempting "*_test.go". A blanket test
+# exemption would mean a real credential pasted into any future test sails through, which is exactly
+# the leak worth catching. Adding a file here is a deliberate act that says: this test's subject is
+# secret handling, and its fixtures are synthetic.
+
+title = "switchtender"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Redaction and masking tests. Their fixtures are synthetic by construction."
+paths = [
+  '''internal/audit/redact_freetext_test\.go''',
+  '''internal/credential/credential_test\.go''',
+  '''internal/credential/sshkey_test\.go''',
+  '''internal/dispatch/credentials_test\.go''',
+  '''internal/dispatch/mask_test\.go''',
+  '''internal/dispatch/notify_leak_test\.go''',
+  '''internal/inventory/secrets_test\.go''',
+  '''internal/secretsource/mutation_gaps_test\.go''',
+  '''internal/server/notify_mask_test\.go''',
+  '''internal/server/promptsecret_test\.go''',
+  '''cmd/cmd_refusals_test\.go''',
+]
+
+[[allowlists]]
+description = "Key and salt constants in the init command's test, fixed hex chosen to be obvious."
+paths = ['''cmd/cmd_init_test\.go''']
+
+# Not allowlisted on purpose: switchtender.env. It holds a real local key, .gitignore keeps it out
+# of the repository, and a working-tree scan flagging it is correct rather than noise. The scan that
+# speaks for this project is the history one:
+#
+#   gitleaks detect --source . --log-opts="--all"

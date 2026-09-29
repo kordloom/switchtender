@@ -219,12 +219,25 @@ stable loopback port, keeps its data in a per-user directory, and opens the UI i
 
     ./switchtender desktop
 
-Open http://localhost:8080 and submit a run:
+The first start on an empty database mints an admin token and prints it once, so the API is
+authenticated from the first request. Export it, then submit a run:
+
+    export ST_TOKEN=<the token serve printed>
 
     curl -X POST localhost:8080/v1/runs \
+      -H "Authorization: Bearer $ST_TOKEN" \
+      -d '{"tool": "bash", "command": "echo hello from switchtender"}'
+
+That one needs nothing on disk. An Ansible run takes a playbook and an inventory instead, resolved
+relative to the server's working directory unless the run names a project:
+
+    curl -X POST localhost:8080/v1/runs \
+      -H "Authorization: Bearer $ST_TOKEN" \
       -d '{"playbook": "site.yml", "inventory": "hosts.ini"}'
 
 Add `"shards": 4` to split it across four slices of the inventory.
+
+Open http://localhost:8080 for the web UI and sign in with the same token.
 
 Migrating is one command. Point it at an export to see what it would create, then apply:
 

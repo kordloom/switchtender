@@ -857,13 +857,21 @@ const (
 // README, and the homepage all opened with a command that exited 1, and the quickstart went on to
 // promise the API was open until the first token. Minting the token instead keeps the bind
 // authenticated from the first request and lets the documented command work as written.
-func tokenCountGuard(count int, countErr error, readOnly, externalAuth, loopback bool,
+func tokenCountGuard(count int, countErr error, accounts int, readOnly, externalAuth, loopback bool,
 	addr string) (servePosture, error) {
 	if countErr != nil {
 		return postureReady, fmt.Errorf("refusing to serve on %s: cannot determine whether any API "+
 			"tokens exist, so the API cannot be safely exposed: %w", addr, countErr)
 	}
 	if count > 0 {
+		return postureReady, nil
+	}
+	// An account turns authentication on exactly as a token does, and the documented production
+	// path creates one and no token: switchtender init, then serve. Judging on tokens alone, that
+	// operator read "the API is UNAUTHENTICATED until you create one" in their log about an install
+	// that was in fact answering 401 to everything, and on a public bind got an admin token minted
+	// they never needed.
+	if accounts > 0 {
 		return postureReady, nil
 	}
 	// An install with external auth enforces from the first request, so there is nothing
@@ -962,7 +970,16 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	store, schedules := bundle.Runs(), bundle.Schedules()
 
 	n, cerr := bundle.Tokens().Count(cmd.Context())
-	posture, gerr := tokenCountGuard(n, cerr, serveReadOnly, externalAuthConfigured(),
+	// A failure to list accounts is not fatal here: the token count already decided the dangerous
+	// direction, and an unreadable user store leaves this exactly where it was before accounts were
+	// consulted rather than refusing to start.
+	accounts := 0
+	if users, uerr := bundle.Users().List(cmd.Context()); uerr == nil {
+		accounts = len(users)
+	} else {
+		log.Warn("cannot count accounts, so the startup authentication notice may be wrong: " + uerr.Error())
+	}
+	posture, gerr := tokenCountGuard(n, cerr, accounts, serveReadOnly, externalAuthConfigured(),
 		isLoopbackAddr(serveAddr), serveAddr)
 	if gerr != nil {
 		return gerr

@@ -51,6 +51,7 @@ function mountRunsWindowChip() {
 
 // wireRunsFilters reloads the table when a filter or order dropdown changes.
 function wireRunsFilters() {
+	applyRunsURLFilters();
 	for (const id of ["runs-status", "runs-tool", "runs-order"]) {
 		const el = document.getElementById(id);
 		if (el) el.addEventListener("change", loadRuns);
@@ -89,6 +90,46 @@ function wireRunsSearch() {
 	});
 }
 
+// syncRunsURL writes the current filters into the address bar, so a narrowed list can be reloaded,
+// bookmarked, and handed to somebody else.
+//
+// The filters lived only in the controls: the address bar read /ui/runs while the table showed four
+// of seventeen runs, a reload silently restored all of them, and a copied URL sent the recipient to
+// the unfiltered list. The app hands out ?q= deep links itself, from the held-runs count and the
+// label chips, so the page could read a filter from the URL it would never write back.
+//
+// replaceState rather than pushState: typing in a search box should not fill the history with a
+// state per keystroke, and Back should still mean the page before this list.
+function syncRunsURL() {
+	if (!window.history || !window.history.replaceState) return;
+	const url = new URLSearchParams(location.search);
+	const set = (key, value) => {
+		if (value) url.set(key, value);
+		else url.delete(key);
+	};
+	set("q", runsQuery());
+	for (const id of ["runs-status", "runs-tool", "runs-order"]) {
+		const el = document.getElementById(id);
+		set(id.replace("runs-", ""), el ? el.value : "");
+	}
+	const sizeEl = document.getElementById("runs-pagesize");
+	// The default is not worth carrying, so an unfiltered list keeps a clean URL.
+	set("pagesize", sizeEl && sizeEl.value && runsPageSize() !== 20 ? sizeEl.value : "");
+	const query = url.toString();
+	window.history.replaceState(null, "", query ? location.pathname + "?" + query : location.pathname);
+}
+
+// applyRunsURLFilters seeds the controls from the address bar, the other half of syncRunsURL: a URL
+// that carries a filter has to produce the list it describes.
+function applyRunsURLFilters() {
+	const url = new URLSearchParams(location.search);
+	for (const id of ["runs-status", "runs-tool", "runs-order", "runs-pagesize"]) {
+		const el = document.getElementById(id);
+		const v = url.get(id.replace("runs-", ""));
+		if (el && v) el.value = v;
+	}
+}
+
 // runsFiltered reports whether a search, a status or tool filter, or a date window narrows the
 // table. An empty result then speaks about the query, not the instance, so the controls that
 // created it have to stay on screen to be revised.
@@ -118,6 +159,7 @@ function runsPageURL(offset) {
 
 // loadRuns populates the run history table.
 async function loadRuns() {
+	syncRunsURL();
 	const tbody = document.getElementById("runs");
 	const table = document.querySelector("table.runs");
 	const sizeEl = document.getElementById("runs-pagesize");
@@ -493,6 +535,10 @@ function wireRunsMore(tbody, offset, hasMore) {
 			const data = await getJSON(runsPageURL(offset));
 			const runs = data.runs || [];
 			appendRunRows(tbody, runs);
+			// A sorted table has to stay sorted when rows arrive, or the header's arrow is a claim
+			// the rows below it contradict.
+			const table = tbody.closest("table");
+			if (table) table.dispatchEvent(new CustomEvent("rowsappended"));
 			// The server's cursor counts the page it read, not the rows this caller may see, so a
 			// strict-grants reader stops re-reading, and repeating, the rows it was refused.
 			wireRunsMore(tbody, data.next_offset || offset + runs.length, data.has_more);

@@ -157,3 +157,41 @@ func TestUnknownDocsSlugIsAPageNotBareText(t *testing.T) {
 		}
 	}
 }
+
+// TestLoginPageAnswersAnInstallWithNoAccounts covers the first page a stranger can get stuck on.
+//
+// A fresh install holds no accounts, so the username and password form on it cannot work and every
+// attempt answers "bad credentials". The page said nothing about that, and the one control that
+// does work sat inside a collapsed disclosure. The read-only demo got an explanation in exactly
+// that spot; the install a person had just set up did not.
+func TestLoginPageAnswersAnInstallWithNoAccounts(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name        string
+		HasAccounts bool
+		WantSays    bool
+	}{{ // Test 0: No accounts, so the page explains itself and opens the token field.
+		Name: "no accounts", HasAccounts: false, WantSays: true,
+	}, { // Test 1: Accounts exist, so the page is the ordinary sign-in form.
+		Name: "accounts exist", HasAccounts: true, WantSays: false,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			handler := ui.New(zap.NewNop(), nil, false, 50000, false, false, false, "",
+				ui.WithAccountCheck(func() bool { return test.HasAccounts })).Handler()
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ui/login", nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%s: GET /ui/login = %d, want 200", test.Name, rec.Code)
+			}
+			body := rec.Body.String()
+			if got := strings.Contains(body, "no accounts yet"); got != test.WantSays {
+				t.Errorf("%s: page explains the empty install = %v, want %v", test.Name, got, test.WantSays)
+			}
+			if got := strings.Contains(body, `<details class="alt-auth" open>`); got != test.WantSays {
+				t.Errorf("%s: token field open by default = %v, want %v", test.Name, got, test.WantSays)
+			}
+		})
+	}
+}

@@ -19,6 +19,12 @@
 			is nothing an account would unlock here. <a href="/ui/">Back to the demo</a>, or self-host
 			to get accounts.</p>
 		{{end}}
+		{{if .NoAccounts}}
+		<p class="muted">This install has no accounts yet, so there is nothing to sign in as. It runs
+			open until the first account or API token exists. <a href="/ui/">Go straight to the
+			interface</a>, or create an account with <code>switchtender user new</code> and sign in
+			here afterward. An API token works below either way.</p>
+		{{end}}
 		<div id="signed-in-return" class="signed-in-return" hidden>
 			<span>This browser is already signed in <span id="signed-in-name"></span>.</span>
 			<a class="button" href="/ui/">Back to SwitchTender</a>
@@ -51,18 +57,20 @@
 		{{end}}
 		<form id="account-form" class="stack">
 			<label class="field-label">Username
-				<input id="username-input" class="input" autocomplete="username" autofocus>
+				<input id="username-input" class="input" autocomplete="username"{{if not .NoAccounts}} autofocus{{end}}>
 			</label>
 			<label class="field-label">Password
 				<input id="password-input" class="input" type="password" autocomplete="current-password">
 			</label>
 			<button type="submit" class="button primary">Sign in</button>
 		</form>
-		<details class="alt-auth">
+		{{/* With no accounts the username form cannot work, so the control that can is open rather
+		     than folded behind a summary the first-run reader has no reason to expand. */}}
+		<details class="alt-auth"{{if .NoAccounts}} open{{end}}>
 			<summary class="muted">Use an API token instead</summary>
 			<form id="login-form" class="stack">
 				<input id="token-input" class="input mono" type="password"
-					placeholder="swt_..." autocomplete="off">
+					placeholder="swt_..." autocomplete="off"{{if .NoAccounts}} autofocus{{end}}>
 				<button type="submit" class="button">Sign in with token</button>
 			</form>
 		</details>

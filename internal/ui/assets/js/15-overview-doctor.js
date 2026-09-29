@@ -143,11 +143,19 @@ function renderOverviewMetrics(runs, hosts, summary, chain) {
 		// The two tiles no competitor can show: the tamper-evident record and the approval gate.
 		// They used to be Failed and Hosts tracked, the same four numbers every AWX screen shows,
 		// so the product's actual story never appeared above the fold.
-		const chainCard = statCard(chain.count, chain.ok ? "Changes on the chain \u00b7 verified"
-			: "Chain BROKEN at " + chain.broke_at, chain.ok ? "ok" : "failed");
-		chainCard.dataset.tip = chain.ok
-			? "Every entry hash-verified against the tamper-evident chain. Click for the trail"
-			: "The chain does not verify. Open the audit trail";
+		// An empty chain gets neither the verified label nor the ok styling. Zero entries recompute
+		// trivially, so the card read "0 CHANGES ON THE CHAIN, VERIFIED" in green on the first
+		// screen of a fresh install: the product's headline claim, presented as proven, about
+		// nothing.
+		const empty = chain.count === 0;
+		const chainLabel = empty ? "Nothing on the chain yet"
+			: chain.ok ? "Changes on the chain \u00b7 verified" : "Chain BROKEN at " + chain.broke_at;
+		const chainCard = statCard(chain.count, chainLabel, empty ? "" : chain.ok ? "ok" : "failed");
+		chainCard.dataset.tip = empty
+			? "Nothing has been recorded yet. The first change lands here. Click for the trail"
+			: chain.ok
+				? "Every entry hash-verified against the tamper-evident chain. Click for the trail"
+				: "The chain does not verify. Open the audit trail";
 		chainCard.style.cursor = "pointer";
 		chainCard.addEventListener("click", () => { location.href = "/ui/audit"; });
 		el.appendChild(chainCard);

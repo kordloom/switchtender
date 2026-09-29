@@ -41,8 +41,12 @@ function mountTopbar() {
 		search.className = "search-btn";
 		const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 		search.innerHTML = svgIcon('<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>') +
-			"<span>Search</span>" + '<span class="kbd">' + (mac ? "⌘K" : "Ctrl K") + "</span>";
-		search.setAttribute("aria-label", "Search pages and actions");
+			"<span>Jump to</span>" + '<span class="kbd">' + (mac ? "⌘K" : "Ctrl K") + "</span>";
+		// Labeled "Search", the most prominent control in the header invited a visitor to type a
+		// host name or a run id. Both are real objects with their own pages, and both came back
+		// "No matches.", because this is a page jumper and always was: its own placeholder and
+		// its aria-label both said so, and only the visible label disagreed.
+		search.setAttribute("aria-label", "Jump to a page or action");
 		search.setAttribute("aria-haspopup", "dialog");
 		search.addEventListener("click", openPalette);
 		const brand = bar.querySelector(".brand");
@@ -268,6 +272,21 @@ function mountExportsForTable(page, table, index) {
 // SORT_SKIP names headers that hold controls rather than comparable values.
 const SORT_SKIP = new Set(["", "actions", "fix", "recent", "history"]);
 
+// DURATION_MS scales each duration suffix the pages render to milliseconds.
+const DURATION_MS = { ms: 1, s: 1000, m: 60000, h: 3600000 };
+
+// durationMs reads a whole cell that is one duration, such as 980ms or 4.2s, in milliseconds, and
+// returns null for anything else so ordinary numbers keep sorting as numbers.
+//
+// Durations are rendered in whichever unit reads best, so a fast run says 980ms and a slow one says
+// 4.2s. Comparing the leading number alone put 980 above 4.2 and ranked the three fastest runs on
+// the page as the three slowest, in a column an operator sorts precisely to find the slow ones.
+function durationMs(text) {
+	const m = /^(\d+(?:\.\d+)?)(ms|s|m|h)$/.exec(text);
+	if (!m) return null;
+	return parseFloat(m[1]) * DURATION_MS[m[2]];
+}
+
 // cellSortValue reads a cell for comparison: a timestamp when the cell carries one, a number when
 // the text is numeric, and lowercased text otherwise, so each column sorts the way it reads.
 function cellSortValue(cell) {
@@ -277,7 +296,9 @@ function cellSortValue(cell) {
 		if (!isNaN(t)) return { n: t };
 	}
 	const text = cell.textContent.trim();
-	// A leading number covers counts, durations, sizes, and ratios such as 1 / 10.
+	const span = durationMs(text);
+	if (span !== null) return { n: span };
+	// A leading number covers counts, sizes, and ratios such as 1 / 10.
 	const num = text.match(/^-?[\d,]+(\.\d+)?/);
 	if (num && num[0].length >= text.replace(/[^\d.,\-].*$/, "").length && num[0] !== "") {
 		const parsed = parseFloat(num[0].replace(/,/g, ""));
@@ -299,12 +320,16 @@ function mountTableSort() {
 		th.tabIndex = 0;
 		th.setAttribute("role", "button");
 		th.dataset.tip = "Click to sort by " + (th.textContent.trim() || "this column");
-		const sort = () => {
-			const desc = th.dataset.dir === "asc";
+		const sort = (keepDirection) => {
+			const desc = keepDirection ? th.dataset.dir === "desc" : th.dataset.dir === "asc";
 			for (const other of table.tHead.rows[0].cells) {
-				if (other !== th) delete other.dataset.dir;
+				if (other !== th) {
+					delete other.dataset.dir;
+					other.removeAttribute("aria-sort");
+				}
 			}
 			th.dataset.dir = desc ? "desc" : "asc";
+			th.setAttribute("aria-sort", desc ? "descending" : "ascending");
 			const rows = Array.from(tbody.rows).filter((r) => !r.classList.contains("skeleton-row"));
 			rows.sort((a, b) => {
 				const av = cellSortValue(a.cells[index]);
@@ -323,9 +348,17 @@ function mountTableSort() {
 			}
 			table.dispatchEvent(new CustomEvent("rowsfiltered"));
 		};
-		th.addEventListener("click", sort);
+		// The listener drops its event argument: a click Event is truthy and would read as "keep the
+		// direction", turning every click into a no-op on the second press.
+		th.addEventListener("click", () => sort(false));
 		th.addEventListener("keydown", (e) => {
-			if (e.key === "Enter" || e.key === " ") { e.preventDefault(); sort(); }
+			if (e.key === "Enter" || e.key === " ") { e.preventDefault(); sort(false); }
+		});
+		// Rows arriving later, from Load more, were appended in server order under a header still
+		// showing its sort arrow, so the table contradicted its own heading after two clicks. The
+		// active column re-sorts in the direction it already shows.
+		table.addEventListener("rowsappended", () => {
+			if (th.dataset.dir) sort(true);
 		});
 	});
 }

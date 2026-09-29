@@ -58,8 +58,14 @@ func (s *streamCount) admit(actor string) (release func(), admitted bool) {
 }
 
 // actorKeyFor identifies the caller a stream is counted against: the authenticated user when there is
-// one, and the remote address otherwise, so an install serving without authentication is still bounded
+// one, and the client host otherwise, so an install serving without authentication is still bounded
 // per client rather than only in total.
+//
+// The anonymous half keyed on RemoteAddr, which carries the ephemeral source port. A stream is one
+// TCP connection, so every stream from one client got its own key and the 32-per-caller bound
+// counted to one forever: a single laptop could take all 512 slots in the install while the comment
+// here said it could not. clientAddr is the same host-only resolution the sign-in limiter uses,
+// including reading a forwarded address only from a proxy the operator trusted.
 func actorKeyFor(r *http.Request) string {
 	if actor, ok := actorFrom(r.Context()); ok {
 		if actor.UserID != "" {
@@ -69,5 +75,5 @@ func actorKeyFor(r *http.Request) string {
 			return "name:" + actor.Name
 		}
 	}
-	return "addr:" + r.RemoteAddr
+	return "addr:" + clientAddr(r)
 }

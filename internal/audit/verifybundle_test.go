@@ -287,3 +287,118 @@ func TestVerifyBundleCatchesASpecInconsistency(t *testing.T) {
 		t.Error("a receipt whose approved and executed specs disagree reported OK")
 	}
 }
+
+// TestVerifyBundleChecksEveryDisclosedOutcome proves a second fabricated outcome cannot ride inside
+// a verdict earned by the first.
+//
+// The scan returned at the first outcome claim carrying a body, so a document disclosing two run
+// outcomes was judged on one of them. A publisher could keep a genuine first disclosure and attach a
+// second whose body does not match the digest its own chain entry committed, and the report still
+// set OutcomeDigestOK: an assertion that what the reader is being shown is what the chain committed,
+// made about a document where it was not true.
+func TestVerifyBundleChecksEveryDisclosedOutcome(t *testing.T) {
+	t.Setenv("SWITCHTENDER_AUDIT_KEY", "")
+	id, err := audit.LoadIdentity(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadIdentity() error = %v", err)
+	}
+	at := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+
+	firstBody := []byte(`{"run_id":"run_a","status":"succeeded","exit_code":0,` +
+		`"log_sha256":"aaa","spec_digest":"sha256:aaaa"}`)
+	firstDigest, firstNonce, err := audit.ContentDigestOf(firstBody)
+	if err != nil {
+		t.Fatalf("ContentDigestOf(first) error = %v", err)
+	}
+	// The second run really failed, and that is what its chain entry commits.
+	secondBody := []byte(`{"run_id":"run_b","status":"failed","exit_code":2,` +
+		`"log_sha256":"bbb","spec_digest":"sha256:aaaa"}`)
+	secondDigest, secondNonce, err := audit.ContentDigestOf(secondBody)
+	if err != nil {
+		t.Fatalf("ContentDigestOf(second) error = %v", err)
+	}
+
+	first := &audit.Entry{
+		ID: "o1", At: at, Actor: "system:dispatcher", ActorType: "system",
+		Method: audit.MethodRun, Path: "/runs/run_a/outcome/succeeded",
+		ContentDigest: firstDigest, Nonce: firstNonce,
+	}
+	audit.Link(nil, first)
+	second := &audit.Entry{
+		ID: "o2", At: at.Add(time.Minute), Actor: "system:dispatcher", ActorType: "system",
+		Method: audit.MethodRun, Path: "/runs/run_b/outcome/failed",
+		ContentDigest: secondDigest, Nonce: secondNonce,
+	}
+	audit.Link(first, second)
+
+	doc, err := audit.BuildBundle([]*audit.Entry{first, second}, id, "v", at)
+	if err != nil {
+		t.Fatalf("BuildBundle() error = %v", err)
+	}
+	attach := func(seq int64, body []byte, nonce string) {
+		var obj any
+		if err := json.Unmarshal(body, &obj); err != nil {
+			t.Fatalf("Unmarshal() error = %v", err)
+		}
+		for i := range doc.Claims {
+			if doc.Claims[i].Chain.Seq == seq {
+				doc.Claims[i].Payload["outcome_body"] = obj
+				doc.Claims[i].Payload["outcome_nonce"] = nonce
+			}
+		}
+	}
+	attach(first.Seq, firstBody, firstNonce)
+	// The fabrication: the second run is disclosed as a success while its entry commits the failure.
+	// Nothing about the chain changes, so the links still recompute and the signature still holds.
+	attach(second.Seq, []byte(`{"run_id":"run_b","status":"succeeded","exit_code":0,`+
+		`"log_sha256":"bbb","spec_digest":"sha256:aaaa"}`), secondNonce)
+
+	signed, err := audit.SignBundleDoc(doc, id.Private())
+	if err != nil {
+		t.Fatalf("SignBundleDoc() error = %v", err)
+	}
+	rep, err := audit.VerifyBundle(signed, "")
+	if err != nil {
+		t.Fatalf("VerifyBundle() error = %v", err)
+	}
+	if !rep.ChainOK || !rep.SignatureOK {
+		t.Fatalf("the fabrication must leave the chain and signature intact, or it proves nothing: "+
+			"chain=%v signature=%v", rep.ChainOK, rep.SignatureOK)
+	}
+	if rep.OutcomeDigestOK {
+		t.Error("a second disclosed outcome that does not match what the chain committed was " +
+			"vouched for, because only the first disclosure was checked")
+	}
+	if rep.OK() {
+		t.Error("a bundle carrying a fabricated second outcome reported OK")
+	}
+}
+
+// TestInstallBindingIsInTheLinkPreimage pins the claim the install-binding comment makes, since a
+// security comment that has drifted from its code is read as the defense by the one person auditing
+// it. Rewriting a bound claim's install id must break the chain, not merely fail an equality check.
+func TestInstallBindingIsInTheLinkPreimage(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	mine := &audit.Entry{
+		ID: "e", At: at, Actor: "admin", ActorType: "session",
+		Method: audit.MethodRun, Path: "/runs", InstallID: "in_aaaaaaaaaaaa",
+	}
+	audit.Link(nil, mine)
+
+	lifted := *mine
+	lifted.InstallID = "in_bbbbbbbbbbbb"
+	if got := audit.EntryHash(&lifted); got == mine.Hash {
+		t.Error("rewriting the install id left the link unchanged, so the binding is cosmetic and " +
+			"a second install can adopt this history by restating the producer alone")
+	}
+	// The unbound case the comment calls out as the residual risk: no id, so nothing to break.
+	unbound := &audit.Entry{
+		ID: "u", At: at, Actor: "admin", ActorType: "session", Method: audit.MethodRun, Path: "/runs",
+	}
+	audit.Link(nil, unbound)
+	alsoUnbound := *unbound
+	if got := audit.EntryHash(&alsoUnbound); got != unbound.Hash {
+		t.Error("an entry naming no install hashed differently from itself")
+	}
+}

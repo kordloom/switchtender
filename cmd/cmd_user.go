@@ -22,7 +22,7 @@ var userRole string
 // userCmd groups account management.
 var userCmd = &cobra.Command{
 	Use:   "user",
-	Short: "Manage accounts. Sign in through the UI or POST /auth/login.",
+	Short: "Manage accounts. Sign in through the UI or POST /v1/auth/login.",
 	Args:  cobra.NoArgs,
 	RunE:  runGroupHelp,
 }

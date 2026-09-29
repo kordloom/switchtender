@@ -56,6 +56,10 @@ type UI struct {
 	oidcBrand string
 	// samlEnabled shows the SAML sign-in button on the sign-in page when set.
 	samlEnabled bool
+	// hasAccounts reports whether this install holds any user account, asked at render time because
+	// an install gains its first account while the server is running. Nil counts as having them, so
+	// nothing changes where the caller said nothing.
+	hasAccounts func() bool
 	// aiEnabled reports whether an advisory AI provider is configured, so the overview can make the
 	// ask panel clearly unavailable rather than looking usable and failing on the first question.
 	aiEnabled bool
@@ -64,11 +68,12 @@ type UI struct {
 // New parses the embedded templates and returns a UI. It panics if the embedded templates fail to
 // parse, which is a build time programming error. docs, when non-nil, is the documentation tree
 // served under /ui/docs; readOnly hides the launch panel and run action buttons for a demo.
-func New(log *zap.Logger, docs fs.FS, readOnly bool, matrixCap int, oidcEnabled, samlEnabled, aiEnabled bool, oidcBrand string) *UI {
+func New(log *zap.Logger, docs fs.FS, readOnly bool, matrixCap int, oidcEnabled, samlEnabled, aiEnabled bool,
+	oidcBrand string, opts ...Option) *UI {
 	if log == nil {
 		log = zap.NewNop()
 	}
-	return &UI{
+	u := &UI{
 		tmpl: template.Must(template.ParseFS(templateFS, "templates/*.html")),
 		log:  log,
 		docs: docs,
@@ -88,6 +93,31 @@ func New(log *zap.Logger, docs fs.FS, readOnly bool, matrixCap int, oidcEnabled,
 		samlEnabled: samlEnabled,
 		aiEnabled:   aiEnabled,
 	}
+	for _, opt := range opts {
+		opt(u)
+	}
+	return u
+}
+
+// Option configures a UI beyond the arguments every caller passes.
+type Option func(*UI)
+
+// WithAccountCheck tells the sign-in page whether this install has any accounts.
+//
+// A fresh install has none, so the username and password form on it cannot work and every attempt
+// answers "bad credentials" with nothing on the page saying why. The read-only demo got an
+// explanation in that exact spot and the fresh install did not, which is the case where a stranger
+// is most likely to be stuck.
+func WithAccountCheck(f func() bool) Option {
+	return func(u *UI) { u.hasAccounts = f }
+}
+
+// accountsExist reports whether the sign-in page should present the account form as usable.
+func (u *UI) accountsExist() bool {
+	if u.hasAccounts == nil {
+		return true
+	}
+	return u.hasAccounts()
 }
 
 // Handler returns the HTTP handler for the web interface, served under /ui/.
@@ -248,7 +278,7 @@ func (u *UI) sources(w http.ResponseWriter, _ *http.Request) {
 // login renders the token sign in page.
 func (u *UI) login(w http.ResponseWriter, _ *http.Request) {
 	u.render(w, "login.html", map[string]any{"OIDCEnabled": u.oidcEnabled, "OIDCBrand": u.oidcBrand,
-		"SAMLEnabled": u.samlEnabled, "ReadOnly": u.readOnly})
+		"SAMLEnabled": u.samlEnabled, "ReadOnly": u.readOnly, "NoAccounts": !u.accountsExist()})
 }
 
 // schedules renders the schedules page.

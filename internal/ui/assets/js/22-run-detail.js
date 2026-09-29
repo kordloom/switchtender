@@ -684,6 +684,40 @@ function renderWarningCallout(run) {
 	host.hidden = false;
 }
 
+// renderFailureCallout says why a run failed, when the server is holding the only copy of the
+// reason.
+//
+// A run that never launched produces no events and a zero-byte log: the tool was missing from PATH,
+// an image could not be pulled, a temp file could not be written. The server records that sentence
+// on the run itself, and the page rendered every other field of the run and not this one, so a
+// stranger who submitted a terraform run without terraform installed saw STATUS failed, a blank
+// expanse, and ten buttons, with "View full log" opening nothing. The reason was already in the
+// response the page had fetched.
+function renderFailureCallout(run) {
+	const host = document.getElementById("run-failure");
+	if (!host) return;
+	host.textContent = "";
+	if (!run.error) {
+		host.hidden = true;
+		return;
+	}
+	const head = document.createElement("div");
+	head.className = "risk-callout-head";
+	const label = document.createElement("strong");
+	label.textContent = "This run did not start";
+	head.appendChild(label);
+	host.appendChild(head);
+	const why = document.createElement("pre");
+	why.className = "drill-pre";
+	why.textContent = run.error;
+	host.appendChild(why);
+	const note = document.createElement("div");
+	note.className = "muted";
+	note.textContent = "Nothing executed, so there is no log or event stream for this run.";
+	host.appendChild(note);
+	host.hidden = false;
+}
+
 // inventoryNames caches stored-inventory names by id for the header, filled once per page.
 let inventoryNames = null;
 
@@ -779,6 +813,7 @@ function renderHeader(run) {
 	}
 	renderRiskCallout(run);
 	renderWarningCallout(run);
+	renderFailureCallout(run);
 	if (run.actor) {
 		const who = field("Requested by",
 			run.actor + (run.actor_type === "agent" ? " (agent)" : ""), null, run.actor);

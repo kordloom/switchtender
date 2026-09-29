@@ -281,6 +281,39 @@ function wfSeedExample() {
 	if (name && !name.value) name.value = "Release pipeline";
 }
 
+// wfSampleShape is the seeded example reduced to what identifies it: each step's name, tool, and
+// command, and the edges between them.
+function wfSampleShape(nodes, edges) {
+	const steps = nodes.map((n) => [n.name, n.tool, n.playbook || "", n.command || ""].join("\u0000"));
+	const links = edges.map((e) => String(e.from) + ">" + String(e.to));
+	return steps.join("\u0001") + "|" + links.sort().join(",");
+}
+
+// wfIsUntouchedSample reports whether the canvas still holds exactly the seeded example.
+//
+// A fresh install opened the workflow page on a four-node graph nobody wrote, with no sign it was
+// an example, under the largest control on the page. Pressing Run launched a real pipeline against
+// the reader's own machine: their first run, the first row of their Runs list, and entries on their
+// brand-new chain were a fabricated release pipeline that failed. Comparing the content rather than
+// setting a flag means a reload, which reloads the draft and never calls the seeder, still knows.
+function wfIsUntouchedSample() {
+	const seeded = { nodes: [], edges: [] };
+	const real = wfState;
+	const nameEl = document.getElementById("wf-name");
+	const named = nameEl ? nameEl.value.trim() : "";
+	try {
+		wfState = seeded;
+		// The seeder names the graph when the field is blank, so the field is put back: asking
+		// whether this is the sample must not turn the canvas into one.
+		wfSeedExample();
+	} finally {
+		wfState = real;
+		if (nameEl) nameEl.value = named;
+	}
+	if (named && named !== "Release pipeline") return false;
+	return wfSampleShape(wfState.nodes, wfState.edges) === wfSampleShape(seeded.nodes, seeded.edges);
+}
+
 // WF_PATTERNS are the shapes a real pipeline usually takes. A blank canvas asks the reader to know
 // both what they want and how this editor expresses it; a pattern answers the second half, laying out
 // named steps and their dependencies for them to rename and point at their own playbooks. Each step
@@ -729,7 +762,35 @@ function renderWorkflow() {
 	renderNodes();
 	renderEdges();
 	renderLegend();
+	renderSampleNote();
 	if (wfState.hint) wfState.hint.hidden = wfState.nodes.length > 0;
+}
+
+// renderSampleNote says the canvas is holding the seeded example, and clears itself the moment the
+// reader changes anything. Without it the page opened on somebody else's four-step release pipeline
+// with nothing marking it as a sample, under a live Run workflow button.
+function renderSampleNote() {
+	const host = document.getElementById("wf-sample-note");
+	if (!host) return;
+	if (!wfIsUntouchedSample()) {
+		host.hidden = true;
+		host.textContent = "";
+		return;
+	}
+	host.textContent = "";
+	const head = document.createElement("div");
+	head.className = "risk-callout-head";
+	const label = document.createElement("strong");
+	label.textContent = "Sample pipeline";
+	head.appendChild(label);
+	host.appendChild(head);
+	const why = document.createElement("div");
+	why.className = "muted";
+	why.textContent = "This graph is an example, not yours. Open a step to point it at a real " +
+		"playbook or command, start from a pattern, or clear the canvas. Run workflow is held " +
+		"until then.";
+	host.appendChild(why);
+	host.hidden = false;
 }
 
 // renderNodes reconciles the node cards with the model, positioning each and wiring its handles.
