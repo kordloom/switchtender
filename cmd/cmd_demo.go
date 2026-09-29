@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/demo"
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/live"
@@ -111,6 +113,14 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 	}
 
 	sealer := newSealerFromEnv(log)
+	// The demo publishes a signing identity too, so a visitor can fetch the trust document and check
+	// an exported bundle end to end rather than take the description on faith.
+	var demoProducer *audit.Identity
+	if id, err := audit.LoadIdentity(filepath.Dir(demoDB)); err != nil {
+		log.Warn("producer identity unavailable: " + err.Error())
+	} else {
+		demoProducer = &id
+	}
 	httpServer := &http.Server{
 		Addr: demoAddr,
 		Handler: server.New(store, disp, log, server.WithStreamer(hub),
@@ -124,6 +134,7 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 			server.WithTeams(bundle.Teams()),
 			server.WithGrants(bundle.Grants(), false),
 			server.WithAudit(bundle.Audits()),
+			server.WithProducerIdentity(demoProducer, resolveVersion()),
 			server.WithPolicies(bundle.Policies()),
 			server.WithUsers(bundle.Users()),
 			server.WithApprover(disp),
