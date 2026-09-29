@@ -32,6 +32,40 @@ type HostSummary struct {
 	RanAt time.Time `json:"ran_at"`
 }
 
+// HostFacts is a host's system facts as of the last run that gathered them. The keys are the
+// Ansible fact names without their prefix: distribution, kernel, architecture, and so on.
+type HostFacts struct {
+	// Host is the host the facts describe.
+	Host string `json:"host"`
+	// Facts maps a fact name to its value.
+	Facts map[string]string `json:"facts"`
+	// RunID is the run that gathered them.
+	RunID string `json:"run_id,omitempty"`
+	// GatheredAt is when that run gathered them.
+	GatheredAt time.Time `json:"gathered_at"`
+}
+
+// HostFactsFromEvents collects the facts a run gathered, one entry per host, keeping the last
+// gather when a play gathers more than once.
+func HostFactsFromEvents(events []event.Event, at time.Time) []HostFacts {
+	byHost := make(map[string]HostFacts)
+	for _, e := range events {
+		if e.Type != event.TypeFacts || e.Host == "" || len(e.Facts) == 0 {
+			continue
+		}
+		byHost[e.Host] = HostFacts{Host: e.Host, Facts: e.Facts, GatheredAt: at}
+	}
+	if len(byHost) == 0 {
+		return nil
+	}
+	out := make([]HostFacts, 0, len(byHost))
+	for _, f := range byHost {
+		out = append(out, f)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Host < out[j].Host })
+	return out
+}
+
 // HostHealth summarizes a host's recent reliability across the most recent runs it appeared in.
 type HostHealth struct {
 	// Host is the target host.

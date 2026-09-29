@@ -95,6 +95,15 @@ What SwitchTender does today.
   the whole history rather than the loaded page.
 - Playbook names open the file itself, read only, from the project's cached checkout.
 
+## Host facts
+
+- A play that gathers facts records what each host is: distribution and version, kernel,
+  architecture, vCPUs, memory, address, service manager, virtualization, and Python version.
+- The facts appear on the host's page with when they were gathered and a link to the run that
+  gathered them. A later gather replaces an earlier one, so the page always shows current truth.
+- Nothing is gathered unless a play asks for it, so a fleet that runs with `gather_facts: false`
+  stores nothing and the page says so.
+
 ## Running a public demo
 
 - `switchtender demo` seeds a database with sample projects, templates, inventories, and real

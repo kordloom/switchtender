@@ -83,6 +83,43 @@ class CallbackModule(CallbackBase):
         self._task = task.get_name()
         self._emit("task_start", play=self._play, task=self._task)
 
+    # FACT_KEYS are the gathered facts worth keeping: enough to answer what a host is without
+    # storing the hundreds of keys Ansible collects, most of which are noise or churn.
+    FACT_KEYS = (
+        "ansible_distribution",
+        "ansible_distribution_version",
+        "ansible_kernel",
+        "ansible_architecture",
+        "ansible_processor_vcpus",
+        "ansible_memtotal_mb",
+        "ansible_default_ipv4",
+        "ansible_fqdn",
+        "ansible_python_version",
+        "ansible_service_mgr",
+        "ansible_virtualization_type",
+    )
+
+    def _facts(self, result):
+        """Return the facts worth recording from a gather, empty when the task gathered none."""
+        raw = result._result.get("ansible_facts")
+        if not isinstance(raw, dict):
+            return {}
+        out = {}
+        for key in self.FACT_KEYS:
+            value = raw.get(key)
+            if value in (None, "", [], {}):
+                continue
+            # The default route is a dict; only its address is worth keeping.
+            if key == "ansible_default_ipv4":
+                if isinstance(value, dict) and value.get("address"):
+                    out["ip"] = str(value["address"])
+                continue
+            text = value if isinstance(value, str) else json.dumps(value)
+            if len(text) > 200:
+                text = text[:200]
+            out[key[len("ansible_"):]] = text
+        return out
+
     def v2_runner_on_ok(self, result):
         self._emit(
             "runner_ok",
@@ -92,6 +129,11 @@ class CallbackModule(CallbackBase):
             changed=self._changed(result),
             **self._summary(result),
         )
+        # A gather_facts task carries the host's system facts. They are emitted separately so the
+        # task event stays small and the facts can be stored per host rather than per task.
+        facts = self._facts(result)
+        if facts:
+            self._emit("facts", host=self._host(result), facts=facts)
 
     def v2_runner_on_failed(self, result, ignore_errors=False):
         self._emit(

@@ -126,6 +126,16 @@ func (c *Client) HostHistory(context.Context, string, int) ([]run.HostSummary, e
 	return nil, ErrUnsupported
 }
 
+// SaveHostFacts is a control-node write and is not served to workers.
+func (c *Client) SaveHostFacts(context.Context, string, []run.HostFacts) error {
+	return ErrUnsupported
+}
+
+// HostFactsFor is a control-node read and is not served to workers.
+func (c *Client) HostFactsFor(context.Context, string) (*run.HostFacts, error) {
+	return nil, ErrUnsupported
+}
+
 // TaskTrends is a control-node analytic and is not served to workers.
 func (c *Client) TaskTrends(context.Context, int) ([]run.TaskTrend, error) {
 	return nil, ErrUnsupported

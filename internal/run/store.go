@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -77,6 +78,11 @@ type Store interface {
 	HostCosts(ctx context.Context, window int) (map[string]float64, error)
 	// HostHistory returns a host's most recent per run summaries, newest first, with run ids.
 	HostHistory(ctx context.Context, host string, limit int) ([]HostSummary, error)
+	// SaveHostFacts records the system facts a run gathered, replacing what is held for each host.
+	SaveHostFacts(ctx context.Context, runID string, facts []HostFacts) error
+	// HostFactsFor returns a host's most recently gathered facts, or ErrNotFound when a host has
+	// never been gathered.
+	HostFactsFor(ctx context.Context, host string) (*HostFacts, error)
 	// SaveTaskSummary replaces the stored per task summaries for a run.
 	SaveTaskSummary(ctx context.Context, runID string, summaries []TaskSummary) error
 	// TaskTrends aggregates each task's durations over its most recent window runs.
@@ -177,6 +183,8 @@ type memStore struct {
 	events map[string][]event.Event
 	// summaries maps run id to its per host outcome summaries.
 	summaries map[string][]HostSummary
+	// facts holds the most recently gathered system facts per host.
+	facts map[string]HostFacts
 	// tasks maps run id to its per task duration summaries.
 	tasks map[string][]TaskSummary
 }
@@ -685,6 +693,42 @@ func (m *memStore) DriftStatus(_ context.Context) ([]HostDrift, error) {
 		return out[i].Host < out[j].Host
 	})
 	return out, nil
+}
+
+// SaveHostFacts records each host's gathered facts, replacing whatever was held before, since the
+// newest gather is the truth about a host.
+func (m *memStore) SaveHostFacts(_ context.Context, runID string, facts []HostFacts) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.facts == nil {
+		m.facts = make(map[string]HostFacts)
+	}
+	for _, f := range facts {
+		if f.Host == "" || len(f.Facts) == 0 {
+			continue
+		}
+		cp := f
+		cp.RunID = runID
+		cp.Facts = maps.Clone(f.Facts)
+		if cp.GatheredAt.IsZero() {
+			cp.GatheredAt = time.Now()
+		}
+		m.facts[f.Host] = cp
+	}
+	return nil
+}
+
+// HostFactsFor returns a host's stored facts, or ErrNotFound when it has never been gathered.
+func (m *memStore) HostFactsFor(_ context.Context, host string) (*HostFacts, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	f, ok := m.facts[host]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := f
+	cp.Facts = maps.Clone(f.Facts)
+	return &cp, nil
 }
 
 // HostHistory returns a host's most recent per run summaries, newest first, with run ids.

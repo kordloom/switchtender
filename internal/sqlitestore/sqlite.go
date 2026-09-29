@@ -109,6 +109,12 @@ CREATE TABLE IF NOT EXISTS run_host_summary (
 	PRIMARY KEY (run_id, host)
 );
 CREATE INDEX IF NOT EXISTS idx_host_summary_host ON run_host_summary(host, ran_at DESC);
+CREATE TABLE IF NOT EXISTS host_facts (
+	host        TEXT PRIMARY KEY,
+	run_id      TEXT NOT NULL,
+	facts       TEXT NOT NULL,
+	gathered_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS run_task_summary (
 	run_id  TEXT NOT NULL,
 	task    TEXT NOT NULL,
@@ -1095,6 +1101,61 @@ SELECT host, changed, run_id, ran_at FROM checks WHERE rn = 1 ORDER BY changed D
 }
 
 // HostHistory returns a host's most recent per run summaries, newest first, with run ids.
+// SaveHostFacts records each host's gathered facts, replacing what was held before since the
+// newest gather is the truth about a host.
+func (s *store) SaveHostFacts(ctx context.Context, runID string, facts []run.HostFacts) error {
+	if len(facts) == 0 {
+		return nil
+	}
+	const q = `
+INSERT INTO host_facts (host, run_id, facts, gathered_at)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(host) DO UPDATE SET
+	run_id=excluded.run_id, facts=excluded.facts, gathered_at=excluded.gathered_at`
+	for _, f := range facts {
+		if f.Host == "" || len(f.Facts) == 0 {
+			continue
+		}
+		at := f.GatheredAt
+		if at.IsZero() {
+			at = time.Now()
+		}
+		blob, err := json.Marshal(f.Facts)
+		if err != nil {
+			return fmt.Errorf("save host facts: %w", err)
+		}
+		if _, err := s.db.ExecContext(ctx, q, f.Host, runID, string(blob),
+			sqlutil.FormatTime(at)); err != nil {
+			return fmt.Errorf("save host facts: %w", err)
+		}
+	}
+	return nil
+}
+
+// HostFactsFor returns a host's stored facts, or run.ErrNotFound when it was never gathered.
+func (s *store) HostFactsFor(ctx context.Context, host string) (*run.HostFacts, error) {
+	const q = "SELECT host, run_id, facts, gathered_at FROM host_facts WHERE host = ?"
+	var (
+		out      run.HostFacts
+		blob     string
+		gathered string
+	)
+	err := s.db.QueryRowContext(ctx, q, host).Scan(&out.Host, &out.RunID, &blob, &gathered)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, run.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("host facts: %w", err)
+	}
+	if err := json.Unmarshal([]byte(blob), &out.Facts); err != nil {
+		return nil, fmt.Errorf("host facts: %w", err)
+	}
+	if out.GatheredAt, err = sqlutil.ParseTime(gathered); err != nil {
+		return nil, fmt.Errorf("host facts: %w", err)
+	}
+	return &out, nil
+}
+
 func (s *store) HostHistory(ctx context.Context, host string, limit int) ([]run.HostSummary, error) {
 	if limit < 1 {
 		limit = 1
