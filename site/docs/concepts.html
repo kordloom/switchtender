@@ -113,6 +113,25 @@ reordering, or deleting an entry breaks the chain, which <code>GET /v1/audit/ver
 export from <code>GET /v1/audit/export</code> seals the chain with an ed25519 signature, so
 <code>switchtender audit verify</code> proves the trail is intact and unaltered offline, without trusting the
 server that produced it.</p>
+<p>A chain proves that what it holds was not altered. On its own it cannot prove that nothing is
+missing, because the same server decides both what happens and what gets written down, and because a
+prefix of a valid chain is itself a valid chain. Three things close that gap.</p>
+<p><strong>A change that cannot be recorded does not happen.</strong> The entry is written before the handler runs,
+so a mutation whose audit write fails is refused with a 503 rather than performed silently. Changes
+made from the command line, including creating an account and minting a token, are recorded the same
+way.</p>
+<p><strong>Anchors fix the chain in time.</strong> <code>switchtender audit anchor</code> asks a public RFC 3161 timestamp
+authority to sign the moment it saw the current head. The token is embedded in every bundle built
+afterwards and is checked offline by any verifier, with no network and no trust in this install, so
+a chain that has quietly lost its tail no longer reaches its anchor and says so. Anchor on a
+schedule: an anchor bounds how much history can vanish unnoticed to whatever happened since the last
+one.</p>
+<p><strong>Receipts make an omission detectable by the party it happened to.</strong> Every mutation returns an
+<code>Audit-Receipt: seq:link</code> header naming where it was recorded. Keep them. <code>switchtender audit receipt 41:9f2c...</code> confirms the chain still holds that exact link at that exact position, and a
+server that omitted the entry cannot produce a chain containing the receipt.</p>
+<p>What none of this defends against is an operator running modified code on the machine itself. That
+is the boundary of every audit system, it costs an attacker the whole controller to reach, and it
+does not hand them the past: anything already anchored stays fixed and still proves what it proved.</p>
 <h2 id="approvals">Approvals</h2>
 <p>A run can be marked to require approval. It is held in a pending-approval state that the claim loop
 never picks up, until an admin approves it, which releases it to run, or rejects it, which ends it.

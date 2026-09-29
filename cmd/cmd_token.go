@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/jsonutil"
 )
@@ -62,12 +63,12 @@ func init() {
 }
 
 // openTokens opens the token store for the --db value.
-func openTokens(db string) (auth.Store, func() error, error) {
+func openTokens(db string) (auth.Store, audit.Store, func() error, error) {
 	bundle, err := openBundle(db)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return bundle.Tokens(), bundle.Close, nil
+	return bundle.Tokens(), bundle.Audits(), bundle.Close, nil
 }
 
 // printJSON writes v as JSON to stdout, indented when --pretty is set.
@@ -82,12 +83,15 @@ func printJSON(v any) error {
 
 // runTokenNew mints and stores a token, printing the plaintext exactly once.
 func runTokenNew(cmd *cobra.Command, _ []string) error {
-	tokens, closeStores, err := openTokens(tokenDB)
+	tokens, audits, closeStores, err := openTokens(tokenDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer func() { _ = closeStores() }()
 
+	if err := recordCLI(cmd.Context(), audits, "/cli/token/new"); err != nil {
+		return err
+	}
 	plain, tok, err := auth.New(tokenName)
 	if err != nil {
 		return fmt.Errorf("mint token: %w", err)
@@ -105,7 +109,7 @@ func runTokenNew(cmd *cobra.Command, _ []string) error {
 
 // runTokenList prints all tokens without secret material.
 func runTokenList(cmd *cobra.Command, _ []string) error {
-	tokens, closeStores, err := openTokens(tokenDB)
+	tokens, _, closeStores, err := openTokens(tokenDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
@@ -120,12 +124,15 @@ func runTokenList(cmd *cobra.Command, _ []string) error {
 
 // runTokenRevoke deletes the token with the given id.
 func runTokenRevoke(cmd *cobra.Command, args []string) error {
-	tokens, closeStores, err := openTokens(tokenDB)
+	tokens, audits, closeStores, err := openTokens(tokenDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer func() { _ = closeStores() }()
 
+	if err := recordCLI(cmd.Context(), audits, "/cli/token/revoke"); err != nil {
+		return err
+	}
 	if err := tokens.Delete(cmd.Context(), args[0]); err != nil {
 		return fmt.Errorf("revoke token: %w", err)
 	}

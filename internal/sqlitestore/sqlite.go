@@ -234,6 +234,16 @@ CREATE TABLE IF NOT EXISTS audit_entries (
 	prev_hash TEXT NOT NULL DEFAULT '',
 	hash      TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS audit_anchors (
+	id    TEXT PRIMARY KEY,
+	type  TEXT NOT NULL,
+	seq   INTEGER NOT NULL,
+	link  TEXT NOT NULL,
+	at    TEXT NOT NULL,
+	ref   TEXT NOT NULL DEFAULT '',
+	proof TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_audit_anchor_seq ON audit_anchors(seq);
 CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_entries(at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_seq ON audit_entries(seq);
 CREATE TABLE IF NOT EXISTS policies (

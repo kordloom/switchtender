@@ -16,6 +16,7 @@ func Contract(t *testing.T, newStore func() audit.Store) {
 	t.Helper()
 	t.Run("append and list", func(t *testing.T) { testAppendList(t, newStore()) })
 	t.Run("chain verifies", func(t *testing.T) { testChain(t, newStore()) })
+	t.Run("anchors round trip and scope", func(t *testing.T) { testAnchors(t, newStore()) })
 	t.Run("concurrent appends do not fork", func(t *testing.T) { testConcurrentAppend(t, newStore()) })
 	t.Run("empty list is non-nil", func(t *testing.T) {
 		got, err := newStore().List(context.Background(), 10)
@@ -146,5 +147,98 @@ func testAppendList(t *testing.T, store audit.Store) {
 	}
 	if len(one) != 1 || one[0].Path != "/users" {
 		t.Errorf("List(1) = %+v, want just the newest", one)
+	}
+}
+
+// testAnchors verifies that anchors persist, come back oldest first, and scope to a sequence.
+//
+// An anchor fixes a chain link somewhere the operator cannot rewrite alone, which is what turns "the
+// chain has not been altered" into "the chain has also not been shortened". That only holds if the
+// anchor itself survives, so it is stored beside the entries rather than left in a log line, and a
+// bundle asks for the anchors covering the range it carries rather than all of them.
+//
+// Identifiers are generated rather than fixed because a contract store may be shared across cases,
+// so the assertions are about the anchors this case saved rather than about absolute counts.
+func testAnchors(t *testing.T, store audit.Store) {
+	t.Helper()
+	ctx := context.Background()
+	anchors, ok := store.(audit.AnchorStore)
+	if !ok {
+		t.Fatalf("%T does not persist anchors, so a chain it holds cannot be fixed in time", store)
+	}
+	before, err := anchors.Anchors(ctx, 0)
+	if err != nil {
+		t.Fatalf("Anchors() error = %v", err)
+	}
+
+	at := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	stamped := &audit.Anchor{
+		ID: audit.NewAnchorID(), Type: audit.AnchorRFC3161, Seq: 5, Link: "aa", At: at,
+		Ref: "https://freetsa.org/tsr", Proof: "MIIBase64Token",
+	}
+	committed := &audit.Anchor{
+		ID: audit.NewAnchorID(), Type: audit.AnchorGit, Seq: 20, Link: "bb", At: at.Add(time.Hour),
+		Ref: "https://github.com/acme/anchors/commit/deadbeef",
+	}
+	for _, a := range []*audit.Anchor{stamped, committed} {
+		if err := anchors.SaveAnchor(ctx, a); err != nil {
+			t.Fatalf("SaveAnchor(%s) error = %v", a.ID, err)
+		}
+	}
+
+	all, err := anchors.Anchors(ctx, 0)
+	if err != nil {
+		t.Fatalf("Anchors(0) error = %v", err)
+	}
+	if len(all) != len(before)+2 {
+		t.Fatalf("Anchors(0) returned %d, want %d", len(all), len(before)+2)
+	}
+	for i := 1; i < len(all); i++ {
+		if all[i-1].Seq > all[i].Seq {
+			t.Errorf("anchors came back out of order at index %d, want oldest first", i)
+		}
+	}
+
+	byID := make(map[string]*audit.Anchor, len(all))
+	for _, a := range all {
+		byID[a.ID] = a
+	}
+	got, ok := byID[stamped.ID]
+	if !ok {
+		t.Fatal("the saved rfc3161 anchor did not come back")
+	}
+	// The embedded proof is the whole value of an rfc3161 anchor. Losing it in storage would leave a
+	// record that looks anchored and proves nothing.
+	if got.Proof != stamped.Proof {
+		t.Errorf("proof = %q, want it stored verbatim", got.Proof)
+	}
+	if got.Ref != stamped.Ref || got.Type != audit.AnchorRFC3161 || got.Link != "aa" {
+		t.Errorf("anchor = %+v, want its type, link, and reference preserved", got)
+	}
+	if !got.At.Equal(at) {
+		t.Errorf("anchor time = %s, want %s", got.At, at)
+	}
+
+	// A bundle covering the first ten entries must not carry an anchor for entry twenty: a verifier
+	// rejects a bundle whose anchor names a link it does not hold.
+	scoped, err := anchors.Anchors(ctx, 10)
+	if err != nil {
+		t.Fatalf("Anchors(10) error = %v", err)
+	}
+	found := false
+	for _, a := range scoped {
+		if a.Seq > 10 {
+			t.Errorf("Anchors(10) returned an anchor at seq %d, which names a link a bundle of the "+
+				"first ten entries does not hold", a.Seq)
+		}
+		if a.ID == stamped.ID {
+			found = true
+		}
+		if a.ID == committed.ID {
+			t.Error("Anchors(10) returned the anchor at seq 20")
+		}
+	}
+	if !found {
+		t.Error("Anchors(10) dropped the anchor at seq 5, which is inside the range")
 	}
 }

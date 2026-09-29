@@ -89,6 +89,9 @@ func runUserNew(cmd *cobra.Command, args []string) error {
 	defer func() { _ = bundle.Close() }()
 	users := bundle.Users()
 
+	if err := recordCLI(cmd.Context(), bundle.Audits(), "/cli/user/create"); err != nil {
+		return err
+	}
 	if _, err := users.FindByUsername(cmd.Context(), args[0]); err == nil {
 		return fmt.Errorf("username %q already exists", args[0])
 	}
@@ -129,6 +132,9 @@ func runUserDelete(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = bundle.Close() }()
 
+	if err := recordCLI(cmd.Context(), bundle.Audits(), "/cli/user/delete"); err != nil {
+		return err
+	}
 	if err := bundle.Users().Delete(cmd.Context(), args[0]); err != nil {
 		return fmt.Errorf("delete user: %w", err)
 	}

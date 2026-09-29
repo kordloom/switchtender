@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -70,7 +71,9 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			if !g.decide(w, r, actor) {
 				return
 			}
-			g.record(u.Username, r)
+			if !g.record(w, u.Username, r) {
+				return
+			}
 			ctx := context.WithValue(r.Context(), actorKey{}, actor)
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return
@@ -96,7 +99,9 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			return
 		}
 		g.touch(tok)
-		g.record(tok.Name, r)
+		if !g.record(w, tok.Name, r) {
+			return
+		}
 		ctx := context.WithValue(r.Context(), actorKey{}, actor)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -123,21 +128,45 @@ func actorFrom(ctx context.Context) (Actor, bool) {
 	return a, ok
 }
 
-// record appends an audit entry for an authenticated mutation without blocking the request. It
-// takes the actor name directly so token and JWT callers are both recorded on the same trail.
-func (g *authGate) record(actor string, r *http.Request) {
+// AuditReceiptHeader carries the chain position of the entry recorded for a mutation, as
+// "seq:hash". A caller that keeps its receipts can later demand that a chain contain them, which is
+// the only way an omitted entry becomes detectable by the party it happened to. A chain proves that
+// what it holds was not altered; it cannot prove that nothing is missing, because the same process
+// decides both what happens and what gets written down. A receipt moves that from the server's word
+// to the holder's evidence.
+const AuditReceiptHeader = "Audit-Receipt"
+
+// record appends an audit entry for an authenticated mutation and reports whether it was written.
+//
+// It runs before the handler, so a change that cannot be recorded does not happen. That ordering is
+// the whole point: the append used to run in a goroutine whose error was logged and dropped, so a
+// full disk or a locked database meant the mutation succeeded, returned 200, and left no trace. The
+// chain showed no gap either, because a sequence number is assigned at append and an entry that was
+// never appended leaves no hole to notice.
+//
+// Recording before the change means the trail holds attempts rather than outcomes: a request that
+// is recorded and then rejected by its handler leaves an entry for something that did not take
+// effect. That is the better direction to be wrong in. An attempt that failed is worth seeing, and
+// the alternative ordering loses the record entirely whenever a process dies mid-change.
+//
+// It takes the actor name directly so token and JWT callers are recorded on the same trail.
+func (g *authGate) record(w http.ResponseWriter, actor string, r *http.Request) bool {
 	if g.audits == nil || r.Method == http.MethodGet || r.Method == http.MethodHead {
-		return
+		return true
 	}
 	entry := &audit.Entry{
 		ID: audit.NewID(), At: time.Now(), Actor: actor,
 		Method: r.Method, Path: r.URL.Path,
 	}
-	go func() {
-		if err := g.audits.Append(context.Background(), entry); err != nil {
-			g.log.Error("server: append audit entry: " + err.Error())
-		}
-	}()
+	if err := g.audits.Append(r.Context(), entry); err != nil {
+		g.log.Error("server: append audit entry: "+err.Error(),
+			zap.String("method", r.Method), zap.String("path", r.URL.Path))
+		respondError(w, g.log, http.StatusServiceUnavailable,
+			"refused: the change could not be recorded in the audit trail")
+		return false
+	}
+	w.Header().Set(AuditReceiptHeader, strconv.FormatInt(entry.Seq, 10)+":"+entry.Hash)
+	return true
 }
 
 // roleFor resolves a token to its user's role. Tokens without an owner come from the command

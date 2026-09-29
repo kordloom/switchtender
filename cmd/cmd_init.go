@@ -80,6 +80,9 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("build admin: %w", err)
 	}
+	if err := recordCLI(cmd.Context(), bundle.Audits(), "/cli/init/admin"); err != nil {
+		return err
+	}
 	if err := bundle.Users().Save(cmd.Context(), admin); err != nil {
 		return fmt.Errorf("save admin: %w", err)
 	}

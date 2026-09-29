@@ -28,7 +28,9 @@ What SwitchTender does today.
 | Auth         | User accounts with admin, operator, and viewer roles enforced per route. Bearer tokens hashed at rest. The API locks down the moment the first token exists.|
 | Approvals    | Mark a run to require sign-off, or require it automatically by policy on tool, command, or target. A held run never executes until an admin approves or rejects it, and the request and decision land in the tamper-evident audit trail.|
 | Observability| A Prometheus metrics endpoint, webhook notifications when runs finish, and an audit trail of every mutation.|
-| Tamper-evident audit | Every mutation is linked into a SHA-256 hash chain. `GET /v1/audit/verify` flags the first altered or deleted entry, and a signed export verified with `switchtender audit verify` proves the whole chain offline.|
+| Tamper-evident audit | Every mutation is linked into a SHA-256 hash chain. `GET /v1/audit/verify` flags the first altered or deleted entry, and a signed export verified with `switchtender audit verify` proves the whole chain offline. A change that cannot be recorded is refused rather than performed silently.|
+| Anchored history | `switchtender audit anchor` has a public RFC 3161 timestamp authority sign the current chain head. The token travels in every bundle and is checked offline by anyone, so a chain that has lost its tail no longer reaches its anchor.|
+| Audit receipts | Every mutation returns an `Audit-Receipt` header naming where it landed in the chain. `switchtender audit receipt` redeems one, so a party who holds a receipt can prove their entry was not dropped.|
 | Evidence report | `switchtender audit report` renders a signed export into a self-contained HTML compliance report, verifying it offline in the same pass, so a vendor-security or SOC 2 reviewer reads the verdict and re-verifies it against the export with no tooling.|
 | Inventories  | Stored inventories referenced by id, materialized on whichever executor runs the play.|
 | Dynamic sources | Inventory plugins and scripts refreshed into stored inventories, with cloud auth from an env credential.|
