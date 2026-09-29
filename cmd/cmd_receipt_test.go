@@ -72,7 +72,7 @@ func TestReceiptProduceAndVerifyOffline(t *testing.T) {
 	if err := store.Runs().Save(ctx, r); err != nil {
 		t.Fatalf("Save(succeeded) error = %v", err)
 	}
-	if err := outcome.Commit(ctx, store.Audits(), store.Runs(), r, "system:dispatcher"); err != nil {
+	if err := outcome.Commit(ctx, store.Audits(), store.Runs(), r, "system:dispatcher", nil); err != nil {
 		t.Fatalf("outcome.Commit() error = %v", err)
 	}
 	_ = store.Close()
@@ -200,7 +200,7 @@ func TestSparseReceiptDisclosesOnlyTheRun(t *testing.T) {
 	if err := store.Runs().Save(ctx, r); err != nil {
 		t.Fatalf("Save(succeeded) error = %v", err)
 	}
-	if err := outcome.Commit(ctx, store.Audits(), store.Runs(), r, "system:dispatcher"); err != nil {
+	if err := outcome.Commit(ctx, store.Audits(), store.Runs(), r, "system:dispatcher", nil); err != nil {
 		t.Fatalf("outcome.Commit() error = %v", err)
 	}
 	_ = store.Close()

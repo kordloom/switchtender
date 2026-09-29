@@ -52,7 +52,7 @@ func TestOutcomeDigestSurvivesTheStoreRoundTrip(t *testing.T) {
 	}
 
 	// The dispatcher commits the outcome from the run it holds in memory.
-	if err := outcome.Commit(ctx, store.Audits(), store.Runs(), r, "system:dispatcher"); err != nil {
+	if err := outcome.Commit(ctx, store.Audits(), store.Runs(), r, "system:dispatcher", nil); err != nil {
 		t.Fatalf("Commit() error = %v", err)
 	}
 	entries, err := store.Audits().Chain(ctx)

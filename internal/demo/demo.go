@@ -12,6 +12,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
 	git "github.com/go-git/go-git/v5"
@@ -68,6 +70,77 @@ type Deps struct {
 	Audit audit.Store
 	// Schedules holds the sample cron entries, so that page shows real cadences.
 	Schedules schedule.Store
+	// Clock parks the timestamps of seeded runs in the recent past and steps forward between them, so
+	// the run history spreads across the last several hours the way a live fleet's would rather than
+	// piling into the seed instant. Nil seeds every run at the real wall clock. It must be the same
+	// clock the dispatcher was given through dispatch.WithClock, or the record and its outcome entry
+	// disagree on when the run happened.
+	Clock *SeedClock
+}
+
+// The demo lays its seeded runs across a window of the recent past so the overview's activity chart,
+// the runs list, and fleet memory read like a fleet that has been working, not one seeded in a single
+// instant. The window opens seedRunWindow ago and closes no later than seedRunMargin before now, and
+// the seeder steps the clock seedRunGap forward once each run's record and outcome have landed.
+const (
+	seedRunWindow = 11 * time.Hour
+	seedRunMargin = 15 * time.Minute
+	seedRunGap    = 40 * time.Minute
+	// seedHistoryBackshiftHours pushes the seeded change history back so all of it predates the run
+	// window. The runs commit their outcomes to the same chain after this history is appended, so
+	// keeping the history older leaves the chain's times descending with its sequence, the way a live
+	// chain reads, rather than a run outcome from hours ago landing beneath a newer config change.
+	seedHistoryBackshiftHours = 12
+)
+
+// SeedClock is the demo's stand-in for the wall clock. It opens in the past and advances a fixed step
+// each read, so one run's handful of timestamps cluster in a small window rather than sharing a single
+// instant, and the seeder steps it forward between runs so successive runs land further apart in time.
+// It never reads past its ceiling, so no seeded time is ever in the future however many runs are
+// seeded. It is safe for the dispatcher's worker goroutines and the seeder to read and step at once.
+type SeedClock struct {
+	// mu serializes reads and steps so concurrent shard executions and the seeder never race.
+	mu sync.Mutex
+	// cursor is the last time handed out; every read advances it.
+	cursor time.Time
+	// step is how far each read moves the cursor, so successive stamps within one run strictly advance.
+	step time.Duration
+	// ceiling is the latest time the clock will ever return, holding every stamp safely before now.
+	ceiling time.Time
+}
+
+// NewSeedClock returns a clock opened seedRunWindow before now, reading forward a millisecond at a
+// time and never passing seedRunMargin before now.
+func NewSeedClock() *SeedClock {
+	now := time.Now()
+	return &SeedClock{
+		cursor:  now.Add(-seedRunWindow),
+		step:    time.Millisecond,
+		ceiling: now.Add(-seedRunMargin),
+	}
+}
+
+// Now returns the next reading, one step past the last and never past the ceiling. It is the function
+// handed to dispatch.WithClock.
+func (c *SeedClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.cursor = c.cursor.Add(c.step)
+	if c.cursor.After(c.ceiling) {
+		c.cursor = c.ceiling
+	}
+	return c.cursor
+}
+
+// advance steps the clock forward by gap so the next seeded run lands that much later, without passing
+// the ceiling.
+func (c *SeedClock) advance(gap time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.cursor = c.cursor.Add(gap)
+	if c.cursor.After(c.ceiling) {
+		c.cursor = c.ceiling
+	}
 }
 
 // Seed populates the stores with sample configuration and a set of runs that exercise the matrix,
@@ -100,7 +173,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 		if err != nil {
 			return fmt.Errorf("seed run: %w", err)
 		}
-		waitTerminal(ctx, d.Runs, r.ID)
+		settle(ctx, d, r.ID)
 	}
 
 	// A split where one shard fails, showing the merged matrix and failed-shard isolation.
@@ -110,7 +183,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 	if err != nil {
 		return fmt.Errorf("seed split: %w", err)
 	}
-	waitTerminal(ctx, d.Runs, split.ID)
+	settle(ctx, d, split.ID)
 
 	// A clean three-step Ansible pipeline.
 	steps := []run.PipelineStep{
@@ -123,7 +196,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 	if err != nil {
 		return fmt.Errorf("seed pipeline: %w", err)
 	}
-	waitTerminal(ctx, d.Runs, pipe.ID)
+	settle(ctx, d, pipe.ID)
 
 	// One more failure on a different host for variety.
 	last, err := d.Submitter.Submit(ctx, playbook, inv,
@@ -132,14 +205,14 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 	if err != nil {
 		return fmt.Errorf("seed run: %w", err)
 	}
-	waitTerminal(ctx, d.Runs, last.ID)
+	settle(ctx, d, last.ID)
 
 	// One fact-gathering play, so every host page shows its distribution, kernel, and the rest
 	// rather than an empty panel.
 	factsPlay := filepath.Join(dir, "facts.yml")
 	factsOpts := seedOpts("schedule", "sch_facts", "deploy-bot", map[string]string{"env": "prod"})
 	if factsRun, err := d.Submitter.Submit(ctx, factsPlay, inv, factsOpts...); err == nil {
-		waitTerminal(ctx, d.Runs, factsRun.ID)
+		settle(ctx, d, factsRun.ID)
 	} else {
 		log.Warn("demo: seed fact gather: " + err.Error())
 	}
@@ -149,7 +222,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 	driftOpts := seedOpts("schedule", "sch_drift_check", "deploy-bot",
 		map[string]string{"env": "prod"}, run.WithDryRun(true))
 	if driftRun, err := d.Submitter.Submit(ctx, driftPlay, inv, driftOpts...); err == nil {
-		waitTerminal(ctx, d.Runs, driftRun.ID)
+		settle(ctx, d, driftRun.ID)
 	} else {
 		log.Warn("demo: seed drift check: " + err.Error())
 	}
@@ -175,7 +248,7 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 	if err != nil {
 		return fmt.Errorf("seed bash run: %w", err)
 	}
-	waitTerminal(ctx, d.Runs, bash.ID)
+	settle(ctx, d, bash.ID)
 
 	if have("python3") {
 		py, err := d.Submitter.Submit(ctx, "", "",
@@ -184,7 +257,7 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 		if err != nil {
 			return fmt.Errorf("seed python run: %w", err)
 		}
-		waitTerminal(ctx, d.Runs, py.ID)
+		settle(ctx, d, py.ID)
 	} else {
 		log.Info("demo: python3 not on PATH, skipping the python run")
 	}
@@ -196,7 +269,7 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 		if err != nil {
 			return fmt.Errorf("seed terraform run: %w", err)
 		}
-		waitTerminal(ctx, d.Runs, tf.ID)
+		settle(ctx, d, tf.ID)
 	} else {
 		log.Info("demo: terraform not on PATH, skipping the terraform run; install terraform to include it")
 	}
@@ -208,7 +281,7 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 		if err != nil {
 			return fmt.Errorf("seed go run: %w", err)
 		}
-		waitTerminal(ctx, d.Runs, gorun.ID)
+		settle(ctx, d, gorun.ID)
 	} else {
 		log.Info("demo: go not on PATH, skipping the go run")
 	}
@@ -224,7 +297,7 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 	if err != nil {
 		return fmt.Errorf("seed mixed pipeline: %w", err)
 	}
-	waitTerminal(ctx, d.Runs, pipe.ID)
+	settle(ctx, d, pipe.ID)
 	return nil
 }
 
@@ -269,6 +342,22 @@ func seedOpts(source, sourceID, actor string, labels map[string]string, extra ..
 	return append(opts, extra...)
 }
 
+// settle waits for a seeded run to finish, then for its outcome to reach the chain, and only then
+// steps the demo clock forward for the next run. Waiting for the outcome entry before stepping is what
+// keeps the entry's time in the same window as the run's record: the outcome is committed just after
+// the terminal save, so a clock stepped the instant the run went terminal would stamp the entry in the
+// next run's window and break the reconciliation the historical seeding exists to show. It is a no-op
+// step when no clock or chain is configured, so the seed still runs against a bare Deps.
+func settle(ctx context.Context, d Deps, id string) {
+	waitTerminal(ctx, d.Runs, id)
+	if d.Audit != nil {
+		waitOutcomeCommitted(ctx, d.Audit, id)
+	}
+	if d.Clock != nil {
+		d.Clock.advance(seedRunGap)
+	}
+}
+
 // waitTerminal polls until the run reaches a terminal state or a timeout elapses.
 func waitTerminal(ctx context.Context, store run.Store, id string) {
 	deadline := time.Now().Add(2 * time.Minute)
@@ -282,6 +371,28 @@ func waitTerminal(ctx context.Context, store run.Store, id string) {
 			return
 		case <-time.After(300 * time.Millisecond):
 		}
+	}
+}
+
+// waitOutcomeCommitted polls the newest chain entries until the run's outcome lands or a short deadline
+// passes. The outcome is committed just after the terminal save, so it is among the newest entries. A
+// child of a split or pipeline rolls its outcome into its parent and commits none, so the bounded wait
+// keeps a run that never commits its own entry from stalling the seed.
+func waitOutcomeCommitted(ctx context.Context, audits audit.Store, id string) {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		recent, err := audits.List(ctx, 64)
+		if err == nil {
+			for _, e := range recent {
+				if e.Method == audit.MethodRun && strings.Contains(e.Path, id) {
+					return
+				}
+			}
+		}
+		if ctx.Err() != nil || time.Now().After(deadline) {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 
@@ -445,7 +556,7 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger, assetDir string) {
 		}
 		for _, h := range history {
 			entry := &audit.Entry{
-				ID: audit.NewID(), At: ago(h.hoursAgo),
+				ID: audit.NewID(), At: ago(h.hoursAgo + seedHistoryBackshiftHours),
 				Actor: h.actor, Method: h.method, Path: h.path,
 			}
 			if err := d.Audit.Append(ctx, entry); err != nil {

@@ -207,7 +207,8 @@ function mountExportsForTable(page, table, index) {
 	if (!host) {
 		host = document.createElement("div");
 		host.className = "list-filter";
-		table.parentNode.insertBefore(host, table);
+		const anchor = table.closest(".list-scroll") || table;
+		anchor.parentNode.insertBefore(host, anchor);
 	}
 	const filePart = page + (index > 0 ? "-" + (index + 1) : "");
 	const stamp = () => new Date().toISOString().slice(0, 10);
@@ -524,7 +525,8 @@ function mountTablePager() {
 	const foot = document.createElement("div");
 	foot.className = "table-foot";
 	foot.hidden = true;
-	table.parentNode.insertBefore(foot, table.nextSibling);
+	const footAnchor = table.closest(".list-scroll") || table;
+	footAnchor.parentNode.insertBefore(foot, footAnchor.nextSibling);
 	const count = document.createElement("span");
 	const spacer = document.createElement("span");
 	spacer.className = "spacer";

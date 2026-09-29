@@ -18,7 +18,7 @@ func (d *Dispatcher) commitOutcome(r *run.Run) {
 	if d.audits == nil || r.ParentID != nil {
 		return
 	}
-	if err := outcome.Commit(context.Background(), d.audits, d.store, r, "system:dispatcher"); err != nil {
+	if err := outcome.Commit(context.Background(), d.audits, d.store, r, "system:dispatcher", d.now); err != nil {
 		d.log.Error("dispatch: commit run outcome: "+err.Error(), zap.String("run_id", r.ID))
 	}
 }

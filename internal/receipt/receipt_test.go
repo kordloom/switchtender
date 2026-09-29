@@ -79,7 +79,7 @@ func heldWith(t *testing.T, verdict string,
 	if err := runs.Save(ctx, r); err != nil {
 		t.Fatalf("save terminal run: %v", err)
 	}
-	if err := outcome.Commit(ctx, audits, runs, r, "system:test"); err != nil {
+	if err := outcome.Commit(ctx, audits, runs, r, "system:test", nil); err != nil {
 		t.Fatalf("Commit outcome: %v", err)
 	}
 	return runs, audits, id, r

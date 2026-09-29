@@ -413,7 +413,8 @@ function wireRunsMore(tbody, offset, hasMore) {
 		btn.className = "button load-more";
 		btn.textContent = "Load more";
 		const table = document.querySelector("table.runs");
-		table.parentNode.insertBefore(btn, table.nextSibling);
+		const anchor = table.closest(".list-scroll") || table;
+		anchor.parentNode.insertBefore(btn, anchor.nextSibling);
 	}
 	runsHasMore = !!hasMore;
 	btn.hidden = !hasMore;

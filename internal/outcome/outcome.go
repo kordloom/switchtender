@@ -96,9 +96,11 @@ type RecordTask struct {
 
 // Commit records a finished run's outcome as a tamper-evident chain entry, so the chain commits not
 // only what was asked of the run but what it did. committer names the process that observed the run
-// finish, a system actor acting on behalf of whoever fired the run. The caller decides when to call
-// this; Commit assumes the run is terminal and its evidence is in store.
-func Commit(ctx context.Context, audits audit.Store, store run.Store, r *run.Run, committer string) error {
+// finish, a system actor acting on behalf of whoever fired the run. now reads the time the entry
+// claims for the outcome; a nil function falls back to time.Now. The dispatcher passes its own clock
+// so a seeded demo run's outcome entry carries the same past instant its record does. The caller
+// decides when to call this; Commit assumes the run is terminal and its evidence is in store.
+func Commit(ctx context.Context, audits audit.Store, store run.Store, r *run.Run, committer string, now func() time.Time) error {
 	body, err := Body(ctx, store, r)
 	if err != nil {
 		return err
@@ -107,8 +109,11 @@ func Commit(ctx context.Context, audits audit.Store, store run.Store, r *run.Run
 	if err != nil {
 		return err
 	}
+	if now == nil {
+		now = time.Now
+	}
 	entry := &audit.Entry{
-		ID: audit.NewID(), At: time.Now(),
+		ID: audit.NewID(), At: now(),
 		Actor: committer, ActorType: "system", OnBehalfOf: r.Actor,
 		Method: audit.MethodRun, Path: "/runs/" + r.ID + "/outcome/" + string(r.Status),
 		ContentDigest: digest, Nonce: nonce,
