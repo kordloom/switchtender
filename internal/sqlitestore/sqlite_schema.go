@@ -341,6 +341,7 @@ CREATE TABLE IF NOT EXISTS policies (
 	actor_kind       TEXT NOT NULL DEFAULT '',
 	actor            TEXT NOT NULL DEFAULT '',
 	min_risk         TEXT NOT NULL DEFAULT '',
+	reversibility    TEXT NOT NULL DEFAULT '',
 	effect           TEXT NOT NULL DEFAULT '',
 	distinct_approver INTEGER NOT NULL DEFAULT 0,
 	created_at       TEXT NOT NULL
@@ -998,7 +999,8 @@ func migratePolicies(db *sql.DB) error {
 		!strings.Contains(err.Error(), "duplicate column name") {
 		return fmt.Errorf("migrate policies: %w", err)
 	}
-	for _, column := range []string{"actor_kind", "actor", "min_risk", "effect", "queue"} {
+	for _, column := range []string{"actor_kind", "actor", "min_risk", "effect", "queue",
+		"reversibility"} {
 		if _, err := db.Exec(
 			"ALTER TABLE policies ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''"); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {

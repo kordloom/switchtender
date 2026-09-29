@@ -380,6 +380,7 @@ CREATE TABLE IF NOT EXISTS policies (
 	actor_kind       TEXT NOT NULL DEFAULT '',
 	actor            TEXT NOT NULL DEFAULT '',
 	min_risk         TEXT NOT NULL DEFAULT '',
+	reversibility    TEXT NOT NULL DEFAULT '',
 	effect           TEXT NOT NULL DEFAULT '',
 	distinct_approver INTEGER NOT NULL DEFAULT 0,
 	created_at       TEXT NOT NULL
@@ -394,6 +395,9 @@ ALTER TABLE policies ADD COLUMN IF NOT EXISTS max_destroy INTEGER NOT NULL DEFAU
 ALTER TABLE policies ADD COLUMN IF NOT EXISTS actor_kind TEXT NOT NULL DEFAULT '';
 ALTER TABLE policies ADD COLUMN IF NOT EXISTS actor TEXT NOT NULL DEFAULT '';
 ALTER TABLE policies ADD COLUMN IF NOT EXISTS min_risk TEXT NOT NULL DEFAULT '';
+-- The grade a rule holds on. Absent, a policy saved with it loaded back without it and held
+-- nothing, while the API answered 200 and the page listed the rule as though it were in force.
+ALTER TABLE policies ADD COLUMN IF NOT EXISTS reversibility TEXT NOT NULL DEFAULT '';
 ALTER TABLE policies ADD COLUMN IF NOT EXISTS effect TEXT NOT NULL DEFAULT '';
 ALTER TABLE policies ADD COLUMN IF NOT EXISTS queue TEXT NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS inventories (
