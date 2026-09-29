@@ -158,6 +158,74 @@ for (const path of PAGES) {
   });
 }
 
+// DEAD_END is the vocabulary of a page that loaded, rendered, threw nothing, and still told the
+// reader it could not do the thing they came for. A console guard cannot see one of these: the page
+// is working exactly as written, and what is wrong is that what it says is a wall.
+//
+// This is the failure that actually costs a sale. Somebody evaluating the product opens a page, reads
+// "this is not enabled", and has no way to tell whether that is the demo being a demo or the product
+// being unable. They do not file a bug, they leave.
+const DEAD_END = /\b(could not|couldn't|cannot|can't|unable to|failed to|not enabled|not configured|not available|unavailable|no such endpoint|went wrong)\b/i;
+
+// ACKNOWLEDGED are the dead ends that are correct to show, each one a decision rather than an
+// accident. A page whose message is not listed here is a wall nobody chose.
+//
+// Keep this list short and keep every entry's reason honest. Adding a pattern to silence a failure is
+// how the guard stops working: the next real wall matches an entry written to excuse a different one.
+const ACKNOWLEDGED = [
+  // The demo serves no token store, so the users page has nothing to list and says so itself.
+  { path: "/ui/users", allow: /token|not enabled/i },
+];
+
+// deadEndsOn returns the visible lines on a page that read as a wall, minus the acknowledged ones.
+//
+// Only text the page produced counts. A page's static copy explains what a feature does and says
+// "cannot" freely while doing it: the changes page describes an outcome that cannot disagree with
+// its runs, which is a guarantee, and the migrate page describes a workflow graph a pipeline cannot
+// express, which is a documented limit. Neither is a wall, and a guard that flags them gets an
+// allowlist entry written to silence it, which is how the guard stops working.
+//
+// A wall is always something that arrived after a fetch came back. So the served HTML is parsed
+// fresh and every line already in it is subtracted, leaving only what this page decided to say.
+async function deadEndsOn(page, path) {
+  const lines = await page.evaluate(async (p) => {
+    const visible = [];
+    const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      const parent = n.parentElement;
+      if (!parent || parent.closest("script, style, template, [hidden]")) continue;
+      if (!parent.getBoundingClientRect().height) continue;
+      const text = n.textContent.trim();
+      if (text) visible.push(text);
+    }
+    const res = await fetch(p);
+    const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+    const served = new Set();
+    const swalk = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+    for (let n = swalk.nextNode(); n; n = swalk.nextNode()) {
+      const text = n.textContent.trim();
+      if (text) served.add(text);
+    }
+    return visible.filter((line) => !served.has(line));
+  }, path);
+
+  return lines.filter((line) => {
+    if (!DEAD_END.test(line)) return false;
+    return !ACKNOWLEDGED.some((a) => a.path === path && a.allow.test(line));
+  });
+}
+
+for (const path of PAGES) {
+  test(`the page at ${path} offers no dead end`, async ({ page }) => {
+    await page.goto(path, { waitUntil: "domcontentloaded" });
+    // The walls arrive after the page's own fetches come back, not at load.
+    await page.waitForTimeout(800);
+    const walls = await deadEndsOn(page, path);
+    expect(walls, `${path} tells the reader it cannot do something:\n  ${walls.join("\n  ")}`)
+      .toEqual([]);
+  });
+}
+
 test("an unknown ui path is refused rather than served as the overview", async ({ page }) => {
   // "/ui/" is a subtree pattern, so it also matches every path beneath it that no route claims. Left
   // alone it answered a mistyped or renamed route with the overview page and a 200, which tells a

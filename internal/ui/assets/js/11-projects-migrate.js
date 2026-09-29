@@ -332,6 +332,9 @@ function wireMigrateFile() {
 function renderMigratePlan(data) {
 	const el = document.getElementById("migrate-plan");
 	el.innerHTML = "";
+	if (data.report) {
+		el.appendChild(migrateSummary(data.report));
+	}
 	// A migration plan is a record worth keeping: it is what was about to change, or what did.
 	const exportRow = document.createElement("div");
 	exportRow.className = "drill-actions migrate-export";
@@ -378,9 +381,20 @@ function renderMigratePlan(data) {
 		}
 	}
 
-	if (data.warnings && data.warnings.length) {
-		el.appendChild(migrateGroup("Warnings", data.warnings));
-		shown++;
+	// Two lists rather than one, matching the summary above and the command line: what the export
+	// held and this does not carry, and what came across but is worth a look. A flat warning list
+	// makes a person classify fifty lines by hand to find the few that cost them something. The
+	// unclassified list is kept as the fallback so a missing report shows the warnings rather than
+	// silently showing none.
+	const classified = data.report ?
+		[["Does not come across", data.report.left_out],
+			["Worth reviewing", data.report.needs_review]] :
+		[["Warnings", data.warnings]];
+	for (const [label, items] of classified) {
+		if (items && items.length) {
+			el.appendChild(migrateGroup(label, items));
+			shown++;
+		}
 	}
 
 	// The export buttons land in el before the groups do, so checking children could never see an
@@ -390,6 +404,69 @@ function renderMigratePlan(data) {
 		exportRow.remove();
 		el.appendChild(emptyLine("Nothing to import from this export."));
 	}
+}
+
+// migrateSummary builds the block somebody reads before deciding whether to migrate at all: how much
+// comes across, how many secrets they re-enter once, and what the export holds that this does not
+// carry. The itemized plan below answers what an import did. This answers whether to attempt one.
+function migrateSummary(report) {
+	const box = document.createElement("div");
+	box.className = "migrate-summary";
+	const heading = document.createElement("h2");
+	heading.textContent = "Migration summary";
+	box.appendChild(heading);
+
+	const leftOut = (report.left_out || []).length;
+	const review = (report.needs_review || []).length;
+	const figures = document.createElement("div");
+	figures.className = "migrate-figures";
+	for (const [label, n, warn] of [
+		["Comes across", report.created_total || 0, false],
+		["Needs a secret", report.needs_secret || 0, false],
+		["Does not come across", leftOut, leftOut > 0],
+		["Worth reviewing", review, false],
+	]) {
+		const cell = document.createElement("div");
+		cell.className = warn ? "migrate-figure migrate-figure-warn" : "migrate-figure";
+		const value = document.createElement("div");
+		value.className = "migrate-figure-n";
+		value.textContent = String(n);
+		const name = document.createElement("div");
+		name.className = "migrate-figure-label";
+		name.textContent = label;
+		cell.appendChild(value);
+		cell.appendChild(name);
+		figures.appendChild(cell);
+	}
+	box.appendChild(figures);
+
+	if (report.created && report.created.length) {
+		const kinds = document.createElement("div");
+		kinds.className = "migrate-kinds";
+		kinds.textContent = report.created.map((c) => c.n + " " + c.kind).join(" \u00b7 ");
+		box.appendChild(kinds);
+	}
+	// An export never carries secret values, from any of these systems, so a credential arrives as a
+	// named shell. Saying so stops the count reading as something the importer failed to do.
+	if (report.needs_secret) {
+		box.appendChild(migrateNote("An export never carries secret values, so each credential " +
+			"arrives as a named shell. Set its secret once before running anything that uses it."));
+	}
+	// A truncated report that looks complete is how somebody concludes an import was clean when it
+	// was only long.
+	if (report.suppressed) {
+		box.appendChild(migrateNote(report.suppressed + " further warning(s) are not listed below, " +
+			"because this export passed the report's cap."));
+	}
+	return box;
+}
+
+// migrateNote builds one explanatory line under the summary figures.
+function migrateNote(text) {
+	const note = document.createElement("div");
+	note.className = "migrate-note";
+	note.textContent = text;
+	return note;
 }
 
 // migrateGroup builds a labeled block listing the names in one import category.

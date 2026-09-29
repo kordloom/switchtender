@@ -422,7 +422,7 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 		obj.Settings = settings
 		plan.Credentials = append(plan.Credentials, obj)
 		credentialIDs[c.Name] = obj.ID
-		const base = "credential %q needs its secret re-entered; exports omit secrets by design"
+		const base = "credential %q needs its secret re-entered; an export never carries secret values"
 		switch {
 		case len(settings) > 0 && len(refused) > 0:
 			plan.warn(base+". Its non-secret settings (%s) were stored on the credential; these AWX "+

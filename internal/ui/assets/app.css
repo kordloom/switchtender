@@ -294,6 +294,14 @@ th.col-num, td.col-num { width: 1%; color: var(--muted); font-variant-numeric: t
 .migrate-group h2 { margin: 0 0 8px; font-size: 15px; }
 .migrate-list { margin: 0; padding-left: 18px; color: var(--muted); font-size: 14px; }
 .migrate-list li { margin: 2px 0; }
+.migrate-summary { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 18px; }
+.migrate-summary h2 { margin: 0 0 12px; font-size: 15px; }
+.migrate-figures { display: flex; flex-wrap: wrap; gap: 26px; }
+.migrate-figure-n { font-size: 22px; font-weight: 600; color: var(--text); line-height: 1.1; }
+.migrate-figure-warn .migrate-figure-n { color: var(--failed); }
+.migrate-figure-label { font-size: 13px; color: var(--muted); margin-top: 3px; }
+.migrate-kinds { margin-top: 12px; font-size: 13px; color: var(--muted); }
+.migrate-note { margin-top: 10px; font-size: 13px; color: var(--muted); }
 
 /* Menu toggle sits at the far left of the top bar and opens the navigation drawer. */
 .nav-toggle { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0; margin-right: 2px; background: none; border: 1px solid transparent; border-radius: var(--radius); color: var(--text); cursor: pointer; }

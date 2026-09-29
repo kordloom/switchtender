@@ -10,6 +10,38 @@
 SwitchTender imports an AWX, Semaphore, Rundeck, or Jenkins export, or a plain crontab, and creates
 the equivalent objects, so moving over is one command rather than a rebuild.
 
+## The migration summary
+
+Every preview opens with a summary before the itemized plan, and the API returns the same thing as
+`report` on an import response. The plan answers what an import did. The summary answers whether to
+attempt one.
+
+    Migration summary:
+      Comes across:       1218 objects
+          templates            847
+          schedules            212
+          inventories          94
+      Needs a secret:     17 credential shell(s), because an export never carries secret values
+      Does not come across: 4
+          - job "nightly-build" is a Pipeline job, whose Groovy script has no equivalent here. It was not imported.
+      Worth reviewing:    8
+          - workflow "Release" imported with 2 steps. Check the graph before you run it.
+
+Two numbers are worth understanding before relying on them.
+
+**Needs a secret is not a limitation of the importer.** An export never carries secret values, from
+any of these systems, so a credential arrives as a named shell whoever wrote the tool. The count is
+how many secrets a person re-enters once.
+
+**Does not come across is itemized, never summarized.** Each entry names the object and the reason,
+because a count with no names cannot be acted on. Nothing is dropped without an entry: a test reads
+every warning the importers can raise and fails when one describes a dropped object in wording the
+summary would file as merely worth reviewing.
+
+When a very long export pushes the warning list past its cap, the summary says how many were not
+listed. A truncated report that looks complete is how somebody concludes an import was clean when it
+was only long.
+
 ## What each source brings over
 
 There are five importers, and they do not all carry the same objects. AWX and Semaphore export a

@@ -56,6 +56,9 @@ export default defineConfig({
         `./.bin/switchtender demo --addr 127.0.0.1:${DEMO_PORT}`,
       url: `${DEMO}/healthz`,
       timeout: 120_000,
+      // Reusing a running server keeps local iteration fast, and it means a local run can pass
+      // against a binary built before the change under test. Rebuild and kill the port, or set CI=1,
+      // before believing a local result: a stale server reports green for code it has never loaded.
       reuseExistingServer: !process.env.CI,
       stdout: "pipe",
       stderr: "pipe",

@@ -218,6 +218,7 @@ func runImportData(cmd *cobra.Command, data []byte, mapper mapFunc) error {
 
 // reportPlan writes a human-readable summary of what an import will create to stdout.
 func reportPlan(plan *importer.Plan) {
+	reportSummary(plan)
 	fmt.Fprintln(os.Stderr, "Import plan:")
 	fmt.Fprintf(os.Stderr, "  Projects:    %d\n", len(plan.Projects))
 	for _, p := range plan.Projects {
@@ -288,4 +289,41 @@ func branchOrDefault(branch string) string {
 		return "default branch"
 	}
 	return branch
+}
+
+// reportSummary prints the headline an operator deciding whether to migrate reads first.
+//
+// Everything below it is the itemized plan, which is the right level of detail for reviewing an
+// import and the wrong level for deciding to attempt one. Somebody holding three hundred job
+// templates is asking two questions: how much of this comes across, and what will I be doing by
+// hand afterward. Both answers were already in the plan and neither was countable without reading
+// every line of it.
+func reportSummary(plan *importer.Plan) {
+	r := plan.Report()
+	fmt.Fprintln(os.Stderr, "Migration summary:")
+	fmt.Fprintf(os.Stderr, "  Comes across:       %d objects\n", r.CreatedTotal)
+	for _, c := range r.Created {
+		fmt.Fprintf(os.Stderr, "      %-20s %d\n", c.Kind, c.N)
+	}
+	if r.NeedsSecret > 0 {
+		// Not a limitation of the importer, and worth saying so: an export never carries secret
+		// values, so this number would be the same whoever wrote the tool.
+		fmt.Fprintf(os.Stderr, "  Needs a secret:     %d credential shell(s), because an export "+
+			"never carries secret values\n", r.NeedsSecret)
+	}
+	fmt.Fprintf(os.Stderr, "  Does not come across: %d\n", len(r.LeftOut))
+	for _, w := range r.LeftOut {
+		fmt.Fprintf(os.Stderr, "      - %s\n", w)
+	}
+	fmt.Fprintf(os.Stderr, "  Worth reviewing:    %d\n", len(r.NeedsReview))
+	for _, w := range r.NeedsReview {
+		fmt.Fprintf(os.Stderr, "      - %s\n", w)
+	}
+	if r.Suppressed > 0 {
+		// A truncated report that looks complete is how somebody concludes an import was clean
+		// when it was only long.
+		fmt.Fprintf(os.Stderr, "  Not listed:         %d further warning(s) past the cap, so this "+
+			"summary is shorter than the export deserves\n", r.Suppressed)
+	}
+	fmt.Fprintln(os.Stderr)
 }
