@@ -18,7 +18,7 @@ A credential's kind decides how its value reaches a run.
 
 | Kind | What it is |
 |------|------------|
-| `ssh_key` | An SSH private key, to reach hosts and clone private git projects. |
+| `ssh_key` | An SSH private key, to reach hosts and clone private git projects. A passphrase protected key is unlocked in memory at run time from a passphrase sealed alongside it, so no prompt blocks the run. |
 | `ssh_password` | A machine login, injected as `ansible_user` and `ansible_password` through a file, so the password stays off the command line. |
 | `vault_password` | An Ansible Vault password. |
 | `become_password` | A privilege escalation password, kept off the command line. |

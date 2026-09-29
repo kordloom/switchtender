@@ -2067,9 +2067,22 @@ function openCredentialEdit(c) {
 	sec.value = "";
 	sec.required = false;
 	sec.placeholder = "Leave blank to keep the current secret";
+	document.getElementById("cred-passphrase").value = "";
+	toggleCredPassphrase();
 	document.getElementById("cred-status").textContent = "";
 	setModalTitle("cred", "Edit credential");
 	document.getElementById("cred-modal").hidden = false;
+}
+
+// toggleCredPassphrase shows the passphrase field only for a locally stored SSH key, the one case
+// where a passphrase unlocks the key at run time, and clears it when hidden so it is never sent.
+function toggleCredPassphrase() {
+	const kind = document.getElementById("cred-kind").value;
+	const source = document.getElementById("cred-source").value;
+	const field = document.getElementById("cred-passphrase-field");
+	const show = kind === "ssh_key" && source === "local";
+	field.hidden = !show;
+	if (!show) document.getElementById("cred-passphrase").value = "";
 }
 
 // wireCredentialForm hooks the credential dialog up to POST /credentials for a new record and PUT
@@ -2090,7 +2103,9 @@ function wireCredentialForm() {
 	};
 	source.addEventListener("change", () => {
 		document.getElementById("cred-secret").placeholder = sourcePlaceholders[source.value] || secPlaceholder;
+		toggleCredPassphrase();
 	});
+	document.getElementById("cred-kind").addEventListener("change", toggleCredPassphrase);
 	const resetToCreate = () => {
 		delete form.dataset.editId;
 		document.getElementById("cred-name").value = "";
@@ -2099,6 +2114,8 @@ function wireCredentialForm() {
 		sec.value = "";
 		sec.required = true;
 		sec.placeholder = secPlaceholder;
+		document.getElementById("cred-passphrase").value = "";
+		toggleCredPassphrase();
 		document.getElementById("cred-status").textContent = "";
 		setModalTitle("cred", "Add a credential");
 	};
@@ -2116,6 +2133,10 @@ function wireCredentialForm() {
 		};
 		const secret = document.getElementById("cred-secret").value;
 		if (secret) payload.secret = secret;
+		const passphrase = document.getElementById("cred-passphrase").value;
+		if (passphrase && payload.kind === "ssh_key" && payload.source === "local") {
+			payload.passphrase = passphrase;
+		}
 		try {
 			if (editId) {
 				await postAction("/credentials/" + editId, payload, "PUT");

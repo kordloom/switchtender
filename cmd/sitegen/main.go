@@ -151,6 +151,7 @@ func writeSitemap(slugs []string) error {
 		"https://switchtender.com/", "https://switchtender.com/get-started",
 		"https://switchtender.com/awx-alternative", "https://switchtender.com/ascender-alternative",
 		"https://switchtender.com/semaphore-alternative", "https://switchtender.com/aap-alternative",
+		"https://switchtender.com/privacy",
 	}
 	for _, slug := range slugs {
 		urls = append(urls, canonicalFor(slug))

@@ -109,9 +109,13 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 			_ = f.Close()
 			return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
 		}
-		if _, err := f.WriteString(plain); err != nil {
-			_ = f.Close()
-			return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
+		// An ssh_key writes its own unlocked key below, so the sealed plaintext, which may hold a
+		// passphrase, never lands on disk. Every other kind writes its raw plaintext here.
+		if c.Kind != credential.KindSSHKey {
+			if _, err := f.WriteString(plain); err != nil {
+				_ = f.Close()
+				return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
+			}
 		}
 		if err := f.Close(); err != nil {
 			return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
@@ -119,6 +123,19 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 
 		switch c.Kind {
 		case credential.KindSSHKey:
+			// Decrypt a passphrase protected key in process and write only the unlocked key, so the
+			// passphrase never reaches disk or argv and the tool never prompts. A bare key passes through.
+			material := credential.ParseSSHKey(plain)
+			if material.Passphrase != "" {
+				secrets = append(secrets, material.Passphrase)
+			}
+			unlocked, err := credential.UnlockSSHKey(material.PrivateKey, material.Passphrase)
+			if err != nil {
+				return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
+			}
+			if err := os.WriteFile(f.Name(), []byte(unlocked), 0o600); err != nil {
+				return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
+			}
 			spec.PrivateKeyPath = f.Name()
 		case credential.KindVaultPassword:
 			spec.VaultPasswordFile = f.Name()
