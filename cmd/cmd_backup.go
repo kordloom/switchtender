@@ -135,8 +135,23 @@ func runRestore(cmd *cobra.Command, _ []string) error {
 		defer func() { _ = f.Close() }()
 		in = f
 	}
+	// Recorded before the restore runs, and recorded whatever the outcome is. A restore rewrites
+	// accounts, roles, and grants wholesale, which is the change most worth auditing in the whole
+	// product, and it was the one CLI command exempt from recording. The exemption rested on the
+	// idea that the file brings its own chain back with it, and it does not: the audit trail is
+	// deliberately outside the backup, and a restore is a merge into a live install that keeps its
+	// existing chain. So an account could be flipped to admin and a grant added while the chain
+	// stayed byte-identical and went on verifying.
+	if err := recordCLI(cmd.Context(), bundle.Audits(), "/cli/restore"); err != nil {
+		return err
+	}
 	sum, err := backup.Read(cmd.Context(), backupStores(bundle), newSealerFromEnv(zap.NewNop()), in)
 	if err != nil {
+		// A restore is not atomic across stores, so a failure can still have written some of the
+		// file. The counts say how far it got, which is the difference between an operator who
+		// knows to look and one who was told nothing happened.
+		fmt.Fprintln(os.Stderr, "Restore failed partway. What it had already written:")
+		reportBackup(sum)
 		return err
 	}
 	fmt.Fprintln(os.Stderr, "Restore complete.")

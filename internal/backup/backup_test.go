@@ -73,7 +73,7 @@ func populate(t *testing.T, ctx context.Context, s Stores) {
 	must(s.Teams.Save(ctx, &team.Team{ID: "team_1", Name: "sre", CreatedAt: testTime}))
 	must(s.Orgs.Save(ctx, &org.Org{ID: "org_1", Name: "acme", CreatedAt: testTime}))
 	must(s.Grants.Save(ctx, &grant.Grant{
-		ID: "grant_1", Subject: "team:team_1", Object: "cred_1", Access: grant.AccessUse, CreatedAt: testTime}))
+		ID: "grant_1", Subject: "team_1", Object: "cred_1", Access: grant.AccessUse, CreatedAt: testTime}))
 }
 
 // TestRoundTrip proves a populated control plane backs up and restores into fresh stores with every
