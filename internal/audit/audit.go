@@ -67,6 +67,19 @@ func EntryHash(e *Entry) string {
 // Link fills e's chain fields from prev, the current head of the chain, or a genesis link when prev
 // is nil. A store calls it while holding the append lock so the chain stays linear.
 func Link(prev, e *Entry) {
+	// The recorded time is truncated to microseconds before anything hashes it.
+	//
+	// The chain profile permits nanoseconds, but a link is only useful if an independent verifier
+	// can recompute it, and most languages carry time at microsecond precision: Python's datetime,
+	// which the reference verifier normalizes through, silently drops the last three digits and then
+	// computes a different link. Linux reports nanosecond-granular wall clocks, so in practice
+	// almost every entry recorded there would hash to a value no third party could reproduce, which
+	// is the whole point of the chain. macOS reports microseconds, which is why this was invisible
+	// in testing.
+	//
+	// Microseconds are ample for an audit timestamp, and truncating here rather than at emit keeps
+	// the stored entry and any bundle built from it committing to the same instant.
+	e.At = e.At.Truncate(time.Microsecond)
 	if prev != nil {
 		e.Seq = prev.Seq + 1
 		e.PrevHash = prev.Hash

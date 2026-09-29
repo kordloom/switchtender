@@ -465,7 +465,12 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 			run.WithTool(req.Tool), run.WithCommand(req.Command), run.WithDryRun(req.DryRun),
 			run.WithSource("api", ""), run.WithActor(actorName(r)), run.WithLabels(req.Labels),
 		}
-		if key := strings.TrimSpace(r.Header.Get(idempotencyKeyHeader)); key != "" {
+		if supplied := strings.TrimSpace(r.Header.Get(idempotencyKeyHeader)); supplied != "" {
+			key, err := run.ClientKey(supplied)
+			if err != nil {
+				respondError(w, log, http.StatusBadRequest, err.Error())
+				return
+			}
 			opts = append(opts, run.WithIdempotencyKey(key))
 		}
 		if req.ProjectID != "" {
@@ -939,7 +944,12 @@ const (
 )
 
 // listRunsHandler returns a page of runs newest first, bounded even when no limit is given.
-func listRunsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
+//
+// The page is filtered to what the caller may read. Fetching one run already checked that, but the
+// list did not, so under strict grants a caller who was refused a run by id could still read it, and
+// everything on it, by listing. A run carries extra vars, a command line, and credential ids, so the
+// list leaked more than the object it was listing.
+func listRunsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: listRunsHandler: Store required")
 	}
@@ -972,6 +982,12 @@ func listRunsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 		runs, err := store.ListPage(r.Context(), filter, limit, offset)
 		if err != nil {
 			log.Error("server: list runs: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not list runs")
+			return
+		}
+		runs, err = readableRuns(r.Context(), authz, runs)
+		if err != nil {
+			log.Error("server: filter runs: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not list runs")
 			return
 		}

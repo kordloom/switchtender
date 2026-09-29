@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -12,11 +13,32 @@ import (
 // firing the same action again a moment later still starts a fresh run.
 const DedupeWindow = 10 * time.Second
 
+// internalKeyPrefix marks an idempotency key the server derived rather than one a client supplied.
+//
+// Both kinds live in the same column under one unique index. Without a marker a caller could send
+// Idempotency-Key with the exact string a later rerun would derive, planting a run under that key so
+// the rerun resolves to it and never executes. The prefix is reserved: ClientKey refuses to mint one,
+// so a derived key cannot be forged from outside.
+const internalKeyPrefix = "st:"
+
+// ErrReservedKey is returned when a caller supplies an idempotency key in the server's namespace.
+var ErrReservedKey = errors.New("reserved idempotency key")
+
 // DedupeKey returns the idempotency key that action on the run named by id saves under during the
 // window containing at. Two requests inside one window derive the same key, so the store's unique
 // index on it rejects the second run rather than letting a double click fire twice.
 func DedupeKey(action, id string, at time.Time) string {
-	return fmt.Sprintf("%s:%s:%d", action, id, at.UnixNano()/int64(DedupeWindow))
+	return fmt.Sprintf("%s%s:%s:%d", internalKeyPrefix, action, id, at.UnixNano()/int64(DedupeWindow))
+}
+
+// ClientKey returns the key a caller-supplied Idempotency-Key header is stored under, or an error
+// when the caller tried to claim the server's reserved namespace.
+func ClientKey(supplied string) (string, error) {
+	if strings.HasPrefix(supplied, internalKeyPrefix) {
+		return "", fmt.Errorf("%w: an idempotency key may not begin with %q", ErrReservedKey,
+			internalKeyPrefix)
+	}
+	return supplied, nil
 }
 
 // ResolveDedupe returns the run that a repeat of action on id already created inside the dedupe

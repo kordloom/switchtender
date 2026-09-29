@@ -306,10 +306,31 @@ func denyOnAuthzError(w http.ResponseWriter, log *zap.Logger, err error) bool {
 	return true
 }
 
-// authorizeRunAccess confirms the request actor may use the project, inventory, and credentials a
-// run references, so a read or a run operation stays scoped to the objects the actor is granted when
-// strict grants are on. It writes the denial and returns true when access is refused.
-func authorizeRunAccess(w http.ResponseWriter, r *http.Request, authz *authorizer, log *zap.Logger, rn *run.Run) bool {
+// readableRuns drops any run the caller may not read. A run is readable when every object it uses is,
+// which is the same rule fetching one run applies, so listing and fetching cannot disagree.
+func readableRuns(ctx context.Context, authz *authorizer, runs []*run.Run) ([]*run.Run, error) {
+	keep, err := authz.readFilter(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*run.Run, 0, len(runs))
+	for _, rn := range runs {
+		allowed := true
+		for _, id := range runObjects(rn) {
+			if !keep(id, "") {
+				allowed = false
+				break
+			}
+		}
+		if allowed {
+			out = append(out, rn)
+		}
+	}
+	return out, nil
+}
+
+// runObjects lists the grantable objects a run uses.
+func runObjects(rn *run.Run) []string {
 	objs := make([]string, 0, 2+len(rn.CredentialIDs))
 	if rn.ProjectID != "" {
 		objs = append(objs, rn.ProjectID)
@@ -317,6 +338,13 @@ func authorizeRunAccess(w http.ResponseWriter, r *http.Request, authz *authorize
 	if rn.InventoryID != "" {
 		objs = append(objs, rn.InventoryID)
 	}
-	objs = append(objs, rn.CredentialIDs...)
-	return denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objs...))
+	return append(objs, rn.CredentialIDs...)
+}
+
+// authorizeRunAccess confirms the request actor may use the project, inventory, and credentials a
+// run references, so a read or a run operation stays scoped to the objects the actor is granted when
+// strict grants are on. It writes the denial and returns true when access is refused.
+func authorizeRunAccess(w http.ResponseWriter, r *http.Request, authz *authorizer, log *zap.Logger, rn *run.Run) bool {
+	return denyOnAuthzError(w, log,
+		authz.authorizeAll(r.Context(), grant.AccessUse, runObjects(rn)...))
 }

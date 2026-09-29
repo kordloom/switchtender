@@ -138,3 +138,29 @@ func TestEntryHashMatchesTheSpec(t *testing.T) {
 		})
 	}
 }
+
+// TestLinkTimeIsMicrosecondPrecise pins that a recorded time never carries sub-microsecond digits.
+//
+// A link is only worth anything if an independent verifier can recompute it, and most languages
+// carry time at microsecond precision. Python's datetime, which the LoomSeal reference verifier
+// normalizes through, drops the last three digits and then computes a different link. Linux reports
+// nanosecond-granular wall clocks, so almost every entry recorded there hashed to a value no third
+// party could reproduce. macOS reports microseconds, which is why testing on a Mac never saw it.
+func TestLinkTimeIsMicrosecondPrecise(t *testing.T) {
+	t.Parallel()
+	// A time carrying nanoseconds, which is what a Linux clock hands back.
+	e := &audit.Entry{
+		At:     time.Date(2026, 7, 31, 2, 8, 36, 952234567, time.UTC),
+		Actor:  "admin",
+		Method: "POST",
+		Path:   "/v1/templates",
+	}
+	audit.Link(nil, e)
+	if got := e.At.Nanosecond() % 1000; got != 0 {
+		t.Errorf("recorded time keeps %d sub-microsecond nanoseconds, which no third party can "+
+			"reproduce; a verifier normalizing through microseconds computes a different link", got)
+	}
+	if want := "2026-07-31T02:08:36.952234Z"; e.At.UTC().Format(time.RFC3339Nano) != want {
+		t.Errorf("At = %s, want %s", e.At.UTC().Format(time.RFC3339Nano), want)
+	}
+}
