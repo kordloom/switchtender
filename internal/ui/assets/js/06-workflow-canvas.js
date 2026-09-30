@@ -437,13 +437,17 @@ document.addEventListener("DOMContentLoaded", () => {
 		wireTemplateForm();
 		loadTemplates();
 	} else if (page === "users") {
-		wireModal("user");
-		wireUserForm();
-		loadUsers();
-		// Tokens live beside accounts because they are the other half of who can reach this install.
-		wireModal("token");
-		wireTokenForm();
-		loadTokens();
+		if (roleAtLeast("admin")) {
+			wireModal("user");
+			wireUserForm();
+			loadUsers();
+			// Tokens live beside accounts, the other half of who can reach this install.
+			wireModal("token");
+			wireTokenForm();
+			loadTokens();
+		} else {
+			renderUsersForAdminsOnly();
+		}
 	} else if (page === "workers") {
 		loadWorkers();
 	} else if (page === "inventories") {

@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { loadPage } from "./pages.mjs";
 import { sandboxOf } from "./loader.mjs";
 import { fire } from "./dom.mjs";
+import { reply } from "./net.mjs";
 
 // heldRun is a run waiting for a decision, the state with the most role-gated controls.
 const heldRun = { id: "run_h", playbook: "site.yml", status: "pending_approval" };
@@ -114,4 +115,68 @@ test("an operator on the audit page is told the trail is for admins, not that ve
 	}
 	assert.equal(page.net.calls.filter((c) => c.url.includes("/audit")).length, 0,
 		"the page still asked the server for the audit trail");
+});
+
+// shown reports whether an element is in the page and not inside anything hidden, which is as close
+// to visible as a DOM without layout gets.
+function shown(el) {
+	return Boolean(el && el.isConnected && !el.closest("[hidden]"));
+}
+
+test("an operator or viewer on the users page is told admins manage users, and nothing is asked", async () => {
+	// Every read on this page is admin only on the server, since an account carries personal data
+	// and the token list names every credential that reaches the install. The page asked anyway, so
+	// an operator who opened it by its address met four refusals, "Failed to load users" and "Could
+	// not read the tokens" in role jargon, and New user, Issue token, and export buttons that could
+	// only be refused again.
+	for (const [role, holder] of [["operator", "an operator"], ["viewer", "a viewer"]]) {
+		// The server's own answer to this role, so a page that still asks meets what it would meet.
+		const refused = reply({ error: "forbidden" }, { status: 403 });
+		const page = loadPage("users", { routes: [[/^\/v1\/(users|tokens)(\?|$)/, refused]], quiet: true });
+		sandboxOf(page.app).localStorage.setItem("st_role", role);
+		fire(page.document, "DOMContentLoaded");
+		await page.clock.flush();
+		const doc = page.document;
+		const status = doc.getElementById("status");
+		const said = status.textContent;
+		assert.ok(shown(status), role + ": the page shows no explanation at all");
+		assert.match(said, /Users and API tokens are managed by admins\./,
+			role + ": the page does not say which role manages users: " + said);
+		assert.match(said, new RegExp("You are signed in as " + holder + ", so you cannot"),
+			role + ": the page does not say this account cannot manage them: " + said);
+		assert.equal(page.net.calls.filter((c) => /^\/v1\/(users|tokens)\b/.test(c.path)).length, 0,
+			role + ": the page still asked for what the server refuses this role");
+		for (const id of ["user-open", "token-open", "token-list-status", "users", "tokens"]) {
+			assert.ok(!shown(doc.getElementById(id)), role + ": #" + id + " is still offered");
+		}
+		const exports = Array.from(doc.querySelectorAll("button.table-export")).filter(shown);
+		assert.equal(exports.length, 0, role + ": export buttons are offered for tables it cannot read");
+	}
+});
+
+test("an admin on the users page still reads the accounts and the tokens", async () => {
+	// The notice is for a role the server refuses. An admin, and a session whose role the page does
+	// not know, which is an open install or an unscoped token, get the page as before.
+	for (const role of ["admin", ""]) {
+		const who = role || "unknown role";
+		const root = { id: "user_1", username: "root", role: "admin" };
+		const page = loadPage("users", {
+			routes: [
+				[/^\/v1\/users(\?|$)/, reply({ users: [root] })],
+				[/^\/v1\/tokens(\?|$)/, reply({ tokens: [] })],
+				[/^\/v1\/runs(\?|$)/, reply({ runs: [] })],
+			],
+			quiet: true,
+		});
+		if (role) sandboxOf(page.app).localStorage.setItem("st_role", role);
+		fire(page.document, "DOMContentLoaded");
+		await page.clock.flush();
+		const doc = page.document;
+		assert.ok(page.net.calledWith("/v1/users").length > 0, who + ": accounts were not read");
+		assert.ok(page.net.calledWith("/v1/tokens").length > 0, who + ": tokens were not read");
+		assert.equal(doc.querySelectorAll("#users tr").length, 1, who + ": the account is not listed");
+		assert.ok(shown(doc.getElementById("user-open")), who + ": New user is gone");
+		assert.ok(shown(doc.getElementById("token-open")), who + ": Issue token is gone");
+		assert.doesNotMatch(doc.body.textContent, /managed by admins/, who + ": the page turned it away");
+	}
 });

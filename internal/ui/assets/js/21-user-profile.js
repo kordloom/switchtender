@@ -244,6 +244,34 @@ async function loadUsers() {
 	}
 }
 
+// renderUsersForAdminsOnly explains the users page to a session below admin. The server refuses
+// such a session every read on this page, since an account carries personal data and the token
+// list names every credential that reaches the install. The page asked anyway, so an operator who
+// opened it by its address met four refusals, a status line reading "Failed to load users", and
+// New user and Issue token buttons whose only answer was another refusal.
+//
+// The token half of the page is taken off rather than hidden. Its table would still collect export
+// buttons when the page's controls mount, and nothing in that half applies to this session.
+function renderUsersForAdminsOnly() {
+	const add = document.getElementById("user-open");
+	if (add) add.hidden = true;
+	const issue = document.getElementById("token-open");
+	const tokens = document.getElementById("tokens-table");
+	const tokenHalf = [
+		issue && issue.closest(".section-head"),
+		document.getElementById("token-list-status"),
+		tokens && tokens.closest(".list-scroll"),
+	];
+	for (const el of tokenHalf) {
+		if (el) el.remove();
+	}
+	const role = uiRole();
+	const holder = role === "operator" ? "an operator" : "a " + role;
+	showEmpty("Users and API tokens are managed by admins. You are signed in as " + holder +
+		", so you cannot see or change them. Ask an admin to add a user, change a role, " +
+		"or issue a token.");
+}
+
 // linkHost labels a profile link by its host, so a column of links reads as the places they lead
 // rather than as a row of full addresses. A value that will not parse is shown as given.
 function linkHost(link) {
