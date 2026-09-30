@@ -23,9 +23,7 @@ packages. A `SHA256SUMS` file lists the checksum of each one.
 
 There is no separate download for the desktop app. The binary is the app: `switchtender desktop`
 picks a loopback port, keeps its data in a per-user directory, and opens the UI. A macOS `.app`
-bundle and a `SwitchTender.dmg` are built by the release workflow and appear on releases it produces;
-releases assembled by hand carry the archives above and nothing else, so check the page for what is
-actually attached rather than assuming.
+bundle and a `SwitchTender.dmg` are built by the release workflow and attached to every release.
 
 What is signed differs by artifact, so here it is per download rather than as one sentence.
 

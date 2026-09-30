@@ -43,8 +43,10 @@ transparency log.
 **A release built any other way is not signed, and its assets carry no `SHA256SUMS.sig` or
 `SHA256SUMS.pem`.** Check for those two files before relying on the command below: their absence
 means the release was assembled by hand and the signature chain described here does not apply to it.
-Releases v1.58.0 through v1.68.8 were built that way. Every release from v1.69.0 on is signed.
-Verify such a release against the checksums alone, and treat the checksums as unattested. This
+Verify such a release against the checksums alone, and treat the checksums as unattested. Every
+release published from this repository is signed. Releases before v1.101.0 were published from an
+earlier repository that is no longer public, and their assets went with it, so `switchtender version
+--verify` on a build older than v1.101.0 cannot find its manifest. Upgrade to verify. This
 product's claim is that you can check what it tells you, so the honest form of that claim includes
 saying when a check is not available.
 
@@ -76,9 +78,9 @@ bundle yet, so those two flags are the ones that apply to it.
 The `deb`, `rpm`, and `apk` packages are not signed with a package manager key. Their integrity comes
 from the signed `SHA256SUMS` above, so verify the checksums first, then install:
 
-    sudo dpkg -i switchtender_1.100.0_linux_amd64.deb
-    sudo rpm -i switchtender_1.100.0_linux_amd64.rpm
-    apk add --allow-untrusted switchtender_1.100.0_linux_amd64.apk
+    sudo dpkg -i switchtender_1.101.0_linux_amd64.deb
+    sudo rpm -i switchtender_1.101.0_linux_amd64.rpm
+    apk add --allow-untrusted switchtender_1.101.0_linux_amd64.apk
 
 apk refuses a package with no trusted signature, and `--allow-untrusted` tells it to go ahead, which
 is why the checksum comes first.
@@ -88,7 +90,7 @@ is why the checksum comes first.
 The images on ghcr.io are signed by the same workflow, keylessly, and carry build provenance. Verify
 one from outside it:
 
-    cosign verify ghcr.io/kordloom/switchtender:1.100.0 \
+    cosign verify ghcr.io/kordloom/switchtender:1.101.0 \
       --certificate-identity-regexp '^https://github.com/kordloom/switchtender/.github/workflows/release.yml@.*' \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com
 

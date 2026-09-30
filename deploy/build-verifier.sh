@@ -8,12 +8,12 @@
 # same bundle, and nothing detected it for two releases. Building from a module version pins the
 # provenance, because the module proxy serves exactly what the tag says and nothing else.
 #
-# Usage: deploy/build-verifier.sh v0.9.0
+# Usage: deploy/build-verifier.sh v1.5.4
 #
 # Cross-check the result against the released command line verifier, which is the comparison that
 # would have caught the drift described above. Both must reach the same verdict on the same bundle:
 #
-#   go install github.com/kordloom/loomseal@v0.9.0 && loomseal verify bundle.json
+#   go install github.com/kordloom/loomseal@v1.5.4 && loomseal verify bundle.json
 #   node -e 'globalThis.crypto??=require("node:crypto").webcrypto;require("./site/verify/wasm_exec.js");
 #     const go=new Go();WebAssembly.instantiate(require("fs").readFileSync("site/verify/loomseal.wasm"),
 #     go.importObject).then(r=>{go.run(r.instance);
@@ -26,11 +26,11 @@ set -euo pipefail
 
 version="${1:-}"
 if [[ -z "$version" ]]; then
-	echo "usage: $0 <loomseal-version>   e.g. $0 v0.9.0" >&2
+	echo "usage: $0 <loomseal-version>   e.g. $0 v1.5.4" >&2
 	exit 2
 fi
 if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-	echo "refusing to build from '$version': pass a released tag such as v0.9.0, not a branch or a commit" >&2
+	echo "refusing to build from '$version': pass a released tag such as v1.5.4, not a branch or a commit" >&2
 	exit 2
 fi
 

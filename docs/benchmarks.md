@@ -2,7 +2,7 @@
 
 Measured numbers for the questions people actually ask: how fast it starts, how much memory it holds
 at idle, how big the binary is, and how big the container image is. Every figure on this page was
-measured on 2026-09-08 against the v1.76.0 tag, except where a line carries its own date. Figures
+measured on 2026-09-08 against the `snapshot/v1.76.0` tag, except where a line carries its own date. Figures
 that vary from run to run say how many trials they came from and how far apart those trials fell.
 Nothing here is a projection, and no measured cell is arithmetic on another cell. Where the page
 does divide or add published figures, for a ratio or a total, it says which figures it used.
@@ -53,7 +53,7 @@ figures above are the ones to plan against.
 
 ## Binary size
 
-A stripped release build from the v1.76.0 tag, with the flags the release uses:
+A stripped release build from the `snapshot/v1.76.0` tag, with the flags the release uses:
 
     CGO_ENABLED=0 go build -trimpath \
       -ldflags "-s -w -X github.com/kordloom/switchtender/cmd.Version=1.76.0"
@@ -110,7 +110,7 @@ not be re-timed here, because it needs Kubernetes and this machine does not have
 weighed before, so its size is a current reading of the same artifact rather than a stale one.
 
 Method for the sizes: each image's exact byte count from `docker image inspect`, divided by 1024
-twice. The SwitchTender image is built from this repository's Dockerfile at the v1.76.0 tag. Method
+twice. The SwitchTender image is built from this repository's Dockerfile at the `snapshot/v1.76.0` tag. Method
 for resident memory: the server process's `VmRSS`, three seconds after it began serving, on five
 freshly started containers.
 
@@ -124,7 +124,7 @@ freshly started containers.
 
 **The container image was published on this page as 40 MiB. That was wrong, and it was wrong on the
 dates it was published, not merely stale.** Built from this repository's Dockerfile, the image
-measures 110.5 MiB at the v1.76.0 tag and 109.8 MiB rebuilt from the v1.62.0 tag. No release this
+measures 110.5 MiB at the `snapshot/v1.76.0` tag and 109.8 MiB rebuilt from the `snapshot/v1.62.0` tag. No release this
 page has covered ever produced an image of 40 MiB. The layers say where the weight goes: 71.5 MiB is
 the Alpine runtime layer carrying `ansible-core`, OpenSSH and CA certificates, 30.9 MiB is the
 SwitchTender binary, and 8.1 MiB is the Alpine base. The static binary is the small part. The
