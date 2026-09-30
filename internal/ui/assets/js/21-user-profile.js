@@ -107,27 +107,40 @@ function wireUserForm() {
 	});
 }
 
-// loadUsers populates the user table with delete actions.
-// userActivity counts each account's runs and finds when it last acted, so the users list shows
-// who is actually driving the fleet rather than only who exists.
-async function userActivity() {
+// userActivity counts the runs each account fired and finds when it was last seen, keyed by account
+// id, so the users list shows who is actually driving the fleet rather than only who exists.
+//
+// A run is named for the credential that fired it, which is the username only for a browser
+// session, so a run fired with a token named ci counted for nobody. The account behind the
+// credential is what counts, and a run recorded before runs carried one falls back to its name.
+// Seen meant only "fired a run", so an account that signed in and worked without launching anything
+// was never seen at all. Every credential an account holds, its browser sessions included, records
+// when it was last used, and the latest of those is when the account was last seen.
+async function userActivity(users) {
+	const idByName = new Map(users.map((u) => [u.username, u.id]));
 	const map = new Map();
-	try {
-		const data = await getJSON("/runs?limit=500");
-		for (const r of data.runs || []) {
-			if (!r.actor) continue;
-			const at = r.created_at;
-			const cur = map.get(r.actor) || { runs: 0, last: null };
-			cur.runs++;
-			if (!cur.last || (at && at > cur.last)) cur.last = at;
-			map.set(r.actor, cur);
+	const note = (id, at, fired) => {
+		if (!id) return;
+		const cur = map.get(id) || { runs: 0, last: null };
+		if (fired) cur.runs++;
+		if (at && (!cur.last || Date.parse(at) > Date.parse(cur.last))) cur.last = at;
+		map.set(id, cur);
+	};
+	// Either list failing leaves its part of the columns at zero and never.
+	const [runs, tokens] = await Promise.allSettled([getJSON("/runs?limit=500"), getJSON("/tokens")]);
+	if (runs.status === "fulfilled") {
+		for (const r of runs.value.runs || []) {
+			note(r.actor_user_id || idByName.get(r.actor), r.created_at, true);
 		}
-	} catch { /* the columns fall back to zero and never */ }
+	}
+	if (tokens.status === "fulfilled") {
+		for (const tk of tokens.value.tokens || []) note(tk.user_id, tk.last_used_at, false);
+	}
 	return map;
 }
 
+// loadUsers populates the user table with delete actions.
 async function loadUsers() {
-	const activity = await userActivity();
 	try {
 		const data = await getJSON("/users");
 		const users = data.users || [];
@@ -146,6 +159,7 @@ async function loadUsers() {
 			}
 			return;
 		}
+		const activity = await userActivity(users);
 		const tbody = document.getElementById("users");
 		for (const u of users) {
 			const tr = document.createElement("tr");
@@ -203,7 +217,7 @@ async function loadUsers() {
 				contact.appendChild(chip);
 			}
 			tr.appendChild(contact);
-			const act = activity.get(u.username) || { runs: 0, last: null };
+			const act = activity.get(u.id) || { runs: 0, last: null };
 			const fired = td("");
 			if (act.runs) {
 				const link = document.createElement("a");
@@ -349,12 +363,17 @@ function wireTokenForm() {
 	// A token acts as an account, so with no account there is nothing to issue one for. The dialog
 	// used to open with an empty required picker and answer a submit with the browser's own "Please
 	// select an item in the list", which says nothing about what to do next.
+	//
+	// blocked holds that reason, because opening the dialog resets its status line and the reason
+	// lives there. Reset to empty, it was never seen: the reader met a disabled Save and nothing else.
+	let blocked = "";
 	fillUserSelect(document.getElementById("token-user")).then((count) => {
 		if (count !== 0) return;
 		const submit = form.querySelector('button[type="submit"]');
 		if (submit) submit.disabled = true;
-		document.getElementById("token-status").textContent = "A token acts as an account, and this " +
-			"install has none yet. Add a user first, then issue it a token.";
+		blocked = "A token acts as an account, and this install has none yet. Add a user first, then " +
+			"issue it a token.";
+		document.getElementById("token-status").textContent = blocked;
 	});
 	const reveal = document.getElementById("token-secret");
 	const value = document.getElementById("token-value");
@@ -363,7 +382,7 @@ function wireTokenForm() {
 		document.getElementById("token-user").value = "";
 		document.getElementById("token-ttl").value = "";
 		document.getElementById("token-agent").checked = false;
-		document.getElementById("token-status").textContent = "";
+		document.getElementById("token-status").textContent = blocked;
 		reveal.hidden = true;
 		value.textContent = "";
 	};

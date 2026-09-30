@@ -280,7 +280,7 @@ async function runMigrate(apply) {
 	const data = await res.json().catch(() => ({}));
 	if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
 	status.textContent = apply
-		? "Imported " + (data.created || 0) + " objects."
+		? "Imported " + (data.created || 0) + " " + plural(data.created || 0, "object", "objects") + "."
 		: "Preview ready.";
 	renderMigratePlan(data);
 }
@@ -360,7 +360,8 @@ function renderMigratePlan(data) {
 	if (data.applied) {
 		const done = document.createElement("div");
 		done.className = "migrate-applied";
-		done.textContent = "Imported " + (data.created || 0) + " objects. Set the secret on each " +
+		done.textContent = "Imported " + (data.created || 0) + " " +
+			plural(data.created || 0, "object", "objects") + ". Set the secret on each " +
 			"imported credential before running templates that need it.";
 		el.appendChild(done);
 	}

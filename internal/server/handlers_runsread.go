@@ -655,10 +655,38 @@ func reversibilityEvidence(ctx context.Context, store run.Store, checkouts dispa
 	r *run.Run) run.ReversibilityEvidence {
 	var ev run.ReversibilityEvidence
 	if r.Status.Terminal() {
-		if hosts, err := store.RunHostSummaries(ctx, r.ID); err == nil {
-			ev.Hosts = hosts
-		}
+		ev.Hosts = finishedHosts(ctx, store, r)
 	}
 	ev.Playbook = dispatch.ScanRunPlaybook(r, checkouts)
 	return ev
+}
+
+// finishedHosts returns the per host outcomes of a finished run, gathered from its shards or steps
+// when it is a split or a pipeline, and nil when any part of it reported none.
+//
+// A parent stores no host rows of its own, because the work ran in its children. Reading the parent
+// alone found nothing, so a split that changed nothing graded costly while the same playbook run
+// unsplit graded reversible. A child that is unfinished or reported no hosts leaves the outcome
+// unknown, and an unknown outcome must not read as a clean one, so the grade then rests on what the
+// run declares instead.
+func finishedHosts(ctx context.Context, store run.Store, r *run.Run) []run.HostSummary {
+	hosts, err := store.RunHostSummaries(ctx, r.ID)
+	if err != nil {
+		return nil
+	}
+	children, err := childRuns(ctx, store, r)
+	if err != nil {
+		return nil
+	}
+	for _, child := range children {
+		if !child.Status.Terminal() {
+			return nil
+		}
+		reported, err := store.RunHostSummaries(ctx, child.ID)
+		if err != nil || len(reported) == 0 {
+			return nil
+		}
+		hosts = append(hosts, reported...)
+	}
+	return hosts
 }

@@ -332,8 +332,17 @@ class STElement {
 	}
 
 	// rows lists a table section's rows, which the row removal helper counts to spot an empty list.
+	// On a textarea it is the height in lines instead, set as a property and reflected to the
+	// attribute the way a browser reflects it, so a page that sizes a textarea can be mounted at all.
 	get rows() {
+		if (this.tagName === "TEXTAREA") return Number(this.attrs.get("rows") || 2);
 		return TABLE_TAGS.has(this.tagName) ? this.querySelectorAll("tr") : undefined;
+	}
+
+	// rows can be assigned only on a textarea. Everywhere else it stays read-only, as in a browser.
+	set rows(v) {
+		if (this.tagName !== "TEXTAREA") throw new TypeError("rows is read-only on " + this.tagName);
+		this.setAttribute("rows", String(v));
 	}
 
 	// options lists a select's option elements.

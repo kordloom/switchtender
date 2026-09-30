@@ -149,9 +149,15 @@ function renderOverviewMetrics(runs, hosts, summary, chain) {
 		// trivially, so the card read "0 CHANGES ON THE CHAIN, VERIFIED" in green on the first
 		// screen of a fresh install: the product's headline claim, presented as proven, about
 		// nothing.
+		//
+		// The count is every entry the chain holds: each recorded request, reads such as a stream
+		// ticket or an import preview among them, each outcome and decision, and each span beat. The
+		// tile called all of that changes, so a quiet install whose newest entries are beats read as
+		// busy. It says entries, which is what the verdict counts.
 		const empty = chain.count === 0;
 		const chainLabel = empty ? "Nothing on the chain yet"
-			: chain.ok ? "Changes on the chain \u00b7 verified" : "Chain BROKEN at " + chain.broke_at;
+			: chain.ok ? plural(chain.count, "Entry", "Entries") + " on the chain \u00b7 verified"
+				: "Chain BROKEN at " + chain.broke_at;
 		const chainCard = statCard(chain.count, chainLabel, empty ? "" : chain.ok ? "ok" : "failed");
 		chainCard.dataset.tip = empty
 			? "Nothing has been recorded yet. The first change lands here. Click for the trail"

@@ -23,12 +23,16 @@ function describeCron(spec) {
 	// consult it: the timed shapes further down read the day fields themselves.
 	const scope = cronScope(dom, mon, dow);
 	const freq = (text) => (scope === null ? "Custom schedule" : text + scope);
+	// every names a stepped field's cadence, and a step of one is the plain "Every minute" that * is.
+	const every = (step, unit) => (Number(step) === 1
+		? "Every " + unit
+		: "Every " + step + " " + unit + "s");
 	if (min === "*" && hour === "*") return freq("Every minute");
-	if (hour === "*" && /^\*\/\d+$/.test(min)) return freq("Every " + min.slice(2) + " minutes");
+	if (hour === "*" && /^\*\/\d+$/.test(min)) return freq(every(min.slice(2), "minute"));
 	if (hour === "*" && /^\d+$/.test(min) && dom === "*" && mon === "*" && dow === "*") {
 		return parseInt(min, 10) === 0 ? "Hourly, on the hour" : "Hourly at :" + String(min).padStart(2, "0");
 	}
-	if (/^\*\/\d+$/.test(hour) && /^\d+$/.test(min)) return freq("Every " + hour.slice(2) + " hours");
+	if (/^\*\/\d+$/.test(hour) && /^\d+$/.test(min)) return freq(every(hour.slice(2), "hour"));
 	// The named shapes below all read a clock time, so both fields must be plain numbers: a step
 	// or wildcard in either belongs to a cadence no sentence here describes.
 	const timed = /^\d+$/.test(min) && /^\d+$/.test(hour);

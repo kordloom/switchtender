@@ -39,3 +39,29 @@ test("an admin's overview and an open install still ask for it", async () => {
 			(role || "an open install") + " stopped asking for the chain verdict: " + urls);
 	}
 });
+
+// chainTileLabel loads the overview as an admin, with the chain verdict reporting count entries,
+// and returns the chain tile's label.
+async function chainTileLabel(count) {
+	const page = loadPage("overview", {
+		routes: {
+			"/v1/runs": reply({ runs: [] }),
+			"/v1/fleet": reply({ hosts: [] }),
+			"/v1/audit/verify": reply({ ok: true, count, anchored: 0 }),
+		},
+	});
+	sandboxOf(page.app).localStorage.setItem("st_role", "admin");
+	await page.app.loadOverview();
+	await page.clock.flush();
+	const labels = Array.from(page.document.querySelectorAll("#ov-metrics .stat-label"));
+	return labels.map((l) => l.textContent).find((t) => /on the chain/.test(t));
+}
+
+test("the chain tile counts entries, which is what the verdict counts", async () => {
+	// The count is every entry on the chain: each recorded request, reads such as a stream ticket or
+	// an import preview among them, each outcome and decision, and each span beat. The tile called
+	// all of them changes, so a quiet install whose newest entries are beats read as busy, and one
+	// entry read "1 changes".
+	assert.equal(await chainTileLabel(1), "Entry on the chain · verified");
+	assert.equal(await chainTileLabel(69), "Entries on the chain · verified");
+});

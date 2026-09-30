@@ -42,7 +42,9 @@ const auditCLI = {
 // to join two columns and know REST to learn that a template was deleted. The sentence is derived
 // here for reading, beside the pair it came from, and never in place of it.
 function auditChange(method, path) {
-	const clean = String(path || "").replace(/^\/v1/, "").replace(/^\//, "");
+	// A span beat carries its count and cadence as a query on its path. That is not a segment, and
+	// read as one it put "beat 17?count=0&cadence_s=300" into the sentence.
+	const clean = String(path || "").replace(/\?.*$/, "").replace(/^\/v1/, "").replace(/^\//, "");
 	const parts = clean.split("/").filter(Boolean);
 	if (parts.length === 0) {
 		return "";
@@ -291,8 +293,8 @@ function renderVerifyVerdict(badge, r) {
 	}
 	if (r.ok && r.anchored > 0) {
 		badge.className = "chip ok";
-		badge.textContent = "Chain verified: " + r.count + " entries, " + r.anchored +
-			" anchor" + (r.anchored === 1 ? "" : "s") + " held";
+		badge.textContent = "Chain verified: " + r.count + " " + plural(r.count, "entry", "entries") +
+			", " + r.anchored + " " + plural(r.anchored, "anchor", "anchors") + " held";
 		setStatus("Every entry recomputes and the chain still satisfies every anchor recorded over it.");
 		return;
 	}
@@ -300,7 +302,8 @@ function renderVerifyVerdict(badge, r) {
 		// Intact but unanchored: the strongest true statement is that nothing was altered, and that
 		// nothing outside this install can vouch for what is missing from the end.
 		badge.className = "chip warn";
-		badge.textContent = "Chain intact: " + r.count + " entries, not anchored";
+		badge.textContent = "Chain intact: " + r.count + " " + plural(r.count, "entry", "entries") +
+			", not anchored";
 		setStatus("Every entry recomputes, so nothing in the trail was altered. Nothing outside this " +
 			"install fixes where the trail ends, though, and a hash chain cannot detect its own " +
 			"truncation: dropping entries from the end leaves a chain that still verifies. Run " +

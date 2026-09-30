@@ -130,6 +130,14 @@ func TestValidateRepoURLBoundaries(t *testing.T) {
 		In: "://github.com/x", Want: ErrBadRepoURL,
 	}, { // Test 52: A port that is not a number fails the parse rather than being guessed at.
 		In: "https://github.com:port/org/repo.git", Want: ErrBadRepoURL,
+	}, { // Test 53: Free text is neither a URL nor a path, and was stored as a project anyway.
+		In: "not a url", Want: ErrBadRepoURL,
+	}, { // Test 54: A bare name names no directory, so it is not a path either.
+		In: "repo.git", Want: ErrBadRepoURL,
+	}, { // Test 55: The same name written as a relative path is one.
+		In: "./repo.git", Want: nil,
+	}, { // Test 56: A Windows relative path separates its directories the other way.
+		In: `mirrors\repo.git`, Want: nil,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -174,6 +182,8 @@ func TestRepoURLPartsClassification(t *testing.T) {
 		In: "--upload-pack=/bin/sh", Want: ErrBadRepoURL,
 	}, { // Test 8: An unparseable scheme-prefixed value is an error, not a guess.
 		In: "https://bad\x7furl/x", Want: ErrBadRepoURL,
+	}, { // Test 9: Text with no scheme, no host, and no directory is not read as a local path.
+		In: "not a url", Want: ErrBadRepoURL,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

@@ -278,7 +278,8 @@ function exportWorkflow(format) {
 	}
 	// The filename is the whole message. A browser that saves without prompting leaves "Exported 3
 	// steps." as the only sign anything happened, which reads as a button that did nothing.
-	wfSetStatus("Exported " + doc.steps.length + " steps to " + file + ".", "");
+	wfSetStatus("Exported " + doc.steps.length + " " + plural(doc.steps.length, "step", "steps") +
+		" to " + file + ".", "");
 }
 
 async function runWorkflow() {
@@ -337,6 +338,13 @@ document.addEventListener("DOMContentLoaded", () => {
 		el.addEventListener("click", beginSSO);
 	}
 	consumeSSOFragment();
+	// A signed-out visitor to an install that requires sign-in goes there before the page asks for
+	// anything. Every data call would only be refused, and each refusal left a 401 in the console of
+	// the first page a stranger opened, three of them on the overview, before the redirect landed.
+	if (document.body.dataset.signin === "required" && !apiToken()) {
+		requireLogin();
+		return;
+	}
 	mountTopbar();
 	mountLiveRegions();
 	explainReadOnly();

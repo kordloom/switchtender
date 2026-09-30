@@ -100,6 +100,10 @@ function wireLaunchForm() {
 		form.addEventListener("submit", (e) => e.preventDefault());
 		return;
 	}
+	// A failed launch says why in the status line, and that sentence belongs to the attempt that
+	// failed. Opening the dialog again for a fresh launch showed it beside a form not yet submitted.
+	const openBtn = document.getElementById("launch-open");
+	if (openBtn) openBtn.addEventListener("click", () => { status.textContent = ""; });
 	const submit = guardedSubmit(form.querySelector('button[type="submit"]'), async () => {
 		const tool = toolSel.value;
 		const payload = {};
@@ -503,7 +507,6 @@ function wireCredentialForm() {
 			resetToCreate();
 			status.textContent = "Saved.";
 			closeModal("cred");
-			document.getElementById("credentials").innerHTML = "";
 			loadCredentials();
 		} catch (err) {
 			status.textContent = "Save failed: " + err.message;
@@ -514,8 +517,10 @@ function wireCredentialForm() {
 	});
 }
 
-// loadCredentials populates the credential table with delete actions.
-async function loadCredentials() {
+// loadCredentials populates the credential table with delete actions. keepPanel leaves the panel of
+// credentials still waiting for a secret as it stands, for the refresh after a save made there:
+// rebuilding it would throw away a secret pasted into another of its rows.
+async function loadCredentials(keepPanel) {
 	try {
 		const data = await getJSON("/credentials");
 		const creds = data.credentials || [];
@@ -540,8 +545,11 @@ async function loadCredentials() {
 				: "No credentials yet. Add one and templates can reach hosts with it, sealed at rest and injected only at execution.");
 			return;
 		}
-		renderNeedsSecret(creds);
+		if (!keepPanel) renderNeedsSecret(creds);
 		const tbody = document.getElementById("credentials");
+		// The rows are replaced once the answer is in, not cleared before the request, so two refreshes
+		// in flight together each redraw the table rather than both appending to it.
+		tbody.textContent = "";
 		for (const c of creds) {
 			const tr = document.createElement("tr");
 			const name = td(c.name);
@@ -732,6 +740,9 @@ function renderNeedsSecret(creds) {
 				} else {
 					setTitle(remaining);
 				}
+				// The table below went on calling this credential "needs a secret" until a reload,
+				// while the server already held the secret. It is read again, and this panel is not.
+				loadCredentials(true);
 			} catch (err) {
 				save.disabled = false;
 				status.textContent = "Save failed: " + err.message;

@@ -33,7 +33,7 @@ function fmtInterval(seconds) {
 		const m = seconds / 60;
 		return m === 1 ? "minute" : m + " minutes";
 	}
-	return seconds + " seconds";
+	return seconds === 1 ? "second" : seconds + " seconds";
 }
 
 // td builds a table cell.

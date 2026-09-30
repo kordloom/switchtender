@@ -440,8 +440,16 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 	}
 	srv.web = ui.New(srv.log, srv.docs, srv.readOnly, srv.matrixCap, srv.oidc != nil, srv.saml != nil,
 		srv.ai != nil, oidcBrand, ui.WithAccountCheck(srv.anyAccount), ui.WithTokenCheck(srv.anyToken),
-		ui.WithDemo(srv.demo))
+		ui.WithSignInCheck(srv.signInRequired), ui.WithDemo(srv.demo))
 	return srv
+}
+
+// signInRequired reports whether the API refuses a request that carries no credential, so a page
+// can send a signed-out visitor to sign in before it asks for anything. It asks what the gate asks:
+// an install told it authenticates, or one holding any token or account. With no token store there
+// is no gate, and nothing is refused.
+func (s *Server) signInRequired() bool {
+	return s.tokens != nil && (s.enforceAuth || s.anyToken() || s.anyAccount())
 }
 
 // anyAccount reports whether this install holds a user account, for the sign-in page. An unreadable

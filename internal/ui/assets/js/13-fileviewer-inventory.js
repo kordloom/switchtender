@@ -30,7 +30,8 @@ async function openFileViewer(projectID, path) {
 	try {
 		const file = await getJSON("/projects/" + encodeURIComponent(projectID) +
 			"/file?path=" + encodeURIComponent(path));
-		const size = file.size >= 1024 ? Math.round(file.size / 1024) + " KB" : file.size + " bytes";
+		const size = file.size >= 1024 ? Math.round(file.size / 1024) + " KB"
+			: file.size + " " + plural(file.size, "byte", "bytes");
 		if (file.binary) {
 			note.textContent = size + ", binary. Nothing to show.";
 		} else {

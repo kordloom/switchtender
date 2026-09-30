@@ -70,7 +70,8 @@ async function loadEstate() {
 		const rows = data.hosts || [];
 		if (rows.length === 0) {
 			showEmpty(diffing
-				? "Nothing moved in that window." + (data.unchanged ? " " + data.unchanged + " host(s) sat still." : "")
+				? "Nothing moved in that window." + (data.unchanged ? " " + data.unchanged + " " +
+					plural(data.unchanged, "host", "hosts") + " sat still." : "")
 				: "No hosts were observed at that point. Facts are gathered by a run, so an estate exists once something has run.",
 				true);
 			table.hidden = true;
@@ -119,7 +120,9 @@ async function loadEstate() {
 		table.hidden = false;
 		const bits = [];
 		if (data.truncated) bits.push("Showing " + rows.length + " of " + data.total + ".");
-		if (diffing && data.unchanged) bits.push(data.unchanged + " host(s) unchanged.");
+		if (diffing && data.unchanged) {
+			bits.push(data.unchanged + " " + plural(data.unchanged, "host", "hosts") + " unchanged.");
+		}
 		// Rows the caller may not read are counted rather than dropped in silence, so a short answer
 		// is never mistaken for a quiet estate.
 		if (data.withheld) bits.push(data.withheld + " hidden by access.");

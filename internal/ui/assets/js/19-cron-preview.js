@@ -181,8 +181,8 @@ function setScheduleGraphNotice(s) {
 	}
 	el.hidden = false;
 	el.textContent = s.steps && s.steps.length
-		? "This schedule fires a pipeline of " + s.steps.length +
-			" steps. Its cadence is editable here; the steps are not."
+		? "This schedule fires a pipeline of " + s.steps.length + " " +
+			plural(s.steps.length, "step", "steps") + ". Its cadence is editable here; the steps are not."
 		: "This schedule fires a split across " + s.shards +
 			" shards. Its cadence is editable here; the split is not.";
 }
@@ -207,7 +207,7 @@ function fillZoneList(list) {
 // scheduleTarget describes what a schedule fires.
 function scheduleTarget(s) {
 	if (s.steps && s.steps.length) {
-		return "pipeline, " + s.steps.length + " steps";
+		return "pipeline, " + s.steps.length + " " + plural(s.steps.length, "step", "steps");
 	}
 	if (s.shards) {
 		return "split x" + s.shards + "  " + (s.playbook || "");

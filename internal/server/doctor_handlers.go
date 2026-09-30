@@ -17,7 +17,7 @@ import (
 )
 
 // doctorFinding is one problem the doctor found in the control plane's registrations: a reference
-// to something that no longer exists, a credential that cannot be used yet, or a schedule that can
+// to something that does not exist, a credential that cannot be used yet, or a schedule that can
 // never fire.
 type doctorFinding struct {
 	// Severity is broken for a reference that stops a launch, warning for one that degrades it.
@@ -105,26 +105,26 @@ func doctorHandler(templates template.Store, schedules schedule.Store, creds cre
 				}
 				if t.InventoryID != "" && invs != nil {
 					if _, err := invs.Get(ctx, t.InventoryID); errors.Is(err, inventory.ErrNotFound) {
-						add("broken", "References stored inventory "+t.InventoryID+", which no longer exists.")
+						add("broken", "References stored inventory "+t.InventoryID+", which does not exist.")
 					}
 				}
 				if t.ProjectID != "" && projs != nil {
 					if _, err := projs.Get(ctx, t.ProjectID); errors.Is(err, project.ErrNotFound) {
-						add("broken", "References project "+t.ProjectID+", which no longer exists.")
+						add("broken", "References project "+t.ProjectID+", which does not exist.")
 					}
 				}
 				for _, cid := range t.CredentialIDs {
 					if !credExists(cid) {
-						add("broken", "References credential "+cid+", which no longer exists.")
+						add("broken", "References credential "+cid+", which does not exist.")
 					}
 				}
 				for _, cid := range t.SelectableCredentialIDs {
 					if !credExists(cid) {
-						add("warning", "Offers selectable credential "+cid+", which no longer exists.")
+						add("warning", "Offers selectable credential "+cid+", which does not exist.")
 					}
 				}
 				if t.PullCredentialID != "" && !credExists(t.PullCredentialID) {
-					add("broken", "References pull credential "+t.PullCredentialID+", which no longer exists.")
+					add("broken", "References pull credential "+t.PullCredentialID+", which does not exist.")
 				}
 			}
 		}
@@ -149,7 +149,7 @@ func doctorHandler(templates template.Store, schedules schedule.Store, creds cre
 				}
 				if s.TemplateID != "" && templates != nil {
 					if _, err := templates.Get(ctx, s.TemplateID); errors.Is(err, template.ErrNotFound) {
-						add("broken", "Fires template "+s.TemplateID+", which no longer exists.")
+						add("broken", "Fires template "+s.TemplateID+", which does not exist.")
 					}
 				}
 			}

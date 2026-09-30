@@ -31,3 +31,12 @@ test("a span beat reads as a sentence rather than SPAN on span", () => {
 	assert.match(text, /unbroken/i, "the sentence does not say what a beat attests");
 	assert.match(text, /22/, "the sentence does not name the beat");
 });
+
+test("a span beat's sentence names the beat, not the query string recorded with it", () => {
+	// The chain records a beat's path with its count and cadence as a query, and the sentence took
+	// everything after /span/ as the beat, so every beat on the audit page read "through beat
+	// 17?count=0&cadence_s=300".
+	const { app } = loadPage("audit", { quiet: true });
+	assert.equal(app.auditChange("SPAN", "/span/17?count=0&cadence_s=300"),
+		"Attested the chain was unbroken through beat 17 covering the previous 5m 0s");
+});

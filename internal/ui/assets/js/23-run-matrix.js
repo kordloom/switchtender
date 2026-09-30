@@ -121,9 +121,10 @@ function renderMatrixTooLarge(hostCount, taskCount, cellCount, cap) {
 	const split = !!shardsPanel && !shardsPanel.hidden;
 	cell.textContent = "";
 	const lead = document.createElement("div");
-	lead.textContent = "This run covers " + hostCount.toLocaleString() + " hosts across " +
-		taskCount + " tasks, which is " + cellCount.toLocaleString() + " cells, past the " +
-		cap.toLocaleString() + " this page draws at once.";
+	lead.textContent = "This run covers " + hostCount.toLocaleString() + " " +
+		plural(hostCount, "host", "hosts") + " across " + taskCount + " " +
+		plural(taskCount, "task", "tasks") + ", which is " + cellCount.toLocaleString() +
+		" cells, past the " + cap.toLocaleString() + " this page draws at once.";
 	cell.appendChild(lead);
 	const next = document.createElement("div");
 	next.className = "muted";
@@ -485,7 +486,7 @@ function showDrill(info) {
 	if (info.message) body.appendChild(drillBlock("Message", info.message));
 	if (info.stdout) body.appendChild(drillBlock("Stdout", info.stdout));
 	if (info.stderr) body.appendChild(drillBlock("Stderr", info.stderr));
-	if (info.diff) body.appendChild(drillBlock("Diff", info.diff));
+	if (info.diff) body.appendChild(drillBlock("Diff", diffText(info.diff)));
 	if (info.truncated) {
 		const note = document.createElement("div");
 		note.className = "drill-note";
@@ -586,6 +587,118 @@ function drillBlock(label, value) {
 	f.appendChild(l);
 	f.appendChild(pre);
 	return f;
+}
+
+// DIFF_CONTEXT is how many unchanged lines a rendered diff keeps on each side of a change, the
+// default Ansible's own --diff output keeps.
+const DIFF_CONTEXT = 3;
+
+// diffText renders the diff a task reported the way ansible-playbook --diff prints it: each side
+// named by its header, then only the changed lines with a little context around them. The callback
+// forwards the module's own structure as JSON, whole file bodies inside it, and the drawer printed
+// that JSON, so a one line change read as two copies of the file with every newline escaped. A
+// value that is not that structure, one the callback's field cap cut short above all, is shown as
+// it came.
+function diffText(raw) {
+	let parsed;
+	try {
+		parsed = JSON.parse(raw);
+	} catch (_) {
+		return raw;
+	}
+	const out = [];
+	for (const d of Array.isArray(parsed) ? parsed : [parsed]) {
+		if (!d || typeof d !== "object") return raw;
+		if ("before" in d && "after" in d) {
+			const hunks = diffHunks(diffSideLines(d.before), diffSideLines(d.after));
+			if (hunks.length) {
+				out.push("--- " + (d.before_header ? "before: " + d.before_header : "before"),
+					"+++ " + (d.after_header ? "after: " + d.after_header : "after"), ...hunks);
+			}
+		}
+		if (typeof d.prepared === "string") out.push(d.prepared);
+	}
+	return out.length ? out.join("\n") : raw;
+}
+
+// diffSideLines splits one side of a reported diff into lines. A side that is state rather than a
+// file, what the file module reports, is laid out as indented JSON the way Ansible lays it out, so
+// it diffs field by field. A last line with no newline is marked the way diff marks it.
+function diffSideLines(side) {
+	if (side === null || side === undefined) return [];
+	const text = typeof side === "string" ? side : JSON.stringify(side, null, 4) + "\n";
+	if (text === "") return [];
+	const lines = text.split("\n");
+	if (lines[lines.length - 1] === "") lines.pop();
+	else lines[lines.length - 1] += "\n\\ No newline at end of file";
+	return lines;
+}
+
+// diffHunks returns the unified diff hunks that turn the before lines into the after lines: each
+// run of changes with DIFF_CONTEXT unchanged lines around it, under a header saying where it sits.
+function diffHunks(before, after) {
+	const ops = diffLines(before, after);
+	const out = [];
+	for (let k = 0; k < ops.length;) {
+		if (ops[k].op === " ") {
+			k++;
+			continue;
+		}
+		// Changes separated by no more than twice the context share one hunk, the way diff joins them.
+		let last = k;
+		for (let j = k + 1; j < ops.length && j - last <= 2 * DIFF_CONTEXT + 1; j++) {
+			if (ops[j].op !== " ") last = j;
+		}
+		const start = Math.max(0, k - DIFF_CONTEXT);
+		const end = Math.min(ops.length, last + DIFF_CONTEXT + 1);
+		const hunk = ops.slice(start, end);
+		out.push("@@ -" + hunkRange(ops[start].beforeAt, hunk.filter((o) => o.op !== "+").length) +
+			" +" + hunkRange(ops[start].afterAt, hunk.filter((o) => o.op !== "-").length) + " @@");
+		for (const o of hunk) out.push(o.op + o.line);
+		k = end;
+	}
+	return out;
+}
+
+// hunkRange writes one side's place in a hunk header the way diff writes it: the first line and the
+// count, the count left off when it is one, and an empty side anchored on the line before it.
+function hunkRange(start, count) {
+	if (count === 1) return String(start + 1);
+	return (count ? start + 1 : start) + "," + count;
+}
+
+// diffLines lines two lists of lines up along their longest common subsequence and returns the
+// edit script: each line marked " " kept, "-" removed, or "+" added, with where it sits in both
+// lists. The table is quadratic, which the callback's cap on a captured field keeps to a few
+// hundred lines a side.
+function diffLines(before, after) {
+	// common[i][j] is the length of the longest common subsequence of before from i and after from j.
+	const common = Array.from({ length: before.length + 1 },
+		() => new Array(after.length + 1).fill(0));
+	for (let i = before.length - 1; i >= 0; i--) {
+		for (let j = after.length - 1; j >= 0; j--) {
+			common[i][j] = before[i] === after[j]
+				? common[i + 1][j + 1] + 1
+				: Math.max(common[i + 1][j], common[i][j + 1]);
+		}
+	}
+	const ops = [];
+	let i = 0;
+	let j = 0;
+	while (i < before.length || j < after.length) {
+		if (i < before.length && j < after.length && before[i] === after[j]) {
+			ops.push({ op: " ", line: before[i], beforeAt: i, afterAt: j });
+			i++;
+			j++;
+		} else if (j >= after.length || (i < before.length && common[i + 1][j] >= common[i][j + 1])) {
+			ops.push({ op: "-", line: before[i], beforeAt: i, afterAt: j });
+			i++;
+		} else {
+			ops.push({ op: "+", line: after[j], beforeAt: i, afterAt: j });
+			j++;
+		}
+	}
+	return ops;
 }
 
 // drillField builds a labeled value in the drill panel, with an optional inline copy control.

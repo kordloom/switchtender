@@ -65,6 +65,9 @@ type UI struct {
 	// hasTokens reports whether any API token exists. An install with tokens and no accounts is
 	// authenticated, not open, and the sign-in page said the opposite. Nil counts as having them.
 	hasTokens func() bool
+	// signIn reports whether the API refuses a request that carries no credential. Nil counts as
+	// not, so a page loads the way it always did where the caller said nothing.
+	signIn func() bool
 	// aiEnabled reports whether an advisory AI provider is configured, so the overview can make the
 	// ask panel clearly unavailable rather than looking usable and failing on the first question.
 	aiEnabled bool
@@ -150,6 +153,23 @@ func (u *UI) tokensExist() bool {
 		return true
 	}
 	return u.hasTokens()
+}
+
+// WithSignInCheck tells every page whether the API refuses a visitor who holds no credential.
+//
+// A page asked the server for its data first and went to the sign-in page only once it was refused,
+// so a signed-out visitor's first page logged a 401 for every request it made, three of them on the
+// overview. A page that knows sign-in is required sends a visitor with no session there before it
+// asks for anything.
+func WithSignInCheck(f func() bool) Option {
+	return func(u *UI) { u.signIn = f }
+}
+
+// signInRequired reports whether a signed-out visitor has to sign in before a page can load its
+// data. Unknown counts as not required, because the flag sends every signed-out visitor away, and
+// on an install that runs open that is a loop between the page and the sign-in screen.
+func (u *UI) signInRequired() bool {
+	return u.signIn != nil && u.signIn()
 }
 
 // Handler returns the HTTP handler for the web interface, served under /ui/.
@@ -355,9 +375,11 @@ func (u *UI) workflows(w http.ResponseWriter, _ *http.Request) {
 // counting statuses ever saw a failure. Every page here is a single template with no partial-write
 // protection in front of it, so any fault past the first action landed that way.
 func (u *UI) render(w http.ResponseWriter, name string, data any) {
-	// Every page is told whether it is the demo, so no handler can forget to say.
+	// Every page is told whether it is the demo, and whether a visitor must sign in first, so no
+	// handler can forget to say.
 	if m, ok := data.(map[string]any); ok {
 		m["Demo"] = u.demo
+		m["SignIn"] = u.signInRequired()
 	}
 	var buf bytes.Buffer
 	if err := u.tmpl.ExecuteTemplate(&buf, name, data); err != nil {

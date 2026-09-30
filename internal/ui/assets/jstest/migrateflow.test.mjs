@@ -71,7 +71,7 @@ test("a rejected migrate import hands Import back to the operator", async () => 
 	fire(button, "click");
 	await clock.flush();
 	assert.equal(attempts, 2);
-	assert.equal(document.getElementById("migrate-status").textContent, "Imported 1 objects.");
+	assert.equal(document.getElementById("migrate-status").textContent, "Imported 1 object.");
 	net.assertClean();
 });
 

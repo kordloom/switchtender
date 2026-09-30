@@ -666,7 +666,8 @@ async function openProjectFiles(project) {
 		const files = data.files || [];
 		filter.hidden = files.length === 0;
 		note.textContent = files.length
-			? files.length + " files in the cached checkout. Click one to view it."
+			? files.length + " " + plural(files.length, "file", "files") +
+				" in the cached checkout. Click one to view it."
 			: "The checkout is empty.";
 		for (const f of files) {
 			const row = document.createElement("button");

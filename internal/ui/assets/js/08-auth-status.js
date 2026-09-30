@@ -286,6 +286,11 @@ function removeRow(tr, emptyMsg) {
 	}
 }
 
+// plural returns one when n is 1 and many otherwise, so a count reads "1 entry" and "3 entries".
+function plural(n, one, many) {
+	return n === 1 ? one : many;
+}
+
 // fmtDuration renders the span between two ISO times.
 function fmtDuration(startISO, endISO) {
 	if (!startISO || !endISO) return "";

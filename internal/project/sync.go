@@ -609,6 +609,13 @@ func repoURLParts(raw string) (host, scheme string, err error) {
 		}
 		return rest[:i], "ssh", nil
 	}
+	// What is left is read as a local path, and a path names a directory. Without a separator it was
+	// no repository anybody meant: "not a url" was stored as a project and failed only at the first
+	// sync, relative to wherever the server happened to be started.
+	if !strings.ContainsAny(raw, `/\`) {
+		return "", "", fmt.Errorf("%w: %q is not a URL or a path, such as https://host/org/repo.git "+
+			"or ./repo", ErrBadRepoURL, raw)
+	}
 	return "", "file", nil
 }
 
