@@ -21,7 +21,7 @@ func TestVerifyBundleRefusesAnUnrepresentableSeq(t *testing.T) {
 	}}
 
 	// The point is that this returns rather than panicking.
-	ok, brokeAt := verifyBundleChain(claims, BundleCoord{Seq: 1 << 60, Link: "aa"})
+	ok, brokeAt, _ := verifyBundleChain(claims, BundleCoord{Seq: 1 << 60, Link: "aa"})
 	if ok {
 		t.Error("a claim whose sequence cannot be canonicalized was accepted")
 	}
@@ -53,10 +53,10 @@ func TestLinkOfStillPanicsForOurOwnEntries(t *testing.T) {
 // a true claim about everything.
 func TestVerifyBundleChainRefusesAnEmptyBundle(t *testing.T) {
 	t.Parallel()
-	if ok, _ := verifyBundleChain(nil, BundleCoord{Seq: 9999, Link: "cafebabe"}); ok {
+	if ok, _, _ := verifyBundleChain(nil, BundleCoord{Seq: 9999, Link: "cafebabe"}); ok {
 		t.Error("a bundle with no claims verified against a head nobody produced")
 	}
-	if ok, _ := verifyBundleChain([]BundleClaim{}, BundleCoord{}); ok {
+	if ok, _, _ := verifyBundleChain([]BundleClaim{}, BundleCoord{}); ok {
 		t.Error("a bundle with no claims and no head verified")
 	}
 }
@@ -87,14 +87,14 @@ func TestVerifyBundleChainEnforcesGenesisAndContinuity(t *testing.T) {
 
 	// Test 0: genesis carrying a prev link. Sequence one must have no prev.
 	genesisWithPrev := []BundleClaim{validClaim(1, "deadbeefdeadbeef")}
-	if ok, _ := verifyBundleChain(genesisWithPrev, headOf(genesisWithPrev)); ok {
+	if ok, _, _ := verifyBundleChain(genesisWithPrev, headOf(genesisWithPrev)); ok {
 		t.Error("a genesis claim carrying a prev link verified; the reference verifier refuses it")
 	}
 
 	// Test 1: a window opening past sequence one with an empty prev. It recomputes as though it
 	// were genesis, presenting a truncated chain as unrooted.
 	windowNoPrev := []BundleClaim{validClaim(5, "")}
-	if ok, _ := verifyBundleChain(windowNoPrev, headOf(windowNoPrev)); ok {
+	if ok, _, _ := verifyBundleChain(windowNoPrev, headOf(windowNoPrev)); ok {
 		t.Error("a window opening at seq 5 with no prev verified; it hides everything before it")
 	}
 
@@ -103,7 +103,7 @@ func TestVerifyBundleChainEnforcesGenesisAndContinuity(t *testing.T) {
 	c0 := validClaim(1, "")
 	c1 := validClaim(7, c0.Chain.Link)
 	gapped := []BundleClaim{c0, c1}
-	if ok, _ := verifyBundleChain(gapped, headOf(gapped)); ok {
+	if ok, _, _ := verifyBundleChain(gapped, headOf(gapped)); ok {
 		t.Error("a chain with sequences 1 then 7 verified; entries were dropped between them")
 	}
 
@@ -112,7 +112,7 @@ func TestVerifyBundleChainEnforcesGenesisAndContinuity(t *testing.T) {
 	g0 := validClaim(1, "")
 	g1 := validClaim(2, g0.Chain.Link)
 	good := []BundleClaim{g0, g1}
-	if ok, brokeAt := verifyBundleChain(good, headOf(good)); !ok {
+	if ok, brokeAt, _ := verifyBundleChain(good, headOf(good)); !ok {
 		t.Errorf("a contiguous rooted chain was refused at seq %d", brokeAt)
 	}
 }

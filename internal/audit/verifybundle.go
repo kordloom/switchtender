@@ -33,9 +33,13 @@ type BundleReport struct {
 	// AnchorsOK reports that every carried anchor names a claim the bundle holds. True when there are
 	// none, which is simply a bundle with no external fixations.
 	AnchorsOK bool
-	// BrokeAtSeq is the sequence of the first claim whose link did not recompute, zero when the chain
-	// is whole.
+	// BrokeAtSeq is the sequence of the claim the chain check stopped at, zero when the chain is whole
+	// or the fault has no position of its own.
 	BrokeAtSeq int64
+	// ChainProblem says what stopped the chain check, naming the position, empty when the chain is
+	// whole. It is not always that claim's own link: the claim after a gap recomputes, and what is
+	// wrong is the entries missing before it, so a gap names the sequence numbers it leaves out.
+	ChainProblem string
 	// KeyID is the producer key fingerprint a relying party pins.
 	KeyID string
 	// Subject says what the bundle's claims are about.
@@ -243,15 +247,19 @@ func verifyBundle(signed []byte, pinnedKeyID, acceptedInstall string) (*BundleRe
 			" open loomseal verifier", ErrVerify, profile)
 	}
 	if profile == TreeProfile {
-		rep.ChainOK, rep.BrokeAtSeq = verifyBundleTree(&b)
+		rep.ChainOK, rep.BrokeAtSeq, rep.ChainProblem = verifyBundleTree(&b)
 	} else {
 		// The linear chain is bound to its producer the same way the tree is. A link is a hash of the
 		// entry's own fields and says nothing about who produced it, so a second install could
 		// otherwise lift a published receipt whole, keep its claims and its genuine third-party
 		// anchor, rewrite the producer block, and re-sign as itself.
-		rep.ChainOK, rep.BrokeAtSeq = verifyBundleChain(b.Claims, head)
-		if rep.ChainOK && !linearInstallMatches(&b, names) {
-			rep.ChainOK, rep.BrokeAtSeq = false, head.Seq
+		rep.ChainOK, rep.BrokeAtSeq, rep.ChainProblem = verifyBundleChain(b.Claims, head)
+		if rep.ChainOK {
+			if matches, seq := linearInstallMatches(&b, names); !matches {
+				rep.ChainOK, rep.BrokeAtSeq = false, seq
+				rep.ChainProblem = fmt.Sprintf("the entry at seq %d names an install the signing "+
+					"key does not speak for", seq)
+			}
 		}
 	}
 	// An anchor is checked against the claim links, and for a tree those links are precisely what the
@@ -575,16 +583,17 @@ func verifyBundleSignature(signed []byte, pub ed25519.PublicKey, keyID string) (
 }
 
 // verifyBundleTree checks a sparse receipt: every disclosed claim folds through its audit path to
-// the tree head the bundle names.
+// the tree head the bundle names. It returns the sequence of the claim the check stopped at, zero
+// when the fault belongs to no one claim, and what was wrong.
 //
 // The install id the leaves are bound to is taken from the producer, never from the chain params a
 // bundle carries alongside them. A copier who lifted somebody else's receipt and rewrote only the
 // producer block would otherwise still fold, because the leaves would keep hashing under the
 // original install. Requiring the two to agree is what ties the receipt to the install that signed
 // it, and it is the rule the reference verifier applies.
-func verifyBundleTree(b *Bundle) (bool, int64) {
+func verifyBundleTree(b *Bundle) (ok bool, brokeAt int64, problem string) {
 	if b.Chain == nil {
-		return false, 0
+		return false, 0, "no chain head is declared, so there is no root to fold to"
 	}
 	// A receipt that discloses nothing proves nothing, so it must not report that nothing was
 	// altered. With no claims the fold below never runs and every check it performs is skipped, so
@@ -593,67 +602,71 @@ func verifyBundleTree(b *Bundle) (bool, int64) {
 	// admissible as an anchor coordinate. The linear profile refuses an empty bundle for the same
 	// reason, and this is the tree profile's half of that rule.
 	if len(b.Claims) == 0 {
-		return false, 0
+		return false, 0, "no entries are carried, so there is nothing to recompute"
 	}
 	installID := b.Producer.InstallID
-	if installID == "" || b.Chain.Params["install_id"] != installID {
-		return false, 0
+	if installID == "" {
+		return false, 0, "the producer names no install for the leaves to bind to"
+	}
+	if b.Chain.Params["install_id"] != installID {
+		return false, 0, "the chain does not bind its leaves to the producer's install"
 	}
 	root, err := hex.DecodeString(b.Chain.Head.Link)
 	if err != nil || len(root) == 0 {
-		return false, 0
+		return false, 0, "the head names a root that is not a hash"
 	}
 	size := b.Chain.Head.Seq
 	var prevSeq int64
 	for _, c := range b.Claims {
 		if c.Inclusion == nil {
-			return false, c.Chain.Seq
+			return false, c.Chain.Seq, fmt.Sprintf("the entry at seq %d carries no audit path",
+				c.Chain.Seq)
 		}
 		// A tree has no per-entry predecessor, and sequences must ascend, or a claim could be
 		// presented twice or out of order to satisfy a proof built for a different position.
-		if c.Chain.Prev != "" || c.Chain.Seq <= prevSeq {
-			return false, c.Chain.Seq
+		if c.Chain.Prev != "" {
+			return false, c.Chain.Seq, fmt.Sprintf("the entry at seq %d carries a previous link, "+
+				"which a tree entry cannot have", c.Chain.Seq)
+		}
+		if c.Chain.Seq < 1 {
+			return false, c.Chain.Seq, fmt.Sprintf("the entry at seq %d names no position in a log, "+
+				"which starts at seq 1", c.Chain.Seq)
+		}
+		if c.Chain.Seq <= prevSeq {
+			return false, c.Chain.Seq, sequenceProblem(b.Claims, prevSeq, c.Chain.Seq)
 		}
 		prevSeq = c.Chain.Seq
 
 		leafData, err := treeLeafFor(c, installID)
-		if err != nil {
-			return false, c.Chain.Seq
-		}
 		// The declared link has to be the hash of the leaf the claim's content produces. Without
 		// this the fold proved only that SOME leaf sits at the claimed position, never that it is
 		// this claim's leaf, so a producer could declare any link, fold a matching path, and anchor
 		// over it, and the receipt read as verified. This is the check the whole receipt rests on.
-		if hex.EncodeToString(merkle.LeafHash(leafData)) != c.Chain.Link {
-			return false, c.Chain.Seq
+		if err != nil || hex.EncodeToString(merkle.LeafHash(leafData)) != c.Chain.Link {
+			return false, c.Chain.Seq, fmt.Sprintf("the entry at seq %d does not recompute to its "+
+				"link", c.Chain.Seq)
 		}
 
 		path, err := decodeProofHashes(c.Inclusion.Path)
-		if err != nil {
-			return false, c.Chain.Seq
-		}
 		// A claim's sequence is one based and the tree is zero based.
-		if !merkle.VerifyInclusion(leafData, c.Chain.Seq-1, size, path, root) {
-			return false, c.Chain.Seq
+		if err != nil || !merkle.VerifyInclusion(leafData, c.Chain.Seq-1, size, path, root) {
+			return false, c.Chain.Seq, fmt.Sprintf("the entry at seq %d does not fold to the root "+
+				"the head names", c.Chain.Seq)
 		}
 	}
 	// A carried consistency proof is verified, not merely displayed. Its from-root becomes an
 	// admissible anchor coordinate below, and admitting a root the proof does not actually fold to
 	// the head would let a producer pair a fabricated history with a genuine-looking anchor.
 	if c := b.Chain.Consistency; c != nil {
-		fromRoot, err := hex.DecodeString(c.FromRoot)
-		if err != nil || len(fromRoot) == 0 {
-			return false, 0
-		}
-		path, err := decodeProofHashes(c.Path)
-		if err != nil {
-			return false, 0
-		}
-		if !merkle.VerifyConsistency(c.FromSize, size, fromRoot, root, path) {
-			return false, 0
+		fromRoot, rerr := hex.DecodeString(c.FromRoot)
+		path, perr := decodeProofHashes(c.Path)
+		if rerr != nil || len(fromRoot) == 0 || perr != nil ||
+			!merkle.VerifyConsistency(c.FromSize, size, fromRoot, root, path) {
+			return false, 0, fmt.Sprintf("the consistency proof does not show the log growing from "+
+				"%d entries to %d by appending only", c.FromSize, size)
 		}
 	}
-	return true, 0
+	return true, 0, ""
 }
 
 // decodeProofHashes turns a claim's hex audit path into the raw hashes the folder takes.
@@ -672,8 +685,14 @@ func decodeProofHashes(in []string) ([][]byte, error) {
 // verifyBundleChain recomputes each claim's link and checks the claims chain to one another. The
 // first claim carries whatever previous link the chain held at that point, since a bundle is often a
 // window into a longer history rather than the genesis; every claim after it must name the previous
-// claim's link as its own previous. It returns the sequence of the first claim that does not verify.
-func verifyBundleChain(claims []BundleClaim, head BundleCoord) (bool, int64) {
+// claim's link as its own previous. It returns the sequence of the claim the check stopped at and
+// what was wrong there.
+//
+// The reason is returned beside the position because the position cannot speak for itself. It was
+// read as the claim whose link did not recompute, and the claim after a gap recomputes perfectly: a
+// bundle with seq 10 cut out was reported as broken at seq 11, which sent a reader to the one entry
+// with nothing wrong with it.
+func verifyBundleChain(claims []BundleClaim, head BundleCoord) (ok bool, brokeAt int64, problem string) {
 	for i, c := range claims {
 		// The genesis rule and contiguous ascending sequence numbers, the two checks the loomseal
 		// reference verifier enforces that recomputing each link from the claim's own prev does not.
@@ -682,10 +701,15 @@ func verifyBundleChain(claims []BundleClaim, head BundleCoord) (bool, int64) {
 		// while the reference verifier the product tells relying parties to trust refused it.
 		if i == 0 {
 			if (c.Chain.Seq == 1) != (c.Chain.Prev == "") {
-				return false, c.Chain.Seq
+				if c.Chain.Seq == 1 {
+					return false, c.Chain.Seq, "the entry at seq 1 names a previous link, which the " +
+						"first entry of a chain cannot have"
+				}
+				return false, c.Chain.Seq, fmt.Sprintf("the first entry is at seq %d but names no "+
+					"previous link, which only the entry at seq 1 may do", c.Chain.Seq)
 			}
 		} else if c.Chain.Seq != claims[i-1].Chain.Seq+1 {
-			return false, c.Chain.Seq
+			return false, c.Chain.Seq, sequenceProblem(claims, claims[i-1].Chain.Seq, c.Chain.Seq)
 		}
 		str := func(k string) string { s, _ := c.Payload[k].(string); return s }
 		// The claim's values came from the document under test, not from this install, so a value
@@ -694,10 +718,12 @@ func verifyBundleChain(claims []BundleClaim, head BundleCoord) (bool, int64) {
 			str("actor"), str("method"), str("path"), c.Chain.Prev,
 			str("actor_type"), str("on_behalf_of"), str("content_digest"), str("install_id")))
 		if err != nil || recomputed != c.Chain.Link {
-			return false, c.Chain.Seq
+			return false, c.Chain.Seq, fmt.Sprintf("the entry at seq %d does not recompute to its link",
+				c.Chain.Seq)
 		}
 		if i > 0 && c.Chain.Prev != claims[i-1].Chain.Link {
-			return false, c.Chain.Seq
+			return false, c.Chain.Seq, fmt.Sprintf("the entry at seq %d names a previous link that is "+
+				"not the link of seq %d", c.Chain.Seq, claims[i-1].Chain.Seq)
 		}
 	}
 	// The head is the value a reader quotes as where the log stood, and nothing checked it, so a
@@ -709,12 +735,14 @@ func verifyBundleChain(claims []BundleClaim, head BundleCoord) (bool, int64) {
 	if len(claims) > 0 {
 		newest := claims[len(claims)-1].Chain
 		if head.Seq < newest.Seq {
-			return false, newest.Seq
+			return false, newest.Seq, fmt.Sprintf("the head names seq %d, behind the newest entry at "+
+				"seq %d", head.Seq, newest.Seq)
 		}
 		if head.Seq == newest.Seq && head.Link != newest.Link {
-			return false, newest.Seq
+			return false, newest.Seq, fmt.Sprintf("the head names seq %d with a link that is not the "+
+				"link of the entry there", head.Seq)
 		}
-		return true, 0
+		return true, 0, ""
 	}
 	// A bundle carrying no claims proves nothing, so it must not report that nothing was altered.
 	// The head is only constrained by the claims, so with none the loop above never ran and this
@@ -723,12 +751,48 @@ func verifyBundleChain(claims []BundleClaim, head BundleCoord) (bool, int64) {
 	// recompute)" to give it away. A receipt is a claim about something; an empty one is not a true
 	// claim about everything.
 	if head.Seq != 0 || head.Link != "" {
-		return false, head.Seq
+		return false, head.Seq, fmt.Sprintf("no entries are carried, so the head at seq %d rests on "+
+			"nothing", head.Seq)
 	}
-	return false, 0
+	return false, 0, "no entries are carried, so there is nothing to recompute"
 }
 
-// linearInstallMatches reports whether every claim that names an install names the signer's.
+// sequenceProblem says why the claim at seq does not follow the claim at prev.
+//
+// A gap names the sequence numbers it leaves out, since the claim after it recomputes and what is
+// wrong is what is absent. A number that is absent at this point but carried later in the document
+// is out of place rather than missing, and calling it missing would send a reader looking for an
+// entry that is sitting in the file.
+func sequenceProblem(claims []BundleClaim, prev, seq int64) string {
+	switch {
+	case seq == prev:
+		return fmt.Sprintf("the entry at seq %d appears twice", seq)
+	case seq < prev:
+		return fmt.Sprintf("the entry at seq %d comes after seq %d, so the entries are out of order",
+			seq, prev)
+	}
+	var displaced int64
+	found := false
+	for _, c := range claims {
+		if c.Chain.Seq > prev && c.Chain.Seq < seq && (!found || c.Chain.Seq < displaced) {
+			displaced, found = c.Chain.Seq, true
+		}
+	}
+	switch {
+	case found:
+		return fmt.Sprintf("the entry at seq %d comes before seq %d, so the entries are out of order",
+			seq, displaced)
+	case prev+1 == seq-1:
+		return fmt.Sprintf("the entry at seq %d is missing, so seq %d does not follow seq %d",
+			prev+1, seq, prev)
+	default:
+		return fmt.Sprintf("the entries at seq %d through %d are missing, so seq %d does not follow "+
+			"seq %d", prev+1, seq-1, seq, prev)
+	}
+}
+
+// linearInstallMatches reports whether every claim that names an install names the signer's, and
+// when one does not, the sequence of the first that does not.
 //
 // A claim that names one is bound, and the binding is load-bearing rather than cosmetic: the
 // install id is one of the fields the chain link is computed over, in entryClaim, so rewriting it
@@ -744,7 +808,7 @@ func verifyBundleChain(claims []BundleClaim, head BundleCoord) (bool, int64) {
 // already written commits to what it committed to. The remedy is on the producing side, not this
 // one. Every process that appends must bind its install, which is why serve and the demo both do it
 // before their first write and warn loudly when they cannot.
-func linearInstallMatches(b *Bundle, names installNames) bool {
+func linearInstallMatches(b *Bundle, names installNames) (bool, int64) {
 	for i := range b.Claims {
 		named, _ := b.Claims[i].Payload["install_id"].(string)
 		if named == "" {
@@ -755,10 +819,10 @@ func linearInstallMatches(b *Bundle, names installNames) bool {
 		// Either name this key has written under. An entry written before the id derivation was
 		// widened names the install by its old width, and no later change can rewrite it.
 		if !names.matches(named) {
-			return false
+			return false, b.Claims[i].Chain.Seq
 		}
 	}
-	return true
+	return true, 0
 }
 
 // verifyBundleAnchors reports whether every anchor names a coordinate the bundle actually holds at

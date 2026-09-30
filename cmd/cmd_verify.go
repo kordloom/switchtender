@@ -59,6 +59,7 @@ func runVerify(cmd *cobra.Command, args []string) error {
 	}
 
 	out := cmd.OutOrStdout()
+	noun := documentNoun(rep.Subject)
 	mark := func(ok bool) string {
 		if ok {
 			return "OK"
@@ -75,12 +76,12 @@ func runVerify(cmd *cobra.Command, args []string) error {
 	if pinned {
 		fmt.Fprintln(out, "pin          OK (matches the fingerprint you pinned, so this is that install's key)")
 	} else {
-		fmt.Fprintln(out, "pin          NONE (this says the receipt was signed, not who signed it)")
+		fmt.Fprintf(out, "pin          NONE (this says the %s was signed, not who signed it)\n", noun)
 	}
 	if rep.ChainOK {
 		fmt.Fprintf(out, "chain        OK (%d entries recompute, head seq %d)\n", rep.ClaimCount, rep.Head.Seq)
 	} else {
-		fmt.Fprintf(out, "chain        FAILED (does not recompute at seq %d)\n", rep.BrokeAtSeq)
+		fmt.Fprintf(out, "chain        FAILED (%s)\n", chainProblem(rep))
 	}
 	if rep.AnchorCount > 0 {
 		// The count of anchors was the whole line, which said nothing about the one part of an anchor
@@ -132,18 +133,40 @@ func runVerify(cmd *cobra.Command, args []string) error {
 
 	if !rep.OK() {
 		fmt.Fprintln(out, "\nNOT VERIFIED: "+failedChecks(rep))
-		return fmt.Errorf("receipt did not verify: %s", failedChecks(rep))
+		return fmt.Errorf("%s did not verify: %s", noun, failedChecks(rep))
 	}
 	// Without a pin a forged receipt earned the same VERIFIED as a genuine one, because any key signs
 	// its own bundle. The unpinned result is its own verdict, the one the browser verifier gives.
 	if !pinned {
-		fmt.Fprintln(out, "\nINTACT, BUT UNIDENTIFIED: nothing has been altered since this receipt was "+
+		fmt.Fprintf(out, "\nINTACT, BUT UNIDENTIFIED: nothing has been altered since this %s was "+
 			"signed. Who signed it is unchecked, because no key was pinned. Pass --pubkey with the "+
-			"fingerprint the producing install publishes at /.well-known/loomseal.json.")
+			"fingerprint the producing install publishes at /.well-known/loomseal.json.\n", noun)
 		return nil
 	}
-	fmt.Fprintln(out, "\nVERIFIED: nothing has been altered since this receipt was signed")
+	fmt.Fprintf(out, "\nVERIFIED: nothing has been altered since this %s was signed\n", noun)
 	return nil
+}
+
+// documentNoun names the file being verified by what its claims are about. A receipt is about one
+// run. The same command reads the whole-install bundle, whose subject is the fleet, and calling that
+// a receipt told its reader they were holding the record of one change when they held the record of
+// every change the install made.
+func documentNoun(subject audit.BundleSubject) string {
+	if subject.Type == "run" {
+		return "receipt"
+	}
+	return "bundle"
+}
+
+// chainProblem says why the chain did not verify, in the verifier's own words, which name the fault
+// and where it is. The position alone was printed as a link that does not recompute, and the entry
+// after a gap recomputes, so a bundle missing seq 10 sent its reader to seq 11. A report that carries
+// no reason, which the verifier never produces, falls back to the position.
+func chainProblem(rep *audit.BundleReport) string {
+	if rep.ChainProblem != "" {
+		return rep.ChainProblem
+	}
+	return fmt.Sprintf("the chain does not verify at seq %d", rep.BrokeAtSeq)
 }
 
 // refuseEmptyPin refuses a pin flag that was given with nothing in it. A pin is usually filled in by
@@ -181,12 +204,13 @@ func matchWord(ok bool) string {
 // the chain broke, or the approved change is not the change that ran; those are different problems
 // with different owners.
 func failedChecks(rep *audit.BundleReport) string {
+	noun := documentNoun(rep.Subject)
 	var failed []string
 	if !rep.SignatureOK {
 		failed = append(failed, "the signature does not cover these bytes")
 	}
 	if !rep.ChainOK {
-		failed = append(failed, fmt.Sprintf("the chain does not recompute at seq %d", rep.BrokeAtSeq))
+		failed = append(failed, chainProblem(rep))
 	}
 	// Only when the receipt carries an anchor. Anchors are not trusted over a chain that does not
 	// recompute, so a broken chain marks them failed too, and a receipt holding no anchor at all was
@@ -196,7 +220,7 @@ func failedChecks(rep *audit.BundleReport) string {
 		if len(rep.TimestampProblems) > 0 {
 			failed = append(failed, "a timestamp token does not fix the link its anchor names")
 		} else {
-			failed = append(failed, "an anchor names a position this receipt does not prove")
+			failed = append(failed, "an anchor names a position this "+noun+" does not prove")
 		}
 	}
 	if rep.OutcomePresent && !rep.OutcomeDigestOK {
@@ -209,7 +233,7 @@ func failedChecks(rep *audit.BundleReport) string {
 		if approvedAndExecuted(rep) {
 			failed = append(failed, "the approved and the executed change are not the same")
 		} else {
-			failed = append(failed, "the spec digests this receipt discloses do not agree")
+			failed = append(failed, "the spec digests this "+noun+" discloses do not agree")
 		}
 	}
 	if len(failed) == 0 {

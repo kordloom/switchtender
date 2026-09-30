@@ -22,19 +22,24 @@ func TestFailedChecksNamesOnlyTheChecksThatApply(t *testing.T) {
 		Report     *audit.BundleReport
 		WantHas    []string
 		WantHasNot []string
-	}{{ // Test 0: A broken chain on a receipt carrying no anchor says nothing about anchors.
+	}{{ // Test 0: A broken chain on a receipt carrying no anchor says nothing about anchors, and it
+		// gives the verifier's reason for the chain rather than a bare position.
 		Name: "broken chain without anchors",
 		Report: &audit.BundleReport{
+			Subject:     audit.BundleSubject{Type: "run", ID: "run_1"},
 			SignatureOK: false, ChainOK: false, BrokeAtSeq: 1,
-			AnchorsOK: false, AnchorCount: 0,
+			ChainProblem: "the entry at seq 1 does not recompute to its link",
+			AnchorsOK:    false, AnchorCount: 0,
 			DecisionsOK: true, SpecConsistent: true,
 		},
-		WantHas:    []string{"the signature does not cover these bytes", "does not recompute at seq 1"},
+		WantHas: []string{"the signature does not cover these bytes",
+			"the entry at seq 1 does not recompute to its link"},
 		WantHasNot: []string{"anchor"},
 	}, { // Test 1: The same receipt carrying an anchor does report it, since the anchor is real and
 		// is genuinely not proven by a chain that does not recompute.
 		Name: "broken chain with an anchor",
 		Report: &audit.BundleReport{
+			Subject:     audit.BundleSubject{Type: "run", ID: "run_1"},
 			SignatureOK: true, ChainOK: false, BrokeAtSeq: 3,
 			AnchorsOK: false, AnchorCount: 1,
 			DecisionsOK: true, SpecConsistent: true,
@@ -50,6 +55,25 @@ func TestFailedChecksNamesOnlyTheChecksThatApply(t *testing.T) {
 		},
 		WantHas:    []string{"a timestamp token does not fix the link its anchor names"},
 		WantHasNot: []string{"an anchor names a position"},
+	}, { // Test 3: A whole-install bundle is not a receipt, and its refusal does not call it one.
+		Name: "bundle with an anchor",
+		Report: &audit.BundleReport{
+			Subject:     audit.BundleSubject{Type: "fleet", ID: "in_1"},
+			SignatureOK: true, ChainOK: false, BrokeAtSeq: 11,
+			ChainProblem: "the entry at seq 10 is missing, so seq 11 does not follow seq 9",
+			AnchorsOK:    false, AnchorCount: 1,
+			DecisionsOK: true, SpecConsistent: true,
+		},
+		WantHas: []string{"the entry at seq 10 is missing, so seq 11 does not follow seq 9",
+			"an anchor names a position this bundle does not prove"},
+		WantHasNot: []string{"receipt", "does not recompute"},
+	}, { // Test 4: A report that carries no reason still names the position rather than nothing.
+		Name: "chain without a reason",
+		Report: &audit.BundleReport{
+			SignatureOK: true, ChainOK: false, BrokeAtSeq: 3,
+			AnchorsOK: true, DecisionsOK: true, SpecConsistent: true,
+		},
+		WantHas: []string{"the chain does not verify at seq 3"},
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -112,7 +136,8 @@ func TestSpecVerdictNamesOnlyTheDigestsItCompared(t *testing.T) {
 			"approved is not the change that ran",
 		WantReason: "the approved and the executed change are not the same",
 	}, { // Test 7: A disagreement on a rejected run does not claim anything was approved or ran.
-		Report: &audit.BundleReport{Decisions: rejected, OutcomePresent: true, OutcomeDigestOK: true,
+		Report: &audit.BundleReport{Subject: audit.BundleSubject{Type: "run", ID: "run_1"},
+			Decisions: rejected, OutcomePresent: true, OutcomeDigestOK: true,
 			OutcomeBody: ended("rejected"), SpecPresent: true},
 		WantVerdict: "rejected and disclosed digests do not agree",
 		WantReason:  "the spec digests this receipt discloses do not agree",
