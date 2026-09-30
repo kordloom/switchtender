@@ -13,7 +13,8 @@ image:
   # official-images name that belongs to nobody, so every pod went ImagePullBackOff while the real
   # image sat published on ghcr.
   repository: ghcr.io/kordloom/switchtender
-  # tag defaults to the chart appVersion when empty.
+  # tag defaults to the chart appVersion when empty. With database.dsn set, a tag older than
+  # 1.101.0 is refused: those releases do not read SWITCHTENDER_DB and would run on SQLite.
   tag: ""
   pullPolicy: IfNotPresent
 

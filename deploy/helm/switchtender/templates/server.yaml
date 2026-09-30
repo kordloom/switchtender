@@ -4,6 +4,7 @@
 {{- if and (not .Values.database.dsn) (gt (int .Values.server.replicas) 1) }}
 {{- fail "SQLite mode (empty database.dsn) runs exactly one server: two replicas sharing one file corrupt it. Set database.dsn to PostgreSQL for more than one." }}
 {{- end }}
+{{- include "switchtender.requireDatabaseAwareImage" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

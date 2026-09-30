@@ -116,6 +116,14 @@ jobs:
           refuse --set worker.enabled=true
           refuse --set database.dsn=postgres://u:p@postgres/db
           refuse --set database.dsn=postgres://u:p@postgres/db --set auditKey=aa --set worker.enabled=true
+          # An image older than the release that reads SWITCHTENDER_DB would run on SQLite against
+          # PostgreSQL, so the chart refuses it, with or without the v prefix.
+          refuse --set database.dsn=postgres://u:p@postgres/db --set auditKey=aa --set image.tag=1.100.0
+          refuse --set database.dsn=postgres://u:p@postgres/db --set auditKey=aa --set image.tag=v1.100.0
+          "$helm" template t deploy/helm/switchtender --set encryptionKey=k --set encryptionSalt=s \
+            --set database.dsn=postgres://u:p@postgres/db --set auditKey=aa --set image.tag=1.101.0 >/dev/null
+          "$helm" template t deploy/helm/switchtender --set encryptionKey=k --set encryptionSalt=s \
+            --set image.tag=1.100.0 >/dev/null
           # SQLite mode's Recreate must null the rolling parameters, or an upgrade from a
           # RollingUpdate deployment is refused by the API server.
           grep -q 'rollingUpdate: null' /tmp/community.yaml
