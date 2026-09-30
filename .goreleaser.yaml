@@ -39,6 +39,26 @@ universal_binaries:
     replace: true
     name_template: switchtender
 
+# Sign the macOS binary with the Developer ID certificate and notarize it, so a quarantined
+# download or a Homebrew cask install runs instead of Gatekeeper refusing an unidentified
+# developer. It sits before the archives, so the archive, SHA256SUMS, and the BINARY_SHA256SUMS
+# manifest built after this all describe the signed binary. It switches on only when the
+# certificate is present and non-empty, since a missing Actions secret arrives as an empty
+# string, which keeps forks and local snapshots building unsigned.
+notarize:
+  macos:
+    - enabled: '{{ ne (index .Env "MACOS_SIGN_P12") "" }}'
+      ids: [switchtender]
+      sign:
+        certificate: '{{ index .Env "MACOS_SIGN_P12" }}'
+        password: '{{ index .Env "MACOS_SIGN_PASSWORD" }}'
+      notarize:
+        issuer_id: '{{ index .Env "MACOS_NOTARY_ISSUER_ID" }}'
+        key_id: '{{ index .Env "MACOS_NOTARY_KEY_ID" }}'
+        key: '{{ index .Env "MACOS_NOTARY_KEY" }}'
+        wait: true
+        timeout: 20m
+
 archives:
   - id: switchtender
     formats: [tar.gz]
@@ -98,7 +118,7 @@ homebrew_casks:
       # plain .Env is the only portable form.
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: "https://switchtender.com"
-    description: "One control point for every way your infrastructure can change"
+    description: "One gate for every change to production, including the ones AI agents make"
 
 # Linux packages: deb, rpm, and apk built with nfpm. No secrets required.
 nfpms:

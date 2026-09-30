@@ -172,6 +172,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ""
+          # The signing material reaches this step alone, never job-wide: GoReleaser signs and
+          # notarizes the macOS binary before archiving it, and nothing after needs these.
+          MACOS_SIGN_P12: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          MACOS_NOTARY_KEY: ${{ secrets.NOTARY_KEY_P8 }}
 
       # BINARY_SHA256SUMS names the hash of the binary inside each archive, which is what
       # `switchtender version --verify` holds the running executable against. SHA256SUMS covers the
