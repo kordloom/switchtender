@@ -1,12 +1,15 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -198,17 +201,71 @@ func recordBinds(binds *[]desktopBind) listenFunc {
 	}
 }
 
-// TestDesktopAlive covers the liveness probe: false with nothing listening on the port.
+// TestDesktopAlive covers the liveness probe: false with nothing listening on the port, and true
+// with an instance answering its health check.
+//
+// The port with nothing listening used to be one this test bound and closed again, and a server
+// another test started in parallel could be handed that port before the probe asked it. A correct
+// probe then found that server answering /healthz and the test failed. Now the cases with a fixed
+// answer are answered through the probe's request rather than the network, and the one case that
+// goes to the network reads whether anything was listening from the probe's own request rather
+// than from the port having been free a moment before.
 func TestDesktopAlive(t *testing.T) {
 	t.Parallel()
+
+	// Test 0: A refused connection is not a live instance, and the probe asks the port it was
+	// given for its health check and nothing else.
+	//
+	// The request is answered with the refusal a port with nothing listening gives, so no server
+	// another test started can answer it instead.
+	var asked []string
+	refused := func(url string) (*http.Response, error) {
+		asked = append(asked, url)
+		return nil, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+	}
+	if desktopAliveWith(8443, refused) {
+		t.Error("desktopAlive(8443) = true with the connection refused")
+	}
+	if want := "http://127.0.0.1:8443/healthz"; len(asked) != 1 || asked[0] != want {
+		t.Errorf("the probe asked for %v, want only %s", asked, want)
+	}
+
+	// Test 1: An instance answering its health check is live, so Test 0 cannot pass on a probe
+	// that never says yes.
+	answered := func(string) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
+	}
+	if !desktopAliveWith(8443, answered) {
+		t.Error("desktopAlive(8443) = false with an instance answering its health check")
+	}
+
+	// Test 2: The same probe with the operating system answering, on a port this test freed.
+	//
+	// The probe's own request says whether anything was listening when it asked. Refused, the
+	// probe must report false. Answered, or left waiting, a server another test started took the
+	// port first, and what it said is no evidence about a port with nothing listening, so that is
+	// logged rather than failed, since Test 0 already pins the refusal.
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
 	}
 	port := l.Addr().(*net.TCPAddr).Port
 	_ = l.Close()
-	if desktopAlive(port) {
+	client := &http.Client{Timeout: desktopProbeTimeout}
+	var gets []error
+	alive := desktopAliveWith(port, func(url string) (*http.Response, error) {
+		resp, err := client.Get(url)
+		gets = append(gets, err)
+		return resp, err
+	})
+	switch {
+	case len(gets) != 1:
+		t.Fatalf("the probe made %d requests, want 1", len(gets))
+	case errors.Is(gets[0], syscall.ECONNREFUSED) && alive:
 		t.Errorf("desktopAlive(%d) = true with nothing listening", port)
+	case !errors.Is(gets[0], syscall.ECONNREFUSED):
+		t.Logf("port %d was taken before the probe asked it (%v), so something was listening",
+			port, gets[0])
 	}
 }
 

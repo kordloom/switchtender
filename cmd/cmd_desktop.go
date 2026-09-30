@@ -132,10 +132,23 @@ func saveDesktopPort(dir string, port int) {
 	_ = os.WriteFile(filepath.Join(dir, "port"), []byte(strconv.Itoa(port)), 0o600)
 }
 
+// desktopProbeTimeout bounds the liveness probe, so a launch does not wait on a port held by
+// something that never answers.
+const desktopProbeTimeout = 500 * time.Millisecond
+
 // desktopAlive reports whether a SwitchTender instance is answering on the loopback port.
 func desktopAlive(port int) bool {
-	client := &http.Client{Timeout: 500 * time.Millisecond}
-	resp, err := client.Get("http://127.0.0.1:" + strconv.Itoa(port) + "/healthz")
+	client := &http.Client{Timeout: desktopProbeTimeout}
+	return desktopAliveWith(port, client.Get)
+}
+
+// getFunc fetches a URL the way http.Client.Get does.
+type getFunc func(url string) (*http.Response, error)
+
+// desktopAliveWith is desktopAlive with its health check made through get, so a caller can see
+// which URL the probe asked for and what the request answered at the moment it answered.
+func desktopAliveWith(port int, get getFunc) bool {
+	resp, err := get("http://127.0.0.1:" + strconv.Itoa(port) + "/healthz")
 	if err != nil {
 		return false
 	}
