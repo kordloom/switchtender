@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -260,10 +261,14 @@ func TestMirrorAgreesWithTheReferenceCorpus(t *testing.T) {
 			// The corpus asks whether the mirror agrees on format verdicts, not whether it
 			// trusts fixture producers, so each vector's own declared install-and-key pair is
 			// accepted the way a relying party accepts a rotation. The product's strict
-			// derivation tie stays exactly as strict for real verification.
+			// derivation tie stays exactly as strict for real verification. An install id in a
+			// key-minted form is the exception: whether it was minted from the signing key is a
+			// format verdict of the switchtender profile, so the mirror judges it unaccepted,
+			// exactly as real verification does.
 			var rep *audit.BundleReport
 			var err error
-			if probe.Producer.InstallID != "" && probe.Producer.KeyID != "" {
+			if probe.Producer.InstallID != "" && probe.Producer.KeyID != "" &&
+				!keyMintedInstallID.MatchString(probe.Producer.InstallID) {
 				rep, err = audit.VerifyBundleForInstall(signed, probe.Producer.KeyID,
 					probe.Producer.InstallID)
 			} else {
@@ -303,6 +308,10 @@ func TestMirrorAgreesWithTheReferenceCorpus(t *testing.T) {
 		})
 	}
 }
+
+// keyMintedInstallID matches an install id in a form minted from a key: in_ and 32 hex digits of the
+// key's SHA-256, or the legacy in_ and 12 hex digits, the key's first six bytes.
+var keyMintedInstallID = regexp.MustCompile(`^in_(?:[0-9a-f]{32}|[0-9a-f]{12})$`)
 
 // implementsProfile reports whether a corpus bundle declares a chain profile this product builds and
 // verifies, which is the only case where its chain verdict has to match the reference's.
