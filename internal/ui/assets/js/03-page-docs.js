@@ -183,8 +183,8 @@ const TOURS = [
 		steps: [
 			// Anchored on the hero tiles rather than centered: a centered first step dimmed the
 			// whole screen and sat exactly over the numbers a first visit should be looking at.
-			{ sel: "#ov-metrics", title: "Welcome to SwitchTender", body: "One binary runs Ansible, Terraform, Bash, Python, and Go, with no Kubernetes. Every change lands on the tamper-evident chain you can see verified right here." },
-			{ sel: ".page-head .button.primary", title: "Launch any tool", body: "Start a run with Ansible, Bash, Terraform, or Python, each with a dry run, and mix them in a single pipeline." },
+			{ sel: "#ov-metrics", title: "Welcome to SwitchTender", body: "One binary runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, with no Kubernetes. Every change lands on the tamper-evident chain you can see verified right here." },
+			{ sel: ".page-head .button.primary", title: "Launch any tool", body: "Start a run with Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, or Go, each with a dry run, and mix them in a single pipeline." },
 			{ sel: ".panel-runs", title: "Watch every run", body: "Runs stream live here, with a host matrix, sharded splits, and multi-step pipelines all in one place." },
 			{ sel: "#tiles a[href='/ui/migrate']", title: "Bring your work with you", body: "Migrating from another tool? Import projects, inventories, templates, and schedules in a few clicks." },
 			{ sel: ".tile-search", title: "Find anything fast", body: "This search filters instantly, and every list in SwitchTender is searchable the same way." },
@@ -204,7 +204,7 @@ const TOURS = [
 			{ page: "workflows", path: "/ui/workflows", sel: "#wf-canvas", title: "Drag a pipeline together", body: "Wire all seven tools, and any tool you plug in, into one graph with per-step retries. AWX's signature feature, without the Kubernetes bill.", hold: 7500 },
 			{ page: "policies", path: "/ui/policies", sel: "#policy-open", title: "The gate nobody skips", body: "Policy holds a prod terraform destroy for an admin's sign-off, automatically. Approvals are enforced, not suggested.", hold: 7000 },
 			{ page: "audit", path: "/ui/audit", sel: "#audit-verify", title: "Prove every change", body: "Every change links into a tamper-evident hash chain. One click verifies it here, and a signed bundle verifies offline with an open verifier.", hold: 7000 },
-			{ page: "overview", path: "/ui/", sel: "#tiles a[href='/ui/migrate']", title: "Switching is one command", body: "Import from AWX, Semaphore, Rundeck, Jenkins, or a crontab in a single pass. AWX and Semaphore bring projects, inventories, templates, surveys, and schedules.", hold: 6500 },
+			{ page: "overview", path: "/ui/", sel: "#tiles a[href='/ui/migrate']", title: "Switching is one command", body: "Import from AWX, Semaphore, Chef, Puppet, Rundeck, or Jenkins in a single pass, and a crontab from the command line. AWX and Semaphore bring projects, inventories, templates, surveys, and schedules.", hold: 8000 },
 			{ title: "That is the moat", body: closingBody(
 				"Running many tools is table stakes. A control plane that proves itself is not. Press Explore and try anything, nothing here can break.",
 				"Running many tools is table stakes. A control plane that proves itself is not. Press Explore and start with a dry run."), hold: 8000 },
@@ -214,7 +214,7 @@ const TOURS = [
 		id: "migrate", title: "Coming from another controller", desc: "Move your automation over",
 		page: "migrate", path: "/ui/migrate",
 		steps: [
-			{ title: "Leave your old controller behind", body: "AWX and Semaphore bring projects, inventories, templates, surveys, credential shells, and schedules in a single pass. Rundeck and Jenkins bring templates, surveys, and schedules against an inventory you name. An AWX workflow arrives as a workflow template unless its graph is one a pipeline cannot express, and then it is reported rather than dropped." },
+			{ title: "Leave your old controller behind", body: "Import from AWX, Semaphore, Chef, Puppet, Rundeck, or Jenkins in a single pass, and a crontab from the command line. AWX and Semaphore bring projects, inventories, templates, surveys, credential shells, and schedules. Rundeck and Jenkins bring templates, surveys, and schedules against an inventory you name. Chef and Puppet bring the fleet, every node grouped by environment. An AWX workflow arrives as a workflow template unless its graph is one a pipeline cannot express, and then it is reported rather than dropped." },
 			{ title: "Preview before you commit", body: "Every import runs as a dry run first, showing exactly what it will create. Apply it when it looks right." },
 			{ title: "No lock-in", body: "You can export and leave anytime, too. SwitchTender earns the switch. It does not trap you." },
 		],
