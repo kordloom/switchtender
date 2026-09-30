@@ -90,12 +90,21 @@ func desktopDataDir() (string, error) {
 // and records the choice. The listener stays open and is handed to the server, so no other process
 // can take the port between choosing it and serving on it.
 func desktopListener(dir string) (net.Listener, error) {
+	return desktopListenerWith(dir, net.Listen)
+}
+
+// listenFunc binds a listener the way net.Listen does.
+type listenFunc func(network, address string) (net.Listener, error)
+
+// desktopListenerWith is desktopListener with every bind made through listen, so a caller can see
+// which port each bind asked for and what it answered at the moment it answered.
+func desktopListenerWith(dir string, listen listenFunc) (net.Listener, error) {
 	if port, ok := savedDesktopPort(dir); ok {
-		if l, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(port)); err == nil {
+		if l, err := listen("tcp", "127.0.0.1:"+strconv.Itoa(port)); err == nil {
 			return l, nil
 		}
 	}
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	l, err := listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
 	}

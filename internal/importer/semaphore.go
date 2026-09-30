@@ -198,18 +198,25 @@ func (v *semaphoreEnumValue) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// semaphoreSchedule is a Semaphore cron schedule.
+// semaphoreSchedule is a Semaphore schedule: a cron cadence, or a single run at a set time.
 type semaphoreSchedule struct {
 	// Name identifies the schedule.
 	Name string `json:"name"`
-	// CronFormat is the standard cron expression.
+	// CronFormat is the standard cron expression, empty for a single run.
 	CronFormat string `json:"cron_format"`
+	// Type is empty for a cron cadence and semaphoreRunOnce for a single run at RunAt.
+	Type string `json:"type"`
+	// RunAt is when a single run fires.
+	RunAt string `json:"run_at"`
 	// Template names the template the schedule runs.
 	Template string `json:"template"`
 	// Active reports whether Semaphore fires this schedule; absent means active, which is what an
 	// export written before the field existed means.
 	Active *bool `json:"active"`
 }
+
+// semaphoreRunOnce is the schedule type Semaphore gives a single run at a set time.
+const semaphoreRunOnce = "run_at"
 
 // FromSemaphore maps a Semaphore export into a Plan of SwitchTender objects with cross-references
 // wired by generated id. Like the AWX mapping it records warnings rather than failing on an asset
@@ -283,8 +290,9 @@ func (p *Plan) addSemaphoreProject(proj semaphoreProject, now time.Time) {
 	inventoryIDs := map[string]string{}
 	for _, inv := range proj.Inventories {
 		if inv.Type != "" && inv.Type != "static" {
-			p.warn("inventory %q in project %q is type %q; only static content imports",
-				inv.Name, proj.Name, inv.Type)
+			p.warn("inventory %q in project %q is type %q, so it imports holding what the "+
+				"export's inventory field carried, which for a file inventory is a path rather "+
+				"than hosts. Read it before relying on it", inv.Name, proj.Name, inv.Type)
 		}
 		// An inventory that arrives with nothing in it is reported, on the same terms as the AWX
 		// importer: this format has more than one shape, and one that carries its content somewhere
@@ -331,6 +339,20 @@ func (p *Plan) addSemaphoreProject(proj semaphoreProject, now time.Time) {
 		if !ok {
 			p.warn("schedule %q in project %q references unknown template %q",
 				s.Name, proj.Name, s.Template)
+			continue
+		}
+		// A single run carries no cron expression, and handing its empty one to the cron check
+		// was reported as "bad cron: empty spec string", which reads as a broken export rather
+		// than as a one-off. A schedule here repeats, so it does not come across, and the report
+		// says why.
+		if s.Type == semaphoreRunOnce {
+			when := ""
+			if at := strings.TrimSpace(s.RunAt); at != "" {
+				when = ", at " + oneLine(at)
+			}
+			p.warn("schedule %q in project %q was not imported: it runs once%s, and a "+
+				"schedule here repeats on a cron expression. Launch template %q by hand when it "+
+				"is due, if it is still needed", s.Name, proj.Name, when, s.Template)
 			continue
 		}
 		// Semaphore's cron format is taken verbatim, so it is validated like any other before it

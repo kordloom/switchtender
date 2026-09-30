@@ -201,9 +201,11 @@ and what a license pays for is the report that assembles it.
 **A witness remembers what the server can no longer take back.** `switchtender witness`, run on a
 machine the server's operator does not control, polls the public beat feed, keeps a signed
 checkpoint of what it saw, and raises a finding when a beat goes missing, a witnessed beat comes
-back rewritten, or the head regresses. Its memory is first write wins, so a rewrite is never signed
-into the checkpoint as if it were the truth, and a standing condition is reported when it appears
-and again when it changes, not once per poll. The checkpoint's signer is pinned to the witness's
+back rewritten, or the head regresses. The feed carries beats only from a server started with
+`--span-cadence`, for example `--span-cadence 60s`, so turn that on before pointing a witness at
+it. The witness's memory is first write wins, so a rewrite is never signed into the checkpoint as
+if it were the truth, and a standing condition is reported when it appears and again when it
+changes, not once per poll. The checkpoint's signer is pinned to the witness's
 own key, so a state file replaced by a forger is refused rather than believed, and one state file
 holds one server. That key is the witness's own, kept in `witness-key.json` and never the watched
 server's `producer-key.json`, so a witness run on the host it watches still signs with a key its

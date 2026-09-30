@@ -78,9 +78,9 @@ and nothing else. The table is in
 <a href="/docs/migration#what-each-source-brings-over">what each source brings over</a>.</p>
 <h2 id="from-the-ui">From the UI</h2>
 <ol>
-<li>Export from your current tool. <code>awx export</code> produces a JSON document. Semaphore has no single
-export command, so gather the project's repositories, inventories, keys, templates, and schedules
-from its API into one JSON document. Rundeck exports a project's jobs as YAML or JSON, or a whole
+<li>Export from your current tool. <code>awx export</code> produces a JSON document. Semaphore writes a project
+backup, one JSON document holding the project's repositories, inventories, keys, templates, and
+schedules, and it imports as it is. Rundeck exports a project's jobs as YAML or JSON, or a whole
 project as an archive from Project Settings; either one uploads and the importer tells them apart
 by content. Jenkins has no export file at all, so zip its <code>jobs</code> directory and upload that.</li>
 <li>Open Migrate from the sidebar, or go to <code>/ui/migrate</code>.</li>

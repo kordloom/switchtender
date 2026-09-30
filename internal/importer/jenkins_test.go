@@ -574,9 +574,10 @@ func TestFromJenkinsAgainstRealJenkinsOutput(t *testing.T) {
 		t.Fatalf("JenkinsBundle() error = %v", err)
 	}
 	// The folder's own job sits two levels down and must arrive carrying the folder in its name.
+	// The folder itself is not a job, so it is not among them.
 	if diff := cmp.Diff([]string{
 		"empty-job", "multi-step", "multi-timer", "nightly-backup", "paused-job", "pipeline-build",
-		"platform", "platform/db-vacuum", "poll-deploy", "weekly-report", "windows-task",
+		"platform/db-vacuum", "poll-deploy", "weekly-report", "windows-task",
 	}, importer.JenkinsJobNames(bundle)); diff != "" {
 		t.Errorf("job names mismatch (-want +got):\n%s", diff)
 	}
@@ -733,15 +734,13 @@ func TestJenkinsBundleAcceptsEveryPathAnOperatorWouldPointAt(t *testing.T) {
 		Path: "testdata/jenkins-home",
 		WantNames: []string{
 			"empty-job", "multi-step", "multi-timer", "nightly-backup", "paused-job",
-			"pipeline-build", "platform", "platform/db-vacuum", "poll-deploy", "weekly-report",
-			"windows-task",
+			"pipeline-build", "platform/db-vacuum", "poll-deploy", "weekly-report", "windows-task",
 		},
 	}, { // Test 1: The jobs directory inside it, which is equally plausible.
 		Path: "testdata/jenkins-home/jobs",
 		WantNames: []string{
 			"empty-job", "multi-step", "multi-timer", "nightly-backup", "paused-job",
-			"pipeline-build", "platform", "platform/db-vacuum", "poll-deploy", "weekly-report",
-			"windows-task",
+			"pipeline-build", "platform/db-vacuum", "poll-deploy", "weekly-report", "windows-task",
 		},
 	}, { // Test 2: One job's directory, which names the job after the directory.
 		Path:      "testdata/jenkins-home/jobs/nightly-backup/config.xml",

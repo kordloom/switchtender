@@ -118,6 +118,10 @@ type jenkinsParam struct {
 	FlatChoices []string `xml:"choices>string"`
 }
 
+// jenkinsFolderRoot is the root element of a folder's config.xml. A folder holds jobs rather than
+// being one.
+const jenkinsFolderRoot = "com.cloudbees.hudson.plugins.folder.Folder"
+
 // jenkinsJobTypes names each Jenkins root element that is not a freestyle project, so a job that
 // cannot be imported is refused by name rather than reported as an unrecognized file.
 var jenkinsJobTypes = map[string]string{
@@ -245,7 +249,7 @@ func (p *Plan) addJenkinsJob(job jenkinsBundledJob, inventoryName string, now ti
 	if name == "" {
 		name = root
 	}
-	if root == "com.cloudbees.hudson.plugins.folder.Folder" {
+	if root == jenkinsFolderRoot {
 		// A folder holds jobs rather than doing anything itself, and the walker already flattened
 		// its contents into the names of the jobs inside it.
 		return

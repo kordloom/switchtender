@@ -102,8 +102,8 @@ warning:
 
 The report lists the projects, inventories, dynamic inventory sources, credentials, templates, and
 schedules that will be created, prints the content of every inventory it would write rather than
-only its name, and calls out anything that could not be mapped cleanly. Apply it when the report
-looks right:
+only its name, and calls out anything that could not be mapped cleanly. It goes to standard output,
+so redirecting it to a file keeps a copy to review. Apply it when the report looks right:
 
     switchtender import awx awx-export.json --db switchtender.db --apply
 

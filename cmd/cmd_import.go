@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -181,7 +182,7 @@ Without --apply the import only reports what it would create.`,
 			return err
 		}
 		if line := importer.JenkinsFoundLine(importer.JenkinsJobNames(bundle)); line != "" {
-			fmt.Fprintln(os.Stderr, line)
+			fmt.Fprintln(cmd.OutOrStdout(), line)
 		}
 		return runImportData(cmd, bundle, importer.FromJenkins(importJenkinsInventory))
 	},
@@ -219,16 +220,18 @@ func runImport(cmd *cobra.Command, path string, mapper mapFunc) error {
 }
 
 // runImportData maps an export document already in hand, reports the plan, and applies it when
-// --apply is set.
+// --apply is set. The report is the command's output and goes to stdout, so it can be saved and
+// read before anything is written. What to do next goes to stderr.
 func runImportData(cmd *cobra.Command, data []byte, mapper mapFunc) error {
 	plan, err := mapper(data, time.Now())
 	if err != nil {
 		return err
 	}
 
-	reportPlan(plan)
+	out := cmd.OutOrStdout()
+	reportPlan(out, plan)
 	if !importApply {
-		fmt.Fprintln(os.Stderr, "\nRun again with --apply to create these objects.")
+		fmt.Fprintln(cmd.ErrOrStderr(), "\nRun again with --apply to create these objects.")
 		return nil
 	}
 	before := len(plan.Warnings)
@@ -244,64 +247,70 @@ func runImportData(cmd *cobra.Command, data []byte, mapper mapFunc) error {
 	// does not have and will be treated as a filesystem path. The plan was printed before apply ran,
 	// so those lines had nowhere to appear and the operator learned about it from a failed run.
 	if len(plan.Warnings) > before {
-		fmt.Fprintf(os.Stderr, "\n  Warnings from the import (%d):\n", len(plan.Warnings)-before)
+		fmt.Fprintf(out, "\n  Warnings from the import (%d):\n", len(plan.Warnings)-before)
 		for _, w := range plan.Warnings[before:] {
-			fmt.Fprintf(os.Stderr, "    - %s\n", w)
+			fmt.Fprintf(out, "    - %s\n", w)
 		}
 	}
-	fmt.Fprintln(os.Stderr, "\n"+createdLine(created, plan.Report().NeedsSecret))
+	fmt.Fprintln(out, "\n"+createdLine(created, plan.Report().NeedsSecret))
 	if fresh {
-		fmt.Fprintf(os.Stderr, "This started a new database. A server reads it only when started with "+
-			"%s.\n", dbFlag(importDB))
+		fmt.Fprintf(cmd.ErrOrStderr(), "This started a new database. A server reads it only when "+
+			"started with %s.\n", dbFlag(importDB))
 	}
 	return nil
 }
 
-// reportPlan writes a human-readable summary of what an import will create to stdout.
-func reportPlan(plan *importer.Plan) {
-	reportSummary(plan)
-	fmt.Fprintln(os.Stderr, "Import plan:")
-	fmt.Fprintf(os.Stderr, "  Projects:    %d\n", len(plan.Projects))
+// reportPlan writes a human-readable summary of what an import will create to out.
+func reportPlan(out io.Writer, plan *importer.Plan) {
+	reportSummary(out, plan)
+	fmt.Fprintln(out, "Import plan:")
+	fmt.Fprintf(out, "  Projects:    %d\n", len(plan.Projects))
 	for _, p := range plan.Projects {
-		fmt.Fprintf(os.Stderr, "    - %s (%s @ %s)\n", p.Name, p.RepoURL, branchOrDefault(p.Branch))
+		fmt.Fprintf(out, "    - %s (%s @ %s)\n", p.Name, p.RepoURL, branchOrDefault(p.Branch))
 	}
-	fmt.Fprintf(os.Stderr, "  Inventories: %d\n", len(plan.Inventories))
+	fmt.Fprintf(out, "  Inventories: %d\n", len(plan.Inventories))
 	for _, inv := range plan.Inventories {
-		fmt.Fprintf(os.Stderr, "    - %s\n", inv.Name)
+		fmt.Fprintf(out, "    - %s\n", inv.Name)
 		// The content is shown, not just the name. An inventory is the list of machines a play
 		// reaches and the variables it reaches them with, assembled from somebody else's export, so
 		// a review that sees only a name is a review of nothing.
 		for _, line := range strings.Split(strings.TrimRight(inv.Content, "\n"), "\n") {
-			fmt.Fprintf(os.Stderr, "        %s\n", line)
+			fmt.Fprintf(out, "        %s\n", line)
 		}
 	}
-	fmt.Fprintf(os.Stderr, "  Sources:     %d\n", len(plan.Sources))
+	fmt.Fprintf(out, "  Sources:     %d\n", len(plan.Sources))
 	for _, s := range plan.Sources {
-		fmt.Fprintf(os.Stderr, "    - %s (%s)\n", s.Name, s.Source)
+		fmt.Fprintf(out, "    - %s (%s)\n", s.Name, s.Source)
 	}
-	fmt.Fprintf(os.Stderr, "  Credentials: %d (secrets must be re-entered)\n", len(plan.Credentials))
+	// Only a credential that arrives needs its secret entered, so a crontab or a fleet that brings
+	// none is not told to re-enter anything.
+	secrets := ""
+	if len(plan.Credentials) > 0 {
+		secrets = " (secrets must be re-entered)"
+	}
+	fmt.Fprintf(out, "  Credentials: %d%s\n", len(plan.Credentials), secrets)
 	for _, c := range plan.Credentials {
-		fmt.Fprintf(os.Stderr, "    - %s (%s)\n", c.Name, c.Kind)
+		fmt.Fprintf(out, "    - %s (%s)\n", c.Name, c.Kind)
 	}
-	fmt.Fprintf(os.Stderr, "  Templates:   %d\n", len(plan.Templates))
+	fmt.Fprintf(out, "  Templates:   %d\n", len(plan.Templates))
 	for _, t := range plan.Templates {
-		fmt.Fprintf(os.Stderr, "    - %s%s\n", t.Name, templateScope(t))
+		fmt.Fprintf(out, "    - %s%s\n", t.Name, templateScope(t))
 	}
-	fmt.Fprintf(os.Stderr, "  Schedules:   %d\n", len(plan.Schedules))
+	fmt.Fprintf(out, "  Schedules:   %d\n", len(plan.Schedules))
 	for _, s := range plan.Schedules {
 		state := ""
 		if !s.Enabled {
 			state = ", arrives switched off"
 		}
-		fmt.Fprintf(os.Stderr, "    - %s (%s%s)\n", s.Name, s.Cron, state)
+		fmt.Fprintf(out, "    - %s (%s%s)\n", s.Name, s.Cron, state)
 	}
 	if len(plan.Warnings) > 0 {
-		fmt.Fprintf(os.Stderr, "  Warnings (%d):\n", len(plan.Warnings))
+		fmt.Fprintf(out, "  Warnings (%d):\n", len(plan.Warnings))
 		for _, w := range plan.Warnings {
-			fmt.Fprintf(os.Stderr, "    - %s\n", w)
+			fmt.Fprintf(out, "    - %s\n", w)
 		}
 		if n := plan.Suppressed(); n > 0 {
-			fmt.Fprintf(os.Stderr, "    (%d more not listed)\n", n)
+			fmt.Fprintf(out, "    (%d more not listed)\n", n)
 		}
 	}
 }
@@ -402,32 +411,33 @@ func branchOrDefault(branch string) string {
 // templates is asking two questions: how much of this comes across, and what will I be doing by
 // hand afterward. Both answers were already in the plan and neither was countable without reading
 // every line of it.
-func reportSummary(plan *importer.Plan) {
+func reportSummary(out io.Writer, plan *importer.Plan) {
 	r := plan.Report()
-	fmt.Fprintln(os.Stderr, "Migration summary:")
-	fmt.Fprintf(os.Stderr, "  Comes across:       %d objects\n", r.CreatedTotal)
+	fmt.Fprintln(out, "Migration summary:")
+	fmt.Fprintf(out, "  Comes across:       %d %s\n", r.CreatedTotal,
+		plural(r.CreatedTotal, "object", "objects"))
 	for _, c := range r.Created {
-		fmt.Fprintf(os.Stderr, "      %-20s %d\n", c.Kind, c.N)
+		fmt.Fprintf(out, "      %-20s %d\n", c.Kind, c.N)
 	}
 	if r.NeedsSecret > 0 {
 		// Not a limitation of the importer, and worth saying so: an export never carries secret
 		// values, so this number would be the same whoever wrote the tool.
-		fmt.Fprintf(os.Stderr, "  Needs a secret:     %d credential shell(s), because an export "+
+		fmt.Fprintf(out, "  Needs a secret:     %d credential shell(s), because an export "+
 			"never carries secret values\n", r.NeedsSecret)
 	}
-	fmt.Fprintf(os.Stderr, "  Does not come across: %d\n", len(r.LeftOut))
+	fmt.Fprintf(out, "  Does not come across: %d\n", len(r.LeftOut))
 	for _, w := range r.LeftOut {
-		fmt.Fprintf(os.Stderr, "      - %s\n", w)
+		fmt.Fprintf(out, "      - %s\n", w)
 	}
-	fmt.Fprintf(os.Stderr, "  Worth reviewing:    %d\n", len(r.NeedsReview))
+	fmt.Fprintf(out, "  Worth reviewing:    %d\n", len(r.NeedsReview))
 	for _, w := range r.NeedsReview {
-		fmt.Fprintf(os.Stderr, "      - %s\n", w)
+		fmt.Fprintf(out, "      - %s\n", w)
 	}
 	if r.Suppressed > 0 {
 		// A truncated report that looks complete is how somebody concludes an import was clean
 		// when it was only long.
-		fmt.Fprintf(os.Stderr, "  Not listed:         %d further warning(s) past the cap, so this "+
+		fmt.Fprintf(out, "  Not listed:         %d further warning(s) past the cap, so this "+
 			"summary is shorter than the export deserves\n", r.Suppressed)
 	}
-	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(out)
 }

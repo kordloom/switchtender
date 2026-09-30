@@ -28,13 +28,14 @@ same database, a PostgreSQL DSN for separate machines, and they compete for work
 
 ## import
 
-Migrates from AWX, Semaphore, Rundeck, Jenkins, or cron. Reports what it would create, then writes
-it with `--apply`. AWX and Semaphore bring projects, inventories, credential shells, templates,
-surveys, and schedules. Rundeck and Jenkins bring templates, surveys, and schedules, against the
-inventory `--inventory` names, and neither brings an inventory of its own. `import rundeck` takes
-either a job export or a project archive, told apart by content, and an archive brings one project
-when its source control configuration names a repository this can reach. A crontab brings schedules
-alone. The per-source table is in
+Migrates from AWX, Semaphore, Rundeck, Jenkins, Chef, Puppet, or cron. Reports what it would create
+on standard output, then writes it with `--apply`. AWX and Semaphore bring projects, inventories,
+credential shells, templates, surveys, and schedules. Rundeck and Jenkins bring templates, surveys,
+and schedules, against the inventory `--inventory` names, and neither brings an inventory of its
+own. `import rundeck` takes either a job export or a project archive, told apart by content, and an
+archive brings one project when its source control configuration names a repository this can reach.
+A crontab brings schedules alone, and Chef and Puppet bring the fleet as a stored inventory and
+nothing else. The per-source table is in
 [what each source brings over](../docs/migration.md#what-each-source-brings-over).
 
     switchtender import awx export.json --db switchtender.db --apply

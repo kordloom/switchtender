@@ -7,40 +7,67 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 // These tests close holes found by mutating the source and watching the rest of the suite stay
 // green. Each one fails against a specific realistic defect that nothing else caught.
 
-// TestGapFindingNamesTheRangeInTheRightOrder pins the two beat numbers the gap summary reports.
+// TestGapFindingNamesTheMissingBeats pins the beat numbers the gap summary reports.
 //
 // The gap walk is summarized rather than reported per gap, so the only thing an operator can act on
-// is the range in its wording. Swapping the oldest and the newest beat in that sentence tells them
-// to look between beat 10 and beat 1, which is a range that does not exist, and every other
-// assertion in the suite passes because the kind and the counts are unchanged.
-func TestGapFindingNamesTheRangeInTheRightOrder(t *testing.T) {
+// is what its wording names. It named the oldest and the newest beat of the whole answer, "between
+// beat 1 and beat 248" for one beat missing at 207, which sends an operator to search two hundred
+// beats for the one that is gone. It names the missing beats themselves, oldest first, and past a
+// handful of gaps it names the first ones and counts the rest, so a hostile feed cannot turn one
+// finding into a thousand-item sentence.
+func TestGapFindingNamesTheMissingBeats(t *testing.T) {
 	t.Parallel()
-	beats := []Beat{beat(1, 1, link("a")), beat(2, 2, link("b")), beat(10, 10, link("j"))}
-	_, findings, err := Check(nil, "https://st.example", beats, fixedClock)
-	if err != nil {
-		t.Fatalf("Check() error = %v", err)
-	}
-	var detail string
-	for _, f := range findings {
-		if f.Kind == "missing_beat" {
-			detail = f.Detail
-		}
-	}
-	if detail == "" {
-		t.Fatal("a feed skipping beats 3 through 9 raised no missing_beat finding")
-	}
-	if want := "between beat 1 and beat 10"; !strings.Contains(detail, want) {
-		t.Errorf("missing_beat detail = %q, want it to name the range %q, oldest first, so an "+
-			"operator is sent to a range that exists", detail, want)
+	tests := []struct {
+		Beats      []int64
+		WantResult string
+	}{{ // Test 0: One beat missing inside a long answer.
+		Beats: []int64{1, 2, 3, 5, 6, 7},
+		WantResult: "the feed skips 1 beat(s) across 1 gap(s), beat 4, so what the chain held " +
+			"there is gone",
+	}, { // Test 1: A run of missing beats, named oldest first.
+		Beats: []int64{1, 2, 10},
+		WantResult: "the feed skips 7 beat(s) across 1 gap(s), beats 3 to 9, so what the chain " +
+			"held there is gone",
+	}, { // Test 2: Two gaps, each named.
+		Beats: []int64{1, 3, 4, 7},
+		WantResult: "the feed skips 3 beat(s) across 2 gap(s), beat 2 and beats 5 to 6, so what " +
+			"the chain held there is gone",
+	}, { // Test 3: Past the cap the first gaps are named and the rest counted.
+		Beats: []int64{1, 3, 5, 7, 9, 11, 13},
+		WantResult: "the feed skips 6 beat(s) across 6 gap(s), beat 2, beat 4, beat 6, beat 8, " +
+			"and 2 more gap(s), so what the chain held there is gone",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			beats := make([]Beat, 0, len(test.Beats))
+			for _, n := range test.Beats {
+				beats = append(beats, beat(n, n, link(fmt.Sprintf("beat-%d", n))))
+			}
+			_, findings, err := Check(nil, "https://st.example", beats, fixedClock)
+			if err != nil {
+				t.Fatalf("Check() error = %v", err)
+			}
+			var details []string
+			for _, f := range findings {
+				if f.Kind == "missing_beat" {
+					details = append(details, f.Detail)
+				}
+			}
+			if diff := cmp.Diff([]string{test.WantResult}, details); diff != "" {
+				t.Errorf("missing_beat details mismatch (-want +got):\n%s", diff)
+			}
+		})
 	}
 }
 

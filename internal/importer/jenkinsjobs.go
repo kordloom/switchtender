@@ -197,20 +197,18 @@ func stripXMLDeclaration(data []byte) []byte {
 }
 
 // JenkinsJobNames lists the job names a bundle carries, for the message the import prints before it
-// reports the plan.
+// reports the plan. A folder is left out: it holds jobs rather than being one, and its name already
+// leads the names of the jobs inside it.
 func JenkinsJobNames(bundle []byte) []string {
-	var doc struct {
-		// Jobs are the bundled job elements, read only for their names.
-		Jobs []struct {
-			// Name is the job's full name.
-			Name string `xml:"name,attr"`
-		} `xml:"job"`
-	}
+	var doc jenkinsBundle
 	if err := xml.Unmarshal(bundle, &doc); err != nil {
 		return nil
 	}
 	names := make([]string, 0, len(doc.Jobs))
 	for _, j := range doc.Jobs {
+		if root, err := jenkinsRootElement(j.Inner); err == nil && root == jenkinsFolderRoot {
+			continue
+		}
 		names = append(names, j.Name)
 	}
 	return names

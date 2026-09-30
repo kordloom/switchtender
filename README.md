@@ -319,7 +319,7 @@ The docs live in [docs/](docs/) and also render inside the app at `/ui/docs`.
 | [AI agents](docs/agents.md) | Put an AI agent behind the approval gate and prove what it did |
 | [Extend in Go](docs/sdk.md) | The SDK: add tools, AI providers, secret engines, and notifiers |
 | [HTTP API](docs/api.md) | Every endpoint the server exposes |
-| [Migration](docs/migration.md) | Moving off AWX, Semaphore, Rundeck, Jenkins, or cron in detail |
+| [Migration](docs/migration.md) | Moving off AWX, Semaphore, Rundeck, Jenkins, Chef, Puppet, or cron in detail |
 | [Comparison](docs/comparison.md) | How SwitchTender compares to AWX, AAP, Semaphore, Ascender, and Rundeck |
 
 Deploy with the `docker-compose.yml` at the root, which brings up a server on SQLite, or on a Team

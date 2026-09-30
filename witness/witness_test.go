@@ -186,9 +186,54 @@ func TestLoadRefusesACheckpointSignedByAnotherKey(t *testing.T) {
 	if err := Save(path, forged, forger); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	if _, err := Load(path, mine.PublicKeyHex()); err == nil {
+	_, err = Load(path, mine.PublicKeyHex())
+	if err == nil {
 		t.Fatal("Load() accepted a checkpoint signed by a key that is not this witness's, so a " +
 			"replaced state file wipes the memory a truncation would have been caught by")
+	}
+	// The refusal names both keys by the sha256 key id the witness prints when it starts, so an
+	// operator can match them to that line. It printed the raw hex keys, which appear nowhere else
+	// an operator looks.
+	for _, want := range []string{forger.KeyID(), mine.KeyID()} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Load() error = %q, want it to name key id %s", err, want)
+		}
+	}
+	for _, raw := range []string{forger.PublicKeyHex(), mine.PublicKeyHex()} {
+		if strings.Contains(err.Error(), raw) {
+			t.Errorf("Load() error = %q, want no raw hex key in it", err)
+		}
+	}
+}
+
+// TestKeyIDOfNamesAKeyTheWayTheWitnessDoes pins the conversion from the hex key a checkpoint or an
+// attestation carries to the sha256 key id the witness prints and publishes. A value that is not an
+// ed25519 key has no key id, and saying so with an empty result keeps a caller from quoting one.
+func TestKeyIDOfNamesAKeyTheWayTheWitnessDoes(t *testing.T) {
+	t.Parallel()
+	id, err := identity.Load(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadIdentity() error = %v", err)
+	}
+	tests := []struct {
+		In         string
+		WantResult string
+	}{{ // Test 0: A hex public key gives the key id the identity reports for itself.
+		In: id.PublicKeyHex(), WantResult: id.KeyID(),
+	}, { // Test 1: Text that is not hex is not a key.
+		In: "not a key",
+	}, { // Test 2: Hex of the wrong length is not an ed25519 key.
+		In: "deadbeef",
+	}, { // Test 3: Nothing is not a key.
+		In: "",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			if got := KeyIDOf(test.In); got != test.WantResult {
+				t.Errorf("KeyIDOf(%q) = %q, want %q", test.In, got, test.WantResult)
+			}
+		})
 	}
 }
 

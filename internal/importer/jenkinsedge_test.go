@@ -707,7 +707,10 @@ func TestJenkinsFoundLineDescribesTheWalk(t *testing.T) {
 
 // TestJenkinsJobNamesReadsABundleAndRefusesRubbish pins the name lister. It is read from an
 // already-built bundle, so a document that does not parse must produce no names rather than a panic
-// or a partial list the operator would take as the whole export.
+// or a partial list the operator would take as the whole export. A folder is not listed: it holds
+// jobs rather than being one, and its name already leads the names of the jobs inside it, but its
+// own config.xml was counted, so a Jenkins with one folder was said to hold one more job than it
+// did.
 func TestJenkinsJobNamesReadsABundleAndRefusesRubbish(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -724,6 +727,12 @@ func TestJenkinsJobNamesReadsABundleAndRefusesRubbish(t *testing.T) {
 			WantNames: []string{""}}, // Test 3.
 		{Name: "escaped name", Bundle: `<jobs><job name="a&quot;b"><project/></job></jobs>`,
 			WantNames: []string{`a"b`}}, // Test 4.
+		{Name: "folder left out", Bundle: `<jobs>
+			<job name="ops"><com.cloudbees.hudson.plugins.folder.Folder/></job>
+			<job name="ops/b"><project/></job></jobs>`,
+			WantNames: []string{"ops/b"}}, // Test 5.
+		{Name: "unreadable job kept", Bundle: `<jobs><job name="blank"></job></jobs>`,
+			WantNames: []string{"blank"}}, // Test 6: A config.xml was found, so it is counted.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {

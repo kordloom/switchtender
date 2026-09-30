@@ -194,3 +194,41 @@ func TestEveryUnreadFieldIsNamed(t *testing.T) {
 		t.Errorf("the list was cut short with a count instead of the names:\n%s", joined)
 	}
 }
+
+// TestOneUnreadFieldIsNamedInTheSingular pins the grammar of the unread warning. One field read as
+// "1 field this importer does not read, so they are not imported", a sentence that stops agreeing
+// with itself on exactly the export an operator is most likely to read closely.
+func TestOneUnreadFieldIsNamedInTheSingular(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Export     string
+		WantResult string
+	}{{ // Test 0: One field is it.
+		Export: `{"templates": [{"name": "t", "playbook": "site.yml", "unread_a": true}]}`,
+		WantResult: "this export holds 1 field this importer does not read, so it is not " +
+			"imported: templates[].unread_a",
+	}, { // Test 1: Two fields are they.
+		Export: `{"templates": [{"name": "t", "playbook": "site.yml", "unread_a": true,
+			"unread_b": true}]}`,
+		WantResult: "this export holds 2 fields this importer does not read, so they are not " +
+			"imported: templates[].unread_a, templates[].unread_b",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			plan, err := FromSemaphore([]byte(test.Export), time.Now())
+			if err != nil {
+				t.Fatalf("FromSemaphore: %v", err)
+			}
+			var got string
+			for _, w := range plan.Warnings {
+				if strings.HasPrefix(w, "this export holds ") {
+					got = w
+				}
+			}
+			if diff := cmp.Diff(test.WantResult, got); diff != "" {
+				t.Errorf("unread warning mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}

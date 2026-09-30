@@ -90,6 +90,42 @@ func TestRegisterWindowsAndDecisions(t *testing.T) {
 	}
 }
 
+// TestRegisterNamesADecisionWithNoActor pins the Decision cell for a decision whose chain entry
+// records no actor, which is what an install serving open on loopback writes. The cell read
+// "Approved by" with nothing after it, which looks like a name that failed to render rather than a
+// record that holds none. The run dossier and the receipt verifier already say so in words.
+func TestRegisterNamesADecisionWithNoActor(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	runs := run.NewMemStore()
+	audits := audit.NewMemStore()
+	base := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	if err := runs.Save(ctx, &run.Run{ID: "run_open", Playbook: "site.yml",
+		Status: run.StatusSucceeded, CreatedAt: base}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := audits.Append(ctx, &audit.Entry{ID: audit.NewID(), At: base,
+		Method: audit.MethodDecision, Path: "/runs/run_open/decision/approved"}); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+	in, err := CollectRegister(ctx, runs, audits, audit.Identity{}, base.Add(-time.Hour),
+		base.Add(time.Hour), base.Add(time.Hour), 0)
+	if err != nil {
+		t.Fatalf("CollectRegister() error = %v", err)
+	}
+	doc, err := RenderRegister(in)
+	if err != nil {
+		t.Fatalf("RenderRegister() error = %v", err)
+	}
+	html := string(doc)
+	if !strings.Contains(html, "Approved with no actor recorded") {
+		t.Errorf("register does not say the decision recorded no actor")
+	}
+	if strings.Contains(html, "Approved by <") || strings.Contains(html, "Approved by  ") {
+		t.Errorf("register renders an empty name after \"Approved by\"")
+	}
+}
+
 func TestRegisterTallies(t *testing.T) {
 	t.Parallel()
 	runs, audits, base := seedRegister(t)

@@ -47,6 +47,15 @@ func TestDesktopPortRoundtrip(t *testing.T) {
 
 // TestDesktopListener proves the listener reuses the saved port when it is free, records a fresh
 // port when there is none, and falls back to a new port when the saved one is taken.
+//
+// Every test in this package binds ports in parallel, and so does every package in a full run, so a
+// port this test frees can be taken before the listener binds it again. The cases used to settle
+// whether that had happened with a bind of their own made afterward, and that bind raced whatever
+// took the port letting it go again. A correct fallback then failed as a missed reuse, and a
+// blocker that could not bind left the fallback case running against a port that was free again by
+// the time the listener tried it. Now a port a case needs free or taken is one the test holds for
+// the whole case, and the one case that frees a port reads the outcome from the bind the listener
+// made itself rather than from a later probe.
 func TestDesktopListener(t *testing.T) {
 	t.Parallel()
 
@@ -63,53 +72,130 @@ func TestDesktopListener(t *testing.T) {
 	}
 	_ = l.Close()
 
-	// Test 1: The saved port is reused when free.
+	// Test 1: The saved port is tried first, a bind on it that succeeds is the listener returned,
+	// and the record is left alone.
 	//
-	// "When free" is the whole claim, and the port stopped being this test's the moment it closed
-	// the listener above. Eight other tests in this package bind ports and all of them run in
-	// parallel, so one can take the freed port in between and the reuse would correctly fall back.
-	// Asserting the port outright made this test fail for a reason that is not a defect, which is
-	// worse than useless in a gate that blocks releases. So a different port is accepted only on
-	// proof that the saved one really was occupied.
-	l2, err := desktopListener(dir)
+	// The bind on the saved port is answered with a listener this test already holds on that port,
+	// which is what binding a free port gives, so nothing else can take the port in between.
+	held, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	defer func() { _ = held.Close() }()
+	port := held.Addr().(*net.TCPAddr).Port
+	heldDir := t.TempDir()
+	saveDesktopPort(heldDir, port)
+	var asked []string
+	handOver := func(network, address string) (net.Listener, error) {
+		asked = append(asked, address)
+		if address == "127.0.0.1:"+strconv.Itoa(port) {
+			return held, nil
+		}
+		return net.Listen(network, address)
+	}
+	reused, err := desktopListenerWith(heldDir, handOver)
 	if err != nil {
 		t.Fatalf("desktopListener() reuse error = %v", err)
 	}
-	if got := l2.Addr().(*net.TCPAddr).Port; got != first {
-		probe, perr := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(first))
-		if perr == nil {
-			_ = probe.Close()
-			t.Errorf("reused port = %d, want %d, and %d was free", got, first, first)
-		} else {
-			t.Logf("port %d was taken by something else between the close and the reuse, so the "+
-				"fallback to %d is the documented behavior rather than a failure", first, got)
-		}
+	defer func() { _ = reused.Close() }()
+	if reused != held || len(asked) != 1 {
+		t.Errorf("binds asked for %v and the listener is on %v, want only the saved port %d and "+
+			"its listener", asked, reused.Addr(), port)
 	}
-	_ = l2.Close()
+	if saved, _ := savedDesktopPort(heldDir); saved != port {
+		t.Errorf("reusing port %d rewrote the record to %d", port, saved)
+	}
 
-	// Test 2: A taken saved port falls back to a fresh one.
+	// Test 2: The same reuse with the operating system answering, on the port Test 0 freed.
 	//
-	// The precondition is that the saved port is occupied. Usually this test occupies it; sometimes
-	// another test in this package, all of which run in parallel and bind ports, already has. Both
-	// satisfy the precondition, so a bind that fails with the port already in use is the setup
-	// succeeding by another route rather than a reason to fail the test.
-	blocker, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(first))
+	// The listener's own bind on the saved port says whether it was still free. Free, the listener
+	// must be on it after that one bind. Taken by something else in between, the listener must be
+	// on whatever port its next bind was given and have recorded that one. That can be the saved
+	// port number again, when the other socket let go and the system handed the number back out.
+	// A fallback is correct and is logged rather than failed, since Test 1 already pins the reuse.
+	var binds []desktopBind
+	l2, err := desktopListenerWith(dir, recordBinds(&binds))
+	if err != nil {
+		t.Fatalf("desktopListener() reuse error = %v", err)
+	}
+	defer func() { _ = l2.Close() }()
+	got := l2.Addr().(*net.TCPAddr).Port
+	want := "127.0.0.1:" + strconv.Itoa(first)
+	if len(binds) == 0 || binds[0].Address != want {
+		t.Fatalf("binds = %v, want the saved port %s tried first", binds, want)
+	}
+	saved, _ = savedDesktopPort(dir)
 	switch {
-	case err == nil:
-		defer func() { _ = blocker.Close() }()
-	case strings.Contains(err.Error(), "address already in use"):
-		t.Logf("port %d was already taken by another test, which is the state this case needs", first)
-	default:
+	case binds[0].Err == nil && (got != first || len(binds) != 1):
+		t.Errorf("the bind on saved port %d succeeded, yet the listener is on %d after %d bind(s)",
+			first, got, len(binds))
+	case binds[0].Err == nil && saved != first:
+		t.Errorf("reusing port %d rewrote the record to %d", first, saved)
+	case binds[0].Err != nil && (len(binds) != 2 || binds[1].Address != "127.0.0.1:0" ||
+		binds[1].Port != got):
+		t.Errorf("the bind on saved port %d was refused, so the listener must be on the fresh "+
+			"port it bound next, but it is on %d after binds %v", first, got, binds)
+	case binds[0].Err != nil && saved != got:
+		t.Errorf("after falling back to %d the record holds %d, want %d", got, saved, got)
+	case binds[0].Err != nil:
+		t.Logf("port %d was taken before the listener bound it again (%v), so it fell back to %d",
+			first, binds[0].Err, got)
+	}
+
+	// Test 3: A taken saved port falls back to a fresh one, and the fresh one is recorded.
+	//
+	// The saved port is one this case binds itself and holds until it ends, so it is taken when the
+	// listener tries it whatever else is running.
+	blocker, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
 		t.Fatalf("Listen() blocker error = %v", err)
 	}
-	l3, err := desktopListener(dir)
+	defer func() { _ = blocker.Close() }()
+	taken := blocker.Addr().(*net.TCPAddr).Port
+	takenDir := t.TempDir()
+	saveDesktopPort(takenDir, taken)
+	binds = nil
+	l3, err := desktopListenerWith(takenDir, recordBinds(&binds))
 	if err != nil {
 		t.Fatalf("desktopListener() fallback error = %v", err)
 	}
-	if got := l3.Addr().(*net.TCPAddr).Port; got == first {
+	defer func() { _ = l3.Close() }()
+	want = "127.0.0.1:" + strconv.Itoa(taken)
+	got = l3.Addr().(*net.TCPAddr).Port
+	if len(binds) != 2 || binds[0].Address != want || binds[0].Err == nil ||
+		binds[1].Address != "127.0.0.1:0" || binds[1].Port != got {
+		t.Errorf("binds = %v with the listener on %d, want a refused bind on the saved port %s "+
+			"and then the fresh port the listener is on", binds, got, want)
+	}
+	if got == taken {
 		t.Errorf("fallback picked the taken port %d", got)
 	}
-	_ = l3.Close()
+	if saved, _ := savedDesktopPort(takenDir); saved != got {
+		t.Errorf("after falling back to %d the record holds %d, want %d", got, saved, got)
+	}
+}
+
+// desktopBind is one bind the desktop listener attempted.
+type desktopBind struct {
+	// Address is the host and port the bind asked for.
+	Address string
+	// Port is the port the bind was given, zero when it failed.
+	Port int
+	// Err is what the bind returned, nil when it succeeded.
+	Err error
+}
+
+// recordBinds returns a listenFunc that binds with net.Listen and appends every attempt to binds.
+func recordBinds(binds *[]desktopBind) listenFunc {
+	return func(network, address string) (net.Listener, error) {
+		l, err := net.Listen(network, address)
+		bind := desktopBind{Address: address, Err: err}
+		if err == nil {
+			bind.Port = l.Addr().(*net.TCPAddr).Port
+		}
+		*binds = append(*binds, bind)
+		return l, err
+	}
 }
 
 // TestDesktopAlive covers the liveness probe: false with nothing listening on the port.

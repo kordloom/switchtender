@@ -322,7 +322,12 @@ func RenderRegister(in *RegisterInput) ([]byte, error) {
 			DryRun:  r.DryRun,
 		}
 		if d, ok := in.Decisions[r.ID]; ok {
+			// An install serving open on loopback records a decision with no actor, and "Approved
+			// by" followed by nothing reads as a name that failed to render.
 			row.Decision = d.Verdict + " by " + d.Actor
+			if d.Actor == "" {
+				row.Decision = d.Verdict + " with no actor recorded"
+			}
 			row.DecisionSeq = d.Seq
 			switch d.Verdict {
 			case "Approved":

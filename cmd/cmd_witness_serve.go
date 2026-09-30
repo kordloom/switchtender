@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"context"
-	"crypto/ed25519"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,7 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kordloom/loomseal/seal"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
@@ -264,7 +261,7 @@ func runWitnessVerify(cmd *cobra.Command, args []string) error {
 	// Both names for the signing key, because both are published and a relying party may hold
 	// either. The attestation carries the raw hex key; the witness prints, and this command's own
 	// help tells an operator to publish, the sha256 key id.
-	keyID := witnessKeyIDOf(signer)
+	keyID := witness.KeyIDOf(signer)
 	if keyID != "" {
 		verdict["signed_by_key_id"] = keyID
 	}
@@ -299,17 +296,4 @@ func runWitnessVerify(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("attestation did not verify")
 	}
 	return nil
-}
-
-// witnessKeyIDOf returns the sha256 key id of a hex-encoded public key, or empty when it is not one.
-//
-// The witness publishes two names for one key: the attestation carries the raw hex key, and the
-// witness API, the startup line, and this command's help all name the key id. A relying party holds
-// whichever they were given, so the pin is compared against both.
-func witnessKeyIDOf(publicKeyHex string) string {
-	raw, err := hex.DecodeString(publicKeyHex)
-	if err != nil || len(raw) != ed25519.PublicKeySize {
-		return ""
-	}
-	return seal.KeyID(raw)
 }

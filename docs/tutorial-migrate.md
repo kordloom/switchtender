@@ -22,9 +22,9 @@ and nothing else. The table is in
 
 ## From the UI
 
-1. Export from your current tool. `awx export` produces a JSON document. Semaphore has no single
-   export command, so gather the project's repositories, inventories, keys, templates, and schedules
-   from its API into one JSON document. Rundeck exports a project's jobs as YAML or JSON, or a whole
+1. Export from your current tool. `awx export` produces a JSON document. Semaphore writes a project
+   backup, one JSON document holding the project's repositories, inventories, keys, templates, and
+   schedules, and it imports as it is. Rundeck exports a project's jobs as YAML or JSON, or a whole
    project as an archive from Project Settings; either one uploads and the importer tells them apart
    by content. Jenkins has no export file at all, so zip its `jobs` directory and upload that.
 2. Open Migrate from the sidebar, or go to `/ui/migrate`.

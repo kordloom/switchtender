@@ -162,6 +162,10 @@ func reportUnread(plan *Plan, raw []byte, v any) {
 	// Every one is named. The list stopped at twelve and said how many more there were, so the field
 	// that mattered, a template's arguments among them, could be the one a reader never saw. Paths
 	// are structural, one per field and not one per record, so the list stays as short as the schema.
-	plan.warn("this export holds %d field%s this importer does not read, so they are not imported: %s",
-		len(paths), plural(len(paths)), strings.Join(paths, ", "))
+	which := "they are"
+	if len(paths) == 1 {
+		which = "it is"
+	}
+	plan.warn("this export holds %d field%s this importer does not read, so %s not imported: %s",
+		len(paths), plural(len(paths)), which, strings.Join(paths, ", "))
 }

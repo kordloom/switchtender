@@ -67,8 +67,8 @@ func applyRequested(r *http.Request) bool {
 	return r.URL.Query().Get("apply") == "true"
 }
 
-// importHandler previews or applies an AWX, Semaphore, Rundeck, or Jenkins export. POST
-// /import/{format} with the export as the body returns the plan; add ?apply=true to write it.
+// importHandler previews or applies an AWX, Semaphore, Chef, Puppet, Rundeck, or Jenkins export.
+// POST /import/{format} with the export as the body returns the plan, and ?apply=true writes it.
 // Preview needs no stores; apply needs projects, inventories, credentials, templates, and schedules
 // all enabled.
 //

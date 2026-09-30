@@ -215,8 +215,8 @@ warning:</p>
 </code></pre>
 <p>The report lists the projects, inventories, dynamic inventory sources, credentials, templates, and
 schedules that will be created, prints the content of every inventory it would write rather than
-only its name, and calls out anything that could not be mapped cleanly. Apply it when the report
-looks right:</p>
+only its name, and calls out anything that could not be mapped cleanly. It goes to standard output,
+so redirecting it to a file keeps a copy to review. Apply it when the report looks right:</p>
 <pre><code>switchtender import awx awx-export.json --db switchtender.db --apply
 </code></pre>
 <p>Apply an export once. A second apply is refused before it writes anything when the install already

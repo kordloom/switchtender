@@ -17,6 +17,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kordloom/loomseal/seal"
+
 	"github.com/kordloom/switchtender/beatfeed"
 	"github.com/kordloom/switchtender/identity"
 )
@@ -97,6 +99,11 @@ type Finding struct {
 // refuses to adopt any head again. The only repair was deleting the state file, which is also the
 // one action that destroys the memory a truncation would have been measured against.
 const maxBeatJump = 1 << 40
+
+// maxNamedGaps bounds how many gaps one missing_beat finding names beat by beat. The first few are
+// where an operator goes looking. Past that the rest are counted, so a hostile feed serving a
+// thousand gaps cannot make one finding a thousand-item sentence.
+const maxNamedGaps = 4
 
 // maxDuplicateFindings bounds how many distinct out-of-order pairs one answer is allowed to name
 // individually. A few named pairs are what an operator acts on; a feed producing more than that is
@@ -183,6 +190,10 @@ func Check(prev *Checkpoint, server string, beats []Beat, now time.Time) (*Check
 	// thousand beats with a thousand gaps, and one finding per gap turns each poll into a thousand
 	// records and a thousand notifications.
 	gaps, missing, firstGapAfter := 0, int64(0), int64(0)
+	// named holds the first gaps as the beats they are missing, since that is what an operator
+	// searches for. Naming the oldest and newest beat of the whole answer instead sent them to look
+	// through every beat served for the one that was gone.
+	var named []string
 	// The out-of-order walk is bounded the same way, and it was not: a feed serving one beat a
 	// thousand times produced nine hundred and ninety-nine findings from a single poll, each one a
 	// line appended to the findings record, a webhook delivery, and an increment of the findings
@@ -212,6 +223,9 @@ func Check(prev *Checkpoint, server string, beats []Beat, now time.Time) (*Check
 			}
 			gaps++
 			missing += beats[i].Beat - beats[i-1].Beat - 1
+			if len(named) < maxNamedGaps {
+				named = append(named, beatSpan(beats[i-1].Beat+1, beats[i].Beat-1))
+			}
 		}
 	}
 	for _, detail := range dupDetails {
@@ -229,9 +243,12 @@ func Check(prev *Checkpoint, server string, beats []Beat, now time.Time) (*Check
 		// sixty second interval one permanent gap is fourteen hundred records and fourteen hundred
 		// alerts a day, and a findings total that climbs by that much says the witness saw fourteen
 		// hundred separate events when it saw one.
+		if more := gaps - len(named); more > 0 {
+			named = append(named, fmt.Sprintf("%d more gap(s)", more))
+		}
 		findings = append(findings, Finding{Kind: "missing_beat", Detail: fmt.Sprintf(
-			"the feed skips %d beat(s) across %d gap(s) between beat %d and beat %d, so entries "+
-				"between them are gone", missing, gaps, beats[0].Beat, beats[len(beats)-1].Beat),
+			"the feed skips %d beat(s) across %d gap(s), %s, so what the chain held there is gone",
+			missing, gaps, listed(named)),
 			Key: fmt.Sprintf("missing_beat: %d beat(s) gone across %d gap(s) after beat %d",
 				missing, gaps, firstGapAfter)})
 	}
@@ -383,6 +400,28 @@ func Check(prev *Checkpoint, server string, beats []Beat, now time.Time) (*Check
 	return next, findings, nil
 }
 
+// beatSpan names the beats from lo to hi, which are the beats one gap is missing.
+func beatSpan(lo, hi int64) string {
+	if lo == hi {
+		return fmt.Sprintf("beat %d", lo)
+	}
+	return fmt.Sprintf("beats %d to %d", lo, hi)
+}
+
+// listed joins items into one English list: "a", "a and b", or "a, b, and c".
+func listed(items []string) string {
+	switch len(items) {
+	case 0:
+		return ""
+	case 1:
+		return items[0]
+	case 2:
+		return items[0] + " and " + items[1]
+	default:
+		return strings.Join(items[:len(items)-1], ", ") + ", and " + items[len(items)-1]
+	}
+}
+
 // sameServer reports whether two spellings address the same server. The witness normalizes the
 // base URL before it fetches, so a checkpoint written from one spelling must not refuse a watch
 // spelled with a trailing slash: refusing means no beat is ever compared again, which blinds the
@@ -486,10 +525,31 @@ func Load(path, expectKey string) (*Checkpoint, error) {
 	// generates their own key satisfies trivially. Pinning the signer to this witness's own key is
 	// what makes a replaced state file detectable.
 	if expectKey != "" && signer != expectKey {
-		return nil, fmt.Errorf("checkpoint was signed by %s, not by this witness (%s); "+
-			"the state file was replaced", signer, expectKey)
+		return nil, fmt.Errorf("checkpoint was signed by key %s, not by this witness's key %s: "+
+			"the state file was replaced, or this witness is not running with the key that wrote "+
+			"it", keyName(signer), keyName(expectKey))
 	}
 	return &c, nil
+}
+
+// KeyIDOf returns the sha256 key id of a hex-encoded public key, or empty when it is not one. The
+// witness names its key by that id when it starts and publishes it for pinning, while a checkpoint
+// and an attestation carry the raw hex key.
+func KeyIDOf(publicKeyHex string) string {
+	raw, err := hex.DecodeString(publicKeyHex)
+	if err != nil || len(raw) != ed25519.PublicKeySize {
+		return ""
+	}
+	return seal.KeyID(raw)
+}
+
+// keyName names a hex public key the way the witness names its own, by key id, falling back to the
+// value as given when it is not a key.
+func keyName(publicKeyHex string) string {
+	if id := KeyIDOf(publicKeyHex); id != "" {
+		return id
+	}
+	return publicKeyHex
 }
 
 // Save signs and writes the checkpoint atomically, so a crash mid-write never leaves a state file

@@ -3,6 +3,7 @@ package importer
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -169,7 +170,9 @@ func TestSemaphoreRefusesARepositoryTheAPIWouldRefuse(t *testing.T) {
 
 // TestSemaphoreNonStaticInventoryIsReportedAndKept pins that only a static inventory carries inline
 // content, and that a type this cannot import is named rather than dropped. An inventory that
-// arrives empty is one that targets nothing, which the report has to say once.
+// arrives empty is one that targets nothing, which the report has to say once. The warning says the
+// inventory came across holding what the export carried: it used to say only static content
+// imports, which read as though the inventory had been left behind when it had been imported.
 func TestSemaphoreNonStaticInventoryIsReportedAndKept(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -207,7 +210,8 @@ func TestSemaphoreNonStaticInventoryIsReportedAndKept(t *testing.T) {
 			if got := plan.Inventories[0].Content; got != test.Content {
 				t.Errorf("content = %q, want it carried verbatim %q", got, test.Content)
 			}
-			_, typeWarn := warningContaining(t, plan.Warnings, "only static content imports")
+			_, typeWarn := warningContaining(t, plan.Warnings, `inventory "prod"`,
+				"so it imports holding what the export's inventory field carried")
 			if typeWarn != test.WantTypeWarn {
 				t.Errorf("type warning = %v, want %v.\nwarnings: %v",
 					typeWarn, test.WantTypeWarn, plan.Warnings)
@@ -338,6 +342,61 @@ func TestSemaphoreCronIsValidatedBeforeItBecomesARow(t *testing.T) {
 			if _, ok := warningContaining(t, plan.Warnings, `schedule "nightly"`,
 				"was not imported"); !ok {
 				t.Errorf("a refused cron was not reported.\nwarnings: %v", plan.Warnings)
+			}
+		})
+	}
+}
+
+// TestSemaphoreRunOnceScheduleIsNamedAsOneOff pins how a schedule Semaphore fires once, at a set
+// time, is reported. It carries no cron expression, so it reached the cron parser empty and was
+// refused as "bad cron: empty spec string", which reads as a malformed export rather than as the
+// one-off run it is, and its run_at time was then listed as a field nobody read. It is still not
+// imported, since a schedule here repeats, and the report now says so in those terms.
+func TestSemaphoreRunOnceScheduleIsNamedAsOneOff(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name      string
+		Schedule  string
+		WantWords []string
+	}{{ // Test 0: A one-off with its time names the time.
+		Name: "with a time",
+		Schedule: `{"name": "release", "type": "run_at", "run_at": "2026-10-15T09:00:00Z",
+			"cron_format": "", "template": "site", "active": true}`,
+		WantWords: []string{`schedule "release" in project "ops" was not imported`, "runs once",
+			"2026-10-15T09:00:00Z"},
+	}, { // Test 1: A one-off whose time is missing still reads as a one-off.
+		Name:      "without a time",
+		Schedule:  `{"name": "release", "type": "run_at", "template": "site"}`,
+		WantWords: []string{`schedule "release" in project "ops" was not imported`, "runs once"},
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			doc := `{"meta": {"name": "ops"},
+				"templates": [{"name": "site", "playbook": "site.yml"}],
+				"schedules": [` + test.Schedule + `, {"name": "nightly", "type": "",
+					"cron_format": "0 2 * * *", "template": "site"}]}`
+			plan, err := FromSemaphore([]byte(doc), importNow)
+			if err != nil {
+				t.Fatalf("FromSemaphore() error = %v", err)
+			}
+			if len(plan.Schedules) != 1 || plan.Schedules[0].Name != "nightly" {
+				t.Fatalf("schedules = %v, want the cadence schedule alone", plan.Schedules)
+			}
+			warning, ok := warningContaining(t, plan.Warnings, test.WantWords...)
+			if !ok {
+				t.Fatalf("no warning holds %q.\nwarnings: %v", test.WantWords, plan.Warnings)
+			}
+			if !slices.Contains(plan.Report().LeftOut, warning) {
+				t.Errorf("%q is not counted as left out", warning)
+			}
+			for _, w := range plan.Warnings {
+				if strings.Contains(w, "spec string") || strings.Contains(w, "bad cron") {
+					t.Errorf("the one-off is reported as a malformed cron: %q", w)
+				}
+				if strings.Contains(w, "schedules[].run_at") {
+					t.Errorf("a field the importer reads is reported as unread: %q", w)
+				}
 			}
 		})
 	}
