@@ -122,6 +122,10 @@ type jenkinsParam struct {
 // being one.
 const jenkinsFolderRoot = "com.cloudbees.hudson.plugins.folder.Folder"
 
+// jenkinsControllerRoot is the root element of the config.xml at the top of a JENKINS_HOME, beside
+// its jobs directory. It configures the controller itself rather than any job.
+const jenkinsControllerRoot = "hudson"
+
 // jenkinsJobTypes names each Jenkins root element that is not a freestyle project, so a job that
 // cannot be imported is refused by name rather than reported as an unrecognized file.
 var jenkinsJobTypes = map[string]string{

@@ -258,8 +258,17 @@ func JenkinsBundleFromZip(data []byte) ([]byte, error) {
 	}
 	var jobs []jenkinsJobFile
 	total, unnamed := 0, 0
+	homes := jenkinsZipHomes(r.File)
 	for _, f := range r.File {
 		if path.Base(f.Name) != "config.xml" || f.FileInfo().IsDir() {
+			continue
+		}
+		// A zip of a whole JENKINS_HOME holds the home's own files beside its jobs directory,
+		// and several are named config.xml: the controller's, one for each user, and one for
+		// each agent. The directory walk enters the jobs directory and reads nothing else, so a
+		// config.xml inside a home but outside its jobs directory is passed over the same way.
+		dirs := jenkinsZipDirs(f.Name)
+		if indexOf(dirs, jenkinsJobsDir) < 0 && jenkinsInHome(dirs, homes) {
 			continue
 		}
 		if f.UncompressedSize64 > maxJenkinsConfigSize {
@@ -274,6 +283,14 @@ func JenkinsBundleFromZip(data []byte) ([]byte, error) {
 		if total > maxJenkinsTotalSize {
 			return nil, fmt.Errorf("read jenkins archive: the definitions in it exceed the %d MiB "+
 				"this reads", maxJenkinsTotalSize>>20)
+		}
+		// A zip of a whole JENKINS_HOME carries the controller's own config.xml beside the jobs
+		// directory. The directory walk never reads that file, and read here it became a job named
+		// after the home with a type nothing recognized. Jenkins writes it behind an XML 1.1
+		// declaration the decoder refuses, so its root element is read past the declaration.
+		if root, err := jenkinsRootElement(stripXMLDeclaration(data)); err == nil &&
+			root == jenkinsControllerRoot {
+			continue
 		}
 		name := jenkinsNameFromZipPath(f.Name)
 		if name == "" {
@@ -296,6 +313,41 @@ func JenkinsBundleFromZip(data []byte) ([]byte, error) {
 	}
 	sort.Slice(jobs, func(i, j int) bool { return jobs[i].Name < jobs[j].Name })
 	return encodeJenkinsBundle(jobs)
+}
+
+// jenkinsZipDirs returns the directories above an archive member, reading either separator the way
+// jenkinsNameFromZipPath does.
+func jenkinsZipDirs(name string) []string {
+	segments := strings.Split(path.Clean(strings.ReplaceAll(name, `\`, "/")), "/")
+	return segments[:len(segments)-1]
+}
+
+// jenkinsZipHomes returns the directories an archive holds job definitions in a jobs directory
+// under, each joined with slashes and empty for the top of the archive. They are what
+// jenkinsNameFromZipPath drops from the front of a job's name: a JENKINS_HOME, or whatever the
+// archive was rooted at above its jobs directory.
+func jenkinsZipHomes(files []*zip.File) map[string]bool {
+	homes := map[string]bool{}
+	for _, f := range files {
+		if path.Base(f.Name) != "config.xml" || f.FileInfo().IsDir() {
+			continue
+		}
+		dirs := jenkinsZipDirs(f.Name)
+		if i := indexOf(dirs, jenkinsJobsDir); i >= 0 {
+			homes[strings.Join(dirs[:i], "/")] = true
+		}
+	}
+	return homes
+}
+
+// jenkinsInHome reports whether a member's directories lie inside one of homes, at any depth.
+func jenkinsInHome(dirs []string, homes map[string]bool) bool {
+	for i := 0; i <= len(dirs); i++ {
+		if homes[strings.Join(dirs[:i], "/")] {
+			return true
+		}
+	}
+	return false
 }
 
 // readZipEntry reads one archive member under a per-entry ceiling, naming the artifact it came out

@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"encoding/xml"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -818,7 +820,7 @@ func TestJenkinsZipNamesJobsByTheirPlaceInTheTree(t *testing.T) {
 			// The controller's own configuration sits beside the jobs directory and is not a job.
 			"jenkins_home/config.xml": "<hudson/>",
 		},
-		WantNames: []string{"alpha", "jenkins_home", "platform/beta"},
+		WantNames: []string{"alpha", "platform/beta"},
 	}, { // Test 2: Rooted inside one job, with no jobs segment at all.
 		Files:     map[string]string{"alpha/config.xml": job},
 		WantNames: []string{"alpha"},
@@ -827,6 +829,22 @@ func TestJenkinsZipNamesJobsByTheirPlaceInTheTree(t *testing.T) {
 			"jobs/a/jobs/b/jobs/c/config.xml": job,
 		},
 		WantNames: []string{"a/b/c"},
+	}, { // Test 4: The controller's config.xml as Jenkins writes it, behind an XML 1.1 declaration
+		// the decoder cannot read, is still the controller's and not a job.
+		Files: map[string]string{
+			"jenkins_home/jobs/alpha/config.xml": job,
+			"jenkins_home/config.xml":            jenkinsControllerConfig,
+		},
+		WantNames: []string{"alpha"},
+	}, { // Test 5: Zipped from inside JENKINS_HOME, where the home's own files sit at the top
+		// beside the jobs directory and none of them is a job.
+		Files: map[string]string{
+			"config.xml":                     jenkinsControllerConfig,
+			"jobs/alpha/config.xml":          job,
+			"users/admin_4827261/config.xml": "<user><id>admin</id></user>",
+			"nodes/agent-1/config.xml":       "<slave><name>agent-1</name></slave>",
+		},
+		WantNames: []string{"alpha"},
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -839,6 +857,75 @@ func TestJenkinsZipNamesJobsByTheirPlaceInTheTree(t *testing.T) {
 				t.Errorf("names mismatch (-want +got):\n%s", diff)
 			}
 		})
+	}
+}
+
+// jenkinsControllerConfig is the start of the config.xml at the top of a JENKINS_HOME, as Jenkins
+// writes it. It configures the controller rather than any job.
+const jenkinsControllerConfig = "<?xml version='1.1' encoding='UTF-8'?>\n" +
+	"<hudson>\n  <version>2.462.3</version>\n  <numExecutors>2</numExecutors>\n" +
+	"  <mode>NORMAL</mode>\n</hudson>\n"
+
+// TestJenkinsZipOfAHomeImportsWhatTheWalkImports pins that zipping a JENKINS_HOME changes nothing
+// about what it imports. The walk enters the home's jobs directory and reads nothing else. The zip
+// read every config.xml in the archive, so the controller's own became a job named after the home
+// with an unrecognized type "hudson", and every user and agent became one too, typed "user" and
+// "slave".
+func TestJenkinsZipOfAHomeImportsWhatTheWalkImports(t *testing.T) {
+	t.Parallel()
+	job := freestyle(timer("0 2 * * *") + shellStep("echo hi"))
+	home := map[string]string{
+		"config.xml":                           jenkinsControllerConfig,
+		"jobs/nightly/config.xml":              job,
+		"jobs/platform/config.xml":             "<com.cloudbees.hudson.plugins.folder.Folder/>",
+		"jobs/platform/jobs/vacuum/config.xml": job,
+		// A user and an agent, each kept in a config.xml of its own, as Jenkins keeps them.
+		"users/admin_4827261/config.xml": "<?xml version='1.1' encoding='UTF-8'?>\n" +
+			"<user>\n  <id>admin</id>\n</user>\n",
+		"nodes/agent-1/config.xml": "<?xml version='1.1' encoding='UTF-8'?>\n" +
+			"<slave>\n  <name>agent-1</name>\n</slave>\n",
+	}
+	dir := filepath.Join(t.TempDir(), "jenkins_home")
+	archive := map[string]string{}
+	for name, body := range home {
+		file := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			t.Fatalf("make fixture: %v", err)
+		}
+		if err := os.WriteFile(file, []byte(body), 0o600); err != nil {
+			t.Fatalf("write fixture: %v", err)
+		}
+		// Zipped the way an operator zips a home, from the directory above it, so every member
+		// sits under the home's own name.
+		archive["jenkins_home/"+name] = body
+	}
+	walked, err := importer.JenkinsBundle(dir)
+	if err != nil {
+		t.Fatalf("JenkinsBundle() error = %v", err)
+	}
+	zipped, err := importer.JenkinsBundleFromZip(zipOf(t, archive))
+	if err != nil {
+		t.Fatalf("JenkinsBundleFromZip() error = %v", err)
+	}
+
+	// The folder holds a job rather than being one, and the controller's configuration is no job.
+	want := []string{"nightly", "platform/vacuum"}
+	if diff := cmp.Diff(want, importer.JenkinsJobNames(walked)); diff != "" {
+		t.Errorf("the walk found other jobs (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff(want, importer.JenkinsJobNames(zipped)); diff != "" {
+		t.Errorf("the zip found other jobs (-want +got):\n%s", diff)
+	}
+	var reports []importer.Report
+	for _, bundle := range [][]byte{walked, zipped} {
+		plan, err := importer.FromJenkins("prod")(bundle, fixedTime)
+		if err != nil {
+			t.Fatalf("FromJenkins() error = %v", err)
+		}
+		reports = append(reports, plan.Report())
+	}
+	if diff := cmp.Diff(reports[0], reports[1]); diff != "" {
+		t.Errorf("the zip reported another import than the walk (-walk +zip):\n%s", diff)
 	}
 }
 
