@@ -68,19 +68,27 @@
 <p>SwitchTender imports an AWX, Semaphore, Rundeck, Jenkins, Chef, or Puppet export, or a plain crontab,
 and creates the equivalent objects, so moving over is one command rather than a rebuild.</p>
 <h2 id="the-migration-summary">The migration summary</h2>
-<p>Every preview opens with a summary before the itemized plan, and the API returns the same thing as
+<p>Every preview prints a summary before the itemized plan, and the API returns the same thing as
 <code>report</code> on an import response. The plan answers what an import did. The summary answers whether to
-attempt one.</p>
+attempt one. This is the summary a preview of a small AWX export prints:</p>
 <pre><code>Migration summary:
-  Comes across:       1218 objects
-      templates            847
-      schedules            212
-      inventories          94
-  Needs a secret:     17 credential shell(s), because an export never carries secret values
-  Does not come across: 4
-      - job &quot;nightly-build&quot; is a Pipeline job, whose Groovy script has no equivalent here. It was not imported.
-  Worth reviewing:    8
-      - workflow &quot;Release&quot; imported with 2 steps. Check the graph before you run it.
+  Comes across:       12 objects
+      credentials          4
+      inventories          3
+      inventory sources    2
+      projects             1
+      templates            1
+      schedules            1
+  Needs a secret:     4 credential shell(s), because an export never carries secret values
+  Does not come across: 2
+      - project &quot;Manual&quot; skipped: only git projects import (scm_type=&quot;&quot;)
+      - schedule &quot;Every 3 days&quot; of template &quot;Deploy Web&quot; skipped: its cadence cannot be expressed as cron (&quot;DTSTART:20260101T090000Z\nRRULE:FREQ=DAILY;INTERVAL=3&quot;)
+  Worth reviewing:    5
+      - credential &quot;prod-ssh&quot; needs its secret re-entered; an export never carries secret values. Its non-secret settings (become_method=sudo, become_user=root, user=deploy) were stored on the credential
+      - credential &quot;vault-pw&quot; needs its secret re-entered; an export never carries secret values
+      - credential &quot;aws-keys&quot; needs its secret re-entered; an export never carries secret values. Its non-secret settings (region=us-east-1, username=AKIAEXAMPLE) were stored on the credential
+      - credential &quot;gh-token&quot; needs its secret re-entered; an export never carries secret values
+      - inventory source &quot;Legacy EC2&quot; imports the &quot;ec2&quot; plugin as its source; point it at a plugin config file before refreshing
 </code></pre>
 <p>Two numbers are worth understanding before relying on them.</p>
 <p><strong>Needs a secret is not a limitation of the importer.</strong> An export never carries secret values, from

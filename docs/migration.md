@@ -12,20 +12,28 @@ and creates the equivalent objects, so moving over is one command rather than a 
 
 ## The migration summary
 
-Every preview opens with a summary before the itemized plan, and the API returns the same thing as
+Every preview prints a summary before the itemized plan, and the API returns the same thing as
 `report` on an import response. The plan answers what an import did. The summary answers whether to
-attempt one.
+attempt one. This is the summary a preview of a small AWX export prints:
 
     Migration summary:
-      Comes across:       1218 objects
-          templates            847
-          schedules            212
-          inventories          94
-      Needs a secret:     17 credential shell(s), because an export never carries secret values
-      Does not come across: 4
-          - job "nightly-build" is a Pipeline job, whose Groovy script has no equivalent here. It was not imported.
-      Worth reviewing:    8
-          - workflow "Release" imported with 2 steps. Check the graph before you run it.
+      Comes across:       12 objects
+          credentials          4
+          inventories          3
+          inventory sources    2
+          projects             1
+          templates            1
+          schedules            1
+      Needs a secret:     4 credential shell(s), because an export never carries secret values
+      Does not come across: 2
+          - project "Manual" skipped: only git projects import (scm_type="")
+          - schedule "Every 3 days" of template "Deploy Web" skipped: its cadence cannot be expressed as cron ("DTSTART:20260101T090000Z\nRRULE:FREQ=DAILY;INTERVAL=3")
+      Worth reviewing:    5
+          - credential "prod-ssh" needs its secret re-entered; an export never carries secret values. Its non-secret settings (become_method=sudo, become_user=root, user=deploy) were stored on the credential
+          - credential "vault-pw" needs its secret re-entered; an export never carries secret values
+          - credential "aws-keys" needs its secret re-entered; an export never carries secret values. Its non-secret settings (region=us-east-1, username=AKIAEXAMPLE) were stored on the credential
+          - credential "gh-token" needs its secret re-entered; an export never carries secret values
+          - inventory source "Legacy EC2" imports the "ec2" plugin as its source; point it at a plugin config file before refreshing
 
 Two numbers are worth understanding before relying on them.
 
