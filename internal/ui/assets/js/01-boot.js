@@ -64,7 +64,7 @@ const OUTCOME_RANK = { skipped: 0, ok: 1, changed: 2, unreachable: 3, failed: 4 
 const NAV_GROUPS = [
 	{ label: "Execution", items: [
 		{ key: "overview", href: "/ui/", label: "Overview", desc: "At a glance" },
-		{ key: "runs", href: "/ui/runs", label: "Runs", desc: "Every playbook execution" },
+		{ key: "runs", href: "/ui/runs", label: "Runs", desc: "Every run across the fleet" },
 		{ key: "fleet", href: "/ui/fleet", label: "Fleet health", desc: "Flaky host detection" },
 		{ key: "drift", href: "/ui/drift", label: "Drift", desc: "Divergence from desired state" },
 		{ key: "estate", href: "/ui/estate", label: "Estate", desc: "The fleet on a date, and what moved" },
