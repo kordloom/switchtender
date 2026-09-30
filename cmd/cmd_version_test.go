@@ -221,4 +221,9 @@ func TestAContainerBuildIsSentToTheImageSignature(t *testing.T) {
 	if !strings.Contains(err.Error(), "cosign verify ghcr.io/kordloom/switchtender:1.100.0") {
 		t.Errorf("the refusal does not name the image check: %v", err)
 	}
+	// Only a run started by a release tag signs a release. An identity ending in @.* would also
+	// accept a signature made by the workflow on any branch.
+	if !strings.Contains(err.Error(), `release\.yml@refs/tags/v'`) {
+		t.Errorf("the image check does not pin a release tag: %v", err)
+	}
 }

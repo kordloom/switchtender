@@ -80,7 +80,7 @@ func runVersionVerify(cmd *cobra.Command) error {
 		return fmt.Errorf("%w from the tagged source, so it is not the release archive's file and "+
 			"cannot match its hashes. Verify the image instead, from outside it: cosign verify "+
 			"ghcr.io/kordloom/switchtender:%s --certificate-identity-regexp "+
-			"'^https://github.com/kordloom/switchtender/.github/workflows/release.yml@.*' "+
+			"'^https://github.com/kordloom/switchtender/\\.github/workflows/release\\.yml@refs/tags/v' "+
 			"--certificate-oidc-issuer https://token.actions.githubusercontent.com",
 			errContainerBuild, version)
 	}

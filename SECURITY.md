@@ -55,13 +55,14 @@ Verify the signature over the checksums, then the archive against them:
     cosign verify-blob SHA256SUMS \
       --signature SHA256SUMS.sig \
       --certificate SHA256SUMS.pem \
-      --certificate-identity-regexp '^https://github.com/kordloom/switchtender/.github/workflows/release.yml@.*' \
+      --certificate-identity-regexp '^https://github.com/kordloom/switchtender/\.github/workflows/release\.yml@refs/tags/v' \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
     grep -q '  BINARY_SHA256SUMS$' SHA256SUMS
     shasum -a 256 -c SHA256SUMS --ignore-missing
 
-The `grep` asserts the signed checksums actually cover `BINARY_SHA256SUMS`, the manifest that
+The identity has to name a release tag, so a signature made by the workflow on a branch does not
+pass. The `grep` asserts the signed checksums actually cover `BINARY_SHA256SUMS`, the manifest that
 `switchtender version --verify` reads. If it fails, the manifest is outside the signature: the
 self-check then establishes nothing beyond TLS to GitHub, and the release should be treated as
 incompletely published. When it holds, the checks above establish the manifest too, which matters
@@ -91,7 +92,7 @@ The images on ghcr.io are signed by the same workflow, keylessly, and carry buil
 one from outside it:
 
     cosign verify ghcr.io/kordloom/switchtender:1.101.0 \
-      --certificate-identity-regexp '^https://github.com/kordloom/switchtender/.github/workflows/release.yml@.*' \
+      --certificate-identity-regexp '^https://github.com/kordloom/switchtender/\.github/workflows/release\.yml@refs/tags/v' \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
 `switchtender version --verify` does not apply inside the image. The image compiles its binary from
