@@ -302,6 +302,15 @@ jobs:
           hdiutil create -volname SwitchTender -srcfolder dist/dmg -ov -format UDZO -fs HFS+ \
             -size "$(( staged * 2 + 300 ))m" "dist/SwitchTender_${VERSION}.dmg"
 
+          # The image is signed as well as the app inside it. Notarizing and stapling an unsigned
+          # image left Gatekeeper reading the download itself as "no usable signature", even though
+          # the app within passed, and the image is the first thing a downloader's Mac checks. It is
+          # signed before notarization so the ticket covers the signed image.
+          if [ -n "${MACOS_SIGN_IDENTITY:-}" ]; then
+            codesign --force --timestamp --sign "$MACOS_SIGN_IDENTITY" "dist/SwitchTender_${VERSION}.dmg"
+            codesign --verify --verbose=1 "dist/SwitchTender_${VERSION}.dmg"
+          fi
+
           # Notarization needs the full credential set; a partial one used to reach notarytool and
           # fail there. The timeout keeps an Apple notary outage from holding the job to the
           # six-hour limit.
