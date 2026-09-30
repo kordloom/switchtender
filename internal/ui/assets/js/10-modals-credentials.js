@@ -640,6 +640,7 @@ async function loadCredentials(keepPanel) {
 				try {
 					await authedDelete("/credentials/" + c.id);
 					removeRow(tr, "No credentials yet.");
+					dropNeedsSecret(c.id);
 				} catch (err) {
 					setStatus("Delete failed: " + err.message);
 				}
@@ -675,10 +676,7 @@ function renderNeedsSecret(creds) {
 	const head = document.createElement("div");
 	head.className = "cred-needs-head";
 	const title = document.createElement("strong");
-	const setTitle = (n) => {
-		title.textContent = n + (n === 1 ? " credential needs a secret" : " credentials need a secret");
-	};
-	setTitle(pending.length);
+	title.textContent = needsSecretTitle(pending.length);
 	const sub = document.createElement("span");
 	sub.className = "cred-needs-sub";
 	sub.textContent = "Set a secret on each to make it usable. Imported credentials arrive this way. ";
@@ -693,10 +691,10 @@ function renderNeedsSecret(creds) {
 
 	const list = document.createElement("div");
 	list.className = "cred-needs-list";
-	let remaining = pending.length;
 	for (const c of pending) {
 		const row = document.createElement("div");
 		row.className = "cred-needs-row";
+		row.dataset.credId = c.id;
 		const meta = document.createElement("div");
 		meta.className = "cred-needs-meta";
 		const name = document.createElement("span");
@@ -734,12 +732,7 @@ function renderNeedsSecret(creds) {
 			try {
 				await postAction("/credentials/" + c.id, { name: c.name, secret }, "PUT");
 				row.remove();
-				remaining -= 1;
-				if (remaining === 0) {
-					panel.hidden = true;
-				} else {
-					setTitle(remaining);
-				}
+				settleNeedsSecret(panel);
 				// The table below went on calling this credential "needs a secret" until a reload,
 				// while the server already held the secret. It is read again, and this panel is not.
 				loadCredentials(true);
@@ -757,6 +750,34 @@ function renderNeedsSecret(creds) {
 	}
 	panel.appendChild(list);
 	panel.hidden = false;
+}
+
+// needsSecretTitle heads the panel with how many credentials it lists.
+function needsSecretTitle(n) {
+	return n + (n === 1 ? " credential needs a secret" : " credentials need a secret");
+}
+
+// settleNeedsSecret retitles the panel after a row leaves it, and takes the panel down once none
+// are left. It counts the rows the panel still holds rather than keeping a tally, because a row
+// leaves either through its own Save or through a delete made in the table below.
+function settleNeedsSecret(panel) {
+	const n = panel.querySelectorAll(".cred-needs-row").length;
+	const title = panel.querySelector(".cred-needs-head strong");
+	if (title) title.textContent = needsSecretTitle(n);
+	panel.hidden = n === 0;
+}
+
+// dropNeedsSecret takes a deleted credential out of the panel. A delete in the table left it listed
+// here, still asking for a secret for something that no longer existed, until a reload. Only its
+// own row goes: rebuilding the panel would throw away a secret pasted into another row.
+function dropNeedsSecret(id) {
+	const panel = document.getElementById("cred-needs");
+	if (!panel) return;
+	for (const row of panel.querySelectorAll(".cred-needs-row")) {
+		if (row.dataset.credId !== id) continue;
+		row.remove();
+		settleNeedsSecret(panel);
+	}
 }
 
 // fillSelect loads options into a select from a list endpoint.
