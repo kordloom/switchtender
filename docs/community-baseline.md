@@ -1,8 +1,8 @@
 # The Community Baseline
 
 Dated 2026-09-21, before launch. The pricing page promises
-that the Community tier as published at launch never shrinks. The contractual list is the Community feature list in LICENSING.md as it stood at the tag
-community-baseline-2026-09-09. This file restates it,
+that the Community tier as published at launch never shrinks. The contractual list is the Community feature list in LICENSING.md as it stood on 2026-09-09,
+frozen at commit ce28bfb, the public snapshot of the release that carried it. This file restates it,
 pinned in the repository so the promise has a fixed object to point at. Anything on this
 list is free forever; paid tiers only ever add.
 
