@@ -169,7 +169,7 @@ func TestAnApprovedPipelineRunsOnlyTheCommitItWasHeldAt(t *testing.T) {
 				}
 				gitIn(t, f.Repo, "commit", "-am", "second")
 			}
-			if _, err := f.D.Approve(ctx, held.ID, "reviewer", "session"); err != nil {
+			if _, err := f.D.Approve(ctx, held.ID, decider("reviewer", "session")); err != nil {
 				t.Fatalf("Approve() error = %v", err)
 			}
 			waitForStatus(t, f.Store, held.ID, test.WantStatus)

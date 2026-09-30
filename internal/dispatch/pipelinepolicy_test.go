@@ -104,7 +104,8 @@ func TestApprovedPipelineRunsItsSteps(t *testing.T) {
 		t.Fatalf("pipeline status = %q, want pending_approval", parent.Status)
 	}
 
-	if _, err := d.Approve(context.Background(), parent.ID, "approver-pat", "session"); err != nil {
+	if _, err := d.Approve(context.Background(), parent.ID,
+		decider("approver-pat", "session")); err != nil {
 		t.Fatalf("Approve() error = %v", err)
 	}
 
@@ -147,7 +148,8 @@ func TestRejectedPipelineNeverRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitPipeline() error = %v", err)
 	}
-	if _, err := d.Reject(context.Background(), parent.ID, "not today", "approver-pat", "session"); err != nil {
+	if _, err := d.Reject(context.Background(), parent.ID, "not today",
+		decider("approver-pat", "session")); err != nil {
 		t.Fatalf("Reject() error = %v", err)
 	}
 
@@ -331,7 +333,7 @@ func TestApproveStartsHeldSplit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}
-	if _, err := d.Approve(ctx, parent.ID, "approver-pat", "session"); err != nil {
+	if _, err := d.Approve(ctx, parent.ID, decider("approver-pat", "session")); err != nil {
 		t.Fatalf("Approve() error = %v", err)
 	}
 	waitForStatus(t, store, parent.ID, run.StatusSucceeded)
@@ -354,7 +356,8 @@ func TestRejectSettlesHeldSplitShards(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}
-	if _, err := d.Reject(ctx, parent.ID, "not this week", "approver-pat", "session"); err != nil {
+	if _, err := d.Reject(ctx, parent.ID, "not this week",
+		decider("approver-pat", "session")); err != nil {
 		t.Fatalf("Reject() error = %v", err)
 	}
 	shards, err := store.Shards(ctx, parent.ID)
@@ -428,7 +431,8 @@ func TestPipelineDistinctApproverComesFromAnyUnit(t *testing.T) {
 	}
 
 	// The end of the story, not just the flag: the requester's own approval must be refused.
-	if _, err := d.Approve(ctx, parent.ID, "requester", "user"); !errors.Is(err, ErrSelfApproval) {
+	if _, err := d.Approve(ctx, parent.ID,
+		decider("requester", "user")); !errors.Is(err, ErrSelfApproval) {
 		t.Fatalf("Approve by the requester = %v, want ErrSelfApproval", err)
 	}
 	if executions != 0 {

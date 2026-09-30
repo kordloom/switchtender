@@ -195,13 +195,12 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			// the install. A hook that resolves to a trigger is recorded by the handler, where the
 			// trigger is known and the entry can say which one fired.
 			if !isSignIn(r) && !isHook(r) {
-				receipt, ok := g.record(w, recordedActor{
-					Name: unauthenticatedActor(r), Type: actorTypeUnauthenticated,
-				}, r)
+				who := recordedActor{Name: unauthenticatedActor(r), Type: actorTypeUnauthenticated}
+				receipt, ok := g.record(w, who, r)
 				if !ok {
 					return
 				}
-				r = r.WithContext(run.WithAuditReceipt(r.Context(), receipt))
+				r = r.WithContext(withRecorded(run.WithAuditReceipt(r.Context(), receipt), who))
 			}
 			next.ServeHTTP(w, r)
 			return
@@ -245,7 +244,7 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 				return
 			}
 			ctx := run.WithAuditReceipt(context.WithValue(r.Context(), actorKey{}, actor), receipt)
-			ctx = g.stampSubmitterOrg(ctx, actor)
+			ctx = withRecorded(g.stampSubmitterOrg(ctx, actor), who)
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
@@ -299,7 +298,7 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			return
 		}
 		ctx := run.WithAuditReceipt(context.WithValue(r.Context(), actorKey{}, actor), receipt)
-		ctx = g.stampSubmitterOrg(ctx, actor)
+		ctx = withRecorded(g.stampSubmitterOrg(ctx, actor), who)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -400,6 +399,30 @@ func (g *authGate) digestBody(w http.ResponseWriter, r *http.Request) (digest, n
 
 // actorKey is the context key under which the authenticated actor is stored.
 type actorKey struct{}
+
+// recordedKey is the context key under which the gate stores the identity it attributes a request
+// to, beside the actor.
+type recordedKey struct{}
+
+// withRecorded carries who on ctx, so a handler that appends a chain entry of its own for the
+// request names the caller exactly as the gate's entry for it does.
+func withRecorded(ctx context.Context, who recordedActor) context.Context {
+	return context.WithValue(ctx, recordedKey{}, who)
+}
+
+// recordedFrom returns the identity the gate attributes this request to, the one its entry for the
+// request carries, and whether the gate supplied one. It is absent when no gate stands in front of
+// the handler.
+//
+// A handler that commits its own entry, as a decision does, takes the caller from here rather than
+// rebuilding it from the actor. The actor carries a token's label and how it authenticated but not
+// the account the token is bound to, and an install serving open has no actor at all while the gate
+// still records the request under a caller class, so a rebuilt identity disagreed with the request
+// entry beside it.
+func recordedFrom(ctx context.Context) (recordedActor, bool) {
+	who, ok := ctx.Value(recordedKey{}).(recordedActor)
+	return who, ok
+}
 
 // Actor is the authenticated caller resolved by the gate, carried in the request context so
 // object-level authorization can identify the user and role behind a request.

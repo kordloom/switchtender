@@ -7,8 +7,20 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/dispatch"
+	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 )
+
+// deciderOf names the caller making a decision exactly as the gate recorded the request carrying
+// it: the name, how the caller authenticated, and the account whose authority it used. The decision
+// entry and the request entry for one decision then agree. The decision entry carried the name and
+// type alone, so the account behind a decision was recoverable only by pairing it with its request,
+// and an install serving open recorded the request under a caller class and the decision under
+// nobody. A handler reached with no gate in front has nobody to name.
+func deciderOf(r *http.Request) outcome.Decider {
+	who, _ := recordedFrom(r.Context())
+	return outcome.Decider{Name: who.Name, Type: who.Type, OnBehalfOf: who.OnBehalfOf}
+}
 
 // denySelfApproval refuses an approval by the person who asked for the run, when the rule that held it
 // requires a different approver. It reports whether the handler should stop.
@@ -62,7 +74,7 @@ func approveRunHandler(approver Approver, store run.Store, authz *authorizer,
 				return
 			}
 		}
-		created, err := approver.Approve(r.Context(), r.PathValue("id"), actorName(r), actorType(r))
+		created, err := approver.Approve(r.Context(), r.PathValue("id"), deciderOf(r))
 		switch {
 		case errors.Is(err, run.ErrNotFound):
 			respondError(w, log, http.StatusNotFound, "run not found")
@@ -123,7 +135,7 @@ func rejectRunHandler(approver Approver, store run.Store, authz *authorizer,
 				return
 			}
 		}
-		created, err := approver.Reject(r.Context(), r.PathValue("id"), req.Reason, actorName(r), actorType(r))
+		created, err := approver.Reject(r.Context(), r.PathValue("id"), req.Reason, deciderOf(r))
 		switch {
 		case errors.Is(err, run.ErrNotFound):
 			respondError(w, log, http.StatusNotFound, "run not found")

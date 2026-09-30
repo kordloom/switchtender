@@ -73,7 +73,7 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
 	<h2>Who asked and who decided</h2>
 	<div class="scroll"><table>
 		<tr><th>Decision</th><th>Actor</th><th>When</th><th>Chain entry</th></tr>
-		{{range .Decisions}}<tr><td>{{.Role}}</td><td>{{if .Actor}}{{.Actor}}{{else}}none recorded{{end}}</td><td>{{.At}}</td><td class="mono">{{.Seq}}</td></tr>
+		{{range .Decisions}}<tr><td>{{.Role}}</td><td>{{if .Actor}}{{.Actor}}{{else}}none recorded{{end}}{{if .OnBehalfOf}} on behalf of {{.OnBehalfOf}}{{end}}</td><td>{{.At}}</td><td class="mono">{{.Seq}}</td></tr>
 		{{end}}
 	</table></div>
 	{{end}}

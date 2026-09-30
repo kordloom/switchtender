@@ -21,6 +21,7 @@ import (
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
 	"github.com/kordloom/switchtender/internal/org"
+	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/schedule"
@@ -88,12 +89,12 @@ type recordingApprover struct {
 }
 
 // Approve marks the run running, the state an approval releases it into.
-func (a *recordingApprover) Approve(ctx context.Context, id, _, _ string) (*run.Run, error) {
+func (a *recordingApprover) Approve(ctx context.Context, id string, _ outcome.Decider) (*run.Run, error) {
 	return a.decide(ctx, id, run.StatusRunning)
 }
 
 // Reject marks the run rejected, recording the reason as its error.
-func (a *recordingApprover) Reject(ctx context.Context, id, reason, _, _ string) (*run.Run, error) {
+func (a *recordingApprover) Reject(ctx context.Context, id, reason string, _ outcome.Decider) (*run.Run, error) {
 	rn, err := a.decide(ctx, id, run.StatusRejected)
 	if err != nil {
 		return nil, err

@@ -29,6 +29,7 @@ import (
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
+	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -165,13 +166,13 @@ type releasingApprover struct {
 }
 
 // Approve releases a held run and records that it then executed.
-func (a *releasingApprover) Approve(ctx context.Context, id, by, byType string) (*run.Run, error) {
+func (a *releasingApprover) Approve(ctx context.Context, id string, by outcome.Decider) (*run.Run, error) {
 	r, err := a.runs.Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if r.RequireDistinctApprover && by == r.Actor {
-		return nil, fmt.Errorf("%q asked for this run and cannot release it", by)
+	if r.RequireDistinctApprover && by.Name == r.Actor {
+		return nil, fmt.Errorf("%q asked for this run and cannot release it", by.Name)
 	}
 	r.Status = run.StatusSucceeded
 	return r, a.runs.Save(ctx, r)
@@ -1093,7 +1094,7 @@ func TestSeedSeedsSchedulesWithoutAPolicyStore(t *testing.T) {
 type sameActorApprover struct{}
 
 // Approve refuses.
-func (sameActorApprover) Approve(context.Context, string, string, string) (*run.Run, error) {
+func (sameActorApprover) Approve(context.Context, string, outcome.Decider) (*run.Run, error) {
 	return nil, errAppendRefused
 }
 

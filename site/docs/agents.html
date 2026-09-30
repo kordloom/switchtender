@@ -258,7 +258,9 @@ along with the actor. <code>actor:agent-bot</code> in run search pulls everythin
 <p>An approval is a chain entry of its own. When a person releases a held run, the chain gains a
 DECISION entry naming the approver and committing a digest of the exact spec released, and the
 executor refuses a spec that changed after the decision. So the record does not say &quot;someone
-approved run 123&quot;; it says this person approved exactly this change, and exactly this change ran.</p>
+approved run 123&quot;; it says this person approved exactly this change, and exactly this change ran.
+The entry names the approver exactly as the request that carried the decision is recorded: the
+token's label, how it authenticated, and the account it is bound to.</p>
 <h2 id="the-whole-path-end-to-end">The whole path, end to end</h2>
 <p>This is the golden path a governed agent change takes, with the commands to watch it happen.</p>
 <ol>
@@ -272,7 +274,7 @@ approval rule holds it: the run is born <code>pending_approval</code> and no exe
 </li>
 <li>
 <p>A person reviews the held run, its assessed risk, and its parameters, and approves. The DECISION
-entry commits who approved and the digest of exactly what.</p>
+entry commits who approved, the account they approved under, and the digest of exactly what.</p>
 </li>
 <li>
 <p>The run executes, on whichever worker claims it, after re-checking the approved digest. The

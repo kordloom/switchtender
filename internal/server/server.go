@@ -22,6 +22,7 @@ import (
 	"github.com/kordloom/switchtender/internal/invsource"
 	"github.com/kordloom/switchtender/internal/live"
 	"github.com/kordloom/switchtender/internal/org"
+	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/relay"
@@ -62,11 +63,12 @@ type Retrier interface {
 	RelaunchFailedHosts(ctx context.Context, runID string, opts ...run.SubmitOption) (*run.Run, error)
 }
 
-// Approver releases or denies a run held for approval, naming the deciding actor so the decision
-// entry on the chain carries who decided. The dispatcher satisfies it.
+// Approver releases or denies a run held for approval, naming the decider so the decision entry on
+// the chain carries who decided, how they authenticated, and the account they acted for. The
+// dispatcher satisfies it.
 type Approver interface {
-	Approve(ctx context.Context, id, by, byType string) (*run.Run, error)
-	Reject(ctx context.Context, id, reason, by, byType string) (*run.Run, error)
+	Approve(ctx context.Context, id string, by outcome.Decider) (*run.Run, error)
+	Reject(ctx context.Context, id, reason string, by outcome.Decider) (*run.Run, error)
 }
 
 // Option configures a Server.

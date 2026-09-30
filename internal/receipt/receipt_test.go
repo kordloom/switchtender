@@ -64,7 +64,8 @@ func heldWith(t *testing.T, verdict string,
 	}
 
 	// The decision, committed to the chain the way an approval does it, and stamped on the run.
-	specDigest, err := outcome.CommitDecision(ctx, audits, r, verdict, "dana", "session", time.Now)
+	specDigest, err := outcome.CommitDecision(ctx, audits, r, verdict,
+		outcome.Decider{Name: "dana", Type: "session"}, time.Now)
 	if err != nil {
 		t.Fatalf("CommitDecision: %v", err)
 	}

@@ -242,17 +242,26 @@ func failedChecks(rep *audit.BundleReport) string {
 	return strings.Join(failed, "; ")
 }
 
-// decidedBy says who made a decision, as far as the chain recorded it. An install with no tokens
-// records a decision with no actor, and printing the empty fields made the line read "by  ()".
+// decidedBy says who made a decision, as far as the chain recorded it. A decision an install
+// serving open recorded before such decisions named their caller carries no actor, and printing the
+// empty fields made the line read "by  ()".
+//
+// The account follows the name when the decider acted for one, since a token's label alone reads
+// the same for two tokens on different accounts. The account is left off when it only repeats the
+// name, as it does for a person's browser session, and the type is left off when it only repeats
+// the name, as the caller class an install serving open records does.
 func decidedBy(d audit.DisclosedDecision) string {
-	switch {
-	case d.Actor == "":
+	if d.Actor == "" {
 		return "with no actor recorded"
-	case d.ActorType == "":
-		return "by " + d.Actor
-	default:
-		return "by " + d.Actor + " (" + d.ActorType + ")"
 	}
+	by := "by " + d.Actor
+	if d.ActorType != "" && d.ActorType != d.Actor {
+		by += " (" + d.ActorType + ")"
+	}
+	if d.OnBehalfOf != "" && d.OnBehalfOf != d.Actor {
+		by += " on behalf of " + d.OnBehalfOf
+	}
+	return by
 }
 
 // specVerdict says which spec digests the receipt let the spec check compare and whether they

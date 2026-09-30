@@ -11,9 +11,10 @@ import (
 
 // Approve releases a run held for approval so the claim loop can pick it up. It fails when the run is
 // not awaiting approval, so a decision cannot be applied twice or to a run that already moved on.
-// by and byType name the approver in the audit chain's vocabulary; the decision is committed to the
-// chain before the run is released, binding the approver to a digest of the exact spec released.
-func (d *Dispatcher) Approve(ctx context.Context, id, by, byType string) (*run.Run, error) {
+// by names the approver in the audit chain's vocabulary, with the account they acted for. The
+// decision is committed to the chain before the run is released, binding the approver to a digest
+// of the exact spec released.
+func (d *Dispatcher) Approve(ctx context.Context, id string, by outcome.Decider) (*run.Run, error) {
 	r, err := d.store.Get(ctx, id)
 	if err != nil {
 		return nil, err
@@ -36,9 +37,9 @@ func (d *Dispatcher) Approve(ctx context.Context, id, by, byType string) (*run.R
 	//
 	// Only an approval is checked. Rejecting a change you asked for needs no second person, and
 	// refusing it would leave a requester unable to withdraw their own request.
-	if r.RequireDistinctApprover && by != "" && by == r.Actor {
+	if r.RequireDistinctApprover && by.Name != "" && by.Name == r.Actor {
 		return nil, fmt.Errorf("%w: %q asked for this run, and the rule that held it requires a "+
-			"different person to approve it", ErrSelfApproval, by)
+			"different person to approve it", ErrSelfApproval, by.Name)
 	}
 	// A decision is only recordable while the run is actually awaiting one. The CAS below is what
 	// makes the release happen at most once, but it runs AFTER the chain entry, so a decision
@@ -58,7 +59,7 @@ func (d *Dispatcher) Approve(ctx context.Context, id, by, byType string) (*run.R
 	// second decision. The digest is also stamped on the run so the executor can refuse a spec
 	// that changed underneath the decision.
 	if d.audits != nil {
-		specDigest, derr := outcome.CommitDecision(ctx, d.audits, r, "approved", by, byType, d.now)
+		specDigest, derr := outcome.CommitDecision(ctx, d.audits, r, "approved", by, d.now)
 		if derr != nil {
 			return nil, fmt.Errorf("record the approval decision: %w", derr)
 		}
@@ -213,9 +214,10 @@ func (d *Dispatcher) startPipeline(parent *run.Run) {
 }
 
 // Reject terminally denies a run held for approval so it never executes. reason is recorded as the
-// run's error; a blank reason becomes a default. by and byType name the decider, and the rejection
-// is committed to the chain before the run is settled, binding the decider to the spec refused.
-func (d *Dispatcher) Reject(ctx context.Context, id, reason, by, byType string) (*run.Run, error) {
+// run's error; a blank reason becomes a default. by names the decider, with the account they acted
+// for, and the rejection is committed to the chain before the run is settled, binding the decider
+// to the spec refused.
+func (d *Dispatcher) Reject(ctx context.Context, id, reason string, by outcome.Decider) (*run.Run, error) {
 	r, err := d.store.Get(ctx, id)
 	if err != nil {
 		return nil, err
@@ -232,7 +234,7 @@ func (d *Dispatcher) Reject(ctx context.Context, id, reason, by, byType string) 
 		return nil, fmt.Errorf("%w: this run is %s", ErrNotPendingApproval, r.Status)
 	}
 	if d.audits != nil {
-		if _, derr := outcome.CommitDecision(ctx, d.audits, r, "rejected", by, byType, d.now); derr != nil {
+		if _, derr := outcome.CommitDecision(ctx, d.audits, r, "rejected", by, d.now); derr != nil {
 			return nil, fmt.Errorf("record the rejection decision: %w", derr)
 		}
 	}

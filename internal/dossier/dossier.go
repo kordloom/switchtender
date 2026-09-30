@@ -330,6 +330,9 @@ type entryRow struct {
 	At string
 	// Actor is the acting principal.
 	Actor string
+	// OnBehalfOf is the account whose authority the actor used, empty when it acted as itself or when
+	// the account only repeats the actor's name.
+	OnBehalfOf string
 	// Action is the method and path recorded.
 	Action string
 	// Role names what the entry did to the run, empty when it is ordinary activity.
@@ -428,7 +431,8 @@ func Render(in *Input) ([]byte, error) {
 	if in.Launch != nil {
 		launchRow := entryRow{
 			Seq: in.Launch.Seq, At: in.Launch.At.UTC().Format(time.RFC3339), Actor: in.Launch.Actor,
-			Action: in.Launch.Method + " " + in.Launch.Path, Role: "Launched",
+			OnBehalfOf: onBehalfOf(in.Launch),
+			Action:     in.Launch.Method + " " + in.Launch.Path, Role: "Launched",
 			Receipt: audit.Receipt(in.Launch),
 		}
 		v.Decisions = append(v.Decisions, launchRow)
@@ -443,9 +447,10 @@ func Render(in *Input) ([]byte, error) {
 	for _, e := range in.Entries {
 		row := entryRow{
 			Seq: e.Seq, At: e.At.UTC().Format(time.RFC3339), Actor: e.Actor,
-			Action:  e.Method + " " + e.Path,
-			Role:    entryRole(e),
-			Receipt: fmt.Sprintf("%d:%s", e.Seq, e.Hash),
+			OnBehalfOf: onBehalfOf(e),
+			Action:     e.Method + " " + e.Path,
+			Role:       entryRole(e),
+			Receipt:    fmt.Sprintf("%d:%s", e.Seq, e.Hash),
 		}
 		v.Entries = append(v.Entries, row)
 		if row.Role != "" {
@@ -533,6 +538,16 @@ func Render(in *Input) ([]byte, error) {
 		return nil, fmt.Errorf("render dossier: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+// onBehalfOf returns the account an entry's actor used, for showing beside the actor. It is empty
+// when the actor acted as itself, and when the account is the actor's own name, as it is for a
+// person's browser session, where saying it twice adds nothing.
+func onBehalfOf(e *audit.Entry) string {
+	if e.OnBehalfOf == e.Actor {
+		return ""
+	}
+	return e.OnBehalfOf
 }
 
 // entryRole names what a chain entry did to the run, empty for ordinary activity.

@@ -49,7 +49,7 @@ func TestApprovedParentWithNothingToRunFailsWithAReason(t *testing.T) {
 				t.Fatalf("Save() error = %v", err)
 			}
 
-			if _, err := d.Approve(ctx, parent.ID, "approver-pat", "session"); err != nil {
+			if _, err := d.Approve(ctx, parent.ID, decider("approver-pat", "session")); err != nil {
 				t.Fatalf("Approve() error = %v", err)
 			}
 
@@ -88,7 +88,7 @@ func TestRejectingASplitSettlesItsHeldShards(t *testing.T) {
 		t.Fatalf("submitted split status = %q, want pending_approval", parent.Status)
 	}
 
-	rejected, err := d.Reject(ctx, parent.ID, "not on a Friday", "approver-pat", "session")
+	rejected, err := d.Reject(ctx, parent.ID, "not on a Friday", decider("approver-pat", "session"))
 	if err != nil {
 		t.Fatalf("Reject() error = %v", err)
 	}
@@ -128,7 +128,7 @@ func TestRejectWithoutAReasonRecordsADefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	if _, err := d.Reject(ctx, created.ID, "", "approver-pat", "session"); err != nil {
+	if _, err := d.Reject(ctx, created.ID, "", decider("approver-pat", "session")); err != nil {
 		t.Fatalf("Reject() error = %v", err)
 	}
 
@@ -154,10 +154,12 @@ func TestApproveAndRejectOnAMissingRun(t *testing.T) {
 	d := New(run.NewMemStore(), okRunner(), nil, WithNoJanitor())
 	defer d.Close()
 
-	if _, err := d.Approve(ctx, "run_absent", "pat", "session"); !errors.Is(err, run.ErrNotFound) {
+	if _, err := d.Approve(ctx, "run_absent",
+		decider("pat", "session")); !errors.Is(err, run.ErrNotFound) {
 		t.Errorf("Approve() error = %v, want %v", err, run.ErrNotFound)
 	}
-	if _, err := d.Reject(ctx, "run_absent", "no", "pat", "session"); !errors.Is(err, run.ErrNotFound) {
+	if _, err := d.Reject(ctx, "run_absent", "no",
+		decider("pat", "session")); !errors.Is(err, run.ErrNotFound) {
 		t.Errorf("Reject() error = %v, want %v", err, run.ErrNotFound)
 	}
 }
@@ -212,7 +214,7 @@ func TestApprovedParentGoesStraightToRunningAndOwned(t *testing.T) {
 				}
 			}
 
-			got, err := d.Approve(ctx, parent.ID, "approver-pat", "session")
+			got, err := d.Approve(ctx, parent.ID, decider("approver-pat", "session"))
 			if err != nil {
 				t.Fatalf("Approve() error = %v", err)
 			}
@@ -257,7 +259,7 @@ func TestApprovedPlainRunIsReleasedUnleased(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 
-	got, err := d.Approve(ctx, held.ID, "approver-pat", "session")
+	got, err := d.Approve(ctx, held.ID, decider("approver-pat", "session"))
 	if err != nil {
 		t.Fatalf("Approve() error = %v", err)
 	}
@@ -293,16 +295,16 @@ func TestApproveIsNotAppliedTwice(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 
-	if _, err := d.Approve(ctx, held.ID, "approver-pat", "session"); err != nil {
+	if _, err := d.Approve(ctx, held.ID, decider("approver-pat", "session")); err != nil {
 		t.Fatalf("Approve(first) error = %v", err)
 	}
-	if _, err := d.Approve(ctx, held.ID, "approver-sam", "session"); !errors.Is(err,
+	if _, err := d.Approve(ctx, held.ID, decider("approver-sam", "session")); !errors.Is(err,
 		ErrNotPendingApproval) {
 		t.Errorf("Approve(second) error = %v, want %v", err, ErrNotPendingApproval)
 	}
 	// And a rejection cannot overturn a decision that was already made.
-	if _, err := d.Reject(ctx, held.ID, "changed my mind", "approver-sam",
-		"session"); !errors.Is(err, ErrNotPendingApproval) {
+	if _, err := d.Reject(ctx, held.ID, "changed my mind",
+		decider("approver-sam", "session")); !errors.Is(err, ErrNotPendingApproval) {
 		t.Errorf("Reject after approve: error = %v, want %v", err, ErrNotPendingApproval)
 	}
 }

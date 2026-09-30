@@ -63,6 +63,7 @@ import (
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
+	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/run"
@@ -89,7 +90,7 @@ type Submitter interface {
 // Approver decides on a run the policy gate is holding. The dispatcher satisfies it.
 type Approver interface {
 	// Approve releases a held run for execution and records who decided.
-	Approve(ctx context.Context, id, by, byType string) (*run.Run, error)
+	Approve(ctx context.Context, id string, by outcome.Decider) (*run.Run, error)
 }
 
 // Deps are the stores and submitter the seeder writes through.
@@ -456,7 +457,8 @@ func seedGovernance(ctx context.Context, d Deps, playbook, inv string, ids seede
 		log.Warn("demo: seed approved run: " + err.Error())
 		return
 	}
-	if _, err := d.Approver.Approve(ctx, r.ID, "admin", "user"); err != nil {
+	if _, err := d.Approver.Approve(ctx, r.ID,
+		outcome.Decider{Name: "admin", Type: "user"}); err != nil {
 		log.Warn("demo: approve seeded run: " + err.Error())
 		return
 	}

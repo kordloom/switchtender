@@ -15,6 +15,75 @@ import (
 	"github.com/kordloom/switchtender/internal/run"
 )
 
+// decider names who decides a run in these tests, a caller the gate recorded as acting for no other
+// account.
+func decider(name, kind string) outcome.Decider {
+	return outcome.Decider{Name: name, Type: kind}
+}
+
+// TestADecisionCommitsTheDecidersAccount proves both decisions carry the account the decider acted
+// for into the DECISION entry, beside the name and how they authenticated. The entry named the
+// token alone, so the account behind a decision was recoverable only by pairing it with the request
+// entry the gate wrote for it.
+func TestADecisionCommitsTheDecidersAccount(t *testing.T) {
+	t.Parallel()
+	laptop := outcome.Decider{Name: "laptop", Type: "token", OnBehalfOf: "alice"}
+	tests := []struct {
+		// Name labels the case.
+		Name string
+		// Verdict is the decision taken.
+		Verdict string
+		// Decide takes it.
+		Decide func(ctx context.Context, d *Dispatcher, id string) error
+	}{{ // Test 0: An approval.
+		Name: "approve", Verdict: "approved",
+		Decide: func(ctx context.Context, d *Dispatcher, id string) error {
+			_, err := d.Approve(ctx, id, laptop)
+			return err
+		},
+	}, { // Test 1: A rejection.
+		Name: "reject", Verdict: "rejected",
+		Decide: func(ctx context.Context, d *Dispatcher, id string) error {
+			_, err := d.Reject(ctx, id, "not today", laptop)
+			return err
+		},
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			store := run.NewMemStore()
+			audits := audit.NewMemStore()
+			d := New(store, okRunner(), nil, WithAudits(audits), WithNoJanitor())
+			defer d.Close()
+			held := &run.Run{
+				ID: "run_account", Playbook: "site.yml", Inventory: "prod",
+				Status: run.StatusPendingApproval, CreatedAt: time.Now(), Actor: "casey",
+			}
+			if err := store.Save(ctx, held); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+			if err := test.Decide(ctx, d, held.ID); err != nil {
+				t.Fatalf("%s error = %v", test.Name, err)
+			}
+			entries, err := audits.Chain(ctx)
+			if err != nil {
+				t.Fatalf("Chain() error = %v", err)
+			}
+			var got []outcome.Decider
+			for _, e := range entries {
+				if e.Method == audit.MethodDecision && e.Path == "/runs/run_account/decision/"+test.Verdict {
+					got = append(got, outcome.Decider{Name: e.Actor, Type: e.ActorType,
+						OnBehalfOf: e.OnBehalfOf})
+				}
+			}
+			if diff := cmp.Diff([]outcome.Decider{laptop}, got); diff != "" {
+				t.Errorf("decision entries mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 // TestApproveCommitsTheDecision proves an approval is a chain event bound to content: releasing a
 // held run appends a DECISION entry naming the approver, committing a digest of the exact spec
 // released, and stamps that digest on the run for the executor to enforce.
@@ -36,7 +105,7 @@ func TestApproveCommitsTheDecision(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 
-	approved, err := d.Approve(ctx, held.ID, "approver-pat", "session")
+	approved, err := d.Approve(ctx, held.ID, decider("approver-pat", "session"))
 	if err != nil {
 		t.Fatalf("Approve() error = %v", err)
 	}
@@ -149,13 +218,13 @@ func TestARefusedDecisionLeavesNoChainEntry(t *testing.T) {
 	}{{ // Test 0: A second approval, the double-click.
 		Name: "a second approve",
 		Second: func(d *Dispatcher, id string) error {
-			_, err := d.Approve(ctx, id, "approver-pat", "session")
+			_, err := d.Approve(ctx, id, decider("approver-pat", "session"))
 			return err
 		},
 	}, { // Test 1: A reject a moment too late, after the approval already released the run.
 		Name: "a late reject",
 		Second: func(d *Dispatcher, id string) error {
-			_, err := d.Reject(ctx, id, "changed my mind", "approver-pat", "session")
+			_, err := d.Reject(ctx, id, "changed my mind", decider("approver-pat", "session"))
 			return err
 		},
 	}}
@@ -175,7 +244,7 @@ func TestARefusedDecisionLeavesNoChainEntry(t *testing.T) {
 			if err := store.Save(ctx, held); err != nil {
 				t.Fatalf("Save() error = %v", err)
 			}
-			if _, err := d.Approve(ctx, held.ID, "approver-pat", "session"); err != nil {
+			if _, err := d.Approve(ctx, held.ID, decider("approver-pat", "session")); err != nil {
 				t.Fatalf("Approve() error = %v", err)
 			}
 			waitTerminal(t, store, held.ID)

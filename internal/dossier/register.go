@@ -37,6 +37,9 @@ type Decision struct {
 	Verdict string
 	// Actor is who decided.
 	Actor string
+	// OnBehalfOf is the account whose authority the decider used, empty when it acted as itself or
+	// when the account only repeats the decider's name.
+	OnBehalfOf string
 	// At is when.
 	At time.Time
 	// Seq is the chain entry recording it.
@@ -159,7 +162,8 @@ func CollectRegister(ctx context.Context, runs run.Store, audits audit.Store,
 		if id, verdict := decisionOf(e); id != "" {
 			// The newest decision wins: a rejection redone as an approval reads as the chain
 			// tells it, in order.
-			in.Decisions[id] = Decision{Verdict: verdict, Actor: e.Actor, At: e.At, Seq: e.Seq}
+			in.Decisions[id] = Decision{Verdict: verdict, Actor: e.Actor, OnBehalfOf: onBehalfOf(e),
+				At: e.At, Seq: e.Seq}
 		}
 		return nil
 	})
@@ -322,11 +326,17 @@ func RenderRegister(in *RegisterInput) ([]byte, error) {
 			DryRun:  r.DryRun,
 		}
 		if d, ok := in.Decisions[r.ID]; ok {
-			// An install serving open on loopback records a decision with no actor, and "Approved
-			// by" followed by nothing reads as a name that failed to render.
+			// A decision an install serving open on loopback recorded before decisions named their
+			// caller carries no actor, and "Approved by" followed by nothing reads as a name that
+			// failed to render.
 			row.Decision = d.Verdict + " by " + d.Actor
 			if d.Actor == "" {
 				row.Decision = d.Verdict + " with no actor recorded"
+			}
+			// A token's label alone reads the same for two tokens on different accounts, so the
+			// account it acted for follows it.
+			if d.OnBehalfOf != "" {
+				row.Decision += " on behalf of " + d.OnBehalfOf
 			}
 			row.DecisionSeq = d.Seq
 			switch d.Verdict {

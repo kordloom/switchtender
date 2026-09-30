@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -51,7 +52,7 @@ type fakeApprover struct {
 }
 
 // Approve releases a held run, refusing a decision by the account that requested it.
-func (f *fakeApprover) Approve(ctx context.Context, id, by, byType string) (*run.Run, error) {
+func (f *fakeApprover) Approve(ctx context.Context, id string, by outcome.Decider) (*run.Run, error) {
 	r, err := f.store.Get(ctx, id)
 	if err != nil {
 		return nil, err
@@ -59,10 +60,10 @@ func (f *fakeApprover) Approve(ctx context.Context, id, by, byType string) (*run
 	if r.Status != run.StatusPendingApproval {
 		return nil, fmt.Errorf("run %s is %s, not held for approval", id, r.Status)
 	}
-	if r.RequireDistinctApprover && by == r.Actor {
-		return nil, fmt.Errorf("%q asked for this run and cannot release it", by)
+	if r.RequireDistinctApprover && by.Name == r.Actor {
+		return nil, fmt.Errorf("%q asked for this run and cannot release it", by.Name)
 	}
-	f.approvedBy = by
+	f.approvedBy = by.Name
 	r.Status = run.StatusSucceeded
 	return r, f.store.Save(ctx, r)
 }

@@ -196,7 +196,7 @@ func TestASplitMissingShardsIsNeitherStartedNorRetried(t *testing.T) {
 			}
 		}
 
-		if _, err := d.Approve(ctx, parentID, "admin", "user"); err != nil {
+		if _, err := d.Approve(ctx, parentID, decider("admin", "user")); err != nil {
 			t.Fatalf("Approve() error = %v", err)
 		}
 		waitForStatus(t, store, parentID, run.StatusFailed)

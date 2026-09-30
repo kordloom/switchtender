@@ -53,7 +53,8 @@ func TestDistinctApproverIsEnforced(t *testing.T) {
 
 	// Test 0: The requester cannot release their own held run.
 	own := submit("casey")
-	if _, err := d.Approve(ctx, own.ID, "casey", "session"); !errors.Is(err, ErrSelfApproval) {
+	if _, err := d.Approve(ctx, own.ID,
+		decider("casey", "session")); !errors.Is(err, ErrSelfApproval) {
 		t.Errorf("self approval error = %v, want ErrSelfApproval: the requester released their own "+
 			"change", err)
 	}
@@ -67,14 +68,14 @@ func TestDistinctApproverIsEnforced(t *testing.T) {
 
 	// Test 1: Anyone else may. The control is separation of duties, not a second signature from the
 	// same person under a different name.
-	if _, err := d.Approve(ctx, own.ID, "dana", "session"); err != nil {
+	if _, err := d.Approve(ctx, own.ID, decider("dana", "session")); err != nil {
 		t.Errorf("approval by another person = %v, want release", err)
 	}
 
 	// Test 2: Rejecting your own run is fine. Refusing a change you asked for needs no second person,
 	// and blocking it would leave a requester unable to withdraw their own request.
 	mine := submit("casey")
-	if _, err := d.Reject(ctx, mine.ID, "changed my mind", "casey", "session"); err != nil {
+	if _, err := d.Reject(ctx, mine.ID, "changed my mind", decider("casey", "session")); err != nil {
 		t.Errorf("self rejection = %v, want accepted", err)
 	}
 
@@ -86,7 +87,7 @@ func TestDistinctApproverIsEnforced(t *testing.T) {
 		t.Fatalf("Save policy: %v", err)
 	}
 	relaxed := submit2(t, ctx, d, "casey")
-	if _, err := d.Approve(ctx, relaxed.ID, "casey", "session"); err != nil {
+	if _, err := d.Approve(ctx, relaxed.ID, decider("casey", "session")); err != nil {
 		t.Errorf("self approval under a rule that permits it = %v, want release", err)
 	}
 }
@@ -212,10 +213,10 @@ func TestDistinctApproverBindsARunBornHeld(t *testing.T) {
 	}
 
 	// The control has to actually refuse, not merely be recorded.
-	if _, err := d.Approve(ctx, r.ID, "casey", "session"); !errors.Is(err, ErrSelfApproval) {
+	if _, err := d.Approve(ctx, r.ID, decider("casey", "session")); !errors.Is(err, ErrSelfApproval) {
 		t.Errorf("self approval error = %v, want ErrSelfApproval", err)
 	}
-	if _, err := d.Approve(ctx, r.ID, "dana", "session"); err != nil {
+	if _, err := d.Approve(ctx, r.ID, decider("dana", "session")); err != nil {
 		t.Errorf("a second person could not approve: %v", err)
 	}
 }
@@ -243,7 +244,7 @@ func TestRequestedHoldStillNamesItselfWithNoRule(t *testing.T) {
 	if r.RequireDistinctApprover {
 		t.Error("a run held only by request gained a distinct-approver requirement no rule set")
 	}
-	if _, err := d.Approve(ctx, r.ID, "casey", "session"); err != nil {
+	if _, err := d.Approve(ctx, r.ID, decider("casey", "session")); err != nil {
 		t.Errorf("the requester could not withdraw a hold they asked for: %v", err)
 	}
 }

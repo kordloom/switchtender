@@ -258,7 +258,7 @@ func TestAHeldRunIsAnnouncedOnceWhereFinishedRunsGo(t *testing.T) {
 	noneArrive(t, events, "a retry of the held request")
 
 	// Test 2: once released, the run executes and its outcome follows the hold.
-	if _, err := d.Approve(ctx, held.ID, "admin", "user"); err != nil {
+	if _, err := d.Approve(ctx, held.ID, decider("admin", "user")); err != nil {
 		t.Fatalf("Approve() error = %v", err)
 	}
 	if e := nextEvent(t, events); e.Event != "run.finished" || e.Run.Status != run.StatusSucceeded {

@@ -156,12 +156,27 @@ func DecisionBody(r *run.Run, verdict string) (body []byte, specDigest string, e
 	return body, specDigest, nil
 }
 
-// CommitDecision records an approval decision as a tamper-evident chain entry naming the deciding
-// actor and committing the decision body, and returns the spec digest it committed. The caller
-// appends it before releasing the run, fail-closed: a decision that cannot be recorded is not a
-// decision this system acts on.
-func CommitDecision(ctx context.Context, audits audit.Store, r *run.Run, verdict, actor,
-	actorType string, now func() time.Time) (string, error) {
+// Decider is who made an approval decision, in the audit chain's vocabulary. The three fields
+// travel together because the decision entry has to name the decider exactly as the entry recording
+// the request that carried the decision does. A token's label alone cannot say whose authority a
+// decision used: two tokens sharing a label on different accounts read identically, and the account
+// behind a decision was recoverable only by pairing the entry with its request.
+type Decider struct {
+	// Name is the decider as the chain records it: a token's label, a username, or a caller class.
+	Name string
+	// Type is how the decider authenticated, in the gate's vocabulary: session, token, agent, or
+	// unauthenticated.
+	Type string
+	// OnBehalfOf is the account whose authority the decider used, empty when it acted as itself.
+	OnBehalfOf string
+}
+
+// CommitDecision records an approval decision as a tamper-evident chain entry naming the decider
+// and committing the decision body, and returns the spec digest it committed. The caller appends it
+// before releasing the run, fail-closed: a decision that cannot be recorded is not a decision this
+// system acts on.
+func CommitDecision(ctx context.Context, audits audit.Store, r *run.Run, verdict string, by Decider,
+	now func() time.Time) (string, error) {
 	body, specDigest, err := DecisionBody(r, verdict)
 	if err != nil {
 		return "", err
@@ -172,7 +187,7 @@ func CommitDecision(ctx context.Context, audits audit.Store, r *run.Run, verdict
 	}
 	entry := &audit.Entry{
 		ID: audit.NewID(), At: now(),
-		Actor: actor, ActorType: actorType,
+		Actor: by.Name, ActorType: by.Type, OnBehalfOf: by.OnBehalfOf,
 		Method: audit.MethodDecision, Path: "/runs/" + r.ID + "/decision/" + verdict,
 		ContentDigest: digest, Nonce: nonce,
 	}

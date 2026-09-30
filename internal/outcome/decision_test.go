@@ -386,8 +386,9 @@ func (f *failingAudits) Append(context.Context, *audit.Entry) error {
 
 // TestCommitDecisionRecordsTheDecidingActorAndTheBody pins the chain entry an approval writes. It
 // is what a change-management review reads to answer who released a change and what exactly they
-// released, so the actor, the actor's type, the path, and the committed digest all have to be the
-// ones the caller asked for and the body has to verify against the digest.
+// released, so the actor, the actor's type, the account they acted for, the path, and the committed
+// digest all have to be the ones the caller asked for and the body has to verify against the
+// digest.
 func TestCommitDecisionRecordsTheDecidingActorAndTheBody(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -399,16 +400,23 @@ func TestCommitDecisionRecordsTheDecidingActorAndTheBody(t *testing.T) {
 		Actor string
 		// ActorType is how they authenticated.
 		ActorType string
+		// OnBehalfOf is the account they acted for, empty when they acted as themselves.
+		OnBehalfOf string
 	}{{ // Test 0: A person approving in a browser.
 		Name: "session approval", Verdict: "approved", Actor: "operator-jane",
 		ActorType: "session",
 	}, { // Test 1: The same person rejecting.
 		Name: "session rejection", Verdict: "rejected", Actor: "operator-jane",
 		ActorType: "session",
-	}, { // Test 2: An AI agent's token, which the chain must not later present as a person's.
+	}, { // Test 2: An AI agent's token, which the chain must not later present as a person's, and
+		// the human account it acts for.
 		Name: "agent approval", Verdict: "approved", Actor: "agent-deploybot", ActorType: "agent",
+		OnBehalfOf: "dev-lead",
 	}, { // Test 3: The command line.
 		Name: "cli approval", Verdict: "approved", Actor: "admin-token", ActorType: "cli",
+	}, { // Test 4: A token bound to an account, whose label alone could be any account's.
+		Name: "bound token rejection", Verdict: "rejected", Actor: "laptop", ActorType: "token",
+		OnBehalfOf: "alice",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -418,8 +426,9 @@ func TestCommitDecisionRecordsTheDecidingActorAndTheBody(t *testing.T) {
 			r := decisionRun()
 			before := time.Now().Add(-time.Second)
 
-			specDigest, err := CommitDecision(ctx, audits, r, test.Verdict, test.Actor,
-				test.ActorType, time.Now)
+			specDigest, err := CommitDecision(ctx, audits, r, test.Verdict, Decider{
+				Name: test.Actor, Type: test.ActorType, OnBehalfOf: test.OnBehalfOf,
+			}, time.Now)
 			if err != nil {
 				t.Fatalf("CommitDecision(, time.Now) error = %v", err)
 			}
@@ -443,6 +452,10 @@ func TestCommitDecisionRecordsTheDecidingActorAndTheBody(t *testing.T) {
 			if e.Actor != test.Actor || e.ActorType != test.ActorType {
 				t.Errorf("actor = %q/%q, want %q/%q; a decision an agent made must not later read "+
 					"as a person's", e.Actor, e.ActorType, test.Actor, test.ActorType)
+			}
+			if e.OnBehalfOf != test.OnBehalfOf {
+				t.Errorf("on behalf of = %q, want %q, since a label alone cannot say whose "+
+					"authority released the change", e.OnBehalfOf, test.OnBehalfOf)
 			}
 			if e.ID == "" || e.Seq != 1 || e.Hash == "" {
 				t.Errorf("entry = %+v, want it linked into the chain", e)
@@ -478,7 +491,7 @@ func TestCommitDecisionFailsClosedWhenTheChainRefuses(t *testing.T) {
 	t.Parallel()
 	audits := &failingAudits{Store: audit.NewMemStore()}
 	specDigest, err := CommitDecision(context.Background(), audits, decisionRun(), "approved",
-		"operator-jane", "session", time.Now)
+		Decider{Name: "operator-jane", Type: "session"}, time.Now)
 	if !errors.Is(err, errAppend) {
 		t.Fatalf("CommitDecision(, time.Now) error = %v, want the store's refusal reported", err)
 	}
@@ -501,7 +514,8 @@ func TestCommitDecisionWritesNothingWhenTheSpecWillNotEncode(t *testing.T) {
 	r := decisionRun()
 	r.ExtraVars = map[string]any{"ratio": math.Inf(1)}
 
-	specDigest, err := CommitDecision(ctx, audits, r, "approved", "operator-jane", "session", time.Now)
+	specDigest, err := CommitDecision(ctx, audits, r, "approved",
+		Decider{Name: "operator-jane", Type: "session"}, time.Now)
 	if err == nil {
 		t.Fatal("CommitDecision(, time.Now) on an unencodable spec = nil error")
 	}
@@ -552,7 +566,8 @@ func TestCommitDecisionKeepsUnusualRunIdentifiersOutOfTheChainPathVerbatim(t *te
 			r := decisionRun()
 			r.ID = test.RunID
 
-			if _, err := CommitDecision(ctx, audits, r, test.Verdict, "op", "session", time.Now); err != nil {
+			if _, err := CommitDecision(ctx, audits, r, test.Verdict, Decider{Name: "op", Type: "session"},
+				time.Now); err != nil {
 				t.Fatalf("CommitDecision(, time.Now) error = %v", err)
 			}
 			chain, err := audits.Chain(ctx)
@@ -594,7 +609,7 @@ func TestCommitDecisionIsSafeUnderConcurrentApprovals(t *testing.T) {
 			r := decisionRun()
 			r.ID = fmt.Sprintf("run_%02d", n)
 			if _, err := CommitDecision(ctx, audits, r, "approved",
-				fmt.Sprintf("operator-%02d", n), "session", time.Now); err != nil {
+				Decider{Name: fmt.Sprintf("operator-%02d", n), Type: "session"}, time.Now); err != nil {
 				errs <- err
 			}
 		}(i)

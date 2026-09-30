@@ -225,6 +225,8 @@ An approval is a chain entry of its own. When a person releases a held run, the 
 DECISION entry naming the approver and committing a digest of the exact spec released, and the
 executor refuses a spec that changed after the decision. So the record does not say "someone
 approved run 123"; it says this person approved exactly this change, and exactly this change ran.
+The entry names the approver exactly as the request that carried the decision is recorded: the
+token's label, how it authenticated, and the account it is bound to.
 
 ## The whole path, end to end
 
@@ -235,7 +237,7 @@ This is the golden path a governed agent change takes, with the commands to watc
 2. Policy sees an agent asking. A deny rule refuses it outright, with the rule named. A matching
    approval rule holds it: the run is born `pending_approval` and no executor can claim it.
 3. A person reviews the held run, its assessed risk, and its parameters, and approves. The DECISION
-   entry commits who approved and the digest of exactly what.
+   entry commits who approved, the account they approved under, and the digest of exactly what.
 4. The run executes, on whichever worker claims it, after re-checking the approved digest. The
    outcome lands on the chain: status, exit code, per-host results, the log digest, and the same
    spec digest.

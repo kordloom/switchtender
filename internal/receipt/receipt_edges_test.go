@@ -706,7 +706,8 @@ func TestSparseReceiptDoesNotDiscloseARunWhoseIDMerelyContainsThisOne(t *testing
 	if err := runs.Save(ctx, neighbor); err != nil {
 		t.Fatalf("save neighbor: %v", err)
 	}
-	_, err := outcome.CommitDecision(ctx, audits, neighbor, "approved", "stranger", "session", time.Now)
+	_, err := outcome.CommitDecision(ctx, audits, neighbor, "approved",
+		outcome.Decider{Name: "stranger", Type: "session"}, time.Now)
 	if err != nil {
 		t.Fatalf("CommitDecision for the neighbor: %v", err)
 	}
@@ -733,7 +734,8 @@ func TestReceiptOmitsADecisionRecordedAfterTheOutcome(t *testing.T) {
 	runs, audits, id, r := held(t, "approved")
 
 	// A second decision lands on the chain after the run already finished.
-	if _, err := outcome.CommitDecision(ctx, audits, r, "rejected", "dana", "session", time.Now); err != nil {
+	if _, err := outcome.CommitDecision(ctx, audits, r, "rejected",
+		outcome.Decider{Name: "dana", Type: "session"}, time.Now); err != nil {
 		t.Fatalf("CommitDecision after the outcome: %v", err)
 	}
 
@@ -771,8 +773,8 @@ func TestAReceiptSurvivesARetriedApproval(t *testing.T) {
 	runs, audits, id, r := held(t, "approved")
 
 	// The retry: a second, identical verdict lands on the chain at the same path.
-	if _, err := outcome.CommitDecision(ctx, audits, r, "approved", "dana", "session",
-		time.Now); err != nil {
+	if _, err := outcome.CommitDecision(ctx, audits, r, "approved",
+		outcome.Decider{Name: "dana", Type: "session"}, time.Now); err != nil {
 		t.Fatalf("CommitDecision retry: %v", err)
 	}
 	// Recommit the outcome so the receipt's segment reaches past the late decision; the fixture

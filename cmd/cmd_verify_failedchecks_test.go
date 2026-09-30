@@ -159,8 +159,9 @@ func TestSpecVerdictNamesOnlyTheDigestsItCompared(t *testing.T) {
 	}
 }
 
-// TestDecidedByNeverPrintsEmptyFields pins how a decision's actor reads. An install with no tokens
-// records a decision with no actor, and the line printed "rejected by  (), binding spec ...".
+// TestDecidedByNeverPrintsEmptyFields pins how a decision's actor reads. A decision recorded before
+// an install serving open named its caller carries no actor, and the line printed "rejected by  (),
+// binding spec ...". The account a decider acted for follows the name, and nothing is said twice.
 func TestDecidedByNeverPrintsEmptyFields(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -172,6 +173,18 @@ func TestDecidedByNeverPrintsEmptyFields(t *testing.T) {
 		Decision: audit.DisclosedDecision{Actor: "drew"}, WantBy: "by drew",
 	}, { // Test 2: No actor at all says so.
 		Decision: audit.DisclosedDecision{}, WantBy: "with no actor recorded",
+	}, { // Test 3: A token bound to an account names the account.
+		Decision: audit.DisclosedDecision{Actor: "laptop", ActorType: "token", OnBehalfOf: "alice"},
+		WantBy:   "by laptop (token) on behalf of alice",
+	}, { // Test 4: The account without a type still follows the name.
+		Decision: audit.DisclosedDecision{Actor: "laptop", OnBehalfOf: "alice"},
+		WantBy:   "by laptop on behalf of alice",
+	}, { // Test 5: A browser session is named for its own account, which is said once.
+		Decision: audit.DisclosedDecision{Actor: "drew", ActorType: "session", OnBehalfOf: "drew"},
+		WantBy:   "by drew (session)",
+	}, { // Test 6: The caller class an install serving open records is said once.
+		Decision: audit.DisclosedDecision{Actor: "unauthenticated", ActorType: "unauthenticated"},
+		WantBy:   "by unauthenticated",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

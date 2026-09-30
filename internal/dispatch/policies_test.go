@@ -343,10 +343,11 @@ func TestPlanGateCarriesDistinctApproverOntoTheApply(t *testing.T) {
 	if !strings.Contains(proposal.HeldByPolicy, "prod destroy limit") {
 		t.Errorf("held by = %q, want it to name the rule", proposal.HeldByPolicy)
 	}
-	if _, err := d.Approve(ctx, proposal.ID, "casey", "session"); !errors.Is(err, ErrSelfApproval) {
+	if _, err := d.Approve(ctx, proposal.ID,
+		decider("casey", "session")); !errors.Is(err, ErrSelfApproval) {
 		t.Errorf("self approval error = %v, want ErrSelfApproval", err)
 	}
-	if _, err := d.Approve(ctx, proposal.ID, "dana", "session"); err != nil {
+	if _, err := d.Approve(ctx, proposal.ID, decider("dana", "session")); err != nil {
 		t.Errorf("a second person could not approve the apply: %v", err)
 	}
 }

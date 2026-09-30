@@ -98,6 +98,9 @@ type DisclosedDecision struct {
 	Actor string
 	// ActorType is how the decider authenticated.
 	ActorType string
+	// OnBehalfOf is the account whose authority the decider used, as the chain committed it. It is
+	// empty when the decider acted as itself and on a decision recorded before decisions carried it.
+	OnBehalfOf string
 	// Verdict is approved or rejected.
 	Verdict string
 	// SpecDigest is the digest of the spec the decision bound to.
@@ -402,8 +405,10 @@ func verifyDecisionDisclosures(claims []BundleClaim, rep *BundleReport) {
 		}
 		actor, _ := c.Payload["actor"].(string)
 		actorType, _ := c.Payload["actor_type"].(string)
+		onBehalfOf, _ := c.Payload["on_behalf_of"].(string)
 		rep.Decisions = append(rep.Decisions, DisclosedDecision{
-			Actor: actor, ActorType: actorType, Verdict: rec.Verdict, SpecDigest: rec.SpecDigest,
+			Actor: actor, ActorType: actorType, OnBehalfOf: onBehalfOf, Verdict: rec.Verdict,
+			SpecDigest: rec.SpecDigest,
 		})
 	}
 }

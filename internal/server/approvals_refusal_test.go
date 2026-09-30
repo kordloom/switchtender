@@ -11,9 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/dispatch"
+	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/user"
 )
@@ -25,19 +27,18 @@ type stubApprover struct {
 	result *run.Run
 	// err is returned instead of result when non-nil.
 	err error
-	// gotID, gotBy, gotByType, and gotReason record the most recent decision.
+	// gotID, gotBy, and gotReason record the most recent decision.
 	gotID     string
-	gotBy     string
-	gotByType string
+	gotBy     outcome.Decider
 	gotReason string
 	// called counts decisions, so a test can prove a refusal happened before the dispatcher.
 	called int
 }
 
 // Approve records the arguments and returns the configured run or error.
-func (s *stubApprover) Approve(_ context.Context, id, by, byType string) (*run.Run, error) {
+func (s *stubApprover) Approve(_ context.Context, id string, by outcome.Decider) (*run.Run, error) {
 	s.called++
-	s.gotID, s.gotBy, s.gotByType = id, by, byType
+	s.gotID, s.gotBy = id, by
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -45,9 +46,9 @@ func (s *stubApprover) Approve(_ context.Context, id, by, byType string) (*run.R
 }
 
 // Reject records the arguments and returns the configured run or error.
-func (s *stubApprover) Reject(_ context.Context, id, reason, by, byType string) (*run.Run, error) {
+func (s *stubApprover) Reject(_ context.Context, id, reason string, by outcome.Decider) (*run.Run, error) {
 	s.called++
-	s.gotID, s.gotReason, s.gotBy, s.gotByType = id, reason, by, byType
+	s.gotID, s.gotReason, s.gotBy = id, reason, by
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -327,47 +328,60 @@ func TestRejectionBodyIsHeldToTheStrictRule(t *testing.T) {
 	}
 }
 
-// TestApprovalRecordsWhoDecidedAndHow pins that the decision carries the caller's audit name and how
-// they authenticated. The chain entry for a release names the approver, and an entry that cannot say
-// whether a person or an agent signed off is the one thing the identity stage of this boundary
+// TestApprovalRecordsWhoDecidedAndHow pins that the decision carries the caller exactly as the gate
+// recorded the request: the audit name, how they authenticated, and the account they acted for. The
+// chain entry for a release names the approver, and an entry that cannot say whether a person or an
+// agent signed off, or under whose account, is the one thing the identity stage of this boundary
 // exists to prevent.
 func TestApprovalRecordsWhoDecidedAndHow(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		Name       string
-		Actor      Actor
-		HasActor   bool
-		WantBy     string
-		WantByType string
-	}{{ // Test 0: A person at a browser is recorded as a session.
-		Name: "session", Actor: Actor{UserID: "user_2", Name: "drew", Type: actorTypeSession},
-		HasActor: true, WantBy: "drew", WantByType: actorTypeSession,
-	}, { // Test 1: A script's token is recorded as a token, under its label.
-		Name: "token", Actor: Actor{UserID: "user_2", Name: "ci-deploy", Type: actorTypeToken},
-		HasActor: true, WantBy: "ci-deploy", WantByType: actorTypeToken,
-	}, { // Test 2: An install with no authentication has nobody to name, and the decision records
-		// empty rather than inventing an actor.
-		Name: "open install", HasActor: false, WantBy: "", WantByType: "",
+		Name     string
+		Decision string
+		Recorded *recordedActor
+		WantBy   outcome.Decider
+	}{{ // Test 0: A person at a browser is recorded as a session, named for their own account.
+		Name: "session", Decision: "approve",
+		Recorded: &recordedActor{Name: "drew", Type: actorTypeSession, OnBehalfOf: "drew"},
+		WantBy:   outcome.Decider{Name: "drew", Type: actorTypeSession, OnBehalfOf: "drew"},
+	}, { // Test 1: A script's token is recorded as a token, under its label and its account.
+		Name: "token", Decision: "approve",
+		Recorded: &recordedActor{Name: "ci-deploy", Type: actorTypeToken, OnBehalfOf: "drew"},
+		WantBy:   outcome.Decider{Name: "ci-deploy", Type: actorTypeToken, OnBehalfOf: "drew"},
+	}, { // Test 2: The same token rejecting carries the same identity.
+		Name: "token rejects", Decision: "reject",
+		Recorded: &recordedActor{Name: "ci-deploy", Type: actorTypeToken, OnBehalfOf: "drew"},
+		WantBy:   outcome.Decider{Name: "ci-deploy", Type: actorTypeToken, OnBehalfOf: "drew"},
+	}, { // Test 3: An install serving open records the request under a caller class, and the
+		// decision under the same one.
+		Name: "open install", Decision: "approve",
+		Recorded: &recordedActor{Name: "unauthenticated", Type: actorTypeUnauthenticated},
+		WantBy:   outcome.Decider{Name: "unauthenticated", Type: actorTypeUnauthenticated},
+	}, { // Test 4: A handler reached with no gate in front has nobody to name, and the decision
+		// records empty rather than inventing an actor.
+		Name: "no gate", Decision: "approve",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			held := heldRun(t, false)
 			approver := &stubApprover{result: held}
-			req := httptest.NewRequest(http.MethodPost, "/v1/runs/run_held/approve", nil)
+			req := httptest.NewRequest(http.MethodPost, "/v1/runs/run_held/"+test.Decision, nil)
 			req.SetPathValue("id", "run_held")
-			if test.HasActor {
-				req = req.WithContext(context.WithValue(req.Context(), actorKey{}, test.Actor))
+			if test.Recorded != nil {
+				req = req.WithContext(withRecorded(req.Context(), *test.Recorded))
 			}
 			rec := httptest.NewRecorder()
-			approveRunHandler(approver, &stubRuns{present: held}, nil, zap.NewNop()).
-				ServeHTTP(rec, req)
+			handler := approveRunHandler(approver, &stubRuns{present: held}, nil, zap.NewNop())
+			if test.Decision == "reject" {
+				handler = rejectRunHandler(approver, &stubRuns{present: held}, nil, zap.NewNop())
+			}
+			handler.ServeHTTP(rec, req)
 			if rec.Code != http.StatusOK {
 				t.Fatalf("%s: status = %d, want 200 (%q)", test.Name, rec.Code, rec.Body.String())
 			}
-			if approver.gotBy != test.WantBy || approver.gotByType != test.WantByType {
-				t.Errorf("%s: decided by %q as %q, want %q as %q",
-					test.Name, approver.gotBy, approver.gotByType, test.WantBy, test.WantByType)
+			if diff := cmp.Diff(test.WantBy, approver.gotBy); diff != "" {
+				t.Errorf("%s: decider mismatch (-want +got):\n%s", test.Name, diff)
 			}
 			if approver.gotID != "run_held" {
 				t.Errorf("%s: decided run = %q, want run_held", test.Name, approver.gotID)
