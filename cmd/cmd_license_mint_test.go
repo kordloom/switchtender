@@ -45,7 +45,7 @@ func TestValidateMintRefusesWhatIsNotSold(t *testing.T) {
 	}, { // Test 6: A band the pricing page does not publish.
 		Name: "bad band", Org: "Acme", Tier: license.TierTeam, Hosts: "banana", Days: 30,
 		WantErr: "is not a published band",
-	}, { // Test 7: A plausible but unsold band. 500 sits between two real ones.
+	}, { // Test 7: A plausible but unsold band, between the 1000 band and unlimited.
 		Name: "unsold band", Org: "Acme", Tier: license.TierTeam, Hosts: "2500", Days: 30,
 		WantErr: "is not a published band",
 	}, { // Test 8: A negative term signs a license that expired before it was issued.
@@ -54,6 +54,14 @@ func TestValidateMintRefusesWhatIsNotSold(t *testing.T) {
 	}, { // Test 9: A zero term is the same defect, and is what an unset flag now leaves.
 		Name: "zero days", Org: "Acme", Tier: license.TierPro, Hosts: "250", Days: 0,
 		WantErr: "--days must be positive",
+	}, { // Test 10: Pro is sold to 250 hosts only, so Pro at a larger band is refused.
+		Name: "pro above its band", Org: "Acme", Tier: license.TierPro, Hosts: "500", Days: 365,
+		WantErr: "is not a band Pro is sold at",
+	}, { // Test 11: The same refusal at the top band, where the price gap is widest.
+		Name: "pro unlimited", Org: "Acme", Tier: license.TierPro, Hosts: "unlimited", Days: 365,
+		WantErr: "is not a band Pro is sold at",
+	}, { // Test 12: Team at the band Pro refuses is still sold.
+		Name: "valid team 500", Org: "Acme", Tier: license.TierTeam, Hosts: "500", Days: 365,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {

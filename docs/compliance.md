@@ -15,7 +15,7 @@ Every mapping below points at the tamper-evident chain, which is free in every i
 chain, RFC 3161 anchoring, signed per-run receipts, and offline verification with the open
 verifier are Community features and always will be. The period change register that
 `switchtender audit report` renders over a date range is a Team feature, so the evidence is
-yours for nothing and the report that assembles it for an auditor is what a license pays for. The paid Assurance service (design partners) adds
+yours for nothing and the report that assembles it for an auditor is what a license pays for. Enterprise evidence operations add
 control-mapped evidence packs and auditor-facing attestation reports, assembled for you on the same
 cadence the `--evidence-dir` registers run on, which is itself a Team feature: the server refuses
 to start with `--evidence-cadence` set on a Community license rather than quietly writing a paid

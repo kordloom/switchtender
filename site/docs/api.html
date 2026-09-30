@@ -73,7 +73,7 @@ unversioned. The root redirects to the UI.</p>
 signing key and identifiers so a relying party can pin the key from a channel independent of any
 bundle it is handed.</p>
 <h2 id="licensed-endpoints">Licensed endpoints</h2>
-<p>Almost every endpoint below runs on Community, which needs no license. Three answer <code>403</code> without one,
+<p>Almost every endpoint below runs on Community, which needs no license. These answer <code>403</code> without one,
 with a message naming the feature rather than failing in some subtler way:</p>
 <table>
 <thead>
@@ -98,6 +98,11 @@ with a message naming the feature rather than failing in some subtler way:</p>
 <td><code>POST</code> and <code>PUT /v1/policies</code></td>
 <td>Team, past the free set</td>
 <td>Deny rules, risk floors, actor scoping, and distinct-approver separation of duties. One require-approval policy is Community, Pro holds five, Team is uncapped.</td>
+</tr>
+<tr>
+<td>A named <code>queue</code> on <code>POST /v1/runs</code>, <code>POST /v1/pipelines</code>, and <code>POST</code> or <code>PUT</code> on <code>/v1/templates</code> and <code>/v1/inventories</code></td>
+<td>Team</td>
+<td>Only a worker serves a named queue, and every worker is Team. The default queue is the server's own pool and is always allowed. A run that inherits a queue from its template or inventory is refused the same way.</td>
 </tr>
 </tbody>
 </table>

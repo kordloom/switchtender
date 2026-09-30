@@ -18,7 +18,7 @@ bundle it is handed.
 
 ## Licensed endpoints
 
-Almost every endpoint below runs on Community, which needs no license. Three answer `403` without one,
+Almost every endpoint below runs on Community, which needs no license. These answer `403` without one,
 with a message naming the feature rather than failing in some subtler way:
 
 | Endpoint | Tier | Note |
@@ -26,6 +26,7 @@ with a message naming the feature rather than failing in some subtler way:
 | `GET /v1/audit/register` | Team | The period change register, covering the last 90 days unless `from` and `to` name another period, each a date or an RFC 3339 timestamp. Per-run dossiers, receipts, bundles, and `GET /v1/audit/verify` are free. |
 | `POST /v1/drift/reconcile` | Team | One-click reconcile. Drift detection is free. |
 | `POST` and `PUT /v1/policies` | Team, past the free set | Deny rules, risk floors, actor scoping, and distinct-approver separation of duties. One require-approval policy is Community, Pro holds five, Team is uncapped. |
+| A named `queue` on `POST /v1/runs`, `POST /v1/pipelines`, and `POST` or `PUT` on `/v1/templates` and `/v1/inventories` | Team | Only a worker serves a named queue, and every worker is Team. The default queue is the server's own pool and is always allowed. A run that inherits a queue from its template or inventory is refused the same way. |
 
 Two more are enforced somewhere other than the request:
 

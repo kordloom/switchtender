@@ -94,6 +94,11 @@ var (
 // license naming a band the product does not sell.
 var mintBands = []string{"250", "500", "1000", "unlimited"}
 
+// proBand is the one band Pro is sold at. The pricing page offers Pro to 250 hosts and nothing
+// larger, and a Pro customer whose fleet outgrows it moves to Team, so a Pro license naming a
+// bigger band is one the product does not sell.
+const proBand = "250"
+
 // licenseMintCmd signs a license. Hidden: it is the issuer's tool, useless without the private key,
 // which never ships in a release.
 var licenseMintCmd = &cobra.Command{
@@ -168,6 +173,10 @@ func validateMint() error {
 	if !band {
 		return fmt.Errorf("hosts %q is not a published band: %s",
 			mintHosts, strings.Join(mintBands, ", "))
+	}
+	if mintTier == license.TierPro && mintHosts != proBand {
+		return fmt.Errorf("hosts %q is not a band Pro is sold at: Pro covers %s hosts, and a "+
+			"larger fleet is Team", mintHosts, proBand)
 	}
 	if mintDays <= 0 {
 		return fmt.Errorf("--days must be positive, got %d, which would sign a license that "+

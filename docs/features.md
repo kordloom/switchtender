@@ -9,8 +9,8 @@
 
 What SwitchTender does today. Almost all of it runs on Community, which needs no license. Six
 capabilities are licensed, and the rows below say so where they appear: directory sign-in is Pro,
-and the full policy engine, the period change register, distributed workers over the mesh relay,
-creating a new PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
+and the full policy engine, the period change register, distributed workers, creating a new
+PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
 <https://switchtender.com/pricing>.
 
 | Capability   | What you get                                                                    |

@@ -7,8 +7,9 @@ one place.
 ## Your install keeps running
 
 The binary is self-hosted and self-contained. There is no license server, no online activation,
-and no phone-home, so nothing stops working when the vendor does. A lapsed paid subscription
-stops paid services from being delivered; it never degrades the software you run.
+and no phone-home, so nothing stops working when the vendor does. A paid license keeps verifying
+offline through the end of its term. When a term lapses, its paid features and services stop and
+nothing else does: your data, your evidence, and every Community feature keep working.
 
 ## Your evidence stays verifiable forever
 
