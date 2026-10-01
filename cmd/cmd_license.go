@@ -94,10 +94,10 @@ var (
 // license naming a band the product does not sell.
 var mintBands = []string{"250", "500", "1000", "unlimited"}
 
-// proBand is the one band Pro is sold at. The pricing page offers Pro to 250 hosts and nothing
-// larger, and a Pro customer whose fleet outgrows it moves to Team, so a Pro license naming a
-// bigger band is one the product does not sell.
-const proBand = "250"
+// proBand is the one band Pro is sold at. The pricing page offers Pro to 500 hosts and nothing
+// larger, and a Pro customer whose fleet outgrows it moves to Team, so a Pro license naming any
+// other band is one the product does not sell.
+const proBand = "500"
 
 // licenseMintCmd signs a license. Hidden: it is the issuer's tool, useless without the private key,
 // which never ships in a release.
@@ -175,8 +175,8 @@ func validateMint() error {
 			mintHosts, strings.Join(mintBands, ", "))
 	}
 	if mintTier == license.TierPro && mintHosts != proBand {
-		return fmt.Errorf("hosts %q is not a band Pro is sold at: Pro covers %s hosts, and a "+
-			"larger fleet is Team", mintHosts, proBand)
+		return fmt.Errorf("hosts %q is not a band Pro is sold at: Pro is sold at the %s band, and "+
+			"a larger fleet is Team", mintHosts, proBand)
 	}
 	if mintDays <= 0 {
 		return fmt.Errorf("--days must be positive, got %d, which would sign a license that "+
@@ -199,7 +199,7 @@ func mintID(pub ed25519.PublicKey) (string, error) {
 
 // confirmMint shows what is about to be signed and waits for a yes, unless --yes was passed. The
 // tier and the band are the two fields worth a second look, since one is the difference between a
-// $490 license and a $54,000 one.
+// $500 license and a $54,000 one.
 func confirmMint(c license.Claims) error {
 	if mintYes {
 		return nil

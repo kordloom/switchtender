@@ -27,20 +27,20 @@ func TestValidateMintRefusesWhatIsNotSold(t *testing.T) {
 		Days    int
 		WantErr string
 	}{{ // Test 0: The shape a real Pro trial takes.
-		Name: "valid pro trial", Org: "Acme", Tier: license.TierPro, Hosts: "250", Days: 30,
+		Name: "valid pro trial", Org: "Acme", Tier: license.TierPro, Hosts: "500", Days: 30,
 	}, { // Test 1: A Team license at the top band.
 		Name: "valid team unlimited", Org: "Acme", Tier: license.TierTeam, Hosts: "unlimited", Days: 365,
 	}, { // Test 2: An empty organization would name nobody, and the field is what the binary matches.
-		Name: "empty org", Org: "", Tier: license.TierPro, Hosts: "250", Days: 30,
+		Name: "empty org", Org: "", Tier: license.TierPro, Hosts: "500", Days: 30,
 		WantErr: "--org is required",
 	}, { // Test 3: Whitespace is not an organization either.
-		Name: "blank org", Org: "   ", Tier: license.TierPro, Hosts: "250", Days: 30,
+		Name: "blank org", Org: "   ", Tier: license.TierPro, Hosts: "500", Days: 30,
 		WantErr: "--org is required",
 	}, { // Test 4: A tier that does not exist.
-		Name: "bad tier", Org: "Acme", Tier: "platinum", Hosts: "250", Days: 30,
+		Name: "bad tier", Org: "Acme", Tier: "platinum", Hosts: "500", Days: 30,
 		WantErr: "is not pro, team, or enterprise",
 	}, { // Test 5: An unset tier, which is what a forgotten flag leaves behind.
-		Name: "empty tier", Org: "Acme", Tier: "", Hosts: "250", Days: 30,
+		Name: "empty tier", Org: "Acme", Tier: "", Hosts: "500", Days: 30,
 		WantErr: "is not pro, team, or enterprise",
 	}, { // Test 6: A band the pricing page does not publish.
 		Name: "bad band", Org: "Acme", Tier: license.TierTeam, Hosts: "banana", Days: 30,
@@ -49,19 +49,22 @@ func TestValidateMintRefusesWhatIsNotSold(t *testing.T) {
 		Name: "unsold band", Org: "Acme", Tier: license.TierTeam, Hosts: "2500", Days: 30,
 		WantErr: "is not a published band",
 	}, { // Test 8: A negative term signs a license that expired before it was issued.
-		Name: "negative days", Org: "Acme", Tier: license.TierPro, Hosts: "250", Days: -30,
+		Name: "negative days", Org: "Acme", Tier: license.TierPro, Hosts: "500", Days: -30,
 		WantErr: "--days must be positive",
 	}, { // Test 9: A zero term is the same defect, and is what an unset flag now leaves.
-		Name: "zero days", Org: "Acme", Tier: license.TierPro, Hosts: "250", Days: 0,
+		Name: "zero days", Org: "Acme", Tier: license.TierPro, Hosts: "500", Days: 0,
 		WantErr: "--days must be positive",
-	}, { // Test 10: Pro is sold to 250 hosts only, so Pro at a larger band is refused.
-		Name: "pro above its band", Org: "Acme", Tier: license.TierPro, Hosts: "500", Days: 365,
+	}, { // Test 10: Pro is sold to 500 hosts only, so Pro at a larger band is refused.
+		Name: "pro above its band", Org: "Acme", Tier: license.TierPro, Hosts: "1000", Days: 365,
 		WantErr: "is not a band Pro is sold at",
 	}, { // Test 11: The same refusal at the top band, where the price gap is widest.
 		Name: "pro unlimited", Org: "Acme", Tier: license.TierPro, Hosts: "unlimited", Days: 365,
 		WantErr: "is not a band Pro is sold at",
-	}, { // Test 12: Team at the band Pro refuses is still sold.
-		Name: "valid team 500", Org: "Acme", Tier: license.TierTeam, Hosts: "500", Days: 365,
+	}, { // Test 12: Team at a band Pro refuses is still sold.
+		Name: "valid team 1000", Org: "Acme", Tier: license.TierTeam, Hosts: "1000", Days: 365,
+	}, { // Test 13: Pro is sold at one band, so a Pro license naming the 250 band is refused too.
+		Name: "pro below its band", Org: "Acme", Tier: license.TierPro, Hosts: "250", Days: 365,
+		WantErr: "is not a band Pro is sold at",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
