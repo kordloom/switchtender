@@ -116,7 +116,7 @@
 				</div>
 				<p class="hero-note">Already on AWX? <a href="/assess">Drop your export here</a> and see what moves, what does not, and how many of your templates can destroy something today without a second person agreeing. It is read in your browser and never uploaded. The same report comes from <code>switchtender assess awx export.json</code>, and <code>switchtender import awx</code> then brings projects, inventories, templates, surveys, and schedules over in one command.</p>
 				<p class="hero-note">Worth knowing if that is where you are: AWX has not shipped a release in over two years, it carries an unpatched <a href="/awx-alternative">CVSS 9.6</a> whose fix ships only in the paid product, and the supported way off it is priced per managed node.</p>
-				<p class="hero-note hero-offer">Would rather not do it yourself? The <a href="/pricing#sprint">Migration Program</a> is $25,000 fixed price, four milestones, about six weeks, first year of Team included. It covers the part that actually goes wrong: cutting over without a window where neither system is authoritative.</p>
+				<p class="hero-note hero-offer">Would rather not do it yourself? The <a href="/pricing#sprint">Migration Program</a> is $25,000 fixed price, four milestones, about six weeks, first year of Team at the 250-host band included. It covers the part that actually goes wrong: cutting over without a window where neither system is authoritative.</p>
 				<p class="hero-note">Source-available. BSL 1.1. Go SDK with drop-in plugins. One binary and one database.</p>
 			</div>
 			<div class="hero-shot reveal">
@@ -215,7 +215,7 @@
 				<article class="card reveal">
 					<div class="ic ic-secret"></div>
 					<h3>Verified without trusting the server</h3>
-					<p>Export the chain as a signed <a href="https://loomseal.com" rel="noopener">LoomSeal</a> bundle and verify it on a machine with no network, with a verifier that is not this binary. LoomSeal is Apache-2.0 and we publish it as well, so the thing standing behind the check is a specified format with conformance vectors and a second implementation, which anyone can reimplement without us. Or <a href="/verify">drop it into your browser</a> and watch the same verifier check it, offline, with nothing uploaded. A checker anchors the signing key without taking the server's word for it: each install publishes its key at <code>/.well-known/loomseal.json</code>, and you can pin a fingerprint handed over out of band, so the key is checked against something other than the bundle that carries it. The binary proves itself the same way: <code>switchtender version --verify</code> hashes the running build against the <code>BINARY_SHA256SUMS</code> published with its GitHub release.</p>
+					<p>Export the chain as a signed <a href="https://loomseal.com" rel="noopener">LoomSeal</a> bundle and check it on a machine with no network, using a verifier that is not this binary, or <a href="/verify">in your browser</a> with nothing uploaded. LoomSeal is an open Apache-2.0 format anyone can reimplement. Pin the install's key from <code>/.well-known/loomseal.json</code>, and the bundle never vouches for itself.</p>
 				</article>
 			</div>
 			<div class="section-head reveal" style="margin-top:48px">

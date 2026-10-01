@@ -374,7 +374,7 @@ Business Source License 1.1. Read the source, run it, and use it in production. 
 and complete for leaving AWX: all seven engines, the importers, RBAC with organizations and teams,
 one digest-bound approval policy, the MCP agent gate, and the whole evidence engine with signed
 receipts and offline verification. Pro adds directory sign-in (OIDC, SAML, LDAP, JWT) and five
-approval policies at $490 a year. Team adds the full policy engine, Postgres and active-active
+approval policies at $500 a year. Team adds the full policy engine, Postgres and active-active
 HA, distributed workers, the change register, and one-click drift reconcile. Every paid feature
 unlocks in the same binary with a signed license file: no license server, no phone-home, flat
 per org. The one

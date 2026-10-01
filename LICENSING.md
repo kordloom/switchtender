@@ -12,7 +12,8 @@ expiry, and no license key. It never requires KordLoom infrastructure to operate
 server, no online activation, no phone-home:
 
 - All execution engines: Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go.
-- One-command importers: AWX, AAP, Tower, Ascender, Semaphore, Rundeck, Jenkins, and crontabs.
+- One-command importers: AWX, AAP, Tower, Ascender, Semaphore, Chef, Puppet, Rundeck, Jenkins,
+  and crontabs.
 - Role-based access control, per-object grants, organizations, and teams, with local accounts.
   Directory sign-in, which is OIDC, SAML, LDAP, and JWT, is a Pro feature: the server refuses to
   start with any of them configured unless a Pro or higher license is installed.
@@ -36,10 +37,9 @@ at no cost.
 The commercial model is open core, and paid features ship in the same binary, unlocked by a
 small signed file verified offline against a key compiled into the binary.
 
-Pro, at $490 a year flat per organization to 250 hosts, adds directory sign-in (OIDC, SAML,
+Pro, at $500 a year flat per organization to 500 hosts, adds directory sign-in (OIDC, SAML,
 LDAP, and JWT, with just-in-time provisioning, and group-to-role mapping on all but OIDC) and
-five approval policies instead of one. That is deliberately the same price the rest of this
-market charges for single sign-on, because a tier nobody can afford to cross is not a tier.
+five approval policies instead of one.
 
 Team adds the full policy engine (unlimited policies, outright denials, risk floors,
 agent-scoped rules, and distinct-approver separation of duties), the period change register,
@@ -57,7 +57,7 @@ Community tier never shrinks. A lapsed license takes nothing: data, evidence, re
 Community feature keep working, and only paid features stop. No phone-home, no seat counting, no
 audits, ever. Every receipt verifies without us, forever, with the open verifier. Each release converts
 to Apache 2.0 two years after it ships, and the terms accelerate that to immediate if
-KordLoom ceases business or ships nothing for 120 consecutive days during a paid term. Your price is
+KordLoom ceases business. Your price is
 fixed for the term, with 60 days notice before any renewal change. And pricing is flat per
 organization within a band, never per seat and never per run.
 

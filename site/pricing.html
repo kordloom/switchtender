@@ -4,10 +4,10 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Pricing | SwitchTender</title>
-	<meta name="description" content="Automation is free. Audit season is not. Running every tool and proving what ran cost nothing, on any number of hosts. You pay for directory sign-in, enforced policy, active-active HA, and the period change register assembled from your real run history.">
+	<meta name="description" content="Automation is free. Audit season is not. Running every tool and proving what ran cost nothing, on any number of hosts. You pay for directory sign-in, more than one approval policy, active-active HA, and the period change register assembled from your real run history.">
 	<link rel="canonical" href="https://switchtender.com/pricing">
 	<meta property="og:title" content="Pricing | SwitchTender">
-	<meta property="og:description" content="Automation is free. Audit season is not. Running every tool and proving what ran cost nothing, on any number of hosts. You pay for directory sign-in, enforced policy, active-active HA, and the period change register assembled from your real run history.">
+	<meta property="og:description" content="Automation is free. Audit season is not. Running every tool and proving what ran cost nothing, on any number of hosts. You pay for directory sign-in, more than one approval policy, active-active HA, and the period change register assembled from your real run history.">
 	<meta property="og:type" content="website">
 	<meta property="og:url" content="https://switchtender.com/pricing">
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
@@ -39,33 +39,21 @@
 	<style>
 		/* Tier pricing layout. Reuses the card system, adding a price header, a feature checklist,
 		   and a featured-tier ring so the middle tier reads as the recommended one. */
-		.tiers { align-items: stretch; margin-top: 8px; }
-		.cards-4 { display: grid; gap: 18px; grid-template-columns: repeat(4, 1fr); }
-		@media (max-width: 1100px) { .cards-4 { grid-template-columns: repeat(2, 1fr); } }
-		@media (max-width: 640px) { .cards-4 { grid-template-columns: 1fr; } }
-		.tiers .tier { display: flex; flex-direction: column; text-align: left; position: relative; }
-		/* The four tiers say different amounts above their buttons, so as four independent columns the
-		   calls to action landed at four different heights and every band below them did too. Subgrid
-		   gives all four cards one set of rows, each sized to the tallest card, so a band lines up
-		   across the row. Scoped to the width where the four sit on one line: below that they wrap and
-		   the row gap between cards is doing real work, which a shared row track would flatten. The
-		   first link in a card is its main call to action whether it is filled or outlined, which is
-		   what puts Enterprise's "Talk to us" on the line with the other three. */
-		@media (min-width: 1101px) {
-			@supports (grid-template-rows: subgrid) {
-				.cards-4.tiers { grid-template-rows: repeat(10, auto); row-gap: 0; }
-				.tiers .tier { display: grid; grid-template-rows: subgrid; grid-row: span 10; }
-				.tiers .tier > .tier-name { grid-row: 1; }
-				.tiers .tier > .tier-for { grid-row: 2; }
-				.tiers .tier > .tier-price { grid-row: 3; }
-				.tiers .tier > .tier-sub { grid-row: 4; }
-				.tiers .tier > .tier-payoff { grid-row: 5; }
-				.tiers .tier > a:nth-of-type(1) { grid-row: 6; align-self: end; }
-				.tiers .tier > a:nth-of-type(2) { grid-row: 7; align-self: end; }
-				.tiers .tier > .tier-inherit { grid-row: 8; }
-				.tiers .tier > .tier-list { grid-row: 9; align-self: start; }
-				.tiers .tier > .fineprint { grid-row: 10; align-self: start; }
-			}
+		/* The tiers stack one per row. Side by side, four cards that say different amounts could not
+		   line up their prices, buttons, and lists. Each card puts what it costs and how to get it on
+		   the left and what it includes on the right, and folds to one column on narrow screens. */
+		.tiers { display: flex; flex-direction: column; gap: 22px; max-width: 1040px; margin: 8px auto 0; }
+		.tiers .tier {
+			display: grid; grid-template-columns: minmax(260px, 320px) 1fr; gap: 8px 40px;
+			text-align: left; position: relative; align-items: start;
+		}
+		.tier-head { display: flex; flex-direction: column; }
+		.tier-body { min-width: 0; }
+		.tier-body > .tier-payoff:first-child { margin-top: 0; }
+		.tier-head .btn + .ghost { margin-top: 10px; }
+		@media (max-width: 760px) {
+			.tiers .tier { grid-template-columns: 1fr; gap: 0; }
+			.tier-body > .tier-payoff:first-child { margin-top: 18px; }
 		}
 		.tier-featured { border-color: rgba(52, 211, 153, 0.5); background: var(--surface-2); }
 		.tier-featured::before {
@@ -74,13 +62,13 @@
 			color: #05140d; background: var(--accent); padding: 3px 10px; border-radius: 999px;
 		}
 		.tier-name { font-family: "Space Grotesk", sans-serif; font-size: 20px; font-weight: 600; }
-		.tier-for { color: var(--muted); font-size: 14px; margin-top: 4px; min-height: 40px; }
+		.tier-for { color: var(--muted); font-size: 14px; margin-top: 4px; }
 		.tier-price { margin: 18px 0 2px; display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
 		.tier-price b { font-family: "Space Grotesk", sans-serif; font-size: 34px; font-weight: 700; line-height: 1; }
 		.tier-price .cadence { color: var(--muted); font-size: 14px; }
 		/* "From" sits with the cadence, not the figure, so the number stays the thing you read. */
 		.tier-price .from { color: var(--muted); font-size: 14px; align-self: center; }
-		.tier-sub { color: var(--muted); font-size: 13px; min-height: 20px; }
+		.tier-sub { color: var(--muted); font-size: 13px; }
 		.tier-payoff {
 			margin: 14px 0 2px; padding: 12px 14px; border-radius: 10px;
 			background: rgba(52, 211, 153, 0.06); border: 1px solid rgba(52, 211, 153, 0.16);
@@ -225,7 +213,7 @@
 				Every run leaves evidence anyone can verify offline: a tamper-evident chain, a signed
 				receipt, and an open verifier that never contacts us. That part is free forever, with
 				no host cap, no seat cap, and no expiry. You pay when an organization has to answer
-				for the work: directory sign-in, enforced policy, active-active HA, distributed
+				for the work: directory sign-in, more than one approval policy, active-active HA, distributed
 				workers, and the period change register assembled from your real run history. One
 				binary, four tiers, and a signed license the binary checks offline, so nothing ever
 				phones home.
@@ -233,80 +221,97 @@
 		</section>
 
 		<section class="section wrap" style="padding-top: 24px;">
-			<div class="cards-4 tiers reveal">
+			<div class="tiers reveal">
 
 				<article class="card tier">
-					<div class="tier-name">Community</div>
-					<p class="tier-for">Leave AWX today. Try real governance.</p>
-					<div class="tier-price"><b>$0</b><span class="cadence">forever</span></div>
-					<p class="tier-sub">Self-hosted, single binary, single-node deployment. No license key.</p>
-					<div class="tier-payoff">Not a trial and not a crippled edition. Everything here is complete: no seat cap, no host cap, no expiry, and the <b>proofs are free forever</b>: the audit chain, anchoring, receipts, and the open verifier.</div>
-					<a class="btn" href="/get-started">Get started</a>
-					<ul class="tier-list">
-						<li>All seven tools: Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</li>
-						<li>One-command importers: AWX, AAP, Tower, Ascender, Semaphore, Chef, Puppet, Rundeck, Jenkins, and crontabs</li>
-						<li>Live host-by-task matrix, balanced splits, fleet memory, and drift detection</li>
-						<li>Drag-and-drop workflow editor, pipelines, schedules, webhooks, notifications</li>
-						<li>Local users with roles, organizations, and teams</li>
-						<li><b>One approval policy</b>, digest-bound: a held run is approved as the exact content the approver saw</li>
-						<li>The full evidence engine: hash chain, RFC 3161 anchoring, signed per-run receipts, the run dossier, and offline verification with the open verifier</li>
-						<li>Sealed credentials with secrets masking in logs</li>
-						<li>The <b>MCP agent gate</b>: an AI agent gets one operator-bound token and can only propose runs through the same approvals a person faces</li>
-						<li>Advisory AI, read-only; community support on GitHub</li>
-					</ul>
+					<div class="tier-head">
+						<div class="tier-name">Community</div>
+						<p class="tier-for">Leave AWX today. Try real governance.</p>
+						<div class="tier-price"><b>$0</b><span class="cadence">forever</span></div>
+						<p class="tier-sub">Self-hosted, single binary, single-node deployment. No license key.</p>
+						<a class="btn" href="/get-started">Get started</a>
+					</div>
+					<div class="tier-body">
+						<div class="tier-payoff">Not a trial and not a crippled edition. Everything here is complete: no seat cap, no host cap, no expiry, and the <b>proofs are free forever</b>: the audit chain, anchoring, receipts, and the open verifier.</div>
+						<ul class="tier-list">
+							<li>All seven tools: Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</li>
+							<li>One-command importers: AWX, AAP, Tower, Ascender, Semaphore, Chef, Puppet, Rundeck, Jenkins, and crontabs</li>
+							<li>Live host-by-task matrix, balanced splits, fleet memory, and drift detection</li>
+							<li>Drag-and-drop workflow editor, pipelines, schedules, webhooks, notifications</li>
+							<li>Local users with roles, organizations, and teams</li>
+							<li><b>One approval policy</b>, digest-bound: a held run is approved as the exact content the approver saw</li>
+							<li>The full evidence engine: hash chain, RFC 3161 anchoring, signed per-run receipts, the run dossier, and offline verification with the open verifier</li>
+							<li>Sealed credentials with secrets masking in logs</li>
+							<li>The <b>MCP agent gate</b>: an AI agent gets one operator-bound token and can only propose runs through the same approvals a person faces</li>
+							<li>Advisory AI, read-only; community support on GitHub</li>
+						</ul>
+					</div>
 				</article>
 
 				<article class="card tier">
-					<div class="tier-name">Pro</div>
-					<p class="tier-for">When one rule stops being enough.</p>
-					<div class="tier-price"><b>$490</b><span class="cadence">per year, flat per org</span></div>
-					<p class="tier-sub">To 250 hosts, single-node. The same binary, unlocked by a signed license file the product verifies offline.</p>
-					<div class="tier-payoff">Community gates changes with one policy, which is one sentence about your whole estate. The second rule is where governing starts, because production is not staging and Terraform is not a health check. That, and sign-in from the directory you already run, which should not cost what the rest of this market charges for it. <b>A lapsed license takes nothing</b>: sign-in falls back to local accounts, and your data, evidence, and every Community feature keep working.</div>
-					<a class="btn" href="mailto:licensing@switchtender.com?subject=SwitchTender%20Pro%20trial&amp;body=Org%20name%3A%0A">Start a 30-day trial</a>
-					<a class="ghost" href="mailto:licensing@switchtender.com?subject=Buy%20SwitchTender%20Pro">Buy Pro</a>
-					<p class="tier-inherit">Everything in Community, plus:</p>
-					<ul class="tier-list">
-						<li><b>Five approval policies</b> instead of one, so production, Terraform, and a risky command can each have a rule of their own where one rule has to choose. Deny rules, risk and reversibility floors, separation of duties, and agent scoping are the full engine, in Team</li>
-						<li><b>Directory sign-in</b>: OIDC, SAML, LDAP, and JWT, so accounts come from the directory you already run</li>
-					</ul>
+					<div class="tier-head">
+						<div class="tier-name">Pro</div>
+						<p class="tier-for">When one rule stops being enough.</p>
+						<div class="tier-price"><b>$500</b><span class="cadence">per year, flat per org</span></div>
+						<p class="tier-sub">To 500 hosts, single-node. The same binary, unlocked by a signed license file the product verifies offline.</p>
+						<a class="btn" href="mailto:licensing@switchtender.com?subject=SwitchTender%20Pro%20trial&amp;body=Org%20name%3A%0A">Start a 30-day trial</a>
+						<a class="ghost" href="mailto:licensing@switchtender.com?subject=Buy%20SwitchTender%20Pro">Buy Pro</a>
+					</div>
+					<div class="tier-body">
+						<div class="tier-payoff">Community gates changes with one policy, which is one sentence about your whole estate. Pro is for when production needs a rule of its own, and people should sign in from the directory you already run. <b>A lapsed license takes nothing</b>: sign-in falls back to local accounts, and your data, evidence, and every Community feature keep working.</div>
+						<p class="tier-inherit">Everything in Community, plus:</p>
+						<ul class="tier-list">
+							<li><b>Five approval policies</b> instead of one, so production, Terraform, and a risky command can each have a rule of their own where one rule has to choose. Deny rules, risk and reversibility floors, separation of duties, and agent scoping are the full engine, in Team</li>
+							<li><b>Directory sign-in</b>: OIDC, SAML, LDAP, and JWT, so accounts come from the directory you already run</li>
+							<li><b>Email support</b>: an engineer's first response within two business days. Clocks are <a href="/terms#support" style="color: var(--accent);">defined in the terms</a></li>
+						</ul>
+					</div>
 				</article>
 
 				<article class="card tier tier-featured">
-					<div class="tier-name">Team</div>
-					<p class="tier-for">Community runs it. Team governs it.</p>
-					<div class="tier-price"><b>$9,900</b><span class="cadence">per year, flat per org</span></div>
-					<p class="tier-sub">By fleet band: <b>$9,900</b> to 250 hosts &middot; <b>$18,000</b> to 500 &middot; <b>$36,000</b> to 1,000 &middot; <b>$54,000</b> unlimited. Self-reported at renewal: no telemetry, no seat counting, no usage audit.</p>
-					<div class="tier-payoff">The quarter-end evidence scramble, ended. <b>The period change register</b> is your SOC 2 CC8.1 and ISO 27001 A.8.32 export, assembled from the runs that actually happened rather than from screenshots somebody gathered by hand three months later.</div>
-					<a class="btn" href="mailto:licensing@switchtender.com?subject=SwitchTender%20Team%20trial&body=Org%20name%3A%0AFleet%20band%20(250%2F500%2F1000%2Funlimited)%3A%0AComing%20from%20(AWX%2FAAP%2FSemaphore%2FRundeck%2Fother)%3A%0A">Start a 30-day trial</a>
-					<a class="ghost" href="mailto:licensing@switchtender.com?subject=Buy%20SwitchTender%20Team">Buy Team</a>
-					<p class="tier-inherit">Everything in Pro, plus:</p>
-					<ul class="tier-list">
-						<li><b>The period change register</b>: the SOC 2 CC8.1 / ISO 27001 A.8.32 evidence export, assembled from your real run history</li>
-						<li><b>The full policy engine</b>: unlimited policies, outright denials, risk floors, separation of duties, and agent-scoped rules</li>
-						<li><b>PostgreSQL</b> and active-active <b>HA</b></li>
-						<li><b>Distributed workers</b> and queues, for fleets one machine cannot reach</li>
-						<li><b>One-click drift reconcile</b>, from detection to a held, approvable fix</li>
-						<li><b>Support with a clock on it</b>: a Severity 1 report, production runs blocked with no workaround, gets an engineer's first response within 12 hours, every day of the year. Severities and clocks are <a href="/terms#support" style="color: var(--accent);">defined in the terms</a>, not implied</li>
-					</ul>
-					<p class="fineprint" style="margin-top:12px;">A signed license file, verified offline by the binary you already run. Thirty-day trial from an email, no card. Purchase by invoice, net 30, and the signed license usually lands within hours. <b>A lapsed license takes nothing</b>: paid features stop, and your data, evidence, and every Community feature keep working.</p>
+					<div class="tier-head">
+						<div class="tier-name">Team</div>
+						<p class="tier-for">Community runs it. Team governs it.</p>
+						<div class="tier-price"><b>$9,900</b><span class="cadence">per year, flat per org</span></div>
+						<p class="tier-sub">By fleet band: <b>$9,900</b> to 250 hosts &middot; <b>$18,000</b> to 500 &middot; <b>$36,000</b> to 1,000 &middot; <b>$54,000</b> unlimited. Self-reported at renewal: no telemetry, no seat counting, no usage audit.</p>
+						<a class="btn" href="mailto:licensing@switchtender.com?subject=SwitchTender%20Team%20trial&body=Org%20name%3A%0AFleet%20band%20(250%2F500%2F1000%2Funlimited)%3A%0AComing%20from%20(AWX%2FAAP%2FSemaphore%2FRundeck%2Fother)%3A%0A">Start a 30-day trial</a>
+						<a class="ghost" href="mailto:licensing@switchtender.com?subject=Buy%20SwitchTender%20Team">Buy Team</a>
+					</div>
+					<div class="tier-body">
+						<div class="tier-payoff">The quarter-end evidence scramble, ended. <b>The period change register</b> assembles evidence relevant to SOC 2 CC8.1 and ISO 27001 A.8.32 from the runs that actually happened.</div>
+						<p class="tier-inherit">Everything in Pro, plus:</p>
+						<ul class="tier-list">
+							<li><b>The period change register</b>: evidence relevant to SOC 2 CC8.1 and ISO 27001 A.8.32, assembled from your real run history</li>
+							<li><b>The full policy engine</b>: unlimited policies, outright denials, risk floors, separation of duties, and agent-scoped rules</li>
+							<li><b>PostgreSQL</b> and active-active <b>HA</b></li>
+							<li><b>Distributed workers</b> and queues, for fleets one machine cannot reach</li>
+							<li><b>One-click drift reconcile</b>, from detection to a held, approvable fix</li>
+							<li><b>Support with a clock on it</b>: a Severity 1 report, production runs blocked with no workaround, gets an engineer's first response within one business day. Severities and clocks are <a href="/terms#support" style="color: var(--accent);">defined in the terms</a>, not implied</li>
+						</ul>
+						<p class="fineprint" style="margin-top:12px;">A signed license file, verified offline by the binary you already run. Thirty-day trial from an email, no card. Purchase by invoice, net 30, and the signed license usually lands within hours. <b>A lapsed license takes nothing</b>: paid features stop, and your data, evidence, and every Community feature keep working.</p>
+						<p class="fineprint"><b>Hosted witness add-on</b>, $3,000 a year, flat per org: a KordLoom-operated witness, outside your install, records and signs the chain heads and counters it observes. It receives no run content, host names, credentials, or personal data. Scoped on the order form.</p>
+					</div>
 				</article>
 
 				<article class="card tier">
-					<div class="tier-name">Enterprise</div>
-					<p class="tier-for">Team governs it. Enterprise puts independent people around it.</p>
-					<div class="tier-price"><b>$75,000</b><span class="cadence">and up, per year</span></div>
-					<p class="tier-sub">Negotiated. Includes Team for the whole organization. The services we operate are scoped and dated on the order form before either of us signs, so what we run for you and for how long is a written agreement rather than a list on a page.</p>
-					<div class="tier-payoff">Everything in Team, plus the things that require <b>someone outside your install</b>: an independent witness countersigning your history, custody that keeps a seven-year-old receipt verifiable, and people on the hook on your audit calendar.</div>
-					<a class="ghost" href="mailto:licensing@switchtender.com?subject=SwitchTender%20Enterprise">Talk to us</a>
-					<ul class="tier-list">
-						<li><b>Hosted witness</b>: an independent party watches your chain feed and countersigns what it saw, the one property an operator cannot self-provide</li>
-						<li><b>Evidence custody and re-anchoring</b> as timestamp authorities come and go</li>
-						<li><b>External approver coordination</b>: sign-off from a link, or as a signed file for air-gapped sites, with no access to your install</li>
-						<li><b>Evidence operations</b> on your audit calendar: the mapped pack assembled and delivered each period</li>
-						<li>Air-gapped deployment assistance, hardened builds, and LTS lines</li>
-						<li>A written support SLA on the order form, up to 24x7 coverage for a down control plane</li>
-						<li>A named engineer and a security questionnaire pack</li>
-					</ul>
+					<div class="tier-head">
+						<div class="tier-name">Enterprise</div>
+						<p class="tier-for">Team governs it. Enterprise adds services outside your install.</p>
+						<div class="tier-price"><b>$75,000</b><span class="cadence">and up, per year</span></div>
+						<p class="tier-sub">Negotiated. Includes Team for the whole organization. Every service below is available, and the ones you choose are scoped and dated on the order form before either of us signs.</p>
+						<a class="ghost" href="mailto:licensing@switchtender.com?subject=SwitchTender%20Enterprise">Talk to us</a>
+					</div>
+					<div class="tier-body">
+						<div class="tier-payoff">Everything in Team, plus the things that require <b>someone outside your install</b>: a KordLoom-operated witness, custody of your evidence, and evidence work on your audit calendar.</div>
+						<ul class="tier-list">
+							<li><b>Hosted witness</b>: a KordLoom-operated witness, outside your install, records and signs the chain heads and counters it observes. It receives no run content, host names, credentials, or personal data</li>
+							<li><b>Evidence custody</b> for the term of the agreement, re-timestamped as timestamp authorities change, with the full archive handed back at the end. A paid retention period after the term can be added on the order form</li>
+							<li><b>Evidence operations</b>: the evidence packs and periods named on the order form, delivered on its dates</li>
+							<li>Air-gapped deployment assistance and hardened builds</li>
+							<li>A written support SLA on the order form, with its coverage and clocks stated there</li>
+							<li>A named engineer and a security questionnaire pack</li>
+						</ul>
+					</div>
 				</article>
 
 			</div>
@@ -315,8 +320,8 @@
 				<strong>Where the line sits, in one sentence:</strong> the proofs are free and the
 				packaging is paid. Anyone can verify a SwitchTender receipt offline forever, on any tier,
 				because evidence you cannot check is not evidence. What Team buys is the org-scale
-				machinery around it, and what Enterprise buys is independence and custody that by
-				definition cannot come from your own install.</p>
+				machinery around it, and what Enterprise buys is work done for you outside your own
+				install, scoped on the order form.</p>
 			<p class="pricing-note"><strong>Why the import is one command and the migration costs $25,000.</strong>
 				The importer moves your configuration. It reads your AWX export and stands the jobs,
 				projects, credentials, schedules, and inventories up here, and that really is one command.
@@ -345,13 +350,12 @@
 			<div class="sprint reveal" id="sprint">
 				<div class="sprint-head">
 					<h3>SwitchTender Migration Program</h3>
-					<div class="sprint-price">$25,000<span>fixed price, four milestones, first year of Team at the 250 band included, larger bands pay the difference</span></div>
+					<div class="sprint-price">$25,000<span>fixed price, four milestones, first year of Team at the 250-host band included, larger bands pay the difference</span></div>
 				</div>
 				<p>We move you off AWX, Semaphore, or Rundeck and into
 				production on SwitchTender, with the change controls you already run and your evidence
 				workflows carried forward. Four milestones, normally about six weeks: discovery and
-				import, environment, governance, cutover and handoff. Your first year of Team at your
-				band is included, so everything wired during the program keeps working after it.</p>
+				import, environment, governance, cutover and handoff. Your first year of Team at the 250-host band is included, and a larger band adds the difference for that year: $8,100 at 500 hosts, $26,100 at 1,000, and $44,100 unlimited. Everything wired during the program keeps working after it.</p>
 				<div class="sprint-cta">
 					<a class="btn" href="mailto:hello@switchtender.com?subject=SwitchTender%20Migration%20Program">Start a migration</a>
 					<a class="ghost" href="/migration">Full program details</a>
@@ -384,7 +388,7 @@
 				<div>
 					<h3>Every receipt verifies without us, forever</h3>
 					<p>The verifier is open source, the format is published with conformance vectors, and
-					a receipt issued this year verifies in ten, whether KordLoom exists or not.</p>
+					verification does not depend on KordLoom continuing to exist.</p>
 				</div>
 				<div>
 					<h3>Your price is fixed for the term</h3>
@@ -415,8 +419,7 @@
 					you need deny rules or agent-scoped policy, PostgreSQL behind more than one controller,
 					workers reaching fleets a single machine cannot, or a change register an auditor will
 					actually read, that is Team. Enterprise is for when the proof has to come from outside
-					your own install: an independent witness countersigning your history, custody that
-					outlives your own retention, and people on the hook on your audit calendar. Most
+					your own install: a KordLoom-operated witness, custody of your evidence, and evidence work on your audit calendar. Most
 					organizations should start on Community and let the gate tell them when they have
 					outgrown it.</p>
 				</details>
@@ -455,23 +458,11 @@
 				</details>
 				<details>
 					<summary>What happens when a license lapses?</summary>
-					<p>Paid features stop; nothing else changes. Your data, your evidence, your receipts,
-					and every Community feature keep working, every paid gate on the running server stops at its next check with no
-					restart, and directory sign-in falls back to local accounts when the server is next
-					started, and a database you initialized on PostgreSQL stays fully usable
-					forever. We built the gate so that it cannot hold your data hostage even if we
-					wanted it to.</p>
+					<p>Paid features stop at their next license check, with no restart, and nothing is deleted, locked, or held. Your data, your evidence, your receipts, and every Community feature keep working, and a database you initialized on PostgreSQL stays fully usable forever. Two things deliberately keep going. Approval policies keep enforcing, advanced rules included, because a gate that opened on the day a term lapsed would release the runs it was written to hold. Directory sign-in stays on until the server next starts, then falls back to local accounts. We built the gate so that it cannot hold your data hostage even if we wanted it to.</p>
 				</details>
 				<details>
 					<summary>What support comes with each tier?</summary>
-					<p>Community and Pro use the public issue tracker. Team adds engineering support
-					over email with one clock that matters: a Severity 1 report, production runs blocked
-					with no workaround, gets a first response within 12 hours, every day of the year,
-					weekends included, which is more than business-hours incumbent support gives you on a
-					Saturday. Severity 2 gets a business day; the rest is reasonable efforts. Enterprise
-					puts an SLA on the order form, up to 24x7. Severities and what a first response means
-					are <a href="/terms#support" style="color: var(--accent);">defined in the terms</a>,
-					so the commitment is checkable rather than a feeling.</p>
+					<p>Community uses the public issue tracker. Pro adds email support, with an engineer's first response within two business days. On Team, Severity 1 and Severity 2 reports, production runs blocked or a paid feature materially degraded with no workaround, get a first response within one business day, and Severity 1 is worked first. The rest is reasonable efforts. Enterprise puts an SLA on the order form, with its coverage and clocks stated there. Severities, business days, and what a first response means are <a href="/terms#support" style="color: var(--accent);">defined in the terms</a>, so the commitment is checkable rather than a feeling.</p>
 				</details>
 				<details>
 					<summary>Why is the change register paid when receipts are free?</summary>
@@ -502,18 +493,14 @@
 					through the end of your term, and nothing you produced is ever lost: Community, your
 					data, and your receipts work forever, and the open verifier does not depend on us.
 					Each release also converts to Apache 2.0 two years after it ships, and the terms
-					accelerate that: if KordLoom ceases business, or ships nothing for 120 consecutive
-					days while you hold a paid term, every published release converts immediately. The
+					accelerate that: if KordLoom ceases business, every published release converts immediately. The
 					code itself outlives the company, on a clock you can enforce.</p>
 				</details>
 				<details>
 					<summary>Did this page ever say something different?</summary>
-					<p>Yes. Until September 1, 2026, an
-					earlier version sold services around a fully free controller. The model changed to
-					the tiers above on September 1, and caches of the old page may still exist. If you
-					evaluated SwitchTender under that page, write to
+					<p>Yes. In August 2026 the page sold monthly plans, Team from $250 a month and Governed from $1,000 a month, and on August 31 it switched to services around a fully free controller. The current tiers began on September 1, and caches of older pages may still exist. Pro arrived on September 8, and on September 21 Team moved from $4,800 to $9,900 at the smallest band and Enterprise from $50,000 to $75,000. If you evaluated SwitchTender under an earlier page, write to
 					<a href="mailto:hello@switchtender.com">hello@switchtender.com</a> by October 31,
-					2026 and we will honor what you read. Nobody ever paid under the old model, and the
+					2026 and we will honor what you read. Nobody ever paid under an earlier model, and the
 					commitments on this page, including that Community never shrinks, date from the
 					current one.</p>
 				</details>
@@ -522,7 +509,7 @@
 
 		<section class="cta wrap reveal">
 			<h2>Leave AWX on Community. License Team the week the org grows into it.</h2>
-			<p>One binary either way, and the proofs are free forever. Team is an email and a signed file away; Enterprise is a conversation. If you need off AWX in a hurry, the Migration Program starts this week.</p>
+			<p>One binary either way, and the proofs are free forever. Team is an email and a signed file away; Enterprise is a conversation. If you need off AWX in a hurry, ask about the Migration Program.</p>
 			<div class="hero-cta center">
 				<a class="btn big" href="/get-started">Get started</a>
 				<a class="ghost big" href="https://demo.switchtender.com/ui/runs?status=pending_approval">Live demo</a>
