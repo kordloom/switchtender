@@ -124,7 +124,7 @@ func TestRetiredPricingClaimsStayGone(t *testing.T) {
 		Pattern: `(?i)enforced policy`,
 		Why:     "Community enforces one policy, so the paid tiers sell more than one.",
 	}, { // Test 9: An independent witness.
-		Pattern: `(?i)independent (party|witness)`,
+		Pattern: `(?i)independent (party|witness)|\bbuys\b[^.]{0,30}\bindependence\b`,
 		Why:     "The hosted witness is KordLoom-operated: outside the customer's install, not independent of KordLoom.",
 	}, { // Test 10: External approver coordination.
 		Pattern: `(?i)external approver coordination`,
