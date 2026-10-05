@@ -541,6 +541,17 @@ one matching step, because a change applied halfway is worse than one that never
 releases the workflow and it runs from the top. The step graph is stored with it, so an approval
 that arrives after a restart still runs the workflow that was approved.
 
+The approval binds the workflow as it was submitted: every step as written, with its tool, its
+command or playbook, its inventory, whether it is a dry run, and what it depends on, along with the
+workflow's variables, the digests of its secret answers, its credentials, its image, and the
+inventory snapshot it was submitted with. A held workflow that reads from a project is pinned to the
+commit its branch pointed at when it was held, and every step runs that commit. It does not bind
+what a step works out when it runs: a Terraform or OpenTofu apply step plans and applies when the
+step runs, so the person who approves the workflow never sees that plan. To approve an exact plan,
+run the apply on its own, held for approval: it plans first, and the approval binds the saved plan.
+An agent's workflow with an apply step is refused at submission for that reason, as
+[Agent runs are held by default](policy.md#agent-runs-are-held-by-default) describes.
+
 ## Approval steps in a workflow
 
 A workflow can also stop partway and wait for a person, at an approval step. The steps the approval
@@ -589,7 +600,8 @@ run, the launcher can always deny, which withdraws their own request.
 
 **What an approval binds to.** An approver approves the state they were shown: the workflow's spec,
 every step the approval waited behind with how it ended and what it published, and the steps each
-answer runs. `GET /v1/approvals` returns that state's `state_digest`, and sending it back with the
+answer runs. A Terraform or OpenTofu apply step that runs after the approval plans when it runs, so
+its plan is not part of that state either. `GET /v1/approvals` returns that state's `state_digest`, and sending it back with the
 decision refuses the decision if the workflow no longer matches. The decision is committed to the
 audit chain with that digest before it takes effect, and the workflow is held to it when it resumes:
 a workflow whose finished steps or published values changed after the approval is refused rather

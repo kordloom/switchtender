@@ -267,6 +267,45 @@ func (d *Dispatcher) pipelineDenied(ctx context.Context, parent *run.Run, steps 
 	return nil
 }
 
+// refuseAgentWorkflowApply refuses an agent's workflow that carries a Terraform or OpenTofu apply
+// step no exemption covers, recording the refusal on the chain the way a deny rule's is. A
+// workflow's approval binds its steps as written, and an apply step plans and applies when it
+// runs, so the approver never sees the plan the step applies. An agent's apply is held before it
+// plans and again carrying the saved plan, and a workflow wrapping the apply would trade those two
+// approvals for one that binds no plan. Each step is judged as the run it would become, carrying
+// the agent's identity and account, which is also what tells an agent's workflow from a person's.
+// It fails closed as every other check here does: a gate that cannot be evaluated has not been
+// passed.
+func (d *Dispatcher) refuseAgentWorkflowApply(ctx context.Context, parent *run.Run,
+	steps []run.PipelineStep) error {
+	policies, err := d.listPolicies(ctx)
+	if err != nil {
+		return fmt.Errorf("%w: approval policies could not be read, so the pipeline is refused "+
+			"rather than run past a gate that could not be checked: %w", ErrPolicyUnavailable, err)
+	}
+	units, names := policyUnits(parent, steps)
+	for i, unit := range units {
+		if !policy.AgentWorkflowApplies(policies, unit) {
+			continue
+		}
+		d.recordRefusal(ctx, parent, policies, policy.AgentWorkflowApply())
+		return fmt.Errorf("%w: %w: step %q applies %s for an agent, and a workflow's approval "+
+			"does not show the plan a step applies. Ask for the apply as its own run, which plans "+
+			"first and waits for approval of the saved plan, or write a policy with effect exempt "+
+			"that covers the step", ErrPolicyDenied, ErrAgentWorkflowApply, names[i],
+			toolName(unit.Tool))
+	}
+	return nil
+}
+
+// toolName names an infrastructure tool the way a refusal says it.
+func toolName(tool string) string {
+	if run.NormalizeTool(tool) == run.ToolOpenTofu {
+		return "OpenTofu"
+	}
+	return "Terraform"
+}
+
 // policyUnits builds the run each executable step of a pipeline would execute as, with its name,
 // for the rules to grade. An approval step executes nothing, so it is not a unit: graded as a run
 // it reads as an Ansible run of no playbook, which a blanket rule on Ansible would hold or refuse,

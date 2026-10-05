@@ -40,6 +40,10 @@ What to do:
   risks.
 - Plan for two approvals on each Terraform or OpenTofu apply an agent asks for, or cover the routine
   ones with an exemption, which lets an apply plan and apply as the rules allow for a person's.
+- An agent's workflow, or a saved workflow an agent launches, that carries a Terraform or OpenTofu
+  step that is not a dry run is now refused at submission, since a workflow's approval never shows
+  the plan a step applies. Have the agent ask for the apply as its own run, or write an exemption
+  that covers the step.
 - A token minted without `--agent` is recorded as a person's and is never held. Mint a replacement
   with `switchtender token new --user <account> --agent` for any agent holding such a token, then
   revoke the old one.

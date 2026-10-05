@@ -346,6 +346,9 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 	if err := d.pipelineDenied(ctx, parent, steps); err != nil {
 		return nil, err
 	}
+	if err := d.refuseAgentWorkflowApply(ctx, parent, steps); err != nil {
+		return nil, err
+	}
 	// Consulted even when the parent arrives held, so the rule governing it binds its approval.
 	held, perr := d.pipelineRequiresApproval(ctx, parent, steps)
 	if perr != nil {

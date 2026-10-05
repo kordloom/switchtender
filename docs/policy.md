@@ -50,8 +50,20 @@ person releases it, it is planned, and the apply its plan proposes is held again
 plan, so the second approval binds the exact plan that applies. A released request is never applied
 without that plan, whatever other rules are in force: a `max_destroy` limit, a risk or
 reversibility floor, or a Rego `plan_gate`. A rerun, a retry, or a relaunch the agent asks for takes
-the same path. An apply an exemption covers plans and applies as the rules allow for a person's. A
-step of an agent's workflow is governed by the workflow's own approval, as every rule leaves it.
+the same path. An apply an exemption covers plans and applies as the rules allow for a person's.
+
+An agent cannot carry an apply inside a workflow. A workflow's approval binds the workflow as
+submitted and never shows the plan a step applies, so an agent's workflow, or a saved workflow an
+agent launches, is refused at submission with a 403 when it holds a Terraform or OpenTofu step that
+is not a dry run, unless an exemption covers that step. The step is judged as the run it would
+become, under the agent's label and account. The refusal names the step, is recorded on the chain
+under the name `an agent's workflow may not apply Terraform or OpenTofu`, and says what to do
+instead: ask for the apply as its own run, which plans first and waits for approval of the saved
+plan, or write an exemption that covers the step. This holds however the workflow arrives: submitted
+whole, launched from a saved workflow, or launched through an MCP tool. A finished workflow is never
+rerun as such, by anybody, only launched again from its saved workflow, which faces the same check.
+An agent's workflow whose infrastructure steps are all plans, or that has none, is held as a whole as
+before. A person's workflow is unchanged.
 
 SwitchTender knows an agent by its agent token, and only by that. A caller that signs in with a
 federated JWT is treated as the person or pipeline its claims map to: it is recorded as a session,
@@ -173,6 +185,22 @@ The apply is planned, the apply the plan proposes carries the saved plan, and th
 proposal, so the rule holds the planned apply and the approval binds the plan that runs rather than a
 request that would plan again when released. An apply whose own submission asks for approval is
 planned first as well, and the apply its plan proposes is held whether or not a rule covers it.
+
+### What a workflow's approval binds
+
+A workflow is approved as a whole, and the approval binds the workflow as it was submitted. The
+decision commits a digest of its spec: every step as written, with its tool, its command or playbook,
+its inventory, whether it is a dry run, and the steps it depends on, along with the workflow's
+variables, the digests of its secret answers, its credentials, its image, and the inventory snapshot
+it was submitted with. A workflow held while it reads from a project is pinned to the commit its
+branch pointed at when it was held, and every step runs that commit.
+
+What a step works out only when it runs is not part of that approval. A Terraform or OpenTofu apply
+step plans and applies when the step runs, so the plan it applies is never shown to the person who
+approves the workflow. To approve an exact plan, run the apply on its own, held for approval by a
+rule or by asking for approval when it is submitted: it plans first, and the approval binds the saved
+plan. An agent's workflow cannot carry an apply step at all, as
+[Agent runs are held by default](#agent-runs-are-held-by-default) describes.
 
 ### Requiring the approver's reason
 

@@ -231,6 +231,11 @@ and `GET /v1/runs/{id}/stream?ticket=...` delivers the run's events as it is rel
 ends. Reading is all it can do about the decision: an agent that tries to approve its own run is
 refused with 403.
 
+An agent's workflow cannot apply Terraform or OpenTofu. A workflow it submits or launches with an
+apply step that is not a dry run is refused with a 403 that names the step, since a workflow's
+approval never shows the plan the step applies: the agent asks for the apply as its own run instead,
+which plans first and waits for approval of the saved plan, unless an exemption covers the step.
+
 A workflow the agent launched can also stop partway, at an approval step. The workflow's steps up
 to it run, and then it waits. `GET /v1/approvals`, or the `list_pending_approvals` tool, shows the
 step waiting, what already ran, and what an approval or a denial runs next, so the agent can tell a

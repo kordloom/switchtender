@@ -78,6 +78,34 @@ func AgentPlansFirst(policies []*Policy, r *run.Run) bool {
 	return unplannedApply(r) && r.ParentID == nil && AgentHolds(policies, r)
 }
 
+// The built-in refusal of an agent's workflow that would apply Terraform or OpenTofu.
+const (
+	// AgentWorkflowApplyID identifies the built-in refusal wherever a rule is named by id.
+	AgentWorkflowApplyID = "builtin_agent_workflow_apply"
+	// AgentWorkflowApplyName is how the built-in refusal is named in the refusal and on the chain.
+	AgentWorkflowApplyName = "an agent's workflow may not apply Terraform or OpenTofu"
+)
+
+// AgentWorkflowApply returns the built-in refusal as a rule, so a refusal it makes is recorded the
+// way a deny rule's is.
+func AgentWorkflowApply() *Policy {
+	return &Policy{ID: AgentWorkflowApplyID, Name: AgentWorkflowApplyName, Effect: EffectDeny,
+		MaxDestroy: DisabledMaxDestroy}
+}
+
+// AgentWorkflowApplies reports whether step, the run a step of a workflow would become, is a
+// Terraform or OpenTofu apply that an agent asked for and no exemption covers.
+//
+// A workflow is approved as a whole, and an apply step plans and applies when the step runs, so the
+// person who approves the workflow never sees the plan the step applies. An agent's own apply is
+// held before it plans and again carrying the saved plan, and wrapping the apply in a workflow
+// would have traded those two approvals for one that binds no plan. Such a workflow is refused at
+// submission instead. The step is judged as the run it would become, carrying the agent's identity
+// and account, so an exemption covers it exactly as it would cover that run on its own.
+func AgentWorkflowApplies(policies []*Policy, step *run.Run) bool {
+	return unplannedApply(step) && AgentHolds(policies, step)
+}
+
 // unplannedApply reports whether r is a Terraform or OpenTofu apply nothing has planned yet: not a
 // dry run, and not the apply a plan proposed.
 func unplannedApply(r *run.Run) bool {
