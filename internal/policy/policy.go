@@ -26,6 +26,10 @@ const (
 	// EffectDeny refuses a matched submission outright, so the run is never created. The refused
 	// request is still on the chain: the gate records it before any handler acts.
 	EffectDeny = "deny"
+	// EffectExempt lets a matched run an agent requested proceed without the built-in hold every
+	// agent's run otherwise waits in. It lifts that one hold and nothing else: a rule that holds
+	// or refuses the same run still does.
+	EffectExempt = "exempt"
 )
 
 // Actor kinds a policy can match. An empty kind matches any actor.
@@ -89,7 +93,8 @@ type Policy struct {
 	// grades high and undoes itself, while deleting a backup set grades quietly and is forever.
 	Reversibility string `json:"reversibility,omitempty"`
 	// Effect is what a matched blanket policy does: require_approval holds the run, deny refuses
-	// the submission. Empty means require_approval.
+	// the submission, and exempt lets a run an agent requested proceed without the built-in agent
+	// hold. Empty means require_approval.
 	Effect string `json:"effect,omitempty"`
 	// ExcludeDryRun leaves dry-run runs unmatched, so a no-change preview does not need approval. A
 	// dry run that is not a no-change preview stays matched: an Ansible dry run whose playbook sets
@@ -204,7 +209,7 @@ func (p *Policy) matchesActor(r *run.Run) bool {
 	case "":
 		return true
 	case ActorKindAgent:
-		return r.ActorType == ActorKindAgent
+		return AgentRequested(r)
 	case ActorKindHuman:
 		return humanActorTypes[r.ActorType]
 	default:
@@ -234,6 +239,13 @@ func (p *Policy) matchesActor(r *run.Run) bool {
 // A Rego policy is the full engine by construction: it can deny, scope to actors, and demand a
 // second approver, and nothing about it can be read before it runs to say that it does not.
 func (p *Policy) Advanced() bool {
+	// An exemption is how a Community install lets an agent's routine work past the built-in hold,
+	// so writing one is never the full engine on its own account. Naming the agent it covers only
+	// narrows it, and charging for the narrowing would push an install toward a broader exemption.
+	// Validate refuses every paid criterion on an exemption, so nothing else can ride in on one.
+	if p.Exempts() {
+		return false
+	}
 	return p.Rego != nil ||
 		p.Effect == EffectDeny ||
 		p.MinRisk != "" ||
@@ -261,6 +273,9 @@ func riskRank(level string) int {
 
 // Denies reports whether the policy refuses matched submissions outright.
 func (p *Policy) Denies() bool { return p.Effect == EffectDeny }
+
+// Exempts reports whether the policy is an exemption from the built-in agent hold.
+func (p *Policy) Exempts() bool { return p.Effect == EffectExempt }
 
 // Denying returns the first deny policy matching r, or nil when none does, so the rule that
 // refused a submission can be named in the refusal and in the evidence.
@@ -294,8 +309,11 @@ func (p *Policy) Validate() error {
 	}
 	switch p.Effect {
 	case "", EffectRequireApproval, EffectDeny:
+	case EffectExempt:
+		return p.validateExemption()
 	default:
-		return fmt.Errorf("effect must be %q or %q, not %q", EffectRequireApproval, EffectDeny, p.Effect)
+		return fmt.Errorf("effect must be %q, %q, or %q, not %q", EffectRequireApproval, EffectDeny,
+			EffectExempt, p.Effect)
 	}
 	switch p.ActorKind {
 	case "", ActorKindAgent, ActorKindHuman:
@@ -338,6 +356,10 @@ func Requires(policies []*Policy, r *run.Run) bool {
 //
 // A Rego policy holding r is returned as a copy labeled with its reasons and bundle digest. One that
 // could not decide holds too, though the dispatcher's deny pass has already refused it by then.
+//
+// When no stored rule holds r, the built-in agent hold is asked last, so a run an agent requested
+// is returned the built-in rule AgentDefault describes unless an exemption covers it. An exemption
+// is never itself a reason to hold.
 func Requiring(policies []*Policy, r *run.Run) *Policy {
 	for _, p := range policies {
 		if p.Rego != nil {
@@ -346,9 +368,15 @@ func Requiring(policies []*Policy, r *run.Run) *Policy {
 			}
 			continue
 		}
-		if p.MaxDestroy < 0 && !p.Denies() && p.Matches(r) {
+		if p.MaxDestroy < 0 && !p.Denies() && !p.Exempts() && p.Matches(r) {
 			return p
 		}
+	}
+	// No stored rule holds r, so the built-in one decides: a run an agent asked for waits for a
+	// person unless an exemption covers it. It comes last so a stored rule that also holds the run is
+	// the one named, since that rule carries the requirements a decision on the run must meet.
+	if AgentHolds(policies, r) {
+		return AgentDefault()
 	}
 	return nil
 }

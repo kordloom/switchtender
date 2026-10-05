@@ -152,24 +152,26 @@ func TestThePerProjectWarningExampleDecidesAsDocumented(t *testing.T) {
 		Run:         judged(docProductionProject, false, false),
 		WantOutcome: exampleOutcome{Held: "production-advice (" + noTicket + ")"},
 	}, { // Test 2: Any other project is decided by neither entry.
-		Run: judged("proj_000000000000", true, false),
+		Run: judged("proj_000000000000", false, false),
 	}, { // Test 3: A clean staging run carries nothing.
 		Run: judged(docStagingProject, false, true),
-	}, { // Test 4: Each finding is its own message.
+	}, { // Test 4: Each finding is its own message, and an agent's run is held by default.
 		Run: judged(docStagingProject, true, false),
-		WantOutcome: exampleOutcome{Notes: []string{
+		WantOutcome: exampleOutcome{Held: AgentDefaultName, Notes: []string{
 			"staging-advice (" + agent + ", " + noTicket + ")"}},
 	}, { // Test 5: Moved to deny, the finding refuses the production run outright.
 		Replace:     map[string]string{"production": ex.Blocking},
 		Run:         judged(docProductionProject, false, false),
 		WantOutcome: exampleOutcome{Denied: "production-advice (" + noTicket + ")"},
 	}, { // Test 6: Left out, the agent finding is silent for staging.
-		Replace: map[string]string{"staging": ex.Silent},
-		Run:     judged(docStagingProject, true, true),
-	}, { // Test 7: The other finding is still noted.
 		Replace:     map[string]string{"staging": ex.Silent},
-		Run:         judged(docStagingProject, true, false),
-		WantOutcome: exampleOutcome{Notes: []string{"staging-advice (" + noTicket + ")"}},
+		Run:         judged(docStagingProject, true, true),
+		WantOutcome: exampleOutcome{Held: AgentDefaultName},
+	}, { // Test 7: The other finding is still noted.
+		Replace: map[string]string{"staging": ex.Silent},
+		Run:     judged(docStagingProject, true, false),
+		WantOutcome: exampleOutcome{Held: AgentDefaultName,
+			Notes: []string{"staging-advice (" + noTicket + ")"}},
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

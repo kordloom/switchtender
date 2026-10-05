@@ -145,6 +145,8 @@ func describeRule(p *Policy) string {
 	switch {
 	case p.Denies():
 		effect = "denies"
+	case p.Exempts():
+		effect = "lets an agent's run proceed without the default hold"
 	case p.MaxDestroy >= 0:
 		effect = fmt.Sprintf("requires approval over %d destroys", p.MaxDestroy)
 	}

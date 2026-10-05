@@ -174,7 +174,8 @@ async function loadPolicies() {
 		const data = await getJSON("/policies");
 		const policies = data.policies || [];
 		if (policies.length === 0) {
-			showEmpty("No policies yet. Add one to require approval for the runs it matches.");
+			showEmpty("No policies yet. A run an agent asks for is held for approval by default. " +
+				"Add a rule to hold more, or an exemption to let a routine agent run through.");
 			return;
 		}
 		const tbody = document.getElementById("policies");
@@ -193,6 +194,13 @@ async function loadPolicies() {
 				chip.className = "chip failed";
 				chip.textContent = "deny";
 				chip.dataset.tip = "A matching submission is refused outright and never created";
+				effectCell.appendChild(chip);
+			} else if (p.effect === "exempt") {
+				const chip = document.createElement("span");
+				chip.className = "chip";
+				chip.textContent = "exempt";
+				chip.dataset.tip = "A matching run an agent asked for goes ahead without the default " +
+					"hold. Any rule that holds or denies it still does";
 				effectCell.appendChild(chip);
 			} else {
 				const span = document.createElement("span");

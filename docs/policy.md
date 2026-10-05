@@ -17,6 +17,105 @@ Open Policy Agent language and decide in code, so an existing OPA or Conftest ru
 being rewritten as criteria. Both are loaded from the same file, reloaded on the same edit, enforced
 at the same points, and recorded in the same evidence.
 
+## Agent runs are held by default
+
+A run an AI agent asked for waits for a person before it executes, with no policy written first.
+The hold is built in. It is named `requested by an agent, held by default` on the held run, in the
+approval queue, and in the run's dossier, and the outcome the audit chain commits carries the same
+words as a note, so a receipt for the run says why it waited. A person's run is unaffected: the
+built-in hold looks only at who asked, and the rules below decide a person's run exactly as before.
+
+Who asked is read from the token, never guessed from the request. The hold applies to agent
+tokens, the ones minted with `switchtender token new --user <account> --agent`. A token minted
+without `--agent` is recorded as a person's and gets no agent hold, so mint every agent's token
+with it. A run counts as an agent's when an agent token submitted it, and when it derives from an
+agent's request: the apply an agent's plan proposes, a shard of an agent's split, a step of its
+workflow, and a retry, a rerun, or a relaunch of failed shards the agent asks for. The derived run
+carries the agent's identity, so it faces the same hold. The receipt for the run proves who
+approved it or which rule exempted it.
+
+A dry run the gate proves changes nothing goes ahead, under the same reading `exclude_dry_run` uses.
+An Ansible dry run whose playbook sets `check_mode` to anything but true runs that work for real, a
+Terraform or OpenTofu plan whose configuration has an external data source runs a program while it
+plans, and a playbook or configuration the gate cannot read in full may do either, so each of them
+is held. The hold note says what the scan found and the two fixes: make the dry run change free, or
+write an exemption that covers it.
+
+An agent's Terraform or OpenTofu apply that the rules would plan first is planned, and the apply its
+plan proposes is held, carrying the saved plan, the way a person's is. Planning runs the
+configuration's programs, though, so the gate first reads the configuration the way it reads a dry
+run. When that read does not show the plan changes nothing, because an external data source runs its
+program while the tool plans or a module could not be read, the apply is held at submission instead,
+before anything executes, and its hold note says what was found and the two fixes: replace the
+external data source, or write a policy with `effect: exempt` that covers the run. A person's apply
+is planned first as before.
+
+The built-in hold sits beside the stored rules and replaces none of them. A deny rule still refuses
+an agent's run outright, and a stored rule that holds the run is the one the hold names, with its
+distinct-approver and reason requirements. Releasing an agent's run works as it always did: a
+person with the admin role approves it, and an agent never can.
+
+### Exempting an agent's routine work
+
+An exemption is a stored rule with `effect: exempt`. The agent runs it matches go ahead without the
+built-in hold:
+
+    policies:
+      - name: release-agent-smoke-tests
+        effect: exempt
+        actor: release-agent
+        tool: bash
+        queue: staging
+        command_contains: ./smoke.sh
+
+An exemption matches on `tool`, `command_contains`, `inventory_id`, `queue`, and `actor`, and
+`actor_kind` may be left out or set to `agent`. It is refused with `min_risk`, `reversibility`,
+`exclude_dry_run`, `require_distinct_approver`, `require_reason`, or `max_destroy`, which belong
+on a rule that holds. It lifts the built-in hold and nothing else: a stored rule that holds or
+refuses the same run still does.
+
+An exemption is a rule like any other. `GET /v1/policies` lists it, the rule set every run records
+as in force covers it and describes it as "lets an agent's run proceed without the default hold",
+and a run it lets through records the note
+`requested by an agent, exempt from the default hold by policy "release-agent-smoke-tests"` in its
+outcome, so the receipt and the dossier name the exemption. Write one through the API or the policy
+file, the same as any rule.
+
+The built-in hold is not a stored policy, so it counts against no license's policy limit and cannot
+be deleted. An exemption is a Community rule, one that names an `actor` included, and it counts as
+one policy, so a Community install's one policy can be the exemption.
+
+What an exemption risks is everything it matches, which then runs with no person looking. Keep it
+narrow.
+
+- `command_contains` matches text anywhere in the command, ignoring case, so an exemption for
+  `smoke` also matches `smoke; rm -rf /`. Pair it with `tool`, `queue`, or `inventory_id`.
+- `actor` matches a token's label, and labels are not unique across accounts. A token minted for
+  another account under the same label is covered too.
+- An exemption with no criteria exempts every agent run, which turns the default off.
+
+Prefer a named `actor` together with a queue or an inventory that reaches only what the agent's
+routine work needs.
+
+### Nothing an agent writes runs later as someone else
+
+An agent's token is capped at the operator role, and creating or editing a schedule, a trigger and
+its webhook, a template, a workflow, an inventory, a project, a credential, or a policy is admin
+work. A manage grant does not open any of it to an agent either, since a grant is delegation between
+people. So nothing an agent writes fires a run later under a schedule's or a webhook's name.
+
+Everything an agent can launch faces the hold under the agent's own name: a run, a split, a
+workflow, a template launch, a drift reconcile, a rerun, a retry, a relaunch of failed shards, a
+tool call through MCP, and the apply a plan proposes, on the control node or on a relay worker. A
+pull request comment acts for the person whose forge account is linked, and an agent cannot link
+one.
+
+### Upgrading
+
+An existing install gets the built-in hold when it upgrades. There is no migration and no setting.
+An agent whose runs went ahead unattended before the upgrade now waits for a person, so write an
+exemption for the routine work that should keep running unattended, and leave everything else held.
+
 ## YAML rules
 
     policies:
@@ -32,10 +131,11 @@ at the same points, and recorded in the same evidence.
         effect: deny
 
 A rule matches on `tool`, `command_contains` (ignoring case), `inventory_id`, `queue`, `actor_kind`,
-`actor`, `min_risk`, `reversibility`, and `exclude_dry_run`. A match holds the run, or refuses it
-with `effect: deny`. `require_distinct_approver` makes the release need someone other than the
-requester, and `max_destroy` plans a Terraform or OpenTofu apply first and holds it only when the
-plan destroys more than that many resources.
+`actor`, `min_risk`, `reversibility`, and `exclude_dry_run`. A match holds the run, refuses it with
+`effect: deny`, or, with `effect: exempt`, lets an agent's run go ahead without the
+[built-in hold](#agent-runs-are-held-by-default). `require_distinct_approver` makes the release need
+someone other than the requester, and `max_destroy` plans a Terraform or OpenTofu apply first and
+holds it only when the plan destroys more than that many resources.
 
 The count is read from the plan file the plan saved, and the apply that follows carries out that
 saved plan, so the plan an approver releases is the plan that runs. If the infrastructure changed
@@ -213,9 +313,12 @@ each warning holds the run:
         some msg in checks.findings
     }
 
-A staging run without a ticket label goes ahead carrying the note `staging-advice (no change ticket on
-the run, ...)`. The same run in production waits for approval, held by `production-advice`. A run in
-any other project is decided by neither entry. `GET /v1/projects` lists each project's id.
+A person's staging run without a ticket label goes ahead carrying the note
+`staging-advice (no change ticket on the run, ...)`. The same run in production waits for approval,
+held by `production-advice`. A run in any other project is decided by neither entry.
+`GET /v1/projects` lists each project's id.
+An agent's run is [held by default](#agent-runs-are-held-by-default) whatever these entries decide,
+unless an exemption covers it, and it still carries the staging note, so the approver sees it.
 
 The same shape scopes a warning to one job instead of a project. A rule reads the playbook the job
 runs, `input.run.playbook`, or `input.run.template_id`, which names the template however the run was

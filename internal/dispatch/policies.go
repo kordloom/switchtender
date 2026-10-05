@@ -36,12 +36,8 @@ const holdRequested = "requested at submission"
 // which is disruptive exactly once and in the direction that does not execute something an approver
 // was meant to see.
 func (d *Dispatcher) requiresApproval(ctx context.Context, r *run.Run) (bool, error) {
-	if d.policies == nil {
-		return false, nil
-	}
-	policies, err := d.policies.List(ctx)
+	policies, err := d.listPolicies(ctx)
 	if err != nil {
-		d.log.Error("dispatch: list policies: " + err.Error())
 		return false, fmt.Errorf("%w: approval policies could not be read, so the run is refused "+
 			"rather than run past a gate that could not be checked: %w", ErrPolicyUnavailable, err)
 	}
@@ -59,11 +55,19 @@ func (d *Dispatcher) requiresApproval(ctx context.Context, r *run.Run) (bool, er
 		// A terraform or opentofu apply a rule holds is planned first, and the request is not held:
 		// the apply its plan proposes is, carrying the saved plan, after the rules decide on it. A
 		// request held here would be approved without its plan and then plan when it ran.
-		if r.Status != run.StatusPendingApproval && policy.PlanGated(policies, gr) {
+		planFirst := r.Status != run.StatusPendingApproval && policy.PlanGated(policies, gr)
+		scans, unproven := d.agentPlanUnproven(r, planFirst)
+		if planFirst && !unproven {
 			return false, nil
 		}
 		r.HeldByPolicy = maskPolicyText(gr, p.Label())
 		r.HoldNote = exemptionHoldNote(policies, gr, p)
+		if unproven {
+			// Planning first would run what the configuration runs while it plans before anybody
+			// approved anything, so an agent's apply is held where it stands, saying what was found.
+			r.DryRunScans = scans
+			r.HoldNote = maskPolicyText(gr, run.AgentPlanHoldNote(scans))
+		}
 		// The label names the first rule for the evidence; the flag is the OR of every matching
 		// rule, and an explicitly requested distinct approver is never lowered by a policy.
 		r.RequireDistinctApprover = r.RequireDistinctApprover || policy.RequireDistinct(policies, gr)
@@ -75,10 +79,46 @@ func (d *Dispatcher) requiresApproval(ctx context.Context, r *run.Run) (bool, er
 	return false, nil
 }
 
-// policyNotes returns what the Rego policies set to warn: note recorded about the graded run g,
-// with g's own secrets masked.
+// agentPlanUnproven reports whether planning r first would execute something nobody approved on
+// an agent's behalf: r is an apply an agent requested that the rules plan first, and the gate's read
+// of the plan it would run, the same read a dry run of it gets, did not show it changes nothing. It
+// returns what that read found. A Terraform or OpenTofu external data source runs its program while
+// the tool plans, so a plan is a change exactly when its dry run is, and the agent hold reads it
+// the way it reads a dry run.
+func (d *Dispatcher) agentPlanUnproven(r *run.Run, planFirst bool) ([]run.DryRunScan, bool) {
+	if !planFirst || !policy.AgentRequested(r) {
+		return nil, false
+	}
+	probe := *r
+	probe.DryRun = true
+	scans := d.graded(&probe).DryRunScans
+	return scans, !run.ScansChangeFree(scans)
+}
+
+// listPolicies returns the stored policies, or none when the dispatcher has no policy store. An
+// install with no store still has the built-in agent hold, so a caller asks the rules either way
+// rather than reading a missing store as a pass.
+func (d *Dispatcher) listPolicies(ctx context.Context) ([]*policy.Policy, error) {
+	if d.policies == nil {
+		return nil, nil
+	}
+	policies, err := d.policies.List(ctx)
+	if err != nil {
+		d.log.Error("dispatch: list policies: " + err.Error())
+		return nil, err
+	}
+	return policies, nil
+}
+
+// policyNotes returns what the rules record about the graded run g without holding it: the
+// warnings Rego policies set to warn: note, and what the built-in agent hold did, with g's own
+// secrets masked. The agent note is recorded whether the hold applied or an exemption lifted it,
+// so the outcome a receipt discloses says which, and names the exemption.
 func policyNotes(policies []*policy.Policy, g *run.Run) []string {
 	notes := policy.Noting(policies, g)
+	if note := policy.AgentNote(policies, g); note != "" {
+		notes = append(notes, note)
+	}
 	for i, note := range notes {
 		notes[i] = maskPolicyText(g, note)
 	}
@@ -255,12 +295,8 @@ func policyUnits(parent *run.Run, steps []run.PipelineStep) ([]*run.Run, []strin
 // one that never started.
 func (d *Dispatcher) pipelineRequiresApproval(ctx context.Context, parent *run.Run,
 	steps []run.PipelineStep) (bool, error) {
-	if d.policies == nil {
-		return false, nil
-	}
-	policies, err := d.policies.List(ctx)
+	policies, err := d.listPolicies(ctx)
 	if err != nil {
-		d.log.Error("dispatch: list policies: " + err.Error())
 		return false, fmt.Errorf("%w: approval policies could not be read, so the pipeline is "+
 			"refused rather than run past a gate that could not be checked: %w",
 			ErrPolicyUnavailable, err)

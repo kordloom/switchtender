@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/policy"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // Contract runs the policy.Store contract against a fresh store from newStore.
@@ -22,6 +23,9 @@ func Contract(t *testing.T, newStore func() policy.Store) {
 		testRegoRefused(t, newStore())
 	})
 	t.Run("get", func(t *testing.T) { testGet(t, newStore()) })
+	t.Run("an exemption round trips and still exempts", func(t *testing.T) {
+		testExemptionRoundTrip(t, newStore())
+	})
 	t.Run("empty list is non-nil", func(t *testing.T) {
 		got, err := newStore().List(context.Background())
 		if err != nil {
@@ -74,6 +78,58 @@ func testGet(t *testing.T, store policy.Store) {
 	}
 	if _, err := store.Get(ctx, "pol_missing"); !errors.Is(err, policy.ErrNotFound) {
 		t.Errorf("Get(missing) = %v, want ErrNotFound", err)
+	}
+}
+
+// testExemptionRoundTrip verifies an exemption from the built-in agent hold loads back as the
+// exemption it was saved as. A store that dropped the effect would load it as a rule holding every
+// run it names, and one that dropped a criterion would load it exempting more agent runs than it
+// was written to, so the loaded rule is asked to judge runs as well as compared field by field.
+func testExemptionRoundTrip(t *testing.T, store policy.Store) {
+	ctx := context.Background()
+	p := &policy.Policy{
+		ID: policy.NewID(), Name: "nightly smoke", Tool: "bash", CommandContains: "smoke",
+		InventoryID: "inv_lab", Queue: "staging", ActorKind: policy.ActorKindAgent,
+		Actor: "triage-bot", Effect: policy.EffectExempt, MaxDestroy: policy.DisabledMaxDestroy,
+		CreatedAt: time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC),
+	}
+	if err := p.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v, want the exemption accepted", err)
+	}
+	if err := store.Save(ctx, p); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	got, err := store.Get(ctx, p.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	listed, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != p.ID || listed[0].Effect != policy.EffectExempt {
+		t.Fatalf("List() = %+v, want the one exemption listed as an exemption", listed)
+	}
+	if got.Effect != policy.EffectExempt || got.Tool != "bash" || got.CommandContains != "smoke" ||
+		got.InventoryID != "inv_lab" || got.Queue != "staging" ||
+		got.ActorKind != policy.ActorKindAgent || got.Actor != "triage-bot" ||
+		got.MaxDestroy != policy.DisabledMaxDestroy {
+		t.Errorf("Get() = %+v, want the saved exemption", got)
+	}
+	covered := &run.Run{Actor: "triage-bot", ActorType: policy.ActorKindAgent, Tool: "bash",
+		Command: "run smoke tests", InventoryID: "inv_lab", Queue: "staging"}
+	if held := policy.Requiring(listed, covered); held != nil {
+		t.Errorf("the loaded exemption left the agent's run held by %q", held.Label())
+	}
+	other := *covered
+	other.Actor = "release-bot"
+	if held := policy.Requiring(listed, &other); !policy.IsAgentDefault(held) {
+		t.Errorf("the loaded exemption covered an agent it does not name: held by %v", held)
+	}
+	person := *covered
+	person.Actor, person.ActorType = "dev-lead", "session"
+	if held := policy.Requiring(listed, &person); held != nil {
+		t.Errorf("the loaded exemption held a person's run: held by %q", held.Label())
 	}
 }
 

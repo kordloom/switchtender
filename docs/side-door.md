@@ -12,7 +12,8 @@ through turns up.
 
 An agent holds one credential, its SwitchTender token, minted with `--agent`. The token is capped at
 operator whatever account it is bound to, so the agent can submit runs and can never approve one,
-manage identity or access, or manage secrets. The SSH keys, cloud logins, and vault passwords its runs
+manage identity or access, or manage secrets. Every run it submits waits for a person's approval
+unless a written policy exempts it. The SSH keys, cloud logins, and vault passwords its runs
 use are sealed on the server and decrypted only at execution, so the agent never sees them.
 
 An agent that holds only its SwitchTender token has no way around the gate. For that actor, the

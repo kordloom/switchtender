@@ -360,6 +360,41 @@ func toolLabel(tool string) string {
 // saying "this one is safe" is a claim the gate cannot check, written by whoever wants the run to
 // go through, which is the bypass the scan exists to close.
 func ExemptionHoldNote(r *Run, rule string, rego bool) string {
+	drop := "drop exclude_dry_run from " + quoteRule(rule)
+	if rego {
+		drop = "stop exempting dry runs in the module of " + quoteRule(rule)
+	}
+	return holdNote(r, "This dry run was not shown to change nothing, so "+quoteRule(rule)+
+		" does not exempt it", drop)
+}
+
+// AgentHoldNote is the hold message for an agent's dry run the built-in agent hold covers only
+// because the gate found it not change free: a dry run shown to change nothing is never held for
+// being an agent's. It names what was found, or what could not be read, and the two clean fixes,
+// the second being an exemption policy that covers the run. It returns the empty string for a run
+// with nothing recorded.
+func AgentHoldNote(r *Run) string {
+	return holdNote(r, "This dry run was not shown to change nothing, so the default hold on an "+
+		"agent's run applies", agentExemptFix)
+}
+
+// AgentPlanHoldNote is the hold message for an agent's Terraform or OpenTofu apply held before it
+// plans. An apply a rule holds is normally planned first and its proposed apply held, but planning
+// runs whatever the configuration runs while it plans, so an agent's apply whose plan was not shown
+// to change nothing is held at submission instead, before anything executes. scans are what the
+// gate read of that plan. It returns the empty string when they found nothing.
+func AgentPlanHoldNote(scans []DryRunScan) string {
+	return holdNote(&Run{DryRun: true, DryRunScans: scans}, "Planning this apply was not shown to "+
+		"change nothing, so the default hold on an agent's run applies before it plans",
+		agentExemptFix)
+}
+
+// agentExemptFix is the second fix a hold note offers when the built-in agent hold placed it.
+const agentExemptFix = "write a policy with effect exempt that covers this run"
+
+// holdNote builds a dry run's hold message: lead, the first thing its scans found, and the two
+// clean fixes, the second of which is second.
+func holdNote(r *Run, lead, second string) string {
 	entries := r.DryRunFindings()
 	if len(entries) == 0 {
 		return ""
@@ -368,14 +403,10 @@ func ExemptionHoldNote(r *Run, rule string, rego bool) string {
 	if n := len(entries); n > 1 {
 		first = fmt.Sprintf("%s (and %d more)", first, n-1)
 	}
-	drop := "drop exclude_dry_run from " + quoteRule(rule)
-	if rego {
-		drop = "stop exempting dry runs in the module of " + quoteRule(rule)
-	}
+	drop := second
 	tool, incomplete := heldScan(r)
 	var b strings.Builder
-	fmt.Fprintf(&b, "This dry run was not shown to change nothing, so %s does not exempt it: %s. ",
-		quoteRule(rule), first)
+	fmt.Fprintf(&b, "%s: %s. ", lead, first)
 	switch {
 	case tool == ToolAnsible && incomplete:
 		fmt.Fprintf(&b, "Two clean fixes: make what the playbook pulls in readable to the gate, "+

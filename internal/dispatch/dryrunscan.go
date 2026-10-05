@@ -118,6 +118,9 @@ func exemptionHoldNote(policies []*policy.Policy, gr *run.Run, held *policy.Poli
 	if policy.Requiring(policies, asChangeFree(gr)) != nil {
 		return ""
 	}
+	if policy.IsAgentDefault(held) {
+		return run.AgentHoldNote(gr)
+	}
 	return run.ExemptionHoldNote(gr, ruleOf(policies, held), held.Rego != nil)
 }
 

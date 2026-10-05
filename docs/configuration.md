@@ -316,9 +316,12 @@ Manages API tokens. A public bind on an empty database mints an initial admin to
   operator whatever role its account holds, so an agent can launch and propose work but can never
   manage identity, access, or secrets, and can never approve its own held run. Every action it takes
   is recorded in the chain as `actor_type: agent` with the account it acts for beside it, which is
-  what `actor_kind: agent` policy rules match on. It requires `--user`, so the chain always records
-  the human the agent acts for. Without one the command refuses. Mint every agent token with it: a
-  token without `--agent` is indistinguishable from a person's in the record.
+  what `actor_kind: agent` policy rules match on. Every run such a token asks for waits for a
+  person's approval unless a written policy exempts it, as
+  [Agent runs are held by default](policy.md#agent-runs-are-held-by-default) describes. It requires
+  `--user`, so the chain always records the human the agent acts for. Without one the command
+  refuses. Mint every agent token with it: a token without `--agent` is indistinguishable from a
+  person's in the record, and gets no agent hold.
 - `token list` lists tokens without their secrets.
 - `token revoke <id>` deletes a token.
 
@@ -534,7 +537,8 @@ key satisfies trivially.
 Serves the Model Context Protocol over stdio, so an agent can list templates, propose a run, and read
 what happened. Every tool call is an ordinary authenticated API request carrying the token given
 here, so it passes the same authorization, the same approval policy, and the same fail-closed audit
-append as a request from a person. See [Agents](agents.md).
+append as a request from a person. A run it proposes waits for a person's approval unless a written
+policy exempts it. See [Agents](agents.md).
 
     export SWITCHTENDER_MCP_TOKEN=swt_...
     switchtender mcp --server https://switchtender.internal
@@ -548,7 +552,7 @@ reach.
 | Flag | Default | Purpose |
 |------|---------|---------|
 | `--server` | required | SwitchTender API base URL. |
-| `--allow-adhoc` | off | Also expose the ad-hoc run tool, letting the agent compose a run rather than launch a template an operator defined. Approval policy still applies. |
+| `--allow-adhoc` | off | Also expose the ad-hoc run tool, letting the agent compose a run rather than launch a template an operator defined. The default hold on agent runs and approval policy still apply. |
 | `--token` | none | API token the agent presents. Prefer `SWITCHTENDER_MCP_TOKEN`. |
 | `--timeout` | `1m0s` | Bounds one API call. |
 | `--allow-admin-token` | `false` | Start even when the token has admin rights. An agent should hold an operator-bound token, so this is a deliberate override. |

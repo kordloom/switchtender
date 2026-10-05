@@ -436,7 +436,10 @@ function openPolicyEdit(p) {
 	document.getElementById("policy-command").value = p.command_contains || "";
 	document.getElementById("policy-inventory").value = p.inventory_id || "";
 	document.getElementById("policy-queue").value = p.queue || "";
-	document.getElementById("policy-effect").value = p.effect === "deny" ? "deny" : "";
+	// An exemption reads back as one. Mapped to the default, an edit saved an exemption as a rule
+	// holding the very runs it was written to let through.
+	document.getElementById("policy-effect").value =
+		p.effect === "deny" || p.effect === "exempt" ? p.effect : "";
 	document.getElementById("policy-actor-kind").value = p.actor_kind || "";
 	document.getElementById("policy-actor").value = p.actor || "";
 	document.getElementById("policy-min-risk").value = p.min_risk || "";
@@ -457,7 +460,8 @@ function openPolicyEdit(p) {
 // dialog, pressed Save, and met a 403 explaining the tier after composing the whole rule, which is
 // the same shape as the evidence-pack refusal and just as avoidable.
 const ADVANCED_POLICY_FIELDS = [
-	["policy-effect", "A rule that denies outright, rather than holding for a person, is Team."],
+	["policy-effect", "A rule that denies outright, rather than holding for a person, is Team. " +
+		"An exemption from the default agent hold is Community."],
 	["policy-actor-kind", "Scoping a rule to who is asking, such as agents as a class, is Team."],
 	["policy-actor", "Scoping a rule to one named actor is Team."],
 	["policy-min-risk", "A risk floor, so a rule applies only above a grade, is Team."],

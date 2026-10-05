@@ -151,7 +151,8 @@ land in the audit trail.
 
 Yes, through the API, holding one credential: a token bound to an operator account. The agent
 submits and manages runs like any operator, every mutation it makes is chained before it executes,
-and a run held for approval waits for a human admin, since an operator token cannot approve.
+and a run held for approval waits for a human admin, since an operator token cannot approve. Every
+run an agent token asks for is held that way by default, unless a written policy exempts it.
 [Run an AI agent through the gate](agents.md) covers the setup.
 
 ## Can I extend SwitchTender?

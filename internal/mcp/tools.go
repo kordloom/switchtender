@@ -56,9 +56,9 @@ func Tools(c *Client, opts Options) []Tool {
 			Name: "propose_run",
 			Description: "Propose a run by launching a job template. The run is submitted for the " +
 				"account this token belongs to and is recorded in the tamper-evident audit chain " +
-				"before it executes. If an approval policy covers it, it is held until a person " +
-				"releases it; you cannot approve it yourself. Returns the created run, whose status " +
-				"tells you whether it is running or awaiting approval.",
+				"before it executes. It is held for a person's approval by default, unless an " +
+				"exemption rule lets it proceed; you cannot approve it yourself. Returns the " +
+				"created run, whose status tells you whether it is running or awaiting approval.",
 			InputSchema: object(map[string]any{
 				"template_id": prop("string", "The template to launch, from list_templates."),
 				"answers": map[string]any{
@@ -248,7 +248,8 @@ func adhocTool(c *Client) Tool {
 		Name: "propose_adhoc_run",
 		Description: "Propose a run you compose yourself, rather than launching a template. Prefer " +
 			"propose_run with a template when one fits. The run is recorded in the audit chain " +
-			"before it executes and is held if an approval policy covers it; you cannot approve it.",
+			"before it executes and is held for a person's approval by default, unless an " +
+			"exemption rule lets it proceed; you cannot approve it.",
 		InputSchema: object(map[string]any{
 			"tool": prop("string",
 				"Execution engine: ansible, terraform, opentofu, bash, powershell, python, or go."),

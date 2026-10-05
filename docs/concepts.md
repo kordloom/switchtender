@@ -295,6 +295,12 @@ Approval policies decide which runs a person has to sign off, so who may change 
 question. Held as rows they are changed by anyone the API lets through, and the change leaves a row
 indistinguishable from the row before it.
 
+One rule needs no file and no row. A run an AI agent asked for is held for a person by default,
+named `requested by an agent, held by default`, until a stored rule with `effect: exempt` says that
+run may go ahead. People's runs are unaffected. [Agent runs are held by
+default](policy.md#agent-runs-are-held-by-default) covers the exemption, what it risks, and the
+upgrade.
+
 Point `--policy-file` at a YAML file and that file becomes the source of truth:
 
     policies:
@@ -465,12 +471,14 @@ never picks up, until an admin approves it, which releases it to run, or rejects
 An operator can request the run, but only an admin can release it, so duties are separated. Set
 `require_distinct_approver` on the policy and the separation covers admins too: the person who asked
 for the change cannot be the one who approves it, and the requirement is recorded on the run at the
-moment it is held, so editing the policy afterward cannot loosen a decision already pending. A held
-run submitted by an AI agent is released the same way, only by a human admin, so an operator-bound
-agent never approves its own work. Both the request and the decision are recorded in the audit
-trail, making who asked for a change and who signed off provable. A Terraform or OpenTofu apply
-marked this way is planned first instead, and the apply its plan proposes is what waits, carrying the
-saved plan the approval binds.
+moment it is held, so editing the policy afterward cannot loosen a decision already pending. A run
+submitted by an AI agent is held this way by default, with no policy written first, unless an
+exemption covers it, and it is released the same way, only by a human admin, so an operator-bound
+agent never approves its own work. See
+[Agent runs are held by default](policy.md#agent-runs-are-held-by-default). Both the request and
+the decision are recorded in the audit trail, making who asked for a change and who signed off
+provable. A Terraform or OpenTofu apply marked this way is planned first instead, and the apply its
+plan proposes is what waits, carrying the saved plan the approval binds.
 
 A pull request comment is one more way to decide. A person whose GitHub or GitLab account is linked
 to their SwitchTender account can comment `/switchtender apply` on a pull request, naming the plan

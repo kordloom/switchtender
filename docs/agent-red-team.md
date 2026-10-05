@@ -31,6 +31,10 @@ Deny rules, risk floors, distinct approvers, and any second policy are Team feat
 license gate refused them on this install. What follows is therefore the floor of the free tier,
 not the ceiling of the paid one.
 
+Since this transcript, the policy above is no longer needed: every run an agent token asks for
+waits for a person's approval unless a written policy exempts it, with no rule written first. See
+[Agent runs are held by default](policy.md#agent-runs-are-held-by-default).
+
 ## What the agent tried
 
 | Attempt | Result |

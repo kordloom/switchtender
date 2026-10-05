@@ -104,16 +104,22 @@ review, fails the build when a new path appears without a test proving an agent 
    authentication is on before the agent holds any credential. Make sure a human admin account
    exists too, so the agent's held runs have somebody who can approve them.
 
-3. Decide what else a human must approve. An agent's run already waits for a person's approval
-   unless a written policy exempts it, and a dry run the scans prove change-free may proceed, so the
-   agent is gated before any policy exists. [Approval policies](policy.md) says how an exemption is
-   written. Policies gate people's runs too. An approval policy with no criteria matches every run,
-   so one empty policy is a gate-everything switch:
+3. Decide what a human must approve. You do not need a policy for the agent's own runs: every run
+   an agent token asks for waits for a person's approval unless a written policy exempts it. The
+   hold applies to tokens minted with `switchtender token new --user <account> --agent`, and a token
+   minted without `--agent` gets no agent hold. A dry run the scans prove change free may proceed.
+   To let routine work through, write an exemption, a rule with `effect: exempt`, which Community
+   covers. The receipt proves who approved each run or which rule exempted it.
+   [Agent runs are held by default](policy.md#agent-runs-are-held-by-default) covers the exemption
+   and what it risks.
+
+   Policies gate people's runs too. An approval policy with no criteria matches every run, so one
+   empty policy is a gate-everything switch:
 
        policies:
          - name: hold-everything
 
-   Or scope policies to the dangerous cases and let routine runs flow:
+   Or scope policies to the dangerous cases and let a person's routine runs flow:
 
        policies:
          - name: prod-terraform-destroy
@@ -148,10 +154,11 @@ review, fails the build when a new path appears without a test proving an agent 
    Every criterion in that file is the full policy engine, which a Team license covers: actor
    scoping, risk floors, deny rules, and distinct-approver separation of duties. A server started
    with a policy file it is not licensed for refuses at startup and says so, rather than running with
-   the rules quietly dropped. The gate itself is free: an agent's run waits for a person unless a
-   written policy exempts it, on every tier, which is the whole containment story on this page. A
-   Community install also holds one plain require-approval policy for everyone's runs. What Team
-   buys is scoping rules by actor and risk, and refusing outright rather than waiting.
+   the rules quietly dropped. The gate itself is free on every tier: every run an agent submits
+   waits for a person with no rule written, and that is the whole containment story on this page. A
+   Community install also holds one plain rule, either a require-approval policy for everyone's runs
+   or one exemption. What Team buys is scoping holds by actor, risk, and reversibility, and a rule
+   that can refuse outright rather than wait.
 
 4. Pin the policies by starting the server with `serve --policy-file policies.yml`. The file is the
    source of truth and the API refuses policy writes, so even an admin API caller cannot rewrite
@@ -180,7 +187,7 @@ The tool set is narrow on purpose. There is no approve tool, so an agent cannot 
 however it is prompted, and no credential, account, token, grant, or policy tool, so it cannot widen
 its own reach. The command refuses to start on an admin token. Ad-hoc runs, where the agent composes
 a command instead of launching a template a person defined, stay off unless you pass `--allow-adhoc`,
-and the approval policy still covers them when they are on.
+and the default hold and the approval policy still cover them when they are on.
 
 The narrowness holds inside a template launch too, which is where it would otherwise leak, and it
 holds on the server, so it applies the same whether the agent connects over MCP or calls the API
@@ -275,8 +282,9 @@ This is the golden path a governed agent change takes, with the commands to watc
 
 1. The agent proposes a change through MCP or the API. The request lands on the chain before
    anything acts, attributed `actor_type: agent`, on behalf of its human.
-2. Policy sees an agent asking. A deny rule refuses it outright, with the rule named. A matching
-   approval rule holds it: the run is born `pending_approval` and no executor can claim it.
+2. Policy sees an agent asking. A deny rule refuses it outright, with the rule named. Unless a
+   written policy exempts it, the run is held: it is born `pending_approval` and no executor can
+   claim it.
 3. A person reviews the held run, its assessed risk, and its parameters, and approves. The DECISION
    entry commits who approved, the account they approved under, and the digest of exactly what.
 4. The run executes, on whichever worker claims it, after re-checking the approved digest. The
