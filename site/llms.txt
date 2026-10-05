@@ -4,16 +4,18 @@
 > Terraform, OpenTofu, Bash, PowerShell, Python, and Go across a fleet, paints
 > every run as a live host-by-task matrix, splits big jobs by measured host cost, records a
 > tamper-evident audit trail, and imports AWX projects, inventories (smart and constructed),
-> templates, workflows with approval steps, surveys, schedules, notification templates, and
-> organizations in one command, with a dry run first. Every change returns a chain receipt, every run exports an evidence
+> templates, workflows with approval steps (apart from shapes the import names and leaves out),
+> surveys, schedules, notification templates, and organizations in one command, with a dry run
+> first. Every recorded change returns a chain receipt, every run exports an evidence
 > dossier, a change register covers each period, an external witness countersigns attestations,
 > and the chain exports as a LoomSeal bundle verified offline. State lives in one SQLite file by default, with Postgres optional.
 > No Kubernetes, no Redis, no message bus. The tools themselves are not inside the binary: a run
-> uses its tool from the PATH, and the container image carries Ansible, Python, Terraform, and
+> uses its tool from the PATH, or for Ansible a pinned ansible-core that `switchtender ansible
+> install` manages, and the container image carries Ansible, Python, Terraform, and
 > OpenTofu. Source-available under BSL 1.1: the controller, every
 > tool, and the full evidence chain are free to self-host with no seat, host, or run limits. Paid
-> tiers add what an organization needs around it: SSO, the full policy engine, PostgreSQL and
-> active-active HA, distributed workers, drift reconcile, and audit-ready change registers. Each
+> tiers add what an organization needs around it: SSO, more approval policies and the full policy
+> engine, creating a new PostgreSQL schema, distributed workers, drift reconcile, and audit-ready change registers. Each
 > release converts to Apache 2.0 two years after it ships.
 
 Install: `go install github.com/kordloom/switchtender@latest`, Homebrew, or release binaries
@@ -44,11 +46,11 @@ seeded read-only tour.
 ## Docs
 
 - [Concepts](https://switchtender.com/docs/concepts): jobs, templates, fleets, runs
-- [Provable audit](https://switchtender.com/docs/concepts#provable-audit): every mutation is recorded in a fail-closed hash chain before it executes, or refused with a 503
+- [Provable audit](https://switchtender.com/docs/concepts#provable-audit): every mutation other than signing in or out is recorded in a fail-closed hash chain before it executes, or refused with a 503
 - [Compliance mapping](https://switchtender.com/docs/compliance): the record mapped to SOC 2 CC8.1, ISO 27001 A.8.32, HIPAA 164.312(b)
 - [Sample evidence pack](https://switchtender.com/docs/sample-evidence-pack): what a reviewer's sample looks like, produced from a real chain
 - Offline verification: signed LoomSeal bundles verify on an air-gapped machine against the key the server publishes at /.well-known/loomseal.json
-- Receipts: every mutation returns an Audit-Receipt header (seq:hash) that later proves the chain still holds that exact entry at that exact position
+- Receipts: every mutation other than signing in or out returns an Audit-Receipt header (seq:hash) that later proves the chain still holds that exact entry at that exact position
 - Receipt contents: a run's receipt discloses its spec, its outcome, and each approval decision, and LoomSeal verifiers from 1.7.0 on check each against the digests the chain committed
 - [Tools](https://switchtender.com/docs/features): Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go
 - [Reliability](https://switchtender.com/docs/reliability): sharding, retries, drift detection

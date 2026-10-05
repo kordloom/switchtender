@@ -27,18 +27,18 @@
  "applicationCategory": "DeveloperApplication",
  "description": "The control plane for infrastructure automation. Every change it runs, whether from a person, a schedule, or an AI agent, passes one governed path of request, policy, and approval, and leaves a cryptographically signed receipt that can be verified offline without the vendor. It does not claim every change to your infrastructure went through it: anyone holding their own SSH key can change a host behind it. Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go from a single self-hosted Go binary, agentless over SSH.",
  "featureList": [
-  "Agentless: reaches managed hosts over SSH with nothing installed on them",
+  "Agentless: reaches managed hosts over SSH with no SwitchTender agent installed on them",
   "Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go",
   "Reads secrets from HashiCorp Vault (KV v1 and v2, and dynamic secrets minted per run and revoked when it ends), AWS Secrets Manager, Azure Key Vault, Google Secret Manager, CyberArk (Conjur and CCP), and 1Password",
   "Per-object access grants: read, use, or manage on one project, template, inventory, or credential, layered over global roles",
-  "Single sign-on through OIDC, SAML, LDAP, and JWT",
+  "Single sign-on through OIDC, SAML, LDAP, and JWT, on the Pro tier",
   "Pipelines with a dependency graph and parallel branches, built in a drag-and-drop editor",
   "Approval gates enforced by policy before a run executes",
   "Tamper-evident hash-chained audit trail a third party can verify offline",
   "Live host-by-task matrix and per-host history across runs",
   "Drift detection from a dry run",
-  "One static Go binary and one SQLite file, with PostgreSQL optional",
-  "One-command import from AWX, Ansible Automation Platform, Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab"
+  "One static Go binary and one SQLite file, with PostgreSQL optional, where creating a new schema is on the Team tier",
+  "One-command import from AWX-format exports (AWX, Tower, and Automation Controller), Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab"
  ],
  "license": "https://mariadb.com/bsl11/",
  "name": "SwitchTender",
@@ -118,11 +118,11 @@
 				</article>
 				<article class="card reveal">
 					<h3>Ansible-only</h3>
-					<p>Real fleets also run Terraform, scripts, and one-off tooling. AWX runs Ansible. SwitchTender runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go through one engine, one UI, and one audit trail, each with a dry-run mode.</p>
+					<p>Real fleets also run Terraform, scripts, and one-off tooling. AWX runs Ansible. SwitchTender runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go through one engine, one UI, and one audit trail. Every tool has a dry run: Ansible check mode and a Terraform or OpenTofu plan preview the change, and a Bash, PowerShell, Python, or Go dry run checks the script without running it.</p>
 				</article>
 				<article class="card reveal">
-					<h3>Scrollback runs</h3>
-					<p>AWX shows a text stream. SwitchTender paints every run as a live host-by-task matrix, one cell per host and task, with the failed host highlighted and per-task drill-down. You read a run like a dashboard, not a log.</p>
+					<h3>A summary, not a matrix</h3>
+					<p>AWX shows a host status bar with per-event drill-down, a summary of the run. SwitchTender paints every run as a live host-by-task matrix, one cell per host and task, with the failed host highlighted and per-task drill-down. You read a run like a dashboard, not a log.</p>
 				</article>
 			</div>
 		</section>
@@ -146,8 +146,8 @@
 					<p>The 24.6.1 images carry two years of unpatched CVEs, including <a href="https://access.redhat.com/security/cve/CVE-2026-12564">CVE-2026-12564</a>, a CVSS 9.6 credential-plugin flaw whose fix ships in Ansible Automation Platform and in no AWX release. Teams report those images <a href="https://forum.ansible.com/t/any-news-on-awx-development/45639">failing security audits</a> with nothing patched to move to.</p>
 				</article>
 				<article class="card reveal">
-					<h3>SSO is leaving the free tier</h3>
-					<p>On AWX's development branch, LDAP, SAML, and OIDC are <a href="https://forum.ansible.com/t/transitioning-authentication-and-authorization-rbac-to-the-new-awx-architecture/8602">removed from core</a> into a shared library built for the paid platform's gateway. SwitchTender ships all three in the same binary you already downloaded, unlocked by Pro at $500 a year, flat per organization.</p>
+					<h3>Sign-in is moving out of core</h3>
+					<p>On AWX's development branch, external authentication has <a href="https://forum.ansible.com/t/transitioning-authentication-and-authorization-rbac-to-the-new-awx-architecture/8602">moved out of core</a> into a shared library. No released AWX has dropped LDAP, SAML, or OIDC. SwitchTender ships all three in the same binary you already downloaded, unlocked by Pro at $500 a year, flat per organization.</p>
 				</article>
 				<article class="card reveal">
 					<h3>In Red Hat's words</h3>
@@ -171,7 +171,7 @@
 						<tr><th>Capability</th><th class="us">SwitchTender</th><th>AWX</th></tr>
 					</thead>
 					<tbody>
-						<tr><td>Deploy</td><td class="us">One binary, SQLite or Postgres</td><td><span class="muted">Kubernetes + operator + Postgres + Redis</span></td></tr>
+						<tr><td>Deploy</td><td class="us">One binary, SQLite or Postgres <span class="muted">creating a new Postgres schema is Team, opening an existing one is never gated</span></td><td><span class="muted">Kubernetes + operator + Postgres + Redis</span></td></tr>
 						<tr><td>Release cadence</td><td class="us">Actively released</td><td><span class="muted">Frozen since July 2024</span></td></tr>
 						<tr><td>Live host-by-task matrix</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Tools</td><td class="us">Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</td><td><span class="muted">Ansible only</span></td></tr>
@@ -180,18 +180,18 @@
 						<tr><td>Provisioning callbacks</td><td class="us"><i class="y"></i> <span class="muted">also at the AWX address</span></td><td><i class="y"></i></td></tr>
 						<tr><td>Drag-and-drop workflow editor</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
 						<tr><td>RBAC, teams, per-object grants</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
-						<tr><td>LDAP, SAML, OIDC sign-in</td><td class="us"><i class="y"></i> <span class="muted">Pro, $500/yr</span></td><td><span class="muted">Today, yes. Removed on the development branch</span></td></tr>
-						<tr><td>Execution environments</td><td class="us">All seven tools, Docker or Podman</td><td><span class="muted">Ansible only, Podman</span></td></tr>
+						<tr><td>LDAP, SAML, OIDC sign-in</td><td class="us"><i class="y"></i> <span class="muted">Pro, $500/yr</span></td><td><span class="muted">Yes. Moved out of core on the development branch</span></td></tr>
+						<tr><td>Execution environments</td><td class="us">All seven tools, Docker or Podman</td><td><span class="muted">Ansible only, run as pods on Kubernetes</span></td></tr>
 						<tr><td>Instance groups</td><td class="us"><i class="y"></i> <span class="muted">worker queues, Team</span></td><td><i class="y"></i></td></tr>
 						<tr><td>High availability</td><td class="us">Active-active on Postgres <span class="muted">creating the schema is Team, opening an existing one is never gated</span></td><td><span class="muted">Via Kubernetes</span></td></tr>
 						<tr><td>Duration-balanced job splitting</td><td class="us"><i class="y"></i></td><td><span class="muted">Round-robin slicing</span></td></tr>
-						<tr><td>Fleet memory: flaky hosts, trends</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Flaky-host detection and duration trends</td><td class="us"><i class="y"></i></td><td><span class="muted">Per-host job summaries, neither of these</span></td></tr>
 						<tr><td>Tamper-evident, signed audit</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Drift detection and reconcile, Ansible and Terraform</td><td class="us"><i class="y"></i> <span class="muted">detection free, one-click reconcile Team</span></td><td><i class="n"></i></td></tr>
-						<tr><td>Notification channels</td><td class="us">Eleven, each with per-template targets</td><td><span class="muted">About ten, per job template</span></td></tr>
+						<tr><td>Drift detection and reconcile, Ansible and Terraform</td><td class="us"><i class="y"></i> <span class="muted">detection free, one-click reconcile Team</span></td><td><span class="muted">Check-mode jobs, no drift report or reconcile</span></td></tr>
+						<tr><td>Notification channels</td><td class="us">Eleven, each with per-template targets</td><td><span class="muted">A similar set, attached to organizations, projects, inventory sources, and templates</span></td></tr>
 						<tr><td>Advisory AI triage and fleet answers</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Drop-in Go plugins: tools, secrets, AI, notifiers</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Import from the other side</td><td class="us">One command</td><td><i class="n"></i></td></tr>
+						<tr><td>Import from other tools</td><td class="us">One command</td><td><span class="muted">AWX format only, through awxkit</span></td></tr>
 					</tbody>
 				</table>
 			</div>
@@ -201,21 +201,21 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>Where AWX is still ahead</h2>
-				<p>AWX has years in production at large organizations, a deep ecosystem of credential types and inventory plugins, and a large community. Every claim on this page is backed by a test you can run. The ecosystem gap is real, but any team can add a tool, a secret engine, an AI provider, or a channel as a drop-in Go plugin binary, no fork and no rebuild of the server.</p>
+				<p>AWX has years in production at large organizations, a deep ecosystem of credential types and inventory plugins, and a large community. The ecosystem gap is real, but any team can add a tool, a secret engine, an AI provider, or a channel as a drop-in Go plugin binary, no fork and no rebuild of the server.</p>
 			</div>
 		</section>
 
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>The other options</h2>
-				<p><a href="/ascender-alternative">Ascender</a> is a support-backed fork of the same frozen codebase, with the same Kubernetes-shaped footprint. Oracle Linux Automation Manager repackages AWX 24.6.1 for Oracle Linux hosts. Semaphore is light, but a run is a text log, RBAC sits in its paid tier, and there are no workflows. The <a href="/semaphore-alternative">full comparison is here</a>. Moving to CI pipelines works until you need RBAC, schedules, approvals, and an audit trail, at which point you have rebuilt a worse control plane. SwitchTender keeps AWX's capabilities without its architecture.</p>
+				<p><a href="/ascender-alternative">Ascender</a> is a support-backed fork of the same frozen codebase, with the same Kubernetes-shaped footprint. Oracle Linux Automation Manager repackages AWX 24.6.1 for Oracle Linux hosts. Semaphore is light, but a run is a text log, custom roles sit in its paid tier, and its workflows are limited to task chaining. The <a href="/semaphore-alternative">full comparison is here</a>. Moving to CI pipelines works until you need RBAC, schedules, approvals, and an audit trail, at which point you have rebuilt a worse control plane. SwitchTender keeps AWX's capabilities without its architecture.</p>
 			</div>
 		</section>
 
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>Move in one command</h2>
-				<p>Export from AWX, import into SwitchTender. Projects, inventories (smart and constructed included), templates, workflows with their approval steps, surveys, schedules, notification templates, and the organizations those belong to come across, with a dry run first so you see the plan before anything is written. Password survey fields arrive as secret fields. Credential secrets never come across, because AWX will not export a vault password, SSH key, or cloud secret in the clear, and neither do the defaults of password fields. Teams, organization memberships, and projects on anything but git are named in the plan as not imported, so you re-enter what is needed once against the imported credential shells. The import lists exactly which ones need it. A template that took provisioning callbacks answers at its old AWX callback address too, once the import knows its AWX id, so the boot scripts and cloud-init data that carry it keep working once the AWX hostname points here. Smart inventories keep AWX's <code>host_filter</code> syntax, and a static inventory is read inside the binary exactly as Ansible reads it, checked against every ansible-core minor from 2.16 to 2.21.</p>
+				<p>Export from AWX, import into SwitchTender. Projects, inventories (smart and constructed included), templates, workflows with their approval steps, surveys, schedules, notification templates, and the organizations those belong to come across, with a dry run first so you see the plan before anything is written. A workflow the importer cannot carry over as it stands is named in the plan and left out: one with a node that runs another workflow or a sync, a path taken on failure, nodes from more than one project, or an always path and a success path on the same node. Password survey fields arrive as secret fields. Credential secrets never come across, because AWX will not export a vault password, SSH key, or cloud secret in the clear, and neither do the defaults of password fields. Teams, organization memberships, and projects on anything but git are named in the plan as not imported, so you re-enter what is needed once against the imported credential shells. The import lists exactly which ones need it. A template that took provisioning callbacks answers at its old AWX callback address too, once the import knows its AWX id, so the boot scripts and cloud-init data that carry it keep working once the AWX hostname points here. Smart inventories keep AWX's <code>host_filter</code> syntax, and a static inventory is read inside the binary exactly as Ansible reads it, checked against every ansible-core minor from 2.16 to 2.21.</p>
 			</div>
 			<div class="gs-steps">
 				<ol>
@@ -247,7 +247,7 @@
 			<div class="cards cards-3">
 				<article class="card reveal">
 					<h3>Does it need an agent on each host?</h3>
-					<p>No. It reaches the machines it manages over SSH, the same way Ansible does, and installs nothing on them. There is no per-host daemon to deploy, patch, or account for. You run the one server binary. Worker processes for extra throughput are a Team feature, and they are pool members rather than agents belonging to a host.</p>
+					<p>No. It reaches the machines it manages over SSH, the same way Ansible does, and installs no agent on them. There is no per-host daemon to deploy, patch, or account for. You run the one server binary. Worker processes for extra throughput are a Team feature, and they are pool members rather than agents belonging to a host.</p>
 				</article>
 				<article class="card reveal">
 					<h3>Can it read secrets from AWS Secrets Manager, Azure Key Vault, or Vault?</h3>
@@ -255,7 +255,7 @@
 				</article>
 				<article class="card reveal">
 					<h3>Can I run a Terraform plan, hold it for approval, then run Ansible?</h3>
-					<p>Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency graph with parallel branches, built on a drag-and-drop canvas. The approval is not a convention somebody can skip: a policy decides which runs are held, the core enforces the hold, and the approval binds to the exact plan reviewed, so a run cannot be approved as one thing and executed as another.</p>
+					<p>Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency graph with parallel branches, built on a drag-and-drop canvas. A policy decides which runs are held, an agent&#39;s run is held unless a written policy exempts it, the core enforces the hold, and the approval binds to the exact plan reviewed, so a run cannot be approved as one thing and executed as another. By default an admin may approve a run they launched. Requiring a different person is a Team rule.</p>
 				</article>
 			</div>
 			<script type="application/ld+json">
@@ -268,7 +268,7 @@
    "name": "Does it need an agent on each host?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "No. It reaches the machines it manages over SSH, the same way Ansible does, and installs nothing on them. There is no per-host daemon to deploy, patch, or account for. You run the one server binary. Worker processes for extra throughput are a Team feature, and they are pool members rather than agents belonging to a host."
+    "text": "No. It reaches the machines it manages over SSH, the same way Ansible does, and installs no agent on them. There is no per-host daemon to deploy, patch, or account for. You run the one server binary. Worker processes for extra throughput are a Team feature, and they are pool members rather than agents belonging to a host."
    }
   },
   {
@@ -284,7 +284,7 @@
    "name": "Can I run a Terraform plan, hold it for approval, then run Ansible?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency graph with parallel branches, built on a drag-and-drop canvas. The approval is not a convention somebody can skip: a policy decides which runs are held, the core enforces the hold, and the approval binds to the exact plan reviewed, so a run cannot be approved as one thing and executed as another."
+    "text": "Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency graph with parallel branches, built on a drag-and-drop canvas. A policy decides which runs are held, an agent's run is held unless a written policy exempts it, the core enforces the hold, and the approval binds to the exact plan reviewed, so a run cannot be approved as one thing and executed as another. By default an admin may approve a run they launched. Requiring a different person is a Team rule."
    }
   }
  ]

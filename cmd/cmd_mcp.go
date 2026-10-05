@@ -53,11 +53,11 @@ what happened, including the run's evidence dossier. It cannot do anything else.
 Every tool call is an ordinary authenticated API request carrying the token given here, so it passes
 the same authorization, the same approval policy, and the same fail-closed audit append as a request
 from a person. A proposed run is written into the tamper-evident chain, under the agent's own account,
-before it executes. Where an approval policy covers the run, it is held until a person releases it.
+before it executes, and it waits until a person releases it unless a written policy exempts it.
 
 There is deliberately no approve tool, so an agent cannot release its own work however it is prompted,
 and no credential, account, token, grant, or policy tool, so it cannot widen its own reach. Give the
-agent an operator-bound token, minted with "switchtender token new --user", and it holds exactly one
+agent an operator-bound token, minted with "switchtender token new --user --agent", and it holds one
 credential whose only door is this gate.
 
 The token's authority is probed before anything is served, and the command refuses to start on an
@@ -143,8 +143,8 @@ func refuseAdminAuthority(err error, allow bool, warn io.Writer) error {
 	}
 	if !allow {
 		return errors.New("refusing to serve an agent on an admin token: mint an operator-bound " +
-			"token with \"switchtender token new --user <account>\", or pass --allow-admin-token " +
-			"for a local trial")
+			"token with \"switchtender token new --user <account> --agent\", or pass " +
+			"--allow-admin-token for a local trial")
 	}
 	fmt.Fprintln(warn, "mcp: warning: serving an agent on an admin token, which can approve "+
 		"its own runs; use an operator-bound token instead")

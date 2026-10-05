@@ -27,18 +27,18 @@
  "applicationCategory": "DeveloperApplication",
  "description": "The control plane for infrastructure automation. Every change it runs, whether from a person, a schedule, or an AI agent, passes one governed path of request, policy, and approval, and leaves a cryptographically signed receipt that can be verified offline without the vendor. It does not claim every change to your infrastructure went through it: anyone holding their own SSH key can change a host behind it. Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go from a single self-hosted Go binary, agentless over SSH.",
  "featureList": [
-  "Agentless: reaches managed hosts over SSH with nothing installed on them",
+  "Agentless: reaches managed hosts over SSH with no SwitchTender agent installed on them",
   "Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go",
   "Reads secrets from HashiCorp Vault (KV v1 and v2, and dynamic secrets minted per run and revoked when it ends), AWS Secrets Manager, Azure Key Vault, Google Secret Manager, CyberArk (Conjur and CCP), and 1Password",
   "Per-object access grants: read, use, or manage on one project, template, inventory, or credential, layered over global roles",
-  "Single sign-on through OIDC, SAML, LDAP, and JWT",
+  "Single sign-on through OIDC, SAML, LDAP, and JWT, on the Pro tier",
   "Pipelines with a dependency graph and parallel branches, built in a drag-and-drop editor",
   "Approval gates enforced by policy before a run executes",
   "Tamper-evident hash-chained audit trail a third party can verify offline",
   "Live host-by-task matrix and per-host history across runs",
   "Drift detection from a dry run",
-  "One static Go binary and one SQLite file, with PostgreSQL optional",
-  "One-command import from AWX, Ansible Automation Platform, Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab"
+  "One static Go binary and one SQLite file, with PostgreSQL optional, where creating a new schema is on the Team tier",
+  "One-command import from AWX-format exports (AWX, Tower, and Automation Controller), Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab"
  ],
  "license": "https://mariadb.com/bsl11/",
  "name": "SwitchTender",

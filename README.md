@@ -57,7 +57,8 @@ No Kubernetes operator, no Postgres, no Redis, no message bus. One process, one 
 
 Automation controllers ask for a cluster before they run a playbook. A Kubernetes operator,
 Postgres, Redis, and a mesh to reach your hosts, all standing before the first task does. Then a run
-finishes and hands you a text log to scroll, and when it ends the tool forgets everything it saw.
+finishes and hands you a text log to scroll, and across runs nothing flags a flaky host or trends a
+task's duration.
 
 SwitchTender runs those same playbooks from one binary and treats every run as structured data you
 can read, split, and remember. One process, one database, and a live host-by-task matrix instead
@@ -68,20 +69,20 @@ of scrollback.
 | Deploy                               | One binary and one SQLite file, running in seconds.                               | A Kubernetes operator, Postgres, Redis, and Receptor first. | One binary.              |
 | Every&nbsp;run                       | A live host-by-task matrix you read like a dashboard, with per-task drill-down.   | A host status bar over a streamed log, with per-event host drill-down. | A status and a streamed log. |
 | Big&nbsp;jobs                        | Sharded across hosts, balanced by their measured duration, only failed shards retried. | Sliced round-robin, with no balancing.     | No splitting at all.     |
-| Memory&nbsp;across&nbsp;runs         | Flaky hosts flagged, durations trended, every host's history kept.               | Forgotten the moment a run ends.                | Forgotten the moment a run ends. |
-| Pipelines                            | A dependency graph with a drag-and-drop editor, passing typed outputs from one step to the next. | A visual workflow builder.       | Basic chaining.          |
+| Memory&nbsp;across&nbsp;runs         | Flaky hosts flagged, durations trended, every host's history kept.               | Job history and per-host summaries, no flaky-host flag or trend. | Each task's log, no host tracked across runs. |
+| Pipelines                            | A dependency graph with a drag-and-drop editor, passing Ansible `set_stats` outputs from one step to the next. | A visual workflow builder.       | Basic chaining.          |
 | Leaving&nbsp;your&nbsp;old&nbsp;tool | One command imports AWX, Semaphore, Chef, Puppet, Rundeck, Jenkins, or a crontab. AWX and Semaphore bring projects, inventories, credential shells, templates, surveys, and schedules; Rundeck and Jenkins bring templates, surveys, and schedules, against an inventory you name, and a Rundeck project archive brings one project as well when its source control configuration names a repository this can reach; a crontab brings schedules; Chef and Puppet are desired-state systems rather than control planes, so they bring the fleet as an inventory, grouped by environment and, for Chef, by run-list role. [What each source brings over](docs/migration.md#what-each-source-brings-over). | Not applicable.                     | Not applicable.          |
 
 The full head-to-head, including where SwitchTender is behind, is in the
 [comparison](docs/comparison.md).
 
-Checked against vendor documentation on 2026-08-10, for AWX 24.6.1 and Semaphore 2.19.7; release
+Checked against vendor documentation on 2026-08-10, for AWX 24.6.1 and Semaphore 2.19.7. Release
 state re-verified 2026-09-07 (AWX still 24.6.1, Semaphore at 2.19.12). These
 products ship, and a table like this decays. If a row is out of date, open an issue and it gets
 corrected.
 
 SwitchTender sits above or alongside whatever already runs your changes. It does not ask you to rip
-out Terraform, Jenkins, or GitHub Actions; it governs the changes that flow through it, and the
+out Terraform, Jenkins, or GitHub Actions. It governs the changes that flow through it, and the
 one-command AWX import is the on-ramp.
 
 ## The path every change walks
@@ -109,26 +110,26 @@ released, so an approval binds to content, not to a run id whose meaning could d
 recomputes that digest before running and refuses a spec that changed after the decision.
 
 **4. Execution.** Local workers, shared-database workers, or relay workers across a network
-boundary, with container execution for every tool. The same policies gate execution wherever the
+boundary, with opt-in container execution for every built-in tool. The same policies gate execution wherever the
 run is claimed, fail closed, and the outcome, exit code, per-host results, a digest of the full log,
 and the spec digest, is committed to the chain by the process that observed it finish.
 
 **5. Evidence.** `switchtender receipt <run-id>` seals the whole story, the request, the decision,
 the execution, the outcome, into one signed file. `switchtender verify` checks it with no database,
 no network, and no trust in the server that produced it: every chain link recomputes, the approver's
-decision provably binds the digest of the spec that executed, and external RFC 3161 timestamps fix
-the history in time. The same bytes verify under the open [loomseal](https://loomseal.com) verifier
+decision provably binds the digest of the spec that executed, and, when anchoring is configured,
+external RFC 3161 timestamps fix the history in time. The same bytes verify under the open [loomseal](https://loomseal.com) verifier
 and its independent Python reference implementation.
 
 The remaining three stages are load-bearing but not headline: identity resolves who is asking and
-caps what an agent may ever do, risk grades each operation from its command and blast radius so
+caps what an agent may ever do, risk grades each operation from its command and its reach so
 policy can act on it, and independent verification is what turns the evidence from a claim the
 operator makes into a statement a third party checks.
 
 Precision about the offline claim, because it is the claim that matters: verification reads one
 file and the key fingerprint you obtained out of band. Without the pinned fingerprint, verify
 proves the receipt is internally intact but not who signed it. A range receipt discloses the run's
-outcome, decisions, and redacted spec; a sparse receipt proves the same chain facts while
+outcome, decisions, and redacted spec, and a sparse receipt proves the same chain facts while
 disclosing nothing about neighboring tenants' entries. A run that dies with the process that ran it
 and never commits an outcome cannot be receipted, and the receipt command says so rather than
 producing something weaker.
@@ -142,12 +143,12 @@ guessed from traffic:
     switchtender token new --agent --user admin --name prod-remediator
 
 - **Bounded authority.** An agent token is capped below admin no matter what account it is bound
-  to. It can launch and propose work; it can never manage identity, access, or secrets, and it can
-  never approve a run, including its own. Separation of duties for machine changes holds by
-  construction, not by convention.
-- **Its own rules.** Policies can name what an agent may do, what it may never do, and what needs a
-  person first. Holding an agent's runs for a person is free: one plain require-approval rule, which
-  Community holds, already gates every run an agent submits. Scoping rules by actor, grading them by
+  to. It can launch and propose work, but it can never manage identity, access, or secrets, and it
+  can never approve a run, including its own. That holds by construction. The person the agent acts
+  for may approve its runs unless a Team rule requires a different approver.
+- **Its own rules.** An agent's run waits for a person's approval unless a written policy exempts
+  it, on every tier, and a dry run the scans prove change-free may proceed. Policies can also name
+  what an agent may never do and what needs a person first. Scoping rules by actor, grading them by
   risk, and refusing outright are the full policy engine, which Team covers:
 
       policies:
@@ -167,11 +168,12 @@ guessed from traffic:
   a person's.
 - **The same receipt.** The run an agent requested and a person approved produces the same signed,
   offline-verifiable receipt as any other change, showing the agent asked, the person approved
-  exactly this spec, and this is what happened.
+  exactly this spec, and this is what happened. A run a written policy exempted shows which rule
+  let it through instead.
 
 The MCP server (`switchtender mcp`) is how an agent talks to the gate: it can list templates,
 propose runs, and read results, and it deliberately has no approve tool, no credential access, and
-refuses to start on an admin token. The full walkthrough is in
+by default refuses to start on an admin token. The full walkthrough is in
 [Run an AI agent through the gate](docs/agents.md).
 
 ## Proven against a real cluster on every push
@@ -217,7 +219,9 @@ host, remembered across every run:
 ## Requirements
 
 - The tools your runs use, on the PATH of the server or worker: `ansible-playbook` and
-  `ansible-inventory` for Ansible, and `terraform`, `tofu`, `python3`, `pwsh`, or `go` for the rest.
+  `ansible-inventory` for Ansible, unless `switchtender ansible install` has put a pinned
+  ansible-core in the data directory ([Ansible runtime](docs/ansible-runtime.md)), and `terraform`,
+  `tofu`, `python3`, `pwsh`, or `go` for the rest.
   Bash runs use the system shell. The container image already carries Ansible, Python, Terraform,
   and OpenTofu.
 - Go 1.26 to build from source, or Docker Compose and the Helm chart to deploy.
@@ -233,7 +237,7 @@ One line with a Go toolchain installed:
     go install github.com/kordloom/switchtender@latest
 
 The module floor is Go 1.26.6, which carries standard-library security fixes this product refuses
-to build without. The default `GOTOOLCHAIN=auto` fetches it for you; a toolchain pinned with
+to build without. The default `GOTOOLCHAIN=auto` fetches it for you, and a toolchain pinned with
 `GOTOOLCHAIN=local` needs 1.26.6 or newer installed.
 
 Or grab a build for your platform from the [releases page](https://github.com/kordloom/switchtender/releases):
@@ -250,8 +254,10 @@ Then serve:
 
     switchtender serve --addr :8080 --db switchtender.db
 
-The first start on an empty database mints an admin token and prints it once, so the API is
-authenticated from the first request. Export it, then submit a run:
+Bound to a network address like this, the first start on an empty database mints an admin token
+and prints it once, or writes it to an `initial-admin-token` file when no terminal is attached, so
+the API is authenticated from the first request. On loopback with no tokens it serves open, with a
+warning. Export it, then submit a run:
 
     export ST_TOKEN=<the token serve printed>
 
@@ -270,7 +276,7 @@ Add `"shards": 4` to split it across four slices of the inventory.
 
 Open http://localhost:8080 for the web UI and sign in with the same token.
 
-Or run it as a local desktop app. On macOS open `SwitchTender.app`; otherwise one command picks a
+Or run it as a local desktop app. On macOS open `SwitchTender.app`. Elsewhere one command picks a
 stable loopback port, keeps its data in a per-user directory, and opens the UI for you:
 
     ./switchtender desktop
@@ -374,12 +380,14 @@ Business Source License 1.1. Read the source, run it, and use it in production. 
 and complete for leaving AWX: all seven engines, the importers, RBAC with organizations and teams,
 one digest-bound approval policy, the MCP agent gate, and the whole evidence engine with signed
 receipts and offline verification. Pro adds directory sign-in (OIDC, SAML, LDAP, JWT) and five
-approval policies at $500 a year. Team adds the full policy engine, Postgres and active-active
-HA, distributed workers, the change register, and one-click drift reconcile. Every paid feature
+approval policies at $500 a year. Team adds the full policy engine, creating a new PostgreSQL
+schema (opening one that exists, and running active-active HA on it, is never gated), distributed
+workers, the change register, and one-click drift reconcile. Every paid feature
 unlocks in the same binary with a signed license file: no license server, no phone-home, flat
 per org. The one
-reserved right is offering SwitchTender to others as a hosted or managed service that competes with
-the maintainer. Each version converts to Apache-2.0 two years after its release.
+reserved right is offering SwitchTender to third parties as a hosted or managed service that
+provides its primary functionality. Each version converts to Apache-2.0 two years after its
+release.
 
 See `LICENSE` for the exact terms and [`LICENSING.md`](LICENSING.md) for what self-hosting grants,
 how a commercial license works, and how to ask about support.

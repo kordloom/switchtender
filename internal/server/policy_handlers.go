@@ -116,8 +116,8 @@ func createPolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusBadRequest, "tool is not a supported execution tool")
 			return
 		}
-		// One plain require-approval policy is Community; the full engine and a second policy are
-		// Team. The check sits before the write so a refusal changes nothing.
+		// One plain require-approval policy is Community and five are Pro. The full engine and a sixth
+		// policy are Team. The check sits before the write so a refusal changes nothing.
 		advanced := usesFullPolicyEngine(req)
 		existing, lerr := store.List(r.Context())
 		if lerr != nil {

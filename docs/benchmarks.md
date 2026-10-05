@@ -3,7 +3,9 @@
 Measured numbers for the questions people actually ask: how fast it starts, how much memory it holds
 at idle, how big the binary is, and how big the container image is. Every figure on this page was
 measured on 2026-10-05 against commit `5bd9bb5` on main, except where a line carries its own date or
-names another version. Figures that vary from run to run say how many trials they came from and how
+names another version. The release this page ships with adds code on top of that commit, among it
+the managed Ansible runtime and the pull request commands, and that build has not been measured
+here. Figures that vary from run to run say how many trials they came from and how
 far apart those trials fell. Nothing here is a projection, and no measured cell is arithmetic on
 another cell. Where the page does divide or add published figures, for a ratio or a total, it says
 which figures it used.
@@ -23,11 +25,12 @@ differ. The method will not.
 | Resident memory at idle, Linux, no encryption key | 46.6 MiB | 45.7-47.3 MiB | 5 |
 | Resident memory at idle, Linux, credential encryption on | 48.7 MiB | 48.0-49.5 MiB | 5 |
 
-Boot is timed in process, from launch to a served `/healthz`, so no shell or subprocess overhead is
-counted. The harness runs a warm-up and five timed trials per path, and it was run three times. The
-median column is the middle of those three five-trial medians, and the spread column is the lowest
-and the highest single trial across all fifteen. The three medians were 48, 42 and 39 ms without
-encryption, and 87, 82 and 90 ms with it.
+Boot is timed by the harness from the moment it starts the server process to a served `/healthz`, so
+the server's own start is counted and no shell or helper such as curl is. The harness runs a warm-up
+and five timed trials per path, and it was run three times. The median column is the middle of those
+three five-trial medians, and the spread column is the lowest and the highest single trial across
+all fifteen. The three medians were 48, 42 and 39 ms without encryption, and 87, 82 and 90 ms with
+it.
 
 The laptop was not idle that day. Other build and test work shared it, so each of the three runs
 began only once the CPU was at least 80 percent idle. That work could still start partway through a
@@ -102,12 +105,13 @@ The repository carries the harness the two boot rows came from:
 
     go run ./cmd/bench
 
-It builds a release binary, runs a warm-up and five timed trials for both boot paths, and prints the
-boot rows with their medians and ranges alongside the size of the binary it just built for your
-platform. Its memory readings come from `ps` on the host, so on macOS they read high for the reason
-given above. The Linux memory rows in the table come from `/proc` inside a container instead, and
-the per-platform sizes come from the release build shown under Binary size. Run it on your own
-hardware and you should get your machine's version of the boot rows rather than ours.
+It builds a binary with the release flags apart from the version stamp, runs a warm-up and five
+timed trials for both boot paths, and prints the boot rows with their medians and ranges alongside
+the size of the binary it just built for your platform. Its memory readings come from `ps` on the
+host, so on macOS they read high for the reason given above. The Linux memory rows in the table come
+from `/proc` inside a container instead, and the per-platform sizes come from the release build
+shown under Binary size. Run it on your own hardware and you should get your machine's version of
+the boot rows rather than ours.
 
 ## Pending re-measurement
 

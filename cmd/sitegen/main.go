@@ -382,22 +382,23 @@ func faqSchema(src []byte) template.HTML {
 // Every line here must be true and checkable in the docs. This is the one place they are written,
 // so the landing pages and the docs cannot drift into saying different things.
 var switchtenderFeatures = []string{
-	"Agentless: reaches managed hosts over SSH with nothing installed on them",
+	"Agentless: reaches managed hosts over SSH with no SwitchTender agent installed on them",
 	"Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go",
 	"Reads secrets from HashiCorp Vault (KV v1 and v2, and dynamic secrets minted per run and " +
 		"revoked when it ends), AWS Secrets Manager, Azure Key Vault, Google Secret Manager, " +
 		"CyberArk (Conjur and CCP), and 1Password",
 	"Per-object access grants: read, use, or manage on one project, template, inventory, or " +
 		"credential, layered over global roles",
-	"Single sign-on through OIDC, SAML, LDAP, and JWT",
+	"Single sign-on through OIDC, SAML, LDAP, and JWT, on the Pro tier",
 	"Pipelines with a dependency graph and parallel branches, built in a drag-and-drop editor",
 	"Approval gates enforced by policy before a run executes",
 	"Tamper-evident hash-chained audit trail a third party can verify offline",
 	"Live host-by-task matrix and per-host history across runs",
 	"Drift detection from a dry run",
-	"One static Go binary and one SQLite file, with PostgreSQL optional",
-	"One-command import from AWX, Ansible Automation Platform, Semaphore UI, Chef, Puppet, " +
-		"Rundeck, Jenkins, and crontab",
+	"One static Go binary and one SQLite file, with PostgreSQL optional, where creating a new " +
+		"schema is on the Team tier",
+	"One-command import from AWX-format exports (AWX, Tower, and Automation Controller), " +
+		"Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab",
 }
 
 // entitySlugs are the docs pages that carry the full application entity rather than only an article
@@ -458,7 +459,7 @@ type landingQA struct {
 var landingFAQ = []landingQA{{
 	Question: "Does it need an agent on each host?",
 	Answer: "No. It reaches the machines it manages over SSH, the same way Ansible does, and " +
-		"installs nothing on them. There is no per-host daemon to deploy, patch, or account for. " +
+		"installs no agent on them. There is no per-host daemon to deploy, patch, or account for. " +
 		"You run the one server binary. Worker processes for extra throughput are a Team feature, " +
 		"and they are pool members rather than agents belonging to a host.",
 }, {
@@ -471,10 +472,11 @@ var landingFAQ = []landingQA{{
 }, {
 	Question: "Can I run a Terraform plan, hold it for approval, then run Ansible?",
 	Answer: "Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency " +
-		"graph with parallel branches, built on a drag-and-drop canvas. The approval is not a " +
-		"convention somebody can skip: a policy decides which runs are held, the core enforces " +
-		"the hold, and the approval binds to the exact plan reviewed, so a run cannot be approved " +
-		"as one thing and executed as another.",
+		"graph with parallel branches, built on a drag-and-drop canvas. A policy decides which " +
+		"runs are held, an agent's run is held unless a written policy exempts it, the core " +
+		"enforces the hold, and the approval binds to the exact plan reviewed, so a run cannot be " +
+		"approved as one thing and executed as another. By default an admin may approve a run " +
+		"they launched. Requiring a different person is a Team rule.",
 }}
 
 // landingExtraFAQ holds page-specific questions appended after the shared ones, keyed by the
@@ -488,8 +490,10 @@ var landingExtraFAQ = map[string][]landingQA{
 			"receipt signed by the same product whose runs it describes is still that system's " +
 			"word about itself, and at this tier ours is no different. The property neither of us " +
 			"can self-provide is an outside party watching the chain and countersigning what it " +
-			"saw, which is what our Enterprise tier is. Until then, judge us on the seven engines " +
-			"and on whether the receipt verifies with a tool we do not control.",
+			"saw, which is what our Enterprise tier includes and what the hosted witness add-on " +
+			"brings to Team. Until then, judge us on the seven engines and on whether the receipt " +
+			"verifies with an open-source verifier, published separately, that you can read and " +
+			"run yourself.",
 	}},
 }
 

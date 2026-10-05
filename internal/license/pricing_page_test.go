@@ -47,7 +47,7 @@ func TestTheGateMapIsWhatThePricingPageSells(t *testing.T) {
 	}, { // Test 3: FeatureRegister.
 		Tier: "Team", WantPhrase: "<b>The period change register</b>",
 	}, { // Test 4: FeaturePostgresInit.
-		Tier: "Team", WantPhrase: "<b>PostgreSQL</b> and active-active <b>HA</b>",
+		Tier: "Team", WantPhrase: "<b>Creating a new PostgreSQL schema</b>",
 	}, { // Test 5: FeatureWorkers.
 		Tier: "Team", WantPhrase: "<b>Distributed workers</b>",
 	}, { // Test 6: FeatureReconcile.

@@ -42,7 +42,7 @@ What that does not mean is that a credential attached to a run is hidden from th
 you asked to execute with that credential in scope, so it can print the value in a form the log
 masker does not recognize, exactly as it can in Jenkins, GitHub Actions, or any other runner. The
 masker removes a secret that appears verbatim, which stops the ordinary accident of echoing a
-variable; it is not a boundary against a script written to defeat it. Scope the operator token to
+variable. It is not a boundary against a script written to defeat it. Scope the operator token to
 the credentials it genuinely needs, and treat the ability to attach a credential to a run as
 equivalent to holding it.
 
@@ -104,8 +104,11 @@ review, fails the build when a new path appears without a test proving an agent 
    authentication is on before the agent holds any credential. Make sure a human admin account
    exists too, so the agent's held runs have somebody who can approve them.
 
-3. Decide what a human must approve. An approval policy with no criteria matches every run, so one
-   empty policy is a gate-everything switch:
+3. Decide what else a human must approve. An agent's run already waits for a person's approval
+   unless a written policy exempts it, and a dry run the scans prove change-free may proceed, so the
+   agent is gated before any policy exists. [Approval policies](policy.md) says how an exemption is
+   written. Policies gate people's runs too. An approval policy with no criteria matches every run,
+   so one empty policy is a gate-everything switch:
 
        policies:
          - name: hold-everything
@@ -136,7 +139,7 @@ review, fails the build when a new path appears without a test proving an agent 
    `actor_kind: agent` scopes a rule to runs an agent submitted, identified by its minted token,
    never guessed from traffic. `actor: prod-remediator` pins a rule to one named principal.
    `min_risk` matches on the run's assessed risk grade, so "destructive operations need a person"
-   is one line. `effect: deny` refuses the submission outright; the refused request is still on the
+   is one line. `effect: deny` refuses the submission outright, and the refused request is still on the
    chain, because the gate records every mutation before anything acts on it.
    `require_distinct_approver: true` refuses a decision made by whoever asked for the change, which
    matters for admins, since an agent or operator can never approve anything. The requirement is
@@ -145,10 +148,10 @@ review, fails the build when a new path appears without a test proving an agent 
    Every criterion in that file is the full policy engine, which a Team license covers: actor
    scoping, risk floors, deny rules, and distinct-approver separation of duties. A server started
    with a policy file it is not licensed for refuses at startup and says so, rather than running with
-   the rules quietly dropped. The gate itself is free: a Community install holds one plain
-   require-approval policy, and one empty rule already holds every run an agent submits for a person,
-   which is the whole containment story on this page. What Team buys is scoping that hold, so agents
-   are held while people are not, and so a rule can refuse outright rather than wait.
+   the rules quietly dropped. The gate itself is free: an agent's run waits for a person unless a
+   written policy exempts it, on every tier, which is the whole containment story on this page. A
+   Community install also holds one plain require-approval policy for everyone's runs. What Team
+   buys is scoping rules by actor and risk, and refusing outright rather than waiting.
 
 4. Pin the policies by starting the server with `serve --policy-file policies.yml`. The file is the
    source of truth and the API refuses policy writes, so even an admin API caller cannot rewrite
@@ -170,8 +173,8 @@ its log, pull a run's evidence dossier, list recent runs, and list the workflow 
 waiting for a person. Every tool call is an ordinary
 authenticated API request under that same token, so it passes the same authorization, the same
 approval policy, and the same fail-closed audit append as a call from a person. A proposed run lands
-in the chain under the agent's account before it executes, and a policy-covered run waits for a human
-to release it.
+in the chain under the agent's account before it executes, and it waits for a human to release it
+unless a written policy exempts it.
 
 The tool set is narrow on purpose. There is no approve tool, so an agent cannot release its own work
 however it is prompted, and no credential, account, token, grant, or policy tool, so it cannot widen
@@ -184,7 +187,7 @@ holds on the server, so it applies the same whether the agent connects over MCP 
 directly:
 
 - An agent cannot supply extra vars. Extra vars sit at Ansible's highest precedence, above everything
-  the template and the inventory set, so an agent that could send them could rewrite what a vetted
+  the template and the inventory set, so an agent allowed to send them would rewrite what a vetted
   template does while the audit trail recorded the template's name. Survey answers are the supported
   channel: the operator declares which fields a caller may fill, and the template says so. That
   includes a secret field, so an agent can supply a password a template asks for. The answer is
@@ -262,7 +265,7 @@ along with the actor. `actor:agent-bot` in run search pulls everything the agent
 An approval is a chain entry of its own. When a person releases a held run, the chain gains a
 DECISION entry naming the approver and committing a digest of the exact spec released, and the
 executor refuses a spec that changed after the decision. So the record does not say "someone
-approved run 123"; it says this person approved exactly this change, and exactly this change ran.
+approved run 123". It says this person approved exactly this change, and exactly this change ran.
 The entry names the approver exactly as the request that carried the decision is recorded: the
 token's label, how it authenticated, and the account it is bound to.
 
@@ -310,7 +313,7 @@ so for that agent the record is not just intact, it is the whole story.
 **Is this the built-in advisory AI?** No. The [advisory AI](ai.md) is the other direction: a model
 that proposes text and never executes, with anything runnable born held for a human. This page is
 about an external agent, yours, that operates SwitchTender through the API the way a person would.
-The advisory AI is a feature you switch on; an agent is a client you let in.
+The advisory AI is a feature you switch on. An agent is a client you let in.
 
 **Can the agent approve its own runs?** No. Approving a held run is admin-only, the agent's token is
 operator-bound, and the dispatcher refuses an agent's approval even if one reached the route. A held

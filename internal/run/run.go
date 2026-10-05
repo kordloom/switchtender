@@ -312,10 +312,11 @@ type Run struct {
 	// before this was recorded.
 	PolicySet *PolicySet `json:"policy_set,omitempty"`
 	// PinnedCommit is the commit this run is only allowed to execute. It is set when a run stands in
-	// for work already judged at a known revision, which today means the apply a plan gate proposes:
-	// the approver read that plan, so releasing an apply of different code would be a substitution
-	// nothing in the record shows. The executor compares it against what the project sync produced and
-	// refuses a mismatch. Empty on an ordinary run, which runs whatever the branch holds.
+	// for work already judged at a known revision: the apply a plan gate proposes, whose plan the
+	// approver read, and any git-backed run held for approval, pinned when it is held. Releasing
+	// different code would be a substitution nothing in the record shows. The executor compares it
+	// against what the project sync produced and refuses a mismatch. Empty on a run never held, which
+	// runs whatever the branch holds.
 	PinnedCommit string `json:"pinned_commit,omitempty"`
 	// GitRef is the git reference the project sync fetches this run's commit from instead of the
 	// project's branch, such as refs/pull/12/head for a GitHub pull request or

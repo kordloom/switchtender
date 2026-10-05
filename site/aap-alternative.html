@@ -27,18 +27,18 @@
  "applicationCategory": "DeveloperApplication",
  "description": "The control plane for infrastructure automation. Every change it runs, whether from a person, a schedule, or an AI agent, passes one governed path of request, policy, and approval, and leaves a cryptographically signed receipt that can be verified offline without the vendor. It does not claim every change to your infrastructure went through it: anyone holding their own SSH key can change a host behind it. Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go from a single self-hosted Go binary, agentless over SSH.",
  "featureList": [
-  "Agentless: reaches managed hosts over SSH with nothing installed on them",
+  "Agentless: reaches managed hosts over SSH with no SwitchTender agent installed on them",
   "Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go",
   "Reads secrets from HashiCorp Vault (KV v1 and v2, and dynamic secrets minted per run and revoked when it ends), AWS Secrets Manager, Azure Key Vault, Google Secret Manager, CyberArk (Conjur and CCP), and 1Password",
   "Per-object access grants: read, use, or manage on one project, template, inventory, or credential, layered over global roles",
-  "Single sign-on through OIDC, SAML, LDAP, and JWT",
+  "Single sign-on through OIDC, SAML, LDAP, and JWT, on the Pro tier",
   "Pipelines with a dependency graph and parallel branches, built in a drag-and-drop editor",
   "Approval gates enforced by policy before a run executes",
   "Tamper-evident hash-chained audit trail a third party can verify offline",
   "Live host-by-task matrix and per-host history across runs",
   "Drift detection from a dry run",
-  "One static Go binary and one SQLite file, with PostgreSQL optional",
-  "One-command import from AWX, Ansible Automation Platform, Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab"
+  "One static Go binary and one SQLite file, with PostgreSQL optional, where creating a new schema is on the Team tier",
+  "One-command import from AWX-format exports (AWX, Tower, and Automation Controller), Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab"
  ],
  "license": "https://mariadb.com/bsl11/",
  "name": "SwitchTender",
@@ -115,7 +115,7 @@
 			<div class="cards cards-3">
 				<article class="card reveal">
 					<h3>The per-node bill</h3>
-					<p>AAP is a subscription that meters by managed node, so the cost climbs with the fleet you automate. SwitchTender is source-available under BSL 1.1 and self-hosts free, with no per-node meter and no seat count to reconcile at renewal.</p>
+					<p>AAP is a subscription that meters by managed node, so the cost climbs with the fleet you automate. SwitchTender is source-available under BSL 1.1 and self-hosts free. Paid tiers are priced by a fleet band you report at renewal, and nothing in the binary counts nodes or seats.</p>
 				</article>
 				<article class="card reveal">
 					<h3>The platform to stand up</h3>
@@ -123,7 +123,7 @@
 				</article>
 				<article class="card reveal">
 					<h3>Ansible only</h3>
-					<p>AAP automates Ansible. Real fleets also run Terraform, scripts, and one-off tooling. SwitchTender runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go through one engine, one UI, and one audit trail, each with a dry-run mode.</p>
+					<p>AAP automates Ansible. Real fleets also run Terraform, scripts, and one-off tooling. SwitchTender runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go through one engine, one UI, and one audit trail. Every tool has a dry run: Ansible check mode and a Terraform or OpenTofu plan preview the change, and a Bash, PowerShell, Python, or Go dry run checks the script without running it.</p>
 				</article>
 			</div>
 		</section>
@@ -146,9 +146,9 @@
 						<tr><th>Capability</th><th class="us">SwitchTender</th><th>Ansible Automation Platform</th></tr>
 					</thead>
 					<tbody>
-						<tr><td>Deploy</td><td class="us">One binary, SQLite or Postgres</td><td><span class="muted">OpenShift or RHEL + Postgres</span></td></tr>
+						<tr><td>Deploy</td><td class="us">One binary, SQLite or Postgres <span class="muted">creating a new Postgres schema is Team, opening an existing one is never gated</span></td><td><span class="muted">OpenShift or RHEL + Postgres</span></td></tr>
 						<tr><td>Model</td><td class="us">Source-available, self-host free</td><td><span class="muted">Per managed-node subscription</span></td></tr>
-						<tr><td>Commercial support and SLA</td><td class="us"><span class="muted">Community and SDK</span></td><td><i class="y"></i></td></tr>
+						<tr><td>Commercial support and SLA</td><td class="us"><span class="muted">Email support from Pro, SLA at Enterprise</span></td><td><i class="y"></i></td></tr>
 						<tr><td>Tools</td><td class="us">Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</td><td><span class="muted">Ansible only</span></td></tr>
 						<tr><td>Live host-by-task matrix</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Job templates, surveys, schedules, workflows</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
@@ -160,12 +160,12 @@
 						<tr><td>Event-Driven Ansible</td><td class="us"><i class="n"></i></td><td><i class="y"></i></td></tr>
 						<tr><td>High availability</td><td class="us">Active-active on Postgres <span class="muted">creating the schema is Team, opening an existing one is never gated</span></td><td><span class="muted">Via the platform</span></td></tr>
 						<tr><td>Duration-balanced job splitting</td><td class="us"><i class="y"></i></td><td><span class="muted">Round-robin slicing</span></td></tr>
-						<tr><td>Fleet memory: flaky hosts, trends</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Flaky-host detection and duration trends</td><td class="us"><i class="y"></i></td><td><span class="muted">Fleet reporting in Automation Analytics</span></td></tr>
 						<tr><td>Tamper-evident, signed audit</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Drift detection and reconcile, Ansible and Terraform</td><td class="us"><i class="y"></i> <span class="muted">detection free, one-click reconcile Team</span></td><td><i class="n"></i></td></tr>
-						<tr><td>Advisory AI triage and fleet answers</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Drift detection and reconcile, Ansible and Terraform</td><td class="us"><i class="y"></i> <span class="muted">detection free, one-click reconcile Team</span></td><td><span class="muted">Check-mode jobs, no drift report or reconcile</span></td></tr>
+						<tr><td>Advisory AI triage and fleet answers</td><td class="us"><i class="y"></i></td><td><span class="muted">Lightspeed helps write content, not triage runs</span></td></tr>
 						<tr><td>Drop-in Go plugins: tools, secrets, AI, notifiers</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Import from the other side</td><td class="us">One command</td><td><i class="n"></i></td></tr>
+						<tr><td>Import from other tools</td><td class="us">One command</td><td><span class="muted">AWX format only, through awxkit</span></td></tr>
 					</tbody>
 				</table>
 			</div>
@@ -175,14 +175,14 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>Where AAP is still ahead</h2>
-				<p>AAP is a decade of enterprise Ansible with Red Hat behind it: a support desk with an SLA, certified content you can point an auditor at, Event-Driven Ansible, a multi-hop Automation Mesh for reaching segmented networks, and analytics through Insights. Every claim on this page is backed by a test you can run. What SwitchTender does not have is Red Hat's certified content or AAP's decade in production. What it does have is a plugin path: any team can add a tool, a secret engine, an AI provider, or a notification channel as a drop-in Go plugin binary, no fork and no rebuild of the server. Pick AAP when the deciding factor is Red Hat support and certified content. Pick SwitchTender when it's the product, the footprint, and the bill.</p>
+				<p>AAP is a decade of enterprise Ansible with Red Hat behind it: a support desk with an SLA, certified content you can point an auditor at, Event-Driven Ansible, a multi-hop Automation Mesh for reaching segmented networks, and analytics through Insights. What SwitchTender does not have is Red Hat's certified content or AAP's decade in production. What it does have is a plugin path: any team can add a tool, a secret engine, an AI provider, or a notification channel as a drop-in Go plugin binary, no fork and no rebuild of the server. Pick AAP when the deciding factor is Red Hat support and certified content. Pick SwitchTender when it's the product, the footprint, and the bill.</p>
 			</div>
 		</section>
 
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>Move in one command</h2>
-				<p>Automation Controller is AWX's data model, so its export imports into SwitchTender the same way AWX's does. Projects, inventories (smart and constructed included), templates, workflows with their approval steps, surveys, schedules, notification templates, and the organizations those belong to come across, with a dry run first so you see the plan before anything is written. A template that took provisioning callbacks answers at its old callback address too, once the import knows its id, so the boot scripts that carry that address keep working when the hostname points here.</p>
+				<p>Automation Controller is AWX's data model, so its export imports into SwitchTender the same way AWX's does. Projects, inventories (smart and constructed included), templates, workflows with their approval steps, surveys, schedules, notification templates, and the organizations those belong to come across, with a dry run first so you see the plan before anything is written. A workflow the importer cannot carry over as it stands is named in the plan and left out: one with a node that runs another workflow or a sync, a path taken on failure, nodes from more than one project, or an always path and a success path on the same node. A template that took provisioning callbacks also answers a POST to <code>/api/v2/job_templates/{id}/callback/</code> once the import knows its id, so a boot script that calls that path keeps working when the hostname points here. A script that calls the controller at any other path needs its URL edited.</p>
 			</div>
 			<div class="gs-steps">
 				<ol>
@@ -214,7 +214,7 @@
 			<div class="cards cards-3">
 				<article class="card reveal">
 					<h3>Does it need an agent on each host?</h3>
-					<p>No. It reaches the machines it manages over SSH, the same way Ansible does, and installs nothing on them. There is no per-host daemon to deploy, patch, or account for. You run the one server binary. Worker processes for extra throughput are a Team feature, and they are pool members rather than agents belonging to a host.</p>
+					<p>No. It reaches the machines it manages over SSH, the same way Ansible does, and installs no agent on them. There is no per-host daemon to deploy, patch, or account for. You run the one server binary. Worker processes for extra throughput are a Team feature, and they are pool members rather than agents belonging to a host.</p>
 				</article>
 				<article class="card reveal">
 					<h3>Can it read secrets from AWS Secrets Manager, Azure Key Vault, or Vault?</h3>
@@ -222,7 +222,7 @@
 				</article>
 				<article class="card reveal">
 					<h3>Can I run a Terraform plan, hold it for approval, then run Ansible?</h3>
-					<p>Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency graph with parallel branches, built on a drag-and-drop canvas. The approval is not a convention somebody can skip: a policy decides which runs are held, the core enforces the hold, and the approval binds to the exact plan reviewed, so a run cannot be approved as one thing and executed as another.</p>
+					<p>Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency graph with parallel branches, built on a drag-and-drop canvas. A policy decides which runs are held, an agent&#39;s run is held unless a written policy exempts it, the core enforces the hold, and the approval binds to the exact plan reviewed, so a run cannot be approved as one thing and executed as another. By default an admin may approve a run they launched. Requiring a different person is a Team rule.</p>
 				</article>
 			</div>
 			<script type="application/ld+json">
@@ -235,7 +235,7 @@
    "name": "Does it need an agent on each host?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "No. It reaches the machines it manages over SSH, the same way Ansible does, and installs nothing on them. There is no per-host daemon to deploy, patch, or account for. You run the one server binary. Worker processes for extra throughput are a Team feature, and they are pool members rather than agents belonging to a host."
+    "text": "No. It reaches the machines it manages over SSH, the same way Ansible does, and installs no agent on them. There is no per-host daemon to deploy, patch, or account for. You run the one server binary. Worker processes for extra throughput are a Team feature, and they are pool members rather than agents belonging to a host."
    }
   },
   {
@@ -251,7 +251,7 @@
    "name": "Can I run a Terraform plan, hold it for approval, then run Ansible?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency graph with parallel branches, built on a drag-and-drop canvas. The approval is not a convention somebody can skip: a policy decides which runs are held, the core enforces the hold, and the approval binds to the exact plan reviewed, so a run cannot be approved as one thing and executed as another."
+    "text": "Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency graph with parallel branches, built on a drag-and-drop canvas. A policy decides which runs are held, an agent's run is held unless a written policy exempts it, the core enforces the hold, and the approval binds to the exact plan reviewed, so a run cannot be approved as one thing and executed as another. By default an admin may approve a run they launched. Requiring a different person is a Team rule."
    }
   }
  ]
