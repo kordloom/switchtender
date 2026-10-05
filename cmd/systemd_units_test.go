@@ -101,10 +101,7 @@ func TestShippedSystemdUnits(t *testing.T) {
 				t.Fatalf("%s ExecStart = %q, want switchtender %s", test.File, s["ExecStart"],
 					test.WantCommand)
 			}
-			sub, _, err := rootCmd.Find([]string{test.WantCommand})
-			if err != nil {
-				t.Fatalf("find the %s command: %v", test.WantCommand, err)
-			}
+			sub := findCommand(t, test.WantCommand)
 			for _, arg := range args[2:] {
 				if !strings.HasPrefix(arg, "--") {
 					continue
