@@ -47,7 +47,10 @@ type PassResult struct {
 
 // sighting is what a sweeper last recorded about one lock-free run directory.
 type sighting struct {
-	// info identifies the directory, so one deleted and recreated under the same name starts over.
+	// info identifies the directory by device and inode, so another directory under the same name
+	// starts over. A filesystem such as ext4 can give a deleted directory's inode number to the
+	// next directory it makes, so a name deleted and made again can look unchanged here, which
+	// Create's random names keep from happening to a run directory.
 	info fs.FileInfo
 	// locked reports that the directory had a lock file, which a directory only lacks in the moment
 	// it is being created or when its creator died in that moment.

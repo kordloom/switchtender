@@ -235,9 +235,13 @@ func TestSweepStartsOverOnAChange(t *testing.T) {
 	tests := []struct {
 		// Change alters the directory between the two passes.
 		Change func(t *testing.T, path string)
-	}{{ // Test 0: The directory was removed and a new one made under the same name.
+	}{{ // Test 0: The directory was moved away and another one made under its name.
 		Change: func(t *testing.T, path string) {
-			if err := os.RemoveAll(path); err != nil {
+			// The first directory stays on disk, out of the root, so the new one cannot be given
+			// its inode number. A filesystem such as ext4 can give a deleted directory's number to
+			// the next directory it makes.
+			aside := filepath.Join(filepath.Dir(filepath.Dir(path)), "moved")
+			if err := os.Rename(path, aside); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.Mkdir(path, 0o700); err != nil {
