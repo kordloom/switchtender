@@ -17,23 +17,24 @@ Every preview prints a summary before the itemized plan, and the API returns the
 attempt one. This is the summary a preview of a small AWX export prints:
 
     Migration summary:
-      Comes across:       12 objects
+      Comes across:       13 objects
           credentials          4
           inventories          3
           inventory sources    2
+          schedules            2
           projects             1
           templates            1
-          schedules            1
       Needs a secret:     4 credential shell(s), because an export never carries secret values
-      Does not come across: 2
+      Does not come across: 1
           - project "Manual" skipped: only git projects import (scm_type="")
-          - schedule "Every 3 days" of template "Deploy Web" skipped: its cadence cannot be expressed as cron ("DTSTART:20260101T090000Z\nRRULE:FREQ=DAILY;INTERVAL=3")
-      Worth reviewing:    5
+      Worth reviewing:    7
           - credential "prod-ssh" needs its secret re-entered; an export never carries secret values. Its non-secret settings (become_method=sudo, become_user=root, user=deploy) were stored on the credential
           - credential "vault-pw" needs its secret re-entered; an export never carries secret values
           - credential "aws-keys" needs its secret re-entered; an export never carries secret values. Its non-secret settings (region=us-east-1, username=AKIAEXAMPLE) were stored on the credential
           - credential "gh-token" needs its secret re-entered; an export never carries secret values
           - inventory source "Legacy EC2" imports the "ec2" plugin as its source; point it at a plugin config file before refreshing
+          - schedule "Nightly" from this AWX export fires template "Deploy Web", whose survey has no usable default for the required question "region", so each fire stops with that reason and starts no run. Give the question a default on the template
+          - schedule "Every 3 days" from this AWX export fires template "Deploy Web", whose survey has no usable default for the required question "region", so each fire stops with that reason and starts no run. Give the question a default on the template
 
 Two numbers are worth understanding before relying on them.
 
@@ -89,8 +90,9 @@ crontab import creates no template either, so an imported cron line has nothing 
 ## Get an export
 
 - AWX: `awx export` produces a JSON document of organizations, projects, inventories, inventory
-  sources, job templates, credentials without secrets, schedules, and surveys. Organizations, teams,
-  and notification templates are counted in the report rather than imported.
+  sources, job templates, credentials without secrets, schedules, surveys, and notification
+  templates. Teams, and organizations that own no smart inventory and hold no notification
+  attachments of their own, are counted in the report rather than imported.
 - Semaphore: export the project's repositories, inventories, keys, templates, and schedules as
   JSON. Semaphore's own single-project backup file and the multi-project wrapper are both read.
 - Rundeck: either export a project's jobs as YAML or JSON from the project's job list or the API, or
@@ -138,9 +140,118 @@ file to point at, so it imports carrying the plugin name and the report tells yo
 plugin config file before it can refresh. The backing inventory arrives empty either way, since its
 hosts come from running the plugin rather than from the export.
 
+An AWX smart inventory imports with its host filter, and a constructed inventory imports with its
+inputs, options, and limit, wired by id to the inventories the same export carried. Both resolve at
+each launch, as they did in AWX. The [inventories guide](inventories.md) describes what each reads.
+
+When the export carries a smart inventory's organization, the smart inventory and every inventory
+imported from that organization are placed in an organization of the same name, created on apply
+or matched to the one already here when exactly one has that name, so its filter reads the same
+inventories it read in AWX. Like AWX, a smart inventory carries its hosts and their variables and
+none of their groups. A play written for a group needs a constructed inventory instead.
+
+One AWX organization becomes one organization here, whatever brings it across: a smart inventory,
+or notification templates attached to the organization itself, whose templates are then placed in
+it too. It is matched by the AWX id or name the export references it by, uses the one organization
+already here with its name when exactly one has it, and when more than one does, the import does
+not guess: what would have been placed in it arrives with no organization, and the report says so.
+The import plan and result name the organization every placed template and inventory lands in.
+Under `--strict-grants`, an object in an organization is visible only to that organization's
+members, and AWX memberships are not imported, so grant access in the organization to everyone who
+needs what was placed there.
+
 Semaphore has no equivalent. An inventory of any type other than static imports holding whatever its
 export's inventory field held, and the report names the type it was. For a file inventory that field
 is a path rather than a host list, so read each one the report names before relying on it.
+
+## AWX fact cache and provisioning callbacks
+
+A job template's `use_fact_cache` and `allow_callbacks` come across as they are, so a template that
+kept facts in AWX keeps them here and a template hosts called back to still accepts callbacks. The
+report says, for each template, what needs a person afterward:
+
+- A host's boot script calls an address on the AWX server. A template whose AWX id the import knew
+  also answers at that address here, as the next section describes. Otherwise point the script at
+  the template's own callback URL on this server, `/v1/templates/{id}/callback`. The curl itself,
+  posting `host_config_key`, stays the same either way.
+- The `host_config_key` an export carries is sealed with this install's encryption key as the
+  import applies, so hosts keep the key they hold. On an install with no encryption key, or when
+  the export wrote the key as `$encrypted$`, the template arrives with callbacks on and no key, and
+  refuses every callback until a key is minted on its page.
+- A template that had both a limit and callbacks is named. AWX launches a callback for the calling
+  host whatever the limit says. Here the template keeps its limit on callbacks, `callback_limit`
+  `intersect`, so a calling host the limit does not select gets no run. Set `callback_limit` to
+  `replace` on the template, in its dialog or with `PUT /v1/templates/{id}`, to match AWX.
+- A second callback while a run for that host is pending or running answers 409 here, the accurate
+  code for a conflict. AWX answers 400 in the same case, so a boot script that checks for exactly
+  400, rather than for any 4xx, needs a change.
+
+Facts AWX had already cached do not come across, since an export does not carry them. The first run
+of each template gathers them again. With the cache on, the setting is part of what an approval
+binds and what a receipt discloses, as [the Ansible
+guide](tool-ansible.md#cached-facts-and-approvals) explains.
+
+See [the Ansible guide](tool-ansible.md#fact-cache) for how both behave.
+
+### The AWX-compatible callback address
+
+Machine images, cloud-init user data, launch templates, and kickstart files carry the AWX callback
+address, `https://<awx host>/api/v2/job_templates/<awx id>/callback/`, and changing all of them is
+often the slowest part of a move. So a template imported from an AWX job template that accepted
+callbacks also answers at that address, once the AWX hostname resolves to this server.
+
+The import binds a template to its AWX id when it knows the id. An export that carries each job
+template's `id` binds it directly. When yours does not, save the job template list the AWX API
+serves at `/api/v2/job_templates/` as JSON and give it to the import:
+
+    switchtender import awx awx-export.json --awx-template-ids job-templates.json --apply
+
+Give `--awx-template-ids` once per page when the list spans pages. An id is taken only for an exact
+match of organization and name that the list names once, so a template is never bound to another's
+id by a guess, and the report says which templates answer at their AWX address and which do not,
+with the reason. An import through the API, `POST /v1/import/awx`, binds the ids the export itself
+carries, and takes no list.
+
+How the address behaves:
+
+- It is `POST /api/v2/job_templates/<awx id>/callback/`, with or without the trailing slash, with
+  `host_config_key` as JSON or as a form. A callback there passes the same key check, host
+  matching, template limit, rate limits, approval gate, and evidence as the template's own address.
+  The chain entry records that it arrived on the AWX-compatible address, and the dossier says so.
+- It is on by default for every template the import bound, and off is a switch on the template
+  page, `awx_callback` in the API. The template page shows when a host last called through it,
+  which is how to tell when nothing uses it anymore. There is no sunset date, but moving images to
+  the template's own address is the recommendation: it does not depend on the old hostname.
+- A binding is for good. Importing the same AWX object again, after its template was deleted,
+  points the id at the new template. A different AWX object claiming the same id, judged by
+  organization and name, fails the import before anything is written, so a boot script calling an
+  id never reaches something else. A template created here never gets an AWX id.
+- When the bound template is deleted, the address answers 410 Gone and never reaches any other
+  template.
+- It says nothing about which ids exist. The rate limit is spent before anything is looked up, and
+  an unknown id, a wrong key, and a template with callbacks or this address off all get the same
+  403.
+- POST is the only method served, and SwitchTender never returns a key. A callback that sends
+  `extra_vars` is refused with 400, since a callback launches the template as it is saved.
+- The status codes are SwitchTender's, documented in
+  [the API reference](api.md#provisioning-callbacks), rather than a copy of AWX's. 409 for a
+  second callback while one is pending is the case most likely to differ from what a script expects.
+- No other AWX API path is served. This address is the single exception.
+
+Before the cutover, check what the images expect of the old hostname:
+
+- **Certificates.** A boot script that verifies TLS checks the certificate against the AWX hostname.
+  The certificate this server presents must carry that name as a subject alternative name, or the
+  call fails before it reaches anything.
+- **Pinned certificates and CAs.** An image that pins AWX's certificate, or trusts only the CA that
+  issued it, refuses a different one even with the right name. Find those images first, since a
+  failed callback is silent at boot.
+- **Load balancers and proxies.** Host matching and the rate limits read the caller's address. A
+  load balancer in front of this server must pass the original address in a header, and be listed
+  with `--trusted-proxy`, or every host appears to call from the balancer: none can be matched, and
+  all share one rate limit.
+- **DNS caching.** Hosts and resolvers keep the old record until its TTL runs out, so lower the TTL
+  well before the switch, and expect callbacks to reach AWX for a while after it.
 
 ## Import Rundeck jobs or a project archive
 
@@ -199,10 +310,13 @@ archive over 25 MiB imports with `switchtender import rundeck` rather than throu
 
 Two details are worth knowing before you run it. A Rundeck schedule is a Quartz expression, which
 counts Sunday as one where cron counts Sunday as zero, so the weekday is renumbered rather than
-copied; a Quartz-only form such as the third Friday of the month has no cron equivalent and is
-reported instead of converted to a day it would fire wrongly on. And a secure option is never
-imported as a survey field, because a survey answer is stored in plain text on the run; the report
-names each one so you can store it as a credential instead.
+copied. A Quartz-only form that cron has no reading for, such as the third Friday of the month
+(`6#3`), the last Friday (`6L`), the last day of the month (`L`), or the last weekday of the month
+(`LW`), comes across as an RFC 5545 recurrence that fires on the same days rather than as a cron
+expression. The nearest-weekday form (`15W`) is the one a single recurrence cannot say exactly, so
+it is reported instead of converted to a day it would fire wrongly on. And a secure option becomes a
+secret survey field, whose answer is sealed rather than stored on the run as text. Its default lives
+in Rundeck's key storage and does not come across, so the report names any option that had one.
 
 ## Import Jenkins jobs
 
@@ -245,9 +359,11 @@ skipped; trigger those from a webhook instead.
 `$JOB_NAME` gets an empty string, so the report names every one it found. Supply them as survey
 fields or extra vars, or rewrite the step.
 
-**Secrets are never imported.** A password parameter is stored encrypted by Jenkins, and a survey
-answer is stored in plain text on the run, so importing one would quietly downgrade it. The same
-goes for a job's remote trigger token. Both are named in the report and left out.
+**Password parameters become secret fields.** Jenkins stores a password parameter encrypted, and a
+secret survey field seals its answer the same way, so it arrives as a secret field. Its default is
+Jenkins ciphertext and does not come across, and the report names it. A job's remote trigger token
+is never imported, since it would grant a launch to anybody holding it, and it is named and left
+out.
 
 Two smaller ones: a Windows batch step is skipped, since the rest of the job imports as Bash, and a
 job whose source control checkout mattered has its repository named rather than attached, because
@@ -320,14 +436,17 @@ archive over that size imports from the CLI alone.
 | AWX inventory | Stored inventory, rendered as INI from its hosts and groups.|
 | AWX inventory source | Dynamic inventory source, plus the stored inventory it maintains, named `<source> (dynamic)`. A file source keeps its path; a cloud plugin source imports carrying the plugin name and is reported, since it needs a config file before it can refresh.|
 | AWX job template | Template, with job slicing becoming shard count. Privilege escalation arrives as `ansible_become: true` in its extra vars, which the report notes, since an extra var also outranks a play that sets `become: false`.|
-| AWX survey | Template survey, field for field, with the field types translated. A password prompt is refused, not downgraded to plain text. A survey switched off in AWX is not imported, since AWX never asks it.|
-| Semaphore survey | Template survey, field for field. A secret variable is refused, not downgraded to plain text: store its value as a credential.|
-| AWX schedule that stops | Refused and named. A rule with `COUNT` or `UNTIL` bounds itself, a cron entry never stops, and importing one would leave a job firing forever.|
+| AWX survey | Template survey, field for field, with the field types translated. A password prompt becomes a secret field, sealed rather than downgraded to plain text. A survey switched off in AWX is not imported, since AWX never asks it.|
+| Semaphore survey | Template survey, field for field. A secret variable becomes a secret field, sealed rather than downgraded to plain text.|
+| AWX schedule that stops | Schedule carrying its recurrence rule, which stops after its `COUNT` or on its `UNTIL` the way AWX stops it. A rule that has already fired its last time is reported and not imported, since it would never run.|
 | AWX workflow job template | Workflow template carrying the graph, with each node's job template inlined as a step and the success and always edges becoming dependencies. Imported whole or reported and skipped, never partially.|
-| AWX job template schedule | Schedule, with the recurrence rule converted to cron and its timezone kept.|
+| AWX job template schedule | Schedule, with its timezone kept. A rule that a cron expression says exactly, checked against the rule's own next fires, becomes cron. Every other rule, such as every third day, the last Friday of the quarter, more than one `RRULE`, or an `EXRULE` or `EXDATE` that takes a holiday out, comes across as the RFC 5545 recurrence it is. A schedule that answers its template's survey fires a copy of the template whose questions default to those answers. A secret answer does not come across, so a schedule that gave one arrives switched off and the report names the question to give a default.|
 | AWX workflow schedule | Schedule on the imported workflow template, read from whichever place the export carried it. A workflow that was refused has no template to fire, so its schedules are named in the report as not imported rather than dropped silently.|
 | AWX credential | Credential shell with its kind mapped from its type and its configured inputs, secret omitted. A become password beside the connection secret arrives as a second shell, attached wherever the first one is.|
-| AWX organization, team, or notification template | Counted in the report, not imported. The report names what to create by hand in their place.|
+| AWX notification template | Notification target of the same channel, its address sealed at rest, and attached for the same events to the templates and workflows the export attaches it to. A secret AWX exports only as `$encrypted$`, a Slack bot token, a PagerDuty token, or a Grafana key, arrives waiting to be entered, and the report says which. A target waiting for its secret keeps every other part the export carried, a Grafana instance's address included, so finishing it asks for the secret alone. A Slack template arrives waiting for an incoming webhook address, since a Slack target here posts to one. A Twilio template that texts several numbers becomes a target per number. An IRC template has no equivalent and is reported.|
+| AWX notification attachment on an organization | Attached to the organization, so every template in it is covered, one created later included. The organization is created from the same export, matched by its AWX id or name, with the templates imported from it placed in it. When this install already holds one organization of that name, that one is used instead of a second. When it holds several, the import does not guess, and the attachments fall back to each template imported from the organization, never both. The report states which happened: imported, matched existing, fell back to N templates, or unresolved when there was no template to fall back to either.|
+| AWX notification attachment on a project | Reported, not imported. AWX tells those targets about project updates, and a run here syncs its project itself.|
+| AWX organization or team | A team is counted in the report, not imported. An organization is imported when the export places something in it: a smart inventory, or notification templates attached to the organization itself. Any other is counted in the report, not imported. The report names what to create by hand in place of what was not imported.|
 | Semaphore repository | Project, cloned with its access key when that key is an SSH key. A login and password key is reported, since a project here clones a private repository over SSH with a key.|
 | Semaphore static inventory | Stored inventory, carrying its SSH key and become key, so every run against it has them.|
 | Semaphore inventory of any other type | Stored inventory holding whatever the export's inventory field carried, which for a file inventory is a path rather than hosts, and reported. Only static content travels in the export.|
@@ -335,7 +454,7 @@ archive over that size imports from the CLI alone.
 | Semaphore key | Credential shell of the kind its use makes it: an SSH key, the login an inventory reaches its hosts with, a become password, or a vault password. A key of type none holds nothing and is not imported.|
 | Semaphore schedule | Schedule.|
 | Rundeck job | Template running the job's step sequence as one Bash script. The same job from a job export and from a project archive produces the same template.|
-| Rundeck option | Survey field. An enforced value list becomes a choice; a secure option is refused, not downgraded. The script sets `RD_OPTION_<NAME>` from the answer, or the option's default, and `@option.name@` and `${option.name}` in a step read the same value. A name with a dash or a dot becomes a survey variable with an underscore in its place. An option's `regex` becomes the field's pattern, checked against the whole answer as Rundeck checks it.|
+| Rundeck option | Survey field. An enforced value list becomes a choice, and a secure option becomes a secret field, sealed rather than downgraded. The script sets `RD_OPTION_<NAME>` from the answer, or the option's default, and `@option.name@` and `${option.name}` in a step read the same value. A name with a dash or a dot becomes a survey variable with an underscore in its place. An option's `regex` becomes the field's pattern, checked against the whole answer as Rundeck checks it.|
 | Rundeck script step naming an interpreter | Kept when the interpreter is a shell. Anything else, a Python interpreter or a command such as `sudo -u deploy /bin/bash`, is refused and named: a template runs one Bash script, so the step body would not be run by what the job ran it with. A script that names no interpreter is judged by its `#!` line the same way.|
 | Rundeck step arguments, error handler, retries, and notifications | Reported as left out. A script runs with no arguments, a failed step ends the job or is passed over when the job keeps going, a failed run is not retried, and the template's notifications are set by hand.|
 | Rundeck project archive `resources.source.N` | Reported, never imported. The archive carries the node source's configuration and no node definitions, so the report names the file path or the endpoint and you attach an inventory of your own.|
@@ -347,7 +466,7 @@ archive over that size imports from the CLI alone.
 | Jenkins freestyle job | Template running the job's shell steps as one Bash script, in order.|
 | Jenkins folder | Nothing of its own. Its jobs keep the folder in their names, so `platform/db-vacuum` stays that.|
 | Jenkins Pipeline job | Refused and named. Groovy has no mechanical translation into a template.|
-| Jenkins parameter | Survey field. A choice becomes a choice and a boolean a toggle; a password parameter is refused, not downgraded. The script sets the parameter under its own name from the answer, or its default, as Jenkins did.|
+| Jenkins parameter | Survey field. A choice becomes a choice and a boolean a toggle, and a password parameter becomes a secret field, sealed rather than downgraded. The script sets the parameter under its own name from the answer, or its default, as Jenkins did.|
 | Jenkins build trigger | One schedule per line, with `H` resolved to concrete times, the `@daily` family expanded, and Sunday renumbered from 7 to 0. A `TZ=` line sets the timezone of every line after it, as in Jenkins.|
 | Jenkins poll trigger | Refused and named. It builds only on a change, so importing it as a schedule would run the job unconditionally.|
 | Jenkins build timeout | Template timeout, converted from minutes to seconds.|
@@ -378,17 +497,21 @@ import has none to re-enter and none to attach.
   every step from one, and a node that runs one node always and another only on success, since a
   step here lets everything after it continue or nothing. A partial graph would keep the workflow's
   name and run a subset of it, which is worse than not importing it.
-- A workflow with an approval node is reported and skipped, and the assessment names it in its
-  governance section. Approval here is a policy that holds a whole run before it starts, not a step
-  partway through, and an import writes no policies, so bringing the other nodes across would run
-  them with the gate gone. Write a policy that holds the workflow's steps, then rebuild it on the
-  Workflows page.
+- A workflow with an approval node imports with the node as an approval step. Its name and
+  description become what the approver is shown, its timeout carries, the nodes after it wait for
+  the approval, and its failure nodes become its deny path, which runs on a denial or a timeout as
+  AWX runs a failure path. The assessment names each workflow whose gate comes across. One shape is
+  refused: an approval node with an always edge, since that edge runs the next node whatever the
+  approver decides. That workflow is reported and named in the governance section as a gate that
+  does not come across, and a workflow holding only approval nodes is reported as having no work for
+  them to release. Who may approve follows your roles and approval policies, not the AWX approval
+  role.
 - A workflow's own schedules import onto the workflow template, so a graph that fired nightly in AWX
   keeps firing nightly here. The one case that does not carry is a workflow the import refused: with
   no template to fire, its schedules cannot import either, and the report says so by name and count
   rather than leaving the loss to be discovered later.
-- An AWX export's organizations, teams, and notification templates are counted in the report and not
-  imported. The report names what to create in their place.
+- An AWX export's teams, and its organizations that own no smart inventory and hold no
+  notification attachments of their own, are counted in the report and not imported. The report names what to create in their place.
 - Non-git projects are skipped, since there is no repository to source playbooks from.
 - A Rundeck project archive never produces an inventory. It carries no node definitions, so the node
   sources it named are reported and you attach an inventory yourself. Every imported template lands
@@ -399,12 +522,29 @@ import has none to re-enter and none to attach.
 - An archive whose members would escape where they are unpacked, by an absolute path, a parent
   segment, or a symbolic link, is refused whole rather than read down to the members that looked
   reasonable. No Rundeck export writes one.
+- An AWX custom credential type in the export imports as a custom type, with its fields and its
+  env, extra var, and file injectors, and each credential of it arrives as a credential of that type
+  waiting for its field values. A type whose injectors use Jinja beyond a field or a file path, such
+  as a filter or a condition, is refused with the reason, since a run here would receive the
+  expression as literal text, and its credentials fall back to the kind mapping below.
+- A custom type that writes a file no env or extra var injector references comes across as it was,
+  marked as imported from AWX. The report names the type and the file among the items worth
+  reviewing, the server logs a warning naming both when the import is applied through it, and every
+  run of a credential of the type carries a warning naming the file. A type defined in SwitchTender
+  is refused for the same thing. See
+  [a file nothing references](secrets.md#a-file-nothing-references).
+- A custom type that does nothing but write a kubeconfig to a file comes across unchanged, so its
+  credentials keep masking every line of the document. The report names the type and gives each of
+  its credentials the one request that switches it to the built-in `kubeconfig` kind, which masks
+  only the secrets inside the document. See
+  [kubeconfig types from AWX](secrets.md#kubeconfig-types-from-awx).
 - A credential type without an exact match maps to the environment kind and is flagged for review.
 - A survey field that prompts for a secret, an AWX password question, a Semaphore secret variable, a
-  Rundeck secure option, or a Jenkins password parameter, is reported and left out rather than
-  imported. A survey answer is stored in plain text on the run, so importing one would quietly make
-  the secret less protected than it was in the tool you left. Store those values as credentials and
-  reference them from the template.
+  Rundeck secure option, or a Jenkins password parameter, imports as a secret survey field. Its
+  answer is sealed with the credential key and never stored on the run as text, so it is as
+  protected as it was in the tool you left. A default for one does not come across, because an
+  export carries it only as a placeholder or in the source tool's own encryption, and the report
+  names each field that had one so you can set it on the template.
 - Secrets are never in an export, so every credential is created as a shell and its secret has to be
   re-entered. The non-secret settings AWX did export, such as the user to connect as and how to
   become root, are stored on the credential itself and take effect at injection, so a machine

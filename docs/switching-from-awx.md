@@ -27,15 +27,20 @@ just live behind a smaller, faster surface.
 | Organization | Organization. A project, template, inventory, or credential can name its owning `org_id`. Access adds a global role and optional per-object grants.|
 | Project (git) | Project.|
 | Inventory | Stored inventory, or a dynamic inventory source that refreshes into one.|
+| Smart or constructed inventory | Smart or constructed inventory, resolved at each launch. A smart inventory imports into its AWX organization and, as in AWX, carries hosts and their variables but no groups. See [inventories](inventories.md).|
 | Job template | Template.|
 | Survey | Template survey, the same typed questions.|
-| Schedule | Schedule, cron instead of a recurrence rule.|
+| Schedule | Schedule, with the same recurrence rule, or a cron expression when one says the same thing.|
+| Notification template | Notification target, attached to templates, workflows, schedules, projects, and organizations for the same events.|
 | Credential | Credential, secret sealed at rest.|
 | Job | Run.|
 | Job slicing | Split, balanced by measured host duration.|
 | Workflow | Pipeline, ordered steps or a dependency graph.|
 | Instance group | Worker queue.|
+| Execution node on a Receptor mesh | Relay worker, which dials out to the control node and receives each run's credentials sealed to its pool's delivery key. See [Delivering secrets to relay workers](configuration.md#delivering-secrets-to-relay-workers).|
 | Execution environment | A container image pinned on a project.|
+| Fact cache, `use_fact_cache` | The template's `use_fact_cache`, the same jsonfile cache with a timeout per template.|
+| Provisioning callback | The template's `allow_callbacks` and host config key, at `/v1/templates/{id}/callback`, and for a template imported from AWX also at its old AWX address, `/api/v2/job_templates/{awx id}/callback/`.|
 
 ## Path A: import your AWX
 
@@ -116,6 +121,17 @@ Open Credentials and add what your runs need. Kinds:
   community.vmware modules read.
 - `openstack`: an OpenStack login, injected as the `OS_*` environment variables
   openstacksdk and the openstack.cloud collection read.
+- `kubeconfig`: a Kubernetes kubeconfig, written to a private file bound to `KUBECONFIG`,
+  `K8S_AUTH_KUBECONFIG`, and `KUBE_CONFIG_PATH`.
+
+A custom credential type from AWX imports as a custom type here, file injectors included, when its
+injectors are plain field and file path substitution. See
+[custom credential types](secrets.md#custom-credential-types). A type that only writes a kubeconfig
+to a file keeps masking every line of it until you switch its credentials to the built-in
+`kubeconfig` kind, one request each, as described in
+[kubeconfig types from AWX](secrets.md#kubeconfig-types-from-awx). A type that writes a file nothing
+references comes across with a warning on every run that uses it, as described in
+[a file nothing references](secrets.md#a-file-nothing-references).
 
 Secrets are encrypted at rest and never returned by the API.
 
@@ -143,7 +159,12 @@ to target specific work:
 
     ./switchtender worker --db switchtender.db --name worker-1
 
-Add a schedule in Schedules with a cron expression to fire a template on a cadence.
+Add a schedule in Schedules with a cron expression or an RFC 5545 recurrence rule to fire a template
+on a cadence. A schedule, a webhook trigger, and a provisioning callback fire a template with each
+survey question's default, a password question's sealed default included. A template whose survey
+has a required question with no default is refused with the question named, on the schedule and in
+the audit trail, rather than run without the answer, so give such a question a default before you
+schedule its template.
 
 ## Where things live differently
 
@@ -162,16 +183,29 @@ Add a schedule in Schedules with a cron expression to fire a template on a caden
   `finish`, so the person who decides is told. A template can additionally name its own targets in
   the template dialog, for all eleven channels: a PagerDuty target names its own routing key, a
   Grafana target its own instance and token, and a Twilio or email target names only a recipient and
-  sends through the server-held account.
+  sends through the server-held account. A notification target defined once can be attached to many
+  templates, workflows, schedules, projects, and organizations for when a run starts, succeeds,
+  fails, or is held, the way a notification template is attached in AWX, and managed on the
+  Notifications page. A target hears each run's events in the run's order, a failed message is
+  retried and then kept as failed on the run and the target, and the next one still goes. See
+  [notification targets](api.md#notification-targets).
 
 ## What is not one to one yet
 
 - Execution environments are a single pinned container image behind a flag, not a managed catalog.
-- A workflow approval node is not a step here. Approval is a policy that holds a whole run before it
-  starts, so a workflow carrying one is reported and not imported rather than imported without its
-  gate. Write the policy first, then rebuild the workflow on the Workflows page.
+- A workflow approval node imports as an approval step, with its timeout and its failure path. An
+  approval node with an always edge is the exception: it would run the next node whatever the
+  approver decides, so that workflow is reported and not imported rather than imported without its
+  gate. Who may approve follows your roles and approval policies rather than the AWX approval role.
 - Import creates objects that belong to no organization. Under the default access model that leaves
   them usable by every operator, which matches how a single-team install already works. If you run
   with strict grants, imported objects have no grants yet, so assign them after importing.
+- A provisioning callback keeps the template's own limit unless the template's `callback_limit` is
+  `replace`: a calling host the limit does not select gets no run, where AWX launches for it. The
+  import report names every template this applies to.
+- A second provisioning callback while one for the same host is pending or running answers 409
+  here, where AWX answers 400. A boot script that checks for exactly 400 needs a change. The
+  [migration guide](migration.md#the-awx-compatible-callback-address) lists every callback answer
+  and what to check before pointing the old AWX hostname here.
 
 If something you rely on is missing, open an issue. Import coverage is widened on purpose.

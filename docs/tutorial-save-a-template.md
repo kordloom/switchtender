@@ -25,14 +25,23 @@ extra vars.
 ## Add a survey
 
 A survey is a set of typed questions asked at launch, whose answers become extra vars. Add fields of
-type text, multiline, integer, boolean, or choice, and mark the ones that are required. Ansible
-receives them as extra vars. Bash and Python receive them as environment values. Terraform receives
-them as `TF_VAR_` variables.
+type text, multiline, secret, integer, boolean, or choice, and mark the ones that are required.
+Ansible receives them as extra vars. Bash and Python receive them as environment values. Terraform
+receives them as `TF_VAR_` variables.
+
+Use the secret type for a password or a token. Its answer is typed into a password field, sealed
+like a credential, never stored on the run as text, and masked in the run's log. The details are in
+[secret fields](api.md#secret-fields).
 
 Each field takes bounds beyond its type, checked before the launch is accepted: `min` and `max` on an
 integer, `min_length`, `max_length`, and a `pattern` regular expression on text, and the fixed set on
 a choice. Add a `help` string to show guidance beneath the prompt. A launch that breaks a bound is
 refused with the field it failed, and no run starts.
+
+Give a field a default if the template will run with nobody there to answer it. A schedule, a
+webhook, a pull request plan, and a provisioning callback answer every question with its default,
+and refuse to fire a template with a required question that has none. See
+[launches nobody answers](api.md#launches-nobody-answers).
 
 ## Launch it
 

@@ -39,8 +39,79 @@ transaction-level advisory lock, which is what lets a fleet write one chain with
 A running run carries a lease that its holder renews every few seconds. If a worker crashes or loses
 the network, the lease goes stale, and a janitor sweeps it after thirty seconds. Work that was still
 pending is returned to the queue for another worker. Work that was mid-flight is marked interrupted
-so it is not silently lost. An interrupted run does not resume from a checkpoint. It is a clean
-failure a person or a schedule can run again, not a partial state left holding a lease forever.
+so it is not silently lost, and announced like any other end of a run: its outcome reaches the
+chain, and its channels and targets hear that it stopped, a pager included. An interrupted run does
+not resume from a checkpoint. It is a clean failure a person or a schedule can run again, not a
+partial state left holding a lease forever.
+
+A worker that only stalled, a paused virtual machine or a long hang on the network, cannot start a
+run the janitor took back from it. The move to running is fenced on the claim itself, the worker's
+name and the capability minted when it claimed the run, so a requeued run, or one another worker has
+claimed since, refuses the stale start, and the worker walks away without starting its tool.
+
+A worker killed outright stops its tool as well. Every tool runs under a small supervisor, the same
+binary started again, that leads the tool's process group and watches a pipe only the worker holds
+open. The operating system closes that pipe the moment the worker dies, however it dies, and on
+Linux the kernel's parent-death signal says so too. The supervisor then stops the group the way a
+cancel does, a terminate signal first and a kill ten seconds later, and for a container run it also
+stops and removes the container by name, since the container runs under its daemon rather than
+under the worker. The play does not carry on changing hosts after the run reads as interrupted. The
+limits:
+
+- This holds on Linux, macOS, and the other Unix platforms. On Windows a tool started by a worker
+  that is killed outright keeps running.
+- The supervisor ends the tool's process group. A process the tool moved out of that group, such as
+  one started with setsid, is outside its reach, as it is outside a cancel's.
+- A supervisor killed on its own, rather than with its worker, leaves its tool running, the same as
+  killing a tool's top process always did.
+
+The keys and tokens a dead worker had staged on its host are removed by the run-files sweep every
+server and worker on that host runs, and by systemd when the worker ran under the shipped unit. A
+worker that is only partitioned keeps its files, because its lock still says it is alive.
+[Run files](run-files.md) has the rule.
+
+Every server and worker on a host shares one project cache. Each run executes from a private copy of
+its project that its process locks for as long as the run lasts, and a process starting up removes
+only the copies whose process is gone, so restarting one replica or worker never deletes the
+checkout a live run on another is executing from. Updates to a project's shared checkout take a lock
+file in the cache, so two processes never clone or reset the same checkout at once.
+
+## What is stopping work
+
+The overview's Needs attention panel answers, for every run that is not moving, what is stopping it.
+It sorts the waiting work into four counts, each a list a click away:
+
+- **Worker lost.** The worker running it stopped renewing its lease. The panel names the worker,
+  says how long ago it last reported, and counts down to the automatic reclaim the sweep above makes
+  once the lease expires. It alerts only when that reclaim has not happened within two lease
+  periods, which means no server is sweeping.
+- **No worker available.** It is queued and no connected worker serves its queue. The panel names
+  the queue, shows zero eligible workers connected, and says it starts automatically when one
+  appears. It alerts after 15 minutes.
+- **Approval needed.** A run held by a rule, a plan gate's apply among them, or a workflow waiting
+  at an approval step, with a badge saying which and, for a step, whether the workflow's other
+  branches are still running or it is paused. It says who can approve, how long it has waited, and
+  what runs next on approve and on deny. It never alerts unless an age alert is turned on.
+- **Blocked.** It has waited past a threshold, 15 minutes by default, behind other work: every
+  worker serving its queue is running as many runs as it takes, or a schedule is skipping its fires
+  while a run it started is still going. It names the run holding it and alerts after 15 minutes.
+
+A connected worker is one that has reported within the last half minute. Every server and database
+worker reports on its own timer, so a worker with every slot busy is never mistaken for a missing
+one, and the control node reports each relay worker it hears from, claims and lease renewals alike.
+
+Work in several conditions at once shows the most urgent as its main blocker, in the order above,
+the rest as badges, and one line on how they interact. Every timer measures the time in the current
+blocker: a run approved after a long hold has waited for a worker only since the approval. A retry,
+a dependency, or a run holding a slot is given as the reason on an item rather than counted, and a
+schedule fire skipped because its inventory matched no hosts stays in the schedule's history rather
+than here. The thresholds are organization defaults with per-queue and per-template overrides, set
+with [`--attention-file`](configuration.md#attention-thresholds).
+
+There is deliberately no button that puts a run back in the queue by hand. A worker that stopped
+reporting may only be cut off from the store rather than gone, and a run requeued out from under it
+could execute a second time on the same hosts. The lease sweep's reclaim is the safe version of that
+move, because it waits for the lease to expire first, and the panel shows exactly when it will.
 
 ## High availability
 
@@ -53,7 +124,11 @@ cross-process decision already happens in the store:
 - A due schedule is claimed with a compare-and-set on its next fire time, so two schedulers ticking
   the same cron entry fire it exactly once.
 - Approve and reject are compare-and-set state transitions, so two admins on two replicas cannot
-  release the same held run twice.
+  release the same held run twice. A decision claims its run before anything records it, so the
+  one that loses, to a second admin, a cancel, or a timeout, is refused with nothing written, and
+  the audit chain and every receipt, register, and decision list name only the decision that took
+  effect. A decision whose process dies after its claim is recorded and applied by the next
+  janitor on any replica.
 - The audit chain appends under a transaction-level advisory lock with a unique sequence index
   behind it, so the chain stays linear across replicas.
 - Live run pages poll the shared store, so a browser on one replica watches a run executing on
@@ -104,6 +179,15 @@ each of them either succeeded or is allowed to continue on failure. A step block
 dependency is skipped, and the skip carries down to everything that depended on it. A skipped step
 starts no run, so the history shows what ran and what never got the chance.
 
+A workflow that reaches an approval step and has nothing else to do parks: it releases its lease and
+waits in the store, so a restart while it waits loses nothing. Whichever replica records the decision
+resumes it from the stored step records with one compare-and-set, so the decision is acted on
+exactly once, and every replica's janitor times out an expired step and resumes a decided workflow a
+crash left parked. A parked workflow is stored under a status of its own, so an earlier release
+running against the same database, during a rolling update or after a rollback, neither approves it
+as a run held before it started nor sweeps it, and it waits for this release. The [concepts
+page](concepts.md) describes approval steps in full.
+
 A step can retry a set number of times. Each attempt is a fresh child run, so every try keeps its own
 log and matrix and none overwrite each other. Retries run back to back with no built-in delay, so a
 step that should pause between attempts sets that in its own logic. Values a step publishes with
@@ -151,10 +235,17 @@ under concurrent writers.
 On PostgreSQL each pending run is claimed exactly once across the fleet. The scheduler uses that same
 claim, so two servers running the same cron entry never double-fire.
 
-Submitting a run is not idempotent. Each call creates a new run with a fresh identifier, and there is
-no request-deduplication key, so a client that retries a submit it already sent creates a second run.
-An approval is a compare-and-set state transition, so two concurrent approvals release a held run
-exactly once and the loser gets a clear conflict. Treat a submit as create-once on the client side.
+A submission is deduplicated when it carries a key. `POST /v1/runs` and `POST /v1/pipelines` take an
+`Idempotency-Key` header, kept per organization, so a client that retries a submit it already sent
+is answered with the run the first one made rather than a second run. Without the header each call
+creates a new run with a fresh identifier, so a client that cannot send one should treat a submit as
+create-once on its side. The server keys what it launches itself the same way: a rerun, a webhook
+delivery, and a provisioning callback are deduplicated on what they carry, and each scheduled fire
+carries a key derived from its schedule and occurrence, `run.ScheduleKey`, in the server's reserved
+`st:` namespace, which no caller's key can spell. A fire that takes up an occurrence an interrupted
+fire handed back therefore finds the run that one made instead of starting a second. An approval is
+a compare-and-set state transition, so two concurrent approvals release a held run exactly once and
+the loser gets a clear conflict.
 
 Stored events are ordered and written once per batch. A batch replayed after a transient error
 appends rather than deduplicates, so a consumer keys on the event sequence number.

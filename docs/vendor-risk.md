@@ -25,6 +25,13 @@ when you configure them, and each is optional:
 | Advisory AI | You configure a provider | Your provider, including local Ollama; read-only, executes nothing |
 | Project sync | You add a git project | Your repository host |
 | Notifications and webhooks | You configure them | Your endpoints |
+| Terraform and OpenTofu modules | A plan's configuration calls registry or remote modules | The module sources the configuration names, from where the plan runs, with the run's own credentials |
+
+The tools SwitchTender starts are held to the same promise. Terraform checks for a newer version of
+itself against HashiCorp's checkpoint service on every command unless `CHECKPOINT_DISABLE` is set,
+so every Terraform and OpenTofu process SwitchTender starts, the module download, the init, and the
+plan or apply, runs with `CHECKPOINT_DISABLE=1`. A run whose own environment sets
+`CHECKPOINT_DISABLE`, through an env credential, keeps the value it sets.
 
 ## Authentication and access
 

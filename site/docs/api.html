@@ -60,18 +60,26 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api" class="active">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api" class="active">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
 			<h1 id="http-api">HTTP API</h1>
 <p>Every endpoint the server exposes. The API is served under the <code>/v1</code> base path. The web UI at
-<code>/ui/</code>, along with <code>/healthz</code>, <code>/readyz</code>, <code>/metrics</code>, <code>/.well-known/loomseal.json</code>, the OpenID
-Connect and SAML sign-in routes, the webhook <code>/hooks</code> path, and the <code>/relay</code> worker path, is
-unversioned. The root redirects to the UI.</p>
+<code>/ui/</code>, along with <code>/healthz</code>, <code>/readyz</code>, <code>/metrics</code>, <code>/.well-known/loomseal.json</code>, the workload
+identity federation documents under <code>/.well-known/</code>, the OpenID Connect and SAML sign-in routes, the
+webhook <code>/hooks</code> path, and the <code>/relay</code> worker path, is unversioned. The root redirects to the UI. A
+template's provisioning callback, <code>POST /v1/templates/{id}/callback</code>, is versioned and carries no
+token: the host config key in its body is the credential. The same holds for the one AWX path
+served, a template's AWX-compatible callback address,
+<code>POST /api/v2/job_templates/{awx id}/callback/</code>. Nothing else under <code>/api/</code> is served.</p>
 <p><code>/.well-known/loomseal.json</code> is deliberately public and unauthenticated: it publishes this install's
 signing key and identifiers so a relying party can pin the key from a channel independent of any
 bundle it is handed.</p>
+<p><code>/.well-known/openid-configuration</code> and <code>/.well-known/jwks.json</code> are public and unauthenticated for
+the same kind of reason: a cloud verifying a run's identity token fetches them and has no account
+here. They hold public keys only, and answer <code>404</code> until <code>--federation-issuer</code> is set. See
+<a href="/docs/federation">Federated cloud credentials</a>.</p>
 <h2 id="licensed-endpoints">Licensed endpoints</h2>
 <p>Almost every endpoint below runs on Community, which needs no license. These answer <code>403</code> without one,
 with a message naming the feature rather than failing in some subtler way:</p>
@@ -135,7 +143,7 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/runs/{id}</code></td>
-<td>One run.</td>
+<td>One run. A <a href="/docs/pull-request-review">pull request review</a> plan also carries <code>pull_request_report</code>: the pull request, the phase and commit status it was last told, when, and a forge failure being retried with its attempts and next try.</td>
 </tr>
 <tr>
 <td>POST</td>
@@ -155,12 +163,37 @@ either licensed or absent.</li>
 <tr>
 <td>POST</td>
 <td><code>/v1/runs/{id}/approve</code></td>
-<td>Release a run held for approval so it runs.</td>
+<td>Release a run held for approval so it runs. Given a workflow approval step's id, or a workflow waiting at exactly one, it approves the step, and an optional <code>state_digest</code> body field binds the decision to the state the approver was shown. An optional <code>reason</code> is recorded as audit evidence, as <a href="#approver-reasons">Approver reasons</a> describes.</td>
 </tr>
 <tr>
 <td>POST</td>
 <td><code>/v1/runs/{id}/reject</code></td>
-<td>Deny a run held for approval.</td>
+<td>Deny a run held for approval, or deny a workflow approval step so the workflow takes its deny path. An optional <code>reason</code> is recorded the same way.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/runs/{id}/decisions</code></td>
+<td>The run's decision records: each approval and denial a person made on it or on its approval steps, the reason given, its corrections, any redaction, and for an agent-initiated run the separation-of-duties evaluation. Admin, or the actor who asked for the run.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/v1/runs/{id}/decisions/{decision}/corrections</code></td>
+<td>Append a correction to a decision's reason, <code>{&quot;text&quot;: &quot;...&quot;}</code>. A reason is never edited. Admin.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/v1/runs/{id}/decisions/{record}/redact</code></td>
+<td>Remove a reason's text and random value, <code>{&quot;category&quot;: &quot;personal_data&quot;}</code> (or <code>secret</code>, <code>other</code>), recorded on the chain. Admin.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/approvals</code></td>
+<td>Workflow approval steps waiting for a decision: the workflow, the step and its description, the steps it waited behind, what each answer runs, when it times out, and the <code>state_digest</code> to decide against. Viewer role.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/attention</code></td>
+<td>What is stopping work: one count per main blocker, worker lost, no worker available, approval needed, and blocked, and each item with its other conditions, how long it has been in its current blocker, who can act, and what happens next. <code>?blocker=</code> lists one blocker's items. See <a href="#what-needs-attention">What needs attention</a>. Viewer role.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -201,6 +234,11 @@ either licensed or absent.</li>
 <td>GET</td>
 <td><code>/v1/runs/{id}/events</code></td>
 <td>Structured events as JSON. <code>?after=&lt;seq&gt;</code> and <code>?limit</code> page them, and the response carries <code>next_after</code> to continue. <code>?download=1</code> streams the same events as newline-delimited JSON with a filename attachment.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/runs/{id}/notifications</code></td>
+<td>What the run's named notification targets were told, in the run's event order: each event, each target, and whether the delivery arrived, is pending, failed after its retries, or was skipped, with why. Operator role.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -245,7 +283,7 @@ either licensed or absent.</li>
 <tr>
 <td>POST</td>
 <td><code>/v1/schedules</code></td>
-<td>Cron schedule for a run, split, pipeline, or template. The response records <code>created_by</code>.</td>
+<td>Cron or RFC 5545 recurrence schedule for a run, split, pipeline, or template. The response records <code>created_by</code>.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -255,7 +293,7 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/schedules/preview</code></td>
-<td>Next fire times for a cron expression and timezone, without saving anything.</td>
+<td>Next fire times for a cron expression or a recurrence rule and timezone, without saving anything.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -374,13 +412,33 @@ either licensed or absent.</li>
 </tr>
 <tr>
 <td>POST</td>
+<td><code>/v1/templates/{id}/callback-key</code></td>
+<td>Mint or rotate the template's provisioning callback key, returned once. Needs the server encryption key.</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/v1/templates/{id}/callback-key</code></td>
+<td>Revoke the template's callback key. Every host holding it is refused from then on.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/v1/templates/{id}/callback</code></td>
+<td>A host's provisioning callback. Authenticated by the host config key in the body rather than a token. See <a href="#provisioning-callbacks">provisioning callbacks</a>.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/v2/job_templates/{awx id}/callback/</code></td>
+<td>The same callback at the address AWX gave an imported template, with or without the trailing slash. POST only. See <a href="#provisioning-callbacks">provisioning callbacks</a>.</td>
+</tr>
+<tr>
+<td>POST</td>
 <td><code>/v1/triggers</code></td>
-<td>Create a webhook trigger, returns a signing secret once.</td>
+<td>Create a webhook trigger, or with <code>review</code> a <a href="/docs/pull-request-review">pull request review</a> trigger, returns a signing secret once.</td>
 </tr>
 <tr>
 <td>PUT</td>
 <td><code>/v1/triggers/{id}</code></td>
-<td>Rename a trigger or toggle signature enforcement.</td>
+<td>Rename a trigger, toggle signature enforcement, or replace a review trigger's <code>review</code> settings.</td>
 </tr>
 <tr>
 <td>POST</td>
@@ -390,7 +448,7 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/triggers</code></td>
-<td>List webhook triggers.</td>
+<td>List webhook triggers, each with <code>last_error</code> saying why its last delivery started no run.</td>
 </tr>
 <tr>
 <td>DELETE</td>
@@ -400,12 +458,57 @@ either licensed or absent.</li>
 <tr>
 <td>POST</td>
 <td><code>/hooks/{token}</code></td>
-<td>Fire a trigger from a git push. A required HMAC signature is checked first.</td>
+<td>Fire a trigger from a git push, or plan a pull request for a review trigger. A required HMAC signature, or GitLab's token, is checked first. A fire whose inventory matches no hosts is skipped and answered <code>200</code> with <code>skipped</code>. Answers within five seconds, with <code>accepted</code> when the launch is still going.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/v1/notifications</code></td>
+<td>Create a named notification target. Its address and key are sealed at rest and never returned. Admin.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/notifications</code></td>
+<td>List notification targets, secrets never included. Operator role.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/notifications/{id}</code></td>
+<td>One notification target. Operator role.</td>
+</tr>
+<tr>
+<td>PUT</td>
+<td><code>/v1/notifications/{id}</code></td>
+<td>Update a target. A blank or masked address or key keeps the stored one. Admin, or a manage grant on it.</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/v1/notifications/{id}</code></td>
+<td>Delete a target and every attachment it has. Admin, or a manage grant on it.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/notifications/{id}/attachments</code></td>
+<td>The objects a target is attached to, and for which events. Operator role.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/notifications/{id}/deliveries</code></td>
+<td>A target's recent deliveries, newest first. <code>?status=failed</code> keeps the failures. Operator role.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/v1/notifications/{id}/attachments</code></td>
+<td>Attach a target to a template, workflow, schedule, project, or organization for one event. Use of the target and management of the object.</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/v1/notifications/{id}/attachments/{attachment}</code></td>
+<td>Detach one attachment, asking what attaching it asked.</td>
 </tr>
 <tr>
 <td>POST</td>
 <td><code>/v1/credentials</code></td>
-<td>Store a credential, encrypted at rest. Fourteen built-in kinds, or a custom type via <code>type_id</code> and <code>fields</code>. Non-secret <code>settings</code> ride beside the secret and return from the API.</td>
+<td>Store a credential, encrypted at rest. Fifteen built-in kinds, or a custom type via <code>type_id</code> and <code>fields</code>. Non-secret <code>settings</code> ride beside the secret and return from the API. The four federated kinds, <code>aws_oidc</code>, <code>gcp_oidc</code>, <code>azure_oidc</code>, and <code>oidc_token</code>, take <code>settings</code> and no <code>secret</code>.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -430,7 +533,7 @@ either licensed or absent.</li>
 <tr>
 <td>PUT</td>
 <td><code>/v1/credential-types/{id}</code></td>
-<td>Replace a custom credential type. Admin only.</td>
+<td>Replace a custom credential type, keeping its creation time and origin. Admin only.</td>
 </tr>
 <tr>
 <td>DELETE</td>
@@ -440,7 +543,32 @@ either licensed or absent.</li>
 <tr>
 <td>PUT</td>
 <td><code>/v1/credentials/{id}</code></td>
-<td>Update a credential.</td>
+<td>Update a credential. A custom-typed credential takes <code>fields</code>, or a built-in <code>kind</code> with that kind's <code>secret</code> to move onto the kind.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/.well-known/openid-configuration</code></td>
+<td>The federation issuer's discovery document. Public.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/.well-known/jwks.json</code></td>
+<td>The federation issuer's public key set: every key from its creation until its removal, which is the signing key, a key a rotation published ahead of signing, and any key retired within the last 24 hours. Public.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/federation/keys</code></td>
+<td>The federation signing keys by id, each with its state and its created, activated, retired, and removed times. No private material.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/v1/federation/keys/rotate</code></td>
+<td>Normal rotation: publish a new federation key now and start signing with it in 24 hours. The current key signs until then and stays published 24 hours after. 409 while a rotation is already under way. Admin only.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/v1/federation/keys/rotate/emergency</code></td>
+<td>Emergency rotation, for a key that may be compromised: a new key signs at once, and every other key leaves the published set now with its private half erased, not only the one signing. The keys are all stored the same way, so a suspected compromise of one is treated as a compromise of all. Runs holding a token from a removed key fail. Admin only.</td>
 </tr>
 <tr>
 <td>DELETE</td>
@@ -470,12 +598,12 @@ either licensed or absent.</li>
 <tr>
 <td>POST</td>
 <td><code>/v1/tokens</code></td>
-<td>Mint a token bound to an account. Returns it once.</td>
+<td>Mint a token bound to an account. Returns it once, with <code>created_by</code> naming who minted it.</td>
 </tr>
 <tr>
 <td>GET</td>
 <td><code>/v1/tokens</code></td>
-<td>List tokens without secrets. Admin only.</td>
+<td>List tokens without secrets, each with <code>created_by</code> and <code>created_by_type</code>. Admin only.</td>
 </tr>
 <tr>
 <td>DELETE</td>
@@ -650,7 +778,32 @@ either licensed or absent.</li>
 <tr>
 <td>DELETE</td>
 <td><code>/v1/inventories/{id}</code></td>
-<td>Delete a stored inventory.</td>
+<td>Delete a stored inventory, with every fact cached for its hosts.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/inventories/{id}/facts</code></td>
+<td>List the inventory's hosts with cached facts: size, gathering run, and time. Operator role.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/inventories/{id}/facts/{host}</code></td>
+<td>Read one host's cached facts. Secret-looking values are masked below admin. Operator role.</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/v1/inventories/{id}/facts/{host}</code></td>
+<td>Clear one host's cached facts, so the next run gathers them afresh.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/v1/inventories/preview</code></td>
+<td>Resolve an unsaved smart or constructed inventory and list the hosts it reaches for the caller, with the <code>engine</code> that resolved it and the <code>ansible_core</code> version when Ansible did.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/v1/inventories/{id}/preview</code></td>
+<td>Resolve a stored smart or constructed inventory and list the hosts a launch by the caller would reach, with the same <code>engine</code> and <code>ansible_core</code>.</td>
 </tr>
 <tr>
 <td>POST</td>
@@ -660,7 +813,7 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/policies</code></td>
-<td>List approval policies.</td>
+<td>List approval policies. A Rego policy from the policy file carries a <code>rego</code> object with its <code>package</code>, <code>syntax</code>, bundle <code>sha256</code>, <code>modules</code>, <code>warn</code> (<code>hold</code> or <code>note</code>), and <code>timeout</code>. See <a href="/docs/policy">Approval policies</a>.</td>
 </tr>
 <tr>
 <td>PUT</td>
@@ -690,7 +843,7 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/doctor</code></td>
-<td>Install health checks and their findings, admin only.</td>
+<td>Install health checks and their findings, admin only, with the server's ansible-core version and the releases the inventory engine is tested against under <code>ansible</code>.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -728,6 +881,16 @@ mistaken for a whole one.</p>
 that has no secret yet, which every imported credential is until someone sets one, or a credential
 whose sealed secret does not open under this server's encryption key and salt. The error names the
 credential and the fix: set its secret, or restore the key and salt it was sealed with.</p>
+<h3 id="how-long-a-submission-can-take">How long a submission can take</h3>
+<p>A submission answers once the approval gate has judged the run, and for a Terraform or OpenTofu
+dry run whose configuration calls registry or remote modules, the gate downloads those modules
+first. <code>POST /v1/runs</code>, a template launch, a rerun, and an agent's submission through MCP wait for
+that download, which <code>--module-fetch-timeout</code> bounds at two minutes by default, and then for the
+scan, so allow a client that long before it gives up. A download that runs out of time does not
+fail the submission: the plan is recorded as unclassified, and held or refused like any other plan
+the gate could not read in full. A webhook does not wait that long, since its sender would stop
+listening first: <code>POST /hooks/{token}</code> answers within five seconds, with <code>accepted</code> when the launch
+is still going.</p>
 <h3 id="when-the-chain-itself-refuses-a-bundle">When the chain itself refuses a bundle</h3>
 <p><code>GET /v1/audit/bundle</code> recomputes the whole chain and holds it against every anchor recorded over it
 before any window is applied. A chain this server checked and rejected is a finding, not a fault, so
@@ -900,6 +1063,14 @@ trigger, runs the graph as a pipeline, and the template's survey answers and ext
 step. A workflow template sets no top-level <code>playbook</code>, <code>command</code>, <code>tool</code>, <code>shards</code>, or Ansible
 controls, since each step names its own; the graph is validated when the template is saved, so a
 cycle or an unknown dependency is refused then rather than on every launch.</p>
+<p>A step with <code>&quot;type&quot;: &quot;approval&quot;</code> is an approval step: the workflow waits there until an admin
+approves or denies it. It takes a <code>description</code> and an <code>approval_timeout</code> in seconds, and a step
+names it in <code>if_denied</code> to run when it is denied or times out. <code>GET /v1/approvals</code> lists the steps
+waiting, and <code>POST /v1/runs/{id}/approve</code> or <code>/reject</code> decides one, optionally with
+<code>{&quot;state_digest&quot;: &quot;...&quot;}</code> from the listing so the decision binds to what was shown. A workflow
+reaching an approval step is announced with its own event, <code>workflow.step_awaiting_approval</code>, which
+names the step and what each answer runs next, so a receiver can tell it from a whole run held for
+approval. The <a href="/docs/concepts">concepts page</a> describes the semantics.</p>
 <pre><code class="language-bash">curl -X POST https://switchtender.example.com/v1/templates   -H &quot;Authorization: Bearer $ST_TOKEN&quot;   -H 'Content-Type: application/json'   -d '{
     &quot;name&quot;: &quot;build and ship&quot;,
     &quot;inventory_id&quot;: &quot;inv_3f9c1b7a2e04&quot;,
@@ -909,6 +1080,143 @@ cycle or an unknown dependency is refused then rather than on every launch.</p>
     ]
   }'
 </code></pre>
+<h2 id="approver-reasons">Approver reasons</h2>
+<p>An approval or a denial may carry the approver's reason, for a held run and a workflow approval
+step alike. It is optional unless a policy's <a href="/docs/policy#requiring-the-approvers-reason"><code>require_reason</code></a>
+asks for one, and it holds at most 1,000 characters.</p>
+<pre><code class="language-bash">curl -X POST https://switchtender.example.com/v1/runs/run_abc123/approve \
+  -H &quot;Authorization: Bearer $ST_TOKEN&quot; -H 'Content-Type: application/json' \
+  -d '{&quot;reason&quot;: &quot;approved, change window confirmed with the database team&quot;}'
+</code></pre>
+<p>The reason passes through the secret masker before anything records it, the same masker run output
+and pull request comments pass through. When the masker changes the text, nothing is recorded: the
+answer is 409 with <code>masked_reason</code>, the text as it would be kept, and the decision goes through when
+it is sent again with <code>masked_reason</code> set to exactly that text. A reason is never refused for looking
+like a secret. The interface shows the masked text and asks the approver to confirm it, and labels
+the field &quot;Stored as audit evidence. Don't include secrets or personal data.&quot; with &quot;Masked for known
+secrets before storage. Treat it as permanent audit data.&quot; beneath it.</p>
+<p>The masked text is stored with a random 32-byte value beside the decision. The chain entry for the
+decision commits a hiding commitment to it, never the text: <code>sha256:</code> and the hex SHA-256 of the
+RFC 8785 canonical JSON object <code>{&quot;event&quot;: &lt;decision id&gt;, &quot;random&quot;: &lt;hex of the random value&gt;, &quot;reason&quot;: &lt;masked text&gt;}</code>, where the decision id is the id of the chain entry that records the
+decision and is committed in its body as <code>decision_id</code>. The request that carried the reason is
+recorded with the reason withheld from its fingerprint, so the text as typed is committed nowhere.</p>
+<p><code>GET /v1/runs/{id}/decisions</code> lists the run's decisions with their reasons and random values, the
+separation-of-duties evaluation of a decision on an agent's run, corrections, and redactions. The
+evidence dossier and a contiguous receipt carry the same text and random value beside each decision,
+so anybody holding the receipt recomputes the commitment offline with no secret, and
+<code>switchtender verify</code> does exactly that and fails a receipt whose reason does not open it.</p>
+<p>A reason is never edited. <code>POST /v1/runs/{id}/decisions/{decision}/corrections</code> with
+<code>{&quot;text&quot;: &quot;...&quot;}</code> appends a correction, masked and committed the same way under its own chain entry,
+and the dossier and the interface show it under the decision it corrects. An admin may redact a
+reason or a correction with <code>POST /v1/runs/{id}/decisions/{record}/redact</code> and
+<code>{&quot;category&quot;: &quot;personal_data&quot;}</code>, or <code>secret</code> or <code>other</code>. Redaction is a privacy action, not an edit:
+it removes the text and the random value together and appends a chain entry recording who redacted
+it, when, and the category, referencing the decision. The commitment stays on the chain and can never
+be opened again. Receipts already issued keep what they disclosed.</p>
+<p>A reason is audit data, subject to your organization's retention policy. It is held as long as its
+run: when retention removes the run, it removes the decision records with it, and the commitment that
+stays on the chain can no longer be opened. A rejected run's <code>error</code> reads &quot;rejected by an approver&quot;
+and a denied step's &quot;denied by an approver&quot;. The reason stays in the decision record, where a
+redaction can reach it, and is never copied into a run's error or its committed outcome.</p>
+<h2 id="fact-cache">Fact cache</h2>
+<p>A template may set <code>use_fact_cache</code>, the setting AWX calls the same thing. Every launch then writes
+the facts earlier runs gathered for the inventory's hosts into a private directory that Ansible's
+<code>jsonfile</code> cache plugin reads, and stores what the run gathers when it ends, so a play with
+<code>gather_facts: false</code> still sees each host's facts. <code>fact_cache_timeout</code> is how many seconds
+cached facts stay fresh enough to serve, and zero serves them however old they are, which is the
+AWX default. Both need <code>inventory_id</code>, because facts are kept per stored inventory host, and both
+are omitted-means-unchanged on an update.</p>
+<pre><code class="language-bash">curl -X PUT https://switchtender.example.com/v1/templates/tpl_9d41c2 \
+  -H &quot;Authorization: Bearer $ST_TOKEN&quot; \
+  -H 'Content-Type: application/json' \
+  -d '{
+    &quot;name&quot;: &quot;patch web&quot;,
+    &quot;playbook&quot;: &quot;plays/patch.yml&quot;,
+    &quot;inventory_id&quot;: &quot;inv_3f9c1b7a2e04&quot;,
+    &quot;use_fact_cache&quot;: true,
+    &quot;fact_cache_timeout&quot;: 86400
+  }'
+</code></pre>
+<p>With the cache on, a run's spec records <code>&quot;fact_cache&quot;: {&quot;timeout_seconds&quot;: N}</code>. An approval binds to
+it and a receipt discloses it, so a run whose fact cache setting changes after it was approved is
+refused, and a held run shows the setting to its approver. With the cache off the field is absent,
+so the digest of every such run is what it always was.</p>
+<p><code>GET /v1/inventories/{id}/facts</code> lists the cached hosts and <code>GET /v1/inventories/{id}/facts/{host}</code>
+returns one host's document. Reading either takes the operator role and read on the inventory, and a
+host whose gathering run the caller may not read is left out. A server started with
+<code>--fact-cache-admin-only</code> answers 403 to anyone below admin. Cached facts never enter the audit
+chain, a receipt, an evidence bundle, or a backup, and a document larger than one mebibyte is not
+kept. See <a href="/docs/tool-ansible#fact-cache">the Ansible guide</a> for how the cache behaves during a run.</p>
+<h2 id="provisioning-callbacks">Provisioning callbacks</h2>
+<p>A template may set <code>allow_callbacks</code>, which lets a host in the template's stored inventory launch
+the template against itself, usually from a boot script. The host posts the template's host config
+key to <code>/v1/templates/{id}/callback</code>. The server matches the address the request came from to one
+host in the inventory and launches the template limited to that host. The launch passes through the
+approval policies like any other.</p>
+<p>Mint the key once, and keep it, because it is never shown again:</p>
+<pre><code class="language-bash">curl -X POST https://switchtender.example.com/v1/templates/tpl_9d41c2/callback-key \
+  -H &quot;Authorization: Bearer $ST_TOKEN&quot;
+</code></pre>
+<pre><code class="language-json">{
+  &quot;template&quot;: &quot;tpl_9d41c2&quot;,
+  &quot;host_config_key&quot;: &quot;hck_...&quot;,
+  &quot;callback_path&quot;: &quot;/v1/templates/tpl_9d41c2/callback&quot;
+}
+</code></pre>
+<p>The host then calls back the same way an AWX host does:</p>
+<pre><code class="language-bash">curl -k -f -i -H 'Content-Type: application/json' -X POST \
+  -d '{&quot;host_config_key&quot;: &quot;hck_...&quot;}' \
+  https://switchtender.example.com/v1/templates/tpl_9d41c2/callback
+</code></pre>
+<p>A form body, <code>host_config_key=hck_...</code>, is accepted too. The answers are:</p>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>201</td>
+<td>The run was created. <code>Location</code> names it, and an approval policy may have held it.</td>
+</tr>
+<tr>
+<td>400</td>
+<td>No host, or more than one, matched the caller's address, the template's survey has a required question with no default (see <a href="#launches-nobody-answers">launches nobody answers</a>), or the body carried <code>extra_vars</code>.</td>
+</tr>
+<tr>
+<td>403</td>
+<td>The key is wrong, the template does not accept callbacks, a deny rule refused the run, or the calling host is outside a limit the template keeps. An unknown AWX id, and a template with its AWX-compatible address off, answer the same as a wrong key.</td>
+</tr>
+<tr>
+<td>409</td>
+<td>A callback run for this host is still pending or running, or the template cannot launch from a callback, which includes a template whose inventory is resolved when a run starts: one read from a secret source or a command, and a smart or constructed inventory. It is also the answer when the template keeps its limit and this server cannot run <code>ansible-inventory</code> to check it.</td>
+</tr>
+<tr>
+<td>410</td>
+<td>On the AWX-compatible address only: the template that address reached was deleted.</td>
+</tr>
+<tr>
+<td>429</td>
+<td>Too many callbacks or wrong keys from this address in the last minute. The body names the limit and the flag that sets it, and <code>Retry-After</code> says when to try again.</td>
+</tr>
+<tr>
+<td>503</td>
+<td>The callback could not be recorded in the audit trail, or the template's limit could not be evaluated, so nothing was launched.</td>
+</tr>
+</tbody>
+</table>
+<p>Turning <code>allow_callbacks</code> off revokes the key. A template also carries <code>callback_limit</code>, which says
+what a callback does with the template's <code>limit</code>: <code>intersect</code>, the default, launches only for a
+calling host the limit selects, and <code>replace</code> launches for any matched host, the way AWX does. Both
+are omitted-means-unchanged on an update.</p>
+<p>A template an import bound to its AWX job template id is served with <code>awx_job_template_id</code> and, once
+a host has called through the AWX-compatible address, <code>awx_callback_called_at</code>. Neither can be set.
+<code>awx_callback</code> turns that address on or off, and can be turned on only for a template an import
+bound. See <a href="/docs/tool-ansible#provisioning-callbacks">the Ansible guide</a> for how a host is matched and
+how the launch is recorded, and <a href="/docs/migration#the-awx-compatible-callback-address">the migration
+guide</a> for the AWX-compatible address.</p>
 <h2 id="list-responses">List responses</h2>
 <p>Every list response is an envelope: the rows under a name, <code>count</code> for how many were returned, and
 <code>total</code> for how many exist. They agree on any ordinary install.</p>
@@ -934,8 +1242,8 @@ an extra var. A field also takes an optional <code>help</code> string shown bene
 <td><code>min</code> and <code>max</code> bound the answer, inclusive.</td>
 </tr>
 <tr>
-<td><code>text</code>, <code>multiline</code></td>
-<td><code>min_length</code> and <code>max_length</code> bound the length; <code>pattern</code> is a regular expression the whole answer must match.</td>
+<td><code>text</code>, <code>multiline</code>, <code>secret</code></td>
+<td><code>min_length</code> and <code>max_length</code> bound the length, and <code>pattern</code> is a regular expression the whole answer must match.</td>
 </tr>
 <tr>
 <td><code>choice</code></td>
@@ -959,8 +1267,9 @@ an extra var. A field also takes an optional <code>help</code> string shown bene
   ]
 }
 </code></pre>
-<p><code>type</code> is one of <code>text</code>, <code>multiline</code>, <code>int</code>, <code>choice</code>, or <code>bool</code>, and <code>integer</code>, <code>boolean</code>, <code>string</code>,
-and <code>textarea</code> are read as <code>int</code>, <code>bool</code>, <code>text</code>, and <code>multiline</code>. <code>var</code> names the extra var the
+<p><code>type</code> is one of <code>text</code>, <code>multiline</code>, <code>secret</code>, <code>int</code>, <code>choice</code>, or <code>bool</code>, and <code>integer</code>, <code>boolean</code>,
+<code>string</code>, <code>textarea</code>, and <code>password</code> are read as <code>int</code>, <code>bool</code>, <code>text</code>, <code>multiline</code>, and <code>secret</code>.
+<code>var</code> names the extra var the
 answer becomes, and it is the only field besides <code>type</code> that every entry must carry. An unknown key
 is refused rather than ignored, so a survey that almost parses is reported instead of silently
 losing a field.</p>
@@ -968,6 +1277,101 @@ losing a field.</p>
 number and a <code>bool</code> as <code>true</code> or <code>false</code>:</p>
 <pre><code class="language-json">{&quot;answers&quot;: {&quot;release&quot;: &quot;v2.1.0&quot;, &quot;batch&quot;: 10, &quot;environment&quot;: &quot;staging&quot;}}
 </code></pre>
+<h3 id="secret-fields">Secret fields</h3>
+<p>A <code>secret</code> field asks for a password, a token, or any other answer that must not be kept as text.
+AWX calls the same thing a password field. The answer is checked against the field's bounds like a
+text answer, then sealed with the credential key before anything is stored, the same AES-256-GCM
+sealing a credential's secret gets. What follows from that:</p>
+<ul>
+<li>The run keeps only the sealed answer. Its <code>extra_vars</code> never hold it, and a run read through the
+API, the UI, an export, or an agent's MCP tools lists the variable under <code>sealed_vars</code> by name
+only, which says an answer was supplied and nothing about what it was.</li>
+<li>The executor opens the answer inside the execution that uses it and hands it to the tool the way
+every other answer arrives: as an Ansible extra var, in <code>SWITCHTENDER_VARS</code> and its own
+<code>SWITCHTENDER_VAR_&lt;name&gt;</code> entry for a script, or as a <code>TF_VAR_</code> entry for Terraform and OpenTofu.
+A secret answer of the same name wins over a template extra var.</li>
+<li>The answer is masked in the run's log and its events wherever the tool prints it, whatever the
+variable is called, the way a credential's secret is. A value shorter than four characters is
+not masked, the same floor credentials have.</li>
+<li>The audit chain, the receipt, the dossier, and the SIEM stream record that a secret answer was
+supplied, by variable name in the run's spec, and never its value or its sealed form.</li>
+<li>An approval covers which sealed answer runs, not only that one was given. A run created with a
+secret answer lists, under <code>sealed_var_digests</code>, the SHA-256 of each answer's sealed form, fixed
+when the run is created and part of the spec an approval binds and a receipt discloses. A digest of
+ciphertext sealed under the server's key says nothing about the answer. The executor opens a
+sealed answer only while it still matches its digest, so an answer swapped for another under the
+same name after the run was approved fails the run with the reason and never reaches the tool. A
+run created before digests existed carries none and keeps the spec it had.</li>
+<li>Launching a template that asks a secret question needs <code>SWITCHTENDER_ENCRYPTION_KEY</code>. Without one
+the launch is refused rather than storing the answer as text.</li>
+<li>A relay worker receives a sealed answer only when its pool registered a delivery key: the control
+node opens the answer at claim and seals it, with the run's credentials, to that pool's key, bound
+to the claim. A run carrying one on a pool with no key fails on the relay worker with the reason
+instead of running with the answer missing. See
+<a href="/docs/configuration#delivering-secrets-to-relay-workers">Delivering secrets to relay workers</a>.</li>
+</ul>
+<p>A secret field may carry a <code>default</code>. It is sealed when the template is saved, and every read of the
+template, an admin's included, shows it as <code>&quot;[redacted]&quot;</code> to say that a default is set. Send that
+mask back unchanged on an edit and the stored default is kept, send a new value to replace it, or
+send an empty string to clear it. A launch that leaves the field unanswered uses the sealed default
+without it ever being opened outside the execution. In the launch dialog the field is a password
+input that is never filled in, and leaving it empty is what uses the default.</p>
+<p>A relaunch, a rerun, a retry, a shard of a split, and every step of a saved workflow carry the
+sealed answer of the run they come from, which is what AWX does on relaunch, held to the digest that
+run was created with. Retention removes the
+sealed answer with the run it belongs to. An agent may answer a secret question on a template it is
+allowed to launch, and no caller, agent or person, can read an answer back.</p>
+<h3 id="launches-nobody-answers">Launches nobody answers</h3>
+<p>A schedule, a webhook trigger, a pull request plan, and a provisioning callback launch a template
+with nobody there to answer its survey, so each one fills it in the same way:</p>
+<ul>
+<li>Every question takes its default. A plain question's default becomes an extra var, over a
+template extra var of the same name, and a secret question's sealed default rides onto the run
+still sealed, in place of any template extra var of that name.</li>
+<li>A required question takes its default too, and the default is checked against the question's
+rules the way an answer is. An empty default does not count as one.</li>
+<li>A required question with no default, or with a default its rules refuse, has no answer, so the
+launch is refused and no run is created. The refusal names every such question and says to give
+it a default or launch the template by hand.</li>
+</ul>
+<p>Where the refusal is recorded depends on what fired:</p>
+<table>
+<thead>
+<tr>
+<th>Launch</th>
+<th>Recorded on</th>
+<th>Chain entry</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Schedule</td>
+<td>The schedule's <code>last_error</code>, shown as &quot;did not run&quot; in the schedules list.</td>
+<td><code>SCHEDULE /schedules/{id}/refused/survey/{questions}</code></td>
+</tr>
+<tr>
+<td>Webhook trigger</td>
+<td>The answer to the sender, a 409, and the trigger's <code>last_error</code> and <code>last_error_at</code>.</td>
+<td><code>POST /hooks/{trigger}/refused/survey/{questions}</code></td>
+</tr>
+<tr>
+<td>Pull request plan</td>
+<td>The pull request's comment and status, and the trigger's <code>last_error</code>.</td>
+<td><code>POST /hooks/{trigger}/review/{number}/refused/survey/{questions}</code></td>
+</tr>
+<tr>
+<td>Provisioning callback</td>
+<td>The answer to the host, a 400.</td>
+<td>None, as for every callback refused before a host is matched.</td>
+</tr>
+</tbody>
+</table>
+<p>The questions are the variable names, comma separated. The refusal is recorded in place of a fire,
+so the trail never shows a fire that ran nothing. On a push trigger, <code>last_error</code> says why the most
+recent delivery started no run, whatever the reason. On a review trigger it records a plan refused
+for its survey, and the pull request hears about every other refusal. Either clears when a delivery
+starts a run. The Doctor reports an enabled schedule whose template cannot be answered as broken,
+before its first fire.</p>
 <h2 id="per-template-notifications">Per-template notifications</h2>
 <p>A template or a run submission may carry <code>notifications</code>, a list of targets that receive its
 terminal state in addition to the server-wide channels, and hear when a rule holds it for approval.
@@ -1041,22 +1445,266 @@ decision, and those report incidents.</p>
 </code></pre>
 <p>A webhook, a target or one named with <code>--notify-webhook</code>, receives one body shape:
 <code>{&quot;event&quot;: &quot;run.finished&quot;, &quot;run&quot;: {...}}</code> when a run reaches a terminal state, and the same with
-<code>&quot;event&quot;: &quot;run.held&quot;</code> when a rule holds it for a person to decide on.</p>
+<code>&quot;event&quot;: &quot;run.held&quot;</code> when a rule holds it for a person to decide on. Two more events use the same
+shape:</p>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>When</th>
+<th>What the <code>run</code> carries</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>workflow.step_awaiting_approval</code></td>
+<td>A workflow reaches an approval step and waits for a person.</td>
+<td>The workflow, with <code>awaiting_step</code>: the step's <code>id</code>, which approve and reject take, its <code>name</code> and <code>description</code>, <code>on_approve</code> and <code>on_deny</code> naming the steps each answer runs next, and <code>expires_at</code> when it times out.</td>
+</tr>
+<tr>
+<td><code>run.needs_attention</code></td>
+<td>Work has needed attention past its alert threshold. See <a href="#what-needs-attention">What needs attention</a>.</td>
+<td>The run, with <code>attention</code>: the alert's <code>id</code>, its <code>blocker</code>, a one-line <code>summary</code>, the <code>reason</code>, <code>who_can_act</code>, <code>next</code>, <code>since</code>, <code>waiting_seconds</code>, <code>threshold_seconds</code>, and the interface <code>path</code> that lists it. A schedule held back by the run is named in <code>schedule_id</code> and <code>schedule_name</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>The chat channels, ntfy, and email say the same in words: a step's message names the workflow, the
+step, what it asks, and what approving and denying each run, and an alert leads with its summary
+and who can act. A step waiting reaches the same channels a hold does. An alert reaches the chat
+channels, webhooks, ntfy, and email, and is emailed whatever <code>--notify-on</code> says, since it reports a
+problem. A run's own PagerDuty, Grafana, and Twilio targets hear neither, the same rule holds
+follow.</p>
 <p>A malformed target is refused at create or update with the field it lacks, not dropped at
 delivery. A Twilio or email target names only a recipient. The account credentials stay in server
 flags, so a template never carries them. On read, webhook URLs, PagerDuty routing keys, and
 Grafana tokens come back masked; an edit that echoes the mask back keeps the stored value.</p>
+<h2 id="notification-targets">Notification targets</h2>
+<p>A notification target is a channel defined once and attached to many objects, the way AWX attaches
+a notification template. It takes the same kinds and fields as a
+<a href="#per-template-notifications">per-template notification</a>: <code>webhook</code>, <code>slack</code>, <code>mattermost</code>,
+<code>rocketchat</code>, <code>discord</code>, <code>teams</code>, and <code>ntfy</code> with a <code>url</code>, <code>pagerduty</code> with a <code>key</code>, <code>grafana</code> with
+a <code>url</code> and a <code>key</code>, and <code>twilio</code> and <code>email</code> with a <code>to</code>. Each target has a <code>name</code>, an optional
+<code>description</code>, and an optional <code>org_id</code> whose members may use it.</p>
+<pre><code class="language-bash">curl -X POST https://switchtender.example.com/v1/notifications \
+  -H &quot;Authorization: Bearer $ST_TOKEN&quot; \
+  -H 'Content-Type: application/json' \
+  -d '{&quot;name&quot;: &quot;ops slack&quot;, &quot;kind&quot;: &quot;slack&quot;, &quot;url&quot;: &quot;https://hooks.slack.com/services/T0/B1/x&quot;}'
+</code></pre>
+<p>The <code>url</code> and <code>key</code> are sealed with the install's encryption key before they are stored, so
+creating a target that carries either needs <code>SWITCHTENDER_ENCRYPTION_KEY</code> and
+<code>SWITCHTENDER_ENCRYPTION_SALT</code> and is refused with 409 without them. Neither is ever returned. A
+read answers <code>url</code> as a hint masked to its scheme and host, <code>key_set</code> when a key is stored, and
+<code>needs_secret</code> for a target an import created without the secret it needs. An edit that sends a
+blank or masked <code>url</code> or <code>key</code> keeps the stored one, so a target can be renamed without its secret
+being entered again, and a stored secret never has to travel back through a form to be kept.</p>
+<p>A read also carries <code>delivery</code>, the target's delivery status. Its <code>state</code> is <code>needs_secret</code> for a
+target waiting for its secret, <code>configured</code> for one that has delivered nothing yet, <code>healthy</code> when
+its latest finished delivery arrived, <code>retrying</code> while a failed attempt waits for its next one, and
+<code>failing</code> when its latest finished delivery failed after its retries. Latest means the one that
+finished last, so a delivery retried for minutes counts from when it finished, not from when it was
+recorded. Beside it are <code>missing</code>, the times of the latest delivery and failure, the latest
+failure's reason, and how many failed in the last seven days. A target waiting for its secret
+keeps every part an import carried, such as a Grafana instance's address, and <code>missing</code> names what
+it still lacks: <code>url</code>, <code>key</code>, or both. An edit that sends only those parts finishes it. An edit
+that leaves one still missing is saved, and the target keeps waiting.</p>
+<p>An attachment ties a target to an object for one event:</p>
+<pre><code class="language-bash">curl -X POST https://switchtender.example.com/v1/notifications/ntf_ab12cd34ef56/attachments \
+  -H &quot;Authorization: Bearer $ST_TOKEN&quot; \
+  -H 'Content-Type: application/json' \
+  -d '{&quot;object_kind&quot;: &quot;template&quot;, &quot;object_id&quot;: &quot;tpl_abc123&quot;, &quot;event&quot;: &quot;failure&quot;}'
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Values</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>object_kind</code></td>
+<td><code>template</code>, <code>workflow</code> (a template whose steps make a graph, stored as <code>template</code>), <code>schedule</code>, <code>project</code>, or <code>org</code></td>
+</tr>
+<tr>
+<td><code>event</code></td>
+<td><code>started</code> when a run begins, <code>success</code> when it succeeds, <code>failure</code> when it fails, is interrupted, is canceled, or is rejected, <code>approval</code> when a rule holds it for a person or a workflow waits at an approval step, <code>skipped</code> when a schedule's fire starts nothing because its inventory matched no hosts, and <code>attention</code> when it has needed attention past its alert threshold. AWX's <code>error</code> and <code>approvals</code> are read as <code>failure</code> and <code>approval</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>When a top-level run reaches an event, every target attached for that event to the template it came
+from, the schedule that fired it, its project, its organization, or the organization that owns its
+template is told, once, however many of those it is attached through. The template is found through the run's source, so a target on a
+template hears the runs its schedules and triggers fire, and a rerun's runs as well. A split's shards
+and a pipeline's steps are not announced one by one. The parent is.</p>
+<p>A target is delivered with the same formatters and the same refusal of private addresses as every
+other channel, and with <code>SWITCHTENDER_EGRESS_PROXY</code> set it leaves through that proxy, after its
+address is checked, as every channel does. A hold reaches a PagerDuty, Grafana, or Twilio target
+never, the same rule a template's own targets follow. The rule is applied to the target as it stands
+when the message goes out, so a target changed to one of those kinds after a hold was recorded for
+it skips the hold, and the delivery is recorded as skipped with why. A target attached for
+<code>approval</code> hears a whole run held and a workflow waiting at an approval step alike, each as its own
+event, <code>run.held</code> or <code>workflow.step_awaiting_approval</code>. A target attached for <code>attention</code> hears an
+alert on every kind, a PagerDuty, Grafana, or Twilio target included, since attaching one for that
+event is the request to be paged. A PagerDuty incident takes the alert's <code>id</code> as its dedup key, so
+one condition opens one incident. A <code>started</code> event reaches a webhook as <code>&quot;event&quot;: &quot;run.started&quot;</code>,
+and a webhook target's body also carries <code>delivery</code>: <code>{&quot;id&quot;: &quot;ntf_ab12cd34ef56/run_x1y2/2&quot;, &quot;sequence&quot;: 2}</code>, with <code>note</code> added when an earlier message failed. The same <code>id</code> arrives as the
+<code>Idempotency-Key</code> header.</p>
+<h3 id="delivery-order">Delivery order</h3>
+<p>For each run and notification target, SwitchTender attempts delivery in the run's event order. A
+failed notification does not prevent later ones from being attempted after its retries run out.</p>
+<p>Each event is recorded as the run reaches it, with the run's next sequence number, in the same
+transaction that queues one delivery per attached target. A database that refuses the write for a
+moment is asked again for up to five seconds. A run's end is also marked owed in the same database
+write that ends the run, whatever ends it: the run's own server, a worker's report, the lease sweep,
+a cancel, or a decision. Every server records an end still owed a few seconds later, so a server
+that stops right after a run ends, or a database that refused the end for longer, leaves the end
+late rather than lost. A run's end is recorded once, however many times it is announced.</p>
+<p>A delivery waits until every earlier delivery to the same target for the same run has finished.
+Targets never wait for each other: a server attempts at most four deliveries to one target at once
+and keeps attempting the others' beside them, so a target that never answers holds only its own
+share. Steps of a workflow that run beside each other are not put in an order between themselves: an
+approval step's message follows the workflow's start and every step it comes after, and the
+workflow's end follows all of them.</p>
+<p>A failed attempt is tried four more times over about three minutes. A target that refuses a message
+outright, with any 4xx but 408, 425, or 429, or a channel this server has no transport for, is not
+retried. An attempt cut short because its server is stopping is not counted, and the next server to
+claim the delivery makes it. When the attempts run out the delivery is kept as failed, and the next
+message to that target about that run carries the note &quot;An earlier notification about this run to
+this target could not be delivered.&quot; The failure shows on the run at
+<code>GET /v1/runs/{id}/notifications</code> and on its page, in the target's delivery status and at
+<code>GET /v1/notifications/{id}/deliveries</code>, and in the doctor. A target waiting for its secret when an
+event happens is recorded as skipped, with why.</p>
+<p>Deliveries are idempotent on the target, the run, and the event's sequence number, so a retry, a
+restart, or several servers delivering from one database never queue or claim the same delivery
+twice. Events live in the database, so a delivery pending when a server stops is made by the next
+process to start on it. Nothing further is promised: not the order a receiver sees messages in, not
+that each arrives exactly once, and not that any arrives.</p>
+<p>This is how named targets are delivered. The server-wide <code>--notify-*</code> channels and a template's own
+<code>notifications</code> list keep their direct, best-effort delivery.</p>
+<p>A schedule's skipped fire is announced the same way, to the targets attached for <code>skipped</code> to the
+schedule, the template it fires, or its organization, and to the targets attached to the schedule
+itself for <code>failure</code>. An AWX import never attaches anything for <code>skipped</code>, and whoever watches a
+schedule's failures is who needs to know it stopped reaching hosts. A target attached only for
+<code>started</code>, <code>success</code>, or <code>approval</code> does not hear it. Each channel says <code>skipped: no hosts matched</code>
+and never failed, and like a hold a skip never reaches a PagerDuty, Grafana, or Twilio target. A
+webhook receives <code>&quot;event&quot;: &quot;schedule.skipped&quot;</code> with a run-shaped body that names the schedule as its
+<code>source_id</code> and its inventory as <code>inventory_id</code>, carries <code>kind</code> <code>skipped_fire</code>, and has no <code>id</code>,
+because no run was started.</p>
+<p>A target's secrets are opened at delivery and never written onto the run, so they stay out of the
+run record, its receipt, and its evidence, where a template's inline targets are stored on the run.
+The server-wide channels and per-template notifications keep working beside targets.</p>
+<p>Deleting a template, a workflow, a schedule, a project, or an organization removes its attachments
+in the same transaction, and leaves the targets. The delete's own audit entry states the cleanup,
+the count and the targets, in its path, such as
+<code>/v1/templates/tpl_abc123?notification_attachments=2&amp;notification_targets=ntf_a,ntf_b</code>, rather than
+as entries of its own. A delete that finds the attachments changed after its entry was written
+deletes nothing and answers 409. The doctor reports any attachment whose object or target is gone,
+from whatever path it was left behind.</p>
+<p>Attaching asks two things: use of the target, and management of the object, which is admin, or a
+manage grant on a template or project, or admin of the organization that owns it. Attaching to a
+schedule or an organization is admin work, the same as editing one. A grant on <code>ntf_&lt;id&gt;</code> scopes a
+target the way a grant on a credential scopes it.</p>
+<h2 id="what-needs-attention">What needs attention</h2>
+<p><code>GET /v1/attention</code> answers the question an operator asks of work that is not moving: what is
+stopping it. Every unfinished run, workflow, split, and schedule falls under at most one of four
+answers, its main blocker, and <code>counts</code> says how many fall under each, so the four add up to the
+items listed:</p>
+<table>
+<thead>
+<tr>
+<th>Blocker</th>
+<th>What it means</th>
+<th>Who acts</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>worker_lost</code></td>
+<td>The worker running it stopped renewing its lease, three renewals in a row.</td>
+<td>Nobody, until the lease sweep is due to reclaim it. An admin when the reclaim is overdue.</td>
+</tr>
+<tr>
+<td><code>no_worker</code></td>
+<td>It is queued and no connected worker serves its queue.</td>
+<td>An admin, by connecting a worker for the queue or moving the work.</td>
+</tr>
+<tr>
+<td><code>approval_needed</code></td>
+<td>A whole run held by a rule, a plan gate's apply among them, or a workflow waiting at an approval step.</td>
+<td>An admin, never an agent, and not the requester when the rule requires a different approver.</td>
+</tr>
+<tr>
+<td><code>blocked</code></td>
+<td>It has waited past its threshold, 15 minutes by default, behind another run: every worker serving its queue is full, or a schedule's fires are skipped while a run it started is still going.</td>
+<td>An admin, or whoever can finish or stop the run holding it.</td>
+</tr>
+</tbody>
+</table>
+<p>An item in several conditions at once, such as a workflow with one branch waiting at an approval
+step while another branch's worker was lost, shows the first of them in the order above as its main
+blocker, the rest under <code>badges</code>, and one line in <code>interaction</code> on how they bear on each other.
+<code>since</code> and <code>waiting_seconds</code> measure the time in the current blocker rather than since the run was
+created: a run approved after a long hold has waited for a worker only since the approval released
+it, and one whose last worker went away has waited since that worker last reported. A retried
+workflow step, a dependency, and a run holding a slot are given as the reason on an item, not
+counted on their own.</p>
+<p>Each item's <code>main</code> condition carries <code>reason</code>, <code>who_can_act</code>, and <code>next</code>. For a missing worker it
+carries <code>queue</code> and <code>eligible_workers</code>, for a lost one <code>worker</code>, <code>last_seen</code>, and <code>reclaim_at</code>, the
+automatic reclaim the view counts down to, for a blocked item <code>holder_run_id</code>, and for an approval
+<code>approval</code>: whether it is a whole run or a <code>workflow_step</code>, for a step whether the workflow's
+<code>other_branches_running</code> or it is <code>paused</code>, the <code>decision_id</code> approve and reject take, who may
+approve, and <code>on_approve</code> and <code>on_deny</code> saying what each answer runs next.</p>
+<p><code>alert_after_seconds</code> is the threshold that applies to the item and <code>alerting</code> reports it has passed
+it, which is also when the doctor lists it and when the attached targets are told, once per
+condition, as a <code>run.needs_attention</code> event. The defaults alert on a lost worker only when the lease
+sweep has not reclaimed its run within two lease periods, a minute, on a missing worker after 15
+minutes, on a blocked item after 15 minutes, and never on an approval, since an approval waiting is
+the gate working. <code>--attention-file</code> changes them for the organization, an organization on the
+install, a queue, or a template. See <a href="/docs/configuration#attention-thresholds">the configuration
+reference</a>. <code>thresholds</code> in the answer gives the install-wide
+values in seconds, zero meaning off.</p>
+<p>The view lists only what the caller may read, under the rules the run list and the schedule list
+apply. There is no way to put a run back in the queue by hand from it. A worker that stopped
+reporting may only be cut off from the store rather than gone, and a run requeued from under it
+could execute twice, so the lease sweep's reclaim, which waits for the lease to expire first, is the
+only way a lost worker's run moves.</p>
+<pre><code class="language-bash">curl -s &quot;https://switchtender.example.com/v1/attention?blocker=no_worker&quot; \
+  -H &quot;Authorization: Bearer $ST_TOKEN&quot;
+</code></pre>
 <h2 id="schedule-timezone">Schedule timezone</h2>
-<p>A schedule reads its cron expression in the server's local time unless it carries a <code>timezone</code>, an
-IANA name such as <code>America/New_York</code> or <code>Europe/Berlin</code>. With one set, <code>0 2 * * *</code> fires at 02:00
-in that zone and follows its daylight-saving shifts, so a nightly window stays put across the year.
-The field is accepted on create and update and applies to the same expression the preview endpoint
-renders.</p>
+<p>A schedule reads its cron expression in its <code>timezone</code>, an IANA name such as <code>America/New_York</code> or
+<code>Europe/Berlin</code>. With one set, <code>0 2 * * *</code> fires at 02:00 in that zone and follows its
+daylight-saving shifts, so a nightly window stays put across the year. The field is accepted on
+create and update and applies to the same expression the preview endpoint renders. A create or an
+import that names no zone takes the server's local zone and writes its name onto the schedule, so
+every server of a highly available group reads it alike, and the preview answers that zone as
+<code>timezone</code>. A schedule an earlier release stored without a zone is read in UTC, and the first server
+of this release to open the database writes <code>UTC</code> onto it.</p>
+<p><code>spring_forward</code> says what a schedule does with a time the clocks skip when they go forward: <code>jump</code>
+runs it when the clock jumps (the default for <code>cron</code>), <code>later</code> runs it after the clock change, the
+length of the jump later (the default for <code>rrule</code>, as AWX does), and <code>skip</code> skips that day. The preview takes the same parameter and
+answers <code>spring_gap</code> for the next night it matters.</p>
 <pre><code class="language-bash">curl -X POST https://switchtender.example.com/v1/schedules \
   -H &quot;Authorization: Bearer $ST_TOKEN&quot; \
   -H 'Content-Type: application/json' \
   -d '{&quot;cron&quot;:&quot;0 2 * * *&quot;,&quot;timezone&quot;:&quot;America/New_York&quot;,&quot;template_id&quot;:&quot;tpl_abc123&quot;}'
 </code></pre>
+<h2 id="schedule-recurrence-rules">Schedule recurrence rules</h2>
+<p>A schedule may carry <code>rrule</code>, an RFC 5545 recurrence, in place of <code>cron</code>: a <code>DTSTART</code> and one or
+more <code>RRULE</code> lines, with any <code>EXRULE</code>, <code>RDATE</code>, and <code>EXDATE</code> lines, separated by line breaks or
+spaces. A <code>TZID</code> on the <code>DTSTART</code> sets the zone, and a create or update that sends no <code>timezone</code>
+takes it from there. A schedule that sends both <code>cron</code> and <code>rrule</code>, a rule whose zone disagrees with
+<code>timezone</code>, or a rule with no fire left after now is refused with 400 and a message naming the
+fault.</p>
+<pre><code class="language-bash">curl -X POST https://switchtender.example.com/v1/schedules \
+  -H &quot;Authorization: Bearer $ST_TOKEN&quot; \
+  -H 'Content-Type: application/json' \
+  -d '{&quot;rrule&quot;:&quot;DTSTART;TZID=America/New_York:20260102T170000\nRRULE:FREQ=MONTHLY;BYMONTH=3,6,9,12;BYDAY=-1FR&quot;,&quot;template_id&quot;:&quot;tpl_abc123&quot;}'
+</code></pre>
+<p><code>GET /v1/schedules/preview</code> takes <code>rrule</code> in place of <code>cron</code> and answers <code>next</code> with up to five
+fires. A rule bounded by <code>COUNT</code> or <code>UNTIL</code> with fewer left answers what it has and <code>&quot;finished&quot;: true</code>, and a rule whose <code>DTSTART</code> names a zone answers that zone as <code>timezone</code>. The
+<a href="/docs/tutorial-schedule-a-job#schedule-what-cron-cannot-say">schedule tutorial</a> lists the parts a rule
+takes and how daylight-saving changes are handled.</p>
 <h2 id="fleet-view-windows">Fleet view windows</h2>
 <p><code>/v1/fleet</code> and <code>/v1/tasks</code> take a <code>window</code>, the number of recent runs per host or per task the
 view considers, and <code>/v1/hosts/{host}/runs</code> takes a <code>limit</code>. All three default to 10. The window is
@@ -1092,7 +1740,7 @@ presents the worker bearer token.</p>
 <tr>
 <td>POST</td>
 <td><code>/relay/v1/claim</code></td>
-<td>Lease the oldest pending run for the caller.</td>
+<td>Lease the oldest pending run for the caller, with its secrets sealed to the pool's delivery key when the pool registered one.</td>
 </tr>
 <tr>
 <td>POST</td>

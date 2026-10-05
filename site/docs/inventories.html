@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Inventories | SwitchTender docs</title>
+	<meta name="description" content="An inventory is the list of hosts a run targets. SwitchTender keeps three kinds.">
+	<link rel="canonical" href="https://switchtender.com/docs/inventories">
+	<meta property="og:title" content="Inventories | SwitchTender docs">
+	<meta property="og:description" content="An inventory is the list of hosts a run targets. SwitchTender keeps three kinds.">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="https://switchtender.com/docs/inventories">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
+	<meta name="twitter:card" content="summary_large_image">
+	<meta name="twitter:title" content="Inventories | SwitchTender docs">
+	<meta name="twitter:description" content="An inventory is the list of hosts a run targets. SwitchTender keeps three kinds.">
+	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
+	<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "TechArticle",
+ "about": {
+  "@type": "SoftwareApplication",
+  "name": "SwitchTender",
+  "url": "https://switchtender.com/"
+ },
+ "description": "An inventory is the list of hosts a run targets. SwitchTender keeps three kinds.",
+ "headline": "Inventories",
+ "isPartOf": {
+  "@type": "WebSite",
+  "name": "SwitchTender docs",
+  "url": "https://switchtender.com/docs/"
+ },
+ "publisher": {
+  "@type": "Organization",
+  "name": "KordLoom LLC",
+  "url": "https://kordloom.com"
+ },
+ "url": "https://switchtender.com/docs/inventories"
+}
+</script>
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=2">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/kordloom/switchtender">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories" class="active">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="inventories">Inventories</h1>
+<p>An inventory is the list of hosts a run targets. SwitchTender keeps three kinds.</p>
+<table>
+<thead>
+<tr>
+<th>Kind</th>
+<th>Where its hosts come from</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Static (the default)</td>
+<td>Its own content: an INI or YAML inventory document, or the same document written as JSON, which is the form a dynamic inventory source refreshes into. The content can also be fetched at launch from a command, Vault, Google Secret Manager, AWS Secrets Manager, or Azure Key Vault.</td>
+</tr>
+<tr>
+<td>Smart</td>
+<td>A host filter over the hosts of the other inventories, evaluated at every launch.</td>
+</tr>
+<tr>
+<td>Constructed</td>
+<td>The Ansible <code>constructed</code> plugin run over a list of input inventories at every launch, building groups and variables from the hosts' own variables.</td>
+</tr>
+</tbody>
+</table>
+<p>Smart and constructed inventories hold no hosts of their own. They are composed from the others each
+time a run launches, so they always reflect what their inputs hold now.</p>
+<h2 id="smart-inventories">Smart inventories</h2>
+<p>A smart inventory is a host filter. The syntax is the AWX <code>host_filter</code> syntax, so a filter copied
+out of AWX means the same thing here.</p>
+<pre><code>groups__name=web and not name__icontains=canary
+variables__env=prod or inventory__name=&quot;db fleet&quot;
+ansible_facts__ansible_distribution=Ubuntu
+</code></pre>
+<p>A filter is a set of <code>key=value</code> terms joined by <code>and</code>, <code>or</code>, and <code>not</code>, grouped with parentheses.
+Two terms side by side mean <code>and</code>. A value with a space in it is quoted.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Matches</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>The host's inventory name.</td>
+</tr>
+<tr>
+<td><code>groups__name</code></td>
+<td>A group the host is a direct member of in its inventory.</td>
+</tr>
+<tr>
+<td><code>inventory</code>, <code>inventory__name</code></td>
+<td>The id or name of the inventory the host comes from.</td>
+</tr>
+<tr>
+<td><code>variables__&lt;key&gt;</code></td>
+<td>A host variable, as Ansible resolves it with its group variables. Nested keys are joined with <code>__</code>, and <code>[]</code> reads a list, as in <code>variables__tags[]=edge</code>. A bare <code>variables__icontains=text</code> searches the host's variables as text.</td>
+</tr>
+<tr>
+<td><code>ansible_facts__&lt;fact&gt;</code></td>
+<td>A fact SwitchTender gathered for the host: distribution, distribution version, kernel, architecture, processor count, memory, default address, fully qualified name, Python version, service manager, and virtualization type. Write it with the <code>ansible_</code> prefix as AWX does, or without. A host never gathered does not match.</td>
+</tr>
+<tr>
+<td><code>enabled</code></td>
+<td>Every host. A host AWX had switched off is left out at import, so <code>enabled=true</code> keeps them all.</td>
+</tr>
+<tr>
+<td><code>search</code></td>
+<td>The host name, ignoring case.</td>
+</tr>
+</tbody>
+</table>
+<p>After the field, a lookup changes the comparison: <code>exact</code> (the default), <code>iexact</code>, <code>contains</code>,
+<code>icontains</code>, <code>startswith</code>, <code>istartswith</code>, <code>endswith</code>, <code>iendswith</code>, <code>regex</code>, <code>iregex</code>, <code>gt</code>, <code>gte</code>,
+<code>lt</code>, <code>lte</code>, <code>in</code> (a comma separated list), and <code>isnull</code>. A fact is compared exactly, as AWX
+compares one. A key or lookup the filter cannot read is refused when the inventory is saved, rather
+than read as matching nothing.</p>
+<p>The filter runs over every static inventory the person launching may use. A smart inventory placed
+in an organization reads only that organization's inventories, which is the reach an AWX smart
+inventory has. A host name that appears in more than one inventory is taken once, from the first
+inventory whose record matches.</p>
+<h3 id="groups-stay-behind">Groups stay behind</h3>
+<p>A smart inventory carries the hosts its filter matches and each host's variables. It carries none
+of the groups those hosts belong to in their own inventories, which is how AWX builds a smart
+inventory too. A play written for <code>hosts: all</code> reaches every host in it. A play written for a group,
+such as <code>hosts: web</code>, reaches none of them, because the smart inventory has no group named web. The
+editor and the host preview say the same.</p>
+<p>When a play needs groups, use a constructed inventory instead. With no options it keeps every group
+its inputs define, a limit narrows it to the hosts a pattern matches, and <code>groups</code> or
+<code>keyed_groups</code> build new groups from the hosts' variables:</p>
+<pre><code>keyed_groups:
+  - key: role
+    prefix: role
+</code></pre>
+<p>The constructed inventory section below covers the options.</p>
+<h2 id="constructed-inventories">Constructed inventories</h2>
+<p>A constructed inventory names its input inventories in order and the plugin options AWX keeps as
+<code>source_vars</code>.</p>
+<pre><code>strict: false
+compose:
+  resolved_state: state | default('running')
+groups:
+  is_shutdown: resolved_state == 'shutdown'
+keyed_groups:
+  - key: account_alias
+    prefix: acct
+</code></pre>
+<p>A limit, such as <code>is_shutdown:&amp;acct_product_dev</code>, is applied after the groups are built, so it may
+name a group the options construct. The options accepted are the ones AWX documents for a
+constructed inventory: <code>strict</code>, <code>compose</code>, <code>groups</code>, <code>keyed_groups</code>, <code>leading_separator</code>, and
+<code>use_vars_plugins</code>. Any other option is refused, and so is an expression that calls a lookup,
+because a lookup reads files or runs commands on the server and a constructed expression only needs
+the hosts' variables.</p>
+<p>A constructed inventory is evaluated by <code>ansible-inventory</code> with the same plugin AWX runs, so its
+expressions behave exactly as they do there. SwitchTender never evaluates the Jinja in these options
+itself. The server needs Ansible installed to resolve one, which the container image includes. A
+later input's variables win over an earlier one's for the same host. An input must be a static
+inventory, not another smart or constructed one, and it cannot be deleted while a constructed
+inventory reads it.</p>
+<h2 id="which-engine-resolves-an-inventory">Which engine resolves an inventory</h2>
+<p>SwitchTender needs Ansible only for what is Ansible's to do. Everything else is resolved by a native
+engine in the binary, which reads an inventory document exactly the way Ansible's own INI and YAML
+plugins read it.</p>
+<table>
+<thead>
+<tr>
+<th>Engine</th>
+<th>What it resolves</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Native</td>
+<td>A static inventory document stored here, INI, YAML, or JSON, and the host filter of a smart inventory over such documents. No Ansible is needed, so a smart inventory works on a server without it.</td>
+</tr>
+<tr>
+<td>Ansible</td>
+<td>A constructed inventory, always. An input whose document only Ansible can read: an inventory plugin configuration, a vault-encrypted value, or one of the rare Python values listed below. A dynamic inventory source, which runs its plugin. An inventory named by a path inside a project, whose <code>group_vars</code> and <code>host_vars</code> directories, vars plugins, inventory directories, and <code>ansible.cfg</code> are Ansible's.</td>
+</tr>
+</tbody>
+</table>
+<p>What an inventory is decides its engine, never whether Ansible happens to be installed, so the same
+inventory resolves the same way on every server. When the engine is Ansible and Ansible is not
+installed, the launch and the preview are refused with the reason it is needed and the one line that
+installs it:</p>
+<pre><code>pipx install ansible-core
+</code></pre>
+<p>Ansible is always run as a separate program, <code>ansible-inventory</code>, and never linked into the binary.
+The container image ships it.</p>
+<h3 id="what-the-native-engine-reproduces">What the native engine reproduces</h3>
+<p>The native engine reproduces Ansible's behavior, quirks included:</p>
+<ul>
+<li>A value on an INI host line is typed the way Python's <code>ast.literal_eval</code> types it, after the line
+is split the way <code>shlex</code> splits it: <code>port=22</code> is the number 22, <code>port=&quot;22&quot;</code> is also the number 22
+because the quotes belong to the line, <code>on=yes</code> is the text yes, <code>flag=True</code> is true, and
+<code>list=[1, 2]</code> is a list. A <code>#</code> outside quotes ends the line, even in the middle of a word.</li>
+<li>A value under <code>[group:vars]</code> is everything after the first <code>=</code>, and is typed the same way.
+Ansible's documentation says these values are strings, but ansible-core types them like host
+values, so <code>5</code> is a number and <code>&quot;5&quot;</code> is text. The engine does what ansible-core does, and the
+corpus pins it.</li>
+<li>Host ranges: <code>web[01:03]</code> with its zero padding, <code>db-[a:c]</code>, strides such as <code>app[1:10:3]</code>,
+several ranges in one name, a range with a port, and a range whose start is after its end, which
+names no hosts.</li>
+<li><code>host:port</code> sets <code>ansible_port</code>, for a name, an IPv4 address, or a bracketed IPv6 address.</li>
+<li><code>[group:children]</code>, including children named before they are declared, nesting at any depth, and
+the error Ansible gives for a group that is never declared or for a loop.</li>
+<li>Which group variable wins: <code>all</code> first, then every other group ordered by depth, then by
+<code>ansible_group_priority</code>, then by name, and the host's own variable last.</li>
+<li>One host in many groups, with the variables of each. A host that shares its name with a group has
+its host-line variables set on the group, as Ansible does.</li>
+<li>YAML read with YAML 1.1 rules, as PyYAML reads it: <code>yes</code>, <code>no</code>, <code>on</code>, and <code>off</code> are booleans,
+<code>010</code> is octal, <code>1:20</code> is the number 80, <code>1e3</code> is text while <code>1.0e+3</code> is a number, and a date is
+a date, which the listing prints in ISO form. Anchors, aliases, merge keys, and <code>!unsafe</code> text are
+read the same way. A document whose aliases expand to far more values than its size could hold,
+a few short anchors nested so each copies the last many times over, is refused as invalid and
+names the bound. Neither PyYAML nor Ansible bounds that expansion, and both hang on such a
+document, so it is not handed to Ansible either. Replace the repeated anchors with explicit
+values.</li>
+<li>JSON is read before YAML, as Ansible reads it, with <code>{&quot;__ansible_unsafe&quot;: ...}</code> values intact.</li>
+</ul>
+<p>Variables Ansible sets itself when a play runs, such as <code>inventory_hostname</code> or <code>group_names</code>, are
+left out of a resolved inventory, as <code>ansible-inventory --list</code> leaves them out.</p>
+<p>A few values are left to Ansible rather than imitated, because Ansible releases disagree about them
+or the JSON a composed inventory is rendered as cannot carry them. They are Python complex numbers,
+sets, bytes, the ellipsis, named Unicode escapes, and lone surrogates, infinite floats, a mapping
+key that is not text or a whole number, <code>!unsafe</code> on something other than text, and a host range
+with a negative step. An inventory holding one is resolved by Ansible.</p>
+<p>A document Ansible would not read whole is refused with the reason, such as an INI section of an
+unknown type, a child group never declared, or the JSON <code>ansible-inventory --list</code> prints, which no
+Ansible plugin reads back as an inventory. Store the output of <code>ansible-inventory --list --yaml</code>
+instead.</p>
+<h3 id="how-the-agreement-is-kept">How the agreement is kept</h3>
+<p>A conformance corpus of inventory documents, each one a quirk listed above or an edge of one, runs
+in CI through the native engine and through one pinned release of every ansible-core minor from
+2.16 to 2.21, and any difference in hosts, groups, or variables fails the build. The Doctor page,
+at <code>/ui/doctor</code>, and <code>GET /v1/doctor</code> report the server's ansible-core version and warn when it is
+outside that range.</p>
+<p>Every Ansible run against an inventory the native engine resolved is checked once more just before
+the play starts. The executor has its own <code>ansible-inventory</code>, with the run's environment, the
+project's <code>ansible.cfg</code>, and the run's container image when it has one, read every input the native
+engine read and the inventory handed to the play, and compares each reading with the native one. On
+any difference the run is refused, and its error and its evidence name each difference: the host,
+the group, or the variable, with its value and type, except that a secret variable is named and its
+value withheld. An executor without Ansible refuses such a run too, rather than running it
+unchecked. A run with another tool, such as a script reading the inventory file, is not checked.</p>
+<h3 id="what-the-evidence-records">What the evidence records</h3>
+<p>The resolution a run records names the engine that produced it, <code>native</code> or <code>ansible</code>, the
+ansible-core version when Ansible did, a digest of the inputs, and a digest of the resolved
+inventory: its hosts, groups, and variables. Both digests are SHA-256 over the secret-masked form,
+the one the API serves, so they identify what was resolved without committing to a password. The
+check before an Ansible run records the ansible-core that made it and the digests it read, which
+match the resolution's unless an input changed while the run waited for approval. The resolution is
+part of the approved spec, the check is part of the outcome record, and the dossier and receipt
+carry both.</p>
+<h2 id="access">Access</h2>
+<p>Composing an inventory never reaches a host its launcher could not reach directly. At launch, every
+input the person launching may not use is dropped before anything is read, for a smart inventory
+and a constructed one alike. Naming an inventory as a constructed inventory's input requires use of
+it, the same as targeting it in a run. A run started by a schedule or a webhook has no person
+behind it and reads every input in the inventory's scope, the same as it reads the rest of its
+template.</p>
+<h2 id="what-a-run-records">What a run records</h2>
+<p>A static inventory is read once, when the run is submitted, and the run executes that snapshot. The
+snapshot is part of the run's spec: the hosts it names, a digest of its content with secret values
+masked, and the digest of the content as sealed on the run. An approval covers all three, and an
+edit to the inventory after the run was submitted, before or after an approval, does not reach it.
+The credentials the inventory attached at submission come with it, and one attached later does not.
+Because inventory content can carry an <code>ansible_password</code> or a token, the snapshot is sealed with
+the server's key while the run waits and wiped when the run ends. A run whose snapshot is missing,
+does not open, or no longer matches what was bound is refused rather than run against whatever the
+inventory holds now. A source that refreshes on launch refreshes at submission, so the snapshot
+holds the refreshed hosts. Content fetched from a command, Vault, or a secret manager is fetched at
+submission too.</p>
+<p>A dynamic source is different by nature: its definition, such as an inventory plugin configuration,
+names no hosts until Ansible asks the live system it describes. The approval binds the definition,
+and the hosts it resolves to are known only at execution. The run resolves it once, hands the play
+exactly that resolution, and records the hosts it reached with the outcome, so the evidence names
+them. The approval view says plainly that such a source resolves at execution.</p>
+<p>A composed inventory is resolved once, when the run is launched. The run records which kind it
+was, the inputs its hosts came from, and every host it resolved to, and execution is held to that
+set: a host that joins an input afterward is not reached, and a shard, a pipeline step, or a retry
+of failed shards reaches only hosts in it. A rerun is a new launch and resolves again. A launch that
+resolves to no host is never started against nothing: a launch by a person is refused, and a
+schedule or webhook fire is recorded as skipped, as <a href="#when-nothing-matches">When nothing matches</a>
+describes.</p>
+<p>The resolved set is part of the run's spec, so the digest an approver's decision commits and the
+digest the outcome entry commits both cover it, and a receipt discloses it. The run's evidence
+dossier lists the hosts under its own heading. A rule scoped to an inventory governs a run whose
+composed inventory drew hosts from that inventory, so a smart inventory over production hosts is
+held by the rules written for production.</p>
+<h2 id="when-nothing-matches">When nothing matches</h2>
+<p>A launch by a person, from the interface, <code>POST /v1/templates/{id}/launch</code>, <code>POST /v1/runs</code>, or a
+rerun, is refused with <code>400</code>, the reason, and a link to the inventory's host preview, since the
+person launching can widen the filter or the inputs right away. The response carries the link as
+<code>preview_url</code> as well, <code>/ui/inventories?preview=&lt;inventory id&gt;</code>, which opens that inventory's
+preview.</p>
+<p>A schedule or a webhook trigger has nobody to answer, and an inventory over hosts that come and go,
+such as the hosts waiting for a patch, can match nothing on an ordinary day. So a fire that resolves
+to no host is recorded as <code>skipped: no hosts matched</code> and never as a failure. Each skip is its own
+entry on the audit chain. A webhook delivery is answered <code>200</code> with
+<code>{&quot;trigger&quot;: &quot;&lt;id&gt;&quot;, &quot;skipped&quot;: &quot;no hosts matched&quot;}</code>, so the sender does not deliver it again. A
+schedule records the skip as its last fire, counts the skips in a row, and tells the notification
+targets attached to it. The
+<a href="/docs/tutorial-schedule-a-job#when-a-fire-matches-no-hosts">schedule tutorial</a> shows where a skipping
+schedule surfaces.</p>
+<h2 id="preview">Preview</h2>
+<p>The Inventories page previews the hosts a smart or constructed inventory resolves to before it is
+saved, and a saved one can be previewed from its row. A preview resolves exactly as a launch by the
+same person would, and lists host names and inputs without any host variables. It also names the
+engine that resolved it, and the ansible-core version when Ansible did.</p>
+<pre><code>POST /v1/inventories/preview          {&quot;kind&quot;: &quot;smart&quot;, &quot;host_filter&quot;: &quot;groups__name=web&quot;}
+POST /v1/inventories/{id}/preview
+</code></pre>
+<h2 id="creating-one-through-the-api">Creating one through the API</h2>
+<pre><code>POST /v1/inventories
+{&quot;name&quot;: &quot;web everywhere&quot;, &quot;kind&quot;: &quot;smart&quot;, &quot;host_filter&quot;: &quot;groups__name=web&quot;}
+
+POST /v1/inventories
+{&quot;name&quot;: &quot;shut down&quot;, &quot;kind&quot;: &quot;constructed&quot;,
+ &quot;input_inventory_ids&quot;: [&quot;inv_web&quot;, &quot;inv_db&quot;],
+ &quot;source_vars&quot;: &quot;groups:\n  is_shutdown: state == 'shutdown'\n&quot;,
+ &quot;limit&quot;: &quot;is_shutdown&quot;}
+</code></pre>
+<h2 id="importing-from-awx">Importing from AWX</h2>
+<p><code>switchtender import awx</code> and <code>switchtender assess awx</code> read smart and constructed inventories.
+A smart inventory arrives with its filter. A constructed inventory arrives with its inputs wired by
+id, whether the export lists them on the inventory or under <code>related</code>, and with the options and
+limit of the constructed source AWX keeps behind it. A filter or option this cannot evaluate is
+reported and the inventory is not imported, rather than created to fail at its first launch. The
+assessment names every composed inventory that comes across.</p>
+<p>An AWX smart inventory filters the inventories of its own organization, so the import places it the
+same way. When the export carries the smart inventory's organization, the smart inventory and every
+inventory imported from that organization, dynamic source inventories included, are placed in an
+organization of the same name, and its filter reads those inventories and no others. Applying the
+import creates the organization, or uses the one already here when exactly one has that name, in
+which case the filter also reads the inventories that organization held before the import. The
+plan and the import result name the organization each placed inventory lands in, and the assessment
+names it beside each smart inventory. AWX memberships do not come across, so add the organization's
+members afterward.</p>
+<p>A smart inventory arrives with no organization, and the report says so, when the export names its
+organization without carrying it, or when more than one organization here has that name and the
+import cannot tell which one the export means. With no organization it filters every inventory the
+person launching may use, so place it and its inventories in one organization to keep the reach it
+had in AWX. Either way it arrives without the groups its hosts had, as described above.</p>
+<h2 id="what-is-not-carried-over">What is not carried over</h2>
+<ul>
+<li>A constructed inventory's <code>update_cache_timeout</code> and <code>verbosity</code>. It is resolved at every launch,
+so there is no cache to time out.</li>
+<li>AWX host fields with no counterpart here, such as <code>description</code> and <code>instance_id</code>, in a filter.</li>
+<li>Facts beyond the set SwitchTender gathers, and nested fact paths other than the default address.</li>
+<li>The credentials and queue of an input inventory. A composed inventory carries its own.</li>
+<li>Refreshing an input's dynamic source before a composed launch. Each input is read as its source
+last left it.</li>
+</ul>
+
+		</main>
+	</div>
+	<div class="foot-legal" style="text-align:center;margin:26px auto 34px;font-size:12px;opacity:.75">SwitchTender&trade; is a trademark of KordLoom LLC. Copyright 2026 KordLoom LLC.</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

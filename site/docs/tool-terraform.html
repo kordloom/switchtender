@@ -60,7 +60,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform" class="active">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform" class="active">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -71,6 +71,45 @@ names that directory, relative to the project checkout.</p>
 <p><code>terraform init</code> runs first. If it fails the run stops there with init's result. Then <code>terraform apply -auto-approve</code> applies the configuration. A dry run runs <code>terraform plan</code> instead, so it
 previews the change without touching infrastructure. All three run with <code>-input=false -no-color</code>, so
 a run never blocks on a prompt.</p>
+<h3 id="a-gated-apply-carries-out-the-approved-plan">A gated apply carries out the approved plan</h3>
+<p>An apply a plan-content rule scopes, one with <code>max_destroy</code> or a Rego <code>plan_gate</code>, runs in two
+steps. First it plans and saves the plan file with <code>-out</code>. The gate measures what the plan destroys
+from that saved file, rendered with <code>terraform show -json</code>, never from the text the tool printed.
+The apply it proposes then carries out exactly that file with <code>terraform apply &lt;planfile&gt;</code>, and the
+approval binds the plan file's digest. If anything changed the state after the plan was made,
+Terraform itself refuses the stale plan, and the apply fails without changing anything rather than
+planning again and applying what nobody weighed.</p>
+<p>A plan file holds the values the configuration was planned with, sensitive ones included, so it is
+handled as a secret. It is sealed with the server's key while the apply waits, written only into the
+run's private directory, never written to the run log, and wiped when the apply ends. The values it
+marks sensitive are added to the masker before the apply prints anything. On a relay worker, the
+plan's worker hands the saved plan file to the control node, which seals it, and the apply's worker
+receives it sealed to its pool's delivery key, like a credential, so a pool with no delivery key
+cannot run a gated apply. A plan file crosses the relay only up to 19 MiB. A larger one is refused
+with its size and the limit stated, and the plan fails without proposing an apply, so run it on a
+queue the control node executes or split the configuration.</p>
+<p>An apply that no plan-content rule scopes still runs <code>apply -auto-approve</code>, which plans and applies
+in one step with nothing saved in between.</p>
+<h2 id="what-a-plan-runs-and-what-the-gate-reads">What a plan runs, and what the gate reads</h2>
+<p>A plan changes no infrastructure, but it is not free of execution. It runs the provider plugins the
+configuration names, with the run's credentials, and every <code>external</code> data source runs the program
+it names while the plan runs, with the same credentials and environment. Providers are trusted code
+the team chose and installed, and the gate does not judge them. Before it exempts a plan from a rule
+with <code>exclude_dry_run</code>, it reads the configuration and every module it calls for external data
+sources, and for anything it cannot read. A plan that declares one, or that the gate cannot read in
+full, is held as the real run it may be and named by address, such as
+<code>module.network.data.external.lookup</code>, and a pull request's plan of it is refused rather than run.
+Before it reads registry and remote modules, the gate downloads them with <code>terraform get</code> in a
+private copy of the configuration, with the run's own credentials and only where the plan runs, and
+reads them where the get installed them. A <code>.terraform</code> the gate did not install, committed or left
+in a working directory, is never read, and no setting makes it trusted: vendor a module and call it
+by a local path to have it read from the repository. The get installs no provider and runs nothing the
+configuration names. A module it could not download is left unread. The run then executes exactly
+the modules the gate read: their digest is in the scan evidence and the approval, the gate's copy is
+put in place, and <code>terraform init</code> runs with <code>-get=false</code>, so it resolves no version again. A run
+that cannot get the same modules is refused. The scan targets explicit program execution and
+unreadable configuration only. See <a href="/docs/concepts#dry-runs-and-exclude-dry-run">dry runs and
+<code>exclude_dry_run</code></a>.</p>
 <h2 id="how-values-reach-the-configuration">How values reach the configuration</h2>
 <ul>
 <li>Extra vars, including survey answers and template vars, arrive as <code>TF_VAR_</code> environment entries, so
@@ -80,6 +119,9 @@ pass as JSON, which Terraform accepts.</li>
 as <code>SWITCHTENDER_TOKEN</code> authenticates the provider. A command-source credential resolves fresh each
 run.</li>
 <li>The command directory cannot escape the project with <code>..</code>, so a run stays inside its checkout.</li>
+<li>Every Terraform process the runner starts, the module download, the init, and the plan or apply,
+runs with <code>CHECKPOINT_DISABLE=1</code>, so it makes no version check against HashiCorp's checkpoint
+service. A run whose own environment sets <code>CHECKPOINT_DISABLE</code> keeps the value it sets.</li>
 </ul>
 <h2 id="example">Example</h2>
 <p>A directory <code>infra/network</code> holding:</p>

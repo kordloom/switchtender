@@ -57,7 +57,12 @@
   <url><loc>https://switchtender.com/docs/benchmarks</loc></url>
   <url><loc>https://switchtender.com/docs/community-baseline</loc></url>
   <url><loc>https://switchtender.com/docs/continuity</loc></url>
+  <url><loc>https://switchtender.com/docs/federation</loc></url>
+  <url><loc>https://switchtender.com/docs/inventories</loc></url>
+  <url><loc>https://switchtender.com/docs/policy</loc></url>
+  <url><loc>https://switchtender.com/docs/pull-request-review</loc></url>
   <url><loc>https://switchtender.com/docs/roadmap</loc></url>
+  <url><loc>https://switchtender.com/docs/run-files</loc></url>
   <url><loc>https://switchtender.com/docs/sdk</loc></url>
   <url><loc>https://switchtender.com/docs/supertest</loc></url>
   <url><loc>https://switchtender.com/docs/vendor-risk</loc></url>

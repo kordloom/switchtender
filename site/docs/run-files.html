@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Run files | SwitchTender docs</title>
+	<meta name="description" content="Many tools take a secret only as a file, so a run writes some of its secrets to disk while it executes.">
+	<link rel="canonical" href="https://switchtender.com/docs/run-files">
+	<meta property="og:title" content="Run files | SwitchTender docs">
+	<meta property="og:description" content="Many tools take a secret only as a file, so a run writes some of its secrets to disk while it executes.">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="https://switchtender.com/docs/run-files">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
+	<meta name="twitter:card" content="summary_large_image">
+	<meta name="twitter:title" content="Run files | SwitchTender docs">
+	<meta name="twitter:description" content="Many tools take a secret only as a file, so a run writes some of its secrets to disk while it executes.">
+	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
+	<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "TechArticle",
+ "about": {
+  "@type": "SoftwareApplication",
+  "name": "SwitchTender",
+  "url": "https://switchtender.com/"
+ },
+ "description": "Many tools take a secret only as a file, so a run writes some of its secrets to disk while it executes.",
+ "headline": "Run files",
+ "isPartOf": {
+  "@type": "WebSite",
+  "name": "SwitchTender docs",
+  "url": "https://switchtender.com/docs/"
+ },
+ "publisher": {
+  "@type": "Organization",
+  "name": "KordLoom LLC",
+  "url": "https://kordloom.com"
+ },
+ "url": "https://switchtender.com/docs/run-files"
+}
+</script>
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=2">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/kordloom/switchtender">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files" class="active">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="run-files">Run files</h1>
+<p>Many tools take a secret only as a file, so a run writes some of its secrets to disk while it
+executes. This page covers where they go, how they are removed on every exit path and after a crash,
+and what keeps them off persistent disk.</p>
+<h2 id="what-a-run-stages">What a run stages</h2>
+<p>SwitchTender writes these for a run, and only for as long as the run needs them:</p>
+<ul>
+<li>SSH private keys, unlocked in memory first so a passphrase never reaches disk.</li>
+<li>Ansible vault password files, and the vars files that carry become, connection, and network
+device passwords off the command line.</li>
+<li>The extra vars file, which carries secret survey answers.</li>
+<li>An inline script for Bash, Python, Go, or PowerShell, which can carry whatever was typed into it.</li>
+<li>Files rendered by credential types, such as cloud configs and kubeconfigs.</li>
+<li>Federated identity token files, and the external account file Google Cloud reads over one.</li>
+<li>The stored inventory the run targets, which can carry secret host variables.</li>
+<li>For a containerized run, the environment file every injected value is sourced from, and the
+registry login the container runtime writes when it pulls a private image.</li>
+<li>The run's copy of the fact cache.</li>
+</ul>
+<p>That is SwitchTender-managed staging. The tools a run starts write their own state as well, and the
+cloud command line tools write state about the credentials they were handed. That part is covered
+under <a href="#tool-state">Tool state</a>.</p>
+<h2 id="where-run-files-live">Where run files live</h2>
+<p>Each run gets one private directory, mode 0700, with every file in it mode 0600. The directories
+live under a root that belongs to the account SwitchTender runs as, mode 0700. The root is chosen in
+this order:</p>
+<ol>
+<li><code>--runfiles-dir</code>, or <code>SWITCHTENDER_RUNFILES_DIR</code> when the flag is absent.</li>
+<li>The systemd runtime directory, when the process runs as a unit that sets <code>RuntimeDirectory=</code>. It
+is memory-backed under <code>/run</code>, private to the service, and removed by systemd when the service
+stops for any reason. The root is <code>runfiles</code> inside it.</li>
+<li>The account's <code>XDG_RUNTIME_DIR</code>, but only when that directory is owned by the account and closed
+to everyone else. The root is <code>switchtender-runfiles</code> inside it.</li>
+<li>Otherwise the temporary directory, as <code>switchtender-runfiles-&lt;uid&gt;</code>, and the doctor, at
+<code>/ui/doctor</code> and <code>GET /v1/doctor</code>, warns about it.</li>
+</ol>
+<p>SwitchTender never picks <code>/dev/shm</code>, and refuses it when named: every process on the host shares it,
+and a container sizes it for shared memory.</p>
+<p>Before a server or worker serves, it proves the root:</p>
+<ul>
+<li>The root is a real directory owned by the account, not a symbolic link, and is closed to 0700.
+Every directory above it is owned by the account or the superuser, and none is writable by other
+accounts unless it has the sticky bit, as <code>/tmp</code> does. Otherwise another account could swap the
+root for a directory of its own.</li>
+<li>The root is on a filesystem known to be local. A network filesystem is refused, since a lock there
+can be lost or held by another machine, and a sweep that misread a live run as dead would delete
+its credentials mid-job. A filesystem SwitchTender does not know is refused as well, even if its
+locks happen to work.</li>
+<li>A probe takes a lock in the root exactly the way a run directory's lock is taken, with the same
+open mode and the same lock call, and proves a second handle is kept out of it until it is
+released.</li>
+</ul>
+<p>Any failure stops the process with the reason and the flag to set.</p>
+<table>
+<thead>
+<tr>
+<th>Platform</th>
+<th>Accepted</th>
+<th>Refused</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Linux</td>
+<td>ext2, ext3, ext4, xfs, btrfs, zfs, tmpfs, ramfs, overlay, f2fs, bcachefs, jfs, reiserfs, nilfs2</td>
+<td>NFS, SMB and CIFS, Ceph, AFS, 9p, virtiofs, VirtualBox shared folders, GFS2, OCFS2, Lustre, GPFS, FUSE, and anything not listed</td>
+</tr>
+<tr>
+<td>macOS</td>
+<td>APFS and HFS+ on a local volume</td>
+<td>NFS, SMB, AFP, WebDAV, FTP, FUSE, and anything not local</td>
+</tr>
+<tr>
+<td>FreeBSD</td>
+<td>UFS, ZFS, and tmpfs on a local volume</td>
+<td>Network filesystems and anything not local</td>
+</tr>
+<tr>
+<td>Windows</td>
+<td>NTFS and ReFS on a local drive</td>
+<td>Network drives and shares, FAT, exFAT</td>
+</tr>
+</tbody>
+</table>
+<p>Overlay is accepted because a container's own filesystem is one. From inside the container
+SwitchTender cannot see what lies under it, so for overlay the lock probe is what shows its locks
+hold.</p>
+<h2 id="how-run-files-are-removed">How run files are removed</h2>
+<p>When a run ends, by success, failure, cancel, timeout, or an error in SwitchTender itself, its
+directory is removed before the run is recorded as finished.</p>
+<p>A process that is killed removes nothing, so every directory carries two things:</p>
+<ul>
+<li>A lock its process holds for the life of the run. The operating system releases it when the
+process dies, however it dies. The lock is the liveness signal.</li>
+<li>A heartbeat counter its process increments every 30 seconds, on a timer rather than on activity.</li>
+</ul>
+<p>Every server and worker sweeps its root when it starts and about every five minutes after, the
+first periodic sweep within a minute of startup and each later one moved by up to a tenth of the
+interval at random, so processes that started together do not sweep together. A lock in the root
+lets one process per host sweep a given pass. A sweep deletes a run directory only when all of these
+hold:</p>
+<ul>
+<li>Its lock was free at an earlier sweep and is free now.</li>
+<li>The two sweeps are at least five minutes apart on the sweeper's own monotonic clock, which a
+changed wall clock does not move.</li>
+<li>Its heartbeat counter did not change between them.</li>
+<li>Nothing in it changed for at least five minutes.</li>
+</ul>
+<p>The counter is never a liveness oracle. It can only hold a deletion back, for the case where a lock
+reads free while its process is somehow still counting. A sweeper keeps what it saw in memory, so a
+restarted process starts fresh and waits a full five minutes before removing anything, rather than
+deleting on one look. In practice a dead run's directory is gone between five and eleven minutes
+after any server or worker on the host first sees it.</p>
+<p>A process that is stopped, by a debugger, a suspended laptop, or a paused virtual machine, keeps its
+lock, and its directory is kept with it.</p>
+<h2 id="a-host-whose-last-process-died">A host whose last process died</h2>
+<p>The sweep runs only while some SwitchTender process runs on the host. For a host whose only worker
+stopped for good:</p>
+<ul>
+<li>
+<p><strong>systemd.</strong> The shipped units in
+<a href="https://github.com/kordloom/switchtender/tree/main/deploy/systemd">deploy/systemd</a> put the root
+in the service's runtime directory, which systemd removes when the service stops for any reason, a
+crash included. <code>PrivateTmp=true</code> gives the service its own <code>/tmp</code>, removed the same way, which
+covers what a tool writes there. systemd sets <code>RUNTIME_DIRECTORY</code> from version 240. On an older
+systemd, add
+<code>--runfiles-dir /run/switchtender/runfiles</code> to <code>ExecStart</code>. <code>switchtender init --systemd</code> writes a
+unit with the same run-files settings.</p>
+</li>
+<li>
+<p><strong>tmpfiles.d, as a last resort.</strong> Where the root is the temporary directory and no unit cleans it,
+an age-based rule can. The age must be longer than the longest run allows, which is
+<code>--run-timeout</code>, because the rule judges by file times and knows nothing of locks. With a 24 hour
+timeout and the service account's uid 998:</p>
+<pre><code># /etc/tmpfiles.d/switchtender.conf
+e /tmp/switchtender-runfiles-998 - - - 26h
+</code></pre>
+<p>systemd-tmpfiles-clean runs it about once a day.</p>
+</li>
+</ul>
+<h2 id="memory-backed-is-not-ram-only">Memory-backed is not RAM-only</h2>
+<p>The runtime directory, an XDG runtime directory, and a Kubernetes memory volume are tmpfs, which is
+memory-backed. Its pages can still be written to swap. On a host that runs SwitchTender:</p>
+<ul>
+<li>Encrypt swap, or turn it off.</li>
+<li>Use full disk encryption, so whatever reaches a disk anyway, through swap, a crash, or a fallback
+root, is unreadable without the key.</li>
+<li>Exclude the run-files root, <code>/tmp</code>, and <code>/var/tmp</code> from backups.</li>
+</ul>
+<p>SwitchTender does not overwrite a file before deleting it. On solid state drives and copy-on-write
+filesystems an overwrite lands on new blocks and leaves the old ones as they were, so it would
+promise more than it does. Encryption at rest is the control for data that reached a disk.</p>
+<h2 id="containers">Containers</h2>
+<p>A containerized run's private directory is an in-memory filesystem inside the container, at the same
+path it has on the host, so every path the run's environment names resolves the same in both. It is
+sized by <code>--container-runfiles-size</code>, 64m by default, and mounted nosuid and nodev. It allows exec,
+which a container runtime turns off for a tmpfs unless told otherwise, so nothing a tool keeps there
+is barred from running. The files staged for the run are bound into it read-only, one by one. What a tool writes
+there stays in the container's memory and never reaches the host's disk, the container's writable
+layer included. The mount counts against <code>--container-memory</code> as it fills.</p>
+<p>The host side of the directory is removed by the server or worker as for any run. Nothing waits on
+the container dying to clean up.</p>
+<h2 id="kubernetes">Kubernetes</h2>
+<p>The <a href="https://github.com/kordloom/switchtender/tree/main/deploy/helm">Helm chart</a> mounts a
+memory-backed <code>emptyDir</code> at <code>/run/switchtender</code> in every server and worker pod and points
+<code>SWITCHTENDER_RUNFILES_DIR</code> at <code>/run/switchtender/runfiles</code>. Its size is <code>runFiles.sizeLimit</code>, 256Mi
+by default. Without it, run files would sit in the container's writable layer on the node's disk.
+For a pod the chart does not manage:</p>
+<pre><code class="language-yaml">containers:
+  - name: worker
+    env:
+      - name: SWITCHTENDER_RUNFILES_DIR
+        value: /run/switchtender/runfiles
+    volumeMounts:
+      - name: runfiles
+        mountPath: /run/switchtender
+volumes:
+  - name: runfiles
+    emptyDir:
+      medium: Memory
+      sizeLimit: 256Mi
+</code></pre>
+<p>A memory-backed volume counts against the pod's memory limit. Raise the size for runs that cache
+facts for thousands of hosts.</p>
+<h2 id="tool-state">Tool state</h2>
+<p>SwitchTender configures known credential-bearing tool state into the run directory. When a run
+hands a cloud command line tool a credential, by any credential kind, a federated credential, or a
+custom credential type, the variables that tool reads to place its configuration and caches point
+inside the run's private directory. What the tool writes about the credential, a token cache or a
+configuration filled in by a login command, goes with the run instead of outliving it in the home
+directory of the account SwitchTender runs as. Inside a container the same paths fall in the
+in-memory mount.</p>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Set when the run carries</th>
+<th>Variables pointed into the run directory</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>AWS CLI and SDKs</td>
+<td><code>AWS_ACCESS_KEY_ID</code>, <code>AWS_SECRET_ACCESS_KEY</code>, <code>AWS_SESSION_TOKEN</code>, <code>AWS_ROLE_ARN</code>, or <code>AWS_WEB_IDENTITY_TOKEN_FILE</code></td>
+<td><code>AWS_CONFIG_FILE</code>, <code>AWS_SHARED_CREDENTIALS_FILE</code>, <code>AWS_LOGIN_CACHE_DIRECTORY</code></td>
+</tr>
+<tr>
+<td>Google Cloud CLI</td>
+<td><code>GOOGLE_APPLICATION_CREDENTIALS</code>, <code>GOOGLE_CREDENTIALS</code>, <code>GOOGLE_OAUTH_ACCESS_TOKEN</code>, <code>CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE</code>, <code>CLOUDSDK_AUTH_ACCESS_TOKEN_FILE</code>, <code>GCP_SERVICE_ACCOUNT_FILE</code>, or <code>GCP_ACCESS_TOKEN</code></td>
+<td><code>CLOUDSDK_CONFIG</code></td>
+</tr>
+<tr>
+<td>Azure CLI</td>
+<td><code>AZURE_CLIENT_ID</code>, <code>AZURE_CLIENT_SECRET</code>, <code>AZURE_SECRET</code>, <code>AZURE_FEDERATED_TOKEN_FILE</code>, <code>ARM_CLIENT_ID</code>, <code>ARM_CLIENT_SECRET</code>, or <code>ARM_OIDC_TOKEN_FILE_PATH</code></td>
+<td><code>AZURE_CONFIG_DIR</code></td>
+</tr>
+<tr>
+<td>kubectl</td>
+<td><code>KUBECONFIG</code>, <code>K8S_AUTH_KUBECONFIG</code>, or <code>KUBE_CONFIG_PATH</code></td>
+<td><code>KUBECACHEDIR</code></td>
+</tr>
+</tbody>
+</table>
+<p>A variable the run's own credentials already set is left as they set it. A run that hands a tool no
+credential keeps that tool's ordinary configuration, so ambient access an operator set up for the
+service account keeps working. A run that does hand AWS a credential no longer reads that account's
+<code>~/.aws/config</code>, so set the region on the credential.</p>
+<p>Some tool state has no variable to move it:</p>
+<ul>
+<li>The AWS CLI keeps credentials from a role it assumes in <code>~/.aws/cli/cache</code>, and SSO tokens in
+<code>~/.aws/sso/cache</code>. To keep the role cache off a host, use the federated AWS credential's exchange
+delivery, which hands the tool ready credentials instead of a role to assume.</li>
+<li>Credential plugins that kubectl runs, such as <code>aws eks get-token</code>, <code>gke-gcloud-auth-plugin</code>, and
+<code>kubelogin</code>, keep their own caches.</li>
+<li>The Ansible event sidecar, which is the run's own output before SwitchTender masks it, stays in the
+temporary directory, where <code>PrivateTmp</code> confines it under the shipped units.</li>
+</ul>
+<h2 id="files-rather-than-environment-variables">Files rather than environment variables</h2>
+<p>A secret in an environment variable is inherited by every process the tool starts and can be printed
+by any of them. SwitchTender delivers by file wherever the tools a credential kind serves all read
+one:</p>
+<table>
+<thead>
+<tr>
+<th>Credential</th>
+<th>Delivery</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SSH key, vault password, become, SSH password, network</td>
+<td>File</td>
+<td>ansible-playbook reads each from a file or a vars file.</td>
+</tr>
+<tr>
+<td>Google Cloud service account, kubeconfig</td>
+<td>File</td>
+<td>Every tool that reads them reads a path.</td>
+</tr>
+<tr>
+<td>Federated AWS, Google Cloud, and Azure</td>
+<td>Token file</td>
+<td>The SDKs read the token from a path. The exchange delivery hands over credentials as variables, since that is what it exists for.</td>
+</tr>
+<tr>
+<td>AWS keys</td>
+<td>Variables</td>
+<td>A shared credentials file would serve the AWS SDKs, but not a script or tool that reads the variables directly, which is common.</td>
+</tr>
+<tr>
+<td>Azure service principal</td>
+<td>Variables</td>
+<td>Terraform's azurerm provider and the Azure SDKs read the client secret from a variable.</td>
+</tr>
+<tr>
+<td>OpenStack</td>
+<td>Variables</td>
+<td>openstacksdk can read a <code>clouds.yaml</code> file, but scripts and other tools read the <code>OS_</code> variables.</td>
+</tr>
+<tr>
+<td>VMware</td>
+<td>Variables</td>
+<td>The VMware Ansible collection reads the password from a variable or a module argument.</td>
+</tr>
+<tr>
+<td>Token, env, and custom variable injectors</td>
+<td>Variables</td>
+<td>The variable is the contract the operator chose. A custom type can render a file instead.</td>
+</tr>
+<tr>
+<td>Secret survey answers to scripts and Terraform</td>
+<td>Variables</td>
+<td>Scripts read <code>SWITCHTENDER_VAR_&lt;name&gt;</code> and Terraform reads <code>TF_VAR_&lt;name&gt;</code>. Ansible receives them in the extra vars file.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="crash-reports-and-core-dumps">Crash reports and core dumps</h2>
+<p>A crashing process can write its memory to disk, and a server's memory holds decrypted credentials
+while a run executes, as does the memory of the tool it handed them to.</p>
+<ul>
+<li>Every server and worker sets its core file size limit to zero at startup, both the soft and the
+hard limit, so it cannot be raised again, and every tool it starts inherits the zero.</li>
+<li>The shipped systemd units set <code>LimitCORE=0</code> as well.</li>
+<li>A crash collector the kernel pipes core dumps to, such as systemd-coredump or apport, decides for
+itself what to keep. Check that yours honors the core limit, or turn it off on hosts that run
+SwitchTender.</li>
+<li>On macOS the core limit applies the same way.</li>
+<li>Windows has no core limit. Windows Error Reporting can keep a dump of a crashing process, so check
+its settings on hosts that run SwitchTender, and configure no <code>LocalDumps</code> policy that covers
+SwitchTender or the tools it runs.</li>
+</ul>
+<h2 id="platform-notes">Platform notes</h2>
+<ul>
+<li><strong>Linux.</strong> Run under the shipped systemd unit, and run files never reach a disk except through
+swap.</li>
+<li><strong>macOS.</strong> There is no memory-backed default, so the root is the per-account temporary directory
+under <code>/var/folders</code>, private to the account, and the doctor warns. FileVault encrypts it at rest.</li>
+<li><strong>Windows.</strong> The root is the account's temporary directory, private by access list, and the doctor
+warns. Encrypt the volume with BitLocker.</li>
+</ul>
+
+		</main>
+	</div>
+	<div class="foot-legal" style="text-align:center;margin:26px auto 34px;font-size:12px;opacity:.75">SwitchTender&trade; is a trademark of KordLoom LLC. Copyright 2026 KordLoom LLC.</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

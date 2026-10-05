@@ -60,7 +60,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model" class="active">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model" class="active">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -86,6 +86,17 @@ the run is released, and it commits a digest of the run's spec at the moment of 
 time the executor recomputes that digest from the spec it is about to run. If they differ, the run
 fails with that stated, rather than executing something nobody approved. The chain would catch the
 same tampering at verify time; this refuses to perform it in the first place.</p>
+<p>The spec covers what decides a run's effect, not only the request. The container image is resolved
+when the run is submitted, from the run, its template, its project, or the server default, and
+pinned onto it by the digest its registry serves, so a project's image changed after an approval
+cannot move the approved run into another container. When the registry does not answer, the run is
+bound to the tag and the approver is told the tag is not pinned to a digest, and the outcome records
+the digest that was pulled. A static inventory is snapshotted at submission and the run executes
+that snapshot, so an inventory edited after an approval cannot widen or redirect the run. A gated
+Terraform or OpenTofu apply carries out the saved plan file its approval bound, and the tool refuses
+that plan if the infrastructure changed since. A dynamic inventory source is the one input that
+resolves at execution by nature: the approval binds its definition and the outcome records the hosts
+it reached.</p>
 <p><strong>&quot;The requester cannot release their own change.&quot;</strong> A rule can require a distinct approver, and
 the check runs before anything is recorded, so a refused self-approval leaves no decision entry
 behind. Approving is admin-only. An agent identity is operator-bound, so an agent can propose work
@@ -124,6 +135,26 @@ is published at a well-known path and can be pinned out of band, so a verifier i
 server's word for which key is real. The hosted witness countersigns what it observed, so a forged
 bundle also needs the witness to have seen a history that was never served. And every entry is
 bound to its install identity, so a bundle signed by one install cannot be replayed as another's.</p>
+<p>The operator who runs the install holds that key, so the operator is this adversary too, and the
+cheapest forgery open to them is not a new history but an edited receipt: change what a receipt
+discloses beside the chain, sign it again, and leave every link intact. That is now bound. Each
+member a receipt discloses beside the links is held against something the anchored links commit:
+an approval decision and a correction against their entry's content digest, an approver's reason
+against the commitment its decision carries, the spec against the digest the decision and the
+outcome name, the outcome under the exact digest form against its entry's content digest, and a
+span beat's numbers against the path its link commits. Edit any of them and re-sign, and this
+product's verifier fails the receipt, and so does every LoomSeal verifier from 1.7.0 on, the Go
+verifier, its browser build, and the independent Python reference alike. Planting beside a checked
+member a second one whose name differs only in case, for a reader that folds case to take instead,
+fails the receipt the same way. A member nothing commits is reported as unchecked, and the verdict
+says how many, rather than reading as verified.</p>
+<p>The limit is the one every append-only record shares. The chain proves that history was not
+rewritten after it was anchored or witnessed. It does not prove that an entry was true when it was
+written: an operator who records a false approval at the moment records it as faithfully as a true
+one. Anchors fix when history existed, so a rewrite made after an anchor shows. A witness that
+countersigns heads as they are served fixes them in a record the operator does not control. Neither
+makes an entry true, and before the first anchor the operator's key is the only thing the record
+rests on.</p>
 <h3 id="an-ai-agent-holding-a-token">An AI agent holding a token</h3>
 <p>The agent holds one credential: a scoped SwitchTender token. It holds no SSH keys and no cloud
 credentials; those are injected by the executor at run time and never pass through the agent. The

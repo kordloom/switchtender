@@ -25,9 +25,12 @@ lapsed license never locks a server out of its own data.
 
 ## What is a dry run?
 
-A run that makes no changes. Ansible runs in check mode, Terraform runs plan instead of apply, and
-Bash and Python are syntax checked without executing. A dry run set on a sharded run is carried to
-every shard, so a preview is always a preview.
+A run in the tool's no-change mode. Ansible runs in check mode, Terraform runs plan instead of
+apply, and Bash and Python are syntax checked without executing. A dry run set on a sharded run is
+carried to every shard. The mode is a promise about the tool, not about what it is given: a task
+can set `check_mode: false`, and a plan runs the program an `external` data source names. So a rule
+that excludes dry runs exempts only a dry run the gate read in full and found running nothing. See
+[dry runs and `exclude_dry_run`](concepts.md#dry-runs-and-exclude-dry-run).
 
 ## How do I migrate from AWX?
 
@@ -98,10 +101,10 @@ name a host set once and reuse it across templates.
 
 Sealed with AES-256-GCM, the key derived from an operator passphrase through argon2id. Secrets
 decrypt only at execution, into the run's environment or a temporary file created mode 0600 and
-deleted when the run finishes, and never appear in API responses. Fourteen kinds cover SSH keys and
+deleted when the run finishes, and never appear in API responses. Fifteen kinds cover SSH keys and
 SSH passwords, vault passwords, become passwords and full become settings, network device logins,
-environment bundles, API tokens, container registry logins, and typed AWS, Azure, GCP, VMware, and
-OpenStack credentials. Set `SWITCHTENDER_ENCRYPTION_KEY` and `SWITCHTENDER_ENCRYPTION_SALT` to
+environment bundles, API tokens, container registry logins, Kubernetes kubeconfigs, and typed AWS,
+Azure, GCP, VMware, and OpenStack credentials. Set `SWITCHTENDER_ENCRYPTION_KEY` and `SWITCHTENDER_ENCRYPTION_SALT` to
 enable them.
 
 A credential does not have to be stored here at all. Nine managers are read natively at launch:

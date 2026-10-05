@@ -80,7 +80,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features" class="active">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features" class="active">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -132,7 +132,7 @@ PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
 </tr>
 <tr>
 <td>Scheduling</td>
-<td>Cron schedules fire runs, splits, or pipelines with full history per fire.</td>
+<td>Cron or RFC 5545 recurrence schedules fire runs, splits, or pipelines with full history per fire. A recurrence says what cron cannot, such as the last Friday of each quarter.</td>
 </tr>
 <tr>
 <td>Fleet memory</td>
@@ -160,7 +160,11 @@ PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
 </tr>
 <tr>
 <td>Approvals</td>
-<td>Mark a run to require sign-off, or require it automatically by policy on tool, command, target, assessed risk, or who is asking. Community holds one such policy, and matching on risk or on who is asking is part of the full engine, which is Team. A held run never executes until an admin approves or rejects it. The decision is a chain entry committing a digest of the exact spec released, the executor refuses a spec that changed after the decision, and the receipt proves the approved and executed change are the same.</td>
+<td>Mark a run to require sign-off, or require it automatically by policy on tool, command, target, assessed risk, or who is asking. Community holds one such policy, and matching on risk or on who is asking is part of the full engine, which is Team. A held run never executes until an admin approves or rejects it. The decision is a chain entry committing a digest of the exact spec released, the executor refuses a spec that changed after the decision, and the receipt proves the approved and executed change are the same. An approver can give a reason, up to 1,000 characters, masked for known secrets and confirmed when the masker changed it, kept as audit evidence and committed so the receipt opens it offline. A rule can require one, and a reason is corrected by appending, never edited.</td>
+</tr>
+<tr>
+<td>Approval steps</td>
+<td>A workflow can stop partway at an approval step. The steps before it run, the workflow waits, and an admin approves or denies from the approvals queue, the run page, or the API. Approval runs the steps after it, and a denial, or the step's timeout passing, runs its deny path instead, the way AWX takes an approval node's failure path. An agent can see that its workflow waits and cannot decide it. The decision is bound to the state the approver was shown, the paused workflow survives a restart and is resumed by exactly one replica, and the request and the decision are chain entries the run's dossier and receipt disclose.</td>
 </tr>
 <tr>
 <td>Reversibility</td>
@@ -176,7 +180,7 @@ PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
 </tr>
 <tr>
 <td>Policy as code (Team past one plain rule)</td>
-<td>Point <code>--policy-file</code> at a YAML file and it becomes the source of truth for policies. A rule can hold a run for approval or deny it outright (<code>effect: deny</code>), can scope itself to agents or people (<code>actor_kind</code>), to one named principal (<code>actor</code>), or to a risk floor (<code>min_risk</code>), and can demand that the approver be someone other than the requester (<code>require_distinct_approver</code>), so an agent's authorization boundary is a reviewed diff with a commit behind it. The API refuses policy writes with a 409 that says where to make the change, and a malformed file stops the server rather than silently gating nothing.</td>
+<td>Point <code>--policy-file</code> at a YAML file and it becomes the source of truth for policies. A rule can hold a run for approval or deny it outright (<code>effect: deny</code>), can scope itself to agents or people (<code>actor_kind</code>), to one named principal (<code>actor</code>), or to a risk floor (<code>min_risk</code>), and can demand that the approver be someone other than the requester (<code>require_distinct_approver</code>), so an agent's authorization boundary is a reviewed diff with a commit behind it. The same file can load Rego policies, so an existing Open Policy Agent or Conftest rule ports as it is, evaluated offline against a documented input and recorded in the evidence by the digest of its exact bundle (<a href="/docs/policy">Approval policies</a>). The API refuses policy writes with a 409 that says where to make the change, and a malformed file stops the server rather than silently gating nothing.</td>
 </tr>
 <tr>
 <td>Observability</td>
@@ -248,7 +252,7 @@ PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
 </tr>
 <tr>
 <td>Credentials</td>
-<td>Fourteen kinds: SSH keys and SSH passwords, vault passwords, become passwords and full become settings, network device logins, env bundles for cloud SDKs, API tokens and JWTs, registry logins, and typed AWS, Azure, GCP, VMware, and OpenStack cloud credentials, all encrypted at rest.</td>
+<td>Fifteen kinds: SSH keys and SSH passwords, vault passwords, become passwords and full become settings, network device logins, env bundles for cloud SDKs, API tokens and JWTs, registry logins, Kubernetes kubeconfigs, and typed AWS, Azure, GCP, VMware, and OpenStack cloud credentials, all encrypted at rest. Custom types add their own fields and inject them as environment variables, extra vars, and private files. Four federated kinds, for AWS, Google Cloud, Azure, and any OpenID Connect relying party, store nothing and hand each run a short-lived identity token instead, as <a href="/docs/federation">workload identity federation</a> describes.</td>
 </tr>
 <tr>
 <td>Secret masking</td>
@@ -263,8 +267,12 @@ PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
 <td>A webhook URL launches a template on push. The project syncs fresh, so it deploys the commit just pushed.</td>
 </tr>
 <tr>
+<td>Pull request review</td>
+<td>A GitHub or GitLab pull request is planned at its head commit in the tool's no-change mode, and the result is posted back as one comment per template, updated on every push, with a commit status. The comment carries the plan summary, the destroy count the rules weigh, the decision the apply would get after merge, a link to the run, and the receipt. A plan a rule holds says it is waiting for approval and links to where it is approved. Each report goes out once across replicas, survives a restart, waits for the plan's outcome on the chain, and is retried when the forge fails. Applying stays in SwitchTender. See <a href="/docs/pull-request-review">pull request review</a>.</td>
+</tr>
+<tr>
 <td>Surveys</td>
-<td>Templates declare typed launch prompts, text, multiline, integer, boolean, or choice, each with bounds checked before launch: min and max on a number, length and a regular-expression pattern on text, and a help line on any field. A launch that breaks a bound is refused with the field it failed, and injected as extra vars.</td>
+<td>Templates declare typed launch prompts, text, multiline, secret, integer, boolean, or choice, each with bounds checked before launch: min and max on a number, length and a regular-expression pattern on text, and a help line on any field. A launch that breaks a bound is refused with the field it failed, and injected as extra vars. A secret answer is sealed like a credential, never stored on the run as text, masked in the log, and recorded on the chain by name only.</td>
 </tr>
 <tr>
 <td>Saved workflows</td>
@@ -296,11 +304,11 @@ PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
 </tr>
 <tr>
 <td>Reach isolated networks (Team)</td>
-<td>A worker dials out to the control node over the mesh relay with a token and needs no inbound port, so it runs jobs inside an air-gapped segment, a DMZ, or a customer network the control node cannot reach directly. Point <code>switchtender worker --server</code> at the control node and set the worker token. The control node announces what the worker does on the channels it is configured with, the runs it finishes and the applies its plans leave held, since a worker in such a segment holds no channels of its own and could not reach them if it did.</td>
+<td>A worker dials out to the control node over the mesh relay with a token and needs no inbound port, so it runs jobs inside an air-gapped segment, a DMZ, or a customer network the control node cannot reach directly. Point <code>switchtender worker --server</code> at the control node and set the worker token. The control node announces what the worker does on the channels it is configured with, the runs it finishes and the applies its plans leave held, since a worker in such a segment holds no channels of its own and could not reach them if it did. A worker pool that registers a delivery key receives each claimed run's credentials and secret survey answers sealed to that key and bound to the claim, so credentialed runs execute there while the worker holds no database and no encryption key.</td>
 </tr>
 <tr>
 <td>Backup and restore</td>
-<td>One encrypted file holds the whole control plane: credentials, projects, templates, inventories, schedules, triggers, and access. Sealed with the deployment key, so it is confidential and tamper-evident, and it restores into either SQLite or Postgres.</td>
+<td>One encrypted file holds the whole control plane: credentials, projects, templates, inventories, schedules, triggers, notification targets, and access. Sealed with the deployment key, so it is confidential and tamper-evident, and it restores into either SQLite or Postgres.</td>
 </tr>
 <tr>
 <td>Retention</td>
@@ -308,7 +316,7 @@ PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
 </tr>
 <tr>
 <td>Email</td>
-<td>An SMTP notification on every finished or held run, or on failures only, alongside the webhooks.</td>
+<td>An SMTP notification on every finished or held run, or on failures only, alongside the webhooks. An attention alert is emailed under either setting.</td>
 </tr>
 <tr>
 <td>Slack</td>
@@ -380,7 +388,7 @@ PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
 </tr>
 <tr>
 <td>Migration</td>
-<td><code>switchtender import awx</code> and <code>import semaphore</code> read an export and create the equivalent projects, inventories, templates, surveys, schedules, and credential shells, with a dry-run report first. <code>import chef</code> and <code>import puppet</code> bring a desired-state fleet across as an inventory, grouped by environment and role, since those systems hold no job definitions to carry and their cookbooks and manifests do not convert. An AWX workflow job template arrives as a workflow template and keeps its own schedules, unless its graph is one a pipeline cannot express, such as a node that runs other nodes on failure, which is reported and skipped whole rather than imported in part. <code>switchtender import rundeck</code> reads either a job export or a project archive, told apart by content, converting Quartz schedules and refusing to downgrade secure options to plaintext. Neither Rundeck artifact carries a node definition, so no inventory is imported from either and each node source is reported by kind and location instead. An archive brings one project when its source control configuration names a repository this can reach. <code>switchtender import jenkins</code> reads a Jenkins jobs directory or a zip of one, turning freestyle jobs into Bash templates, resolving Jenkins H notation into real cron times, and refusing to import a password parameter or a poll trigger. <code>switchtender import cron</code> brings a crontab under governance, turning each cron line into an approved, recorded schedule. The per-source table is in <a href="/docs/migration#what-each-source-brings-over">what each source brings over</a>.</td>
+<td><code>switchtender import awx</code> and <code>import semaphore</code> read an export and create the equivalent projects, inventories, templates, surveys, schedules, and credential shells, with a dry-run report first. <code>import chef</code> and <code>import puppet</code> bring a desired-state fleet across as an inventory, grouped by environment and role, since those systems hold no job definitions to carry and their cookbooks and manifests do not convert. An AWX workflow job template arrives as a workflow template and keeps its own schedules, unless its graph is one a pipeline cannot express, such as a node that runs other nodes on failure, which is reported and skipped whole rather than imported in part. <code>switchtender import rundeck</code> reads either a job export or a project archive, told apart by content, converting Quartz schedules and bringing secure options across as secret fields. Neither Rundeck artifact carries a node definition, so no inventory is imported from either and each node source is reported by kind and location instead. An archive brings one project when its source control configuration names a repository this can reach. <code>switchtender import jenkins</code> reads a Jenkins jobs directory or a zip of one, turning freestyle jobs into Bash templates, resolving Jenkins H notation into real cron times, bringing a password parameter across as a secret field, and refusing to import a poll trigger. <code>switchtender import cron</code> brings a crontab under governance, turning each cron line into an approved, recorded schedule. The per-source table is in <a href="/docs/migration#what-each-source-brings-over">what each source brings over</a>.</td>
 </tr>
 <tr>
 <td>Offboarding record</td>
@@ -393,6 +401,10 @@ PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
 <tr>
 <td>Schedule timezones</td>
 <td>A schedule reads its cron expression in an IANA timezone such as <code>America/New_York</code>, following that zone's daylight-saving shifts, so a nightly window stays put across the year instead of drifting with the server clock. On the day a zone falls back the repeated hour fires once, not twice, and on the day it springs forward a slot inside the hour that never happens fires at the instant the clocks jumped, so a nightly job runs every night of the year.</td>
+</tr>
+<tr>
+<td>Schedule recurrences</td>
+<td>A schedule takes an RFC 5545 recurrence rule in place of a cron expression: a <code>DTSTART</code> with its zone, one or more <code>RRULE</code> lines, and <code>EXRULE</code>, <code>RDATE</code>, and <code>EXDATE</code> lines, so the last Friday of each quarter, every other Tuesday, or nightly except on a holiday is one schedule. Rules are expanded on the zone's wall clock and read through daylight-saving changes the way RFC 5545 defines, a rule bounded by <code>COUNT</code> or <code>UNTIL</code> fires its last occurrence and stops, and two servers on one database fire each occurrence once. An AWX import carries every schedule's rule across rather than skipping the ones cron cannot say.</td>
 </tr>
 <tr>
 <td>Schedule failures</td>
@@ -413,8 +425,9 @@ credential picks, extra vars merged over the template's, and a dry-run toggle. O
 the same authorization as the template's own objects.</li>
 <li>The doctor at /ui/doctor verifies every registered reference: templates to inventories,
 projects, and credentials, schedules to templates, and every cron expression, plus credentials
-still waiting for a secret. Each finding links to the page that fixes it.</li>
-<li>Schedules preview their next firings as you type the cron expression.</li>
+still waiting for a secret. It reports the server's ansible-core version against the releases
+the inventory engine is tested on. Each finding links to the page that fixes it.</li>
+<li>Schedules preview their next firings as you type the cron expression or the recurrence rule.</li>
 <li>Every list exports the filtered rows as CSV or JSON. Runs export events as NDJSON, the full
 log as text, and per-host results as JSON. Credentials are excluded from export on purpose.</li>
 <li>Per-template notification routing is editable in the template dialog, with failure-only delivery
@@ -424,6 +437,16 @@ routing key and a Grafana target its own instance and token, so each template ca
 annotate its own team. A Twilio or email target names only a recipient and sends through the
 server-held account, so the account secret never lives in a template. Routing keys and tokens
 are masked on read the same as webhook URLs.</li>
+<li>Notification targets are defined once and attached to many objects, the way AWX attaches a
+notification template: a target attached to a template, a workflow, a schedule, a project, or an
+organization hears that object's runs when they start, succeed, fail, or are held for approval,
+and a schedule's fires when they are skipped because its inventory matched no hosts.
+A target's address and key are sealed at rest and never returned, and an AWX import brings its
+notification templates and their attachments across, an organization's own included.</li>
+<li>Each run's notifications reach a target in the run's event order. A failed one is retried, then
+kept as failed on the run, on the target, and in the doctor, and the next one still goes with a
+note saying an earlier one failed. The Notifications page shows each target's delivery status and
+what it still needs.</li>
 <li>The overview charts runs per day, and every outcome tick in fleet health links to its run.</li>
 </ul>
 <h2 id="run-provenance-and-search">Run provenance and search</h2>

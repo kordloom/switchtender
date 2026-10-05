@@ -10,6 +10,9 @@ A backup holds the configuration and secrets a deployment needs to stand back up
 
 - Credentials, with their sealed secrets.
 - Projects, templates, inventories, and inventory sources.
+- Each imported template's binding to its AWX job template id, including the binding of a template
+  since deleted, so its AWX-compatible callback address keeps answering, or keeps answering gone,
+  after a restore.
 - Schedules and webhook triggers.
 - Users, teams, organizations, their memberships, and access grants.
 - API tokens, stored and restored by their hashes, so existing tokens keep working after a restore.
@@ -71,6 +74,9 @@ it replaces any existing file only after it is written in full.
 Without `--out` the backup is written to standard output, so it can be piped or redirected. The object
 counts are written to standard error, so a piped backup stays clean.
 
+The backup reads every table at one instant, on SQLite and on PostgreSQL alike, so a server writing
+while it runs cannot leave the file holding a state the database never was in.
+
 ## Restore
 
     SWITCHTENDER_ENCRYPTION_KEY=... SWITCHTENDER_ENCRYPTION_SALT=... \
@@ -81,6 +87,12 @@ never deletes objects that are absent from the file, so restoring into a live de
 than replaces. Without `--in` the backup is read from standard input. Nothing is applied until the
 whole file has decrypted and decoded, so a corrupt or truncated file cannot leave a half-applied
 restore.
+
+A backup file names its format version. This release writes version 3 and restores versions 2 and 3.
+A release that reads only version 2 refuses a version 3 file rather than restoring part of it,
+because version 3 carries objects that release does not know, such as notification targets and a
+template's sealed provisioning callback key. Restore a backup with the release that wrote it or a
+later one.
 
 ## Moving from SQLite to PostgreSQL
 

@@ -26,6 +26,18 @@ time the executor recomputes that digest from the spec it is about to run. If th
 fails with that stated, rather than executing something nobody approved. The chain would catch the
 same tampering at verify time; this refuses to perform it in the first place.
 
+The spec covers what decides a run's effect, not only the request. The container image is resolved
+when the run is submitted, from the run, its template, its project, or the server default, and
+pinned onto it by the digest its registry serves, so a project's image changed after an approval
+cannot move the approved run into another container. When the registry does not answer, the run is
+bound to the tag and the approver is told the tag is not pinned to a digest, and the outcome records
+the digest that was pulled. A static inventory is snapshotted at submission and the run executes
+that snapshot, so an inventory edited after an approval cannot widen or redirect the run. A gated
+Terraform or OpenTofu apply carries out the saved plan file its approval bound, and the tool refuses
+that plan if the infrastructure changed since. A dynamic inventory source is the one input that
+resolves at execution by nature: the approval binds its definition and the outcome records the hosts
+it reached.
+
 **"The requester cannot release their own change."** A rule can require a distinct approver, and
 the check runs before anything is recorded, so a refused self-approval leaves no decision entry
 behind. Approving is admin-only. An agent identity is operator-bound, so an agent can propose work
@@ -74,6 +86,28 @@ is published at a well-known path and can be pinned out of band, so a verifier i
 server's word for which key is real. The hosted witness countersigns what it observed, so a forged
 bundle also needs the witness to have seen a history that was never served. And every entry is
 bound to its install identity, so a bundle signed by one install cannot be replayed as another's.
+
+The operator who runs the install holds that key, so the operator is this adversary too, and the
+cheapest forgery open to them is not a new history but an edited receipt: change what a receipt
+discloses beside the chain, sign it again, and leave every link intact. That is now bound. Each
+member a receipt discloses beside the links is held against something the anchored links commit:
+an approval decision and a correction against their entry's content digest, an approver's reason
+against the commitment its decision carries, the spec against the digest the decision and the
+outcome name, the outcome under the exact digest form against its entry's content digest, and a
+span beat's numbers against the path its link commits. Edit any of them and re-sign, and this
+product's verifier fails the receipt, and so does every LoomSeal verifier from 1.7.0 on, the Go
+verifier, its browser build, and the independent Python reference alike. Planting beside a checked
+member a second one whose name differs only in case, for a reader that folds case to take instead,
+fails the receipt the same way. A member nothing commits is reported as unchecked, and the verdict
+says how many, rather than reading as verified.
+
+The limit is the one every append-only record shares. The chain proves that history was not
+rewritten after it was anchored or witnessed. It does not prove that an entry was true when it was
+written: an operator who records a false approval at the moment records it as faithfully as a true
+one. Anchors fix when history existed, so a rewrite made after an anchor shows. A witness that
+countersigns heads as they are served fixes them in a record the operator does not control. Neither
+makes an entry true, and before the first anchor the operator's key is the only thing the record
+rests on.
 
 ### An AI agent holding a token
 

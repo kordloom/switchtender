@@ -42,7 +42,7 @@ LDAP, and JWT, with just-in-time provisioning, and group-to-role mapping on all 
 five approval policies instead of one.
 
 Team adds the full policy engine (unlimited policies, outright denials, risk floors,
-agent-scoped rules, and distinct-approver separation of duties), the period change register,
+agent-scoped rules, distinct-approver separation of duties, and Rego policies), the period change register,
 distributed workers, initializing a new PostgreSQL database for active-active high availability,
 and one-click drift reconcile. No license server, no activation, no phone-home, no seat counting,
 and fleet bands are self-reported and never audited. A lapsed license takes nothing: opening an

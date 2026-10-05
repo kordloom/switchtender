@@ -21,6 +21,11 @@ the app at `/ui/docs`.
 | [Concepts](concepts.md) | Runs, splits, pipelines, projects, templates, and the rest.|
 | [Reliability](reliability.md) | How runs execute: workers, splits, failure, recovery, durability.|
 | [Configuration](configuration.md) | Every command, flag, and environment variable.|
+| [Run files](run-files.md) | Where a run stages keys and tokens on disk, how they go after a crash, and keeping them off disk.|
+| [Approval policies](policy.md) | YAML rules and Rego policies, the input a policy reads, and how it fails closed.|
+| [Inventories](inventories.md) | Static, dynamic, smart, and constructed inventories, and the hosts a run resolved to.|
+| [Federated cloud credentials](federation.md) | Short-lived AWS, Google Cloud, and Azure access minted per run, with nothing stored.|
+| [Pull request review](pull-request-review.md) | Plan comments and commit statuses on GitHub and GitLab pull requests.|
 | [Desktop](desktop.md) | Run SwitchTender as a local desktop app.|
 | [Features](features.md) | The full capability list.|
 | [Compliance mapping](compliance.md) | What the record shows for SOC 2, ISO 27001, and HIPAA change controls.|
