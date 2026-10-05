@@ -527,6 +527,49 @@ func TestPrintOutcomeRendersWhatTheRunActuallyDid(t *testing.T) {
 		},
 		WantLines: []string{"commit         deadbeefcafe", "spec digest    sha256:1234",
 			"image          creator-ee@sha256:aa"},
+	}, { // Test 7: A dry run whose playbook forced real work is not reported as changing nothing.
+		Name: "forcing dry run",
+		Record: outcome.Record{
+			RunID: "run_h", Status: "succeeded", ExitCode: &exit0, LogSHA256: "abc", DryRun: true,
+			DryRunScans: []run.DryRunScan{{Tool: run.ToolAnsible, Scanner: "ansible-check-mode",
+				Version: 1, Inputs: []string{"site.yml"},
+				Findings:       []string{`site.yml: task "Restart web" sets check_mode to false`},
+				Classification: run.DryRunNotChangeFree}},
+		},
+		WantLines: []string{"dry run, but the gate did not find it change free",
+			"dry-run scan   ansible-check-mode version 1, not_change_free, 1 files read",
+			`not change free site.yml: task "Restart web" sets check_mode to false`},
+		DenyLines: []string{"nothing was changed"},
+	}, { // Test 8: A plan that runs a program names the address the scan found.
+		Name: "plan running a program",
+		Record: outcome.Record{
+			RunID: "run_i", Status: "succeeded", ExitCode: &exit0, LogSHA256: "abc", DryRun: true,
+			Tool: "terraform",
+			DryRunScans: []run.DryRunScan{{Tool: run.ToolTerraform, Scanner: "terraform-external",
+				Version: 1, Inputs: []string{"infra/main.tf"},
+				Findings: []string{"data.external.lookup runs a program during plan " +
+					"(infra/main.tf line 1)"},
+				Classification: run.DryRunNotChangeFree}},
+		},
+		WantLines: []string{"dry run, but the gate did not find it change free",
+			"terraform-external version 1, not_change_free",
+			"not change free data.external.lookup runs a program during plan"},
+		DenyLines: []string{"nothing was changed"},
+	}, { // Test 9: A plan whose registry modules the gate downloaded before reading says so, with
+		// the download's exit status.
+		Name: "plan with downloaded modules",
+		Record: outcome.Record{
+			RunID: "run_j", Status: "succeeded", ExitCode: &exit0, LogSHA256: "abc", DryRun: true,
+			Tool: "terraform",
+			DryRunScans: []run.DryRunScan{{Tool: run.ToolTerraform, Scanner: "terraform-external",
+				Version: 1, Inputs: []string{"infra/.terraform/modules/net/main.tf", "infra/main.tf"},
+				Fetch:          &run.ModuleFetch{Command: "terraform get", ExitStatus: 0},
+				Classification: run.DryRunChangeFree}},
+		},
+		WantLines: []string{"dry-run scan   terraform-external version 1, change_free, 2 files " +
+			"read, modules downloaded first by the gate's terraform get (exit status 0)",
+			"check mode, so nothing was changed"},
+		DenyLines: []string{"did not find it change free"},
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

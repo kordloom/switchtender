@@ -3,8 +3,11 @@ package dispatch
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -13,6 +16,7 @@ import (
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/runfiles"
 	"github.com/kordloom/switchtender/internal/secretsource"
 	"github.com/kordloom/switchtender/internal/util"
 )
@@ -52,10 +56,20 @@ func (d *Dispatcher) validateCredentials(ctx context.Context, tool string, ids [
 		return credential.ErrNoKey
 	}
 	ansible := run.NormalizeTool(tool) == run.ToolAnsible
+	federated := map[credential.Kind]string{}
 	for _, id := range ids {
 		c, err := d.credentials.Get(ctx, id)
 		if err != nil {
 			return fmt.Errorf("%w: %s", err, id)
+		}
+		// A federated credential holds no secret to open. What it needs instead is an issuer on
+		// this process and settings that will mint, checked now so a run that cannot get its token
+		// is refused at submit rather than failing once it is running.
+		if credential.Federated(c.Kind) {
+			if _, err := d.checkFederated(c, federated); err != nil {
+				return err
+			}
+			continue
 		}
 		if _, err := d.sealer.Open(c.Secret); err != nil {
 			return unopenable(c, err)
@@ -109,22 +123,70 @@ func (d *Dispatcher) inventoryCredentialIDs(ctx context.Context, r *run.Run) []s
 // materializeCredentials decrypts the run's credentials into files only the executing process can
 // read and maps them onto the spec. It also returns every resolved plaintext secret so the caller
 // can redact those values from the run's output. The returned cleanup removes every file.
+//
+// Every file is written into one private directory for the run, mode 0700 with each file 0600, and
+// the cleanup removes the directory whole. The caller defers the cleanup, so success, failure, a
+// cancel, and a timeout all end there. A process killed mid-run runs no cleanup at all, which is
+// why the directory is locked for the life of the run, its heartbeat counts while the process
+// lives, and every dispatcher on the host sweeps the directories whose lock nobody holds.
+//
+// The directory is made for every run, credentials or not, and handed to the runner as the spec's
+// RunDir, because a run carries secrets by other routes too: secret survey answers reach the extra
+// vars file, an inline script can hold a token, and a containerized run's environment file holds
+// every injected value. All of them now sit where the sweep reaches them.
 func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spec *roundhouse.Spec) (func(), []string, error) {
-	cleanup := func() {}
-	ids := d.effectiveCredentialIDs(ctx, r)
+	return d.materializeFrom(ctx, storeSource{d: d}, r, spec)
+}
+
+// materializeFrom is materializeCredentials with the secrets taken from src: this executor's own
+// store, or what the control node delivered to a relay worker. Everything after the opening is the
+// same either way, so a delivered credential lands in the same private run directory, in the same
+// form, and reaches the masker the same way.
+func (d *Dispatcher) materializeFrom(ctx context.Context, src secretSource, r *run.Run,
+	spec *roundhouse.Spec) (func(), []string, error) {
+	dir, err := runfiles.Create(d.runFiles(), r.ID)
+	if err != nil {
+		return func() {}, nil, fmt.Errorf("create the run's private directory: %w", err)
+	}
+	spec.RunDir, spec.RunFilesRoot = dir.Path(), d.runFiles()
+	cleanup := func() {
+		if err := dir.Remove(); err != nil && d.log != nil {
+			d.log.Warn("dispatch: remove run credential directory: "+err.Error(),
+				zap.String("run_id", r.ID))
+		}
+	}
+	ids, err := src.credentialIDs(ctx, r)
+	if err != nil {
+		return cleanup, nil, err
+	}
 	if len(ids) == 0 {
 		return cleanup, nil, nil
-	}
-	if d.credentials == nil || d.sealer == nil {
-		return cleanup, nil, credential.ErrNoKey
 	}
 
 	var paths []string
 	var secrets []string
 	var leases []*secretsource.Lease
+	// runDir returns the run's private directory.
+	runDir := func() (*runfiles.Dir, error) {
+		return dir, nil
+	}
+	// newFile creates a private file in the run's directory.
+	newFile := func() (*os.File, error) {
+		rd, err := runDir()
+		if err != nil {
+			return nil, err
+		}
+		return rd.CreateTemp("cred-*")
+	}
 	cleanup = func() {
 		for _, p := range paths {
 			_ = os.Remove(p)
+		}
+		// Every file a run writes, federated token files included, lives in the run's one private
+		// directory, removed whole, so no file written into it can outlive the run.
+		if err := dir.Remove(); err != nil && d.log != nil {
+			d.log.Warn("dispatch: remove run credential directory: "+err.Error(),
+				zap.String("run_id", r.ID))
 		}
 		for _, lease := range leases {
 			revokeCtx, cancel := context.WithTimeout(context.Background(), revokeTimeout)
@@ -135,15 +197,44 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 			cancel()
 		}
 	}
+	federated := map[credential.Kind]string{}
 	for _, id := range ids {
-		c, plain, lease, err := d.openCredential(ctx, id)
-		if err != nil {
-			return cleanup, secrets, err
-		}
+		c, plain, lease, err := src.credential(ctx, id)
 		if lease != nil {
 			leases = append(leases, lease)
 		}
-		secrets = append(secrets, plain)
+		if err != nil && !errors.Is(err, errFederatedCredential) {
+			return cleanup, secrets, err
+		}
+		// A federated credential stores nothing and resolves nothing. It mints the run's identity
+		// token now, into the run's private directory, created mode 0700 and registered for removal
+		// before anything is written to it, so every return below, and the caller's deferred cleanup
+		// on every exit after this, takes the token files with it. The directory is locked for the
+		// life of the run, so the crash sweep reclaims token files a killed process left behind.
+		if errors.Is(err, errFederatedCredential) {
+			rd, err := runDir()
+			if err != nil {
+				return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
+			}
+			delivery, err := src.federated(ctx, r, c, spec.DryRun, rd.Path(), federated)
+			// The token joins the mask list even when the delivery failed partway, such as an
+			// exchange refused after the token was minted, so no reader of the list misses it.
+			secrets = append(secrets, delivery.Secrets...)
+			if err != nil {
+				return cleanup, secrets, err
+			}
+			spec.Env = append(spec.Env, delivery.Env...)
+			// The container plan mounts these, so the path a variable names resolves inside the
+			// container as well as on the host.
+			spec.CredentialFiles = append(spec.CredentialFiles, delivery.Files...)
+			continue
+		}
+		// A kubeconfig is handed to the masker by its secret values, which its injector names, and
+		// not whole. The masker redacts every line of a value, and a kubeconfig's lines include
+		// "apiVersion: v1", which every kubectl get -o yaml prints.
+		if c.Kind != credential.KindKubeconfig {
+			secrets = append(secrets, plain)
+		}
 		if c.Kind == credential.KindEnv {
 			// The secret is each value, not the KEY=VALUE bundle, so mask the values a tool may echo.
 			for _, line := range credential.EnvLines(plain) {
@@ -153,24 +244,19 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 			}
 		}
 		// A credential of a custom type carries its field values as a JSON object, not a single
-		// secret, and its type decides the injection. It contributes environment variables and, when
-		// the type declares them, an extra-vars file, and never a raw credential file, so it takes
-		// its own path and skips the per-kind switch below.
+		// secret, and its type decides the injection. It contributes environment variables, the
+		// files its type renders, and, when the type declares them, an extra-vars file, so it takes
+		// its own path and skips the per-kind switch below. Every file it creates is registered for
+		// cleanup as it is created, before any error is checked, so a failure partway leaves nothing.
 		if c.TypeID != "" {
-			vf, err := d.injectTypedCredential(ctx, c, plain, spec, &secrets)
-			// Register the file for cleanup before checking the error: injectTypedCredential can
-			// fail after creating and partially writing the extra-vars file, which holds the
-			// credential's field values, so tracking it only on success would leave a 0600 file of
-			// secret material in TMPDIR until the OS cleared it.
-			if vf != "" {
-				paths = append(paths, vf)
-			}
-			if err != nil {
+			if err := d.injectTypedCredential(ctx, src, c, plain, spec, &secrets, newFile,
+				&paths); err != nil {
 				return cleanup, secrets, err
 			}
+			d.warnUnreferencedFiles(ctx, src, r, c)
 			continue
 		}
-		f, err := os.CreateTemp("", "switchtender-cred-*")
+		f, err := newFile()
 		if err != nil {
 			return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
 		}
@@ -221,7 +307,7 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 			// play through a vars file like every other connection variable.
 			if vars := connectionVars(c.Settings["user"], c.Settings["become_method"],
 				c.Settings["become_user"]); len(vars) > 0 {
-				vf, err := os.CreateTemp("", "switchtender-cred-*")
+				vf, err := newFile()
 				if err != nil {
 					return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
 				}
@@ -353,7 +439,7 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 			spec.Env = append(spec.Env, inj.Env...)
 			secrets = append(secrets, injectedMaskValues(inj)...)
 			for _, file := range inj.Files {
-				ff, err := os.CreateTemp("", "switchtender-cred-*")
+				ff, err := newFile()
 				if err != nil {
 					return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
 				}
@@ -369,7 +455,12 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 				if err := ff.Close(); err != nil {
 					return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
 				}
-				secrets = append(secrets, file.Content)
+				// A file whose injector named its secret values one by one is not handed over whole:
+				// the masker redacts every line of a value, and a kubeconfig's ordinary lines would
+				// vanish from the run's output wherever they appear.
+				if !file.MaskByField {
+					secrets = append(secrets, file.Content)
+				}
 				// The decoded fields are registered as well as the stored blob.
 				//
 				// A GCP service-account file is JSON, and its private_key is a PEM whose line breaks
@@ -391,7 +482,7 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 			// extra vars never reached the play. Write them to a private vars file like every other
 			// extra-vars carrier. Their values are masked through injectedMaskValues above.
 			if len(inj.ExtraVars) > 0 {
-				vf, err := os.CreateTemp("", "switchtender-cred-*")
+				vf, err := newFile()
 				if err != nil {
 					return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
 				}
@@ -461,30 +552,58 @@ func injectedMaskValues(inj credential.Injection) []string {
 	return out
 }
 
-// injectTypedCredential applies a custom-typed credential to the spec, returning the path of any
-// extra-vars file it wrote so the caller can clean it up.
+// injectTypedCredential applies a custom-typed credential to the spec. newFile creates a private
+// file in the run's directory, and every file created is appended to paths as soon as it exists, so
+// the caller's cleanup removes it even when a later step fails.
 //
-// The field values are the sealed JSON object; the type's injectors turn them into environment
-// variables and extra vars. Every value the type marks secret is added to the mask, so a field a
-// tool echoes is redacted the same as any built-in secret. Extra vars go through a private file so
-// they never land on argv, the way a become or network credential's variables do.
-func (d *Dispatcher) injectTypedCredential(ctx context.Context, c *credential.Credential, plain string,
-	spec *roundhouse.Spec, secrets *[]string) (string, error) {
-	if d.credentialTypes == nil {
-		return "", fmt.Errorf("materialize credential %s: it names a custom type but none are "+
-			"configured", c.ID)
-	}
-	typ, err := d.credentialTypes.Get(ctx, c.TypeID)
+// The field values are the sealed JSON object; the type's injectors turn them into files,
+// environment variables, and extra vars. Files are rendered and written first, because an env or
+// extra-var template may hand a file's path to the tool, which is how a kubeconfig reaches kubectl.
+// Every value the type marks secret is added to the mask, so a field a tool echoes is redacted the
+// same as any built-in secret. Extra vars go through a private file so they never land on argv, the
+// way a become or network credential's variables do.
+func (d *Dispatcher) injectTypedCredential(ctx context.Context, src secretSource, c *credential.Credential,
+	plain string, spec *roundhouse.Spec, secrets *[]string, newFile func() (*os.File, error),
+	paths *[]string) error {
+	typ, err := src.credentialType(ctx, c)
 	if err != nil {
-		return "", fmt.Errorf("materialize credential %s: read type %s: %w", c.ID, c.TypeID, err)
+		return err
 	}
 	var values map[string]string
 	if err := json.Unmarshal([]byte(plain), &values); err != nil {
-		return "", fmt.Errorf("materialize credential %s: decode field values: %w", c.ID, err)
+		return fmt.Errorf("materialize credential %s: decode field values: %w", c.ID, err)
 	}
-	inj, err := typ.Inject(values)
+	// With no field marked secret, every value is masked, the same fail-safe injectedMaskValues
+	// applies to the env and extra vars below. A value that only reaches a file is not in either of
+	// those, so without this a type nobody marked wrote its values into a file a tool can print.
+	if len(typ.SecretFields()) == 0 {
+		for _, v := range values {
+			*secrets = append(*secrets, v)
+		}
+	}
+	files, err := typ.RenderFiles(values)
 	if err != nil {
-		return "", fmt.Errorf("materialize credential %s: %w", c.ID, err)
+		return fmt.Errorf("materialize credential %s: %w", c.ID, err)
+	}
+	written := make(map[string]string, len(files))
+	for _, name := range slices.Sorted(maps.Keys(files)) {
+		f, err := newFile()
+		if err != nil {
+			return fmt.Errorf("materialize credential %s: %w", c.ID, err)
+		}
+		*paths = append(*paths, f.Name())
+		_, werr := f.WriteString(files[name])
+		if err := errors.Join(werr, f.Close()); err != nil {
+			return fmt.Errorf("materialize credential %s: write file %s: %w", c.ID, name, err)
+		}
+		written[name] = f.Name()
+		// The container plan mounts these, so the path an injector hands over resolves inside the
+		// container as well as on the host.
+		spec.CredentialFiles = append(spec.CredentialFiles, f.Name())
+	}
+	inj, err := typ.Inject(values, written)
+	if err != nil {
+		return fmt.Errorf("materialize credential %s: %w", c.ID, err)
 	}
 	spec.Env = append(spec.Env, inj.Env...)
 	// The same fail-safe the built-in kinds use. Taking inj.Secrets raw meant a custom type whose
@@ -495,24 +614,48 @@ func (d *Dispatcher) injectTypedCredential(ctx context.Context, c *credential.Cr
 	// forgetting the flag is a one-word mistake with no warning attached to it.
 	*secrets = append(*secrets, injectedMaskValues(inj)...)
 	if len(inj.ExtraVars) == 0 {
-		return "", nil
+		return nil
 	}
-	vf, err := os.CreateTemp("", "switchtender-cred-*")
+	vf, err := newFile()
 	if err != nil {
-		return "", fmt.Errorf("materialize credential %s: %w", c.ID, err)
+		return fmt.Errorf("materialize credential %s: %w", c.ID, err)
 	}
-	if err := vf.Chmod(0o600); err != nil {
-		_ = vf.Close()
-		return vf.Name(), fmt.Errorf("materialize credential %s: %w", c.ID, err)
-	}
+	*paths = append(*paths, vf.Name())
 	if err := vf.Close(); err != nil {
-		return vf.Name(), fmt.Errorf("materialize credential %s: %w", c.ID, err)
+		return fmt.Errorf("materialize credential %s: %w", c.ID, err)
 	}
 	if err := writeAnsibleVarsFile(vf.Name(), inj.ExtraVars); err != nil {
-		return vf.Name(), fmt.Errorf("materialize credential %s: %w", c.ID, err)
+		return fmt.Errorf("materialize credential %s: %w", c.ID, err)
 	}
 	spec.ExtraVarsFiles = append(spec.ExtraVarsFiles, vf.Name())
-	return vf.Name(), nil
+	return nil
+}
+
+// runFiles returns the directory run credential directories are created under.
+func (d *Dispatcher) runFiles() string {
+	if d.runFilesRoot != "" {
+		return d.runFilesRoot
+	}
+	return runfiles.DefaultRoot()
+}
+
+// sweepRunFiles sweeps the run-files root with s until the dispatcher closes: once as it starts,
+// which on a restarted server or worker is the first moment anything can, and about every five
+// minutes after, so a host whose only worker crashed for good is still cleaned by any server or
+// worker that shares its root. A directory is removed only after two sweeps a gap apart find its
+// lock free and its heartbeat still, so a restart costs one gap of waiting and never a live run's
+// files.
+func (d *Dispatcher) sweepRunFiles(s *runfiles.Sweeper) {
+	defer d.wg.Done()
+	s.Run(d.ctx, func(res runfiles.PassResult, err error) {
+		if err != nil {
+			d.log.Warn("dispatch: sweep run directories: "+err.Error(), zap.String("root", s.Root()))
+		}
+		if res.Removed > 0 {
+			d.log.Info("dispatch: removed run directories left by a process that stopped",
+				zap.Int("count", res.Removed), zap.String("root", s.Root()))
+		}
+	})
 }
 
 // writeAnsibleVarsFile encodes vars as JSON into the private file at path, so a connection or become
@@ -536,6 +679,15 @@ func (d *Dispatcher) openCredential(ctx context.Context, id string) (*credential
 	c, err := d.credentials.Get(ctx, id)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("credential %s: %w", id, err)
+	}
+	// A federated credential has no value to open. Its token is minted for a run and belongs to the
+	// run's environment, so a project key, a registry login, or an inventory source naming one is
+	// refused rather than handed an empty secret it would use as a blank login. The credential is
+	// still returned, so run materialization can tell this refusal apart and mint instead.
+	if credential.Federated(c.Kind) {
+		return c, "", nil, fmt.Errorf("%w: credential %q is %s, which mints a token for a run's "+
+			"environment and cannot stand in for a stored secret here", errFederatedCredential, c.Name,
+			c.Kind)
 	}
 	plain, err := d.sealer.Open(c.Secret)
 	if err != nil {
@@ -581,9 +733,15 @@ func sshKeyFrom(plain string) (key, passphrase string, err error) {
 // effectiveCredentialIDs returns the run's own credentials plus any attached to the stored inventory
 // it targets, deduplicated and in order, so an inventory can carry secret variables that every run
 // against it receives.
+//
+// A run executing an inventory snapshot receives the credentials the inventory attached when the run
+// was submitted, which its approval covers, never the ones the inventory attaches now.
 func (d *Dispatcher) effectiveCredentialIDs(ctx context.Context, r *run.Run) []string {
 	ids := append([]string(nil), r.CredentialIDs...)
-	if r.InventoryID != "" && d.inventories != nil {
+	switch {
+	case r.InventorySnapshot != nil:
+		ids = append(ids, r.InventorySnapshot.CredentialIDs...)
+	case r.InventoryID != "" && d.inventories != nil:
 		if inv, err := d.inventories.Get(ctx, r.InventoryID); err == nil {
 			ids = append(ids, inv.CredentialIDs...)
 		}

@@ -31,6 +31,7 @@ func TestEverySelectedColumnIsDeclared(t *testing.T) {
 		{"credentials", credentialColumns},
 		{"grants", grantColumns},
 		{"credential_types", credTypeColumns},
+		{"federation_keys", fedKeyColumns},
 		{"inventories", inventoryColumns},
 		{"inventory_sources", invSourceColumns},
 		{"projects", projectColumns},

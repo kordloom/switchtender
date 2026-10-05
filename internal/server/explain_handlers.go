@@ -395,7 +395,12 @@ func buildIntentProposalPrompt(rn *run.Run) string {
 		b.WriteString("\nLimited to hosts: ")
 		b.WriteString(rn.Limit)
 	}
-	if rn.DryRun {
+	if rn.DryRun && !rn.ChangeFree() {
+		// Told as it is, so an explanation of a held dry run does not reassure anyone that nothing
+		// will change when the gate's scan says otherwise.
+		b.WriteString("\nMode: dry run, but the gate did not find it change free: ")
+		b.WriteString(util.Clip(strings.Join(rn.DryRunFindings(), "; "), explainCommandCap))
+	} else if rn.DryRun {
 		b.WriteString("\nMode: check mode, no changes")
 	} else {
 		b.WriteString("\nMode: real, applies changes")

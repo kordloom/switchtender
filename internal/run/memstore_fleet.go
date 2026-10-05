@@ -263,7 +263,11 @@ func (m *memStore) SaveHostFacts(_ context.Context, runID string, facts []HostFa
 		if cp.GatheredAt.IsZero() {
 			cp.GatheredAt = time.Now()
 		}
-		m.facts[f.Host] = cp
+		// The newest gather is the truth about a host, by when it was gathered, so a run that
+		// gathered first and finished last does not write its older reading over a newer one.
+		if held, ok := m.facts[f.Host]; !ok || !held.GatheredAt.After(cp.GatheredAt) {
+			m.facts[f.Host] = cp
+		}
 		// Kept as well as replaced, the same way the SQL backends do it. The map above answers what
 		// a host is now and overwrites to do it, so without this the memory store would be the one
 		// backend where estate history silently does not exist and every test against it would
@@ -276,7 +280,9 @@ func (m *memStore) SaveHostFacts(_ context.Context, runID string, facts []HostFa
 		replaced := false
 		for i := range kept {
 			if FactsBucket(kept[i].GatheredAt, kept[i].RunID, FactsInterval()) == bucket {
-				kept[i] = cp
+				if !kept[i].GatheredAt.After(cp.GatheredAt) {
+					kept[i] = cp
+				}
 				replaced = true
 				break
 			}
@@ -501,17 +507,22 @@ func (m *memStore) HostCosts(_ context.Context, window int) (map[string]float64,
 	return out, nil
 }
 
-// TrimSummaries keeps the newest keep summaries for each host and each task and drops the rest.
+// TrimSummaries keeps the newest keep summaries for each host and each task and drops the rest,
+// except the summaries of a run an owed outcome is built from. See heldForOutcome.
 func (m *memStore) TrimSummaries(_ context.Context, keep int) (int, error) {
 	if keep < 1 {
 		keep = 1
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	held := func(runID string) bool {
+		r, ok := m.runs[runID]
+		return ok && m.heldForOutcome(r)
+	}
 	deleted := trimNewestPerKey(m.summaries, keep,
-		func(hs HostSummary) string { return hs.Host }, newerHostSummary)
+		func(hs HostSummary) string { return hs.Host }, newerHostSummary, held)
 	deleted += trimNewestPerKey(m.tasks, keep,
-		func(ts TaskSummary) string { return ts.Task }, newerTaskSummary)
+		func(ts TaskSummary) string { return ts.Task }, newerTaskSummary, held)
 	return deleted, nil
 }
 
@@ -524,10 +535,11 @@ type summaryRef struct {
 }
 
 // trimNewestPerKey keeps the newest keep entries under each group key across every run's slice in
-// byRun and removes the rest, returning how many entries it removed. key groups an entry, and
-// newer reports whether a sorts ahead of b when the group is ordered newest first.
+// byRun and removes the rest, returning how many entries it removed. key groups an entry, newer
+// reports whether a sorts ahead of b when the group is ordered newest first, and an entry of a run
+// held reports is kept whatever its age.
 func trimNewestPerKey[T any](byRun map[string][]T, keep int, key func(T) string,
-	newer func(a, b T) bool) int {
+	newer func(a, b T) bool, held func(runID string) bool) int {
 	groups := make(map[string][]summaryRef)
 	for runID, list := range byRun {
 		for i, entry := range list {
@@ -545,6 +557,9 @@ func trimNewestPerKey[T any](byRun map[string][]T, keep int, key func(T) string,
 			return newer(byRun[refs[i].runID][refs[i].index], byRun[refs[j].runID][refs[j].index])
 		})
 		for _, ref := range refs[keep:] {
+			if held(ref.runID) {
+				continue
+			}
 			if drop[ref.runID] == nil {
 				drop[ref.runID] = make(map[int]bool)
 			}

@@ -24,6 +24,10 @@ type credTypeResponse struct {
 // reference are checked, so a definition that would inject nothing or reference a field it does not
 // declare is refused at creation rather than surfacing as a broken credential later. A type carries
 // no secret, so it is management data, admin only to read as well as write.
+//
+// The origin is the server's to set, the way the id and creation time are. A type created here has
+// none, so it is held to every rule, including that each file it writes is referenced: a request
+// claiming to be an AWX import does not get the allowance an import does.
 func createCredTypeHandler(store credential.TypeStore, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
@@ -36,6 +40,7 @@ func createCredTypeHandler(store credential.TypeStore, log *zap.Logger) http.Han
 		}
 		t.ID = credential.NewTypeID()
 		t.CreatedAt = time.Now()
+		t.Origin = ""
 		if err := t.Validate(); err != nil {
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
@@ -49,7 +54,12 @@ func createCredTypeHandler(store credential.TypeStore, log *zap.Logger) http.Han
 	}
 }
 
-// updateCredTypeHandler replaces a credential type, keeping its id.
+// updateCredTypeHandler replaces a credential type, keeping its id, its creation time, and its
+// origin.
+//
+// The origin and the creation time come from the stored type, never the request, the way the id
+// does. A type imported from AWX keeps the files nothing references that it arrived with, and an
+// edit cannot add another, since a file nothing references is refused for anything defined here.
 func updateCredTypeHandler(store credential.TypeStore, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
@@ -61,16 +71,20 @@ func updateCredTypeHandler(store credential.TypeStore, log *zap.Logger) http.Han
 			return
 		}
 		id := r.PathValue("id")
-		if _, err := store.Get(r.Context(), id); errors.Is(err, credential.ErrNotFound) {
+		stored, err := store.Get(r.Context(), id)
+		if errors.Is(err, credential.ErrNotFound) {
 			respondError(w, log, http.StatusNotFound, "credential type not found")
 			return
-		} else if err != nil {
+		}
+		if err != nil {
 			log.Error("server: read credential type: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not read credential type")
 			return
 		}
 		t.ID = id
-		if err := t.Validate(); err != nil {
+		t.Origin = stored.Origin
+		t.CreatedAt = stored.CreatedAt
+		if err := t.ValidateEdit(stored); err != nil {
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
 		}

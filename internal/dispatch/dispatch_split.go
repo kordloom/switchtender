@@ -5,6 +5,7 @@ import (
 	"errors"
 	"maps"
 	"sort"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -95,6 +96,7 @@ func (d *Dispatcher) startParentRow(parent *run.Run) {
 		parent.ClaimedAt = &started
 	}
 	_ = d.save(parent)
+	d.notifyStarted(parent)
 }
 
 // coordinate waits for the parent's shards, which execute wherever a claim loop picks them up,
@@ -314,6 +316,7 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 	run.ApplyOptions(parent, opts)
 	stampReceipt(ctx, parent)
 	stampOrg(ctx, parent)
+	stampInitiator(ctx, parent)
 	// The graph is stored on the parent so a pipeline held for approval can still be executed after
 	// a restart, and so a finished pipeline can show the shape it ran.
 	parent.Steps = steps
@@ -324,6 +327,15 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 		return existing, nil
 	}
 	if err := d.validateRun(ctx, parent); err != nil {
+		return nil, err
+	}
+	if err := d.resolveComposed(ctx, parent); err != nil {
+		return nil, err
+	}
+	if err := d.snapshotInventory(ctx, parent); err != nil {
+		return nil, err
+	}
+	if err := d.pinImage(ctx, parent); err != nil {
 		return nil, err
 	}
 	d.resolveQueue(ctx, parent)
@@ -340,6 +352,12 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 	}
 	if held {
 		parent.Status = run.StatusPendingApproval
+	}
+	if err := d.approvalStepsRequireDistinct(ctx, parent, steps); err != nil {
+		return nil, err
+	}
+	if err := d.approvalStepsRequireReason(ctx, parent, steps); err != nil {
+		return nil, err
 	}
 	recordHold(parent, holdRequested)
 	// Pinned while it is held, like every other submit path. Each step copies the parent's pin, so
@@ -361,7 +379,7 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 	}
 
 	d.wg.Add(1)
-	go d.runPipeline(parent.Clone(), steps)
+	go d.runPipeline(parent.Clone())
 
 	return parent, nil
 }
@@ -369,8 +387,19 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 // runPipeline executes pipeline steps, in order or as a dependency graph, and finalizes the
 // parent. The parent registers its own cancel so stopping the parent stops the running steps and
 // halts everything that has not started.
-func (d *Dispatcher) runPipeline(parent *run.Run, steps []run.PipelineStep) {
+func (d *Dispatcher) runPipeline(parent *run.Run) {
 	defer d.wg.Done()
+	if d.coordinatePipeline(parent, false) {
+		d.afterPark(parent.ID)
+	}
+}
+
+// coordinatePipeline walks a pipeline and settles its parent, reporting whether the walk instead
+// parked the workflow at an approval step. A resumed workflow was already claimed by the resume and
+// continues from its stored step records rather than from the top.
+func (d *Dispatcher) coordinatePipeline(parent *run.Run, resumed bool) bool {
+	leave := d.enterCoordinator(parent.ID)
+	defer leave()
 
 	pipeCtx, cancelPipe := context.WithCancelCause(d.ctx)
 	d.register(parent.ID, cancelPipe)
@@ -378,25 +407,55 @@ func (d *Dispatcher) runPipeline(parent *run.Run, steps []run.PipelineStep) {
 	defer cancelPipe(nil)
 
 	// A pipeline's steps do not exist yet, so there are no children to settle here.
-	if !d.parentMayStart(parent, nil) {
-		return
+	if !resumed {
+		if !d.parentMayStart(parent, nil) {
+			return false
+		}
+		d.startParentRow(parent)
 	}
-	d.startParentRow(parent)
 
 	watchCtx, stopWatch := context.WithCancel(pipeCtx)
 	defer stopWatch()
 	go d.watch(watchCtx, parent.ID)
 
+	steps := parent.Steps
 	var res stepsResult
-	if hasDependencies(steps) {
-		res = d.runStepsDAG(pipeCtx, parent.Clone(), steps)
-	} else {
+	switch {
+	case hasDependencies(steps) || run.HasApproval(steps):
+		// A sequence holding an approval step is walked as the chain it is, because only the graph
+		// walk can stop at a step, park, and later continue from what the store says happened.
+		w := d.newDAGWalk(parent.Clone(), run.GraphSteps(steps))
+		if resumed {
+			children, err := d.store.Steps(pipeCtx, parent.ID)
+			if err != nil {
+				d.log.Error("dispatch: read a resumed workflow's steps: "+err.Error(),
+					zap.String("run_id", parent.ID))
+				d.finalize(parent, run.StatusFailed, nil,
+					"could not read the steps to resume from: "+err.Error())
+				d.publisher.CloseRun(parent.ID)
+				return false
+			}
+			w.restore(pipeCtx, children)
+		}
+		res = w.run(pipeCtx)
+	default:
 		res = d.runStepsLinear(pipeCtx, parent.Clone(), steps)
 	}
 
+	if res.parked {
+		// The lease watch stops first: once parked the parent is no longer running, and a heartbeat
+		// against it would read as a lost lease and cancel what has just been handed over.
+		stopWatch()
+		if d.park(parent) {
+			return true
+		}
+		res.parked = false
+		res.canceled = true
+	}
 	status, reason, code := d.pipelineOutcome(res)
 	d.finalize(parent, status, code, reason)
 	d.publisher.CloseRun(parent.ID)
+	return false
 }
 
 // pipelineOutcome maps how a pipeline's steps ended onto the parent's terminal record.
@@ -413,7 +472,7 @@ func (d *Dispatcher) pipelineOutcome(res stepsResult) (run.Status, string, *int)
 		return d.stoppedStatus(), d.stoppedReason(), nil
 	case res.failed:
 		code := 1
-		return run.StatusFailed, "", &code
+		return run.StatusFailed, res.reason, &code
 	default:
 		code := 0
 		return run.StatusSucceeded, "", &code
@@ -432,6 +491,12 @@ type stepsResult struct {
 	canceled bool
 	// interrupted is set when a step ended interrupted, meaning its executor died under it.
 	interrupted bool
+	// parked is set when nothing is left to do but wait for a person at an approval step, so the
+	// coordinator hands the workflow to the store instead of settling it.
+	parked bool
+	// reason explains a failure the steps' own records do not, such as an approval refused because
+	// the workflow changed after it was given.
+	reason string
 }
 
 // runStepsLinear executes the steps one after another, stopping at a failure unless the failing
@@ -523,8 +588,21 @@ func stepRun(parent *run.Run, step run.PipelineStep, idx, attempt int, vars map[
 	// and the policy gate graded each step off this same value and so decided on a run whose scope did
 	// not match the one that would execute.
 	child.CredentialIDs = parent.CredentialIDs
+	// A workflow's secret survey answers reach its steps the way its plain answers do, still sealed.
+	// Each step opens them only inside its own execution, held to the digests the workflow was
+	// approved with.
+	child.SealedNames = parent.SealedNames
+	child.SealedVars = parent.SealedVars
+	child.SealedDigests = parent.SealedDigests
 	child.ProjectID = parent.ProjectID
 	child.InventoryID = parent.InventoryID
+	// A step that targets the pipeline's composed inventory is held to the hosts it resolved to
+	// when the pipeline launched, the same set the approver was shown.
+	child.InventoryResolution = parent.InventoryResolution.Clone()
+	// A step that targets the pipeline's plain stored inventory executes the snapshot the pipeline
+	// was submitted with, for the same reason.
+	child.InventorySnapshot = parent.InventorySnapshot.Clone()
+	child.InventorySealed = parent.InventorySealed
 	child.Queue = parent.Queue
 	child.Timeout = parent.Timeout
 	child.Image = parent.Image
@@ -544,6 +622,9 @@ func stepRun(parent *run.Run, step run.PipelineStep, idx, attempt int, vars map[
 	child.Verbosity = parent.Verbosity
 	child.Forks = parent.Forks
 	child.DiffMode = parent.DiffMode
+	// A pipeline that asked for the fact cache asked for it on every Ansible step it runs.
+	child.UseFactCache = parent.UseFactCache
+	child.FactCacheTimeout = parent.FactCacheTimeout
 	// The rules that were in force when the pipeline was submitted. Recorded on every run precisely so
 	// that "no rule applied" and "there were no rules" do not leave the same trace, which they did for
 	// every step of every pipeline.
@@ -552,6 +633,12 @@ func stepRun(parent *run.Run, step run.PipelineStep, idx, attempt int, vars map[
 	// whose sync produced anything else, and a pinned pipeline whose steps were unpinned would run
 	// approved-at-a-revision work against whatever the branch holds now.
 	child.PinnedCommit = parent.PinnedCommit
+	// A step runs as part of the template its pipeline was launched from, so the identity token a
+	// step mints names that template the same as the pipeline's would.
+	child.TemplateID = parent.TemplateID
+	// The ref travels with the pin, since a pin to a commit no branch holds can only be met by
+	// fetching the ref that holds it.
+	child.GitRef = parent.GitRef
 	// A step is scoped to the pipeline's tenant. A step may name no stored object, so without the
 	// parent's org it would be an objectless run readable across every tenant.
 	child.OrgID = parent.OrgID
@@ -563,6 +650,17 @@ func stepRun(parent *run.Run, step run.PipelineStep, idx, attempt int, vars map[
 	// submitted to make no changes: check mode is a promise about the whole run, and a step running
 	// for real underneath it would break that promise silently.
 	child.DryRun = step.DryRun || parent.DryRun
+	// The gate recorded on the pipeline what its scan of each step read, named by its step, so the
+	// step run carries its own share of that record.
+	child.DryRunScans = parent.StepDryRunScans(step.Name)
+	// What a policy noted about the step is recorded the same way, so the step run carries its own
+	// notes and not its siblings'.
+	prefix := run.StepPrefix(step.Name)
+	for _, note := range parent.PolicyNotes {
+		if rest, ok := strings.CutPrefix(note, prefix); ok {
+			child.PolicyNotes = append(child.PolicyNotes, rest)
+		}
+	}
 	// Notifications stay on the parent. The pipeline is the thing that finished, and copying its
 	// targets onto every step would page once per step instead of once per run.
 	return child

@@ -89,7 +89,8 @@ func TestAWebhookSaysWhichCredentialIsNotReady(t *testing.T) {
 		t.Fatalf("save trigger: %v", err)
 	}
 	sub := &fakeSubmitter{err: fmt.Errorf("%w: %q. Set its secret", credential.ErrNoSecret, "deploy-key")}
-	handler := hookHandler(triggers, templates, sub, run.NewMemStore(), nil, nil, zap.NewNop())
+	handler := hookHandler(triggers, templates, sub, run.NewMemStore(), nil, nil, nil,
+		newHookFlights(), zap.NewNop())
 	req := httptest.NewRequest(http.MethodPost, "/hooks/"+token, strings.NewReader(`{}`))
 	req.SetPathValue("token", token)
 	rec := httptest.NewRecorder()

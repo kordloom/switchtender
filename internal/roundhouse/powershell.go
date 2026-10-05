@@ -31,7 +31,7 @@ func (p *pwshRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Result,
 	if spec.Command == "" {
 		return Result{ExitCode: -1}, ErrNoCommand
 	}
-	path, cleanup, err := writeScriptFile("switchtender-ps-*.ps1", spec.Command)
+	path, cleanup, err := writeScriptFileIn(spec.RunDir, "switchtender-ps-*.ps1", spec.Command)
 	if err != nil {
 		return Result{ExitCode: -1}, err
 	}

@@ -249,6 +249,10 @@ func testPurge(t *testing.T, store run.Store) {
 	if err := store.Save(ctx, &run.Run{ID: "recent", Status: run.StatusSucceeded, CreatedAt: recent}); err != nil {
 		t.Fatalf("Save(recent) finalize error = %v", err)
 	}
+	// Both outcomes are on the chain, as the process that finished each run puts them, so only age
+	// decides what retention removes. A run whose outcome is still owed is retention's other
+	// limit; see testRetentionKeepsOwedOutcomes.
+	settleOutcomes(t, store, "old", "recent")
 	if err := store.Save(ctx, &run.Run{ID: "running", Status: run.StatusRunning, CreatedAt: old}); err != nil {
 		t.Fatalf("Save(running) error = %v", err)
 	}

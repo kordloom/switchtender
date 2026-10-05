@@ -17,13 +17,41 @@ import (
 func Contract(t *testing.T, newStore func() run.Store) {
 	t.Helper()
 	t.Run("save and get", func(t *testing.T) { testSaveGet(t, newStore()) })
+	t.Run("a finished run owes its outcome", func(t *testing.T) { testOutcomeOwed(t, newStore()) })
+	t.Run("retention keeps what an owed outcome is built from", func(t *testing.T) {
+		testRetentionKeepsOwedOutcomes(t, newStore())
+	})
 	t.Run("plan destroys round trip", func(t *testing.T) { testPlanDestroysRoundTrip(t, newStore()) })
+	t.Run("template id round trip", func(t *testing.T) { testTemplateIDRoundTrip(t, newStore()) })
+	t.Run("inventory resolution round trip", func(t *testing.T) {
+		testInventoryResolutionRoundTrip(t, newStore())
+	})
+	t.Run("inventory check round trip", func(t *testing.T) {
+		testInventoryCheckRoundTrip(t, newStore())
+	})
+	t.Run("sealed secret answers", func(t *testing.T) { testSealedVars(t, newStore()) })
+	t.Run("sealed answer digests", func(t *testing.T) { testSealedDigests(t, newStore()) })
+	t.Run("sealed snapshot and plan file", func(t *testing.T) { testSealedMaterial(t, newStore()) })
+	t.Run("sealed material is wiped when a run ends", func(t *testing.T) {
+		testSealedMaterialWipes(t, newStore())
+	})
+	t.Run("git ref round trip", func(t *testing.T) { testGitRefRoundTrip(t, newStore()) })
+	t.Run("dry run scans round trip", func(t *testing.T) {
+		testDryRunScansRoundTrip(t, newStore())
+	})
+	t.Run("policy notes round trip", func(t *testing.T) { testPolicyNotesRoundTrip(t, newStore()) })
+	t.Run("initiator and reason rule round trip", func(t *testing.T) {
+		testInitiatorAndReasonRuleRoundTrip(t, newStore())
+	})
 	t.Run("stream ticket refuses a wrong run and an expiry", func(t *testing.T) {
 		testStreamTicketRefusesWrongRunAndExpiry(t, newStore())
 	})
 	t.Run("provenance round trip", func(t *testing.T) { testProvenance(t, newStore()) })
 	t.Run("warning round trip", func(t *testing.T) { testWarning(t, newStore()) })
 	t.Run("host facts", func(t *testing.T) { testHostFacts(t, newStore()) })
+	t.Run("host facts keep the newer gather", func(t *testing.T) {
+		testHostFactsKeepTheNewerGather(t, newStore())
+	})
 	t.Run("estate history", func(t *testing.T) { testEstateHistory(t, newStore()) })
 	t.Run("estate returns each host once", func(t *testing.T) { testEstateOneRowPerHost(t, newStore()) })
 	t.Run("estate depth cap bounds history", func(t *testing.T) { testEstateDepthCap(t, newStore()) })
@@ -77,6 +105,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("run timings", func(t *testing.T) { testRunTimings(t, newStore()) })
 	t.Run("reclaim resolves orphaned children", func(t *testing.T) { testReclaimOrphans(t, newStore()) })
 	t.Run("transition and claim are one step", func(t *testing.T) { testTransitionStatusAndClaim(t, newStore()) })
+	t.Run("start is fenced on the claim", func(t *testing.T) { testStartClaimed(t, newStore()) })
 	t.Run("reclaim settles abandoned parents", func(t *testing.T) { testReclaimAbandonedParents(t, newStore()) })
 	t.Run("reclaim settles an approved parent with no coordinator", func(t *testing.T) {
 		testReclaimApprovedParentWithNoCoordinator(t, newStore())
@@ -101,6 +130,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 		testStoreAgreementOnEdges(t, newStore())
 	})
 	t.Run("transition status", func(t *testing.T) { testTransitionStatus(t, newStore()) })
+	t.Run("queued times", func(t *testing.T) { testQueuedTimes(t, newStore()) })
 	t.Run("finalize running is one write", func(t *testing.T) { testFinalizeRunning(t, newStore()) })
 	t.Run("finalize revokes the lease and keeps attribution", func(t *testing.T) {
 		testFinalizeRevokesTheLease(t, newStore())
@@ -112,6 +142,12 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("retention purge", func(t *testing.T) { testPurge(t, newStore()) })
 	t.Run("summary trim bounds growth", func(t *testing.T) { testTrimSummaries(t, newStore()) })
 	t.Run("terminal run fences writes", func(t *testing.T) { testTerminalFence(t, newStore()) })
+	t.Run("every run end is owed until settled", func(t *testing.T) { testEndLedger(t, newStore()) })
+	t.Run("reclaim attributes a stale cancel", func(t *testing.T) {
+		testReclaimAttributesAStaleCancel(t, newStore())
+	})
+	approvalContract(t, newStore)
+	callbackContract(t, newStore)
 }
 
 // sampleRun returns a fully populated terminal run with deterministic times.
@@ -131,6 +167,7 @@ func sampleRun(id string) *run.Run {
 		Tool:      "bash", Command: "echo hi", DryRun: true,
 		Tags: []string{"deploy", "config"}, SkipTags: []string{"slow"},
 		Verbosity: 2, Forks: 10, DiffMode: true,
+		UseFactCache: true, FactCacheTimeout: 86400,
 		ProposedFrom: "run_check", Intent: "echo hello on the box",
 		OrgID:          "org_sample",
 		IdempotencyKey: "idem_sample",
@@ -144,8 +181,9 @@ func sampleRun(id string) *run.Run {
 // intPtr returns a pointer to n, for the nullable index columns above.
 func intPtr(n int) *int { return &n }
 
-// saveFinishedRun writes a run, its host summaries, then finalizes it, which is the order a real
-// run takes. Summary writes are fenced once a run is terminal, so the summary has to land first.
+// saveFinishedRun writes a run, its host summaries, then finalizes it and settles its outcome, which
+// is the order a real run takes. Summary writes are fenced once a run is terminal, so the summary
+// has to land first.
 func saveFinishedRun(t *testing.T, store run.Store, id string, at time.Time, dry bool,
 	sums []run.HostSummary,
 ) {
@@ -161,6 +199,18 @@ func saveFinishedRun(t *testing.T, store run.Store, id string, at time.Time, dry
 	r.Status = run.StatusSucceeded
 	if err := store.Save(ctx, r); err != nil {
 		t.Fatalf("Save(%s) finalize error = %v", id, err)
+	}
+	settleOutcomes(t, store, id)
+}
+
+// settleOutcomes records that the outcome of each run in ids is on the audit chain, as the process
+// that finished it does, so retention may remove the run once it is old enough.
+func settleOutcomes(t *testing.T, store run.Store, ids ...string) {
+	t.Helper()
+	for _, id := range ids {
+		if err := store.SettleOutcome(context.Background(), id); err != nil {
+			t.Fatalf("SettleOutcome(%s) error = %v", id, err)
+		}
 	}
 }
 

@@ -415,21 +415,22 @@ func TestCommitSettledSkipsWhatItCannotReadAndRecordsTheRest(t *testing.T) {
 	}
 }
 
-// TestCommitSettledDoesNothingWithoutAChain pins the two no-op guards. An install that keeps no audit
-// trail must not have the sweep read every settled run back out of the store for nothing, and an
-// empty sweep must not touch the store at all.
-func TestCommitSettledDoesNothingWithoutAChain(t *testing.T) {
+// TestCommitSettledReadsEachSettledRunOnce pins what the sweep reads. An install that keeps no
+// audit trail still reads each settled run once, since a settled run is announced like every other
+// end of a run, and an empty sweep must not touch the store at all.
+func TestCommitSettledReadsEachSettledRunOnce(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := &readCountingStore{Store: run.NewMemStore()}
 
 	t.Run("test 0", func(t *testing.T) {
-		// Test 0: No audit store configured, so nothing is read and nothing is committed.
+		// Test 0: No audit store configured, so each run is read once to announce it.
 		d := &Dispatcher{store: store, log: zap.NewNop(), ctx: ctx, now: time.Now}
 		d.commitSettled([]string{"run_a", "run_b"})
-		if got := store.reads.Load(); got != 0 {
-			t.Errorf("%d reads with no chain configured, want none", got)
+		if got := store.reads.Load(); got != 2 {
+			t.Errorf("%d reads with no chain configured, want one per settled run", got)
 		}
+		store.reads.Store(0)
 	})
 
 	t.Run("test 1", func(t *testing.T) {

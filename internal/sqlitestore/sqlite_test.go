@@ -17,12 +17,18 @@ import (
 	"github.com/kordloom/switchtender/internal/authtest"
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/credtest"
+	"github.com/kordloom/switchtender/internal/factcache"
+	"github.com/kordloom/switchtender/internal/factcachetest"
+	"github.com/kordloom/switchtender/internal/federation"
+	"github.com/kordloom/switchtender/internal/federationtest"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/granttest"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/inventorytest"
 	"github.com/kordloom/switchtender/internal/invsource"
 	"github.com/kordloom/switchtender/internal/invsourcetest"
+	"github.com/kordloom/switchtender/internal/notification"
+	"github.com/kordloom/switchtender/internal/notificationtest"
 	"github.com/kordloom/switchtender/internal/org"
 	"github.com/kordloom/switchtender/internal/orgtest"
 	"github.com/kordloom/switchtender/internal/policy"
@@ -267,6 +273,19 @@ func TestCredentialStoreContract(t *testing.T) {
 	})
 }
 
+// TestFederationKeyStoreContract runs the signing key contract against SQLite.
+func TestFederationKeyStoreContract(t *testing.T) {
+	t.Parallel()
+	federationtest.KeyContract(t, func() federation.KeyStore {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.FederationKeys()
+	})
+}
+
 func TestProjectStoreContract(t *testing.T) {
 	t.Parallel()
 	projecttest.Contract(t, func() project.Store {
@@ -277,6 +296,28 @@ func TestProjectStoreContract(t *testing.T) {
 		t.Cleanup(func() { _ = db.Close() })
 		return db.Projects()
 	})
+}
+
+func TestFactCacheStoreContract(t *testing.T) {
+	t.Parallel()
+	factcachetest.Contract(t, func() (factcache.Store, inventory.Store) {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.FactCache(), db.Inventories()
+	})
+}
+
+func TestInventoryDeleteClearsCachedFacts(t *testing.T) {
+	t.Parallel()
+	db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	factcachetest.InventoryCascade(t, db.Inventories(), db.FactCache())
 }
 
 func TestTemplateStoreContract(t *testing.T) {
@@ -348,6 +389,18 @@ func TestInvSourceStoreContract(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = db.Close() })
 		return db.InventorySources()
+	})
+}
+
+func TestNotificationStoreContract(t *testing.T) {
+	t.Parallel()
+	notificationtest.Contract(t, func() notification.Store {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.Notifications()
 	})
 }
 
@@ -452,7 +505,7 @@ func TestStoreMigratesProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open raw db: %v", err)
 	}
-	for _, index := range []string{"idx_runs_actor", "idx_runs_source"} {
+	for _, index := range []string{"idx_runs_actor", "idx_runs_source", "idx_runs_callback_live"} {
 		if _, err := raw.Exec("DROP INDEX IF EXISTS " + index); err != nil {
 			t.Fatalf("simulate old schema, drop %s: %v", index, err)
 		}

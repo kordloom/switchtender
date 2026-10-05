@@ -82,7 +82,7 @@ func runReceipt(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	res, err := receipt.Build(cmd.Context(), store.Runs(), store.Audits(), id, resolveVersion(),
-		runID, receipt.Options{Sparse: receiptSparse, From: receiptFrom})
+		runID, receipt.Options{Sparse: receiptSparse, From: receiptFrom, Decisions: store.Decisions()})
 	if err != nil {
 		// A refusal from the builder is a statement about the chain, not about this run. The walk
 		// above catches the ordinary tamper; this catches what it does not cover, such as an entry

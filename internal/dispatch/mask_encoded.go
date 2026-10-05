@@ -19,8 +19,9 @@ const minEncodedCore = 8
 
 // encodedForms returns the other forms a tool commonly prints a secret in: hex in either case, the
 // base64 the secret alone determines at each alignment it can take inside a longer encoded blob,
-// in the standard and URL alphabets, its URL-escaped forms, and its JSON-escaped forms. Every form
-// is derived from the secret and nothing else, so redacting one redacts the secret and no more.
+// in the standard and URL alphabets, its URL-escaped forms, its JSON-escaped forms, and the form a
+// shell tracing its commands quotes it in. Every form is derived from the secret and nothing else,
+// so redacting one redacts the secret and no more.
 func encodedForms(s string) []string {
 	b := []byte(s)
 	h := hex.EncodeToString(b)
@@ -53,6 +54,11 @@ func encodedForms(s string) []string {
 				escaped = append(escaped, strings.ReplaceAll(j, "/", `\/`))
 			}
 		}
+	}
+	// A shell tracing its commands, as set -x does, prints a value that holds a single quote inside
+	// single quotes, writing each quote as '\'' so the secret never appears in one piece.
+	if strings.Contains(s, "'") {
+		escaped = append(escaped, strings.ReplaceAll(s, "'", `'\''`))
 	}
 	for _, e := range escaped {
 		if e != s {

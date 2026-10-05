@@ -13,6 +13,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
+	"github.com/kordloom/switchtender/internal/plantest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -86,12 +87,13 @@ type planGateRunner struct {
 	summary string
 }
 
-// Run writes the plan summary for a dry run and records a real apply otherwise.
+// Run writes the plan summary for a dry run, returning the plan it saved, and records a real apply
+// otherwise.
 func (p *planGateRunner) Run(_ context.Context, spec roundhouse.Spec,
 	out io.Writer) (roundhouse.Result, error) {
 	if spec.DryRun {
 		_, _ = io.WriteString(out, p.summary)
-		return roundhouse.Result{ExitCode: 0, Drift: true}, nil
+		return plantest.Result(p.summary), nil
 	}
 	p.applies.Add(1)
 	_, _ = io.WriteString(out, "Apply complete!\n")

@@ -287,7 +287,7 @@ func TestZeroHostOutcomeCommitsWhyTheRunFailed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("outcome.Body() error = %v", err)
 	}
-	if !audit.VerifyContentDigest(entry.ContentDigest, entry.Nonce, body) {
+	if !outcome.VerifyBody(entry.ContentDigest, entry.Nonce, body) {
 		t.Fatal("the committed digest does not verify against the run's rebuilt outcome")
 	}
 	rec, err := outcome.Parse(body)

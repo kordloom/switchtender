@@ -395,8 +395,11 @@ func TestTheToolSetIsExactlyThese(t *testing.T) {
 	defer ts.Close()
 
 	// Propose one run, and read runs and their evidence. Nothing writes anything else.
+	// Seeing that work waits at an approval step is a read, and an agent that cannot see it reads a
+	// paused workflow as stuck. Deciding the step stays with a person.
 	wantDefault := []string{
-		"get_run", "get_run_evidence", "get_run_log", "list_runs", "list_templates", "propose_run",
+		"get_run", "get_run_evidence", "get_run_log", "list_pending_approvals", "list_runs",
+		"list_templates", "propose_run",
 	}
 	// The ad-hoc tool is the single opt-in addition, and it still only proposes.
 	wantAdhoc := append(append([]string{}, wantDefault...), "propose_adhoc_run")

@@ -12,6 +12,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/event"
+	"github.com/kordloom/switchtender/internal/review"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/template"
@@ -290,9 +291,10 @@ func listRunsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.H
 	}
 }
 
-// getRunHandler returns a single run by id.
+// getRunHandler returns a single run by id. A pull request review plan also carries what its pull
+// request was last told, read from reports, so a forge failure being retried shows on the run.
 func getRunHandler(store run.Store, checkouts dispatch.CheckoutReader, authz *authorizer,
-	log *zap.Logger) http.HandlerFunc {
+	log *zap.Logger, reports review.Store) http.HandlerFunc {
 	if store == nil {
 		panic("server: getRunHandler: Store required")
 	}
@@ -317,8 +319,42 @@ func getRunHandler(store run.Store, checkouts dispatch.CheckoutReader, authz *au
 		ev := reversibilityEvidence(r.Context(), store, checkouts, got)
 		undo := run.AssessReversibilityFrom(got, ev)
 		got.Reversibility = &undo
-		respondRun(w, r, log, http.StatusOK, got)
+		state := pullRequestReport(r.Context(), reports, got, log)
+		if state == nil {
+			respondRun(w, r, log, http.StatusOK, got)
+			return
+		}
+		respondJSON(w, log, http.StatusOK, runDetail{Run: scrubbedRun(r.Context(), maskRun(got)),
+			PullRequestReport: state}, wantsPretty(r))
 	}
+}
+
+// runDetail is one run as its detail endpoint answers it for a pull request review plan: the run,
+// and what its pull request was last told.
+type runDetail struct {
+	*run.Run
+	// PullRequestReport is what the plan's pull request was last told, and the forge failure a
+	// report is retrying, if any.
+	PullRequestReport *review.ReportState `json:"pull_request_report,omitempty"`
+}
+
+// pullRequestReport returns what review plan rn's pull request was last told, or nil for a run
+// that is not a review plan, has no record, or whose record cannot be read. A read failure is
+// logged and leaves the run itself to answer, since the run is what the caller asked for.
+func pullRequestReport(ctx context.Context, reports review.Store, rn *run.Run,
+	log *zap.Logger) *review.ReportState {
+	if reports == nil || rn.Source != review.Source {
+		return nil
+	}
+	rec, err := reports.Get(ctx, rn.ID)
+	if err != nil {
+		if !errors.Is(err, review.ErrRecordNotFound) {
+			log.Warn("server: read a review plan's report: "+err.Error(),
+				zap.String("run_id", rn.ID))
+		}
+		return nil
+	}
+	return rec.State()
 }
 
 // runShardsHandler returns the shard runs of a parent run.

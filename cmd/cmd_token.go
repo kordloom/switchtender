@@ -176,6 +176,9 @@ func runTokenNew(cmd *cobra.Command, _ []string) error {
 	if tokenAgent {
 		tok.Kind = auth.KindAgent
 	}
+	// The host account behind the command line minted it, which is the issuer an agent-initiated
+	// run's evidence names as having provisioned the agent.
+	tok.CreatedBy, tok.CreatedByType = cliActor(), actorTypeCLI
 	out := map[string]string{"id": tok.ID, "name": tok.Name}
 	if tokenAgent {
 		out["kind"] = auth.KindAgent

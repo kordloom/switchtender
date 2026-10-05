@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -14,6 +15,7 @@ import (
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/runfiles"
 )
 
 // Close stops accepting new work, cancels in-flight runs, and waits for workers to drain. The
@@ -22,11 +24,21 @@ import (
 func (d *Dispatcher) Close() {
 	d.cancel(errShuttingDown)
 	d.wg.Wait()
+	d.flushOutbox()
 	d.notifyWG.Wait()
 }
 
 // executeLeased runs a claimed run on the worker slot the claim loop already holds.
 func (d *Dispatcher) executeLeased(base context.Context, r *run.Run) run.Status {
+	// Whatever the control node delivered with this claim is wiped when the execution ends, however
+	// it ends. Deferred first, so it runs last, after every other step of the run has let go.
+	defer d.discardDelivery(r.ID)
+	// The lease was stamped when the claim was won, and a claim across the relay spends part of its
+	// lifetime opening and sealing the run's secrets before the answer arrives. It is renewed now,
+	// before anything else, so the fenced start has a whole lifetime to land in and a slow secret
+	// source does not leave a healthy claim for the janitor to take back. The answer is not acted
+	// on here: the fenced start decides whether this claim still holds the run.
+	_ = d.store.Heartbeat(base, r.ID, d.owner)
 	runCtx, cancel := context.WithCancelCause(base)
 	d.register(r.ID, cancel)
 	defer d.unregister(r.ID)
@@ -141,12 +153,13 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	// A claimant that stalled past its lease wakes up holding a run the janitor requeued and
 	// another worker may already be executing; the blind save it used to make wrote its own claim
 	// over the live one and started a second tool against the same hosts. The fence matches only
-	// a run still pending, so the woken worker learns it lost and walks away without a write,
-	// without a tool, and without a finalize to stomp the real owner's outcome. The lease time is
-	// stamped by the store's own clock inside the transition, for the same reason heartbeats are.
+	// a run still pending under this claim's own capability, so the woken worker learns it lost
+	// and walks away without a write, without a tool, and without a finalize to stomp the real
+	// owner's outcome, whether the run is running elsewhere, waiting requeued, or claimed again.
+	// The lease time is stamped by the store's own clock inside the transition, for the same
+	// reason heartbeats are.
 	started := d.now()
-	moved, terr := d.store.TransitionStatusAndClaim(ctx, r.ID, run.StatusPending,
-		run.StatusRunning, d.owner, started)
+	moved, terr := d.store.StartClaimed(ctx, r.ID, d.owner, r.ClaimSecret, started)
 	if terr != nil || !moved {
 		if terr != nil {
 			d.log.Error("dispatch: transition to running: "+terr.Error(),
@@ -163,6 +176,7 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	r.Status = run.StatusRunning
 	r.StartedAt = &started
 	r.ClaimedBy = d.owner
+	d.notifyStarted(r)
 
 	watchCtx, stopWatch := context.WithCancel(ctx)
 	defer stopWatch()
@@ -195,11 +209,17 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 		d.tailEvents(r.ID, parent, eventsPath, stop, mask, fold)
 	}()
 
+	// What the run stages under the run-files root is removed before its terminal record, on every
+	// path below that writes one, and on the way out as well, which covers a panic.
+	staged := &stagedFiles{}
+	defer staged.removeAll()
+
 	// fail finalizes r as failed and closes its output stream when a setup step cannot complete, so a
 	// run that never reached the runner still records why and stops the tailer.
 	fail := func(err error) run.Status {
 		close(stop)
 		<-tailed
+		staged.removeAll()
 		d.finalize(r, run.StatusFailed, nil, mask.redactString(err.Error()))
 		d.publisher.CloseRun(r.ID)
 		return run.StatusFailed
@@ -253,8 +273,12 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 		Tags: r.Tags, SkipTags: r.SkipTags, Verbosity: r.Verbosity, Forks: r.Forks,
 		DiffMode: r.DiffMode, Image: r.Image,
 	}
+	// The run's secrets come from this executor's store, or on a relay worker from what the control
+	// node sealed at claim. Whatever was opened is dropped on every return below.
+	src := d.secretsFor(r)
+	defer src.wipe()
 	if r.Image != "" {
-		pullCleanup, perr := d.resolvePullCredential(ctx, r.PullCredentialID, &spec)
+		pullCleanup, perr := d.resolvePullFrom(ctx, src, r.PullCredentialID, &spec)
 		// Deferred here, beside the other execution credentials, so a minted login is live for the
 		// pull and released once the run is over. It is deferred before the error is checked, so a
 		// resolve that failed partway still hands back whatever it minted.
@@ -263,16 +287,29 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 			return fail(err)
 		}
 	}
-	d.refreshOnLaunch(ctx, r)
-	invCleanup, invSecrets, err := d.materializeInventory(ctx, r, &spec)
+	invCleanup, invSecrets, invComposed, err := d.materializeInventory(ctx, src, r, &spec)
 	if err != nil {
 		return fail(err)
 	}
-	defer invCleanup()
+	staged.add(invCleanup)
+	// A gated apply's plan file is opened now, while src still holds what was delivered, and written
+	// into the run's private directory once that exists. The bytes are dropped when the run ends.
+	approvedPlan, err := d.openPlanForApply(ctx, src, r, dryRun)
+	if err != nil {
+		return fail(err)
+	}
+	defer clear(approvedPlan)
+	// Secret survey answers are opened here, for this execution only, and reach the tool through
+	// the spec's variables the way every other answer does. The run keeps only their sealed form.
+	secretAnswers, err := src.answers(ctx, r)
+	if err != nil {
+		return fail(err)
+	}
+	spec.ExtraVars = varsWithSecrets(spec.ExtraVars, secretAnswers)
 	// The run's own request can carry a secret the credential and inventory paths never see, so it is
 	// registered here with them rather than only once credentials resolve: output written before that
-	// point is masked too.
-	ownSecrets := runOwnSecrets(r.ExtraVars, r.Command)
+	// point is masked too. Secret survey answers are masked unconditionally, whatever they are named.
+	ownSecrets := append(runOwnSecrets(r.ExtraVars, r.Command), secretValues(secretAnswers)...)
 	early := make([]string, 0, len(invSecrets)+len(ownSecrets))
 	early = append(early, invSecrets...)
 	early = append(early, ownSecrets...)
@@ -295,6 +332,15 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 		}
 	}
 	d.applyDefaultImage(&spec)
+	// An approved run executes in the image it was approved with or not at all. This executor's own
+	// default image applies to a run that pinned none when it was submitted, which is the executor's
+	// environment rather than a change anyone made to the run, and is refused for an approved run that
+	// was approved to run without it.
+	if run.IsBuiltinTool(r.Tool) {
+		if err := checkImagePin(r, spec.Image); err != nil {
+			return fail(err)
+		}
+	}
 	// Record the image the run actually executed in. spec.Image was seeded from r.Image and is only
 	// ever filled when it was empty, so a run that pinned its own image sees no change, a run that
 	// took a project or server default now has that image on its record, and a host run stays empty.
@@ -306,12 +352,25 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 		r.Image = spec.Image
 	}
 
-	credCleanup, secrets, err := d.materializeCredentials(ctx, r, &spec)
+	materialized, secrets, err := d.materializeFrom(ctx, src, r, &spec)
+	// Every opened value now sits where the tool reads it, so the copy held for opening is dropped
+	// before the tool starts rather than when the run ends.
+	src.wipe()
+	// The cleanup runs once whichever call reaches it first. It is called directly as soon as the
+	// tool returns, so the run's credential files and minted secrets are gone before the run is
+	// recorded as finished, and deferred as well so an early return or a panic still removes them.
+	credCleanup := sync.OnceFunc(materialized)
+	staged.add(credCleanup)
 	if err != nil {
 		credCleanup()
 		return fail(err)
 	}
-	defer credCleanup()
+	// SwitchTender configures known credential-bearing tool state into the run directory. A cloud
+	// command line tool the run hands a credential writes what it keeps about that credential, a
+	// token cache or a configuration aws configure or gcloud auth fills in, under the run's private
+	// directory instead of the executing account's home, where it outlived the run. Inside a
+	// container the same paths fall in the in-memory secrets mount.
+	spec.Env = append(spec.Env, runfiles.ToolStateEnv(spec.RunDir, spec.Env)...)
 	// The registry pull login reaches the spec through resolvePullCredential, not
 	// materializeCredentials, so its values are not in secrets. Add them here, or a container
 	// runner that echoes a failed registry login leaks the password into the run's output the way
@@ -325,7 +384,61 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	allSecrets = append(allSecrets, ownSecrets...)
 	mask.set(allSecrets)
 
+	// A dynamic inventory source is resolved here, once, with the run's environment, and the play is
+	// handed exactly that resolution, so the hosts the outcome records are the hosts the play reached.
+	dynSecrets, err := d.resolveDynamicSnapshot(ctx, r, &spec, mask.redactString)
+	if err != nil {
+		credCleanup()
+		return fail(err)
+	}
+	if len(dynSecrets) > 0 {
+		allSecrets = append(allSecrets, dynSecrets...)
+		mask.set(allSecrets)
+	}
+	// A plan the gate makes saves its plan file in the run's private directory, and a gated apply
+	// carries out the plan file its approval bound, written there for the tool and removed with it.
+	if err := preparePlanFile(r, dryRun, approvedPlan, &spec); err != nil {
+		credCleanup()
+		return fail(err)
+	}
+	// Values the tool reveals as sensitive while it runs, such as those a saved plan carries, join the
+	// masker before the tool prints anything that could quote them.
+	var secretsMu sync.Mutex
+	spec.AddSecrets = func(values []string) {
+		secretsMu.Lock()
+		defer secretsMu.Unlock()
+		allSecrets = append(allSecrets, values...)
+		mask.set(allSecrets)
+	}
+
+	// An Ansible run against an inventory the native engine resolved is held to Ansible's own reading
+	// of it, made here with the run's environment, project configuration, and image, just before the
+	// play would start. A disagreement refuses the run with the exact difference.
+	if err := d.crossCheckInventory(ctx, r, spec, invComposed, mask.redactString); err != nil {
+		credCleanup()
+		return fail(err)
+	}
+	// A plan the gate read after downloading its modules executes exactly those modules or nothing.
+	// They go in place now, with the run's credentials open in case they must be downloaded again,
+	// and the tool is told init installs none, so a version constraint cannot resolve to a release
+	// published while the plan waited for approval.
+	if err := d.pinModules(ctx, r, &spec, mask, sink); err != nil {
+		credCleanup()
+		return fail(err)
+	}
+
+	// Written last, once the inventory path is final, and removed when the run is over: the cached
+	// facts are as sensitive as anything else this run materializes.
+	facts := d.prepareFactCache(ctx, r, &spec)
+	staged.add(facts.remove)
+
 	res, runErr := d.runner.Run(ctx, spec, sink)
+	credCleanup()
+	// The digest of the image the runtime pulled and ran, which the outcome commits, so the record
+	// names the bytes that executed even when the run was bound to a tag.
+	if res.ImageDigest != "" {
+		r.ImageDigest = res.ImageDigest
+	}
 	// The masker holds back the end of each chunk so a secret split across two of them is caught
 	// before either half is emitted. The process can write no more, so the withheld tail is released
 	// now, while the run is still live: an append to a finalized run is fenced and would be dropped.
@@ -333,6 +446,10 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 
 	close(stop)
 	<-tailed
+	// Read back after the tailer has stopped, so the fold's recap is complete, and before the run is
+	// finalized, so a warning the collection raises lands on the run's terminal record.
+	d.collectFactCache(r, facts, spec.Inventory, fold)
+	staged.removeAll()
 
 	status := finish(res, runErr, mask, fold)
 	d.publisher.CloseRun(r.ID)
@@ -628,6 +745,21 @@ func (d *Dispatcher) CancelWaiting(ctx context.Context, id string) (bool, error)
 		d.log.Error("dispatch: read a canceled run to settle it: "+err.Error(), zap.String("run_id", id))
 		return true, nil
 	}
+	// A workflow parked at an approval step is held with its step waiting, and the step would
+	// otherwise stay in the approval queue for a workflow that no longer exists.
+	if r.Kind == run.KindPipeline {
+		if pending, perr := run.PendingApprovalSteps(ctx, d.store, r.ID); perr == nil {
+			for _, node := range pending {
+				if _, cerr := d.store.CancelPending(ctx, node.ID); cerr != nil {
+					d.log.Error("dispatch: withdraw approval step: "+cerr.Error(),
+						zap.String("run_id", node.ID))
+				}
+			}
+		}
+		// A step a decision had already claimed is not withdrawn but finished, so its decision is
+		// on the chain before the workflow's outcome rather than after it.
+		d.finishClaimedSteps(ctx, r.ID)
+	}
 	d.commitOutcome(r)
 	d.notify(r)
 	return true, nil
@@ -648,13 +780,18 @@ func (d *Dispatcher) finalize(r *run.Run, status run.Status, exitCode *int, fail
 	fin := run.Finalization{
 		Status: status, ExitCode: exitCode, Error: failure, Image: r.Image,
 		CommitSHA: r.CommitSHA, PullCredentialID: r.PullCredentialID,
-		Outputs: r.Outputs, Warning: r.Warning, EndedAt: d.now(),
+		Outputs: r.Outputs, Warning: r.Warning, InventoryCheck: r.InventoryCheck,
+		ImageDigest: r.ImageDigest, ResolvedHosts: r.ResolvedHosts, EndedAt: d.now(),
 	}
 	stored, recorded := d.recordTerminal(r, fin)
 	if !recorded {
 		r.Status = stored
 		return
 	}
+	// The run's sealed material is needed only while it waits and executes. The terminal write wipes
+	// it when it moved the run from running, and this covers the ends that reach the store another
+	// way, such as a rejection.
+	d.wipeSealed(r)
 	// Commit the outcome to the chain before notifying anyone. A notification is external and
 	// after-the-fact; the tamper-evident record of what the run did comes first.
 	d.commitOutcome(r)
@@ -740,6 +877,22 @@ func (d *Dispatcher) recordTerminal(r *run.Run, fin run.Finalization) (run.Statu
 	}
 	*r = next
 	return fin.Status, true
+}
+
+// wipeSealed removes r's sealed inventory snapshot and plan file from the store and from r, leaving
+// the digests that bound them. A failure is logged: the janitor's sweep wipes any ended run that
+// still carries sealed material.
+func (d *Dispatcher) wipeSealed(r *run.Run) {
+	if r.InventorySealed == "" && r.PlanSealed == "" {
+		// Nothing sealed reached this copy of the run, which is always the case on a relay worker:
+		// the control node keeps the sealed material and wipes it when the worker reports the end.
+		return
+	}
+	r.InventorySealed, r.PlanSealed = "", ""
+	if err := d.store.WipeSealed(context.Background(), r.ID); err != nil &&
+		!errors.Is(err, run.ErrNotFound) {
+		d.log.Warn("dispatch: wipe sealed run material: "+err.Error(), zap.String("run_id", r.ID))
+	}
 }
 
 // applyFinalization copies a stored terminal record onto the run in memory.

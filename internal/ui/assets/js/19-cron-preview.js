@@ -1,27 +1,39 @@
 // openScheduleEdit fills the schedule dialog with an existing record and switches it to edit mode.
-// wireCronPreview shows the next firings for the cron spec as it is typed, so a schedule is
-// verifiable before saving.
+// wireCronPreview shows the next firings for the cadence as it is typed, whether a cron spec or a
+// recurrence rule, so a schedule is verifiable before saving.
 function wireCronPreview() {
 	const input = document.getElementById("schedule-cron");
 	const out = document.getElementById("cron-preview");
 	if (!input || !out) return;
 	const zoneEl = document.getElementById("schedule-timezone");
+	const ruleEl = document.getElementById("schedule-rrule");
+	const kindEl = document.getElementById("schedule-kind");
+	const springEl = document.getElementById("schedule-spring-forward");
+	const gapEl = document.getElementById("cron-preview-gap");
 	let timer = 0;
 	const update = async () => {
-		const spec = input.value.trim();
-		if (!spec) { out.textContent = ""; return; }
+		const asRule = scheduleKind() === "rrule";
+		const spec = (asRule ? (ruleEl ? ruleEl.value : "") : input.value).trim();
+		if (!spec) { out.textContent = ""; renderSpringGap(gapEl, null); return; }
 		try {
 			// The zone was never sent, so a schedule the operator had just set to America/New_York
 			// previewed in UTC and the times under the box were the wrong times. The server has
 			// always accepted this parameter; only the caller omitted it.
 			const zone = zoneEl ? zoneEl.value.trim() : "";
-			const data = await getJSON("/schedules/preview?cron=" + encodeURIComponent(spec) +
-				(zone ? "&timezone=" + encodeURIComponent(zone) : ""));
+			// The setting changes where a time the clocks skip fires, so the preview asks with it and
+			// shows the times the schedule will really fire at.
+			const spring = springEl ? springEl.value : "";
+			const data = await getJSON("/schedules/preview?" + (asRule ? "rrule=" : "cron=") +
+				encodeURIComponent(spec) + (zone ? "&timezone=" + encodeURIComponent(zone) : "") +
+				(spring ? "&spring_forward=" + encodeURIComponent(spring) : ""));
 			// Rendered on the schedule's own clock and labeled with it. Showing a New York schedule
 			// in the reader's local zone is a different wrong answer: right instant, wrong clock face.
-			const shown = zone || "UTC";
+			// A recurrence names its zone on its DTSTART, and the server says which one it read.
+			const shown = zone || data.timezone || "UTC";
 			const fmt = { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" };
-			const times = (data.next || []).slice(0, 3).map((t) => {
+			// A recurrence is the form people reach for when the dates are irregular, so it shows
+			// all five fires the server returns: three of a last-Friday rule do not show the year.
+			const times = (data.next || []).slice(0, asRule ? 5 : 3).map((t) => {
 				try {
 					return new Date(t).toLocaleString(undefined, Object.assign({ timeZone: shown }, fmt));
 				} catch {
@@ -29,28 +41,122 @@ function wireCronPreview() {
 					return new Date(t).toLocaleString(undefined, fmt);
 				}
 			});
+			// A rule bounded by COUNT or UNTIL may have fewer fires left than asked for, and a list
+			// that simply ends reads as a rule that repeats. It says so.
+			const tail = data.finished ? ", then it stops" : "";
 			out.textContent = times.length
-				? "Next: " + times.join("  ·  ") + "  (" + shown + ")"
+				? "Next: " + times.join("  ·  ") + "  (" + shown + ")" + tail
 				: "";
 			out.classList.remove("error-text");
-		} catch {
-			out.textContent = "Invalid cron expression";
+			renderSpringGap(gapEl, data.spring_gap);
+		} catch (err) {
+			// A recurrence spans several lines, so the server's refusal, which names the part at
+			// fault, is the only way to find it. A cron expression is one line and its message says
+			// nothing a reader can use.
+			out.textContent = asRule
+				? "Invalid recurrence rule: " + ((err && err.message) || "it could not be read")
+				: "Invalid cron expression";
 			out.classList.add("error-text");
+			renderSpringGap(gapEl, null);
 		}
 	};
-	input.addEventListener("input", () => {
+	const later = () => {
 		window.clearTimeout(timer);
 		timer = window.setTimeout(update, 350);
-	});
+	};
+	input.addEventListener("input", later);
+	if (ruleEl) ruleEl.addEventListener("input", later);
+	// Switching between the two forms re-asks, or the preview keeps describing the other one.
+	if (kindEl) kindEl.addEventListener("change", update);
 	// Changing the zone has to re-ask, or the preview keeps showing the previous zone's times.
 	if (zoneEl) {
 		zoneEl.addEventListener("change", update);
-		zoneEl.addEventListener("input", () => {
-			window.clearTimeout(timer);
-			timer = window.setTimeout(update, 350);
-		});
+		zoneEl.addEventListener("input", later);
 	}
+	// So does the setting, since it moves the one night a year a time does not exist.
+	if (springEl) springEl.addEventListener("change", update);
 	update();
+}
+
+// SPRING_FORWARD_LABELS names each spring-forward setting the way the dialog's choices do.
+const SPRING_FORWARD_LABELS = {
+	jump: "run when the clock jumps",
+	later: "run after the clock change",
+	skip: "skip that day",
+};
+
+// syncSpringForwardDefault names the default the dialog's first choice stands for, which depends on
+// the cadence: a cron expression runs when the clock jumps, a recurrence rule after the clock
+// change.
+function syncSpringForwardDefault() {
+	const el = document.getElementById("schedule-spring-forward");
+	if (!el || !el.options || !el.options.length) return;
+	const fallback = scheduleKind() === "rrule" ? "later" : "jump";
+	el.options[0].textContent = "Default for this cadence (" + SPRING_FORWARD_LABELS[fallback] + ")";
+}
+
+// springGapText says what the schedule does on the next night the clocks go forward over a time it
+// names: the date, the readings the jump erases, and where it fires that night or that it skips.
+// The times are on the clock of the zone that jumps, which is the schedule's own.
+function springGapText(gap) {
+	const zone = gap.zone || "UTC";
+	const onZone = (t, fmt) => {
+		try {
+			return new Date(t).toLocaleString(undefined, Object.assign({ timeZone: zone }, fmt));
+		} catch {
+			return new Date(t).toLocaleString(undefined, fmt);
+		}
+	};
+	const day = onZone(gap.transition, { weekday: "short", month: "short", day: "numeric" });
+	let text = "Daylight saving: on " + day + " the clock jumps from " + gap.from + " to " + gap.to +
+		" (" + zone + "), so a time this schedule names does not exist that night.";
+	const times = (gap.fires || []).map((t) => onZone(t, { hour: "2-digit", minute: "2-digit" }));
+	let list = times.join(", ");
+	if (gap.more_fires) list += ", and " + gap.more_fires + " more";
+	if (gap.setting === "skip") {
+		text += " It is skipped.";
+		if (times.length) text += " Still firing in that hour: " + list + ".";
+		return text;
+	}
+	const how = SPRING_FORWARD_LABELS[gap.setting] || "";
+	if (times.length) {
+		text += " It fires at " + list + (how ? " (" + how + ")" : "") + ".";
+	}
+	return text;
+}
+
+// renderSpringGap shows the daylight-saving note under the preview, or hides it when the server
+// described no such night.
+function renderSpringGap(el, gap) {
+	if (!el) return;
+	if (!gap) {
+		el.hidden = true;
+		el.textContent = "";
+		return;
+	}
+	el.textContent = springGapText(gap);
+	el.hidden = false;
+}
+
+// scheduleKind reports which cadence form the schedule dialog is set to: "cron" or "rrule".
+function scheduleKind() {
+	const el = document.getElementById("schedule-kind");
+	return el && el.value === "rrule" ? "rrule" : "cron";
+}
+
+// setScheduleKind switches the schedule dialog between a cron expression and a recurrence rule. The
+// cron box is required only while it is the form in use, or a rule could never be saved.
+function setScheduleKind(kind) {
+	const asRule = kind === "rrule";
+	const el = document.getElementById("schedule-kind");
+	if (el) el.value = asRule ? "rrule" : "cron";
+	const cronField = document.getElementById("schedule-cron-field");
+	const ruleField = document.getElementById("schedule-rrule-field");
+	if (cronField) cronField.hidden = asRule;
+	if (ruleField) ruleField.hidden = !asRule;
+	const cron = document.getElementById("schedule-cron");
+	if (cron) cron.required = !asRule;
+	syncSpringForwardDefault();
 }
 
 function openScheduleEdit(s) {
@@ -58,12 +164,20 @@ function openScheduleEdit(s) {
 	form.dataset.editId = s.id;
 	document.getElementById("schedule-name").value = s.name || "";
 	document.getElementById("schedule-cron").value = s.cron || "";
+	// A schedule imported from AWX often carries a recurrence rule rather than a cron expression, and
+	// a dialog that showed an empty cron box for it invited saving one over the rule.
+	document.getElementById("schedule-rrule").value = s.rrule || "";
+	setScheduleKind(s.rrule ? "rrule" : "cron");
 	document.getElementById("schedule-template").value = s.template_id || "";
+	scheduleInventoryPreview(s.template_id || "");
 	// A schedule the interface did not create carries a zone and, for an imported crontab line, a
 	// direct target instead of a template. The dialog knew about neither, so opening one of the
 	// hundreds an import produces and pressing Save either moved when it fires or was refused for
 	// having no template it never had.
 	document.getElementById("schedule-timezone").value = s.timezone || "";
+	// The setting is shown as stored, so saving the dialog keeps it rather than resetting it.
+	const springEl = document.getElementById("schedule-spring-forward");
+	if (springEl) springEl.value = s.spring_forward || "";
 	document.getElementById("schedule-playbook").value = s.playbook || "";
 	document.getElementById("schedule-inventory").value = s.inventory || "";
 	// A pipeline or split schedule is a graph the dialog cannot express, so the fields it does show
@@ -92,6 +206,11 @@ function wireScheduleForm() {
 	const form = document.getElementById("schedule-form");
 	fillTemplateSelect(document.getElementById("schedule-template"));
 	fillZoneList(document.getElementById("tz-list"));
+	const kindEl = document.getElementById("schedule-kind");
+	if (kindEl) kindEl.addEventListener("change", () => setScheduleKind(kindEl.value));
+	syncSpringForwardDefault();
+	const tplEl = document.getElementById("schedule-template");
+	if (tplEl) tplEl.addEventListener("change", () => scheduleInventoryPreview(tplEl.value));
 	const resetToCreate = () => {
 		delete form.dataset.editId;
 		form.dataset.graph = "";
@@ -100,8 +219,13 @@ function wireScheduleForm() {
 		}
 		document.getElementById("schedule-name").value = "";
 		document.getElementById("schedule-cron").value = "";
+		document.getElementById("schedule-rrule").value = "";
+		setScheduleKind("cron");
 		document.getElementById("schedule-template").value = "";
+		scheduleInventoryPreview("");
 		document.getElementById("schedule-timezone").value = "";
+		const springEl = document.getElementById("schedule-spring-forward");
+		if (springEl) springEl.value = "";
 		document.getElementById("schedule-playbook").value = "";
 		document.getElementById("schedule-inventory").value = "";
 		document.getElementById("schedule-inline").open = false;
@@ -138,14 +262,28 @@ function wireScheduleForm() {
 		// Every field the API knows is sent, filled or empty, because the update handler rebuilds the
 		// schedule whole: an omitted timezone used to move when an imported schedule fires, and an
 		// omitted target used to leave it firing nothing.
+		// Only the form in use is sent; the other goes as empty, since the server refuses a schedule
+		// that carries both, and switching an edit from one to the other has to clear the old one.
+		const asRule = scheduleKind() === "rrule";
+		const cronText = document.getElementById("schedule-cron").value.trim();
+		const ruleText = document.getElementById("schedule-rrule").value.trim();
+		if (asRule && !ruleText) {
+			status.textContent = "Write a recurrence rule, or switch the cadence back to cron.";
+			return;
+		}
 		const payload = {
 			name: document.getElementById("schedule-name").value.trim(),
-			cron: document.getElementById("schedule-cron").value.trim(),
+			cron: asRule ? "" : cronText,
+			rrule: asRule ? ruleText : "",
 			timezone: document.getElementById("schedule-timezone").value.trim(),
 			template_id: templateID,
 			playbook: playbook,
 			inventory: document.getElementById("schedule-inventory").value.trim(),
 		};
+		// Sent whatever it says, because the dialog shows the stored setting: an empty value is the
+		// default the dialog displays, and an edit has to be able to return a schedule to it.
+		const springEl = document.getElementById("schedule-spring-forward");
+		if (springEl) payload.spring_forward = springEl.value;
 		inFlight = true;
 		if (submitBtn) submitBtn.disabled = true;
 		try {
@@ -166,6 +304,48 @@ function wireScheduleForm() {
 			if (submitBtn) submitBtn.disabled = false;
 		}
 	});
+}
+
+// schedulePreviewSeq numbers the inventory previews the schedule dialog asks for, so a slow answer
+// for a template no longer selected cannot overwrite the answer for the one that is.
+let schedulePreviewSeq = 0;
+
+// scheduleInventoryPreview says, under the template picker, what the chosen template's inventory
+// matches right now when it is a smart or constructed one. A schedule over a composed inventory that
+// matches nothing still fires on time and records each fire as skipped, so the dialog warns before
+// Save rather than leaving it to a week of skipped fires. It is best effort and never blocks Save:
+// any failure leaves the hint empty.
+async function scheduleInventoryPreview(templateID) {
+	const out = document.getElementById("schedule-inventory-preview");
+	if (!out) return;
+	const seq = ++schedulePreviewSeq;
+	out.hidden = true;
+	out.textContent = "";
+	out.className = "field-hint";
+	if (!templateID) return;
+	try {
+		const tpls = await getJSON("/templates");
+		const tpl = (tpls.templates || []).find((t) => t.id === templateID);
+		if (!tpl || !tpl.inventory_id) return;
+		const invs = await getJSON("/inventories");
+		const inv = (invs.inventories || []).find((i) => i.id === tpl.inventory_id);
+		if (!inv || !inv.kind) return;
+		const res = await postAction("/inventories/" + encodeURIComponent(inv.id) + "/preview");
+		if (seq !== schedulePreviewSeq) return;
+		const count = typeof res.count === "number" ? res.count : (res.hosts || []).length;
+		const what = "Its " + inv.kind + " inventory \u201c" + inv.name + "\u201d";
+		if (count > 0) {
+			out.textContent = what + " matches " + count + " " + plural(count, "host", "hosts") +
+				" right now.";
+		} else {
+			out.className = "warn-note";
+			out.textContent = what + " matches no hosts right now. Each fire is recorded as " +
+				"skipped, not failed, until it matches a host.";
+		}
+		out.hidden = false;
+	} catch (_) {
+		// Best effort: a preview that cannot be read says nothing rather than something wrong.
+	}
 }
 
 // setScheduleGraphNotice warns, when a schedule fires a pipeline or a split, that the dialog shows
@@ -264,6 +444,8 @@ function openPolicyEdit(p) {
 		(p.max_destroy !== undefined && p.max_destroy !== null && p.max_destroy >= 0) ? String(p.max_destroy) : "";
 	document.getElementById("policy-exclude-dry").checked = !!p.exclude_dry_run;
 	document.getElementById("policy-distinct-approver").checked = !!p.require_distinct_approver;
+	const reasonField = document.getElementById("policy-require-reason");
+	if (reasonField) reasonField.value = p.require_reason || "";
 	document.getElementById("policy-status").textContent = "";
 	setModalTitle("policy", "Edit policy");
 	document.getElementById("policy-modal").hidden = false;
@@ -313,6 +495,8 @@ function wirePolicyForm() {
 		document.getElementById("policy-max-destroy").value = "";
 		document.getElementById("policy-exclude-dry").checked = false;
 		document.getElementById("policy-distinct-approver").checked = false;
+		const reasonField = document.getElementById("policy-require-reason");
+		if (reasonField) reasonField.value = "";
 		document.getElementById("policy-status").textContent = "";
 		setModalTitle("policy", "Add a policy");
 	};
@@ -345,6 +529,8 @@ function wirePolicyForm() {
 			min_risk: document.getElementById("policy-min-risk").value,
 			exclude_dry_run: document.getElementById("policy-exclude-dry").checked,
 			require_distinct_approver: document.getElementById("policy-distinct-approver").checked,
+			// Sent filled or empty, for the reason every other field is: the update rebuilds the rule.
+			require_reason: (document.getElementById("policy-require-reason") || {}).value || "",
 		};
 		const maxDestroy = document.getElementById("policy-max-destroy").value.trim();
 		if (maxDestroy !== "") {

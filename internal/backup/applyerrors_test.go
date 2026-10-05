@@ -14,6 +14,7 @@ import (
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
+	"github.com/kordloom/switchtender/internal/notification"
 	"github.com/kordloom/switchtender/internal/org"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
@@ -60,6 +61,8 @@ type (
 	saveFailSchedules struct{ schedule.Store }
 	// saveFailTriggers refuses to write a trigger.
 	saveFailTriggers struct{ trigger.Store }
+	// saveFailNotifications refuses to write a notification target.
+	saveFailNotifications struct{ notification.Store }
 )
 
 // Save refuses the write.
@@ -113,6 +116,11 @@ func (saveFailSchedules) Save(context.Context, *schedule.Schedule) error { retur
 
 // Save refuses the write.
 func (saveFailTriggers) Save(context.Context, *trigger.Trigger) error { return errStore }
+
+// Save refuses.
+func (saveFailNotifications) Save(context.Context, *notification.Notification) error {
+	return errStore
+}
 
 // TestRestoreStopsAtTheFirstWriteItCannotMake proves every write a restore makes is checked, that
 // the failure names the object it could not write, and that the summary still reports what was
@@ -230,6 +238,12 @@ func TestRestoreStopsAtTheFirstWriteItCannotMake(t *testing.T) {
 		Break:       func(s *Stores) { s.Triggers = saveFailTriggers{s.Triggers} },
 		WantMessage: "save trigger",
 		Count:       func(s Summary) int { return s.Triggers },
+		WantEarlier: true,
+	}, { // Test 16: Notification targets.
+		Name:        "notification targets",
+		Break:       func(s *Stores) { s.Notifications = saveFailNotifications{s.Notifications} },
+		WantMessage: "save notification target",
+		Count:       func(s Summary) int { return s.Notifications },
 		WantEarlier: true,
 	}}
 	for testNum, test := range tests {

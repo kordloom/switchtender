@@ -79,7 +79,56 @@ CREATE TABLE IF NOT EXISTS runs (
 	pinned_commit TEXT NOT NULL DEFAULT '',
 	policy_set TEXT NOT NULL DEFAULT '',
 	actor_user_id TEXT NOT NULL DEFAULT '',
-	plan_destroys INTEGER
+	plan_destroys INTEGER,
+	template_id TEXT NOT NULL DEFAULT '',
+	inventory_resolution TEXT NOT NULL DEFAULT '',
+	-- The sealed answers to a run's secret survey fields, a JSON object of ciphertext. It is never
+	-- plain text and leaves the database only through the executor that opens it.
+	sealed_vars TEXT NOT NULL DEFAULT '',
+	use_fact_cache INTEGER NOT NULL DEFAULT 0,
+	fact_cache_timeout INTEGER NOT NULL DEFAULT 0,
+	git_ref TEXT NOT NULL DEFAULT '',
+	-- What the gate's scan of a dry run read, as JSON: the scanner, the files examined, what was
+	-- found and what could not be read, and the classification that followed.
+	dry_run_scans TEXT NOT NULL DEFAULT '',
+	hold_note TEXT NOT NULL DEFAULT '',
+	-- The digest of each sealed answer's ciphertext, a JSON list fixed when the run is created. It
+	-- binds which sealed answer the run carries, so an approval covers it, and never the answer.
+	sealed_digests TEXT NOT NULL DEFAULT '',
+	policy_notes TEXT NOT NULL DEFAULT '',
+	-- The cross-check an Ansible run against a natively resolved inventory made before it ran, as
+	-- JSON: the ansible-core that read the inventory, and the digests or the differences.
+	inventory_check TEXT NOT NULL DEFAULT '',
+	-- The agent identity of an agent-initiated run, a JSON object, empty for any other run.
+	initiator TEXT NOT NULL DEFAULT '',
+	require_reason TEXT NOT NULL DEFAULT '',
+	-- The stored inventory the run executes against, materialized when it was submitted: a JSON
+	-- record of the sealed content's digest, a digest with its secrets masked, and the hosts it
+	-- names. The content itself is in inventory_sealed, ciphertext only, and is wiped when the run
+	-- ends.
+	inventory_snapshot TEXT NOT NULL DEFAULT '',
+	inventory_sealed TEXT NOT NULL DEFAULT '',
+	-- The hosts a dynamic inventory source resolved to when the run executed, as a JSON list.
+	resolved_hosts TEXT NOT NULL DEFAULT '',
+	-- The digest of the sealed plan file a gated apply carries out, and the plan file itself,
+	-- ciphertext only, wiped when the run ends.
+	plan_sha256 TEXT NOT NULL DEFAULT '',
+	plan_sealed TEXT NOT NULL DEFAULT '',
+	-- The digest of the image the container runtime pulled and ran.
+	image_digest TEXT NOT NULL DEFAULT '',
+	-- The decision that won a held run or an approval step: the id of its record and of the chain
+	-- entry recording it. Set when the decision claims the run and never changed afterward.
+	decision_id TEXT NOT NULL DEFAULT '',
+	-- The decision that claimed the run and has not settled it, as JSON: its chain entry and how it
+	-- settles the run. Empty once it settles. While it is set the row's status reads deciding.
+	decision_claim TEXT NOT NULL DEFAULT '',
+	-- When the run last re-entered the queue: released by an approval or put back by the lease
+	-- sweep. Empty for a run that has waited since it was created.
+	queued_at TEXT,
+	-- When the run came to owe its outcome to the audit chain, in Unix milliseconds by the store's
+	-- clock, and zero while it owes nothing. The runs_outcome_owed trigger sets it, and the commit
+	-- that puts the outcome on the chain clears it.
+	outcome_owed_ms INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 -- Every run listing selects top-level runs and pages them by creation time, and that pair has to sit
@@ -111,6 +160,19 @@ CREATE INDEX IF NOT EXISTS idx_runs_child_parent
 -- SQLite only uses a partial index when the query's WHERE matches the index's, so a predicate that
 -- drifted from the index would silently return the scan rather than fail.
 CREATE INDEX IF NOT EXISTS idx_runs_live ON runs(created_at) WHERE ` + nonTerminalRun + `;
+-- A top-level run comes to owe its outcome to the audit chain in the write that makes it terminal,
+-- whichever statement that is, so an append the chain refused or a process that died before it
+-- appended cannot lose the outcome for good: the janitor commits what is still owed. A run stored
+-- already finished owes nothing, since no process saw it finish. The trigger is created once and
+-- never replaced on open, because replacing it would leave a moment in which another process's
+-- terminal write marked nothing, so a change to it takes a new name.
+CREATE TRIGGER IF NOT EXISTS runs_outcome_owed AFTER UPDATE OF status ON runs
+FOR EACH ROW WHEN NEW.parent_id IS NULL AND NEW.` + terminalRun + ` AND OLD.` + nonTerminalRun + `
+BEGIN
+	UPDATE runs SET outcome_owed_ms = CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)
+	WHERE id = NEW.id;
+END;
+CREATE INDEX IF NOT EXISTS idx_runs_outcome_owed ON runs(outcome_owed_ms) WHERE outcome_owed_ms > 0;
 CREATE TABLE IF NOT EXISTS run_logs (
 	seq    INTEGER PRIMARY KEY AUTOINCREMENT,
 	run_id TEXT NOT NULL,
@@ -127,6 +189,15 @@ CREATE TABLE IF NOT EXISTS stream_tickets (
 	expires_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS stream_tickets_actor ON stream_tickets (actor_key, expires_at);
+-- Fixed-window allowances every process sharing the database spends from, such as a provisioning
+-- callback's per-address request and wrong-key budgets. window_end is in Unix nanoseconds, and a row
+-- whose window has closed is deleted when the next window anywhere opens.
+CREATE TABLE IF NOT EXISTS budgets (
+	key        TEXT PRIMARY KEY,
+	window_end INTEGER NOT NULL DEFAULT 0,
+	spent      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_budgets_window_end ON budgets(window_end);
 
 CREATE TABLE IF NOT EXISTS run_events (
 	seq    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -189,6 +260,37 @@ CREATE TABLE IF NOT EXISTS host_facts_history (
 );
 CREATE INDEX IF NOT EXISTS idx_host_facts_history_host_time
 	ON host_facts_history (host, gathered_at DESC);
+-- host_fact_cache is the fact cache a template turns on with use_fact_cache: the whole fact
+-- document Ansible gathered for one host of one stored inventory, written back into Ansible's
+-- jsonfile cache for the next run of a template that uses it. host_facts above keeps a handful of
+-- identifying facts for the estate views, and this keeps everything a play can read, which is why
+-- it is kept apart. It is runtime state like run history: it never enters the audit chain, a
+-- receipt, or a backup, because a fact document routinely carries the remote user's environment.
+CREATE TABLE IF NOT EXISTS host_fact_cache (
+	inventory_id TEXT NOT NULL,
+	host         TEXT NOT NULL,
+	facts        TEXT NOT NULL,
+	run_id       TEXT NOT NULL DEFAULT '',
+	modified_at  TEXT NOT NULL,
+	PRIMARY KEY (inventory_id, host)
+);
+-- worker_presence holds each executor's latest report that it is polling for work: the queues it
+-- serves, how many runs it takes at once, and when it was first and last seen. It is how the
+-- dashboard tells a queue nothing serves from one whose workers are busy. It is runtime state, kept
+-- only while a worker reports and a day after, and never enters a backup or the audit chain.
+CREATE TABLE IF NOT EXISTS worker_presence (
+	owner      TEXT PRIMARY KEY,
+	queues     TEXT NOT NULL DEFAULT '',
+	slots      INTEGER NOT NULL DEFAULT 0,
+	first_seen TEXT NOT NULL DEFAULT '',
+	last_seen  TEXT NOT NULL DEFAULT ''
+);
+-- attention_alerts records each attention alert the first time any server raises it, so replicas
+-- sharing the database alert once between them. A row outlives its condition by a week at most.
+CREATE TABLE IF NOT EXISTS attention_alerts (
+	alert_key TEXT PRIMARY KEY,
+	raised_at TEXT NOT NULL DEFAULT ''
+);
 CREATE TABLE IF NOT EXISTS run_task_summary (
 	run_id  TEXT NOT NULL,
 	task    TEXT NOT NULL,
@@ -216,7 +318,13 @@ CREATE TABLE IF NOT EXISTS schedules (
 	timezone    TEXT NOT NULL DEFAULT '',
 	org_id      TEXT NOT NULL DEFAULT '',
 	created_by  TEXT NOT NULL DEFAULT '',
-	last_error  TEXT NOT NULL DEFAULT ''
+	last_error  TEXT NOT NULL DEFAULT '',
+	rrule       TEXT NOT NULL DEFAULT '',
+	spring_forward TEXT NOT NULL DEFAULT '',
+	-- Why the most recent fire was skipped, and how many fires in a row ending with it were. A
+	-- fire whose inventory matched no hosts is skipped rather than failed.
+	last_skip     TEXT NOT NULL DEFAULT '',
+	skipped_fires INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_schedules_created ON schedules(created_at, id);
 CREATE TABLE IF NOT EXISTS users (
@@ -242,7 +350,9 @@ CREATE TABLE IF NOT EXISTS tokens (
 	created_at   TEXT NOT NULL,
 	last_used_at TEXT,
 	expires_at   TEXT,
-	kind         TEXT NOT NULL DEFAULT ''
+	kind         TEXT NOT NULL DEFAULT '',
+	created_by      TEXT NOT NULL DEFAULT '',
+	created_by_type TEXT NOT NULL DEFAULT ''
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tokens_hash ON tokens(hash);
 CREATE TABLE IF NOT EXISTS projects (
@@ -286,7 +396,26 @@ CREATE TABLE IF NOT EXISTS templates (
 	forks          INTEGER NOT NULL DEFAULT 0,
 	diff_mode      INTEGER NOT NULL DEFAULT 0,
 	steps          TEXT NOT NULL DEFAULT '',
-	limit_pattern  TEXT NOT NULL DEFAULT ''
+	limit_pattern  TEXT NOT NULL DEFAULT '',
+	use_fact_cache INTEGER NOT NULL DEFAULT 0,
+	fact_cache_timeout INTEGER NOT NULL DEFAULT 0,
+	allow_callbacks INTEGER NOT NULL DEFAULT 0,
+	host_config_key TEXT NOT NULL DEFAULT '',
+	callback_limit TEXT NOT NULL DEFAULT '',
+	awx_callback   INTEGER NOT NULL DEFAULT 0
+);
+-- awx_callback_bindings ties an AWX job template id to the template an import created from that AWX
+-- job template, so a host's boot script that still posts to AWX's callback address reaches it. Only
+-- an import of the same AWX object, by organization and name, points a binding at another template.
+-- A binding keeps the id of a deleted template, which is never reused, so the address answers gone.
+CREATE TABLE IF NOT EXISTS awx_callback_bindings (
+	awx_id         INTEGER PRIMARY KEY,
+	template_id    TEXT NOT NULL DEFAULT '',
+	awx_org        TEXT NOT NULL DEFAULT '',
+	awx_name       TEXT NOT NULL DEFAULT '',
+	created_at     TEXT NOT NULL,
+	updated_at     TEXT NOT NULL,
+	last_called_at TEXT
 );
 CREATE TABLE IF NOT EXISTS inventory_sources (
 	id            TEXT PRIMARY KEY,
@@ -310,9 +439,91 @@ CREATE TABLE IF NOT EXISTS triggers (
 	require_signature INTEGER NOT NULL DEFAULT 0,
 	last_fired_at     TEXT,
 	created_at        TEXT NOT NULL,
-	created_by        TEXT NOT NULL DEFAULT ''
+	created_by        TEXT NOT NULL DEFAULT '',
+	review_provider   TEXT NOT NULL DEFAULT '',
+	review_api_url    TEXT NOT NULL DEFAULT '',
+	review_repository TEXT NOT NULL DEFAULT '',
+	review_credential_id TEXT NOT NULL DEFAULT '',
+	review_allow_forks INTEGER NOT NULL DEFAULT 0,
+	-- Why the most recent delivery started no run, and when it arrived. Cleared by the next fire.
+	last_error TEXT NOT NULL DEFAULT '',
+	last_error_at TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_triggers_hash ON triggers(token_hash);
+CREATE TABLE IF NOT EXISTS notification_targets (
+	id           TEXT PRIMARY KEY,
+	name         TEXT NOT NULL DEFAULT '',
+	description  TEXT NOT NULL DEFAULT '',
+	org_id       TEXT NOT NULL DEFAULT '',
+	kind         TEXT NOT NULL,
+	recipient    TEXT NOT NULL DEFAULT '',
+	url_hint     TEXT NOT NULL DEFAULT '',
+	key_set      INTEGER NOT NULL DEFAULT 0,
+	needs_secret INTEGER NOT NULL DEFAULT 0,
+	sealed_url   TEXT NOT NULL DEFAULT '',
+	sealed_key   TEXT NOT NULL DEFAULT '',
+	created_at   TEXT NOT NULL,
+	created_by   TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_notification_targets_created ON notification_targets(created_at, id);
+CREATE TABLE IF NOT EXISTS notification_attachments (
+	id              TEXT PRIMARY KEY,
+	notification_id TEXT NOT NULL,
+	object_kind     TEXT NOT NULL,
+	object_id       TEXT NOT NULL,
+	event           TEXT NOT NULL,
+	created_at      TEXT NOT NULL,
+	created_by      TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_attachments_unique
+	ON notification_attachments(notification_id, object_kind, object_id, event);
+CREATE INDEX IF NOT EXISTS idx_notification_attachments_object
+	ON notification_attachments(object_kind, object_id, created_at, id);
+-- A run's notification events in the order the run reached them: seq is the run's own sequence,
+-- which is what delivery is ordered by. The snapshot is the run as it stood at the event, redacted
+-- the way everything sent off the host is. Times in these two tables are Unix milliseconds, so the
+-- claim's comparisons are exact without depending on how a text timestamp sorts.
+CREATE TABLE IF NOT EXISTS notification_events (
+	run_id     TEXT NOT NULL,
+	seq        INTEGER NOT NULL,
+	event      TEXT NOT NULL,
+	branch     TEXT NOT NULL DEFAULT '',
+	dedupe_key TEXT NOT NULL,
+	snapshot   TEXT NOT NULL,
+	created_ms INTEGER NOT NULL,
+	PRIMARY KEY (run_id, seq)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_events_dedupe
+	ON notification_events(run_id, dedupe_key);
+-- One row per event and target, keyed by target, run, and sequence, so no retry and no second
+-- worker can queue or claim the same delivery twice.
+CREATE TABLE IF NOT EXISTS notification_deliveries (
+	notification_id TEXT NOT NULL,
+	run_id          TEXT NOT NULL,
+	seq             INTEGER NOT NULL,
+	event           TEXT NOT NULL,
+	branch          TEXT NOT NULL DEFAULT '',
+	follows         TEXT NOT NULL DEFAULT '',
+	target_name     TEXT NOT NULL DEFAULT '',
+	target_kind     TEXT NOT NULL DEFAULT '',
+	status          TEXT NOT NULL,
+	attempts        INTEGER NOT NULL DEFAULT 0,
+	next_attempt_ms INTEGER NOT NULL DEFAULT 0,
+	claimed_by      TEXT NOT NULL DEFAULT '',
+	claim_until_ms  INTEGER NOT NULL DEFAULT 0,
+	last_error      TEXT NOT NULL DEFAULT '',
+	note            TEXT NOT NULL DEFAULT '',
+	created_ms      INTEGER NOT NULL,
+	finished_ms     INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY (notification_id, run_id, seq)
+);
+CREATE INDEX IF NOT EXISTS idx_notification_deliveries_due
+	ON notification_deliveries(status, next_attempt_ms);
+CREATE INDEX IF NOT EXISTS idx_notification_deliveries_run
+	ON notification_deliveries(run_id, seq);
+CREATE INDEX IF NOT EXISTS idx_notification_deliveries_target
+	ON notification_deliveries(notification_id, created_ms);
+` + runEndsSchema + `
 CREATE TABLE IF NOT EXISTS audit_entries (
 	id        TEXT PRIMARY KEY,
 	at        TEXT NOT NULL,
@@ -345,6 +556,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_seq ON audit_entries(seq);
 -- Span beats are a narrow slice of the chain selected by actor and method and ordered by seq.
 -- Without this the unauthenticated beat feed and every beat append walked the whole entries table.
 CREATE INDEX IF NOT EXISTS idx_audit_span ON audit_entries(actor, method, seq);
+-- A run has one outcome entry, and every append of one first asks whether the chain already holds
+-- it. The index holds outcome entries only, so that question costs a lookup instead of a scan of
+-- the chain.
+CREATE INDEX IF NOT EXISTS idx_audit_outcome ON audit_entries(path) WHERE method = 'RUN';
 CREATE TABLE IF NOT EXISTS policies (
 	id               TEXT PRIMARY KEY,
 	name             TEXT NOT NULL DEFAULT '',
@@ -360,7 +575,8 @@ CREATE TABLE IF NOT EXISTS policies (
 	reversibility    TEXT NOT NULL DEFAULT '',
 	effect           TEXT NOT NULL DEFAULT '',
 	distinct_approver INTEGER NOT NULL DEFAULT 0,
-	created_at       TEXT NOT NULL
+	created_at       TEXT NOT NULL,
+	require_reason   TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS inventories (
 	id             TEXT PRIMARY KEY,
@@ -371,7 +587,12 @@ CREATE TABLE IF NOT EXISTS inventories (
 	content_config TEXT NOT NULL DEFAULT '',
 	queue          TEXT NOT NULL DEFAULT '',
 	org_id         TEXT NOT NULL DEFAULT '',
-	created_at     TEXT NOT NULL
+	created_at     TEXT NOT NULL,
+	kind           TEXT NOT NULL DEFAULT '',
+	host_filter    TEXT NOT NULL DEFAULT '',
+	input_ids      TEXT NOT NULL DEFAULT '',
+	source_vars    TEXT NOT NULL DEFAULT '',
+	limit_pattern  TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS credentials (
 	id         TEXT PRIMARY KEY,
@@ -391,7 +612,26 @@ CREATE TABLE IF NOT EXISTS credential_types (
 	fields     TEXT NOT NULL DEFAULT '[]',
 	env        TEXT NOT NULL DEFAULT '{}',
 	extra_vars TEXT NOT NULL DEFAULT '{}',
-	created_at TEXT NOT NULL DEFAULT '0001-01-01T00:00:00Z'
+	files      TEXT NOT NULL DEFAULT '{}',
+	created_at TEXT NOT NULL DEFAULT '0001-01-01T00:00:00Z',
+	-- Where the type was defined: empty for one created here, awx for one an AWX import brought
+	-- across, which may keep a file no injector references.
+	origin     TEXT NOT NULL DEFAULT ''
+);
+-- The workload identity federation signing keys. The private half arrives sealed under the
+-- encryption key, so the column holds ciphertext, and every process on the database signs with and
+-- publishes the same keys. Each key records when it was created, when it starts signing, when it
+-- stops, and when it leaves the published set, empty for a time that has not been set; a removed
+-- key keeps its row, with sealed emptied, as the record of when it was trusted.
+CREATE TABLE IF NOT EXISTS federation_keys (
+	id           TEXT PRIMARY KEY,
+	algorithm    TEXT NOT NULL DEFAULT 'RS256',
+	public_key   TEXT NOT NULL DEFAULT '',
+	sealed       TEXT NOT NULL DEFAULT '',
+	created_at   TEXT NOT NULL DEFAULT '',
+	retired_at   TEXT NOT NULL DEFAULT '',
+	activated_at TEXT NOT NULL DEFAULT '',
+	removed_at   TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS teams (
 	id         TEXT PRIMARY KEY,
@@ -424,6 +664,67 @@ CREATE TABLE IF NOT EXISTS grants (
 	created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_grants_object ON grants(object);
+-- What each pull request review report last told its pull request, and the claim and retry state
+-- that sends each report once across every process sharing the database. A plan's record is keyed
+-- by its run id and goes when retention deletes the run.
+CREATE TABLE IF NOT EXISTS review_reports (
+	id              TEXT PRIMARY KEY,
+	kind            TEXT NOT NULL DEFAULT 'plan',
+	run_id          TEXT NOT NULL DEFAULT '',
+	trigger_id      TEXT NOT NULL DEFAULT '',
+	pull_request    INTEGER NOT NULL DEFAULT 0,
+	commit_sha      TEXT NOT NULL DEFAULT '',
+	reason          TEXT NOT NULL DEFAULT '',
+	receipt         TEXT NOT NULL DEFAULT '',
+	phase           TEXT NOT NULL DEFAULT '',
+	held_by         TEXT NOT NULL DEFAULT '',
+	status_state    TEXT NOT NULL DEFAULT '',
+	comment_sha256  TEXT NOT NULL DEFAULT '',
+	recorded_sha256 TEXT NOT NULL DEFAULT '',
+	reported_at     TEXT NOT NULL DEFAULT '',
+	done            INTEGER NOT NULL DEFAULT 0,
+	version         INTEGER NOT NULL DEFAULT 0,
+	claimed_by      TEXT NOT NULL DEFAULT '',
+	claimed_until   TEXT NOT NULL DEFAULT '',
+	attempts        INTEGER NOT NULL DEFAULT 0,
+	failing_since   TEXT NOT NULL DEFAULT '',
+	retry_at        TEXT NOT NULL DEFAULT '',
+	last_error      TEXT NOT NULL DEFAULT '',
+	created_at      TEXT NOT NULL DEFAULT '',
+	-- Where the report goes, fixed when the record is made, so a trigger pointed elsewhere later
+	-- cannot carry it to a pull request it never planned. Empty on a record an earlier release made.
+	provider        TEXT NOT NULL DEFAULT '',
+	api_url         TEXT NOT NULL DEFAULT '',
+	repository      TEXT NOT NULL DEFAULT '',
+	-- The commit status context the record's first status was set under, which it keeps.
+	status_context  TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_review_reports_pending ON review_reports(done, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_review_reports_lane ON review_reports(trigger_id, pull_request);
+
+-- One row per approval or denial a person made, and per correction appended to one. The reason is
+-- the masked text and the random value its chain commitment hides it under, stored together and
+-- removed together by a redaction, which keeps the commitment and records why in the redaction
+-- column.
+CREATE TABLE IF NOT EXISTS run_decisions (
+	id                TEXT PRIMARY KEY,
+	kind              TEXT NOT NULL DEFAULT '',
+	decision_id       TEXT NOT NULL DEFAULT '',
+	run_id            TEXT NOT NULL DEFAULT '',
+	step_run_id       TEXT NOT NULL DEFAULT '',
+	verdict           TEXT NOT NULL DEFAULT '',
+	recorded_at       TEXT NOT NULL DEFAULT '',
+	actor             TEXT NOT NULL DEFAULT '',
+	actor_type        TEXT NOT NULL DEFAULT '',
+	on_behalf_of      TEXT NOT NULL DEFAULT '',
+	reason_text       TEXT NOT NULL DEFAULT '',
+	reason_random     TEXT NOT NULL DEFAULT '',
+	reason_commitment TEXT NOT NULL DEFAULT '',
+	reason_masked     INTEGER NOT NULL DEFAULT 0,
+	redaction         TEXT NOT NULL DEFAULT '',
+	sod               TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_run_decisions_run ON run_decisions(run_id);
 `
 
 // createPrivate creates the database file readable by its owner alone when it does not exist yet.
@@ -492,6 +793,10 @@ func Open(path string) (*DB, error) {
 	// the hand-kept ALTER lists below drifted once, runs.org_id reached the CREATE and the shared
 	// select list and never the lists, and every database from before it failed every read of the
 	// runs table after an upgrade.
+	if err := healFedKeyLifecycle(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := healColumns(db); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -501,6 +806,10 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
 	if err := migrateRuns(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := upgradeIdempotencyKeys(db); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -564,6 +873,10 @@ func Open(path string) (*DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := pinScheduleZones(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := ensureRunIndexes(db); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -578,19 +891,23 @@ func Open(path string) (*DB, error) {
 	}
 	split := &splitDB{w: db, r: reader}
 	return &DB{db: split, runs: &store{db: split}, schedules: &scheduleStore{db: split}, tokens: &tokenStore{db: split},
-		credentials: &credentialStore{db: split},
-		credTypes:   &credTypeStore{db: split},
-		projects:    &projectStore{db: split},
-		templates:   &templateStore{db: split},
-		users:       &userStore{db: split},
-		inventories: &inventoryStore{db: split},
-		audits:      &auditStore{db: split},
-		invSources:  &invSourceStore{db: split},
-		triggers:    &triggerStore{db: split},
-		teams:       &teamStore{db: split},
-		orgs:        &orgStore{db: split},
-		grants:      &grantStore{db: split},
-		policies:    &policyStore{db: split}}, nil
+		credentials:   &credentialStore{db: split},
+		credTypes:     &credTypeStore{db: split},
+		fedKeys:       &fedKeyStore{db: split},
+		projects:      &projectStore{db: split},
+		templates:     &templateStore{db: split},
+		users:         &userStore{db: split},
+		inventories:   &inventoryStore{db: split},
+		audits:        &auditStore{db: split},
+		invSources:    &invSourceStore{db: split},
+		triggers:      &triggerStore{db: split},
+		notifications: &notificationStore{db: split},
+		teams:         &teamStore{db: split},
+		orgs:          &orgStore{db: split},
+		grants:        &grantStore{db: split},
+		policies:      &policyStore{db: split},
+		factCache:     &factCacheStore{db: split},
+		reviews:       &reviewStore{db: split}}, nil
 }
 
 // readPoolConns bounds the read-only pool. WAL readers are cheap, and a handful is enough to keep the
@@ -732,14 +1049,27 @@ func migrateRuns(db *sql.DB) error {
 		!strings.Contains(err.Error(), "duplicate column name") {
 		return fmt.Errorf("add notifications column: %w", err)
 	}
-	for _, column := range []string{"source", "source_id", "actor", "rerun_of", "labels", "steps", "warning", "audit_receipt", "held_by_policy", "tags", "skip_tags", "claim_secret", "actor_type", "approved_spec_digest", "approved_spec_binding", "pinned_commit", "policy_set", "actor_user_id"} {
+	for _, column := range []string{"source", "source_id", "actor", "rerun_of", "labels", "steps",
+		"warning", "audit_receipt", "held_by_policy", "tags", "skip_tags", "claim_secret",
+		"actor_type", "approved_spec_digest", "approved_spec_binding", "pinned_commit", "policy_set",
+		"actor_user_id", "template_id", "inventory_resolution", "sealed_vars", "git_ref",
+		"dry_run_scans", "hold_note", "sealed_digests", "policy_notes", "inventory_check",
+		"initiator", "require_reason", "inventory_snapshot", "inventory_sealed", "resolved_hosts",
+		"plan_sha256", "plan_sealed", "image_digest", "decision_id", "decision_claim"} {
 		if _, err := db.Exec(
 			"ALTER TABLE runs ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''"); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {
 			return fmt.Errorf("add %s column: %w", column, err)
 		}
 	}
-	for _, column := range []string{"verbosity", "forks", "diff_mode", "distinct_approver"} {
+	// When a run last re-entered the queue has no value until it does, so it is the one run column
+	// that stays NULL rather than empty.
+	if _, err := db.Exec("ALTER TABLE runs ADD COLUMN queued_at TEXT"); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("add queued_at column: %w", err)
+	}
+	for _, column := range []string{"verbosity", "forks", "diff_mode", "distinct_approver",
+		"use_fact_cache", "fact_cache_timeout"} {
 		if _, err := db.Exec(
 			"ALTER TABLE runs ADD COLUMN " + column + " INTEGER NOT NULL DEFAULT 0"); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {
@@ -935,10 +1265,12 @@ func migrateCredentialTypes(db *sql.DB) error {
 	fields     TEXT NOT NULL DEFAULT '[]',
 	env        TEXT NOT NULL DEFAULT '{}',
 	extra_vars TEXT NOT NULL DEFAULT '{}',
-	created_at TEXT NOT NULL DEFAULT '0001-01-01T00:00:00Z'
+	files      TEXT NOT NULL DEFAULT '{}',
+	created_at TEXT NOT NULL DEFAULT '0001-01-01T00:00:00Z',
+	origin     TEXT NOT NULL DEFAULT ''
 )`,
-		"INSERT INTO credential_types_new (id, name, fields, env, extra_vars) " +
-			"SELECT id, name, fields, env, extra_vars FROM credential_types",
+		"INSERT INTO credential_types_new (id, name, fields, env, extra_vars, files, origin) " +
+			"SELECT id, name, fields, env, extra_vars, files, origin FROM credential_types",
 		"DROP TABLE credential_types",
 		"ALTER TABLE credential_types_new RENAME TO credential_types",
 	} {
@@ -1006,6 +1338,7 @@ func ensureRunIndexes(db *sql.DB) error {
 		"CREATE INDEX IF NOT EXISTS idx_runs_leased ON runs(claimed_at) WHERE claimed_by<>''",
 		"CREATE INDEX IF NOT EXISTS idx_runs_actor ON runs(actor, created_at DESC, id DESC)",
 		"CREATE INDEX IF NOT EXISTS idx_runs_source ON runs(source, source_id, created_at DESC, id DESC)",
+		callbackLiveIndex,
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			return fmt.Errorf("create run index: %w", err)
@@ -1081,6 +1414,10 @@ func migrateTemplates(db *sql.DB) error {
 		"ALTER TABLE templates ADD COLUMN diff_mode INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE templates ADD COLUMN steps TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE templates ADD COLUMN limit_pattern TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE templates ADD COLUMN use_fact_cache INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE templates ADD COLUMN fact_cache_timeout INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE templates ADD COLUMN allow_callbacks INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE templates ADD COLUMN host_config_key TEXT NOT NULL DEFAULT ''",
 	} {
 		if _, err := db.Exec(stmt); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {
@@ -1090,13 +1427,20 @@ func migrateTemplates(db *sql.DB) error {
 	return nil
 }
 
-// migrateSchedules adds the columns a schedules table created before them lacks: the timezone, whose
-// empty default is server-local so an older schedule fires exactly as it did, and the reason the last
-// fire started no run, whose empty default says nothing failed.
+// migrateSchedules adds the columns a schedules table created before them lacks: the timezone,
+// whose empty default is server-local so an older schedule fires exactly as it did, the reason the
+// last fire started no run, whose empty default says nothing failed, the recurrence rule, whose
+// empty default leaves every existing schedule on its cron expression, the spring-forward setting,
+// whose empty default takes each kind of schedule's own default, and the skip reason and count,
+// whose empty defaults say no fire was skipped.
 func migrateSchedules(db *sql.DB) error {
 	for _, column := range []string{
 		"timezone TEXT NOT NULL DEFAULT ''",
 		"last_error TEXT NOT NULL DEFAULT ''",
+		"rrule TEXT NOT NULL DEFAULT ''",
+		"spring_forward TEXT NOT NULL DEFAULT ''",
+		"last_skip TEXT NOT NULL DEFAULT ''",
+		"skipped_fires INTEGER NOT NULL DEFAULT 0",
 	} {
 		if _, err := db.Exec("ALTER TABLE schedules ADD COLUMN " + column); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {
@@ -1109,11 +1453,17 @@ func migrateSchedules(db *sql.DB) error {
 // migrateInventories adds the owning-organization column to an inventories table created before object
 // tenancy. Empty is the unowned default, so an inventory made before this column stays global. Adding
 // a column that already exists is the ordinary case for a current database and is treated as success.
+//
+// The composition columns follow the same rule: every one defaults to empty, which is the static
+// kind, so an inventory made before smart and constructed inventories existed reads back unchanged.
 func migrateInventories(db *sql.DB) error {
-	if _, err := db.Exec(
-		"ALTER TABLE inventories ADD COLUMN org_id TEXT NOT NULL DEFAULT ''"); err != nil &&
-		!strings.Contains(err.Error(), "duplicate column name") {
-		return fmt.Errorf("migrate inventories: %w", err)
+	for _, column := range []string{"org_id", "kind", "host_filter", "input_ids", "source_vars",
+		"limit_pattern"} {
+		if _, err := db.Exec(
+			"ALTER TABLE inventories ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''"); err != nil &&
+			!strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("migrate inventories: %w", err)
+		}
 	}
 	return nil
 }

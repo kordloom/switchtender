@@ -19,6 +19,9 @@ var (
 	// ErrBadRepoURL is returned when a repository URL uses a disallowed scheme or points at a
 	// blocked host, such as loopback or a cloud metadata address.
 	ErrBadRepoURL = errors.New("invalid repository url")
+	// ErrBadRef is returned when a git reference a run asks to fetch is not a full, well-formed
+	// reference name.
+	ErrBadRef = errors.New("invalid git reference")
 )
 
 // Project is one git-sourced playbook repository.

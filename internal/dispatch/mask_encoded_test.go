@@ -319,6 +319,9 @@ func TestMaskerRedactsWhatToolsActuallyPrint(t *testing.T) {
 	}, { // Test 7: A byte dump, as BSD od -An -tx1 writes it.
 		Name: "a byte dump, as BSD od -An -tx1 writes it", Secret: aws,
 		Output: "           46  41  4b  45  61  77  73  2f  53  6b  33  2b  79  71  39  50\n           7a  30  77  58  76  54  37  75  4c  72  4e  32  6d  51  38  6b\n           4a  35  68  47  34  66  44  31                                \n\n",
+	}, { // Test 8: A shell tracing its commands, as set -x prints an assignment holding a quote.
+		Name: "a shell tracing its commands", Secret: "FAKEpa'ss-word-1",
+		Output: `+ PGPASSWORD='FAKEpa'\''ss-word-1' psql`,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {

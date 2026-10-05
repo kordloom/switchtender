@@ -262,7 +262,8 @@ func TestContainerLimitsArgs(t *testing.T) {
 // especially a network of "host", is a change to what a container can reach.
 func TestDefaultContainerLimitsAreBounded(t *testing.T) {
 	t.Parallel()
-	want := ContainerLimits{Memory: "2g", CPUs: "2", PidsLimit: 2048, Network: "bridge"}
+	want := ContainerLimits{Memory: "2g", CPUs: "2", PidsLimit: 2048, Network: "bridge",
+		RunFilesSize: "64m"}
 	if diff := cmp.Diff(want, DefaultContainerLimits()); diff != "" {
 		t.Errorf("default limits mismatch (-want +got):\n%s", diff)
 	}

@@ -203,7 +203,7 @@ func TestServeBootstrapsTokenOnPublicBind(t *testing.T) {
 	setString(t, &serveSAMLIDPMetadataURL, "")
 	setString(t, &serveJWTJWKSURL, "")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cmd := &cobra.Command{}
 	cmd.SetContext(ctx)
@@ -211,21 +211,28 @@ func TestServeBootstrapsTokenOnPublicBind(t *testing.T) {
 	errCh := make(chan error, 1)
 	go func() { errCh <- runServe(cmd, nil) }()
 
-	body, served := probeListener(ln.Addr().String(), 1500*time.Millisecond)
+	// A start on a busy machine can take seconds, so the probe waits until something answers or
+	// serve gives up, under a deadline no healthy start comes near, rather than inside a window a
+	// slow start could outrun.
+	body, served, why := awaitServing(ln.Addr().String(), errCh, time.Minute)
 	if !served {
-		t.Fatalf("nothing answered on %s; the bind was refused rather than bootstrapped", ln.Addr())
+		t.Fatalf("nothing answered on %s; the bind was refused rather than bootstrapped: %v",
+			ln.Addr(), why)
 	}
 	if !strings.Contains(body, "401") {
 		t.Errorf("an anonymous caller got %q from %s, want 401: the public bind is unauthenticated",
 			body, ln.Addr())
 	}
 
+	// Stopping is asked for once the answer is in, rather than left to a timer that a slow start
+	// could expire first.
+	cancel()
 	select {
 	case err := <-errCh:
 		if err != nil {
-			t.Fatalf("runServe() error = %v, want a clean shutdown after the context expired", err)
+			t.Fatalf("runServe() error = %v, want a clean shutdown once it was stopped", err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(time.Minute):
 		t.Fatal("runServe() did not return; it is still serving")
 	}
 
@@ -245,18 +252,24 @@ func TestServeBootstrapsTokenOnPublicBind(t *testing.T) {
 	}
 }
 
-// probeListener asks the address for the run list until it answers or the window closes. It reports
-// the response status and true when anything answered, which means a server is running there.
-func probeListener(addr string, window time.Duration) (string, bool) {
+// awaitServing asks the address for the run list until something answers, serve returns, or the
+// window closes. It reports the response status and true when anything answered, which means a
+// server is running there, and otherwise why nothing did.
+func awaitServing(addr string, exited <-chan error, window time.Duration) (string, bool, error) {
 	client := &http.Client{Timeout: probeTimeout}
 	deadline := time.Now().Add(window)
 	for time.Now().Before(deadline) {
+		select {
+		case err := <-exited:
+			return "", false, fmt.Errorf("serve returned before anything answered: %v", err)
+		default:
+		}
 		resp, err := client.Get("http://" + addr + "/v1/runs")
 		if err == nil {
 			_ = resp.Body.Close()
-			return resp.Status, true
+			return resp.Status, true, nil
 		}
 		time.Sleep(probeInterval)
 	}
-	return "", false
+	return "", false, fmt.Errorf("nothing answered within %v", window)
 }

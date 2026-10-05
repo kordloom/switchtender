@@ -258,11 +258,16 @@ func verify(t *testing.T, engine, binary string, a Assumption) {
 	// Terraform and OpenTofu will not plan an uninitialized directory, and init with no providers
 	// declared reaches no network. A failure here is reported as its own thing rather than as the
 	// assumption failing, since the two have different remedies.
+	// The tools also make a version check against the vendor's service on every command unless it
+	// is turned off, so it is turned off for each one, as the runner does for every run.
+	env := os.Environ()
 	if engine == "terraform" || engine == "opentofu" {
+		env = append(env, "CHECKPOINT_DISABLE=1")
 		ctx, cancel := context.WithTimeout(context.Background(), contractTimeout)
 		defer cancel()
 		init := exec.CommandContext(ctx, binary, "init", "-input=false", "-no-color")
 		init.Dir = dir
+		init.Env = env
 		if out, err := init.CombinedOutput(); err != nil {
 			t.Fatalf("%s init failed before the assumption could be checked: %v\n%s",
 				binary, err, out)
@@ -273,6 +278,7 @@ func verify(t *testing.T, engine, binary string, a Assumption) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, binary, a.Args(dir)...)
 	cmd.Dir = dir
+	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	code := cmd.ProcessState.ExitCode()
 	if ctx.Err() != nil {

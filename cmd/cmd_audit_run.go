@@ -66,6 +66,10 @@ func runAuditRunDossier(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("collect evidence: %w", err)
 	}
+	if err := dossier.AttachDecisions(cmd.Context(), in, store.Decisions(),
+		store.Runs()); err != nil {
+		return fmt.Errorf("collect evidence: %w", err)
+	}
 	doc, err := dossier.Render(in)
 	if err != nil {
 		return fmt.Errorf("render dossier: %w", err)

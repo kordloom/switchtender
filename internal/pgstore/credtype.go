@@ -12,9 +12,9 @@ import (
 )
 
 // credTypeColumns is the shared select list for credential-type reads.
-const credTypeColumns = `id, name, fields, env, extra_vars, created_at`
+const credTypeColumns = `id, name, fields, env, extra_vars, files, created_at, origin`
 
-// credTypeStore is a credential.TypeStore backed by the shared SQLite database. A type holds no
+// credTypeStore is a credential.TypeStore backed by the shared PostgreSQL database. A type holds no
 // secret, so its fields and injectors are stored as plain JSON columns.
 type credTypeStore struct {
 	// db is the open database handle shared with the run store.
@@ -23,16 +23,18 @@ type credTypeStore struct {
 
 // Save inserts or replaces the credential type.
 func (s *credTypeStore) Save(ctx context.Context, t *credential.CredentialType) error {
-	fields, env, extra, err := marshalType(t)
+	fields, env, extra, files, err := marshalType(t)
 	if err != nil {
 		return err
 	}
 	const q = `
-INSERT INTO credential_types (id, name, fields, env, extra_vars, created_at)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO credential_types (id, name, fields, env, extra_vars, files, created_at, origin)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT(id) DO UPDATE SET
-	name=excluded.name, fields=excluded.fields, env=excluded.env, extra_vars=excluded.extra_vars`
-	if _, err := s.db.ExecContext(ctx, q, t.ID, t.Name, fields, env, extra, t.CreatedAt.UnixNano()); err != nil {
+	name=excluded.name, fields=excluded.fields, env=excluded.env, extra_vars=excluded.extra_vars,
+	files=excluded.files, origin=excluded.origin`
+	if _, err := s.db.ExecContext(ctx, q, t.ID, t.Name, fields, env, extra, files,
+		t.CreatedAt.UnixNano(), t.Origin); err != nil {
 		return fmt.Errorf("save credential type: %w", err)
 	}
 	return nil
@@ -90,20 +92,24 @@ func (s *credTypeStore) Delete(ctx context.Context, id string) error {
 }
 
 // marshalType encodes a type's fields and injectors as JSON for storage.
-func marshalType(t *credential.CredentialType) (fields, env, extra string, err error) {
+func marshalType(t *credential.CredentialType) (fields, env, extra, files string, err error) {
 	fb, err := json.Marshal(t.Fields)
 	if err != nil {
-		return "", "", "", fmt.Errorf("encode credential type fields: %w", err)
+		return "", "", "", "", fmt.Errorf("encode credential type fields: %w", err)
 	}
 	eb, err := json.Marshal(nonNilMap(t.EnvInjectors))
 	if err != nil {
-		return "", "", "", fmt.Errorf("encode credential type env: %w", err)
+		return "", "", "", "", fmt.Errorf("encode credential type env: %w", err)
 	}
 	xb, err := json.Marshal(nonNilMap(t.ExtraVarInjectors))
 	if err != nil {
-		return "", "", "", fmt.Errorf("encode credential type extra vars: %w", err)
+		return "", "", "", "", fmt.Errorf("encode credential type extra vars: %w", err)
 	}
-	return string(fb), string(eb), string(xb), nil
+	ffb, err := json.Marshal(nonNilMap(t.FileInjectors))
+	if err != nil {
+		return "", "", "", "", fmt.Errorf("encode credential type files: %w", err)
+	}
+	return string(fb), string(eb), string(xb), string(ffb), nil
 }
 
 // nonNilMap returns m, or an empty map so a nil marshals to {} rather than null.
@@ -119,9 +125,11 @@ func scanCredType(sc scanner) (*credential.CredentialType, error) {
 	var (
 		t                  credential.CredentialType
 		fields, env, extra string
+		files              string
 		createdNanos       int64
 	)
-	if err := sc.Scan(&t.ID, &t.Name, &fields, &env, &extra, &createdNanos); err != nil {
+	if err := sc.Scan(&t.ID, &t.Name, &fields, &env, &extra, &files, &createdNanos,
+		&t.Origin); err != nil {
 		return nil, err
 	}
 	t.CreatedAt = time.Unix(0, createdNanos).UTC()
@@ -139,6 +147,12 @@ func scanCredType(sc scanner) (*credential.CredentialType, error) {
 	}
 	if len(t.ExtraVarInjectors) == 0 {
 		t.ExtraVarInjectors = nil
+	}
+	if err := json.Unmarshal([]byte(files), &t.FileInjectors); err != nil {
+		return nil, fmt.Errorf("decode credential type files: %w", err)
+	}
+	if len(t.FileInjectors) == 0 {
+		t.FileInjectors = nil
 	}
 	return &t, nil
 }

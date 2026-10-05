@@ -161,7 +161,7 @@ export function rows(specs) {
 	return specs.map((spec) => Object.assign({
 		When: "2026-07-01 09:00", Run: "run_x", Change: "ansible site.yml", Actor: "root",
 		Source: "template tpl_x", Risk: "low", Held: "", Decision: "", DecisionSeq: 0,
-		Outcome: "succeeded", DryRun: false,
+		Outcome: "succeeded", DryRun: false, NotChangeFree: false,
 	}, spec));
 }
 

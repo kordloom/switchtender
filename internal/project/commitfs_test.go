@@ -13,6 +13,7 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/google/go-cmp/cmp"
 )
 
 // initLinkedRepo builds a local git repository holding files and symbolic links, committed on main,
@@ -315,5 +316,89 @@ func TestFetchUpdatesTheCheckoutWithoutARunCopy(t *testing.T) {
 	}
 	if _, err := s.Fetch(&Project{ID: p.ID, RepoURL: "file:///etc"}, ""); err == nil {
 		t.Error("Fetch() accepted a remote the URL check refuses")
+	}
+}
+
+// TestACommitsDirectoriesList covers listing, which a Terraform configuration needs where an
+// Ansible playbook did not: a module is every configuration file in its directory, so the gate has
+// to list the directory as the commit holds it rather than as the checkout's working tree does.
+//
+// A listing is of the commit asked for, a directory reached through a link inside the commit is
+// listed, a link out of it is refused, a file is not a directory, and the installed dependencies
+// list beside the committed files the same way they read.
+//
+//nolint:funlen // Test function.
+func TestACommitsDirectoriesList(t *testing.T) {
+	t.Parallel()
+	repo := initLinkedRepo(t, map[string]string{
+		"infra/main.tf":        "first\n",
+		"infra/vars.tf":        "x\n",
+		"infra/modules/a/x.tf": "a\n",
+	}, map[string]string{
+		"linked": "infra",
+		"climb":  "../../../../../../../../etc",
+	})
+	s, p, first := syncedProject(t, repo)
+	commitTestFile(t, repo, "infra/added.tf", "second\n")
+	resync(t, s, p)
+	installed := filepath.Join(s.cacheDir, p.ID, galaxyDir, "roles", "acme.db")
+	if err := os.MkdirAll(installed, 0o750); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	tests := []struct {
+		Commit    string
+		Dir       string
+		WantNames []string
+		WantDirs  []string
+		Want      error
+	}{{ // Test 0: The commit asked for is listed, without what a later commit added.
+		Commit: first, Dir: "infra",
+		WantNames: []string{"main.tf", "modules", "vars.tf"}, WantDirs: []string{"modules"},
+	}, { // Test 1: The current commit lists what it added.
+		Dir:       "infra",
+		WantNames: []string{"added.tf", "main.tf", "modules", "vars.tf"}, WantDirs: []string{"modules"},
+	}, { // Test 2: A directory reached through a link inside the commit is listed.
+		Commit: first, Dir: "linked",
+		WantNames: []string{"main.tf", "modules", "vars.tf"}, WantDirs: []string{"modules"},
+	}, { // Test 3: The root lists links as links, and does not follow them.
+		Commit: first, Dir: ".",
+		WantNames: []string{"climb", "infra", "linked"}, WantDirs: []string{"infra"},
+	}, { // Test 4: A link that climbs out is refused.
+		Commit: first, Dir: "climb", Want: ErrOutsideCheckout,
+	}, { // Test 5: A file is not a directory.
+		Commit: first, Dir: "infra/main.tf", Want: fs.ErrInvalid,
+	}, { // Test 6: A directory the commit does not hold is not there.
+		Commit: first, Dir: "infra/absent", Want: fs.ErrNotExist,
+	}, { // Test 7: The installed dependencies list beside the commit.
+		Commit: first, Dir: ".galaxy/roles", WantNames: []string{"acme.db"},
+		WantDirs: []string{"acme.db"},
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			var names, dirs []string
+			err := s.ReadCommit(p.ID, test.Commit, func(fsys fs.FS, _ string) error {
+				entries, err := fs.ReadDir(fsys, test.Dir)
+				for _, e := range entries {
+					names = append(names, e.Name())
+					if e.IsDir() {
+						dirs = append(dirs, e.Name())
+					}
+				}
+				return err
+			})
+			if !errors.Is(err, test.Want) {
+				t.Fatalf("ReadDir(%q) error = %v, want %v", test.Dir, err, test.Want)
+			}
+			if test.Want != nil {
+				return
+			}
+			if diff := cmp.Diff(test.WantNames, names); diff != "" {
+				t.Errorf("names mismatch (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff(test.WantDirs, dirs); diff != "" {
+				t.Errorf("directories mismatch (-want +got):\n%s", diff)
+			}
+		})
 	}
 }

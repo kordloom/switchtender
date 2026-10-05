@@ -62,6 +62,29 @@
 					<input id="tpl-limit" class="input mono" placeholder="all hosts in the inventory">
 					<span class="field-hint">Narrows every launch to the hosts matching this pattern, the way --limit does. Empty targets the whole inventory.</span>
 				</label>
+				<label class="field-label check-label" id="tpl-field-fact-cache">
+					<input type="checkbox" id="tpl-fact-cache"> Use fact cache
+					<span class="field-hint">Keeps the facts each launch gathers per host of the stored inventory and serves them to the next launch. Needs a stored inventory.</span>
+				</label>
+				<label class="field-label" id="tpl-field-fact-cache-timeout">Fact cache timeout, seconds
+					<input id="tpl-fact-cache-timeout" class="input" type="number" min="0" placeholder="0">
+					<span class="field-hint">Cached facts older than this are gathered again. Zero serves them however old they are.</span>
+				</label>
+				<label class="field-label check-label" id="tpl-field-callbacks">
+					<input type="checkbox" id="tpl-allow-callbacks"> Allow provisioning callbacks
+					<span class="field-hint">Lets a host in the stored inventory launch this template against itself with the callback key, which is shown once when it is minted.</span>
+				</label>
+				<label class="field-label" id="tpl-field-callback-limit">When a host calls back
+					<select id="tpl-callback-limit" class="input">
+						<option value="intersect">Keep the template's limit</option>
+						<option value="replace">Replace the limit with the calling host, as AWX does</option>
+					</select>
+					<span class="field-hint">Keeping the limit refuses a calling host the limit does not select. A template with no limit launches for any matched host either way.</span>
+				</label>
+				<label class="field-label check-label" id="tpl-field-awx-callback" hidden>
+					<input type="checkbox" id="tpl-awx-callback"> Answer on the AWX callback address
+					<span class="field-hint" id="tpl-awx-callback-hint">Answers callbacks on the address this template had in AWX, so boot scripts that still call it keep working. Move them to this template's own address when you can.</span>
+				</label>
 				<label class="field-label" id="tpl-field-shards">Shards
 					<input id="tpl-shards" class="input" type="number" min="0" max="64" placeholder="0">
 				</label>
@@ -87,6 +110,7 @@
 				</label>
 				<label class="field-label">Survey, JSON array
 					<textarea id="tpl-survey" class="input mono" rows="2" placeholder='[{"var":"env","label":"Environment","type":"choice","required":true,"choices":["prod","stage"]}]'></textarea>
+					<span class="field-hint">Types are text, multiline, secret, int, bool, and choice. A secret answer is typed into a password field and sealed like a credential. A saved secret default reads as [redacted], and leaving it that way keeps it.</span>
 				</label>
 				<div class="field-label notify-block">Notifications
 						<div id="tpl-notify-rows" class="notify-rows"></div>

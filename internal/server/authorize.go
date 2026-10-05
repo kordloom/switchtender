@@ -377,6 +377,17 @@ func filterReadable[T any](ctx context.Context, authz *authorizer, items []T, id
 	return out, nil
 }
 
+// mayUse reports whether the request's actor may use object, answering false for a denial and an
+// error only when the decision itself could not be made. A composed inventory asks it of each input
+// it would draw hosts from, and a denial there drops the input rather than refusing the launch.
+func (a *authorizer) mayUse(ctx context.Context, object string) (bool, error) {
+	err := a.authorize(ctx, object, grant.AccessUse)
+	if errors.Is(err, errForbiddenGrant) || errors.Is(err, errForbiddenOrg) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // authorizeAll requires want access on every non-empty object, returning the first denial. Handlers
 // that reference several grantable objects at once, such as a run naming a project, an inventory,
 // and credentials, use it to authorize each before acting.

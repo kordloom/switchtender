@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/runfiles"
 	"github.com/kordloom/switchtender/internal/secretsource"
 )
 
@@ -31,49 +33,89 @@ func (d *Dispatcher) validateInventory(ctx context.Context, id string) error {
 }
 
 // materializeInventory writes the run's stored inventory to a file for the executor and points the
-// spec at it. It returns the cleanup that removes the file and the secret-looking values in the host
-// list, so a variable such as ansible_password is masked in the run's output.
-func (d *Dispatcher) materializeInventory(ctx context.Context, r *run.Run, spec *roundhouse.Spec) (func(), []string, error) {
+// spec at it. It returns the cleanup that removes the file, the secret-looking values in the host
+// list, so a variable such as ansible_password is masked in the run's output, and for a composed
+// inventory what it resolved to, which the cross-check before an Ansible run reads.
+//
+// A plain stored inventory is the snapshot the run was submitted with, opened through src, never the
+// inventory as the store holds it now. A composed inventory is rendered from its inputs held to the
+// hosts it resolved to at submission. A run naming a stored inventory with neither is refused: it
+// would otherwise execute whatever the inventory holds when it is claimed, which nobody approved.
+func (d *Dispatcher) materializeInventory(ctx context.Context, src secretSource, r *run.Run,
+	spec *roundhouse.Spec) (func(), []string, *composed, error) {
 	cleanup := func() {}
 	if r.InventoryID == "" {
-		return cleanup, nil, nil
+		return cleanup, nil, nil, nil
 	}
-	path, remove, secrets, err := d.inventoryFile(ctx, r.InventoryID)
+	if r.InventorySnapshot != nil {
+		content, err := src.inventorySnapshot(ctx, r)
+		if err != nil {
+			return cleanup, nil, nil, err
+		}
+		remove, secrets, err := d.materializeSnapshot(r, content, spec)
+		return remove, secrets, nil, err
+	}
+	if r.InventoryResolution == nil {
+		return cleanup, nil, nil, fmt.Errorf("%w: this run names stored inventory %s and carries no "+
+			"snapshot of it, so it is refused rather than run against whatever the inventory holds "+
+			"now. Submit it again", ErrInventorySnapshot, r.InventoryID)
+	}
+	path, remove, secrets, comp, err := d.inventoryFile(ctx, r.InventoryID, r.InventoryResolution)
 	if err != nil {
-		return cleanup, nil, err
+		return cleanup, nil, nil, err
 	}
 	spec.Inventory = path
-	return remove, secrets, nil
+	return remove, secrets, comp, nil
 }
 
-// inventoryFile materializes a stored inventory to a temp file and returns its path, cleanup, and the
-// secret-looking values in its content.
-func (d *Dispatcher) inventoryFile(ctx context.Context, id string) (string, func(), []string, error) {
+// inventoryFile materializes a stored inventory to a file in a directory of its own and returns its
+// path, cleanup, the secret-looking values in its content, and for a composed inventory what it
+// resolved to. A smart or constructed inventory is rendered from its inputs, held to res, the
+// resolution the run recorded when it launched.
+//
+// The directory is private to this run. Ansible reads group_vars and host_vars directories beside
+// an inventory file, so a file written straight into the shared temporary directory took whatever
+// variables another account had left there, and neither the record nor the cross-check would have
+// known. A host list can carry secret variables, such as ansible_password, so the directory is a run
+// directory, staged the way a credential is: locked and counted while in use and swept if the
+// process dies, where a crash in the shared temporary directory left it until the operating system
+// cleared that.
+func (d *Dispatcher) inventoryFile(ctx context.Context, id string,
+	res *run.InventoryResolution) (string, func(), []string, *composed, error) {
+	noop := func() {}
 	if d.inventories == nil {
-		return "", func() {}, nil, inventory.ErrNotFound
+		return "", noop, nil, nil, inventory.ErrNotFound
 	}
 	inv, err := d.inventories.Get(ctx, id)
 	if err != nil {
-		return "", func() {}, nil, fmt.Errorf("inventory %s: %w", id, err)
+		return "", noop, nil, nil, fmt.Errorf("inventory %s: %w", id, err)
 	}
-	content, err := d.inventoryContent(ctx, inv)
+	var (
+		content string
+		comp    *composed
+	)
+	if inv.Composed() {
+		comp, err = d.composedContent(ctx, inv, res)
+		if comp != nil {
+			content = comp.Content
+		}
+	} else {
+		content, err = d.inventoryContent(ctx, inv)
+	}
 	if err != nil {
-		return "", func() {}, nil, err
+		return "", noop, nil, nil, err
 	}
-	f, err := os.CreateTemp("", "switchtender-inventory-*")
+	dir, err := runfiles.Create(d.runFiles(), "inventory-"+id)
 	if err != nil {
-		return "", func() {}, nil, fmt.Errorf("materialize inventory %s: %w", id, err)
+		return "", noop, nil, nil, fmt.Errorf("materialize inventory %s: %w", id, err)
 	}
-	if _, err := f.WriteString(content); err != nil {
-		_ = f.Close()
-		_ = os.Remove(f.Name())
-		return "", func() {}, nil, fmt.Errorf("materialize inventory %s: %w", id, err)
+	remove := func() { _ = dir.Remove() }
+	path := filepath.Join(dir.Path(), "inventory")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		remove()
+		return "", noop, nil, nil, fmt.Errorf("materialize inventory %s: %w", id, err)
 	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(f.Name())
-		return "", func() {}, nil, fmt.Errorf("materialize inventory %s: %w", id, err)
-	}
-	return f.Name(), func() { _ = os.Remove(f.Name()) }, inventorySecrets(content), nil
+	return path, remove, inventorySecrets(content), comp, nil
 }
 
 // inventoryContent returns the inventory's content, resolving it from its content source when that

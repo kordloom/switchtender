@@ -467,6 +467,7 @@ main.content table th[scope="row"] { max-width: 34ch; overflow: hidden; text-ove
 [data-tool="python"] { --tool: var(--tool-python); }
 [data-tool="powershell"] { --tool: var(--tool-powershell); }
 [data-tool="go"] { --tool: var(--tool-go); }
+[data-tool="approval"] { --tool: var(--changed); }
 /* ink is the readable shade of the tool hue against the current theme's background; wash is its
    tint, used for chip and card fills. */
 [data-tool] {
@@ -479,6 +480,7 @@ main.content table th[scope="row"] { max-width: 34ch; overflow: hidden; text-ove
 .run-kind.split { background: var(--accent-soft); color: var(--accent); }
 .run-kind.pipeline { background: color-mix(in srgb, var(--violet) 16%, transparent); color: var(--violet); }
 .run-kind.dry { background: rgba(210, 153, 34, 0.18); color: var(--tool-dry); }
+.run-kind.noted { background: color-mix(in srgb, var(--changed) 16%, transparent); color: var(--changed); }
 /* Tool badge, colored by which tool it names so a type column scans by hue before it is read. */
 .tool-badge { display: inline-block; margin-right: 6px; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; background: var(--tool-wash, var(--surface-3)); color: var(--tool-ink, var(--muted)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tool, transparent) 26%, transparent); vertical-align: middle; }
 .check-label { flex-direction: row; align-items: center; gap: 8px; font-weight: 600; }
@@ -735,6 +737,8 @@ button.topbar-link { background: none; border: none; padding: 0; font: inherit; 
 .cred-source.external { background: color-mix(in srgb, var(--violet) 16%, transparent); color: var(--violet); }
 .cred-needs-input { width: 100%; resize: vertical; }
 .cred-needs-status { grid-column: 2 / -1; font-size: 12px; }
+/* The controls a custom credential type declares, one per field, spaced like the form around them. */
+.cred-type-fields { display: flex; flex-direction: column; gap: 12px; }
 @media (max-width: 680px) { .cred-needs-row { grid-template-columns: 1fr; } .cred-needs-status { grid-column: 1; } }
 
 /* Workflow editor: a canvas of draggable step nodes wired into a dependency graph, run as a
@@ -798,6 +802,14 @@ button.topbar-link { background: none; border: none; padding: 0; font: inherit; 
 .wf-in { left: -7px; }
 .wf-out { right: -7px; cursor: crosshair; }
 .wf-out:hover { background: var(--tool-ink, var(--accent)); transform: translateY(-50%) scale(1.25); }
+.wf-out-deny { right: -7px; top: 48px; border-color: var(--failed); cursor: crosshair; }
+.wf-out-deny:hover { background: var(--failed); transform: translateY(-50%) scale(1.25); }
+.wf-edge-deny { stroke: var(--failed); stroke-dasharray: 6 4; }
+.approval-steps .approval-step { padding: 12px 0; border-top: 1px solid var(--border); }
+.approval-steps .approval-step:first-of-type { border-top: 0; }
+.approval-step-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.approval-step-paths { margin: 6px 0 0; font-size: 14px; }
+.approval-step-actions { display: flex; gap: 8px; margin-top: 8px; }
 
 /* The empty canvas offers the two ways in rather than only describing the gestures. */
 .wf-hint { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 340px; max-width: 86%; text-align: center; }
@@ -849,6 +861,7 @@ button.topbar-link { background: none; border: none; padding: 0; font: inherit; 
 	.wf-handle { width: 22px; height: 22px; }
 	.wf-in { left: -12px; }
 	.wf-out { right: -12px; }
+	.wf-out-deny { right: -12px; }
 	.wf-node-del { font-size: 22px; padding: 4px 8px; }
 	.tour-start { min-height: 44px; }
 	.tour-btns .button { min-height: 40px; padding: 8px 14px; }
@@ -895,6 +908,10 @@ button.topbar-link { background: none; border: none; padding: 0; font: inherit; 
 .risk-callout-head strong { font-size: 14px; }
 .risk-reasons { margin: 9px 0 0; padding-left: 20px; color: var(--muted); font-size: 13px; line-height: 1.6; }
 .risk-reasons li { margin: 1px 0; }
+.risk-forced p { margin: 9px 0 0; font-size: 13px; font-weight: 600; }
+.risk-forced p.risk-hold-note, .risk-forced p.risk-scan-read { font-weight: 400; }
+.risk-forced p.risk-scan-read { color: var(--muted); font-size: 12px; }
+.risk-facts { margin: 9px 0 0; font-size: 13px; color: var(--muted); }
 
 /* AI triage panel on the run detail page: an advisory explanation of a failed run, on demand. */
 .explain-panel { margin-top: 16px; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius); padding: 14px 16px; }
@@ -1580,3 +1597,52 @@ td.col-labels .label-wrap { flex-wrap: nowrap; }
 /* The horizon note when a question predates the records. It is information, not a failure: the
    answer is correct and the limit is the data's, so it is colored as a caution rather than an error. */
 .warn-note { margin: 0 0 12px; padding: 9px 12px; border-left: 3px solid var(--changed); background: var(--surface); border-radius: var(--radius); font-size: 13.5px; }
+
+/* Notification targets: the detail panel's two lists, the attach form, and a delivery that failed,
+   which stands out on the target's panel and on the run's page alike. */
+.notify-sub-head { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin: 18px 0 8px; }
+.notify-attach-form { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; margin: 12px 0 4px; }
+.notify-attach-form .field-label { min-width: 180px; }
+table.runs tr.notify-failed td { background: color-mix(in srgb, var(--failed) 9%, transparent); }
+table.runs tr.notify-failed td:first-child { box-shadow: inset 3px 0 0 var(--failed); }
+
+/* The federation signing keys. Two rotations sit side by side, and the note on choosing between
+   them reads as prose under the table rather than as a tooltip nobody opens. */
+.fedkey-actions { display: flex; flex-wrap: wrap; gap: 8px; flex: none; }
+.fedkey-help { margin-top: 14px; max-width: 78ch; font-size: 14px; }
+.fedkey-help summary { cursor: pointer; font-weight: 600; }
+.fedkey-help p { margin: 8px 0 0; }
+
+/* Needs attention: the four counts answering what is stopping work, and the items beneath them. */
+.attn-counts { margin: 0 0 12px; box-shadow: none; }
+.attn-count { cursor: pointer; }
+.attn-count[aria-pressed="true"] { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.attn-count:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.attn-filter { margin: 0 0 10px; }
+.attn-list { display: flex; flex-direction: column; gap: 10px; }
+.attn-item { border: 1px solid var(--border-muted); border-radius: 8px; padding: 10px 14px; }
+.attn-item-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.attn-main { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
+.attn-main.failed { color: var(--failed); }
+.attn-main.changed { color: var(--changed); }
+.attn-name { font-weight: 600; overflow-wrap: anywhere; }
+.attn-since { margin-left: auto; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.attn-alerting { font-size: 11.5px; font-weight: 600; padding: 1px 8px; border-radius: 999px; color: var(--failed); border: 1px solid color-mix(in srgb, var(--failed) 40%, transparent); }
+.attn-badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
+.attn-badge { font-size: 11.5px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+.attn-badge.failed { color: var(--failed); border-color: color-mix(in srgb, var(--failed) 40%, transparent); }
+.attn-badge.changed { color: var(--changed); border-color: color-mix(in srgb, var(--changed) 40%, transparent); }
+.attn-reason { margin: 8px 0 0; font-size: 14px; }
+.attn-interaction { margin: 4px 0 0; font-size: 14px; }
+.attn-facts { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; margin: 8px 0 0; font-size: 14px; }
+.attn-facts dt { color: var(--muted); }
+.attn-facts dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+	.attn-counts { flex-wrap: wrap; }
+	.attn-counts .stat-card { flex: 1 1 45%; }
+	.attn-facts { grid-template-columns: 1fr; }
+	.attn-since { margin-left: 0; }
+}
+@media print {
+	.attn-count { cursor: default; }
+}

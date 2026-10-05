@@ -17,6 +17,7 @@ import (
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
+	"github.com/kordloom/switchtender/internal/notification"
 	"github.com/kordloom/switchtender/internal/org"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
@@ -161,31 +162,64 @@ func fillEverything(t *testing.T, ctx context.Context, s Stores) {
 		Steps: []run.PipelineStep{{
 			Name: "one", Playbook: "a.yml", Retries: 2, DependsOn: []string{"zero"},
 		}},
-		CreatedAt: testFillTime,
+		UseFactCache: true, FactCacheTimeout: 3600, AllowCallbacks: true,
+		HostConfigKey: "sealed-callback-key", CallbackLimit: template.CallbackLimitReplace,
+		AWXCallback: true,
+		CreatedAt:   testFillTime,
 	}))
 	must(s.Templates.Save(ctx, &template.Template{
 		ID: "tpl_2", Name: "plain", Playbook: "b.yml", CreatedAt: later,
 	}))
+	// One binding reaches a template, and one outlives a deleted template, so its AWX address
+	// stays gone after a restore.
+	called := testFillTime.Add(time.Hour)
+	must(s.Templates.BindAWX(ctx, template.AWXBinding{AWXID: 42, TemplateID: "tpl_1",
+		Organization: "Platform", Name: "deploy", CreatedAt: testFillTime, UpdatedAt: later,
+		LastCalledAt: &called}))
+	must(s.Templates.BindAWX(ctx, template.AWXBinding{AWXID: 7, TemplateID: "tpl_deleted",
+		Name: "retired", CreatedAt: testFillTime, UpdatedAt: testFillTime}))
 
 	lastRun := testFillTime.Add(4 * time.Hour)
 	must(s.Schedules.Save(ctx, &schedule.Schedule{
 		ID: "sch_1", Name: "nightly", Cron: "0 2 * * *", Timezone: "UTC", Playbook: "site.yml",
 		Inventory: "prod", Shards: 2, TemplateID: "tpl_1", OrgID: "org_1", Enabled: true,
 		CreatedAt: testFillTime, CreatedBy: "user_1", LastRunAt: &lastRun, LastRunID: "run_9",
+		LastSkip: "no hosts matched", SkippedFires: 3,
 	}))
+	// A schedule that names no zone is pinned on restore, which
+	// TestRestorePinsTheZoneOfAScheduleThatNamesNone covers, so this one names its own.
 	must(s.Schedules.Save(ctx, &schedule.Schedule{
-		ID: "sch_2", Name: "off", Cron: "0 3 * * *", TemplateID: "tpl_2", Enabled: false,
-		CreatedAt: later,
+		ID: "sch_2", Name: "off", Cron: "0 3 * * *", Timezone: "Europe/Berlin", TemplateID: "tpl_2",
+		Enabled: false, CreatedAt: later, SpringForward: schedule.SpringForwardSkip,
 	}))
 
 	fired := testFillTime.Add(5 * time.Hour)
+	refused := testFillTime.Add(6 * time.Hour)
 	must(s.Triggers.Save(ctx, &trigger.Trigger{
 		ID: "trg_1", Name: "hook", TemplateID: "tpl_1", TokenHash: "TOKEN-HASH",
 		SigningSecret: "SEALED-SIGN", RequireSignature: true, LastFiredAt: &fired,
+		LastError: "refused: survey question unanswered", LastErrorAt: &refused,
 		CreatedBy: "user_1", CreatedAt: testFillTime,
 	}))
 	must(s.Triggers.Save(ctx, &trigger.Trigger{
 		ID: "trg_2", Name: "second", TemplateID: "tpl_2", TokenHash: "H2", CreatedAt: later,
+	}))
+
+	must(s.Notifications.Save(ctx, &notification.Notification{
+		ID: "ntf_1", Name: testUnicode, Description: "pages ops", OrgID: "org_1", Kind: "grafana",
+		URLHint: "https://grafana.example.com/…", KeySet: true, SealedURL: "SEALED-NTF-URL",
+		SealedKey: "SEALED-NTF-KEY", CreatedAt: testFillTime, CreatedBy: "user_1",
+	}))
+	must(s.Notifications.Save(ctx, &notification.Notification{
+		ID: "ntf_2", Name: "slack shell", Kind: "slack", NeedsSecret: true, CreatedAt: later,
+	}))
+	must(s.Notifications.Attach(ctx, &notification.Attachment{
+		ID: "nta_1", NotificationID: "ntf_1", ObjectKind: "template", ObjectID: "tpl_1",
+		Event: "failure", CreatedAt: testFillTime, CreatedBy: "user_1",
+	}))
+	must(s.Notifications.Attach(ctx, &notification.Attachment{
+		ID: "nta_2", NotificationID: "ntf_1", ObjectKind: "schedule", ObjectID: "sch_1",
+		Event: "started", CreatedAt: later,
 	}))
 }
 
@@ -243,7 +277,7 @@ func TestRoundTripIsFaithfulForEveryObject(t *testing.T) {
 	}, { // Test 2: Projects.
 		Name: "projects",
 		List: func(s Stores) (any, error) { return s.Projects.List(ctx) },
-	}, { // Test 3: Templates, including their steps, survey, and extra vars.
+	}, { // Test 3: Templates, including their steps, survey, extra vars, and sealed callback key.
 		Name: "templates",
 		List: func(s Stores) (any, error) { return s.Templates.List(ctx) },
 	}, { // Test 4: Inventories, whose dynamic source config is hidden from JSON.
@@ -277,6 +311,15 @@ func TestRoundTripIsFaithfulForEveryObject(t *testing.T) {
 		Name: "schedules",
 		List: func(s Stores) (any, error) { return s.Schedules.List(ctx) },
 		Opts: []cmp.Option{cmpopts.IgnoreFields(schedule.Schedule{}, "NextRunAt")},
+	}, { // Test 14: Notification targets, whose sealed address and key are hidden from JSON.
+		Name: "notification targets",
+		List: func(s Stores) (any, error) { return s.Notifications.List(ctx) },
+	}, { // Test 15: The attachments that say where a target reports.
+		Name: "notification attachments",
+		List: func(s Stores) (any, error) { return s.Notifications.Attachments(ctx, "ntf_1") },
+	}, { // Test 16: AWX callback bindings, including one whose template was deleted.
+		Name: "awx callback bindings",
+		List: func(s Stores) (any, error) { return s.Templates.AWXBindings(ctx) },
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -692,6 +735,8 @@ func TestBackupHidesEveryFixtureSecret(t *testing.T) {
 		{Name: "account name", Secret: "ada@example.com"},               // Test 7.
 		{Name: "inventory content", Secret: testUnicode},                // Test 8.
 		{Name: "repository url", Secret: "example.com/app.git"},         // Test 9.
+		{Name: "sealed notification address", Secret: "SEALED-NTF-URL"}, // Test 10.
+		{Name: "sealed notification key", Secret: "SEALED-NTF-KEY"},     // Test 11.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

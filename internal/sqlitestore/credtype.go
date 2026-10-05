@@ -12,7 +12,7 @@ import (
 )
 
 // credTypeColumns is the shared select list for credential-type reads.
-const credTypeColumns = `id, name, fields, env, extra_vars, created_at`
+const credTypeColumns = `id, name, fields, env, extra_vars, files, created_at, origin`
 
 // credTypeStore is a credential.TypeStore backed by the shared SQLite database. A type holds no
 // secret, so its fields and injectors are stored as plain JSON columns.
@@ -28,18 +28,18 @@ type credTypeStore struct {
 // time overflowed to the eighteenth century rather than staying zero, sorted ahead of every real
 // type in List, and could not be corrected because the upsert left created_at out of its SET list.
 func (s *credTypeStore) Save(ctx context.Context, t *credential.CredentialType) error {
-	fields, env, extra, err := marshalType(t)
+	fields, env, extra, files, err := marshalType(t)
 	if err != nil {
 		return err
 	}
 	const q = `
-INSERT INTO credential_types (id, name, fields, env, extra_vars, created_at)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO credential_types (id, name, fields, env, extra_vars, files, created_at, origin)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	name=excluded.name, fields=excluded.fields, env=excluded.env, extra_vars=excluded.extra_vars,
-	created_at=excluded.created_at`
-	if _, err := s.db.ExecContext(ctx, q, t.ID, t.Name, fields, env, extra,
-		sqlutil.FormatTime(t.CreatedAt)); err != nil {
+	files=excluded.files, created_at=excluded.created_at, origin=excluded.origin`
+	if _, err := s.db.ExecContext(ctx, q, t.ID, t.Name, fields, env, extra, files,
+		sqlutil.FormatTime(t.CreatedAt), t.Origin); err != nil {
 		return fmt.Errorf("save credential type: %w", err)
 	}
 	return nil
@@ -97,20 +97,24 @@ func (s *credTypeStore) Delete(ctx context.Context, id string) error {
 }
 
 // marshalType encodes a type's fields and injectors as JSON for storage.
-func marshalType(t *credential.CredentialType) (fields, env, extra string, err error) {
+func marshalType(t *credential.CredentialType) (fields, env, extra, files string, err error) {
 	fb, err := json.Marshal(t.Fields)
 	if err != nil {
-		return "", "", "", fmt.Errorf("encode credential type fields: %w", err)
+		return "", "", "", "", fmt.Errorf("encode credential type fields: %w", err)
 	}
 	eb, err := json.Marshal(nonNilMap(t.EnvInjectors))
 	if err != nil {
-		return "", "", "", fmt.Errorf("encode credential type env: %w", err)
+		return "", "", "", "", fmt.Errorf("encode credential type env: %w", err)
 	}
 	xb, err := json.Marshal(nonNilMap(t.ExtraVarInjectors))
 	if err != nil {
-		return "", "", "", fmt.Errorf("encode credential type extra vars: %w", err)
+		return "", "", "", "", fmt.Errorf("encode credential type extra vars: %w", err)
 	}
-	return string(fb), string(eb), string(xb), nil
+	ffb, err := json.Marshal(nonNilMap(t.FileInjectors))
+	if err != nil {
+		return "", "", "", "", fmt.Errorf("encode credential type files: %w", err)
+	}
+	return string(fb), string(eb), string(xb), string(ffb), nil
 }
 
 // nonNilMap returns m, or an empty map so a nil marshals to {} rather than null.
@@ -126,9 +130,11 @@ func scanCredType(sc scanner) (*credential.CredentialType, error) {
 	var (
 		t                  credential.CredentialType
 		fields, env, extra string
+		files              string
 		created            string
 	)
-	if err := sc.Scan(&t.ID, &t.Name, &fields, &env, &extra, &created); err != nil {
+	if err := sc.Scan(&t.ID, &t.Name, &fields, &env, &extra, &files, &created,
+		&t.Origin); err != nil {
 		return nil, err
 	}
 	at, err := sqlutil.ParseTime(created)
@@ -150,6 +156,12 @@ func scanCredType(sc scanner) (*credential.CredentialType, error) {
 	}
 	if len(t.ExtraVarInjectors) == 0 {
 		t.ExtraVarInjectors = nil
+	}
+	if err := json.Unmarshal([]byte(files), &t.FileInjectors); err != nil {
+		return nil, fmt.Errorf("decode credential type files: %w", err)
+	}
+	if len(t.FileInjectors) == 0 {
+		t.FileInjectors = nil
 	}
 	return &t, nil
 }

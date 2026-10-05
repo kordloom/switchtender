@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -574,5 +575,46 @@ func TestStreamMaskerReleasesASelfOverlappingSecretAsItGoes(t *testing.T) {
 	// a match and stays as it is.
 	if want := (1<<20)/len(secret)*len(maskToken) + (1<<20)%len(secret); got.Len() != want {
 		t.Errorf("emitted %d bytes, want %d: output was dropped or duplicated", got.Len(), want)
+	}
+}
+
+// TestRunOwnSecretsReadsValuesAsTheProgramDoes pins that the masker learns the value a program
+// receives rather than the text it was written as. A program prints what it received, so a password
+// written with the shell's idiom for a quote inside single quotes was searched for as its first
+// fragment and printed whole into the log, and one inside a JSON body was never learned at all.
+func TestRunOwnSecretsReadsValuesAsTheProgramDoes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// Name says which shape the secret is written in.
+		Name string
+		// Vars are the run's variables.
+		Vars map[string]any
+		// Command is the run's command line.
+		Command string
+		// WantResult is a value the masker must hold.
+		WantResult string
+	}{{ // Test 0: A quote inside single quotes.
+		Name: "quote inside single quotes", Command: `PGPASSWORD='hun'\''ter2' psql`, WantResult: "hun'ter2",
+	}, { // Test 1: An empty quote pair before the value.
+		Name: "empty quote pair", Command: `export TOKEN=''abc123def; deploy`, WantResult: "abc123def",
+	}, { // Test 2: A JSON body carried in a variable.
+		Name:       "json body in a variable",
+		Vars:       map[string]any{"body": `{"password":"s3cr3t-value"}`},
+		WantResult: "s3cr3t-value",
+	}, { // Test 3: An escaped quote inside a double-quoted value.
+		Name: "escaped quote", Command: `mysql --password="a\"bcdef"`, WantResult: `a"bcdef`,
+	}, { // Test 4: A value Ansible reads as a Python literal once the shell has unquoted it.
+		Name:       "python literal inside shell quotes",
+		Command:    `ansible-playbook -e ansible_password="'s3cr3tvalue'" site.yml`,
+		WantResult: "s3cr3tvalue",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			got := runOwnSecrets(test.Vars, test.Command)
+			if !slices.Contains(got, test.WantResult) {
+				t.Errorf("runOwnSecrets() = %q, want it to hold %q", got, test.WantResult)
+			}
+		})
 	}
 }

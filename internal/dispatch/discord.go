@@ -43,8 +43,21 @@ func (d *Dispatcher) notifyDiscord(r *run.Run) {
 // discordMessage renders a run as a one-line Discord message with a status emoji, the run label, and
 // the elapsed time. It carries no extra vars, so channel secrets are not exposed.
 func discordMessage(r *run.Run) string {
+	if isSkip(r) {
+		return "SwitchTender schedule **" + skipSchedule(r) + "** " + skipHeadline(r) + " " +
+			skipDetail(r)
+	}
+	if r.Attention != nil {
+		return "SwitchTender alert: " + attentionSentences(r)
+	}
 	if r.Status == run.StatusPendingApproval {
+		if r.AwaitingStep != nil {
+			return "SwitchTender workflow **" + runLabel(r) + "** " + stepSentences(r)
+		}
 		return "SwitchTender run **" + runLabel(r) + "** " + heldSentences(r)
+	}
+	if r.Status == run.StatusRunning {
+		return "SwitchTender run **" + runLabel(r) + "** " + startedSentence
 	}
 	icon := "✅"
 	if r.Status != run.StatusSucceeded {

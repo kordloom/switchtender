@@ -22,7 +22,11 @@ const runColumns = `id, playbook, inventory, status, exit_code, error, created_a
 	proposed_from, intent, image, pull_credential_id, idempotency_key, timeout, notifications,
 	source, source_id, actor, rerun_of, labels, warning, audit_receipt, held_by_policy,
 	tags, skip_tags, verbosity, forks, diff_mode, claim_secret, actor_type, approved_spec_digest,
-	distinct_approver, pinned_commit, policy_set, actor_user_id, approved_spec_binding, plan_destroys`
+	distinct_approver, pinned_commit, policy_set, actor_user_id, approved_spec_binding, plan_destroys,
+	template_id, inventory_resolution, sealed_vars, use_fact_cache, fact_cache_timeout, git_ref,
+	dry_run_scans, hold_note, sealed_digests, policy_notes, inventory_check, initiator,
+	require_reason, inventory_snapshot, inventory_sealed, resolved_hosts, plan_sha256, plan_sealed,
+	image_digest, decision_id, decision_claim`
 
 // Save inserts or replaces the run identified by r.ID. The cancel flag merges with MAX so a
 // replace from a stale snapshot cannot erase a cancel another process just requested.
@@ -39,10 +43,16 @@ INSERT INTO runs
 	 image, pull_credential_id, idempotency_key, timeout, notifications,
 	 source, source_id, actor, rerun_of, labels, warning, audit_receipt, held_by_policy,
 	 tags, skip_tags, verbosity, forks, diff_mode, claim_secret, actor_type, approved_spec_digest,
-	 distinct_approver, pinned_commit, policy_set, actor_user_id, approved_spec_binding, plan_destroys)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	 distinct_approver, pinned_commit, policy_set, actor_user_id, approved_spec_binding, plan_destroys,
+	 template_id, inventory_resolution, sealed_vars, use_fact_cache, fact_cache_timeout, git_ref,
+	 dry_run_scans, hold_note, sealed_digests, policy_notes, inventory_check, initiator,
+	 require_reason, inventory_snapshot, inventory_sealed, resolved_hosts, plan_sha256, plan_sealed,
+	 image_digest)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
-	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
+	playbook=excluded.playbook, inventory=excluded.inventory,
+	status=CASE WHEN runs.status IN ('parked', 'deciding') AND excluded.status='pending_approval'
+		THEN runs.status ELSE excluded.status END,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
 	started_at=excluded.started_at, ended_at=excluded.ended_at,
 	parent_id=excluded.parent_id, shard_index=excluded.shard_index,
@@ -67,7 +77,30 @@ ON CONFLICT(id) DO UPDATE SET
 	approved_spec_digest=excluded.approved_spec_digest,
 	distinct_approver=excluded.distinct_approver, pinned_commit=excluded.pinned_commit,
 	policy_set=excluded.policy_set, actor_user_id=excluded.actor_user_id,
-	approved_spec_binding=excluded.approved_spec_binding, plan_destroys=excluded.plan_destroys`
+	approved_spec_binding=excluded.approved_spec_binding, plan_destroys=excluded.plan_destroys,
+	template_id=excluded.template_id, inventory_resolution=excluded.inventory_resolution,
+	sealed_vars=CASE WHEN runs.sealed_vars = '' THEN excluded.sealed_vars ELSE runs.sealed_vars END,
+	use_fact_cache=excluded.use_fact_cache, fact_cache_timeout=excluded.fact_cache_timeout,
+	git_ref=excluded.git_ref, dry_run_scans=excluded.dry_run_scans,
+	hold_note=excluded.hold_note,
+	sealed_digests=CASE WHEN runs.sealed_digests = '' THEN excluded.sealed_digests
+		ELSE runs.sealed_digests END,
+	policy_notes=excluded.policy_notes, inventory_check=excluded.inventory_check,
+	initiator=excluded.initiator, require_reason=excluded.require_reason,
+	inventory_snapshot=CASE WHEN runs.inventory_snapshot = '' THEN excluded.inventory_snapshot
+		ELSE runs.inventory_snapshot END,
+	inventory_sealed=runs.inventory_sealed, resolved_hosts=excluded.resolved_hosts,
+	plan_sha256=CASE WHEN runs.plan_sha256 = '' THEN excluded.plan_sha256 ELSE runs.plan_sha256 END,
+	plan_sealed=runs.plan_sealed, image_digest=excluded.image_digest`
+	// The sealed answers are written once, by the insert that created the run, and kept by every
+	// later save. A run decoded from JSON, which is how a relay worker and every API reader holds
+	// one, does not carry them, so a whole-row save from such a copy would otherwise erase the
+	// answers the executor still has to open. Their digests are written once for the same reason
+	// and one more: they are what an approval binds, so no later save may move them.
+	//
+	// The sealed inventory snapshot and the sealed plan file go further: only the insert writes
+	// them, so a whole-row save can neither erase one nor bring one back after the run's end wiped
+	// it. The records binding them are written once, as the answer digests are.
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), sqlutil.NullInt(r.ExitCode), r.Error,
 		sqlutil.FormatTime(r.CreatedAt), sqlutil.NullTime(r.StartedAt), sqlutil.NullTime(r.EndedAt),
@@ -81,9 +114,19 @@ ON CONFLICT(id) DO UPDATE SET
 		r.HeldByPolicy, sqlutil.JoinIDs(r.Tags), sqlutil.JoinIDs(r.SkipTags), r.Verbosity, r.Forks,
 		sqlutil.BoolToInt(r.DiffMode), r.ClaimSecret, r.ActorType, r.ApprovedSpecDigest,
 		sqlutil.BoolToInt(r.RequireDistinctApprover), r.PinnedCommit, marshalPolicySet(r.PolicySet),
-		r.ActorUserID, r.ApprovedSpecBinding, sqlutil.NullInt(r.PlanDestroys),
+		r.ActorUserID, r.ApprovedSpecBinding, sqlutil.NullInt(r.PlanDestroys), r.TemplateID,
+		run.ResolutionColumn(r.InventoryResolution), sqlutil.JSONSealed(r.SealedVars),
+		sqlutil.BoolToInt(r.UseFactCache), r.FactCacheTimeout, r.GitRef,
+		run.ScansColumn(r.DryRunScans), r.HoldNote, run.SealedDigestsColumn(r.SealedDigests),
+		sqlutil.JSONStrings(r.PolicyNotes), run.CheckColumn(r.InventoryCheck),
+		run.InitiatorColumn(r.Initiator), r.RequireReason,
+		run.SnapshotColumn(r.InventorySnapshot), r.InventorySealed,
+		sqlutil.JSONStrings(r.ResolvedHosts), r.PlanSHA256, r.PlanSealed, r.ImageDigest,
 	)
 	if err != nil {
+		if isCallbackConflict(err) {
+			return run.ErrCallbackPending
+		}
 		if r.IdempotencyKey != "" && isKeyConflict(err) {
 			return run.ErrDuplicateKey
 		}
@@ -135,7 +178,9 @@ func (s *store) ListPage(ctx context.Context, filter run.ListFilter, limit, offs
 	if clause != "" {
 		q += " AND " + clause
 	}
-	if filter.Status != "" {
+	if filter.Status == string(run.StatusPendingApproval) {
+		q += " AND " + heldStatuses
+	} else if filter.Status != "" {
 		q += " AND status = ?"
 		args = append(args, filter.Status)
 	}
@@ -250,7 +295,7 @@ func (s *store) RunStatusCounts(ctx context.Context) (map[run.Status]int, error)
 		if err := rows.Scan(&status, &n); err != nil {
 			return nil, fmt.Errorf("run status counts: %w", err)
 		}
-		out[run.Status(status)] = n
+		out[run.StatusFromStored(status)] += n
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("run status counts: %w", err)
@@ -393,6 +438,28 @@ func scanRun(s scanner) (*run.Run, error) {
 		policySet string
 		// planDestroys is the destroy count a proposed apply's plan reported, NULL for no plan read.
 		planDestroys sql.NullInt64
+		// resolution is the composed inventory's resolved target set, stored as JSON.
+		resolution string
+		// sealed is the run's sealed secret answers as stored JSON, ciphertext only.
+		sealed string
+		// factCache is the fact cache switch, stored as an integer like every other boolean on a run.
+		factCache int
+		// scans is what the gate's scan of a dry run read, stored as JSON.
+		scans string
+		// sealedDigests are the digests of the sealed answers' ciphertext, fixed when the run was
+		// created and stored as JSON.
+		sealedDigests string
+		// policyNotes are the warnings a policy noted on the run, stored as JSON because each entry
+		// is free text that may hold a comma.
+		policyNotes string
+		// inventoryCheck is the execution-time inventory cross-check, stored as JSON.
+		inventoryCheck string
+		// initiator is an agent-initiated run's identity evidence, stored as JSON.
+		initiator string
+		// snapshot is the record binding the run's inventory snapshot, stored as JSON.
+		snapshot string
+		// resolvedHosts are the hosts a dynamic source resolved to, stored as JSON.
+		resolvedHosts string
 	)
 	if err := s.Scan(&r.ID, &r.Playbook, &r.Inventory, &status, &exit, &r.Error,
 		&created, &started, &ended, &parent, &shardIdx, &shardCnt, &r.Limit,
@@ -403,14 +470,60 @@ func scanRun(s scanner) (*run.Run, error) {
 		&r.Source, &r.SourceID, &r.Actor, &r.RerunOf, &labels, &r.Warning, &r.AuditReceipt,
 		&r.HeldByPolicy, &tags, &skipTags, &r.Verbosity, &r.Forks, &diffMode,
 		&r.ClaimSecret, &r.ActorType, &r.ApprovedSpecDigest, &distinctApprover, &r.PinnedCommit,
-		&policySet, &r.ActorUserID, &r.ApprovedSpecBinding, &planDestroys); err != nil {
+		&policySet, &r.ActorUserID, &r.ApprovedSpecBinding, &planDestroys,
+		&r.TemplateID, &resolution, &sealed, &factCache, &r.FactCacheTimeout, &r.GitRef,
+		&scans, &r.HoldNote, &sealedDigests, &policyNotes, &inventoryCheck, &initiator,
+		&r.RequireReason, &snapshot, &r.InventorySealed, &resolvedHosts, &r.PlanSHA256,
+		&r.PlanSealed, &r.ImageDigest, &r.DecisionID, &r.DecisionClaim); err != nil {
 		return nil, err
 	}
+	snap, err := run.ParseSnapshotColumn(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	r.InventorySnapshot = snap
+	if r.ResolvedHosts, err = sqlutil.ParseStrings(resolvedHosts); err != nil {
+		return nil, err
+	}
+	agent, err := run.ParseInitiatorColumn(initiator)
+	if err != nil {
+		return nil, err
+	}
+	r.Initiator = agent
+	sealedVars, err := sqlutil.ParseSealed(sealed)
+	if err != nil {
+		return nil, err
+	}
+	digests, err := run.ParseSealedDigestsColumn(sealedDigests)
+	if err != nil {
+		return nil, err
+	}
+	// The digests are read as stored, never recomputed from the ciphertext beside them, so a run
+	// whose ciphertext changed in storage still carries the digest its approval bound.
+	run.RestoreSealed(&r, sealedVars, digests)
 	if planDestroys.Valid {
 		n := int(planDestroys.Int64)
 		r.PlanDestroys = &n
 	}
+	if r.DryRunScans, err = run.ParseScansColumn(scans); err != nil {
+		return nil, err
+	}
+	notes, err := sqlutil.ParseStrings(policyNotes)
+	if err != nil {
+		return nil, err
+	}
+	r.PolicyNotes = notes
 	r.RequireDistinctApprover = distinctApprover != 0
+	res, err := run.ParseResolutionColumn(resolution)
+	if err != nil {
+		return nil, err
+	}
+	r.InventoryResolution = res
+	check, err := run.ParseCheckColumn(inventoryCheck)
+	if err != nil {
+		return nil, err
+	}
+	r.InventoryCheck = check
 	set, err := unmarshalPolicySet(policySet)
 	if err != nil {
 		return nil, err
@@ -419,6 +532,7 @@ func scanRun(s scanner) (*run.Run, error) {
 	r.CancelRequested = cancelI != 0
 	r.DryRun = dryRun != 0
 	r.DiffMode = diffMode != 0
+	r.UseFactCache = factCache != 0
 	r.Tags = sqlutil.SplitIDs(tags)
 	r.SkipTags = sqlutil.SplitIDs(skipTags)
 	r.CredentialIDs = sqlutil.SplitIDs(credIDs)
@@ -441,7 +555,7 @@ func scanRun(s scanner) (*run.Run, error) {
 	if r.ClaimedAt, err = sqlutil.ParseNullTime(claimed); err != nil {
 		return nil, err
 	}
-	r.Status = run.Status(status)
+	r.Status = run.StatusFromStored(status)
 	if exit.Valid {
 		v := int(exit.Int64)
 		r.ExitCode = &v
@@ -720,21 +834,18 @@ func (s *store) reclaimStale(ctx context.Context, ttl time.Duration) (int, []str
 	// run, so the run sat pending and unclaimable with nothing that sweeps a pending run to end it,
 	// reported as canceling forever. The person already asked for this outcome and the run never began,
 	// so it ends canceled. This runs before the requeue so the requeue cannot pick the row up first.
-	res, err := tx.ExecContext(ctx, `
+	canceled, settledCanceled, err := updateReturningTopLevel(ctx, tx, `
 UPDATE runs SET status='canceled', claimed_by='', claimed_at=NULL, claim_secret='', ended_at=?
-WHERE status='pending' AND claimed_by!='' AND claimed_at < ? AND cancel_requested=1`,
-		sqlutil.FormatTime(time.Now()), cut)
-	if err != nil {
-		return 0, nil, fmt.Errorf("reclaim stale: %w", err)
-	}
-	canceled, err := res.RowsAffected()
+WHERE status='pending' AND claimed_by!='' AND claimed_at < ? AND cancel_requested=1
+RETURNING id, parent_id`, sqlutil.FormatTime(time.Now()), cut)
 	if err != nil {
 		return 0, nil, fmt.Errorf("reclaim stale: %w", err)
 	}
 
-	res, err = tx.ExecContext(ctx, `
-UPDATE runs SET claimed_by='', claimed_at=NULL, claim_secret=''
-WHERE status='pending' AND claimed_by!='' AND claimed_at < ? AND cancel_requested=0`, cut)
+	res, err := tx.ExecContext(ctx, `
+UPDATE runs SET claimed_by='', claimed_at=NULL, claim_secret='', queued_at=?
+WHERE status='pending' AND claimed_by!='' AND claimed_at < ? AND cancel_requested=0`,
+		sqlutil.FormatTime(time.Now()), cut)
 	if err != nil {
 		return 0, nil, fmt.Errorf("reclaim stale: %w", err)
 	}
@@ -802,7 +913,7 @@ WHERE status='running' AND cancel_requested=0 AND parent_id IS NOT NULL
 	if err := tx.Commit(); err != nil {
 		return 0, nil, fmt.Errorf("reclaim stale: %w", err)
 	}
-	settled := append(settledStale, settledAbandoned...)
+	settled := append(append(settledCanceled, settledStale...), settledAbandoned...)
 	return int(requeued + interrupted + abandoned + orphaned + stopping), settled, nil
 }
 
@@ -826,7 +937,7 @@ func (s *store) RequestCancel(ctx context.Context, id string) error {
 func (s *store) CancelPending(ctx context.Context, id string) (bool, error) {
 	res, err := s.db.ExecContext(ctx, `
 UPDATE runs SET status='canceled', ended_at=?
-WHERE id=? AND claimed_by='' AND status IN ('pending', 'pending_approval')`,
+WHERE id=? AND claimed_by='' AND status IN ('pending', 'pending_approval', 'parked')`,
 		sqlutil.FormatTime(time.Now()), id)
 	if err != nil {
 		return false, fmt.Errorf("cancel pending: %w", err)
@@ -855,8 +966,8 @@ func (s *store) TransitionStatusAndClaim(ctx context.Context, id string, from, t
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE runs SET status=?, claimed_by=?, claimed_at=?,
 started_at=COALESCE(NULLIF(started_at,''), NULLIF(?,''))
-WHERE id=? AND status=? AND cancel_requested=0`,
-		string(to), owner, now, started, id, string(from))
+WHERE id=? AND (status=? OR (?='pending_approval' AND status='parked')) AND cancel_requested=0`,
+		string(to), owner, now, started, id, string(from), string(from))
 	if err != nil {
 		return false, fmt.Errorf("transition status and claim: %w", err)
 	}
@@ -867,10 +978,43 @@ WHERE id=? AND status=? AND cancel_requested=0`,
 	return n > 0, nil
 }
 
+// StartClaimed moves a pending run to running for the claim that still holds it, in one statement
+// fenced on the owner and the claim's capability as well as the status.
+func (s *store) StartClaimed(ctx context.Context, id, owner, secret string, startedAt time.Time) (bool, error) {
+	if owner == "" {
+		return false, nil
+	}
+	started := ""
+	if !startedAt.IsZero() {
+		started = sqlutil.FormatTime(startedAt)
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE runs SET status='running', claimed_at=?,
+started_at=COALESCE(NULLIF(started_at,''), NULLIF(?,''))
+WHERE id=? AND status='pending' AND cancel_requested=0 AND claimed_by=? AND claim_secret=?`,
+		sqlutil.FormatTime(time.Now()), started, id, owner, secret)
+	if err != nil {
+		return false, fmt.Errorf("start claimed run: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("start claimed run: %w", err)
+	}
+	return n > 0, nil
+}
+
 // TransitionStatus atomically moves the run from one status to another, reporting whether it changed.
 func (s *store) TransitionStatus(ctx context.Context, id string, from, to run.Status) (bool, error) {
+	// A run moved into pending has just joined the queue, so the moment is recorded with it. That is
+	// how a dashboard measures an approved run's wait for a worker from the approval rather than from
+	// a creation that may lie hours behind it, on the far side of the hold.
+	queued := ""
+	if to == run.StatusPending {
+		queued = sqlutil.FormatTime(time.Now())
+	}
 	res, err := s.db.ExecContext(ctx,
-		"UPDATE runs SET status=? WHERE id=? AND status=?", string(to), id, string(from))
+		"UPDATE runs SET status=?, queued_at=COALESCE(NULLIF(?,''), queued_at) WHERE id=? AND status=?",
+		string(to), queued, id, string(from))
 	if err != nil {
 		return false, fmt.Errorf("transition status: %w", err)
 	}
@@ -900,18 +1044,89 @@ func (s *store) StampApprovedSpec(ctx context.Context, id, digest, binding strin
 	return nil
 }
 
+// ParkForApproval moves a running parent this owner holds to pending_approval and clears its lease
+// in one statement, so the parent is never seen held with an owner nothing will ever release. The
+// row is stored as parked, which reads back as pending_approval: an earlier release, reading the
+// stored value, neither approves the workflow as a run held before it started nor sweeps it.
+func (s *store) ParkForApproval(ctx context.Context, id, owner string) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `
+UPDATE runs SET status=?, claimed_by='', claimed_at=NULL, claim_secret=''
+WHERE id=? AND status=? AND claimed_by=? AND claimed_by!='' AND cancel_requested=0`,
+		run.StoredParked, id, string(run.StatusRunning), owner)
+	if err != nil {
+		return false, fmt.Errorf("park for approval: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("park for approval: %w", err)
+	}
+	return n > 0, nil
+}
+
+// SettleHeld ends a run waiting unclaimed in pending_approval and records the failure text and end
+// time in the same statement, so a decided approval step is never terminal without its end time.
+func (s *store) SettleHeld(ctx context.Context, id string, fin run.Finalization) (bool, error) {
+	if !fin.Status.Terminal() {
+		return false, run.ErrNotTerminal
+	}
+	fin.SanitizeText()
+	res, err := s.db.ExecContext(ctx, `
+UPDATE runs SET status=?, error=?, ended_at=?, inventory_sealed='', plan_sealed=''
+WHERE id=? AND status=? AND claimed_by=''`,
+		string(fin.Status), fin.Error, sqlutil.FormatTime(fin.EndedAt), id,
+		string(run.StatusPendingApproval))
+	if err != nil {
+		return false, fmt.Errorf("settle held run: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("settle held run: %w", err)
+	}
+	return n > 0, nil
+}
+
+// WipeSealed removes the run's sealed inventory snapshot and sealed plan file, keeping the digests
+// that bound them.
+func (s *store) WipeSealed(ctx context.Context, id string) error {
+	if _, err := s.db.ExecContext(ctx,
+		"UPDATE runs SET inventory_sealed='', plan_sealed='' WHERE id=?", id); err != nil {
+		return fmt.Errorf("wipe sealed run material: %w", err)
+	}
+	return nil
+}
+
+// SweepSealed wipes the sealed material of every ended run still carrying some.
+func (s *store) SweepSealed(ctx context.Context) (int, error) {
+	res, err := s.db.ExecContext(ctx, `
+UPDATE runs SET inventory_sealed='', plan_sealed=''
+WHERE status IN (?, ?, ?, ?, ?) AND (inventory_sealed<>'' OR plan_sealed<>'')`,
+		string(run.StatusSucceeded), string(run.StatusFailed), string(run.StatusCanceled),
+		string(run.StatusRejected), string(run.StatusInterrupted))
+	if err != nil {
+		return 0, fmt.Errorf("sweep sealed run material: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("sweep sealed run material: %w", err)
+	}
+	return int(n), nil
+}
+
 // FinalizeRunning moves a running run to its terminal status and records the exit code, failure
 // detail, resolved image, and end time in the same statement, so a run is never terminal with the
-// facts that explain it missing.
+// facts that explain it missing. The run's sealed material is wiped by the same statement.
 func (s *store) FinalizeRunning(ctx context.Context, id string, fin run.Finalization) (bool, error) {
 	fin.SanitizeText()
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE runs SET status=?, exit_code=?, error=?, image=?, commit_sha=?,
-pull_credential_id=?, outputs=?, warning=?, ended_at=?, claim_secret=''
+pull_credential_id=?, outputs=?, warning=?, ended_at=?, claim_secret='', inventory_check=?,
+image_digest=?, resolved_hosts=?, inventory_sealed='', plan_sealed=''
 WHERE id=? AND status=? AND (?='' OR claimed_by=?)`,
 		string(fin.Status), sqlutil.NullInt(fin.ExitCode), fin.Error, fin.Image,
 		fin.CommitSHA, fin.PullCredentialID, sqlutil.JSONMap(fin.Outputs), fin.Warning,
-		sqlutil.FormatTime(fin.EndedAt), id, string(run.StatusRunning), fin.Owner, fin.Owner)
+		sqlutil.FormatTime(fin.EndedAt), run.CheckColumn(fin.InventoryCheck),
+		fin.ImageDigest, sqlutil.JSONStrings(fin.ResolvedHosts), id,
+		string(run.StatusRunning), fin.Owner, fin.Owner)
 	if err != nil {
 		return false, fmt.Errorf("finalize running run: %w", err)
 	}

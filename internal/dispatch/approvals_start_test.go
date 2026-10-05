@@ -108,8 +108,11 @@ func TestRejectingASplitSettlesItsHeldShards(t *testing.T) {
 			t.Errorf("shard %s is %q after its parent was rejected, so it waits in the approval "+
 				"queue for a decision that has already been made", s.ID, s.Status)
 		}
-		if !strings.Contains(s.Error, "not on a Friday") {
-			t.Errorf("shard %s error = %q, want the rejection reason carried onto it", s.ID, s.Error)
+		// The shards are settled as part of the rejection, and the reason itself stays in the decision
+		// record: copied onto each shard, it could never be redacted from them.
+		if !strings.Contains(s.Error, "rejected by an approver") || strings.Contains(s.Error, "Friday") {
+			t.Errorf("shard %s error = %q, want the rejection named and its reason kept off it", s.ID,
+				s.Error)
 		}
 	}
 }

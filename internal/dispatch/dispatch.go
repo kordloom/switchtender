@@ -13,9 +13,13 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/event"
+	"github.com/kordloom/switchtender/internal/factcache"
+	"github.com/kordloom/switchtender/internal/federation"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
+	named "github.com/kordloom/switchtender/internal/notification"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -111,10 +115,22 @@ type Dispatcher struct {
 	publisher Publisher
 	// hostLister enumerates inventory hosts for split runs, nil when the runner cannot list hosts.
 	hostLister roundhouse.HostLister
+	// invLister lists inventories through ansible-inventory to resolve smart and constructed
+	// inventories, nil when the runner cannot.
+	invLister roundhouse.InventoryLister
+	// invReader reads inventory files with the run's own Ansible, for the cross-check an Ansible
+	// run against a natively resolved inventory makes before it executes, nil when the runner
+	// cannot, which refuses such a run rather than letting it execute unchecked.
+	invReader roundhouse.InventoryReader
+	// ansibleCoreReporter reports the server's ansible-core version, nil when the runner cannot.
+	ansibleCoreReporter roundhouse.AnsibleCoreReporter
 	// cmu guards cancels.
 	cmu sync.Mutex
 	// cancels maps a pending or executing run id to its cancel func.
 	cancels map[string]context.CancelCauseFunc
+	// coordinators maps a workflow coordinated in this process to a channel closed when its
+	// coordinator returns, so a resumed workflow never has two coordinators here at once.
+	coordinators map[string]chan struct{}
 	// owner identifies this process on the leases it takes.
 	owner string
 	// claimInterval is how often the claim loop polls when idle.
@@ -132,12 +148,22 @@ type Dispatcher struct {
 	// claimGateSaid makes the refusal print once rather than on every attempt, since the condition
 	// persists until somebody renews.
 	claimGateSaid sync.Once
+	// presence records that this process is polling for work, nil when nothing records it.
+	presence PresenceRecorder
 	// credentials resolves stored execution secrets, nil when the feature is off.
 	credentials credential.Store
 	// credentialTypes resolves operator-defined credential types, nil when none are configured.
 	credentialTypes credential.TypeStore
+	// federation mints run identity tokens for federated credentials, nil when no issuer is set.
+	federation *federation.Issuer
+	// runFilesRoot is the directory each run's private credential directory is created under. Empty
+	// uses runfiles.DefaultRoot.
+	runFilesRoot string
 	// sealer decrypts credential secrets.
 	sealer *credential.Sealer
+	// delivery hands a relay worker the secrets the control node sealed for each run at claim, nil on
+	// an executor that opens them from its own store.
+	delivery SecretDelivery
 	// projects resolves git projects, nil when the feature is off.
 	projects project.Store
 	// syncer maintains project checkouts.
@@ -179,19 +205,42 @@ type Dispatcher struct {
 	emailer Emailer
 	// emailOnFailureOnly limits email notifications to failed runs.
 	emailOnFailureOnly bool
+	// router finds the named notification targets attached to what a run came from, nil when none
+	// are configured.
+	router NotificationRouter
+	// outbox records the events named notification targets hear in each run's order and delivers
+	// them, nil to deliver them directly through the router.
+	outbox *named.Outbox
 	// inventories resolves stored inventories, nil when the feature is off.
 	inventories inventory.Store
 	// invSources resolves dynamic inventory sources, nil when the feature is off.
 	invSources invsource.Store
+	// factCache holds the facts a template's fact cache serves, nil when no executor here can.
+	factCache factcache.Store
 	// syncSources runs the background scheduled-sync loop for dynamic inventory sources.
 	syncSources bool
 	// dumper renders inventory sources to JSON.
 	dumper roundhouse.InventoryDumper
 	// policies gate submitted runs by holding matches for approval, nil when enforcement is off.
 	policies policy.Store
+	// decisions keeps the record of each decision a person makes on a held run or an approval step:
+	// the masked reason and the random value its commitment hides it under, its corrections, and the
+	// separation-of-duties evaluation of an agent-initiated run. Never nil.
+	decisions decision.Store
 	// defaultImage is the fallback execution image used when a run, its template, and its project pin
 	// none. Empty leaves an unpinned run on the host.
 	defaultImage string
+	// imageResolver resolves a run's image tag to the digest its registry serves when the run is
+	// submitted. Nil leaves every image bound to its tag.
+	imageResolver ImageResolver
+	// moduleFetchTimeout bounds how long the gate's module download may run.
+	moduleFetchTimeout time.Duration
+	// moduleFetchMaxBytes bounds what the gate's module download may write.
+	moduleFetchMaxBytes int64
+	// planScans keeps the scans recent module downloads fed, so one submission downloads once.
+	planScans *planScanCache
+	// modules keeps the module trees the gate downloaded, so the run it judged executes them.
+	modules *moduleStore
 	// runTimeout bounds how long a single run may execute before it is canceled and finalized failed.
 	// Zero disables the cap, so a run may take as long as it needs.
 	runTimeout time.Duration

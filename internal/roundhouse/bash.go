@@ -39,7 +39,7 @@ func (b *bashRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Result,
 	// password=... inline is doing something the product warns against, but the other three script
 	// tools do not punish it this way, and a difference like that between sibling tools is not a
 	// decision anybody made.
-	path, cleanup, err := writeScriptFile("switchtender-sh-*.sh", spec.Command)
+	path, cleanup, err := writeScriptFileIn(spec.RunDir, "switchtender-sh-*.sh", spec.Command)
 	if err != nil {
 		return Result{ExitCode: -1}, err
 	}

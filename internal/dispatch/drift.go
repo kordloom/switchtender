@@ -46,6 +46,12 @@ type planCounts struct {
 	Total int
 	// Destroy is the number of resources the plan would destroy.
 	Destroy int
+	// Add is the number of resources the plan would create.
+	Add int
+	// Change is the number of resources the plan would update in place.
+	Change int
+	// Import is the number of resources the plan would import.
+	Import int
 }
 
 // recordPlanDrift records a drift signal for a dry run whose plan found pending changes, keyed on the
@@ -117,8 +123,15 @@ func parsePlanClauses(line string) planCounts {
 			continue
 		}
 		counts.Total += n
-		if clause[2] == "destroy" {
+		switch clause[2] {
+		case "destroy":
 			counts.Destroy = n
+		case "add":
+			counts.Add = n
+		case "change":
+			counts.Change = n
+		case "import":
+			counts.Import = n
 		}
 	}
 	return counts

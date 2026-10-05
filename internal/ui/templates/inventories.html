@@ -7,7 +7,7 @@
 	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
 	<link rel="stylesheet" href="/ui/assets/app.css">
 </head>
-<body data-page="inventories"{{if .ReadOnly}} data-readonly="true"{{end}}{{if .Demo}} data-demo="true"{{end}}{{if .SignIn}} data-signin="required"{{end}}>
+<body data-page="inventories"{{if .ReadOnly}} data-readonly="true"{{end}}{{if .Demo}} data-demo="true"{{end}}{{if .SignIn}} data-signin="required"{{end}}{{if .FactCacheAdminOnly}} data-fact-cache-admin-only="true"{{end}}>
 	<header class="topbar">
 		<div class="brand"><a href="/ui/"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="SwitchTender"></picture>SwitchTender</a></div>
 	</header>
@@ -16,7 +16,7 @@
 		<div class="page-head">
 			<div class="page-head-text">
 				<h1>Inventories</h1>
-				<p class="muted">An inventory is the list of hosts a run targets, grouped into sets such as web and db. Stored here, it travels with the run to whichever executor picks it up, so no file has to exist on the worker.</p>
+				<p class="muted">An inventory is the list of hosts a run targets, grouped into sets such as web and db. Stored here, it travels with the run to whichever executor picks it up, so no file has to exist on the worker. A smart or constructed inventory is composed from the others at each launch.</p>
 			</div>
 			<button id="inventory-open" class="button primary">
 				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -34,6 +34,44 @@
 				<label class="field-label">Name
 					<input id="inv-name" class="input" placeholder="production fleet" required>
 				</label>
+				<label class="field-label">Kind
+					<select id="inv-kind" class="input">
+						<option value="">Hosts of its own</option>
+						<option value="smart">Smart (a host filter over other inventories)</option>
+						<option value="constructed">Constructed (groups built from input inventories)</option>
+					</select>
+					<span class="field-hint">A smart or constructed inventory is resolved at every launch, and each run records the hosts it reached.</span>
+				</label>
+				<div id="inv-kind-smart" class="stack" data-kind-group hidden>
+					<label class="field-label">Host filter
+						<input id="inv-host-filter" class="input mono" placeholder="groups__name=web and not name__startswith=canary">
+						<span class="field-hint">AWX host_filter syntax over every inventory you may use: name, groups__name, inventory__name, variables__key, and ansible_facts__ansible_distribution, joined by and, or, and not.</span>
+						<span class="field-hint" id="inv-smart-groups">A smart inventory carries the matching hosts and their variables but none of their groups, the same as in AWX. A play for hosts: all reaches them, and a play for a group does not. To keep groups or build new ones, use a constructed inventory.</span>
+					</label>
+				</div>
+				<div id="inv-kind-constructed" class="stack" data-kind-group hidden>
+					<label class="field-label">Input inventories
+						<select id="inv-inputs" class="input" multiple size="4"></select>
+						<span class="field-hint">Read in the order listed, so a later input's variables win.</span>
+					</label>
+					<label class="field-label">Plugin options
+						<textarea id="inv-source-vars" class="input mono" rows="6"
+							placeholder="groups:&#10;  is_shutdown: state | default('running') == 'shutdown'&#10;keyed_groups:&#10;  - key: account_alias"></textarea>
+						<span class="field-hint">strict, compose, groups, and keyed_groups, as the constructed plugin reads them.</span>
+					</label>
+					<label class="field-label">Limit
+						<input id="inv-limit" class="input mono" placeholder="optional, for example is_shutdown:&amp;product_dev">
+						<span class="field-hint">Applied after the groups are built, so it may name one of them.</span>
+					</label>
+				</div>
+				<div id="inv-preview-box" class="stack" hidden>
+					<div class="launch-actions">
+						<button type="button" id="inv-preview" class="button">Preview hosts</button>
+						<span id="inv-preview-status" class="muted"></span>
+					</div>
+					<ul id="inv-preview-hosts" class="mono"></ul>
+				</div>
+				<div id="inv-kind-static" class="stack" data-kind-group>
 				<label class="field-label">Content source
 					<select id="inv-content-source" class="input">
 						<option value="local">Stored (paste the inventory)</option>
@@ -116,6 +154,7 @@
 					</label>
 				</div>
 				<span id="inv-source-hint" class="field-hint" hidden>Editing keeps the stored source configuration unless you fill these in.</span>
+				</div>
 				<label class="field-label">Credentials
 					<select id="inv-credentials" class="input" multiple size="3"></select>
 					<span class="field-hint">Secret variables every run against this inventory receives.</span>

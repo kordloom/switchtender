@@ -66,9 +66,18 @@ func (d *Dispatcher) notifyTeams(r *run.Run) {
 // with the status, the elapsed time, and any failure detail. It carries no extra vars, so channel
 // secrets are not exposed.
 func teamsCardPayload(r *run.Run) teamsMessage {
+	if isSkip(r) {
+		return teamsCardOf("SwitchTender schedule "+skipSchedule(r)+" "+skipHeadline(r), "Warning",
+			skipTeamsFacts(r))
+	}
 	title := "SwitchTender run " + runLabel(r)
 	color := "Good"
-	if r.Status != run.StatusSucceeded {
+	switch r.Status {
+	case run.StatusSucceeded:
+	case run.StatusRunning:
+		title += " started"
+		color = "Accent"
+	default:
 		color = "Attention"
 	}
 	facts := []map[string]string{{"title": "Status", "value": string(r.Status)}}
@@ -80,16 +89,32 @@ func teamsCardPayload(r *run.Run) teamsMessage {
 	}
 	// A held run is a question for whoever reads the card, so it says what is being asked and who
 	// is asking rather than an outcome it does not have yet.
-	if r.Status == run.StatusPendingApproval {
+	switch {
+	case r.Attention != nil:
+		title, color, facts = attentionCard(r)
+	case r.Status == run.StatusPendingApproval && r.AwaitingStep != nil:
+		title, color, facts = stepCard(r)
+	case r.Status == run.StatusPendingApproval:
 		title += " is waiting for approval"
 		color = "Warning"
 		if r.HeldByPolicy != "" {
 			facts = append(facts, map[string]string{"title": "Held by", "value": r.HeldByPolicy})
 		}
+		if why := r.NotChangeFreeSummary(); why != "" {
+			facts = append(facts, map[string]string{"title": "Not a preview", "value": why})
+		}
+		if r.HoldNote != "" {
+			facts = append(facts, map[string]string{"title": "Why it waits", "value": r.HoldNote})
+		}
 		if r.Actor != "" {
 			facts = append(facts, map[string]string{"title": "Requested by", "value": r.Actor})
 		}
 	}
+	return teamsCardOf(title, color, facts)
+}
+
+// teamsCardOf wraps a title, its color, and a fact set in the Adaptive Card message Teams accepts.
+func teamsCardOf(title, color string, facts []map[string]string) teamsMessage {
 	card := teamsCard{
 		Schema:  "http://adaptivecards.io/schemas/adaptive-card.json",
 		Type:    "AdaptiveCard",

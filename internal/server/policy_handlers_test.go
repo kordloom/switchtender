@@ -25,8 +25,10 @@ import (
 func TestEveryPolicyFieldAFileCanSetTheApiCanSetToo(t *testing.T) {
 	t.Parallel()
 
-	// Fields the API deliberately does not take: the server assigns them.
-	assigned := map[string]bool{"id": true, "created_at": true}
+	// Fields the API deliberately does not take: the server assigns them, or, for a Rego bundle,
+	// only the policy file holds them. A Rego policy is a set of module files reviewed in the same
+	// diff as the YAML that names them, and no database store has anywhere to keep one.
+	assigned := map[string]bool{"id": true, "created_at": true, "rego": true}
 
 	tags := func(v any) map[string]bool {
 		out := map[string]bool{}

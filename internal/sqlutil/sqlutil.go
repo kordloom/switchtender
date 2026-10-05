@@ -56,6 +56,56 @@ func ParseMap(s string) (map[string]any, error) {
 	return m, nil
 }
 
+// JSONSealed renders a run's sealed secret answers as stored JSON, empty for none. The values are
+// ciphertext already, so this never sees a plain answer.
+func JSONSealed(m map[string]string) string {
+	if len(m) == 0 {
+		return ""
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// JSONStrings renders a list of free text as JSON for storage, empty string for an empty list. It
+// is for text that may hold a comma, which JoinIDs would split apart on the way back.
+func JSONStrings(list []string) string {
+	if len(list) == 0 {
+		return ""
+	}
+	data, err := json.Marshal(list)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// ParseSealed parses a run's stored sealed secret answers, nil for an empty string.
+func ParseSealed(s string) (map[string]string, error) {
+	if s == "" {
+		return nil, nil
+	}
+	var m map[string]string
+	if err := json.Unmarshal([]byte(s), &m); err != nil {
+		return nil, fmt.Errorf("parse stored sealed vars: %w", err)
+	}
+	return m, nil
+}
+
+// ParseStrings parses a stored JSON list of text, nil for an empty string.
+func ParseStrings(s string) ([]string, error) {
+	if s == "" {
+		return nil, nil
+	}
+	var list []string
+	if err := json.Unmarshal([]byte(s), &list); err != nil {
+		return nil, fmt.Errorf("parse stored list: %w", err)
+	}
+	return list, nil
+}
+
 // FormatTime renders a time as a UTC string for storage.
 //
 // The fractional second keeps RFC 3339's trimming rather than being padded to a fixed width. Padding

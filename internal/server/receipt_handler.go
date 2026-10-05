@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/receipt"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -41,7 +42,7 @@ import (
 // shown without. The refusal names the break, so the operator loses nothing forensic: the entries,
 // the position, and GET /v1/audit/verify are all still there.
 func runReceiptHandler(store run.Store, audits audit.Store, producer *audit.Identity, version string,
-	authz *authorizer, log *zap.Logger) http.HandlerFunc {
+	decisions decision.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: runReceiptHandler: Store required")
 	}
@@ -84,7 +85,7 @@ func runReceiptHandler(store run.Store, audits audit.Store, producer *audit.Iden
 		if refused {
 			return
 		}
-		opts := receipt.Options{Sparse: r.URL.Query().Get("sparse") != ""}
+		opts := receipt.Options{Sparse: r.URL.Query().Get("sparse") != "", Decisions: decisions}
 		// A non-admin receives the sparse shape whatever they asked for. The contiguous shape carries
 		// the chain segment recorded between this run's creation and its outcome, which on a shared
 		// install holds other organizations' entries: their actors, their methods, and their request

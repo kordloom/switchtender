@@ -2,6 +2,7 @@ package storetest
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -367,6 +368,8 @@ func testFinalizeRunning(t *testing.T, store run.Store) {
 		Image: "ghcr.io/example/runner:1.2", CommitSHA: "c0ffee1234567890c0ffee1234567890c0ffee12",
 		PullCredentialID: "cred_pull", Outputs: map[string]any{"version": "1.2.3"},
 		Warning: "this run recorded no per-host result", EndedAt: ended,
+		InventoryCheck: &run.InventoryCheck{AnsibleCore: "2.18.1", InputDigest: "sha256:aa",
+			ResolvedDigest: "sha256:bb"},
 	}
 
 	r := sampleRun("run_fin")
@@ -441,6 +444,11 @@ func testFinalizeRunning(t *testing.T, store run.Store) {
 	}
 	if got.Warning != fin.Warning {
 		t.Errorf("warning = %q, want %q", got.Warning, fin.Warning)
+	}
+	// The inventory cross-check is made just before the play, after the last whole-run save, and the
+	// outcome digest commits to it, so the terminal write is its only chance to land.
+	if diff := cmp.Diff(fin.InventoryCheck, got.InventoryCheck); diff != "" {
+		t.Errorf("inventory check mismatch (-want +got):\n%s", diff)
 	}
 
 	// A second attempt has nothing to finalize, and it must not rewrite what the first one recorded.
@@ -535,6 +543,200 @@ func testPlanDestroysRoundTrip(t *testing.T, store run.Store) {
 		}
 		if diff := cmp.Diff(want, got.PlanDestroys); diff != "" {
 			t.Errorf("%s PlanDestroys mismatch (-want +got):\n%s", id, diff)
+		}
+	}
+}
+
+// testTemplateIDRoundTrip verifies the template a run executes survives the store, and that a run
+// no template launched reads back with none.
+//
+// A run identity token names the template, and a cloud trust policy keys on it. A store that
+// dropped the column would mint every template run as a run of no template, and one that invented a
+// value would hand a role to a run its policy never named.
+func testTemplateIDRoundTrip(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	for _, want := range []string{"", "tpl_deploy"} {
+		id := "run_template_none"
+		if want != "" {
+			id = "run_template_" + want
+		}
+		if err := store.Save(ctx, &run.Run{
+			ID: id, Playbook: "site.yml", Status: run.StatusPending, CreatedAt: time.Now(),
+			TemplateID: want,
+		}); err != nil {
+			t.Fatalf("Save(%s) error = %v", id, err)
+		}
+		got, err := store.Get(ctx, id)
+		if err != nil {
+			t.Fatalf("Get(%s) error = %v", id, err)
+		}
+		if diff := cmp.Diff(want, got.TemplateID); diff != "" {
+			t.Errorf("%s TemplateID mismatch (-want +got):\n%s", id, diff)
+		}
+	}
+}
+
+// testInventoryResolutionRoundTrip verifies the host set a composed inventory resolved to at launch
+// survives the store exactly, and that a run with none reads back with none.
+//
+// The set is what execution is held to and what the evidence names as the run's targets. A store
+// that dropped it would leave a run with no record of the machines it was launched against, and
+// the executor would have nothing to hold the run to.
+func testInventoryResolutionRoundTrip(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	want := &run.InventoryResolution{
+		Kind: "smart", Inputs: []string{"inv_b", "inv_a"}, Hosts: []string{"db1", "web1", "web2"},
+		Engine: "native", InputDigest: "sha256:aa", ResolvedDigest: "sha256:bb",
+	}
+	for id, res := range map[string]*run.InventoryResolution{"run_res_set": want, "run_res_nil": nil} {
+		if err := store.Save(ctx, &run.Run{
+			ID: id, Playbook: "site.yml", InventoryID: "inv_smart", Status: run.StatusPending,
+			CreatedAt: time.Now(), InventoryResolution: res,
+		}); err != nil {
+			t.Fatalf("Save(%s) error = %v", id, err)
+		}
+		got, err := store.Get(ctx, id)
+		if err != nil {
+			t.Fatalf("Get(%s) error = %v", id, err)
+		}
+		if diff := cmp.Diff(res, got.InventoryResolution); diff != "" {
+			t.Errorf("%s InventoryResolution mismatch (-want +got):\n%s", id, diff)
+		}
+	}
+}
+
+// testInventoryCheckRoundTrip verifies the cross-check an Ansible run made against a natively
+// resolved inventory survives the store exactly, differences included, and that a run that made
+// none reads back with none.
+//
+// The check is evidence: the outcome record commits it, and a receipt rebuilt from the store must
+// reproduce it, so a store that dropped or reordered it would break the receipt.
+func testInventoryCheckRoundTrip(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	agreed := &run.InventoryCheck{AnsibleCore: "2.18.1", InputDigest: "sha256:aa",
+		ResolvedDigest: "sha256:bb"}
+	refused := &run.InventoryCheck{AnsibleCore: "2.21.4",
+		Differences: []string{"host web1 variable port is 80 (int) in the native view and " +
+			"\"80\" (string) in Ansible's", "group web, with a comma"}}
+	for id, check := range map[string]*run.InventoryCheck{
+		"run_check_agreed": agreed, "run_check_refused": refused, "run_check_nil": nil,
+	} {
+		if err := store.Save(ctx, &run.Run{
+			ID: id, Playbook: "site.yml", InventoryID: "inv_smart", Status: run.StatusSucceeded,
+			CreatedAt: time.Now(), InventoryCheck: check,
+		}); err != nil {
+			t.Fatalf("Save(%s) error = %v", id, err)
+		}
+		got, err := store.Get(ctx, id)
+		if err != nil {
+			t.Fatalf("Get(%s) error = %v", id, err)
+		}
+		if diff := cmp.Diff(check, got.InventoryCheck); diff != "" {
+			t.Errorf("%s InventoryCheck mismatch (-want +got):\n%s", id, diff)
+		}
+	}
+}
+
+// testGitRefRoundTrip verifies the ref a review plan fetches its commit from survives the store
+// beside the pin it serves, and that an ordinary run reads back with no ref at all.
+//
+// A store that dropped the ref would hand the executor a run pinned to a pull request's commit with
+// nowhere to fetch it from, so every review plan would sync the branch and fail as moved.
+func testGitRefRoundTrip(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	tests := []struct {
+		WantRef string
+		ID      string
+		Pin     string
+	}{{ // Test 0: A review plan keeps its ref and pin.
+		ID: "run_ref_pr", WantRef: "refs/pull/12/head", Pin: "0123456789abcdef0123456789abcdef01234567",
+	}, { // Test 1: An ordinary run carries no ref.
+		ID: "run_ref_none",
+	}}
+	for _, test := range tests {
+		if err := store.Save(ctx, &run.Run{
+			ID: test.ID, Tool: run.ToolTerraform, Command: "infra", Status: run.StatusPending,
+			DryRun: true, CreatedAt: time.Now(), GitRef: test.WantRef, PinnedCommit: test.Pin,
+		}); err != nil {
+			t.Fatalf("Save(%s) error = %v", test.ID, err)
+		}
+		got, err := store.Get(ctx, test.ID)
+		if err != nil {
+			t.Fatalf("Get(%s) error = %v", test.ID, err)
+		}
+		if diff := cmp.Diff(test.WantRef, got.GitRef); diff != "" {
+			t.Errorf("%s GitRef mismatch (-want +got):\n%s", test.ID, diff)
+		}
+		if diff := cmp.Diff(test.Pin, got.PinnedCommit); diff != "" {
+			t.Errorf("%s PinnedCommit mismatch (-want +got):\n%s", test.ID, diff)
+		}
+	}
+}
+
+// testDryRunScansRoundTrip verifies what the gate's scan of a dry run read survives the store
+// whole, with the module download the gate ran first and the note explaining why the run was held.
+// It is the evidence for why a dry run waited, and each entry is free text naming a file, a task,
+// or an address, so a comma or a quote inside one must not split or mangle it. A scan that found
+// something, or could not read in full, must come back not change free, or a held dry run would
+// read back as a preview.
+func testDryRunScansRoundTrip(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	clean := run.DryRunScan{Tool: run.ToolTerraform, Scanner: "terraform-external", Version: 1,
+		Inputs: []string{"infra/.terraform/modules/net/main.tf", "infra/main.tf"},
+		Fetch: &run.ModuleFetch{Command: "terraform get",
+			ModulesDigest: "sha256:" + strings.Repeat("ab", 32)},
+		Classification: run.DryRunChangeFree}
+	found := run.DryRunScan{
+		Tool: run.ToolAnsible, Scanner: "ansible-check-mode", Version: 1,
+		Source: "read at commit 0123456789ab, the project's last synced commit",
+		Inputs: []string{"roles/db/tasks/main.yml", "site.yml"},
+		Findings: []string{
+			`site.yml: task "Restart web, then db" sets check_mode to false`,
+			`roles/db/tasks/main.yml: block "Migrate" sets check_mode to "{{ live }}", which is ` +
+				`only decided at run time`,
+		},
+		Classification: run.DryRunNotChangeFree,
+	}
+	incomplete := run.DryRunScan{
+		Step: "plan, then apply", Tool: run.ToolOpenTofu, Scanner: "terraform-external", Version: 1,
+		Inputs: []string{"infra/main.tf", "infra/modules/net/main.tf"},
+		Unread: []string{`module.vpc from "acme/vpc/aws" (not downloaded, since the gate's tofu ` +
+			`get did not finish within 2m0s)`},
+		Fetch: &run.ModuleFetch{Command: "tofu get", ExitStatus: -1,
+			Error: "the gate's tofu get did not finish within 2m0s"},
+		Classification: run.DryRunIncomplete,
+	}
+	note := `This dry run was not shown to change nothing, so "prod, all tools" does not exempt it.`
+	tests := []struct {
+		ID             string
+		Scans          []run.DryRunScan
+		Note           string
+		WantChangeFree bool
+	}{
+		{ID: "run_scans_none", WantChangeFree: true},
+		{ID: "run_scans_clean", Scans: []run.DryRunScan{clean}, WantChangeFree: true},
+		{ID: "run_scans_found", Scans: []run.DryRunScan{found, incomplete}, Note: note},
+	}
+	for _, test := range tests {
+		if err := store.Save(ctx, &run.Run{
+			ID: test.ID, Playbook: "site.yml", DryRun: true, Status: run.StatusPendingApproval,
+			CreatedAt: time.Now(), DryRunScans: test.Scans, HoldNote: test.Note,
+		}); err != nil {
+			t.Fatalf("Save(%s) error = %v", test.ID, err)
+		}
+		got, err := store.Get(ctx, test.ID)
+		if err != nil {
+			t.Fatalf("Get(%s) error = %v", test.ID, err)
+		}
+		if diff := cmp.Diff(test.Scans, got.DryRunScans, cmpopts.EquateEmpty()); diff != "" {
+			t.Errorf("%s DryRunScans mismatch (-want +got):\n%s", test.ID, diff)
+		}
+		if got.HoldNote != test.Note {
+			t.Errorf("%s HoldNote = %q, want %q", test.ID, got.HoldNote, test.Note)
+		}
+		if got.ChangeFree() != test.WantChangeFree {
+			t.Errorf("%s ChangeFree() = %v after the round trip, want %v", test.ID, got.ChangeFree(),
+				test.WantChangeFree)
 		}
 	}
 }
@@ -1620,5 +1822,151 @@ func testStreamTicketRefusesWrongRunAndExpiry(t *testing.T, store run.Store) {
 	}
 	if _, ok, _ := store.RedeemStreamTicket(ctx, "hash_old", "run_old", time.Now()); ok {
 		t.Fatal("an expired ticket redeemed")
+	}
+}
+
+// testSealedVars pins how every backend keeps a run's secret survey answers: sealed values round
+// trip under their names, the names are derived for readers, a whole-row save from a copy that
+// never carried them leaves them in place, the run's JSON never holds them, and purging the run
+// removes them with it.
+func testSealedVars(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	sealed := map[string]string{
+		"db_password": "sealed-ciphertext-one", "api_token": "sealed-ciphertext-two",
+	}
+	r := sampleRun("run_sealed")
+	r.Status = run.StatusRunning
+	r.EndedAt = nil
+	r.ExitCode = nil
+	r.IdempotencyKey = ""
+	run.WithSealedVars(sealed)(r)
+	if err := store.Save(ctx, r); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	got, err := store.Get(ctx, "run_sealed")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if diff := cmp.Diff(sealed, got.SealedVars); diff != "" {
+		t.Errorf("sealed vars mismatch (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff([]string{"api_token", "db_password"}, got.SealedNames); diff != "" {
+		t.Errorf("secret var names mismatch (-want +got):\n%s", diff)
+	}
+
+	// A copy read from JSON, which is how a relay worker and every API reader holds a run, carries
+	// no sealed values. Saving it whole must not erase them.
+	data, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	for _, v := range sealed {
+		if strings.Contains(string(data), v) {
+			t.Errorf("the run's JSON carries a sealed value: %s", data)
+		}
+	}
+	var decoded run.Run
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	decoded.Status = run.StatusRunning
+	if err := store.Save(ctx, &decoded); err != nil {
+		t.Fatalf("Save(decoded) error = %v", err)
+	}
+	kept, err := store.Get(ctx, "run_sealed")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if diff := cmp.Diff(sealed, kept.SealedVars); diff != "" {
+		t.Errorf("a save from a JSON copy changed the sealed vars (-want +got):\n%s", diff)
+	}
+
+	// Retention removes the sealed answers with the run, once its outcome is on the chain.
+	kept.Status = run.StatusSucceeded
+	if err := store.Save(ctx, kept); err != nil {
+		t.Fatalf("Save(finalize) error = %v", err)
+	}
+	settleOutcomes(t, store, "run_sealed")
+	if _, err := store.PurgeRunsBefore(ctx, kept.CreatedAt.Add(time.Hour)); err != nil {
+		t.Fatalf("PurgeRunsBefore() error = %v", err)
+	}
+	if _, err := store.Get(ctx, "run_sealed"); !errors.Is(err, run.ErrNotFound) {
+		t.Errorf("Get() after purge error = %v, want ErrNotFound", err)
+	}
+}
+
+// testSealedDigests pins how every backend keeps the digests that bind a run's sealed answers: they
+// round trip as the run was created with them, appear in the run's JSON where the ciphertext never
+// does, survive a whole-row save from a JSON copy, are never moved by a later save, and are never
+// recomputed on read, so a run stored before digests existed reads back without any.
+//
+// Each of those is what an approval rests on. A backend that recomputed the digests on read would
+// change the spec of every run stored before them, which breaks the receipts already issued over
+// those specs, and would hide a ciphertext changed in storage behind a digest freshly taken over it.
+func testSealedDigests(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	sealed := map[string]string{"db_password": "sealed-ciphertext-one"}
+	r := sampleRun("run_digests")
+	r.Status = run.StatusRunning
+	r.EndedAt = nil
+	r.ExitCode = nil
+	r.IdempotencyKey = ""
+	run.WithSealedVars(sealed)(r)
+	if err := store.Save(ctx, r); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	got, err := store.Get(ctx, "run_digests")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	want := run.SealedDigestsOf(sealed)
+	if diff := cmp.Diff(want, got.SealedDigests); diff != "" {
+		t.Errorf("digests mismatch (-want +got):\n%s", diff)
+	}
+
+	data, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if !strings.Contains(string(data), want[0].SHA256) || strings.Contains(string(data), sealed["db_password"]) {
+		t.Errorf("the run's JSON = %s, want the digest and never the ciphertext", data)
+	}
+	var decoded run.Run
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	// A copy whose digests were rewritten, the way a row edited underneath an approval would read,
+	// does not move the stored ones.
+	decoded.SealedDigests = []run.SealedDigest{{Var: "db_password", SHA256: "rewritten"}}
+	if err := store.Save(ctx, &decoded); err != nil {
+		t.Fatalf("Save(decoded) error = %v", err)
+	}
+	kept, err := store.Get(ctx, "run_digests")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if diff := cmp.Diff(want, kept.SealedDigests); diff != "" {
+		t.Errorf("a later save moved the digests (-want +got):\n%s", diff)
+	}
+
+	// A run stored before digests existed carries its sealed answers and no digests, and reads back
+	// that way rather than with digests taken now over whatever the column holds.
+	legacy := sampleRun("run_legacy_sealed")
+	legacy.IdempotencyKey = ""
+	legacy.SealedVars = map[string]string{"db_password": "sealed-ciphertext-two"}
+	legacy.SealedNames = []string{"db_password"}
+	if err := store.Save(ctx, legacy); err != nil {
+		t.Fatalf("Save(legacy) error = %v", err)
+	}
+	old, err := store.Get(ctx, "run_legacy_sealed")
+	if err != nil {
+		t.Fatalf("Get(legacy) error = %v", err)
+	}
+	if diff := cmp.Diff(legacy.SealedVars, old.SealedVars); diff != "" {
+		t.Errorf("legacy sealed vars mismatch (-want +got):\n%s", diff)
+	}
+	if len(old.SealedDigests) != 0 {
+		t.Errorf("a run stored without digests read back with %v, so its spec changed after the fact",
+			old.SealedDigests)
 	}
 }

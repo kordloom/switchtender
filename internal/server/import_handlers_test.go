@@ -89,9 +89,10 @@ func TestImportRundeckFormat(t *testing.T) {
 	if !strings.Contains(body, "Nightly") {
 		t.Errorf("preview does not name the imported job: %s", body)
 	}
-	// A secure option must be reported as refused, never quietly imported as a plaintext survey field.
-	if !strings.Contains(body, "secret_token") {
-		t.Errorf("preview does not report the refused secure option: %s", body)
+	// A secure option imports as a secret survey field, sealed rather than stored as text, so the
+	// preview no longer reports it as left out.
+	if strings.Contains(body, "secret_token") || strings.Contains(body, "NOT imported") {
+		t.Errorf("preview still reports the secure option as refused: %s", body)
 	}
 
 	// An unknown format is still refused, and the message names what is accepted.

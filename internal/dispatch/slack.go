@@ -52,8 +52,21 @@ func (d *Dispatcher) deliverSlackFormat(urls []string, label string, r *run.Run)
 // slackMessage renders a run as a one-line Slack message with a status icon, the run label, and
 // the elapsed time. It carries no extra vars, so channel secrets are not exposed.
 func slackMessage(r *run.Run) string {
+	if isSkip(r) {
+		return ":fast_forward: SwitchTender schedule *" + skipSchedule(r) + "* " + skipHeadline(r) +
+			" " + skipDetail(r)
+	}
+	if r.Attention != nil {
+		return "SwitchTender alert: " + attentionSentences(r)
+	}
 	if r.Status == run.StatusPendingApproval {
+		if r.AwaitingStep != nil {
+			return "SwitchTender workflow *" + runLabel(r) + "* " + stepSentences(r)
+		}
 		return "SwitchTender run *" + runLabel(r) + "* " + heldSentences(r)
+	}
+	if r.Status == run.StatusRunning {
+		return ":arrow_forward: SwitchTender run *" + runLabel(r) + "* " + startedSentence
 	}
 	icon := ":white_check_mark:"
 	if r.Status != run.StatusSucceeded {

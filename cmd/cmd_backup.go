@@ -32,7 +32,7 @@ var (
 // snapshot to the terminal and reporting success.
 var backupCmd = &cobra.Command{
 	Use:   "backup",
-	Short: "Write an encrypted backup of credentials, projects, templates, inventories, schedules, triggers, tokens, and access.",
+	Short: "Write an encrypted backup of credentials, projects, templates, inventories, schedules, triggers, notification targets, tokens, and access.",
 	Long: "Write an encrypted, portable backup of the control-plane configuration and secrets. The whole " +
 		"file is sealed with the deployment encryption key, so it stays confidential and tamper-evident, and " +
 		"it restores into either the SQLite or the PostgreSQL backend. Run history and the audit chain are " +
@@ -87,6 +87,7 @@ func backupStores(bundle storeBundle) backup.Stores {
 		InventorySources: bundle.InventorySources(),
 		Schedules:        bundle.Schedules(),
 		Triggers:         bundle.Triggers(),
+		Notifications:    bundle.Notifications(),
 		Users:            bundle.Users(),
 		Tokens:           bundle.Tokens(),
 		Teams:            bundle.Teams(),
@@ -95,12 +96,10 @@ func backupStores(bundle storeBundle) backup.Stores {
 		CredentialTypes:  bundle.CredentialTypes(),
 		Policies:         bundle.Policies(),
 	}
-	// Only a backend that can pin one consistent read snapshot advertises it. SQLite can, on its
-	// serialized read connection. Postgres does not: its reads run over a connection pool, and
-	// pinning a snapshot across the fourteen table reads would mean threading one transaction
-	// through every store read method, which pgx's pool cannot fake and which is a larger change
-	// than a backup wants to carry. A Postgres backup runs unpinned, the way every backup did
-	// before, rather than behind a snapshot that quietly did not hold.
+	// Only a backend that can pin one consistent read snapshot advertises it. SQLite does, on its
+	// serialized read connection, and PostgreSQL does, on one pooled connection held inside a
+	// REPEATABLE READ transaction for the length of the gather. PostgreSQL is the backend every
+	// highly available install runs on, the one most likely to be written during a backup.
 	if sb, ok := bundle.(backup.SnapshotBeginner); ok {
 		stores.Snapshot = sb
 	}
@@ -277,9 +276,10 @@ func reportBackup(s backup.Summary) {
 func summaryLine(s backup.Summary) string {
 	return fmt.Sprintf(
 		"credentials %d, credential types %d, projects %d, templates %d, inventories %d, "+
-			"inventory sources %d, schedules %d, triggers %d, users %d, tokens %d, teams %d, "+
-			"orgs %d, memberships %d, grants %d, policies %d",
+			"inventory sources %d, schedules %d, triggers %d, notification targets %d, "+
+			"notification attachments %d, users %d, tokens %d, teams %d, orgs %d, "+
+			"memberships %d, grants %d, policies %d, awx callback bindings %d",
 		s.Credentials, s.CredentialTypes, s.Projects, s.Templates, s.Inventories,
-		s.InventorySources, s.Schedules, s.Triggers, s.Users, s.Tokens, s.Teams,
-		s.Orgs, s.Memberships, s.Grants, s.Policies)
+		s.InventorySources, s.Schedules, s.Triggers, s.Notifications, s.NotificationAttachments,
+		s.Users, s.Tokens, s.Teams, s.Orgs, s.Memberships, s.Grants, s.Policies, s.AWXBindings)
 }

@@ -3,6 +3,7 @@ package pgstore_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"io"
 	"sync"
 	"sync/atomic"
@@ -234,6 +235,58 @@ func TestHASchedulersNeverDoubleFire(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 	if got := counter.fired.Load(); got != 1 {
 		t.Errorf("fires = %d, want exactly 1", got)
+	}
+}
+
+// TestHASchedulersNeverDoubleFireRecurrence is the double-fire proof for a schedule driven by an
+// RFC 5545 recurrence, across two replicas on one database. The ordinary fire advances the next
+// fire time and the last fire of a bounded rule clears it, and each is a compare-and-set, so either
+// way exactly one replica fires.
+func TestHASchedulersNeverDoubleFireRecurrence(t *testing.T) {
+	dsn := testDSN(t)
+	openReplica(t, dsn)
+	start := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Minute)
+	stamp := start.Format("20060102T150405Z")
+	tests := []struct {
+		Rule      string
+		WantFinal bool
+	}{{ // Test 0: An unbounded rule.
+		Rule: "DTSTART:" + stamp + " RRULE:FREQ=HOURLY",
+	}, { // Test 1: The last occurrence of a counted rule.
+		Rule: "DTSTART:" + stamp + " RRULE:FREQ=HOURLY;COUNT=2", WantFinal: true,
+	}}
+	for testNum, test := range tests {
+		truncateAll(t, dsn)
+		id := fmt.Sprintf("sched_ha_rrule_%d", testNum)
+		due := start.Add(time.Hour)
+		if err := openReplica(t, dsn).Schedules().Save(context.Background(), &schedule.Schedule{
+			ID: id, Name: "quarter close", RRule: test.Rule, Playbook: "play.yml",
+			Enabled: true, CreatedAt: time.Now(), NextRunAt: &due,
+		}); err != nil {
+			t.Fatalf("test %d: Save() error = %v", testNum, err)
+		}
+		counter := &countingSubmitter{}
+		a := schedule.NewScheduler(openReplica(t, dsn).Schedules(), counter, zap.NewNop(),
+			schedule.WithInterval(20*time.Millisecond))
+		b := schedule.NewScheduler(openReplica(t, dsn).Schedules(), counter, zap.NewNop(),
+			schedule.WithInterval(20*time.Millisecond))
+		a.Start()
+		b.Start()
+		waitFor(t, "the schedule to fire", func() bool { return counter.fired.Load() >= 1 })
+		time.Sleep(500 * time.Millisecond)
+		a.Close()
+		b.Close()
+		if got := counter.fired.Load(); got != 1 {
+			t.Errorf("test %d: fires = %d, want exactly 1", testNum, got)
+		}
+		got, err := openReplica(t, dsn).Schedules().Get(context.Background(), id)
+		if err != nil {
+			t.Fatalf("test %d: Get() error = %v", testNum, err)
+		}
+		if test.WantFinal != (got.NextRunAt == nil) {
+			t.Errorf("test %d: NextRunAt = %v, want cleared only after the final occurrence",
+				testNum, got.NextRunAt)
+		}
 	}
 }
 

@@ -89,8 +89,9 @@ function wfPointerUp(e) {
 		const el = document.elementFromPoint(e.clientX, e.clientY);
 		const over = el ? el.closest(".wf-node") : null;
 		const fromId = wfState.link.from;
+		const deny = wfState.link.deny;
 		wfState.link = null;
-		if (over) linkTo(fromId, over.dataset.id);
+		if (over) linkTo(fromId, over.dataset.id, deny);
 		renderEdges();
 	}
 	if (wfState.drag) {
@@ -127,10 +128,18 @@ function wfCancelPointer(e) {
 }
 
 // linkTo adds a dependency edge from one node to another, rejecting self-links, duplicates, and
-// edges that would create a cycle. The status line announces the new dependency.
-function linkTo(fromId, toId) {
+// edges that would create a cycle. With deny set it adds a deny path edge instead, which only an
+// approval step can have: the target runs when that approval is denied or times out. A step cannot
+// both wait for an approval and handle its denial, since it could then never run. The status line
+// announces the new link.
+function linkTo(fromId, toId, deny) {
 	if (fromId === toId) return;
-	if (wfState.edges.some((e) => e.from === fromId && e.to === toId)) return;
+	if (wfState.edges.some((e) => e.from === fromId && e.to === toId)) {
+		if (wfState.edges.some((e) => e.from === fromId && e.to === toId && !!e.deny !== !!deny)) {
+			wfSetStatus("A step cannot both wait for an approval and run when it is denied.", "err");
+		}
+		return;
+	}
 	if (reaches(toId, fromId)) {
 		wfSetStatus("That link would create a cycle.", "err");
 		return;
@@ -138,9 +147,18 @@ function linkTo(fromId, toId) {
 	const from = wfState.nodes.find((n) => n.id === fromId);
 	const to = wfState.nodes.find((n) => n.id === toId);
 	if (!from || !to) return;
+	if (deny && !isApprovalNode(from)) {
+		wfSetStatus("Only a step that waits for approval has a deny path.", "err");
+		return;
+	}
 	wfSnapshot();
-	wfState.edges.push({ from: fromId, to: toId });
-	wfSetStatus(to.name + " now waits for " + from.name + ".", "");
+	if (deny) {
+		wfState.edges.push({ from: fromId, to: toId, deny: true });
+		wfSetStatus(to.name + " now runs if " + from.name + " is denied or times out.", "");
+	} else {
+		wfState.edges.push({ from: fromId, to: toId });
+		wfSetStatus(to.name + " now waits for " + from.name + ".", "");
+	}
 	wfSave();
 }
 
@@ -232,22 +250,34 @@ async function saveWorkflowTemplate() {
 // and routes through sign-in so the graph survives the round trip.
 // workflowSteps renders the canvas graph into the pipeline steps the API accepts, resolving each
 // edge into a dependency by step name.
+// An approval step becomes a step of type approval carrying its description and timeout, and a deny
+// path edge becomes if_denied on the step it points at.
 function workflowSteps() {
+	const sources = (n, deny) => wfState.edges.filter((e) => e.to === n.id && !!e.deny === deny)
+		.map((e) => {
+			const src = wfState.nodes.find((x) => x.id === e.from);
+			return src ? src.name : null;
+		})
+		.filter(Boolean);
 	return wfState.nodes.map((n) => {
-		const step = { name: n.name, tool: n.tool };
-		if (n.tool === "ansible") step.playbook = n.playbook;
-		else step.command = n.command;
-		if (n.inventory) step.inventory = n.inventory;
-		if (n.dryRun) step.dry_run = true;
-		if (n.continueOnFailure) step.continue_on_failure = true;
-		if (n.retries > 0) step.retries = n.retries;
-		const deps = wfState.edges.filter((e) => e.to === n.id)
-			.map((e) => {
-				const src = wfState.nodes.find((x) => x.id === e.from);
-				return src ? src.name : null;
-			})
-			.filter(Boolean);
+		let step;
+		if (isApprovalNode(n)) {
+			step = { name: n.name, type: "approval" };
+			if (n.description) step.description = n.description;
+			if (n.timeout > 0) step.approval_timeout = n.timeout;
+		} else {
+			step = { name: n.name, tool: n.tool };
+			if (n.tool === "ansible") step.playbook = n.playbook;
+			else step.command = n.command;
+			if (n.inventory) step.inventory = n.inventory;
+			if (n.dryRun) step.dry_run = true;
+			if (n.continueOnFailure) step.continue_on_failure = true;
+			if (n.retries > 0) step.retries = n.retries;
+		}
+		const deps = sources(n, false);
 		if (deps.length) step.depends_on = deps;
+		const denied = sources(n, true);
+		if (denied.length) step.if_denied = denied;
 		return step;
 	});
 }
@@ -386,8 +416,11 @@ document.addEventListener("DOMContentLoaded", () => {
 		wireRunsFilters();
 		wireRunsAutoRefresh();
 		loadRuns();
+		loadApprovalSteps("");
 	} else if (page === "detail") {
 		loadDetail(document.body.dataset.runId);
+		loadApprovalSteps(document.body.dataset.runId);
+		loadRunNotifications(document.body.dataset.runId);
 	} else if (page === "fleet") {
 		loadFleet();
 	} else if (page === "activity") {
@@ -415,6 +448,11 @@ document.addEventListener("DOMContentLoaded", () => {
 		wireModal("cred");
 		wireCredentialForm();
 		loadCredentials();
+		wireModal("ctype");
+		wireCredentialTypes();
+		loadCredentialTypes();
+		wireFederationKeys();
+		loadFederationKeys();
 	} else if (page === "audit") {
 		if (roleAtLeast("admin")) {
 			wireAudit();
@@ -462,6 +500,11 @@ document.addEventListener("DOMContentLoaded", () => {
 		wireMigrate();
 	} else if (page === "doctor") {
 		loadDoctor();
+	} else if (page === "notifications") {
+		wireModal("notify");
+		wireNotifyForm();
+		wireNotifyDetail();
+		loadNotifications();
 	}
 	if (page === "runs") mountRunsWindowChip();
 	buildNav();

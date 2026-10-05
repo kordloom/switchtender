@@ -36,11 +36,7 @@ func (d *Dispatcher) notifyGrafana(r *run.Run) {
 	if len(d.grafanaURLs) == 0 {
 		return
 	}
-	ann := grafanaAnnotation{Text: grafanaText(r), Tags: []string{"switchtender", string(r.Status)}}
-	if r.EndedAt != nil {
-		ann.Time = r.EndedAt.UnixMilli()
-	}
-	body, err := json.Marshal(ann)
+	body, err := json.Marshal(grafanaAnnotationFor(r))
 	if err != nil {
 		d.log.Error("dispatch: encode grafana annotation: "+err.Error(), zap.String("run_id", r.ID))
 		return
@@ -59,8 +55,28 @@ func (d *Dispatcher) notifyGrafana(r *run.Run) {
 	}
 }
 
+// grafanaAnnotationFor builds the annotation a run posts: its text, its status tags and an attention
+// alert's, and the time it ended when it has. Every Grafana path builds it here, so a dashboard
+// shows the same marker whichever path reaches it.
+func grafanaAnnotationFor(r *run.Run) grafanaAnnotation {
+	ann := grafanaAnnotation{Text: grafanaText(r), Tags: []string{"switchtender", string(r.Status)}}
+	if r.EndedAt != nil {
+		ann.Time = r.EndedAt.UnixMilli()
+	}
+	if r.Attention != nil {
+		ann.Tags = append(ann.Tags, "attention", r.Attention.Blocker)
+	}
+	return ann
+}
+
 // grafanaText renders a run as a one-line annotation with the run label, status, and elapsed time.
 func grafanaText(r *run.Run) string {
+	if r.Attention != nil {
+		return "SwitchTender alert: " + r.Attention.Summary
+	}
+	if r.Status == run.StatusRunning {
+		return "SwitchTender run " + runLabel(r) + " " + startedSentence
+	}
 	text := fmt.Sprintf("SwitchTender run %s %s", runLabel(r), r.Status)
 	if el := runElapsed(r); el != "" {
 		text += " in " + el

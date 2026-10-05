@@ -69,3 +69,45 @@ func TestEveryFlagIsInTheConfigurationReference(t *testing.T) {
 			len(missing), strings.Join(missing, "\n  "))
 	}
 }
+
+// TestNotifyFlagHelpMatchesTheConfigurationReference pins that what serve --help says each
+// notification channel is told about is what the configuration reference says, word for word.
+//
+// The two are written apart, and the help is what an operator reads at the moment of choosing a
+// channel. When approval steps and attention alerts reached the channels, the reference said so and
+// the help still said a channel heard a run finish or be held, so the one place an operator looks
+// while wiring a pager or a mailbox undersold what it would receive.
+func TestNotifyFlagHelpMatchesTheConfigurationReference(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile("../docs/configuration.md")
+	if err != nil {
+		t.Fatalf("read the configuration reference: %v", err)
+	}
+	documented := map[string]string{}
+	for _, line := range strings.Split(string(raw), "\n") {
+		cells := strings.Split(line, " | ")
+		if len(cells) < 3 || !strings.HasPrefix(cells[0], "| `--") {
+			continue
+		}
+		name := strings.Trim(strings.TrimPrefix(cells[0], "| "), "`")
+		documented[name] = strings.ReplaceAll(strings.TrimSuffix(cells[2], " |"), "`", "")
+	}
+	for _, name := range []string{"notify-webhook", "notify-slack", "notify-mattermost",
+		"notify-rocketchat", "notify-discord", "notify-teams", "notify-ntfy", "notify-pagerduty",
+		"notify-grafana", "notify-twilio-to", "notify-on"} {
+		f := serveCmd.Flags().Lookup(name)
+		if f == nil {
+			t.Errorf("serve has no --%s flag", name)
+			continue
+		}
+		want, ok := documented["--"+name]
+		if !ok {
+			t.Errorf("the configuration reference has no row for --%s", name)
+			continue
+		}
+		if f.Usage != want {
+			t.Errorf("--%s help says\n\t%s\nthe configuration reference says\n\t%s", name, f.Usage,
+				want)
+		}
+	}
+}

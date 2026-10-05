@@ -65,11 +65,17 @@ const (
 type PlaybookSignals struct {
 	// Permanent lists the reasons the playbook holds something that cannot be undone.
 	Permanent []string
+	// Forced lists each play, block, task, role, or include that sets check_mode to anything but
+	// literal true, naming the file and the task, which Ansible executes for real even under --check.
+	Forced []string
 	// Unread lists what the playbook pulls in that the scan could not read, each with why, so the
 	// grade can say its own scope rather than implying it read everything that will run.
 	Unread []string
 	// Files counts the distinct files the scan read, the playbook included.
 	Files int
+	// Inputs lists the distinct files the scan read, sorted, the playbook included, which is what
+	// the evidence of a dry run's scan names as examined.
+	Inputs []string
 	// Source says which version of the files was read, such as the commit, and is empty when the
 	// files have only the one version.
 	Source string
@@ -107,6 +113,10 @@ func ScanPlaybookIn(fsys fs.FS, name, place string) (PlaybookSignals, error) {
 	}
 	s.loadConfig()
 	s.scanPlays(name, plays, 0)
+	for file := range s.files {
+		out.Inputs = append(out.Inputs, file)
+	}
+	sort.Strings(out.Inputs)
 	return out, nil
 }
 
@@ -267,6 +277,7 @@ func (s *playbookScan) locate(what, name string, depth int, candidates []string,
 func (s *playbookScan) scanPlays(file string, plays []map[string]any, depth int) {
 	basedir := path.Dir(file)
 	for _, play := range plays {
+		s.checkMode(file, playLabel(play), play)
 		for _, key := range sortedKeys(play) {
 			// An imported playbook is a play-level entry naming another playbook, resolved against
 			// the directory of the one importing it.
@@ -277,6 +288,9 @@ func (s *playbookScan) scanPlays(file string, plays []map[string]any, depth int)
 		ctx := scanContext{file: file, basedir: basedir, collections: stringList(play["collections"]),
 			depth: depth}
 		for _, entry := range asList(play["roles"]) {
+			if args, ok := entry.(map[string]any); ok {
+				s.checkMode(file, label("role", roleName(entry)), args)
+			}
 			s.followRole(ctx, "role", roleName(entry), "", "")
 		}
 		for _, key := range []string{"pre_tasks", "tasks", "post_tasks", "handlers"} {
@@ -424,6 +438,9 @@ func (s *playbookScan) followDependencies(ctx scanContext, what, dir string) {
 			continue
 		}
 		for _, dep := range asList(meta["dependencies"]) {
+			if args, ok := dep.(map[string]any); ok {
+				s.checkMode(file, label("role dependency", roleName(dep)), args)
+			}
 			s.followRole(ctx, "role", roleName(dep), "", "")
 		}
 	}
@@ -478,6 +495,7 @@ func (s *playbookScan) scanTaskList(ctx scanContext, raw any) {
 		if !ok {
 			continue
 		}
+		s.checkMode(ctx.file, taskLabel(task), task)
 		// A block holds more tasks, and its rescue and always paths run real work too.
 		for _, nested := range []string{"block", "rescue", "always"} {
 			if inner, ok := task[nested]; ok {
@@ -499,9 +517,11 @@ func (s *playbookScan) scanTask(ctx scanContext, task map[string]any) {
 		module := shortName(key)
 		switch module {
 		case "include_tasks", "import_tasks", "include":
+			s.checkApply(ctx.file, task, value)
 			s.followTasks(ctx, module, value)
 			continue
 		case "include_role", "import_role":
+			s.checkApply(ctx.file, task, value)
 			args := moduleArgs(value)
 			s.followRole(ctx, module, stringArg(args, "name"), stringArg(args, "tasks_from"),
 				stringArg(args, "handlers_from"))
@@ -526,6 +546,109 @@ func (s *playbookScan) scanTask(ctx scanContext, task map[string]any) {
 				" with state absent, which destroys what it held")
 		}
 	}
+}
+
+// checkMode records a play, block, task, role entry, or include that sets check_mode to anything
+// but literal true. Ansible runs such work for real even under --check, so a dry run of a playbook
+// holding one is not a preview. A value that is templated, null, or anything Ansible would not read
+// as true is recorded too: what it evaluates to is decided at run time, after the gate has passed
+// the run, so it is taken as the value that changes hosts.
+func (s *playbookScan) checkMode(file, what string, holder map[string]any) {
+	value, ok := holder["check_mode"]
+	if !ok || checkModeTrue(value) {
+		return
+	}
+	finding := util.Clip(util.SafeText(file), 2*maxScanLabel) + ": " + what + " sets check_mode to " +
+		checkModeText(value)
+	if s.listed[finding] {
+		return
+	}
+	s.listed[finding] = true
+	s.out.Forced = append(s.out.Forced, finding)
+}
+
+// checkApply records an include whose apply keyword sets check_mode on everything it pulls in. A
+// keyword on a dynamic include binds the include itself, and apply is how it reaches the tasks
+// included, so both are read.
+func (s *playbookScan) checkApply(file string, task map[string]any, value any) {
+	apply, ok := moduleArgs(value)["apply"].(map[string]any)
+	if !ok {
+		return
+	}
+	s.checkMode(file, "the apply of "+taskLabel(task), apply)
+}
+
+// checkModeTrue reports whether a check_mode value is one Ansible reads as true without evaluating
+// anything: the boolean, or one of the spellings its boolean conversion accepts.
+func checkModeTrue(value any) bool {
+	switch v := value.(type) {
+	case bool:
+		return v
+	case int:
+		return v == 1
+	case float64:
+		return v == 1
+	case string:
+		if templated(v) {
+			return false
+		}
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "true", "yes", "on", "y", "t", "1":
+			return true
+		}
+	}
+	return false
+}
+
+// checkModeText renders a check_mode value the way a finding repeats it.
+func checkModeText(value any) string {
+	switch v := value.(type) {
+	case nil:
+		return "nothing, which is not true"
+	case bool:
+		return strconv.FormatBool(v)
+	case string:
+		text := strconv.Quote(util.Clip(util.SafeText(v), maxScanLabel))
+		if templated(v) {
+			return text + ", which is only decided at run time"
+		}
+		return text
+	default:
+		return strconv.Quote(util.Clip(util.SafeText(fmt.Sprint(v)), maxScanLabel))
+	}
+}
+
+// playLabel names a play as a finding repeats it.
+func playLabel(play map[string]any) string {
+	for _, key := range []string{"import_playbook", "ansible.builtin.import_playbook"} {
+		if target := includeTarget(play[key]); target != "" {
+			return label("import_playbook", target)
+		}
+	}
+	if name := stringArg(play, "name"); name != "" {
+		return label("play", name)
+	}
+	return "an unnamed play"
+}
+
+// taskLabel names a task or block as a finding repeats it: by its name, or by the module it runs
+// when it has none, so an approver can find it in the file.
+func taskLabel(task map[string]any) string {
+	kind := "task"
+	if _, ok := task["block"]; ok {
+		kind = "block"
+	}
+	if name := stringArg(task, "name"); name != "" {
+		return label(kind, name)
+	}
+	if kind == "task" {
+		for _, key := range sortedKeys(task) {
+			if !taskKeywords[key] {
+				return "an unnamed " + strconv.Quote(util.Clip(key, maxScanLabel)) + " task"
+			}
+		}
+	}
+	return "an unnamed " + kind
 }
 
 // loadConfig reads the role and collection search paths from the ansible.cfg at the root of the

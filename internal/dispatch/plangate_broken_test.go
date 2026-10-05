@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/plantest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -25,6 +25,8 @@ type brokenPlanRunner struct {
 	exitCode int
 	// err is what the plan pass returns, standing in for a tool that could not be launched.
 	err error
+	// plan, when set, is what a plan pass that succeeds returns, so a test chooses the saved plan.
+	plan *roundhouse.Result
 }
 
 // Run reports the configured plan failure and counts any apply that reached it.
@@ -35,6 +37,9 @@ func (b *brokenPlanRunner) Run(_ context.Context, spec roundhouse.Spec,
 		return roundhouse.Result{ExitCode: 0}, nil
 	}
 	_, _ = io.WriteString(out, b.output)
+	if b.plan != nil && b.err == nil && b.exitCode == 0 {
+		return *b.plan, nil
+	}
 	return roundhouse.Result{ExitCode: b.exitCode}, b.err
 }
 
@@ -121,22 +126,18 @@ func TestABrokenPlanProposesNoApply(t *testing.T) {
 	}
 }
 
-// TestATruncatedPlanIsHeldRatherThanWeighed pins the bound on the plan buffer meeting the gate. The
-// summary sits at the end of a plan and the parser cross-checks every summary line, so judging the
-// part that fit could both miss the answer and miss a disagreement between two of them. An unweighed
-// plan is exactly what the hold is for, so the apply waits for a person rather than being queued as
-// though it destroyed nothing.
-func TestATruncatedPlanIsHeldRatherThanWeighed(t *testing.T) {
+// TestAPlanWhoseRenderingCouldNotBeReadIsHeld pins the gate's fail-safe on the saved plan. The gate
+// weighs a plan by its JSON rendering, and the runner leaves the rendering off when the tool would
+// not render the plan or the rendering is larger than it holds. A plan nobody weighed is exactly
+// what the hold is for, so the apply waits for a person rather than being queued as though it
+// destroyed nothing, whatever the printed summary said.
+func TestAPlanWhoseRenderingCouldNotBeReadIsHeld(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-
-	// A plan larger than the read cap whose readable summary destroys nothing. Weighed whole it
-	// would queue; truncated it must be held instead.
-	filler := strings.Repeat("resource churn line\n", (planReadCap/20)+64)
 	runner := &brokenPlanRunner{
-		output:   filler + "Plan: 0 to add, 0 to change, 0 to destroy.\n",
-		exitCode: 0,
+		output: "Plan: 0 to add, 0 to change, 0 to destroy.\n",
+		plan:   &roundhouse.Result{ExitCode: 0, Drift: true, PlanFile: plantest.File},
 	}
 	d := New(store, runner, nil, WithNoJanitor(), WithPolicies(destroyGuardStore(t, 3)),
 		WithClaimInterval(time.Millisecond))
@@ -150,24 +151,17 @@ func TestATruncatedPlanIsHeldRatherThanWeighed(t *testing.T) {
 	if plan := waitTerminal(t, store, created.ID); plan.Status != run.StatusSucceeded {
 		t.Fatalf("plan run status = %q, want succeeded: the plan itself worked", plan.Status)
 	}
-
 	proposal := waitProposal(t, store, created.ID)
 	stored, err := store.Get(ctx, proposal.ID)
 	if err != nil {
 		t.Fatalf("Get(proposal) error = %v", err)
 	}
 	if stored.Status != run.StatusPendingApproval {
-		t.Errorf("proposed apply status = %q, want pending_approval: a plan too large to read was "+
-			"never weighed against the destroy limit", stored.Status)
+		t.Errorf("proposed apply status = %q, want pending_approval: a plan whose rendering could "+
+			"not be read was never weighed", stored.Status)
 	}
-	if !strings.Contains(stored.HeldByPolicy, "unreadable") {
-		t.Errorf("held-by reason = %q, want it to say the summary could not be read",
-			stored.HeldByPolicy)
-	}
-
-	time.Sleep(200 * time.Millisecond)
 	if n := runner.applies.Load(); n != 0 {
-		t.Errorf("%d applies executed off a plan nobody could weigh", n)
+		t.Errorf("%d applies executed off a plan nobody weighed", n)
 	}
 }
 
@@ -255,27 +249,18 @@ func TestPlanGateWithNoPoliciesConfiguredGatesNothing(t *testing.T) {
 	}
 }
 
-// TestAPlanTruncatedAfterAReadableSummaryIsStillHeld covers the case the read cap exists for that a
-// plan whose summary never fit does not reach. Terraform prints a summary that a truncated copy can
-// contain, and the parser cross-checks every summary line in the output before it trusts one, so a
-// plan holding a second, disagreeing summary beyond the cap reads as confidently weighed when only
-// the first line survives. Weighed whole this plan is unreadable and held; weighed on the part that
-// fit it destroys nothing and is queued. The fail-safe that discards the count of any truncated
-// buffer is the only thing standing between the two, so it is pinned on output the parser can
-// actually read rather than on output it would have refused anyway.
-func TestAPlanTruncatedAfterAReadableSummaryIsStillHeld(t *testing.T) {
+// TestTheGateWeighsTheSavedPlanNotThePrintedSummary pins where the destroy count comes from. The
+// apply carries out the saved plan file, so the count the limit is held against has to be the one in
+// that file, read from its JSON rendering, never the text the tool printed: a summary that reads as
+// destroying nothing over a plan file that destroys nine must not queue an apply that destroys nine.
+func TestTheGateWeighsTheSavedPlanNotThePrintedSummary(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-
-	// A harmless summary well inside the cap, then enough output to overrun it, then the summary
-	// that actually disagrees. The parser reads the whole of this as unreadable and the first
-	// 4MB of it as "destroys nothing".
-	filler := strings.Repeat("resource churn line\n", (planReadCap/20)+64)
 	runner := &brokenPlanRunner{
-		output: "Plan: 1 to add, 0 to change, 0 to destroy.\n" + filler +
-			"Plan: 0 to add, 0 to change, 9 to destroy.\n",
-		exitCode: 0,
+		output: "Plan: 0 to add, 0 to change, 0 to destroy.\n",
+		plan: &roundhouse.Result{ExitCode: 0, Drift: true, PlanFile: plantest.File,
+			PlanJSON: plantest.JSON(9)},
 	}
 	d := New(store, runner, nil, WithNoJanitor(), WithPolicies(destroyGuardStore(t, 3)),
 		WithClaimInterval(time.Millisecond))
@@ -289,23 +274,16 @@ func TestAPlanTruncatedAfterAReadableSummaryIsStillHeld(t *testing.T) {
 	if plan := waitTerminal(t, store, created.ID); plan.Status != run.StatusSucceeded {
 		t.Fatalf("plan run status = %q, want succeeded: the plan itself worked", plan.Status)
 	}
-
 	proposal := waitProposal(t, store, created.ID)
 	stored, err := store.Get(ctx, proposal.ID)
 	if err != nil {
 		t.Fatalf("Get(proposal) error = %v", err)
 	}
 	if stored.Status != run.StatusPendingApproval {
-		t.Errorf("proposed apply status = %q, want pending_approval: the count came from a "+
-			"truncated buffer, so the plan was never weighed whole", stored.Status)
+		t.Errorf("proposed apply status = %q, want pending_approval: the saved plan destroys nine "+
+			"against a limit of three", stored.Status)
 	}
-	if !strings.Contains(stored.HeldByPolicy, "unreadable") {
-		t.Errorf("held-by reason = %q, want it to say the summary could not be read",
-			stored.HeldByPolicy)
-	}
-
-	time.Sleep(200 * time.Millisecond)
-	if n := runner.applies.Load(); n != 0 {
-		t.Errorf("%d applies executed off a plan read only as far as the cap", n)
+	if stored.PlanDestroys == nil || *stored.PlanDestroys != 9 {
+		t.Errorf("recorded destroys = %v, want the saved plan's nine", stored.PlanDestroys)
 	}
 }

@@ -46,6 +46,9 @@ type createTokenResponse struct {
 	Role string `json:"role"`
 	// ExpiresAt is when it stops working, absent when it never does.
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	// CreatedBy names who minted it, as the chain records the caller, which for an agent is who
+	// provisioned it.
+	CreatedBy string `json:"created_by,omitempty"`
 }
 
 // listTokensResponse wraps the token list. The tokens carry no secret: auth.Token keeps its hash out
@@ -143,6 +146,10 @@ func createTokenHandler(tokens auth.Store, users user.Store, log *zap.Logger) ht
 		}
 		tok.UserID = u.ID
 		tok.Kind = req.Kind
+		// Who minted it is recorded beside whom it acts for. An organization admin who provisions an
+		// agent for somebody else is a different person from the account the agent is bound to, and
+		// an agent-initiated run's evidence names both.
+		tok.CreatedBy, tok.CreatedByType = issuerOf(r)
 		if req.TTLHours > 0 {
 			expires := time.Now().Add(time.Duration(req.TTLHours) * time.Hour)
 			tok.ExpiresAt = &expires
@@ -162,6 +169,7 @@ func createTokenHandler(tokens auth.Store, users user.Store, log *zap.Logger) ht
 		out := createTokenResponse{
 			ID: tok.ID, Name: tok.Name, Token: plain, Kind: tok.Kind,
 			Username: u.Username, Role: string(role), ExpiresAt: tok.ExpiresAt,
+			CreatedBy: tok.CreatedBy,
 		}
 		respondJSON(w, log, http.StatusCreated, out, wantsPretty(r))
 		// The plaintext is cleared from the response value as soon as it is written, so it does not
@@ -170,6 +178,17 @@ func createTokenHandler(tokens auth.Store, users user.Store, log *zap.Logger) ht
 		plain = ""
 		_ = plain
 	}
+}
+
+// issuerOf names the caller minting a token exactly as the gate recorded the request that carried
+// the mint, so the token's issuer and the chain entry for its issuance agree. A handler reached
+// with no gate in front has nobody to name, and the issuer stays empty rather than guessed.
+func issuerOf(r *http.Request) (name, kind string) {
+	who, ok := recordedFrom(r.Context())
+	if !ok {
+		return "", ""
+	}
+	return who.Name, who.Type
 }
 
 // deleteTokenHandler revokes a token by id, which stops it working everywhere at once.

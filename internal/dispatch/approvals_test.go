@@ -92,8 +92,18 @@ func TestRunReject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
-	if got.Status != run.StatusRejected || got.Error != "not allowed on prod" {
-		t.Errorf("stored = {status:%q error:%q}, want rejected with the reason", got.Status, got.Error)
+	// The run's error says it was rejected and does not carry the reason: the reason is kept in the
+	// decision record, where a redaction can remove it, and never in the run's committed outcome.
+	if got.Status != run.StatusRejected || got.Error != "rejected by an approver" {
+		t.Errorf("stored = {status:%q error:%q}, want rejected by an approver", got.Status, got.Error)
+	}
+	records, err := d.Decisions(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("Decisions() error = %v", err)
+	}
+	if len(records) != 1 || records[0].Reason == nil ||
+		records[0].Reason.Text != "not allowed on prod" {
+		t.Errorf("decision records = %+v, want one rejection carrying the reason", records)
 	}
 }
 

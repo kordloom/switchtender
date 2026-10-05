@@ -46,10 +46,7 @@ func (d *Dispatcher) twilioConfigured() bool {
 // sendTwilioText posts one SMS to a single recipient through the configured account. The caller has
 // already decided the run warrants a text and confirmed the account is set.
 func (d *Dispatcher) sendTwilioText(r *run.Run, to string) {
-	message := "SwitchTender run " + runLabel(r) + " " + string(r.Status)
-	if r.Error != "" {
-		message += ": " + truncateError(r.Error)
-	}
+	message := twilioText(r)
 	endpoint := d.twilioBaseURL + "/2010-04-01/Accounts/" + url.PathEscape(d.twilioSID) + "/Messages.json"
 	headers := map[string]string{
 		"Content-Type":  "application/x-www-form-urlencoded",
@@ -62,4 +59,21 @@ func (d *Dispatcher) sendTwilioText(r *run.Run, to string) {
 		defer d.notifyWG.Done()
 		d.deliverWithHeaders(endpoint, r.ID, body, headers)
 	}()
+}
+
+// twilioText is the text message a run sends: an attention alert's summary, a start, or the run's
+// status with its error. Every Twilio path builds it here, so a phone reads the same message
+// whichever path reaches it.
+func twilioText(r *run.Run) string {
+	if r.Attention != nil {
+		return "SwitchTender alert: " + r.Attention.Summary
+	}
+	message := "SwitchTender run " + runLabel(r) + " " + string(r.Status)
+	if r.Status == run.StatusRunning {
+		message = "SwitchTender run " + runLabel(r) + " " + startedSentence
+	}
+	if r.Error != "" {
+		message += ": " + truncateError(r.Error)
+	}
+	return message
 }

@@ -17,6 +17,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/ai"
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
@@ -101,6 +102,15 @@ func (a *recordingApprover) Reject(ctx context.Context, id, reason string, _ out
 	}
 	rn.Error = reason
 	return rn, nil
+}
+
+// DecideRun applies a decision carrying a reason the way Approve and Reject do.
+func (a *recordingApprover) DecideRun(ctx context.Context, id string,
+	dec dispatch.RunDecision) (*run.Run, error) {
+	if dec.Approve {
+		return a.Approve(ctx, id, dec.By)
+	}
+	return a.Reject(ctx, id, dec.Reason, dec.By)
 }
 
 // decide writes status onto the stored run and returns it.

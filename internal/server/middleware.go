@@ -27,7 +27,7 @@ func bodyLimit(next http.Handler) http.Handler {
 			// method left uncapped is a body the audit gate then buffers whole to digest it, which
 			// an anonymous caller could turn into an out-of-memory crash.
 			limit := int64(maxBodyBytes)
-			if uploadPath(r.URL.Path) {
+			if uploadPath(r.URL.Path) || planFilePath(r.URL.Path) {
 				limit = maxUploadBodyBytes
 			}
 			r.Body = http.MaxBytesReader(w, r.Body, limit)
@@ -42,6 +42,19 @@ func bodyLimit(next http.Handler) http.Handler {
 func uploadPath(p string) bool {
 	clean := path.Clean("/" + strings.TrimPrefix(strings.ToLower(p), "/"))
 	return strings.HasPrefix(clean, "/v1/import/") || strings.HasPrefix(clean, "/hooks/")
+}
+
+// planFilePath reports whether p is the relay route a worker hands a saved plan file to, which a plan
+// of an ordinary configuration outgrows the ordinary cap with. It matches the cleaned, lowercased path
+// exactly, as uploadPath does.
+func planFilePath(p string) bool {
+	clean := path.Clean("/" + strings.TrimPrefix(strings.ToLower(p), "/"))
+	rest, ok := strings.CutPrefix(clean, "/relay/v1/runs/")
+	if !ok {
+		return false
+	}
+	id, tail, ok := strings.Cut(rest, "/")
+	return ok && id != "" && tail == "propose-apply"
 }
 
 // securityHeaders stamps every response with the browser hardening headers: no MIME sniffing, no

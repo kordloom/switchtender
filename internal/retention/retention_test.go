@@ -43,6 +43,11 @@ func TestSweepTrimsThenDeletes(t *testing.T) {
 		if err := store.Save(ctx, &run.Run{ID: id, Status: run.StatusSucceeded, CreatedAt: now.Add(-age)}); err != nil {
 			t.Fatalf("Save(%s) finalize error = %v", id, err)
 		}
+		// Its outcome is on the chain, as the process that finished it puts it, so only age
+		// decides what the sweep removes.
+		if err := store.SettleOutcome(ctx, id); err != nil {
+			t.Fatalf("SettleOutcome(%s) error = %v", id, err)
+		}
 	}
 
 	sweeper := retention.NewSweeper(store, nil,

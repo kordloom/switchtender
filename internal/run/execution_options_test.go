@@ -28,6 +28,8 @@ func fullSpecRun(t *testing.T) *Run {
 		Verbosity:        3,
 		Forks:            25,
 		DiffMode:         true,
+		UseFactCache:     true,
+		FactCacheTimeout: 3600,
 		ProjectID:        "proj_1",
 		InventoryID:      "inv_1",
 		Queue:            "gpu",
@@ -35,6 +37,11 @@ func fullSpecRun(t *testing.T) *Run {
 		Image:            "ghcr.io/org/img:1",
 		PullCredentialID: "cred_pull",
 		PinnedCommit:     "deadbeefcafe",
+		TemplateID:       "tpl_1",
+		SealedNames:      []string{"db_password"},
+		SealedVars:       map[string]string{"db_password": "sealed-answer"},
+		SealedDigests:    SealedDigestsOf(map[string]string{"db_password": "sealed-answer"}),
+		GitRef:           "refs/pull/12/head",
 		// Everything below belongs to this one run rather than to the spec.
 		Limit:         "shard-0-hosts",
 		Labels:        map[string]string{"team": "core"},
@@ -48,6 +55,19 @@ func fullSpecRun(t *testing.T) *Run {
 		HeldByPolicy:  "prod gate",
 		AuditReceipt:  "41:9f2caa",
 		ShardCount:    &shards,
+		// What the gate read in the playbook is a judgment about this request, and so is the note on
+		// why it was held. A derived request is graded again, against the playbook as it stands then.
+		DryRunScans: []DryRunScan{{Tool: ToolAnsible, Scanner: CheckModeScanner,
+			Findings: []string{`site.yml: task "Restart" sets check_mode to false`}}},
+		HoldNote: "This dry run was not shown to change nothing.",
+		// What the executor's inventory cross-check found is about this execution, and a policy's
+		// notes about this request; a derived run makes and earns its own.
+		InventoryCheck: &InventoryCheck{AnsibleCore: "2.18.1", ResolvedDigest: "sha256:abc"},
+		PolicyNotes:    []string{"policy \"advice\" noted: staging change"},
+		// Who initiated this request, and what the rules that held it ask of its decision, belong
+		// to this request; a derived run is attributed and judged on its own.
+		Initiator:     &Initiator{InitiatedBy: "deploy-bot", BoundTo: "user_7"},
+		RequireReason: "denials",
 	}
 }
 
@@ -72,9 +92,15 @@ func TestExecutionOptionsCarriesTheWholeSpec(t *testing.T) {
 		ExtraVars: map[string]any{"env": "prod"}, CredentialIDs: []string{"cred_a", "cred_b"},
 		Tags: []string{"deploy"}, SkipTags: []string{"slow"},
 		Verbosity: 3, Forks: 25, DiffMode: true,
+		UseFactCache: true, FactCacheTimeout: 3600,
 		ProjectID: "proj_1", InventoryID: "inv_1", Queue: "gpu", Timeout: 900,
 		Image: "ghcr.io/org/img:1", PullCredentialID: "cred_pull",
-		PinnedCommit: "deadbeefcafe",
+		PinnedCommit: "deadbeefcafe", TemplateID: "tpl_1", GitRef: "refs/pull/12/head",
+		// A rerun, a retry, and a shard carry the secret survey answer still sealed, which is what
+		// AWX does with a password answer on relaunch, bound by the digest of the same ciphertext.
+		SealedNames:   []string{"db_password"},
+		SealedVars:    map[string]string{"db_password": "sealed-answer"},
+		SealedDigests: SealedDigestsOf(map[string]string{"db_password": "sealed-answer"}),
 	}
 	if diff := cmp.Diff(want, derived, cmpopts.EquateEmpty()); diff != "" {
 		t.Errorf("the derived run's spec differs from the source (-want +got):\n%s", diff)
@@ -132,6 +158,18 @@ func TestExecutionOptionsLeavesPerRunFieldsAlone(t *testing.T) {
 	}
 	if derived.ShardCount != nil {
 		t.Errorf("ShardCount = %v, want nil: the shard shape belongs to the split", *derived.ShardCount)
+	}
+	if len(derived.DryRunScans) != 0 || derived.HoldNote != "" {
+		t.Errorf("DryRunScans = %v and HoldNote = %q, want neither carried: a derived request is "+
+			"graded again", derived.DryRunScans, derived.HoldNote)
+	}
+	if derived.Initiator != nil || derived.RequireReason != "" {
+		t.Errorf("Initiator = %v and RequireReason = %q, want neither carried: a derived run is "+
+			"attributed and judged on its own", derived.Initiator, derived.RequireReason)
+	}
+	if derived.InventoryCheck != nil || len(derived.PolicyNotes) != 0 {
+		t.Errorf("InventoryCheck = %v and PolicyNotes = %v, want neither carried: a derived run "+
+			"is checked and judged again", derived.InventoryCheck, derived.PolicyNotes)
 	}
 }
 
@@ -212,5 +250,47 @@ func TestExecutionOptionsKeepsTheDryRunFlagFalse(t *testing.T) {
 	ApplyOptions(target, apply.ExecutionOptions())
 	if target.DryRun {
 		t.Error("a run derived from a real apply stayed a dry run, so it would change nothing")
+	}
+}
+
+// TestADerivedRunIsHeldToItsSourcesDigests pins that a run derived from another carries the digests
+// its source was created with rather than digests taken afresh over whatever ciphertext the source
+// holds now. A sealed answer changed in storage after the source ran is then caught when the rerun,
+// relaunch, shard, or proposed apply executes, instead of being bound anew as if it were the answer.
+func TestADerivedRunIsHeldToItsSourcesDigests(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// Source is the run derived from.
+		Source *Run
+		// WantDigests are the digests the derived run must carry.
+		WantDigests []SealedDigest
+	}{{ // Test 0: The ciphertext changed after the source was created, its digest did not.
+		Source: &Run{
+			SealedVars:    map[string]string{"token": "changed-ciphertext"},
+			SealedNames:   []string{"token"},
+			SealedDigests: SealedDigestsOf(map[string]string{"token": "original-ciphertext"}),
+		},
+		WantDigests: SealedDigestsOf(map[string]string{"token": "original-ciphertext"}),
+	}, { // Test 1: A source created before digests existed is bound by digests taken now.
+		Source: &Run{
+			SealedVars:  map[string]string{"token": "legacy-ciphertext"},
+			SealedNames: []string{"token"},
+		},
+		WantDigests: SealedDigestsOf(map[string]string{"token": "legacy-ciphertext"}),
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			derived := &Run{ID: "run_child"}
+			ApplyOptions(derived, test.Source.ExecutionOptions())
+			if diff := cmp.Diff(test.WantDigests, derived.SealedDigests); diff != "" {
+				t.Errorf("derived digests (-want +got):\n%s", diff)
+			}
+			for name, sealed := range derived.SealedVars {
+				if test.Source.SealedDigests != nil && derived.SealedMatches(name, sealed) {
+					t.Errorf("the derived run would open the changed answer to %q", name)
+				}
+			}
+		})
 	}
 }

@@ -4,7 +4,7 @@ const PAGE_NAV = {
 	tasks: "tasks", workers: "workers", drift: "drift", estate: "estate", changes: "changes", projects: "projects", inventories: "inventories",
 	sources: "sources", jobtemplates: "templates", schedules: "schedules", workflows: "workflows",
 	migrate: "migrate", credentials: "credentials", users: "users", audit: "audit",
-	policies: "policies", doctor: "doctor", docs: "docs",
+	policies: "policies", doctor: "doctor", docs: "docs", notifications: "notifications",
 };
 
 // NAV_ICONS holds the inline SVG body for each nav key, stroked in the current color.
@@ -22,6 +22,7 @@ const NAV_ICONS = {
 	sources: '<path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>',
 	templates: '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>',
 	schedules: '<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/>',
+	notifications: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>',
 	workflows: '<circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="6" r="2.4"/><circle cx="12" cy="18" r="2.4"/><path d="M6.7 7.6 10.6 16M17.3 7.6 13.4 16"/>',
 	migrate: '<path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
 	credentials: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
@@ -379,6 +380,7 @@ const FACET_COLUMNS = {
 	credentials: ["Kind", "Source", "Secret"],
 	users: ["Role"],
 	schedules: ["Enabled"],
+	notifications: ["Kind", "State"],
 	fleet: ["Last outcome"],
 	drift: ["State"],
 	estate: ["Change"],

@@ -40,7 +40,7 @@ func TestDoctorReportsAnInstallThatCannotSign(t *testing.T) {
 		t.Run(test.Name, func(t *testing.T) {
 			t.Parallel()
 			h := doctorHandler(nil, nil, nil, nil, nil,
-				func() bool { return test.CanSign }, zap.NewNop())
+				func() bool { return test.CanSign }, nil, nil, zap.NewNop())
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/doctor", nil))
 			if rec.Code != http.StatusOK {

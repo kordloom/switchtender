@@ -155,6 +155,7 @@ function openTemplateEdit(t) {
 	document.getElementById("tpl-command").value = t.command || "";
 	document.getElementById("tpl-dry-run").checked = !!t.dry_run;
 	document.getElementById("tpl-confirm-launch").checked = !!t.confirm_on_launch;
+	fillCacheCallbackFields(t);
 	const notifyRows = document.getElementById("tpl-notify-rows");
 	if (notifyRows) {
 		notifyRows.innerHTML = "";
@@ -256,6 +257,7 @@ function wireTemplateForm() {
 		}
 		payload.notifications = collectNotifyTargets();
 		const editId = form.dataset.editId;
+		applyCacheCallbackFields(payload, !tool || tool === "ansible", !!editId);
 		if (editId && form.dataset.inventoryId) payload.inventory_id = form.dataset.inventoryId;
 		// The controls the dialog does not render ride along on an edit, so a PUT replaces the
 		// template with what it already was plus the changes, not with the subset this form knows.
@@ -267,16 +269,26 @@ function wireTemplateForm() {
 		inFlight = true;
 		if (submitBtn) submitBtn.disabled = true;
 		try {
+			let saved;
 			if (editId) {
-				await postAction("/templates/" + editId, payload, "PUT");
+				saved = await postAction("/templates/" + editId, payload, "PUT");
 			} else {
-				await postAction("/templates", payload);
+				saved = await postAction("/templates", payload);
 			}
 			resetToCreate();
 			status.textContent = "Saved.";
 			closeModal("template");
 			document.getElementById("templates").innerHTML = "";
 			loadTemplates();
+			// Turning callbacks on is only half of it: a host needs a key, and the key is shown once,
+			// so it is minted and shown here rather than left for the operator to find.
+			if (saved && saved.allow_callbacks && !saved.host_config_key_set && roleAtLeast("admin")) {
+				try {
+					await mintCallbackKey(saved);
+				} catch (err) {
+					setStatus("Callbacks are on, and minting the callback key failed: " + err.message);
+				}
+			}
 		} catch (err) {
 			status.textContent = "Save failed: " + err.message;
 		} finally {
@@ -381,7 +393,8 @@ function launchSplitButton(t) {
 			const created = await postAction("/templates/" + t.id + "/launch");
 			location.href = "/ui/runs/" + created.id;
 		} catch (err) {
-			setStatus("Launch failed: " + err.message);
+			setStatus("Launch failed");
+			showLaunchFailure(document.getElementById("status"), err);
 			main.disabled = false;
 		}
 	});
@@ -537,6 +550,7 @@ function openTemplateView(t) {
 	addRow("Dry run", t.dry_run ? "always" : "");
 	addRow("Extra vars", Object.keys(t.extra_vars || {}).sort().join(", "));
 	addRow("Notifies", (t.notifications || []).map((n) => n.kind).join(", "));
+	cacheCallbackRows(addRow, t);
 	addRow("Created", t.created_at ? fmtTime(t.created_at) : "");
 	const code = document.getElementById("view-code");
 	code.hidden = !t.command;
@@ -553,6 +567,7 @@ function openTemplateView(t) {
 		row.appendChild(open);
 		rows.parentNode.insertBefore(row, code.nextSibling);
 	}
+	appendCallbackAction(rows.parentNode, code, t, () => { overlay.hidden = true; });
 	overlay.hidden = false;
 }
 
@@ -581,6 +596,16 @@ function surveyFieldsInto(container, survey) {
 				opt.textContent = v;
 				input.appendChild(opt);
 			}
+		} else if (f.type === "secret") {
+			// A secret answer is typed into a password field, never echoed, and never offered back by
+			// the browser's autofill. Its default is sealed on the server and reads only as set, so it
+			// is never put in the field: leaving the field empty is what uses it.
+			input = document.createElement("input");
+			input.type = "password";
+			input.setAttribute("autocomplete", "new-password");
+			if (f.default !== undefined && f.default !== null) {
+				input.placeholder = "A default is set. Leave empty to use it.";
+			}
 		} else {
 			input = document.createElement("input");
 			input.type = f.type === "int" ? "number" : "text";
@@ -588,7 +613,7 @@ function surveyFieldsInto(container, survey) {
 		input.className = "input";
 		input.dataset.var = f.var;
 		input.dataset.type = f.type || "text";
-		if (f.default !== undefined && f.default !== null) input.value = f.default;
+		if (f.type !== "secret" && f.default !== undefined && f.default !== null) input.value = f.default;
 		label.appendChild(input);
 		container.appendChild(label);
 	}
@@ -625,8 +650,28 @@ function openSurvey(t) {
 			{ answers: collectSurveyAnswers(form) });
 		location.href = "/ui/runs/" + created.id;
 	}, (err) => {
-		document.getElementById("survey-status").textContent = "Launch failed: " + err.message;
+		showLaunchFailure(document.getElementById("survey-status"), err);
 	});
+}
+
+// showLaunchFailure writes why a launch failed into el. When the refusal links to the host preview
+// of an inventory that matched no hosts, the address at the end of the reason becomes a link to it,
+// so the next step is one click rather than a copied path.
+function showLaunchFailure(el, err) {
+	if (!el) return;
+	const msg = "Launch failed: " + ((err && err.message) || "it could not start");
+	const url = err && err.previewURL;
+	el.textContent = "";
+	if (typeof url !== "string" || !url.startsWith("/ui/") || !msg.endsWith(url)) {
+		el.textContent = msg;
+		return;
+	}
+	el.appendChild(document.createTextNode(msg.slice(0, msg.length - url.length)));
+	const link = document.createElement("a");
+	link.href = url;
+	link.className = "launch-preview-link";
+	link.textContent = url;
+	el.appendChild(link);
 }
 
 // openProjectFiles lists a project's cached checkout and opens any file in the viewer, so a

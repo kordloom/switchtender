@@ -220,6 +220,10 @@ func TestEveryToolCallIsOneAuthenticatedRequestOnItsOwnEndpoint(t *testing.T) {
 			Tool: "propose_adhoc_run", Args: `{"command":"echo hi"}`, WantMethod: http.MethodPost,
 			WantPath: "/v1/runs",
 		},
+		{ // Test 6: Listing pending approvals is a read of the approvals queue and nothing else.
+			Tool: "list_pending_approvals", Args: ``, WantMethod: http.MethodGet,
+			WantPath: "/v1/approvals",
+		},
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -476,13 +480,14 @@ func TestToolSchemasDeclareWhatTheModelMustSupply(t *testing.T) {
 	t.Parallel()
 	_, tools := recordingTools(t, Options{AllowAdhoc: true})
 	wantRequired := map[string][]string{
-		"list_templates":    nil,
-		"propose_run":       {"template_id"},
-		"get_run":           {"run_id"},
-		"get_run_log":       {"run_id"},
-		"get_run_evidence":  {"run_id"},
-		"list_runs":         nil,
-		"propose_adhoc_run": nil,
+		"list_templates":         nil,
+		"propose_run":            {"template_id"},
+		"get_run":                {"run_id"},
+		"get_run_log":            {"run_id"},
+		"get_run_evidence":       {"run_id"},
+		"list_runs":              nil,
+		"propose_adhoc_run":      nil,
+		"list_pending_approvals": nil,
 	}
 	if len(tools) != len(wantRequired) {
 		t.Fatalf("tool set holds %d tools, want %d", len(tools), len(wantRequired))

@@ -65,7 +65,15 @@ func (d *Dispatcher) resolveProject(ctx context.Context, r *run.Run, spec *round
 		return cleanup, err
 	}
 
-	wt, err := d.syncer.Sync(p, sshKey)
+	// A run naming a ref executes the commit that ref holds rather than the branch tip. That is how a
+	// review plan runs a pull request's head, which sits on no branch the project tracks. The pin it
+	// always carries is enforced below exactly as for any pinned run.
+	var wt *project.Worktree
+	if r.GitRef != "" {
+		wt, err = d.syncer.SyncRef(p, sshKey, r.GitRef)
+	} else {
+		wt, err = d.syncer.Sync(p, sshKey)
+	}
 	if err != nil {
 		return cleanup, fmt.Errorf("sync project %s: %w", p.Name, err)
 	}
@@ -101,25 +109,9 @@ func (d *Dispatcher) resolveProject(ctx context.Context, r *run.Run, spec *round
 		return cleanup, err
 	}
 
-	// The run's own image, from the request or its template, outranks the project's.
-	if p.Image != "" && spec.Image == "" {
-		spec.Image = p.Image
-		// Record the pull credential that goes with the adopted image. Without this, a later retry or
-		// proposed-apply reconstructs the spec from the run with the image set but the login gone,
-		// since the image is no longer empty for resolveProject to re-resolve the credential from.
-		r.PullCredentialID = p.PullCredentialID
-		// Chained onto this function's cleanup, which the caller defers for the length of the run,
-		// so the minted login outlives the pull that uses it.
-		pullCleanup, perr := d.resolvePullCredential(ctx, p.PullCredentialID, spec)
-		checkout := cleanup
-		cleanup = func() {
-			pullCleanup()
-			checkout()
-		}
-		if perr != nil {
-			return cleanup, perr
-		}
-	}
+	// The project's image is not adopted here. It was pinned onto the run, with its pull credential,
+	// when the run was submitted, so the image an approval covers is the image the run executes in,
+	// and a project whose image changed since cannot move an approved run into another container.
 	return cleanup, nil
 }
 
@@ -134,7 +126,8 @@ func (d *Dispatcher) resolveProject(ctx context.Context, r *run.Run, spec *round
 // matches. A sync failure downgrades to an unpinned hold, which is exactly the old behavior, but
 // says so on the run so the approver can see the guarantee is absent rather than assume it.
 func (d *Dispatcher) pinHeldRunCommit(r *run.Run) {
-	if r.Status != run.StatusPendingApproval || r.ProjectID == "" || r.PinnedCommit != "" {
+	if r.Status != run.StatusPendingApproval || r.ProjectID == "" || r.PinnedCommit != "" ||
+		r.GitRef != "" {
 		return
 	}
 	if d.projects == nil || d.syncer == nil {
@@ -197,29 +190,39 @@ func (d *Dispatcher) projectKey(ctx context.Context, p *project.Project) (string
 	return unlocked, release, nil
 }
 
-// refreshForGate brings the checkouts a submission draws its playbooks from up to date, once,
-// before the gate first grades them. Each submission path calls it from its first rule check, so
-// every later check in the same submission reads the commit it fetched.
+// refreshForGate brings the checkouts a submission draws its playbooks and configurations from up
+// to date, once, before the gate first grades them. Each submission path calls it from its first
+// rule check, so every later check in the same submission reads the commit it fetched.
 //
 // The gate reads a project run's playbook from the project's checkout, and the checkout holds
 // whatever the last sync fetched. Graded from that alone, a destructive role pushed a minute ago
 // and launched straight away was graded on the commit before it, and ran past a rule written to
 // hold exactly that change. Fetching first makes the grade describe the commit the run is about to
-// execute. A run tied to a fixed commit is read at that commit, which no fetch changes.
+// execute. A run tied to a fixed commit is read at that commit, which no fetch changes, except one
+// that names the ref holding that commit, such as a pull request's plan: its commit may sit on no
+// branch the checkout has fetched, so the ref is fetched, and the commit read where it landed.
 //
-// It fetches only when a rule in force reads what a playbook does, which only a reversibility
-// floor does, so an install without one pays no fetch on the submit path. A failed fetch is logged
-// and the gate grades what the checkout already holds: the execution that follows syncs the same
-// remote and fails on the same fault, so it runs nothing the grade did not see.
+// It fetches only when a rule in force reads what the run's playbook or configuration does, which
+// a reversibility floor does for any run and a dry-run exclusion or a risk floor does for a dry
+// run, so an install without one pays no fetch on the submit path. A failed fetch is logged and the
+// gate grades what the checkout already holds: the execution that follows syncs the same remote and
+// fails on the same fault, so it runs nothing the grade did not see.
 func (d *Dispatcher) refreshForGate(policies []*policy.Policy, units ...*run.Run) {
-	if d.projects == nil || d.syncer == nil || !gradesPlaybooks(policies) {
+	if d.projects == nil || d.syncer == nil {
 		return
 	}
 	ctx := context.Background()
 	fetched := map[string]bool{}
 	for _, r := range units {
-		if r == nil || r.ProjectID == "" || r.Playbook == "" || fetched[r.ProjectID] ||
-			r.CommitSHA != "" || r.PinnedCommit != "" || run.NormalizeTool(r.Tool) != run.ToolAnsible {
+		if r == nil || r.ProjectID == "" || r.CommitSHA != "" || !scannable(r) ||
+			!readsPlaybook(policies, r) {
+			continue
+		}
+		if r.GitRef != "" {
+			d.fetchRefForGate(ctx, r)
+			continue
+		}
+		if fetched[r.ProjectID] || r.PinnedCommit != "" {
 			continue
 		}
 		fetched[r.ProjectID] = true
@@ -238,11 +241,44 @@ func (d *Dispatcher) refreshForGate(policies []*policy.Policy, units ...*run.Run
 	}
 }
 
-// gradesPlaybooks reports whether a rule in force decides on what a playbook does. Only a
-// reversibility floor does; nothing else in a rule reads a playbook's content.
-func gradesPlaybooks(policies []*policy.Policy) bool {
+// fetchRefForGate fetches the ref r names into its project's checkout, so the commit r is pinned
+// to can be read before r runs. A failure is logged and left to the read, which then fails closed.
+func (d *Dispatcher) fetchRefForGate(ctx context.Context, r *run.Run) {
+	if d.projects == nil || d.syncer == nil || r.ProjectID == "" || r.GitRef == "" {
+		return
+	}
+	p, err := d.projects.Get(ctx, r.ProjectID)
+	if err != nil {
+		d.log.Warn("dispatch: read project for the gate: "+err.Error(),
+			zap.String("project", r.ProjectID))
+		return
+	}
+	sshKey, release, err := d.projectKey(ctx, p)
+	if err == nil {
+		_, err = d.syncer.FetchRef(p, sshKey, r.GitRef)
+	}
+	release()
+	if err != nil {
+		d.log.Warn("dispatch: fetch ref for the gate: "+err.Error(), zap.String("project", p.ID))
+	}
+}
+
+// readsPlaybook reports whether a rule in force decides on what r's playbook or configuration
+// does. A reversibility floor does for every run, and so does a Rego policy that reads
+// input.reversibility. For a dry run, so do a rule that excludes dry runs, a risk floor, and every
+// Rego policy: the scan decides whether the dry run is change free, which decides whether the
+// exclusion applies and how the run is graded, and a Rego policy judges a dry run that is not
+// change free as the real run it may be as well as by what it reads. Nothing else in a rule reads a
+// playbook's or a configuration's content.
+func readsPlaybook(policies []*policy.Policy, r *run.Run) bool {
 	for _, p := range policies {
-		if p != nil && p.Reversibility != "" {
+		if p == nil {
+			continue
+		}
+		if p.Reversibility != "" || (r.DryRun && (p.ExcludeDryRun || p.MinRisk != "")) {
+			return true
+		}
+		if p.Rego != nil && (r.DryRun || p.Rego.Reads("reversibility")) {
 			return true
 		}
 	}
@@ -293,6 +329,13 @@ func (d *Dispatcher) applyDefaultImage(spec *roundhouse.Spec) {
 // The returned cleanup is always safe to call, including on the error paths.
 func (d *Dispatcher) resolvePullCredential(ctx context.Context, id string,
 	spec *roundhouse.Spec) (cleanup func(), err error) {
+	return d.resolvePullFrom(ctx, storeSource{d: d}, id, spec)
+}
+
+// resolvePullFrom is resolvePullCredential with the login taken from src, so a relay worker pulls
+// with the login the control node delivered rather than one it has no store to open.
+func (d *Dispatcher) resolvePullFrom(ctx context.Context, src secretSource, id string,
+	spec *roundhouse.Spec) (cleanup func(), err error) {
 	cleanup = func() {}
 	if id == "" {
 		return cleanup, nil
@@ -302,7 +345,7 @@ func (d *Dispatcher) resolvePullCredential(ctx context.Context, id string,
 	// source configuration, and RegistryLogin read that JSON as a username, so an install keeping
 	// registry logins in a secret store pulled with a garbage login and the run failed on an image
 	// it was entitled to.
-	_, plain, lease, err := d.openCredential(ctx, id)
+	_, plain, lease, err := src.credential(ctx, id)
 	if err != nil {
 		return cleanup, fmt.Errorf("pull credential %s: %w", id, err)
 	}

@@ -34,12 +34,20 @@ type ContainerLimits struct {
 	PidsLimit int
 	// Network is the docker --network value, for example "bridge" or "none".
 	Network string
+	// RunFilesSize caps the in-memory filesystem a containerized run's private directory is mounted
+	// as, in the tmpfs size form, for example "64m". It counts against Memory as it fills.
+	RunFilesSize string
 }
+
+// DefaultRunFilesSize is the cap on a containerized run's in-memory secrets mount when none is set.
+// The mount holds the state cloud tools keep about the run's credentials, which is small.
+const DefaultRunFilesSize = "64m"
 
 // DefaultContainerLimits returns bounded defaults that keep normal runs working while stopping a
 // single container from exhausting host memory, CPU, or process tables.
 func DefaultContainerLimits() ContainerLimits {
-	return ContainerLimits{Memory: "2g", CPUs: "2", PidsLimit: 2048, Network: "bridge"}
+	return ContainerLimits{Memory: "2g", CPUs: "2", PidsLimit: 2048, Network: "bridge",
+		RunFilesSize: DefaultRunFilesSize}
 }
 
 // args returns the docker run flags for the configured limits, omitting any that are unset.
@@ -81,6 +89,21 @@ type Spec struct {
 	Command string
 	// DryRun runs the tool in its no-change mode: ansible --check, a syntax check for bash.
 	DryRun bool
+	// ModulesInstalled says a Terraform or OpenTofu working directory already holds exactly the
+	// modules the run must use, put there and checked against what the approval gate read. Init
+	// then installs no module, so it cannot resolve a version again and fetch something newer.
+	ModulesInstalled bool
+	// PlanOut, on a Terraform or OpenTofu dry run, is where the plan saves its plan file. The runner
+	// returns the saved plan and its JSON rendering in the Result. Empty plans without saving. It is a
+	// path in the run's private directory, because a plan file holds sensitive values.
+	PlanOut string
+	// PlanFile, on a Terraform or OpenTofu apply, is a saved plan file the apply carries out instead of
+	// planning again, so the tool applies exactly that plan and refuses one that has gone stale. Empty
+	// applies the configuration directly.
+	PlanFile string
+	// AddSecrets, when set, receives secret values a runner learns while it runs, such as the values a
+	// saved plan marks sensitive, before the runner writes output that could contain them.
+	AddSecrets func([]string)
 	// ExtraVars are passed to ansible-playbook as one JSON --extra-vars argument so values keep
 	// their types.
 	ExtraVars map[string]any
@@ -109,6 +132,10 @@ type Spec struct {
 	Forks int
 	// DiffMode shows the before-and-after of every file and template change, passed as --diff.
 	DiffMode bool
+	// FactCacheDir, when set, points Ansible's jsonfile fact cache plugin at this directory, which
+	// holds the cached facts written for the run and receives the facts it gathers. A container run
+	// mounts it writable.
+	FactCacheDir string
 	// CredentialFiles are host paths a credential injection wrote, whose locations reach the tool
 	// through environment variables. A container has to mount them or the variable names a path that
 	// is not there, so they are tracked here rather than only in the environment.
@@ -125,6 +152,17 @@ type Spec struct {
 	RegistryUsername string
 	// RegistryPassword is the password for RegistryUsername, fed to docker login on stdin.
 	RegistryPassword string
+	// RunDir is the run's private directory, mode 0700 and removed when the run ends, swept if the
+	// executor dies. The extra vars file, an inline script, a container run's environment file, and a
+	// registry login are written inside it rather than into the shared temporary directory, and a
+	// containerized run mounts an in-memory filesystem at the same path inside the container, so what
+	// the tool writes there stays in the container's memory. Empty keeps the temporary directory.
+	RunDir string
+	// RunFilesRoot is the private root every run directory lives under. A containerized run may bind
+	// mount a path inside it even where the root sits under a directory the mount guard otherwise
+	// refuses, such as a systemd runtime directory under /run, because the root holds nothing but
+	// what SwitchTender staged for runs.
+	RunFilesRoot string
 }
 
 // Result is the outcome of a completed execution.
@@ -135,6 +173,16 @@ type Result struct {
 	// state. It is set by a tool with a no-change check that distinguishes a clean plan from a
 	// changed one, such as a Terraform plan with a detailed exit code.
 	Drift bool
+	// ImageDigest is the digest of the image a container run pulled and ran, empty for a run on the
+	// host or when the runtime could not say.
+	ImageDigest string
+	// PlanFile is the plan file a Terraform or OpenTofu dry run saved to Spec.PlanOut, empty when it
+	// saved none. It holds sensitive values and is never written to the run's output.
+	PlanFile []byte
+	// PlanJSON is that plan as show -json renders it, for measuring what it changes, empty when it
+	// could not be rendered. It holds sensitive values in the clear and is never written to the run's
+	// output.
+	PlanJSON []byte
 }
 
 // Runner executes a Spec, streaming combined output to out, and reports the Result.
@@ -149,6 +197,24 @@ type RunnerFunc func(ctx context.Context, spec Spec, out io.Writer) (Result, err
 
 // Run calls f.
 func (f RunnerFunc) Run(ctx context.Context, spec Spec, out io.Writer) (Result, error) {
+	return f(ctx, spec, out)
+}
+
+// ModuleFetcher downloads the modules a Terraform or OpenTofu working directory calls, where and
+// how a run of that directory would run the tool, and does nothing else. The approval gate asks it
+// for a private copy of a configuration before it reads the registry and remote modules a plan
+// would execute.
+type ModuleFetcher interface {
+	// FetchModules runs the tool's get for spec, streaming combined output to out. A get that runs
+	// to completion with a non-zero exit returns a Result with that code and a nil error.
+	FetchModules(ctx context.Context, spec Spec, out io.Writer) (Result, error)
+}
+
+// ModuleFetcherFunc adapts a function to the ModuleFetcher interface.
+type ModuleFetcherFunc func(ctx context.Context, spec Spec, out io.Writer) (Result, error)
+
+// FetchModules calls f.
+func (f ModuleFetcherFunc) FetchModules(ctx context.Context, spec Spec, out io.Writer) (Result, error) {
 	return f(ctx, spec, out)
 }
 
@@ -368,6 +434,30 @@ func (t *toolRouter) Run(ctx context.Context, spec Spec, out io.Writer) (Result,
 	}
 }
 
+// FetchModules runs the get of spec's Terraform or OpenTofu working directory the way Run would run
+// the tool there: with the host's binary and environment, or inside spec's image with the image's
+// binary, the same mounts, limits, and network. It downloads the modules the configuration calls
+// and nothing else, so it installs no provider and runs no program the configuration names, and it
+// is handed no variables, since a get needs none.
+func (t *toolRouter) FetchModules(ctx context.Context, spec Spec, out io.Writer) (Result, error) {
+	tool := run.NormalizeTool(spec.Tool)
+	if tool != run.ToolTerraform && tool != run.ToolOpenTofu {
+		return Result{ExitCode: -1}, fmt.Errorf("%w: %s calls no modules to fetch", ErrUnknownTool,
+			spec.Tool)
+	}
+	spec.ExtraVars = nil
+	if spec.Image != "" {
+		if !t.allowContainer {
+			return Result{ExitCode: -1}, ErrContainerDisabled
+		}
+		return t.container.runBuilt(ctx, spec, out, buildModulesPlan)
+	}
+	if tool == run.ToolOpenTofu {
+		return t.opentofu.fetchModules(ctx, spec, out)
+	}
+	return t.terraform.fetchModules(ctx, spec, out)
+}
+
 // pluginName is the callback plugin name, matching the embedded file and its CALLBACK_NAME.
 const pluginName = "switchtender"
 
@@ -386,6 +476,7 @@ func (a *ansibleRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Resu
 		}
 		env = append(env, callbackEnv(dir, spec.EventsPath)...)
 	}
+	env = append(env, factCacheEnv(spec.FactCacheDir)...)
 
 	varsCleanup, err := materializeExtraVars(&spec)
 	if err != nil {
@@ -424,7 +515,7 @@ func materializeExtraVars(spec *Spec) (func(), error) {
 	if err != nil {
 		return noCleanup, fmt.Errorf("marshal extra vars: %w", err)
 	}
-	f, err := os.CreateTemp("", "switchtender-vars-*.json")
+	f, err := os.CreateTemp(spec.RunDir, "switchtender-vars-*.json")
 	if err != nil {
 		return noCleanup, fmt.Errorf("create extra vars file: %w", err)
 	}
@@ -456,7 +547,7 @@ func runProcess(ctx context.Context, cmd *exec.Cmd, out io.Writer) (Result, erro
 	cmd.Stdout = out
 	cmd.Stderr = out
 	configureProcessGroup(cmd)
-	err := cmd.Run()
+	err := runSupervised(cmd, nil)
 	if err == nil {
 		return Result{ExitCode: 0}, nil
 	}
@@ -472,12 +563,20 @@ func runProcess(ctx context.Context, cmd *exec.Cmd, out io.Writer) (Result, erro
 	return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
 }
 
-// writeScriptFile writes content to a private temp file matching pattern and returns its path and a
-// cleanup that removes it. The Python, Go, and PowerShell runners share it so a run's inline source
-// reaches a host process and a container mount the same way.
+// writeScriptFile writes content to a private temp file matching pattern in the temporary directory
+// and returns its path and a cleanup that removes it.
 func writeScriptFile(pattern, content string) (string, func(), error) {
+	return writeScriptFileIn("", pattern, content)
+}
+
+// writeScriptFileIn writes content to a private temp file matching pattern in dir, the temporary
+// directory when dir is empty, and returns its path and a cleanup that removes it. The script tools
+// share it so a run's inline source reaches a host process and a container mount the same way, and
+// pass the run's private directory so a script that carries a secret is swept with the run's other
+// secrets when its executor dies.
+func writeScriptFileIn(dir, pattern, content string) (string, func(), error) {
 	noop := func() {}
-	f, err := os.CreateTemp("", pattern)
+	f, err := os.CreateTemp(dir, pattern)
 	if err != nil {
 		return "", noop, fmt.Errorf("%w: %w", ErrLaunch, err)
 	}
@@ -571,6 +670,22 @@ func callbackEnv(pluginDir, eventsPath string) []string {
 		"ANSIBLE_CALLBACK_PLUGINS=" + pluginDir,
 		"ANSIBLE_CALLBACKS_ENABLED=" + pluginName,
 		"SWITCHTENDER_EVENTS_PATH=" + eventsPath,
+	}
+}
+
+// factCacheEnv returns the environment entries that point Ansible's fact cache at dir, or none when
+// dir is empty. They are the settings AWX uses: the jsonfile plugin reading and writing one file
+// per host in the run's own directory. The plugin's own timeout is off because the cache was
+// filtered by the template's timeout when it was written, and a long run must not expire facts
+// partway through.
+func factCacheEnv(dir string) []string {
+	if dir == "" {
+		return nil
+	}
+	return []string{
+		"ANSIBLE_CACHE_PLUGIN=jsonfile",
+		"ANSIBLE_CACHE_PLUGIN_CONNECTION=" + dir,
+		"ANSIBLE_CACHE_PLUGIN_TIMEOUT=0",
 	}
 }
 

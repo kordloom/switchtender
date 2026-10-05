@@ -341,12 +341,14 @@ func TestToolArgsForEveryScriptEngine(t *testing.T) {
 		{"pwsh dry run", pwshArgs("/t/s.ps1", true),
 			[]string{"-NoProfile", "-NonInteractive", "-Command",
 				`[void][scriptblock]::Create((Get-Content -Raw '/t/s.ps1'))`}}, // Test 8.
-		{"terraform init", terraformInitArgs(),
+		{"terraform init", terraformInitArgs(false),
 			[]string{"init", "-input=false", "-no-color"}}, // Test 9.
-		{"terraform apply", terraformActionArgs(false),
+		{"terraform apply", terraformActionArgs(Spec{}),
 			[]string{"apply", "-auto-approve", "-input=false", "-no-color"}}, // Test 10.
-		{"terraform plan", terraformActionArgs(true),
+		{"terraform plan", terraformActionArgs(Spec{DryRun: true}),
 			[]string{"plan", "-input=false", "-no-color", "-detailed-exitcode"}}, // Test 11.
+		{"terraform init over modules the gate read", terraformInitArgs(true),
+			[]string{"init", "-input=false", "-no-color", "-get=false"}}, // Test 12.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -357,8 +359,8 @@ func TestToolArgsForEveryScriptEngine(t *testing.T) {
 		})
 	}
 	// Neither Terraform mode ever prompts, since an executor has no terminal to answer with.
-	for _, args := range [][]string{terraformInitArgs(), terraformActionArgs(true),
-		terraformActionArgs(false)} {
+	for _, args := range [][]string{terraformInitArgs(false), terraformInitArgs(true),
+		terraformActionArgs(Spec{DryRun: true}), terraformActionArgs(Spec{})} {
 		if !strings.Contains(strings.Join(args, " "), "-input=false") {
 			t.Errorf("args %v may prompt for input on an executor with no terminal", args)
 		}

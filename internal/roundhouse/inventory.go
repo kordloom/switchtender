@@ -3,9 +3,11 @@ package roundhouse
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"sort"
+	"strings"
 )
 
 // defaultInventoryBinary is the executable used to enumerate inventory hosts.
@@ -22,6 +24,49 @@ type HostLister interface {
 // which is how a dynamic source becomes a concrete host list.
 type InventoryDumper interface {
 	Dump(ctx context.Context, source string, env []string) ([]byte, error)
+}
+
+// InventoryLister renders several inventory sources as one ansible-inventory listing, narrowed to
+// the hosts a limit matches, which is how a constructed inventory runs the constructed plugin over
+// its inputs and how a smart inventory reads each input's hosts and resolved variables.
+type InventoryLister interface {
+	ListInventory(ctx context.Context, sources []string, limit string) ([]byte, error)
+}
+
+// maxListingStderr bounds how much of ansible-inventory's error output an error carries.
+const maxListingStderr = 2048
+
+// ListInventory returns the ansible-inventory --list JSON for every source read together, narrowed
+// to the hosts limit matches when one is given. A failure carries the tail of what Ansible printed,
+// because an unreadable input or a constructed expression that does not evaluate is only ever
+// explained there.
+func (a *ansibleRunner) ListInventory(ctx context.Context, sources []string, limit string) ([]byte, error) {
+	if len(sources) == 0 {
+		return nil, ErrNoInventory
+	}
+	args := make([]string, 0, 2*len(sources)+3)
+	for _, s := range sources {
+		args = append(args, "-i", s)
+	}
+	args = append(args, "--list")
+	if limit != "" {
+		args = append(args, "--limit", limit)
+	}
+	cmd := exec.CommandContext(ctx, defaultInventoryBinary, args...)
+	cmd.Env = a.baseEnv
+	out, err := cmd.Output()
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && len(exit.Stderr) > 0 {
+			tail := strings.TrimSpace(string(exit.Stderr))
+			if len(tail) > maxListingStderr {
+				tail = tail[len(tail)-maxListingStderr:]
+			}
+			return nil, fmt.Errorf("%w: %w: %s", ErrLaunch, err, tail)
+		}
+		return nil, fmt.Errorf("%w: %w", ErrLaunch, err)
+	}
+	return out, nil
 }
 
 // Dump returns the raw ansible-inventory --list JSON for a source, with env layered over the base

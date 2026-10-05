@@ -64,33 +64,11 @@ func (s *orgStore) List(ctx context.Context) ([]*org.Org, error) {
 	return out, nil
 }
 
-// Delete removes the organization and its memberships in one transaction, or returns org.ErrNotFound.
-// The transaction keeps the two deletes atomic so an interrupt cannot orphan membership rows.
+// Delete removes the organization, its memberships, and its notification attachments in one
+// transaction, or returns org.ErrNotFound. The transaction keeps the deletes atomic so an interrupt
+// cannot orphan membership or attachment rows.
 func (s *orgStore) Delete(ctx context.Context, id string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("delete org: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if _, err := tx.ExecContext(ctx, "DELETE FROM org_members WHERE org_id=$1", id); err != nil {
-		return fmt.Errorf("delete org members: %w", err)
-	}
-	res, err := tx.ExecContext(ctx, "DELETE FROM orgs WHERE id=$1", id)
-	if err != nil {
-		return fmt.Errorf("delete org: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("delete org: %w", err)
-	}
-	if n == 0 {
-		return org.ErrNotFound
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("delete org: %w", err)
-	}
-	return nil
+	return deleteAttachable(ctx, s.db, attachableOrg, id, nil)
 }
 
 // AddMember adds a user to an organization with a role, or updates an existing member's role.

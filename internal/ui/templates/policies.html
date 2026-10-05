@@ -92,6 +92,14 @@
 					<input id="policy-distinct-approver" type="checkbox">
 					Require a different person to approve, so the requester cannot release their own run
 				</label>
+				<label class="field-label">Approver reason
+					<select id="policy-require-reason" class="input">
+						<option value="">Optional</option>
+						<option value="denials">Required to deny</option>
+						<option value="always">Required to approve or deny</option>
+					</select>
+					<span class="muted">The reason is stored as audit evidence with the decision.</span>
+				</label>
 				<div class="launch-actions">
 					<button type="submit" class="button primary">Save</button>
 					<span id="policy-status" class="muted"></span>

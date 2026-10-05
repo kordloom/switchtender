@@ -19,6 +19,7 @@ jobs:
           # Every Fuzz function in the module. TestFuzzMatrixCoversEveryTarget holds this list to
           # the source, so a new fuzz target cannot be written and then quietly never fuzzed.
           - { pkg: ./internal/importer, fn: FuzzFromAWX }
+          - { pkg: ./internal/importer, fn: FuzzFromAWXWithTemplateIDs }
           - { pkg: ./internal/importer, fn: FuzzFromSemaphore }
           - { pkg: ./internal/importer, fn: FuzzFromJenkins }
           - { pkg: ./internal/importer, fn: FuzzFromRundeck }
@@ -33,6 +34,7 @@ jobs:
           - { pkg: ./internal/audit, fn: FuzzParseSpanPath }
           - { pkg: ./internal/credential, fn: FuzzInject }
           - { pkg: ./internal/dispatch, fn: FuzzStreamMaskerHoldsAcrossAnyChunking }
+          - { pkg: ./internal/util, fn: FuzzRedactAssignmentsIsIdempotent }
           - { pkg: ./internal/mcp, fn: FuzzServe }
           - { pkg: ./witness, fn: FuzzCheck }
           - { pkg: ./witness, fn: FuzzLoad }

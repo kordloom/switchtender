@@ -371,8 +371,10 @@ function renderMigratePlan(data) {
 		["Inventories", data.inventories],
 		["Sources", data.sources],
 		["Credentials", data.credentials],
+		["Credential types", data.credential_types],
 		["Templates", data.templates],
 		["Schedules", data.schedules],
+		["Notification targets", data.notifications],
 	];
 	let shown = 0;
 	for (const [label, names] of groups) {
@@ -499,11 +501,13 @@ function syncTemplateTool() {
 	// tools left an image nobody could see or set, and an edit of a containerized non-Ansible
 	// template stripped it, so the next run executed on the host instead of in the container.
 	const ansibleFields = ["tpl-field-playbook", "tpl-field-inventory", "tpl-field-limit",
-		"tpl-field-shards"];
+		"tpl-field-shards", "tpl-field-fact-cache", "tpl-field-fact-cache-timeout",
+		"tpl-field-callbacks", "tpl-field-callback-limit"];
 	for (const id of ansibleFields) {
 		const el = document.getElementById(id);
 		if (el) el.hidden = !ansible;
 	}
+	syncAWXCallbackField(ansible);
 	const cmd = document.getElementById("tpl-field-command");
 	if (cmd) cmd.hidden = ansible;
 }

@@ -7,25 +7,32 @@ import (
 	"io/fs"
 	"net/http"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/beatfeed"
 	"github.com/kordloom/switchtender/internal/ai"
+	"github.com/kordloom/switchtender/internal/attention"
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/dispatch"
+	"github.com/kordloom/switchtender/internal/factcache"
+	"github.com/kordloom/switchtender/internal/federation"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/importer"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
 	"github.com/kordloom/switchtender/internal/live"
+	"github.com/kordloom/switchtender/internal/notification"
 	"github.com/kordloom/switchtender/internal/org"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/relay"
+	"github.com/kordloom/switchtender/internal/review"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/team"
@@ -90,6 +97,22 @@ func WithAnnouncer(a relay.Announcer) Option {
 	return func(srv *Server) { srv.announcer = a }
 }
 
+// WithSecretOpener lets the relay deliver a claimed run's credentials and secret answers, sealed to
+// the delivery key the claiming worker's pool registered. The dispatcher satisfies it. Without it
+// no relay worker receives a secret, and a run that needs one fails on a relay worker with the
+// reason.
+func WithSecretOpener(o relay.SecretOpener) Option {
+	return func(srv *Server) { srv.secretOpener = o }
+}
+
+// WithPlanSealer lets the relay accept the plan file a worker's plan saved and seal it, with this
+// control node's key, onto the apply proposed from it. The dispatcher satisfies it. Without it a
+// plan-gated apply cannot complete on a relay worker, and the worker's proposal is refused with the
+// reason.
+func WithPlanSealer(p relay.PlanSealer) Option {
+	return func(srv *Server) { srv.planSealer = p }
+}
+
 // WithRetrier enables the failed shard retry endpoint backed by r.
 func WithRetrier(r Retrier) Option {
 	return func(srv *Server) { srv.retrier = r }
@@ -98,6 +121,13 @@ func WithRetrier(r Retrier) Option {
 // WithApprover enables the run approval endpoints backed by a.
 func WithApprover(a Approver) Option {
 	return func(srv *Server) { srv.approver = a }
+}
+
+// WithDecisions serves decision records from store: the reasons approvers gave, their corrections
+// and redactions, and the separation-of-duties evaluations of agent-initiated runs, for the run's
+// decisions route, its evidence dossier, and its receipt.
+func WithDecisions(store decision.Store) Option {
+	return func(srv *Server) { srv.decisions = store }
 }
 
 // WithSchedules enables the schedule endpoints backed by the given store.
@@ -155,6 +185,12 @@ func WithTriggers(store trigger.Store, sealer *credential.Sealer) Option {
 		srv.triggers = store
 		srv.sealer = sealer
 	}
+}
+
+// WithNotificationTargets enables the named notification target endpoints backed by the given
+// store. A target's secrets are sealed with the sealer WithCredentials or WithTriggers set.
+func WithNotificationTargets(store notification.Store) Option {
+	return func(srv *Server) { srv.notifications = store }
 }
 
 // WithTeams enables the team endpoints backed by the given store.
@@ -276,6 +312,11 @@ func WithInventorySources(store invsource.Store, refresher SourceRefresher) Opti
 	}
 }
 
+// WithInventoryPreviewer enables previewing the hosts a smart or constructed inventory resolves to.
+func WithInventoryPreviewer(p InventoryPreviewer) Option {
+	return func(srv *Server) { srv.previewer = p }
+}
+
 // WithTemplates enables the template endpoints backed by the given store.
 func WithTemplates(store template.Store) Option {
 	return func(srv *Server) { srv.templates = store }
@@ -330,10 +371,19 @@ type Server struct {
 	// announcer tells the notification channels about what relay workers finish, nil when the
 	// control node announces nothing for them.
 	announcer relay.Announcer
+	// secretOpener opens a claimed run's secrets for sealed delivery to a relay worker pool, nil when
+	// the relay delivers none.
+	secretOpener relay.SecretOpener
+	// planSealer seals the plan file a relay worker's plan saved onto the apply proposed from it, nil
+	// when this control node accepts none.
+	planSealer relay.PlanSealer
 	// retrier backs the failed shard retry endpoint when configured.
 	retrier Retrier
 	// approver backs the run approval endpoints when configured.
 	approver Approver
+	// decisions holds the decision records approvals, denials, and corrections leave beside the
+	// chain, nil when the install keeps none.
+	decisions decision.Store
 	// schedules backs the schedule endpoints when configured.
 	schedules schedule.Store
 	// tokens backs API authentication when configured.
@@ -342,6 +392,9 @@ type Server struct {
 	credentials credential.Store
 	// credTypes backs the custom credential type endpoints when configured.
 	credTypes credential.TypeStore
+	// federation is the workload identity issuer whose discovery document and keys are served, nil
+	// when no issuer URL is set.
+	federation *federation.Issuer
 	// sealer encrypts credential secrets.
 	sealer *credential.Sealer
 	// syncer browses project checkouts for the file endpoints when configured.
@@ -363,14 +416,29 @@ type Server struct {
 	producer *audit.Identity
 	// producerProblem is why producer is nil, empty when there is nothing to explain.
 	producerProblem string
+	// runFiles is where this server stages run files, for the doctor, nil when it was not told.
+	runFiles *runFilesState
 	// productVersion stamps the trust document.
 	productVersion string
 	// invSources backs the dynamic inventory source endpoints when configured.
 	invSources invsource.Store
 	// refresher refreshes inventory sources when configured.
 	refresher SourceRefresher
+	// previewer resolves smart and constructed inventories for a preview, nil when not configured.
+	previewer InventoryPreviewer
 	// triggers backs webhook triggers when configured.
 	triggers trigger.Store
+	// notifications backs the named notification target endpoints when configured.
+	notifications notification.Store
+	// factCache backs the per-host fact cache endpoints when configured.
+	factCache factcache.Store
+	// callbackResolver resolves names for provisioning callback host matching. Nil uses the
+	// system resolver.
+	callbackResolver callbackResolver
+	// callbackCfg holds the provisioning callback rate limits and the template limit check.
+	callbackCfg callbackSettings
+	// factCacheAdminOnly restricts reading cached facts to admins.
+	factCacheAdminOnly bool
 	// teams backs the team endpoints when configured.
 	teams team.Store
 	// orgs backs the organization endpoints when configured.
@@ -410,6 +478,21 @@ type Server struct {
 	// shutdown is canceled when the process begins draining, ending live streams. Nil when unset,
 	// which leaves a stream running until its run ends or its client goes away.
 	shutdown context.Context
+	// reviewPublicURL is this server's public address, used to link a review comment to its run.
+	reviewPublicURL string
+	// reviewClient reaches the forge a review reports to, nil for the guarded default.
+	reviewClient *http.Client
+	// reviewInterval is how often a review plan is checked for a change to report, zero for the
+	// default.
+	reviewInterval time.Duration
+	// reviews reports review plans to their pull requests, nil when this server cannot.
+	reviews *review.Reporter
+	// reviewStore holds what each review plan's pull request was last told, shown on its run.
+	reviewStore review.Store
+	// attention reads what is stopping work for the dashboard and the doctor, nil when not wired.
+	attention *attention.Source
+	// hooks runs the work webhook deliveries start, answering each sender before it stops waiting.
+	hooks *hookFlights
 }
 
 // New returns a Server. It panics if store or submitter is nil; a nil logger becomes a no-op.
@@ -423,7 +506,7 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 	if log == nil {
 		log = zap.NewNop()
 	}
-	srv := &Server{store: store, submitter: submitter, log: log}
+	srv := &Server{store: store, submitter: submitter, log: log, hooks: newHookFlights()}
 	for _, opt := range opts {
 		opt(srv)
 	}
@@ -436,13 +519,15 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 	if srv.oidc != nil {
 		srv.oidc.WithAudits(srv.audits)
 	}
+	srv.reviews = srv.newReviewReporter()
 	oidcBrand := ""
 	if srv.oidc != nil {
 		oidcBrand = srv.oidc.Brand()
 	}
 	srv.web = ui.New(srv.log, srv.docs, srv.readOnly, srv.matrixCap, srv.oidc != nil, srv.saml != nil,
 		srv.ai != nil, oidcBrand, ui.WithAccountCheck(srv.anyAccount), ui.WithTokenCheck(srv.anyToken),
-		ui.WithSignInCheck(srv.signInRequired), ui.WithDemo(srv.demo))
+		ui.WithSignInCheck(srv.signInRequired), ui.WithDemo(srv.demo),
+		ui.WithFactCacheAdminOnly(srv.factCacheAdminOnly))
 	return srv
 }
 
@@ -558,6 +643,15 @@ func (s *Server) Handler() http.Handler {
 	// Served unversioned and unauthenticated: a relying party checking a bundle has no account here,
 	// and the document holds only the public half of the signing key.
 	mux.Handle("GET /.well-known/loomseal.json", trustHandler(s.producer, s.productVersion, s.log))
+	// Served unversioned and unauthenticated at the issuer URL, because the cloud verifying a run's
+	// identity token fetches them from there and has no account here. They hold public keys only.
+	mux.Handle("GET /.well-known/openid-configuration",
+		federationDiscoveryHandler(s.federation, s.log))
+	mux.Handle("GET /.well-known/jwks.json", federationJWKSHandler(s.federation, s.log))
+	mux.Handle("GET /v1/federation/keys", federationKeysHandler(s.federation, s.log))
+	mux.Handle("POST /v1/federation/keys/rotate", federationRotateHandler(s.federation, s.log))
+	mux.Handle("POST /v1/federation/keys/rotate/emergency",
+		federationEmergencyRotateHandler(s.federation, s.log))
 	mux.Handle("POST /v1/runs", createRunHandler(s.submitter, authz, s.log))
 	mux.Handle("POST /v1/pipelines", createPipelineHandler(s.submitter, authz, s.log))
 	mux.Handle("POST /v1/runs/{id}/cancel", cancelRunHandler(s.store, s.canceler, authz, s.log))
@@ -566,17 +660,26 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/runs/{id}/rerun", rerunRunHandler(s.store, s.submitter, authz, s.log))
 	mux.Handle("POST /v1/runs/{id}/approve", approveRunHandler(s.approver, s.store, authz, s.log))
 	mux.Handle("POST /v1/runs/{id}/reject", rejectRunHandler(s.approver, s.store, authz, s.log))
+	mux.Handle("GET /v1/approvals", approvalsHandler(s.store, authz, s.log))
+	mux.Handle("GET /v1/runs/{id}/decisions", runDecisionsHandler(s.store, s.decisions, authz, s.log))
+	mux.Handle("POST /v1/runs/{id}/decisions/{decision}/corrections",
+		addCorrectionHandler(s.store, s.approver, authz, s.log))
+	mux.Handle("POST /v1/runs/{id}/decisions/{record}/redact",
+		redactReasonHandler(s.store, s.approver, authz, s.log))
 	mux.Handle("GET /v1/runs", listRunsHandler(s.store, authz, s.log))
-	mux.Handle("GET /v1/runs/{id}", getRunHandler(s.store, s.checkouts(), authz, s.log))
+	mux.Handle("GET /v1/runs/{id}",
+		getRunHandler(s.store, s.checkouts(), authz, s.log, s.reviewStore))
 	mux.Handle("GET /v1/runs/{id}/compare", runCompareHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/runs/{id}/shards", runShardsHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/runs/{id}/steps", runStepsHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/runs/{id}/logs", runLogsHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/runs/{id}/events", runEventsHandler(s.store, authz, s.log))
+	mux.Handle("GET /v1/runs/{id}/notifications",
+		runNotificationsHandler(s.store, s.notifications, authz, s.log))
 	mux.Handle("GET /v1/runs/{id}/evidence",
-		runEvidenceHandler(s.store, s.audits, producer, authz, s.log))
+		runEvidenceHandler(s.store, s.audits, producer, s.decisions, authz, s.log))
 	mux.Handle("GET /v1/runs/{id}/receipt",
-		runReceiptHandler(s.store, s.audits, s.producer, s.productVersion, authz, s.log))
+		runReceiptHandler(s.store, s.audits, s.producer, s.productVersion, s.decisions, authz, s.log))
 	mux.Handle("POST /v1/runs/{id}/explain", explainRunHandler(s.store, s.ai, authz, s.log))
 	mux.Handle("POST /v1/ai/draft", draftStepHandler(s.ai, s.log))
 	mux.Handle("POST /v1/ai/ask", askFleetHandler(s.store, s.ai, authz, s.log))
@@ -589,7 +692,9 @@ func (s *Server) Handler() http.Handler {
 		runStreamHandler(s.streamer, s.store, authz, s.log, s.shutdown))
 	mux.Handle("GET /v1/schedules/preview", previewScheduleHandler(s.log))
 	mux.Handle("GET /v1/doctor", doctorHandler(s.templates, s.schedules, s.credentials, s.inventories, s.projects,
-		s.canSign, s.log))
+		s.canSign, s.runFiles, ansibleCoreOf(s.previewer), s.log,
+		notificationDoctor(s.notifications, s.notificationObjects(), s.log), s.attentionCheck))
+	mux.Handle("GET /v1/attention", attentionHandler(s.attention, authz, s.log))
 	mux.Handle("POST /v1/schedules", createScheduleHandler(s.schedules, authz, s.log))
 	mux.Handle("GET /v1/schedules", listSchedulesHandler(s.schedules, authz, s.log))
 	mux.Handle("GET /v1/schedules/{id}", getScheduleHandler(s.schedules, authz, s.log))
@@ -627,7 +732,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /v1/credential-types/{id}", updateCredTypeHandler(s.credTypes, s.log))
 	mux.Handle("DELETE /v1/credential-types/{id}", deleteCredTypeHandler(s.credTypes, s.log))
 	mux.Handle("POST /v1/credentials", createCredentialHandler(s.credentials, s.credTypes, s.sealer, authz, s.log))
-	mux.Handle("PUT /v1/credentials/{id}", updateCredentialHandler(s.credentials, s.sealer, authz, s.log))
+	mux.Handle("PUT /v1/credentials/{id}", updateCredentialHandler(s.credentials, s.credTypes, s.sealer, authz, s.log))
 	// refs lets a credential or project delete refuse to orphan an object that still uses it, and
 	// gives the credential list the same reading so its Used by column cannot disagree.
 	refs := &refChecker{
@@ -647,6 +752,17 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /v1/inventories/{id}", updateInventoryHandler(s.inventories, authz, s.sealer, s.log))
 	mux.Handle("GET /v1/inventories", listInventoriesHandler(s.inventories, authz, s.log))
 	mux.Handle("DELETE /v1/inventories/{id}", deleteInventoryHandler(s.inventories, refs, s.log))
+	mux.Handle("POST /v1/inventories/preview",
+		previewInventoryHandler(s.inventories, s.previewer, authz, s.log))
+	mux.Handle("POST /v1/inventories/{id}/preview",
+		previewSavedInventoryHandler(s.inventories, s.previewer, authz, s.log))
+	mux.Handle("GET /v1/inventories/{id}/facts",
+		listFactsHandler(s.inventories, s.factCache, s.store, authz, s.factCacheAdminOnly, s.log))
+	mux.Handle("GET /v1/inventories/{id}/facts/{host}",
+		hostCachedFactsHandler(s.inventories, s.factCache, s.store, authz, s.factCacheAdminOnly,
+			s.log))
+	mux.Handle("DELETE /v1/inventories/{id}/facts/{host}",
+		clearHostFactsHandler(s.inventories, s.factCache, authz, s.log))
 	mux.Handle("POST /v1/policies", createPolicyHandler(s.policies, s.log))
 	mux.Handle("GET /v1/policies", listPoliciesHandler(s.policies, s.log))
 	mux.Handle("PUT /v1/policies/{id}", updatePolicyHandler(s.policies, s.log))
@@ -656,17 +772,49 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/inventory-sources", listSourcesHandler(s.invSources, authz, s.log))
 	mux.Handle("DELETE /v1/inventory-sources/{id}", deleteSourceHandler(s.invSources, authz, s.log))
 	mux.Handle("POST /v1/inventory-sources/{id}/refresh", refreshSourceHandler(s.refresher, s.invSources, authz, s.log))
-	mux.Handle("POST /v1/triggers", createTriggerHandler(s.triggers, s.templates, s.sealer, authz, s.log))
-	mux.Handle("PUT /v1/triggers/{id}", updateTriggerHandler(s.triggers, s.templates, authz, s.log))
+	mux.Handle("POST /v1/triggers",
+		createTriggerHandler(s.triggers, s.templates, s.credentials, s.sealer, authz, s.log))
+	mux.Handle("PUT /v1/triggers/{id}",
+		updateTriggerHandler(s.triggers, s.templates, s.credentials, authz, s.log))
 	mux.Handle("POST /v1/triggers/{id}/rotate-secret", rotateTriggerSecretHandler(s.triggers, s.sealer, authz, s.log))
 	mux.Handle("GET /v1/triggers", listTriggersHandler(s.triggers, authz, s.log))
 	mux.Handle("DELETE /v1/triggers/{id}", deleteTriggerHandler(s.triggers, authz, s.log))
-	mux.Handle("POST /hooks/{token}", hookHandler(s.triggers, s.templates, s.submitter, s.store, s.sealer, s.audits, s.log))
-	mux.Handle("POST /v1/templates", createTemplateHandler(s.templates, authz, s.log))
-	mux.Handle("PUT /v1/templates/{id}", updateTemplateHandler(s.templates, authz, s.log))
+	notifyObjects := notificationObjects{
+		templates: s.templates, schedules: s.schedules, projects: s.projects, orgs: s.orgs,
+	}
+	mux.Handle("POST /v1/notifications",
+		createNotificationHandler(s.notifications, s.sealer, authz, s.log))
+	mux.Handle("GET /v1/notifications",
+		listNotificationsHandler(s.notifications, s.sealer, authz, s.log))
+	mux.Handle("GET /v1/notifications/{id}", getNotificationHandler(s.notifications, authz, s.log))
+	mux.Handle("PUT /v1/notifications/{id}",
+		updateNotificationHandler(s.notifications, s.sealer, authz, s.log))
+	mux.Handle("DELETE /v1/notifications/{id}", deleteNotificationHandler(s.notifications, s.log))
+	mux.Handle("GET /v1/notifications/{id}/deliveries",
+		targetDeliveriesHandler(s.notifications, authz, s.log))
+	mux.Handle("GET /v1/notifications/{id}/attachments",
+		listAttachmentsHandler(s.notifications, authz, s.log))
+	mux.Handle("POST /v1/notifications/{id}/attachments",
+		attachNotificationHandler(s.notifications, notifyObjects, authz, s.log))
+	mux.Handle("DELETE /v1/notifications/{id}/attachments/{attachment}",
+		detachNotificationHandler(s.notifications, authz, s.log))
+	mux.Handle("POST /hooks/{token}", hookHandler(s.triggers, s.templates, s.submitter, s.store,
+		s.sealer, s.audits, s.reviews, s.hooks, s.log))
+	mux.Handle("POST /v1/templates", createTemplateHandler(s.templates, s.sealer, authz, s.log))
+	mux.Handle("PUT /v1/templates/{id}", updateTemplateHandler(s.templates, s.sealer, authz, s.log))
 	mux.Handle("GET /v1/templates", listTemplatesHandler(s.templates, authz, s.log))
 	mux.Handle("DELETE /v1/templates/{id}", deleteTemplateHandler(s.templates, refs, s.log))
-	mux.Handle("POST /v1/templates/{id}/launch", launchTemplateHandler(s.templates, s.submitter, authz, s.log))
+	mux.Handle("POST /v1/templates/{id}/launch",
+		launchTemplateHandler(s.templates, s.submitter, s.sealer, authz, s.log))
+	mux.Handle("POST /v1/templates/{id}/callback-key",
+		mintCallbackKeyHandler(s.templates, s.sealer, authz, s.log))
+	mux.Handle("DELETE /v1/templates/{id}/callback-key",
+		revokeCallbackKeyHandler(s.templates, authz, s.log))
+	// Served without an account: the host config key in the body is the credential, the way a
+	// webhook's path token is. The AWX-compatible address shares the native one's budgets.
+	callbacks := s.newCallbacks()
+	mux.Handle("POST /v1/templates/{id}/callback", callbacks.native())
+	callbacks.registerAWX(mux)
 	mux.Handle("POST /v1/teams", createTeamHandler(s.teams, s.log))
 	mux.Handle("GET /v1/teams", listTeamsHandler(s.teams, s.log))
 	mux.Handle("DELETE /v1/teams/{id}", deleteTeamHandler(s.teams, s.log))
@@ -689,7 +837,8 @@ func (s *Server) Handler() http.Handler {
 		}
 		return importer.ApplyStores{
 			Projects: s.projects, Inventories: s.inventories, Sources: s.invSources,
-			Credentials: s.credentials, Templates: s.templates, Schedules: s.schedules,
+			Credentials: s.credentials, CredentialTypes: s.credTypes, Templates: s.templates,
+			Schedules: s.schedules, Notifications: s.notifications, Orgs: s.orgs, Sealer: s.sealer,
 		}, true
 	}, s.log))
 	// Every refusal this API makes is a JSON object with an "error" string, except the two the mux
@@ -703,7 +852,8 @@ func (s *Server) Handler() http.Handler {
 	handler = compress(handler)
 	if s.tokens != nil {
 		gate := &authGate{tokens: s.tokens, users: s.users, jwt: s.jwt, audits: s.audits, log: s.log,
-			authz: authz, alwaysEnforce: s.enforceAuth, tickets: tickets, publicReads: s.readOnly}
+			authz: authz, alwaysEnforce: s.enforceAuth, tickets: tickets, publicReads: s.readOnly,
+			cleanups: attachmentCleanups(s.notifications), secretVars: templateSecretVars(s.templates)}
 		handler = gate.wrap(handler)
 	}
 	if s.readOnly {
@@ -717,6 +867,15 @@ func (s *Server) Handler() http.Handler {
 		var opts []relay.HandlerOption
 		if s.announcer != nil {
 			opts = append(opts, relay.WithAnnouncer(s.announcer))
+		}
+		if s.secretOpener != nil {
+			opts = append(opts, relay.WithSecretOpener(s.secretOpener))
+		}
+		if s.planSealer != nil {
+			opts = append(opts, relay.WithPlanSealer(s.planSealer))
+		}
+		if s.attention != nil && s.attention.Presence != nil {
+			opts = append(opts, relay.WithPresence(s.attention.Presence))
 		}
 		handler = relayGate(relay.NewHandler(s.relayStore, pools, s.log, s.policies, s.audits,
 			opts...), handler)
@@ -793,6 +952,18 @@ func (s *Server) resolveObjectOrg(ctx context.Context, objectID string) (orgID s
 			return "", false, err
 		}
 		return c.OrgID, true, nil
+	case strings.HasPrefix(objectID, "ntf_"):
+		if s.notifications == nil {
+			return "", false, nil
+		}
+		n, err := s.notifications.Get(ctx, objectID)
+		if errors.Is(err, notification.ErrNotFound) {
+			return "", false, nil
+		}
+		if err != nil {
+			return "", false, err
+		}
+		return n.OrgID, true, nil
 	default:
 		return "", false, nil
 	}

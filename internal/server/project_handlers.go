@@ -212,9 +212,12 @@ func deleteProjectHandler(store project.Store, refs *refChecker, log *zap.Logger
 				return
 			}
 		}
-		err := store.Delete(r.Context(), id)
+		err := deleteAttachableObject(r.Context(), store, id)
 		if errors.Is(err, project.ErrNotFound) {
 			respondError(w, log, http.StatusNotFound, "project not found")
+			return
+		}
+		if respondCleanupChanged(w, log, err) {
 			return
 		}
 		if err != nil {

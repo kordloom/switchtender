@@ -34,19 +34,25 @@ const (
 // invisible to the reversibility grade, whose own comment explains why.
 var disruptiveMarkers = []string{"reboot", "shutdown", "halt", "--force", "-force"}
 
-// AssessRisk grades r from its tool, command, and blast radius. A dry run is always low since it
-// changes nothing. A destructive marker or a Terraform apply that is not a dry run is high; a state
-// change with a wide target is medium. The result carries the reasons so an approver sees why.
+// AssessRisk grades r from its tool, command, and blast radius. A dry run that changes nothing is
+// always low. A dry run the gate did not find change free, such as one whose playbook forces tasks
+// to run for real or whose configuration runs a program while it plans, is graded as the real run
+// it may be, and says so. A destructive marker or a Terraform apply that is not a dry run is high;
+// a state change with a wide target is medium. The result carries the reasons so an approver sees
+// why.
 func AssessRisk(r *Run) Risk {
 	if r == nil {
 		return Risk{Level: RiskLow}
 	}
-	if r.DryRun {
+	if r.ChangeFree() {
 		return Risk{Level: RiskLow, Reasons: []string{"dry run, makes no changes"}}
 	}
 
 	var reasons []string
 	level := RiskLow
+	if why := r.NotChangeFreeSummary(); why != "" {
+		reasons = append(reasons, why)
+	}
 
 	// Extra vars are scanned too: a variable is string material a playbook or script splices into
 	// what it executes, so a destructive command riding in -e graded low and slipped past a

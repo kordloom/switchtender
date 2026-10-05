@@ -13,6 +13,7 @@ import (
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
+	"github.com/kordloom/switchtender/internal/notification"
 	"github.com/kordloom/switchtender/internal/org"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
@@ -47,6 +48,8 @@ type (
 	failSchedules struct{ schedule.Store }
 	// failTriggers fails listing triggers.
 	failTriggers struct{ trigger.Store }
+	// failNotifications fails listing notification targets.
+	failNotifications struct{ notification.Store }
 	// failUsers fails listing users.
 	failUsers struct{ user.Store }
 	// failTokens fails listing tokens.
@@ -90,6 +93,11 @@ func (failSchedules) List(context.Context) ([]*schedule.Schedule, error) { retur
 
 // List fails so a backup cannot read this store.
 func (failTriggers) List(context.Context) ([]*trigger.Trigger, error) { return nil, errStore }
+
+// List fails.
+func (failNotifications) List(context.Context) ([]*notification.Notification, error) {
+	return nil, errStore
+}
 
 // List fails so a backup cannot read this store.
 func (failUsers) List(context.Context) ([]*user.User, error) { return nil, errStore }
@@ -193,6 +201,10 @@ func TestWriteReportsWhichStoreFailed(t *testing.T) {
 		Name:        "org members",
 		Break:       func(s *Stores) { s.Orgs = failOrgMembers{s.Orgs} },
 		WantMessage: "list members of organization",
+	}, { // Test 16: Notification targets.
+		Name:        "notification targets",
+		Break:       func(s *Stores) { s.Notifications = failNotifications{s.Notifications} },
+		WantMessage: "list notification targets",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

@@ -458,7 +458,7 @@ func runOwnSecrets(vars map[string]any, command string) []string {
 			// the receipt already apply to free text.
 			_, found := util.RedactAssignments(v, "")
 			for _, a := range found {
-				out = append(out, a.Value)
+				out = append(out, a.Readings()...)
 			}
 		}
 	}
@@ -470,7 +470,7 @@ func runOwnSecrets(vars map[string]any, command string) []string {
 	if command != "" {
 		_, found := util.RedactAssignments(command, "")
 		for _, a := range found {
-			out = append(out, a.Value)
+			out = append(out, a.Readings()...)
 		}
 	}
 	return out

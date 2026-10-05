@@ -15,6 +15,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/extplugin"
+	"github.com/kordloom/switchtender/internal/handoff"
 	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/logutil"
 	"github.com/kordloom/switchtender/internal/policy"
@@ -77,6 +78,10 @@ var workerRetainFacts int
 // run may execute. Zero disables the cap.
 var workerRunTimeout time.Duration
 
+// workerDeliveryKeys holds the values of the repeatable worker --delivery-key flag: the private key
+// files a relay worker opens the run secrets its control node seals to the worker's pool with.
+var workerDeliveryKeys []string
+
 // workerCmd runs a SwitchTender worker: a process that leases pending runs from the shared store,
 // executes them, and streams results back. Point it and a server at the same database, a
 // PostgreSQL DSN for separate machines, and they compete for work.
@@ -124,16 +129,38 @@ func init() {
 			"wherever the control node runs with one: on a file-pinned install the policy table is "+
 			"empty, so without this a worker enforces nothing and the gate depends on which process "+
 			"claims the run.")
+	workerCmd.Flags().StringArrayVar(&workerDeliveryKeys, "delivery-key", nil,
+		"Private key file a relay worker opens the run secrets its control node seals to this "+
+			"worker's pool with, made by switchtender worker key new. Repeatable, so a worker holds "+
+			"its pool's old and new key while the pool rotates. Only with --server.")
 	workerCmd.Flags().StringVar(&workerPluginsDir, "plugins-dir", "",
 		"Directory of extension plugin binaries to load at startup. Empty loads none. Also SWITCHTENDER_PLUGINS_DIR.")
 	registerContainerFlags(workerCmd)
+	registerRunFilesFlag(workerCmd)
+	registerModuleFetchFlags(workerCmd)
 	registerGalaxyFlag(workerCmd)
+	registerFederationFlag(workerCmd)
 }
 
 // runWorker leases and executes runs until interrupted.
 func runWorker(cmd *cobra.Command, _ []string) error {
 	workerDB = dbFromEnv(cmd, workerDB)
+	log, err := logutil.New()
+	if err != nil {
+		return fmt.Errorf("init logger: %w", err)
+	}
+	defer func() { _ = log.Sync() }()
+	protectProcess(log)
+	if err := applyEgressProxy(log); err != nil {
+		return err
+	}
 	if err := checkWorkers(workerWorkers, workerWorkersHint); err != nil {
+		return err
+	}
+	if err := checkModuleFetchLimits(moduleFetchTimeout, moduleFetchMaxMiB); err != nil {
+		return err
+	}
+	if err := checkModuleKeep(moduleKeepFor, moduleKeepMaxMiB); err != nil {
 		return err
 	}
 	if err := checkContainerChoices(); err != nil {
@@ -143,6 +170,15 @@ func runWorker(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if err := refuseBadAuditKey(); err != nil {
+		return err
+	}
+	if len(workerDeliveryKeys) > 0 && workerServer == "" {
+		return fmt.Errorf("%w: --delivery-key opens secrets a control node seals to a relay "+
+			"worker, so it needs --server; a worker with --db opens them from the database itself",
+			ErrUsage)
+	}
+	_, runFilesReport, err := prepareRunFiles(log)
+	if err != nil {
 		return err
 	}
 	run.SetFactsInterval(workerFactsInterval)
@@ -155,11 +191,6 @@ func runWorker(cmd *cobra.Command, _ []string) error {
 	if err := license.Allow(license.FeatureWorkers); err != nil {
 		return err
 	}
-	log, err := logutil.New()
-	if err != nil {
-		return fmt.Errorf("init logger: %w", err)
-	}
-	defer func() { _ = log.Sync() }()
 
 	closePlugins, err := extplugin.Load(pluginsDir(workerPluginsDir), log)
 	if err != nil {
@@ -173,6 +204,7 @@ func runWorker(cmd *cobra.Command, _ []string) error {
 	}
 	defer closeStore()
 
+	opts = append(opts, dispatch.WithRunFilesRoot(runFilesReport.Root))
 	if workerName != "" {
 		opts = append(opts, dispatch.WithOwner(workerName))
 	}
@@ -215,15 +247,26 @@ func workerStore(log *zap.Logger) (run.Store, []dispatch.Option, func(), error) 
 		dispatch.WithWorkers(workerWorkers),
 		dispatch.WithDefaultImage(workerDefaultImage),
 		dispatch.WithRunTimeout(workerRunTimeout),
+		moduleFetchOption(),
+		moduleKeepOption(),
 	}
 	if workerServer != "" {
 		token := os.Getenv("SWITCHTENDER_WORKER_TOKEN")
 		if token == "" {
 			return nil, nil, nil, errors.New("open store: relay worker needs SWITCHTENDER_WORKER_TOKEN")
 		}
+		// The delivery keys are read before anything is dialed, so a key file another account can
+		// read, or one that is not a key, stops the worker at startup rather than at its first run.
+		ring, err := loadDeliveryKeys(workerDeliveryKeys)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 		client := &http.Client{Timeout: relayClientTimeout}
 		transport := relay.NewHTTPTransport(workerServer, token, client)
 		store := relay.NewClient(transport)
+		if ring.Len() > 0 {
+			log.Info("relay secret delivery enabled", zap.Strings("delivery_keys", ring.IDs()))
+		}
 		// The relay Client cannot reclaim stale leases; that stays the control node's job, so the
 		// janitor would only log ErrUnsupported on every sweep. Turn it off for the relay worker.
 		//
@@ -231,8 +274,14 @@ func workerStore(log *zap.Logger) (run.Store, []dispatch.Option, func(), error) 
 		// across the relay rather than from a database it has no route to. Without them it would
 		// apply a gated terraform change with no plan and no approver whenever it won the claim
 		// ahead of the control node.
+		//
+		// A relay worker has no credential store and no encryption key. A run's secrets arrive sealed
+		// to its pool's delivery key with the claim, and the receiver opens them in memory when the run
+		// first needs one. It is set even with no key, so a delivery the worker cannot open, or one the
+		// control node refused, fails the run with that reason rather than an unexplained missing key.
 		opts = append(opts, dispatch.WithNoJanitor(),
-			dispatch.WithPolicies(relay.NewPolicyClient(transport)))
+			dispatch.WithPolicies(relay.NewPolicyClient(transport)),
+			dispatch.WithSecretDelivery(relay.NewReceiver(transport, ring)))
 		return store, opts, func() {}, nil
 	}
 
@@ -258,12 +307,22 @@ func workerStore(log *zap.Logger) (run.Store, []dispatch.Option, func(), error) 
 		_ = bundle.Close()
 		return nil, nil, nil, fmt.Errorf("project cache: %w", err)
 	}
+	// A worker signs the identity tokens of the runs it executes with the keys every process on
+	// this database shares, so a token it mints verifies against the set the server publishes.
+	issuer, err := newFederationIssuer(federationIssuer, bundle.FederationKeys(), sealer,
+		bundle.Audits())
+	if err != nil {
+		_ = bundle.Close()
+		return nil, nil, nil, err
+	}
 	opts = append(opts,
 		dispatch.WithCredentials(bundle.Credentials(), sealer),
 		dispatch.WithCredentialTypes(bundle.CredentialTypes()),
+		dispatch.WithFederation(issuer),
 		dispatch.WithProjects(bundle.Projects(), syncer),
 		dispatch.WithInventories(bundle.Inventories()),
 		dispatch.WithInventorySources(bundle.InventorySources()),
+		dispatch.WithFactCache(bundle.FactCache()),
 		// The chain is written by whichever process finishes the run. Without this a worker executed
 		// runs and committed no outcome for any of them: not receiptable, absent from their own
 		// dossiers, invisible to the offline verification the product rests on, and silent about it,
@@ -274,6 +333,13 @@ func workerStore(log *zap.Logger) (run.Store, []dispatch.Option, func(), error) 
 		// The plan-content gate is enforced by whichever process claims the run, so a worker needs
 		// the policies as much as the control node does, and from the same place it does.
 		dispatch.WithPolicies(policies),
+		// A named notification target is told about a run by whichever process starts and finishes
+		// it, the same as the chain entry above, or a fleet's runs would reach no target at all.
+		// The event is recorded in the shared outbox, so any process on the database delivers it.
+		dispatch.WithNotificationOutbox(notificationOutbox(bundle, sealer, log)),
+		// A worker on the database reports itself so the dashboard can tell a queue it serves from
+		// one nothing serves. A relay worker is reported by the control node it claims from.
+		dispatch.WithPresence(bundle.Attention()),
 	)
 	return bundle.Runs(), opts, func() { _ = bundle.Close() }, nil
 }
@@ -295,4 +361,22 @@ func redactDSN(dsn string) string {
 		}
 	}
 	return dsn
+}
+
+// loadDeliveryKeys reads each --delivery-key file into one key ring. A file that is not a delivery
+// key, or that another account can read, is refused, and so is the same key named twice.
+func loadDeliveryKeys(paths []string) (*handoff.KeyRing, error) {
+	keys := make([]*handoff.PrivateKey, 0, len(paths))
+	for _, path := range paths {
+		k, err := handoff.LoadPrivateKeyFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("--delivery-key: %w", err)
+		}
+		keys = append(keys, k)
+	}
+	ring, err := handoff.NewKeyRing(keys...)
+	if err != nil {
+		return nil, fmt.Errorf("--delivery-key: %w", err)
+	}
+	return ring, nil
 }

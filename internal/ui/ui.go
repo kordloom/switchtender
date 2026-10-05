@@ -71,6 +71,9 @@ type UI struct {
 	// aiEnabled reports whether an advisory AI provider is configured, so the overview can make the
 	// ask panel clearly unavailable rather than looking usable and failing on the first question.
 	aiEnabled bool
+	// factCacheAdminOnly reports whether reading cached facts is restricted to admins, so the
+	// inventories page offers them only to who may read them.
+	factCacheAdminOnly bool
 }
 
 // New parses the embedded templates and returns a UI. It panics if the embedded templates fail to
@@ -202,6 +205,7 @@ func (u *UI) Handler() http.Handler {
 	mux.HandleFunc("GET /ui/projects", u.projects)
 	mux.HandleFunc("GET /ui/templates", u.jobTemplates)
 	mux.HandleFunc("GET /ui/schedules", u.schedules)
+	mux.HandleFunc("GET /ui/notifications", u.notifications)
 	mux.HandleFunc("GET /ui/workflows", u.workflows)
 	mux.HandleFunc("GET /ui/migrate", u.migrate)
 	if u.docs != nil {
@@ -335,7 +339,8 @@ func (u *UI) workers(w http.ResponseWriter, _ *http.Request) {
 
 // inventories renders the stored inventory management page.
 func (u *UI) inventories(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "inventories.html", map[string]any{"ReadOnly": u.readOnly})
+	u.render(w, "inventories.html", map[string]any{"ReadOnly": u.readOnly,
+		"FactCacheAdminOnly": u.factCacheAdminOnly})
 }
 
 // sources renders the dynamic inventory source page.
@@ -353,6 +358,12 @@ func (u *UI) login(w http.ResponseWriter, _ *http.Request) {
 // schedules renders the schedules page.
 func (u *UI) schedules(w http.ResponseWriter, _ *http.Request) {
 	u.render(w, "schedules.html", map[string]any{"ReadOnly": u.readOnly})
+}
+
+// notifications renders the notification targets page: the named channels runs are reported to,
+// what each is attached to, and what each was told.
+func (u *UI) notifications(w http.ResponseWriter, _ *http.Request) {
+	u.render(w, "notifications.html", map[string]any{"ReadOnly": u.readOnly})
 }
 
 // activity renders the full-page activity view: the windowed run chart with an outcome breakdown and

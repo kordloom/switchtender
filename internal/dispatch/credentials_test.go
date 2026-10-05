@@ -867,9 +867,12 @@ func TestRegistryPasswordMaskedInLog(t *testing.T) {
 	d := New(store, runner, nil, WithCredentials(creds, sealer), WithNoJanitor())
 	defer d.Close()
 	ctx := context.Background()
+	// Claimed by this dispatcher under a capability, the way its claim loop hands a run over: the
+	// fenced start moves only a run its own claim holds.
 	r := &run.Run{
 		ID: "run_reg", Playbook: "site.yml", Image: "ghcr.io/acme/ee:1",
 		PullCredentialID: "pull_1", Status: run.StatusPending, CreatedAt: time.Now(),
+		ClaimedBy: d.owner, ClaimSecret: "claim-run-reg",
 	}
 	if err := store.Save(ctx, r); err != nil {
 		t.Fatalf("Save() error = %v", err)

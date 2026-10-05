@@ -6,9 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/sqlutil"
 )
 
@@ -35,7 +38,9 @@ type auditStore struct {
 
 // Append records one entry, linking it to the current chain head inside a transaction that holds an
 // advisory lock, so concurrent writes on any process serialize and cannot fork the chain. A span
-// marker entry is refused: only AppendSpanBeat mints beats.
+// marker entry is refused: only AppendSpanBeat mints beats. A run's second outcome entry is refused
+// with audit.ErrOutcomeRecorded, checked under the same lock, so two replicas that both found an
+// outcome owed cannot both commit it.
 func (s *auditStore) Append(ctx context.Context, e *audit.Entry) error {
 	if audit.IsSpanMarker(e) {
 		return fmt.Errorf("append audit entry: %w", audit.ErrReservedSpan)
@@ -49,21 +54,40 @@ func (s *auditStore) Append(ctx context.Context, e *audit.Entry) error {
 	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", auditLockKey); err != nil {
 		return fmt.Errorf("append audit entry: %w", err)
 	}
+	if runID, ok := audit.OutcomeRunID(e); ok {
+		held, herr := outcomeHeld(ctx, tx, runID)
+		if herr != nil {
+			return fmt.Errorf("append audit entry: %w", herr)
+		}
+		if held {
+			return fmt.Errorf("append audit entry: run %s: %w", runID, audit.ErrOutcomeRecorded)
+		}
+	}
 	prev, err := s.head(ctx, tx)
 	if err != nil {
 		return err
 	}
+	now, err := lockedClock(ctx, tx)
+	if err != nil {
+		return fmt.Errorf("append audit entry: %w", err)
+	}
 	cp := *e
 	audit.BindEntryInstall(&cp, s.installID)
 	// The time is stamped here, under the same lock that assigns the sequence, so the two can never
-	// disagree. A caller that set its own time keeps it.
-	audit.StampAppendTime(prev, &cp, time.Now())
+	// disagree, and from the database's clock, the one clock every replica sharing this chain reads
+	// alike. A caller that set its own time keeps it, unless it is later than that clock: a replica
+	// whose own clock ran fast used to date its entries ahead, and the pin then carried every later
+	// entry from every replica forward with them.
+	audit.StampAppendTime(prev, &cp, now)
 	audit.Link(prev, &cp)
 	const q = `INSERT INTO audit_entries (id, at, actor, actor_type, on_behalf_of, method, path, content_digest, seq, prev_hash, hash, nonce, install_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
 	if _, err := tx.ExecContext(ctx, q,
 		cp.ID, sqlutil.FormatTime(cp.At), cp.Actor, cp.ActorType, cp.OnBehalfOf, cp.Method,
 		cp.Path, cp.ContentDigest, cp.Seq, cp.PrevHash, cp.Hash, cp.Nonce, cp.InstallID); err != nil {
+		if isConstraintConflict(err, "audit_entries_pkey") {
+			return fmt.Errorf("append audit entry %s: %w", cp.ID, audit.ErrDuplicateID)
+		}
 		return fmt.Errorf("append audit entry: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -79,10 +103,12 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
 // append lock rather than a separate span key because the count and the link must also hold
 // against a concurrent ordinary Append, and this is the lock that serializes the chain.
 //
-// A time that does not advance past the newest beat is refused with audit.ErrClockBehind and
-// nothing is written: a beat's time is a signed claim, so writing a time the clock did not read
-// would be a false statement in an attestation. The skipped beat surfaces as a reported gap, and
-// its number waits for the next beat the chain accepts.
+// A time that does not advance past the newest beat, or that falls behind the newest entry, is
+// refused with audit.ErrClockBehind and nothing is written: a beat's time is a signed claim, so
+// writing a time the clock did not read would be a false statement in an attestation. The skipped
+// beat surfaces as a reported gap, and its number waits for the next beat the chain accepts. A zero
+// time is read from the database's clock once the lock is held, the clock every entry is stamped
+// with here.
 func (s *auditStore) AppendSpanBeat(ctx context.Context, at time.Time, cadenceS int) (*audit.Entry, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -96,6 +122,11 @@ func (s *auditStore) AppendSpanBeat(ctx context.Context, at time.Time, cadenceS 
 	prev, err := s.head(ctx, tx)
 	if err != nil {
 		return nil, err
+	}
+	if at.IsZero() {
+		if at, err = lockedClock(ctx, tx); err != nil {
+			return nil, fmt.Errorf("append span beat: %w", err)
+		}
 	}
 	var headSeq int64
 	if prev != nil {
@@ -111,6 +142,11 @@ func (s *auditStore) AppendSpanBeat(ctx context.Context, at time.Time, cadenceS 
 	// bundle covering the pair. See audit.CheckBeatAdvance.
 	if err := audit.CheckBeatAdvance(at, lastSpanAt, beat); err != nil {
 		return nil, fmt.Errorf("append span beat: %w", err)
+	}
+	if prev != nil {
+		if err := audit.CheckBeatAfterHead(at, prev.At, beat); err != nil {
+			return nil, fmt.Errorf("append span beat: %w", err)
+		}
 	}
 	e := audit.NewSpanEntry(at, beat, count, cadenceS)
 	audit.BindEntryInstall(e, s.installID)
@@ -164,6 +200,57 @@ ORDER BY seq DESC`
 		return 0, 0, time.Time{}, fmt.Errorf("last span: %w", err)
 	}
 	return 0, 0, time.Time{}, nil
+}
+
+// pgClockText reads the database's clock at the moment the statement runs, in the stored time form.
+// It is clock_timestamp rather than now, which is when the transaction began: an append's
+// transaction begins before its lock is granted, and the time has to be read once the lock is held.
+// A federation key change reads it for the same reason, so a change that waited for the key lock
+// judges the keys at the moment it got the lock, after every change it waited for.
+const pgClockText = `to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`
+
+// lockedClock returns the database's clock, read through q, which an append scopes to its
+// transaction once it holds the append lock.
+func lockedClock(ctx context.Context, q rowQuerier) (time.Time, error) {
+	var raw string
+	if err := q.QueryRowContext(ctx, "SELECT "+pgClockText).Scan(&raw); err != nil {
+		return time.Time{}, fmt.Errorf("read the database clock: %w", err)
+	}
+	now, err := sqlutil.ParseTime(raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("read the database clock: %w", err)
+	}
+	return now, nil
+}
+
+// outcomeHeld reports whether the chain already holds an outcome entry for runID. The paths are
+// matched exactly, one for each terminal status, so the lookup rides idx_audit_outcome, which holds
+// only outcome entries, and an exact match answers the same on any collation the database uses.
+func outcomeHeld(ctx context.Context, q rowQuerier, runID string) (bool, error) {
+	paths := outcomePaths(runID)
+	marks := make([]string, len(paths))
+	for i := range paths {
+		marks[i] = "$" + strconv.Itoa(i+1)
+	}
+	query := "SELECT EXISTS (SELECT 1 FROM audit_entries WHERE method = '" + audit.MethodRun +
+		"' AND path IN (" + strings.Join(marks, ", ") + "))"
+	var held bool
+	if err := q.QueryRowContext(ctx, query, paths...).Scan(&held); err != nil {
+		return false, fmt.Errorf("find run %s outcome: %w", runID, err)
+	}
+	return held, nil
+}
+
+// outcomePaths returns every path an outcome entry for runID can carry, one for each terminal
+// status, as query arguments.
+func outcomePaths(runID string) []any {
+	var paths []any
+	for _, st := range run.AllStatuses() {
+		if st.Terminal() {
+			paths = append(paths, audit.OutcomePath(runID, string(st)))
+		}
+	}
+	return paths
 }
 
 // head returns the current chain head, the entry with the highest sequence, or nil when empty. It

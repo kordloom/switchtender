@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/plantest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -66,14 +67,15 @@ func TestPolicyHoldsMatchingRun(t *testing.T) {
 	}
 }
 
-// planRunner returns a runner that emits destroyLine for a plan (dry run) and a plain apply line for a
-// real run, so a plan-content gate test controls the destroy count its plan reports.
+// planRunner returns a runner that emits destroyLine for a plan (dry run), returning the saved plan it
+// describes, and a plain apply line for a real run, so a plan-content gate test controls the destroy
+// count its plan reports.
 func planRunner(destroyLine string) roundhouse.Runner {
 	return roundhouse.RunnerFunc(
 		func(_ context.Context, spec roundhouse.Spec, out io.Writer) (roundhouse.Result, error) {
 			if spec.DryRun {
 				_, _ = io.WriteString(out, destroyLine+"\n")
-				return roundhouse.Result{ExitCode: 0, Drift: true}, nil
+				return plantest.Result(destroyLine), nil
 			}
 			_, _ = io.WriteString(out, "Apply complete!\n")
 			return roundhouse.Result{ExitCode: 0}, nil

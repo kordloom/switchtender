@@ -16,6 +16,7 @@ const PAGE_DOCS = {
 	jobtemplates: { slug: "tutorial-save-a-template", label: "Save a template" },
 	workflows: { slug: "concepts", label: "Concepts" },
 	schedules: { slug: "tutorial-schedule-a-job", label: "Schedule a job" },
+	notifications: { slug: "api", label: "API" },
 	migrate: { slug: "tutorial-migrate", label: "Migrate your setup" },
 	credentials: { slug: "secrets", label: "Secrets" },
 	users: { slug: "configuration", label: "Configuration" },
@@ -95,7 +96,7 @@ function mountPageDocs() {
 // server, across every run rather than only the loaded page.
 const LIST_PAGES = ["jobtemplates", "credentials", "projects", "inventories", "sources",
 	"schedules", "users", "workers", "fleet", "tasks", "host", "policies", "drift", "audit", "doctor",
-	"compare"];
+	"compare", "notifications"];
 
 // mountListFilter adds a search box above the main list table and filters its rows by text as you
 // type, so every list is searchable. It reads the rows live, so it works no matter when they load.

@@ -21,11 +21,69 @@ import (
 // TestARunsGradeReadsItsProject covers the approver's view of a project run. The playbook names a
 // role and the role holds the work, so the run detail has to read the role from the project's
 // checkout, the way the gate does, or an approver is shown a grade the rule never used.
+//
+// Each case builds its own checkout once it is running, rather than sharing one made before the
+// cases waited their turn: on a busy machine a parallel case can wait minutes for a slot, and a
+// checkout that sat in the temporary directory that long was the one thing the case depended on
+// that it did not hold.
 func TestARunsGradeReadsItsProject(t *testing.T) {
 	t.Parallel()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
 	}
+	tests := []struct {
+		Name       string
+		Checkouts  bool
+		WantClass  string
+		WantReason string
+	}{{ // Test 0: With the checkouts, the role is read.
+		Name:       "with checkouts",
+		Checkouts:  true,
+		WantClass:  run.Irreversible,
+		WantReason: "a task in roles/purge/tasks/main.yml removes a file",
+	}, { // Test 1: Without them the grade says what it rests on rather than guessing.
+		Name:       "without checkouts",
+		WantClass:  run.ReversibleCostly,
+		WantReason: "the playbook's own contents were not examined",
+	}}
+	for _, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Parallel()
+			syncer, projects := gradeProject(t)
+			opts := []Option{WithProjects(projects)}
+			if test.Checkouts {
+				opts = append(opts, WithProjectFiles(syncer))
+			}
+			store := run.NewMemStore()
+			if err := store.Save(context.Background(), &run.Run{ID: "run_1", Tool: run.ToolAnsible,
+				Playbook: "site.yml", ProjectID: "proj_1", Status: run.StatusPendingApproval}); err != nil {
+				t.Fatalf("Save(run) error = %v", err)
+			}
+			handler := New(store, &fakeSubmitter{}, zap.NewNop(), opts...).Handler()
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/runs/run_1", nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("get run = %d, body %s", rec.Code, rec.Body.String())
+			}
+			var got struct {
+				Reversibility run.Reversibility `json:"reversibility"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			said := strings.Join(got.Reversibility.Reasons, "\n")
+			if got.Reversibility.Class != test.WantClass || !strings.Contains(said, test.WantReason) {
+				t.Errorf("reversibility = %q, want %q saying %q:\n%s", got.Reversibility.Class,
+					test.WantClass, test.WantReason, said)
+			}
+		})
+	}
+}
+
+// gradeProject builds project proj_1 with a committed checkout whose playbook names a role that
+// removes a file, and returns the syncer over the checkout and the project store.
+func gradeProject(t *testing.T) (*project.Syncer, project.Store) {
+	t.Helper()
 	cache := t.TempDir()
 	checkout := filepath.Join(cache, "proj_1")
 	for rel, body := range map[string]string{
@@ -61,50 +119,7 @@ func TestARunsGradeReadsItsProject(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Save(project) error = %v", err)
 	}
-
-	tests := []struct {
-		Name       string
-		Options    []Option
-		WantClass  string
-		WantReason string
-	}{{ // Test 0: With the checkouts, the role is read.
-		Name:       "with checkouts",
-		Options:    []Option{WithProjects(projects), WithProjectFiles(syncer)},
-		WantClass:  run.Irreversible,
-		WantReason: "a task in roles/purge/tasks/main.yml removes a file",
-	}, { // Test 1: Without them the grade says what it rests on rather than guessing.
-		Name:       "without checkouts",
-		Options:    []Option{WithProjects(projects)},
-		WantClass:  run.ReversibleCostly,
-		WantReason: "the playbook's own contents were not examined",
-	}}
-	for _, test := range tests {
-		t.Run(test.Name, func(t *testing.T) {
-			t.Parallel()
-			store := run.NewMemStore()
-			if err := store.Save(context.Background(), &run.Run{ID: "run_1", Tool: run.ToolAnsible,
-				Playbook: "site.yml", ProjectID: "proj_1", Status: run.StatusPendingApproval}); err != nil {
-				t.Fatalf("Save(run) error = %v", err)
-			}
-			handler := New(store, &fakeSubmitter{}, zap.NewNop(), test.Options...).Handler()
-			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/runs/run_1", nil))
-			if rec.Code != http.StatusOK {
-				t.Fatalf("get run = %d, body %s", rec.Code, rec.Body.String())
-			}
-			var got struct {
-				Reversibility run.Reversibility `json:"reversibility"`
-			}
-			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-				t.Fatalf("decode: %v", err)
-			}
-			said := strings.Join(got.Reversibility.Reasons, "\n")
-			if got.Reversibility.Class != test.WantClass || !strings.Contains(said, test.WantReason) {
-				t.Errorf("reversibility = %q, want %q saying %q:\n%s", got.Reversibility.Class,
-					test.WantClass, test.WantReason, said)
-			}
-		})
-	}
+	return syncer, projects
 }
 
 // TestASplitRunIsGradedOnWhatItsShardsDid covers a finished split. A parent stores no host rows of

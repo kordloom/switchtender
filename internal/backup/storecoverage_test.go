@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kordloom/switchtender/internal/backup"
+	"github.com/kordloom/switchtender/internal/pgstore"
 	"github.com/kordloom/switchtender/internal/sqlitestore"
 )
 
@@ -18,51 +19,68 @@ var notBackedUp = map[string]string{
 	"Runs":   "run history is out of scope; it is operational data, not configuration",
 	"Audits": "the audit chain has its own signed export and must not be restored under a new identity",
 	"Close":  "not a store",
+	"FactCache": "cached facts are runtime state a run regathers, and a fact document carries the " +
+		"remote user's environment, which a portable file handed between installs should not",
+	"FederationKeys": "the federation signing keys are sealed under this install's encryption key " +
+		"and regenerate on their own; restoring them into another install would let it sign run " +
+		"identity tokens a cloud trusts as this one",
 	"BeginReadSnapshot": "not a store; it is the seam a backup pins its one consistent instant with, " +
 		"carried on Stores as the Snapshot field",
+	"ReviewReports": "a pull request review report record is runtime state about runs, " +
+		"which are out of scope, and restoring one into another install would have it post " +
+		"to a pull request again",
+	"Decisions": "decision records are run history: an approver's reason belongs to its run and " +
+		"its chain entry, both out of scope, and restoring it into another install would attach " +
+		"reasons to commitments that install's chain never made",
+	"Attention": "worker reports and raised attention alerts are runtime state the fleet rebuilds " +
+		"within seconds of starting, and restoring another install's alerts would silence ones " +
+		"this install never raised",
 }
 
-// TestEveryStoreIsBackedUpOrDeliberatelyNot pins that a store the database exposes is either carried
-// by a backup or named here as an exclusion.
+// TestEveryStoreIsBackedUpOrDeliberatelyNot pins that a store either database exposes is either
+// carried by a backup or named here as an exclusion.
 //
 // A backup is a hand-maintained parallel list of what matters. Adding a store to the product does
 // not add it to the backup, and nothing fails when it is missed: the backup writes, the restore
 // reads, and the summary counts everything it knew to count. The gap appears on the day somebody
 // restores and finds the thing simply absent. This turns that into a failing test at the moment the
-// store is added, when the person adding it can still decide.
+// store is added, when the person adding it can still decide. Both databases are read, since a
+// store added to one first is as absent from a backup as one added to neither.
 func TestEveryStoreIsBackedUpOrDeliberatelyNot(t *testing.T) {
 	t.Parallel()
-	db := reflect.TypeOf(&sqlitestore.DB{})
 	carried := map[string]bool{}
 	stores := reflect.TypeOf(backup.Stores{})
 	for i := 0; i < stores.NumField(); i++ {
 		carried[stores.Field(i).Name] = true
 	}
-
-	var missing []string
-	for i := 0; i < db.NumMethod(); i++ {
-		name := db.Method(i).Name
-		if carried[name] {
-			continue
+	exposed := map[string]bool{}
+	for _, db := range []reflect.Type{reflect.TypeOf(&sqlitestore.DB{}), reflect.TypeOf(&pgstore.DB{})} {
+		var missing []string
+		for i := 0; i < db.NumMethod(); i++ {
+			name := db.Method(i).Name
+			exposed[name] = true
+			if carried[name] {
+				continue
+			}
+			if _, deliberate := notBackedUp[name]; deliberate {
+				continue
+			}
+			missing = append(missing, name)
 		}
-		if _, deliberate := notBackedUp[name]; deliberate {
-			continue
+		sort.Strings(missing)
+		if len(missing) > 0 {
+			t.Errorf("these %s stores are neither backed up nor listed as deliberate exclusions: "+
+				"%s.\nAdd each to backup.Stores and to gather/apply, or name it in notBackedUp with "+
+				"the reason. A store that is silently absent is only discovered during a restore.",
+				db, strings.Join(missing, ", "))
 		}
-		missing = append(missing, name)
-	}
-	sort.Strings(missing)
-	if len(missing) > 0 {
-		t.Errorf("these stores are neither backed up nor listed as deliberate exclusions: %s.\n"+
-			"Add each to backup.Stores and to gather/apply, or name it in notBackedUp with the "+
-			"reason. A store that is silently absent is only discovered during a restore.",
-			strings.Join(missing, ", "))
 	}
 
-	// The exclusion list guards itself: a name here that the database no longer exposes is stale,
-	// and a stale exclusion would hide a real gap if the name were ever reused.
+	// The exclusion list guards itself: a name here that neither database exposes is stale, and a
+	// stale exclusion would hide a real gap if the name were ever reused.
 	for name := range notBackedUp {
-		if _, ok := db.MethodByName(name); !ok {
-			t.Errorf("notBackedUp names %q, which the database no longer exposes; remove it", name)
+		if !exposed[name] {
+			t.Errorf("notBackedUp names %q, which neither database exposes; remove it", name)
 		}
 	}
 }
@@ -70,7 +88,9 @@ func TestEveryStoreIsBackedUpOrDeliberatelyNot(t *testing.T) {
 // summaryExtras are Summary count fields with no same-named Stores field, each with its reason.
 // Memberships counts rows carried inside teams and orgs rather than a store of their own.
 var summaryExtras = map[string]string{
-	"Memberships": "team and org membership rows ride inside their parents",
+	"Memberships":             "team and org membership rows ride inside their parents",
+	"NotificationAttachments": "attachment rows ride inside the notification target they belong to",
+	"AWXBindings":             "awx callback bindings ride in the template store beside the templates",
 }
 
 // TestEveryStoreFieldIsCountedBySummary pins the next link of the chain storecoverage starts.

@@ -1,0 +1,49 @@
+# SwitchTender worker, as a systemd service.
+#
+# Install it once, on each worker host:
+#
+#   useradd --system --home-dir /var/lib/switchtender-worker --shell /usr/sbin/nologin switchtender
+#   install -d -m 0750 -o root -g switchtender /etc/switchtender
+#   install -m 0640 -o root -g switchtender /dev/null /etc/switchtender/worker.env
+#   install -m 0644 switchtender-worker.service /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now switchtender-worker
+#
+# worker.env holds the worker's settings, one KEY=value per line: SWITCHTENDER_ENCRYPTION_KEY,
+# SWITCHTENDER_ENCRYPTION_SALT, and SWITCHTENDER_DB with the shared PostgreSQL DSN, or, for a worker
+# that reaches the control node over the relay, SWITCHTENDER_WORKER_TOKEN with --server added to
+# ExecStart. SWITCHTENDER_LICENSE names the license file.
+#
+# Run files, the keys, tokens, and secret answers each run stages on disk, go to the runtime
+# directory below: memory-backed under /run, private to this account, and removed by systemd when the
+# service stops for any reason, a crash included. SwitchTender finds it through RUNTIME_DIRECTORY,
+# which systemd sets from version 240. On an older systemd add
+# --runfiles-dir /run/switchtender-worker/runfiles to ExecStart.
+
+[Unit]
+Description=SwitchTender worker
+Documentation=https://switchtender.com/docs/run-files
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=switchtender
+Group=switchtender
+EnvironmentFile=/etc/switchtender/worker.env
+ExecStart=/usr/local/bin/switchtender worker
+WorkingDirectory=/var/lib/switchtender-worker
+StateDirectory=switchtender-worker
+StateDirectoryMode=0700
+RuntimeDirectory=switchtender-worker
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=no
+PrivateTmp=true
+NoNewPrivileges=true
+LimitCORE=0
+KillMode=mixed
+TimeoutStopSec=90
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

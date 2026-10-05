@@ -40,9 +40,10 @@ func TestAgentToolsUseOnlyOrdinaryEndpoints(t *testing.T) {
 	}
 	sort.Strings(got)
 
-	// Runs and templates, and nothing else. An agent lists templates, proposes a run, and reads
-	// what happened; every one of those is a public endpoint a person uses too.
-	want := []string{"/v1/runs", "/v1/runs/", "/v1/templates", "/v1/templates/"}
+	// Runs, templates, and the approvals queue, and nothing else. An agent lists templates, proposes
+	// a run, reads what happened, and reads what waits for a person; every one of those is a public
+	// endpoint a person uses too, and the approvals queue is a viewer read, never a decision.
+	want := []string{"/v1/approvals", "/v1/runs", "/v1/runs/", "/v1/templates", "/v1/templates/"}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("the agent surface reaches different endpoints (-want +got):\n%s\n"+
 			"Every claim made for this gate assumes an agent's request is an ordinary API request. "+

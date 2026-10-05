@@ -19,7 +19,14 @@
 		<section id="run-header" class="run-header" hidden></section>
 		<div id="risk-callout" class="risk-callout" hidden></div>
 		<div id="run-warning" class="risk-callout risk-medium" hidden></div>
+		<div id="run-policy-notes" class="risk-callout risk-medium" hidden></div>
 		<div id="run-failure" class="risk-callout risk-high" hidden></div>
+		<div id="run-report" class="risk-callout risk-medium" hidden></div>
+		<section class="panel approval-steps" id="approval-steps" hidden></section>
+		<section class="panel" id="decisions-panel" hidden>
+			<div class="panel-head"><h2>Decisions</h2></div>
+			<div id="decisions"></div>
+		</section>
 
 		<section class="panel" id="shards-panel" hidden>
 			<div class="panel-head"><h2>Shards</h2></div>
@@ -63,6 +70,8 @@
 			</div>
 			<pre class="log" id="log"></pre>
 		</section>
+
+		<section class="panel run-notifications" id="run-notifications" hidden></section>
 
 		<div class="actions">
 			<a id="full-log" class="button" href="#" target="_blank" rel="noopener">View full log</a>

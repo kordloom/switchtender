@@ -87,7 +87,7 @@ func TestClientKeyRefusalsAreExact(t *testing.T) {
 		Name: "plain key, no org", Supplied: "nightly", WantStored: "nightly",
 	}, { // Test 1: The same key under an organization is scoped to it.
 		Name: "plain key, org", Supplied: "nightly", OrgID: "org_acme",
-		WantStored: "org_acme\x00nightly",
+		WantStored: clientDigestPrefix + digestHex("org_acme\x00nightly"),
 	}, { // Test 2: The reserved prefix is refused whatever follows it.
 		Name: "reserved prefix", Supplied: "st:anything", Want: ErrReservedKey,
 	}, { // Test 3: The prefix alone is refused.
@@ -107,7 +107,7 @@ func TestClientKeyRefusalsAreExact(t *testing.T) {
 		Name: "leading null", Supplied: "\x00nightly", Want: ErrReservedKey,
 	}, { // Test 9: A unicode key is ordinary text and is stored as sent.
 		Name: "unicode key", Supplied: "夜間デプロイ", OrgID: "org_acme",
-		WantStored: "org_acme\x00夜間デプロイ",
+		WantStored: clientDigestPrefix + digestHex("org_acme\x00夜間デプロイ"),
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -127,9 +127,10 @@ func TestClientKeyRefusalsAreExact(t *testing.T) {
 				t.Errorf("ClientKey(%q, %q) = %q, want %q", test.Supplied, test.OrgID, got,
 					test.WantStored)
 			}
-			// A stored key never enters the server's own namespace, whatever the caller sent.
-			if strings.HasPrefix(got, internalKeyPrefix) {
-				t.Errorf("the stored key %q sits in the reserved namespace", got)
+			// A stored key that is not what the caller sent is one no caller can send, so it cannot
+			// be planted from outside.
+			if _, err := ClientKey(got, ""); got != test.Supplied && !errors.Is(err, ErrReservedKey) {
+				t.Errorf("the stored key %q can be sent by a caller: %v", got, err)
 			}
 		})
 	}
@@ -139,8 +140,9 @@ func TestClientKeyRefusalsAreExact(t *testing.T) {
 //
 // The submit handler only calls this when the header is present and non-blank, so the empty case is
 // unreachable through the API today. It is recorded because the shape is worth seeing: under an
-// organization an empty key does not stay empty, it becomes the separator-terminated org prefix,
-// which is a real key that a second empty submission from the same organization would collide with.
+// organization an empty key does not stay empty, it becomes the digest of the separator-terminated
+// org prefix, which is a real key that a second empty submission from the same organization would
+// collide with.
 // A caller reaching this function from anywhere else has to keep the handler's guard.
 func TestClientKeyOfAnEmptyKeyUnderAnOrg(t *testing.T) {
 	t.Parallel()
@@ -153,7 +155,7 @@ func TestClientKeyOfAnEmptyKeyUnderAnOrg(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ClientKey(\"\", org) error = %v", err)
 	}
-	if scoped != "org_acme\x00" {
+	if scoped != clientDigestPrefix+digestHex("org_acme\x00") {
 		t.Errorf("ClientKey(\"\", org) = %q, want the org prefix", scoped)
 	}
 	if scoped == "" {

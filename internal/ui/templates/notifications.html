@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Notifications - SwitchTender</title>
+	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="notifications"{{if .ReadOnly}} data-readonly="true"{{end}}{{if .Demo}} data-demo="true"{{end}}{{if .SignIn}} data-signin="required"{{end}}>
+	<header class="topbar">
+		<div class="brand"><a href="/ui/"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="SwitchTender"></picture>SwitchTender</a></div>
+	</header>
+
+	<main class="content">
+		<div class="page-head">
+			<div class="page-head-text">
+				<h1>Notifications</h1>
+				<p class="muted">Named targets, a chat channel, a webhook, a pager, or a mailbox, defined once and attached to the templates, schedules, projects, and organizations whose runs they should hear about.</p>
+			</div>
+			<button id="notify-open" class="button primary">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+				New target
+			</button>
+		</div>
+
+		<div id="notify-modal" class="modal" hidden>
+			<div class="modal-card wide">
+				<div class="modal-head">
+					<h2>Add a notification target</h2>
+					<button type="button" class="modal-close" id="notify-close" aria-label="Close">&times;</button>
+				</div>
+			<form id="notify-form" class="stack">
+				<label class="field-label">Name
+					<input id="notify-name" class="input" placeholder="ops chat" required>
+				</label>
+				<label class="field-label">Description
+					<input id="notify-description" class="input" placeholder="tells the on-call channel about production runs">
+				</label>
+				<label class="field-label">Kind
+					<select id="notify-kind" class="input">
+						<option value="slack">Slack</option>
+						<option value="mattermost">Mattermost</option>
+						<option value="rocketchat">Rocket.Chat</option>
+						<option value="discord">Discord</option>
+						<option value="teams">Microsoft Teams</option>
+						<option value="webhook">Webhook</option>
+						<option value="ntfy">ntfy</option>
+						<option value="pagerduty">PagerDuty</option>
+						<option value="grafana">Grafana annotation</option>
+						<option value="twilio">Twilio text message</option>
+						<option value="email">Email</option>
+					</select>
+					<span id="notify-kind-hint" class="field-hint"></span>
+				</label>
+				<div id="notify-missing" class="ro-banner" hidden></div>
+				<label class="field-label" id="notify-url-field">Address
+					<span id="notify-url-state" class="field-hint" hidden></span>
+					<input id="notify-url" class="input mono" type="password" autocomplete="off" spellcheck="false">
+				</label>
+				<label class="field-label" id="notify-key-field" hidden>Key
+					<span id="notify-key-state" class="field-hint" hidden></span>
+					<input id="notify-key" class="input mono" type="password" autocomplete="off" spellcheck="false">
+				</label>
+				<label class="field-label" id="notify-to-field" hidden>Recipient
+					<input id="notify-to" class="input" autocomplete="off">
+				</label>
+				<span id="notify-secret-hint" class="field-hint">An address or key is sealed with the server's encryption key, never shown again, and kept when an edit leaves it empty.</span>
+				<div class="launch-actions">
+					<button type="submit" class="button primary">Save</button>
+					<span id="notify-status" class="muted"></span>
+				</div>
+			</form>
+			</div>
+		</div>
+
+		<div id="status" class="muted">Loading notification targets.</div>
+		<div id="notify-needs" class="cred-needs" hidden></div>
+		<div class="list-scroll">
+		<table id="notify-table" class="runs" hidden>
+			<thead>
+				<tr>
+					<th>Name</th>
+					<th>Kind</th>
+					<th>Address or recipient</th>
+					<th>State</th>
+					<th>Last delivered</th>
+					<th>Created</th>
+					<th class="col-actions">Actions</th>
+				</tr>
+			</thead>
+			<tbody id="notifications"></tbody>
+		</table>
+		</div>
+
+		<section class="panel notify-detail" id="notify-detail" hidden>
+			<div class="panel-head">
+				<h2 id="notify-detail-title">Target</h2>
+				<button type="button" class="modal-close" id="notify-detail-close" aria-label="Close">&times;</button>
+			</div>
+			<p id="notify-detail-state" class="muted"></p>
+
+			<h3 class="notify-sub-head">Attached to</h3>
+			<div id="notify-attach-status" class="muted"></div>
+			<div class="list-scroll">
+			<table id="notify-attach-table" class="runs" hidden>
+				<thead>
+					<tr>
+						<th>Object</th>
+						<th>Name</th>
+						<th>Event</th>
+						<th class="col-actions">Actions</th>
+					</tr>
+				</thead>
+				<tbody id="notify-attachments"></tbody>
+			</table>
+			</div>
+			<form id="notify-attach-form" class="notify-attach-form">
+				<label class="field-label">Object
+					<select id="notify-attach-kind" class="input">
+						<option value="template">Template or workflow</option>
+						<option value="schedule">Schedule</option>
+						<option value="project">Project</option>
+						<option value="org">Organization</option>
+					</select>
+				</label>
+				<label class="field-label">Which
+					<select id="notify-attach-object" class="input"></select>
+				</label>
+				<label class="field-label">When
+					<select id="notify-attach-event" class="input">
+						<option value="failure">A run fails</option>
+						<option value="success">A run succeeds</option>
+						<option value="started">A run starts</option>
+						<option value="approval">A run waits for approval</option>
+					</select>
+				</label>
+				<div class="launch-actions">
+					<button type="submit" class="button" data-mutates="true">Attach</button>
+					<span id="notify-attach-form-status" class="muted"></span>
+				</div>
+			</form>
+
+			<h3 class="notify-sub-head">Recent deliveries</h3>
+			<div id="notify-delivery-status" class="muted"></div>
+			<div class="list-scroll">
+			<table id="notify-delivery-table" class="runs" hidden>
+				<thead>
+					<tr>
+						<th>Run</th>
+						<th>Event</th>
+						<th>Status</th>
+						<th>Attempts</th>
+						<th>Detail</th>
+						<th>Recorded</th>
+					</tr>
+				</thead>
+				<tbody id="notify-deliveries"></tbody>
+			</table>
+			</div>
+		</section>
+	</main>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>

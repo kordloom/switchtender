@@ -1,11 +1,19 @@
 package dispatch
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+)
 
 // staticFromDump converts ansible-inventory --list output into a static inventory document that
 // ansible-playbook can read from a file. The dynamic format lists group children and hosts as
 // arrays; the static format the yaml and json plugins accept uses dictionaries and folds each
 // host's vars in from the _meta block.
+//
+// Numbers keep the text Ansible printed. Decoded as float64, a float such as 4.0 was written back
+// as 4, which Ansible then reads as an int, and an int past 2^53 lost its last digits, so the
+// stored inventory and every play run from it held different values from the ones the source
+// produced.
 func staticFromDump(dump []byte) ([]byte, error) {
 	var doc map[string]json.RawMessage
 	if err := json.Unmarshal(dump, &doc); err != nil {
@@ -17,7 +25,9 @@ func staticFromDump(dump []byte) ([]byte, error) {
 		var m struct {
 			HostVars map[string]map[string]any `json:"hostvars"`
 		}
-		if err := json.Unmarshal(meta, &m); err == nil {
+		dec := json.NewDecoder(bytes.NewReader(meta))
+		dec.UseNumber()
+		if err := dec.Decode(&m); err == nil {
 			hostVars = m.HostVars
 		}
 	}
@@ -32,7 +42,9 @@ func staticFromDump(dump []byte) ([]byte, error) {
 			Children []string       `json:"children"`
 			Vars     map[string]any `json:"vars"`
 		}
-		if err := json.Unmarshal(raw, &group); err != nil {
+		gdec := json.NewDecoder(bytes.NewReader(raw))
+		gdec.UseNumber()
+		if err := gdec.Decode(&group); err != nil {
 			continue
 		}
 		entry := map[string]any{}

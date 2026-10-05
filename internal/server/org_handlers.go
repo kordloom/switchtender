@@ -116,9 +116,12 @@ func deleteOrgHandler(store org.Store, refs *refChecker, log *zap.Logger) http.H
 				return
 			}
 		}
-		err := store.Delete(r.Context(), r.PathValue("id"))
+		err := deleteAttachableObject(r.Context(), store, r.PathValue("id"))
 		if errors.Is(err, org.ErrNotFound) {
 			respondError(w, log, http.StatusNotFound, "organization not found")
+			return
+		}
+		if respondCleanupChanged(w, log, err) {
 			return
 		}
 		if err != nil {

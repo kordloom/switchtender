@@ -20,6 +20,13 @@ import (
 // committed the way an approval commits it, and returns the path of the receipt written for it.
 func receiptForDecision(t *testing.T, actor, actorType, onBehalfOf string) string {
 	t.Helper()
+	return receiptForDecisionUnder(t, actor, actorType, onBehalfOf, false)
+}
+
+// receiptForDecisionUnder is receiptForDecision with the approval committed under the legacy
+// unkeyed digest form when unkeyed is set, the way an entry recorded before nonces was.
+func receiptForDecisionUnder(t *testing.T, actor, actorType, onBehalfOf string, unkeyed bool) string {
+	t.Helper()
 	ctx := context.Background()
 	dir := t.TempDir()
 	db := filepath.Join(dir, "state.db")
@@ -49,6 +56,9 @@ func receiptForDecision(t *testing.T, actor, actorType, onBehalfOf string) strin
 	digest, nonce, err := audit.ContentDigestOf(body)
 	if err != nil {
 		t.Fatalf("ContentDigestOf() error = %v", err)
+	}
+	if unkeyed {
+		digest, nonce = audit.UnkeyedDigestOf(body), ""
 	}
 	if err := store.Audits().Append(ctx, &audit.Entry{
 		ID: audit.NewID(), At: at.Add(time.Minute), Actor: actor, ActorType: actorType,

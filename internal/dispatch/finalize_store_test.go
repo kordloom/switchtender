@@ -101,7 +101,7 @@ func TestFinalizeCommitsNoOutcomeWhenTerminalWriteFails(t *testing.T) {
 			}
 			t.Errorf("an outcome entry was committed for a run the store never recorded: path %q, "+
 				"digest recomputes from the stored run = %v", e.Path,
-				audit.VerifyContentDigest(e.ContentDigest, e.Nonce, body))
+				outcome.VerifyBody(e.ContentDigest, e.Nonce, body))
 		}
 	}
 
@@ -168,7 +168,7 @@ func TestFinalizeStoresWhatTheOutcomeDigestCommits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Body() error = %v", err)
 	}
-	if !audit.VerifyContentDigest(entry.ContentDigest, entry.Nonce, body) {
+	if !outcome.VerifyBody(entry.ContentDigest, entry.Nonce, body) {
 		t.Error("the committed outcome digest does not recompute from the stored run")
 	}
 }

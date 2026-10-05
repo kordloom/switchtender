@@ -15,6 +15,8 @@ import (
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/grant"
+	"github.com/kordloom/switchtender/internal/inventory"
+	"github.com/kordloom/switchtender/internal/review"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/template"
 	"github.com/kordloom/switchtender/internal/trigger"
@@ -33,6 +35,9 @@ type createTriggerRequest struct {
 	// RequireSignature enforces HMAC signature verification on inbound webhooks. It needs the server
 	// to have an encryption key so the signing secret can be sealed at rest.
 	RequireSignature bool `json:"require_signature"`
+	// Review, when set, makes the trigger plan pull requests instead of firing the template. A
+	// review trigger always verifies its deliveries, so it needs the encryption key too.
+	Review *trigger.Review `json:"review,omitempty"`
 }
 
 // createTriggerResponse returns the trigger and its webhook path, shown once.
@@ -61,8 +66,8 @@ type listTriggersResponse struct {
 // createTriggerHandler mints a trigger and returns its webhook path once. When the server has an
 // encryption key it also mints a sealed HMAC signing secret and returns the plaintext once, so the
 // operator can configure the git host and later enforce signatures.
-func createTriggerHandler(triggers trigger.Store, templates template.Store, sealer *credential.Sealer,
-	authz *authorizer, log *zap.Logger) http.HandlerFunc {
+func createTriggerHandler(triggers trigger.Store, templates template.Store, creds credential.Store,
+	sealer *credential.Sealer, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if triggers == nil || templates == nil {
 			respondError(w, log, http.StatusNotFound, "triggers not enabled")
@@ -74,6 +79,13 @@ func createTriggerHandler(triggers trigger.Store, templates template.Store, seal
 		}
 		if req.Name == "" || req.TemplateID == "" {
 			respondError(w, log, http.StatusBadRequest, "name and template_id are required")
+			return
+		}
+		if req.Review != nil && (sealer == nil || !sealer.Enabled()) {
+			respondError(w, log, http.StatusConflict,
+				"review needs an encryption key, because a review trigger always verifies its "+
+					"deliveries: set SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT on "+
+					"the server")
 			return
 		}
 		if req.RequireSignature && (sealer == nil || !sealer.Enabled()) {
@@ -90,8 +102,17 @@ func createTriggerHandler(triggers trigger.Store, templates template.Store, seal
 			authz.authorizeAll(r.Context(), grant.AccessUse, req.TemplateID)) {
 			return
 		}
-		if _, err := templates.Get(r.Context(), req.TemplateID); errors.Is(err, template.ErrNotFound) {
+		tpl, err := templates.Get(r.Context(), req.TemplateID)
+		if errors.Is(err, template.ErrNotFound) {
 			respondError(w, log, http.StatusBadRequest, "template not found")
+			return
+		}
+		if err != nil {
+			log.Error("server: get template: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not create trigger")
+			return
+		}
+		if req.Review != nil && !checkReviewConfig(w, r, req.Review, tpl, creds, authz, log) {
 			return
 		}
 
@@ -102,6 +123,12 @@ func createTriggerHandler(triggers trigger.Store, templates template.Store, seal
 			return
 		}
 		tg.RequireSignature = req.RequireSignature
+		if req.Review != nil {
+			// A review trigger fetches and runs whatever ref its event names, so an unverified
+			// delivery is never acceptable on one, whatever the request asked for.
+			tg.Review = req.Review
+			tg.RequireSignature = true
+		}
 		// Recorded so an offboarding review can find the webhooks somebody set up. A trigger's token
 		// is a bearer credential belonging to the trigger rather than to a person, so removing an
 		// account does not revoke it, and the record is what makes those findable and rotatable.
@@ -151,11 +178,16 @@ type updateTriggerRequest struct {
 	// bool, a client doing the rename the API documents sent a body with no require_signature and
 	// turned webhook signature verification off, silently, on a trigger that had it on.
 	RequireSignature *bool `json:"require_signature,omitempty"`
+	// Review replaces a review trigger's configuration when set, and is left alone when omitted. It
+	// cannot turn a push trigger into a review trigger or back, since the two answer the same
+	// webhook differently and the forge was configured for one of them.
+	Review *trigger.Review `json:"review,omitempty"`
 }
 
-// updateTriggerHandler renames a trigger and toggles signature enforcement.
-func updateTriggerHandler(triggers trigger.Store, templates template.Store, authz *authorizer,
-	log *zap.Logger) http.HandlerFunc {
+// updateTriggerHandler renames a trigger, toggles signature enforcement, and replaces a review
+// trigger's configuration.
+func updateTriggerHandler(triggers trigger.Store, templates template.Store, creds credential.Store,
+	authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if triggers == nil {
 			respondError(w, log, http.StatusNotFound, "triggers not enabled")
@@ -191,6 +223,27 @@ func updateTriggerHandler(triggers trigger.Store, templates template.Store, auth
 			respondError(w, log, http.StatusConflict,
 				"cannot require signatures without a signing secret: rotate one first")
 			return
+		}
+		if tg.Review != nil && req.RequireSignature != nil && !*req.RequireSignature {
+			respondError(w, log, http.StatusConflict,
+				"a review trigger always verifies its deliveries, so its signature cannot be turned off")
+			return
+		}
+		if req.Review != nil {
+			if tg.Review == nil {
+				respondError(w, log, http.StatusConflict,
+					"a push trigger cannot become a review trigger: create a review trigger instead")
+				return
+			}
+			tpl, err := templates.Get(r.Context(), tg.TemplateID)
+			if err != nil {
+				respondError(w, log, http.StatusConflict, "trigger template is gone")
+				return
+			}
+			if !checkReviewConfig(w, r, req.Review, tpl, creds, authz, log) {
+				return
+			}
+			tg.Review = req.Review
 		}
 		tg.Name = req.Name
 		if req.RequireSignature != nil {
@@ -339,7 +392,11 @@ func deleteTriggerHandler(triggers trigger.Store, authz *authorizer, log *zap.Lo
 // secret before anything launches. The launched template syncs its project fresh, so the run
 // executes the commit that was just pushed.
 func hookHandler(triggers trigger.Store, templates template.Store, submitter Submitter,
-	store run.Store, sealer *credential.Sealer, audits audit.Store, log *zap.Logger) http.HandlerFunc {
+	store run.Store, sealer *credential.Sealer, audits audit.Store, reviews *review.Reporter,
+	hooks *hookFlights, log *zap.Logger) http.HandlerFunc {
+	if hooks == nil {
+		panic("hookHandler: hook flights required")
+	}
 	// The hook endpoint carries no credential but the path, so anybody who can reach the port can
 	// present a guess, and a wrong token answers differently from a right token with a bad
 	// signature. That is a usable oracle at unlimited rate. The window is generous, because a busy
@@ -360,6 +417,13 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 			respondError(w, log, http.StatusNotFound, "unknown webhook")
 			return
 		}
+		if tg.Review != nil {
+			serveReviewHook(w, r, tg, reviewHookDeps{
+				templates: templates, triggers: triggers, submitter: submitter, store: store,
+				sealer: sealer, audits: audits, reviews: reviews, hooks: hooks, log: log,
+			})
+			return
+		}
 		var signed []byte
 		if tg.RequireSignature {
 			var ok bool
@@ -367,9 +431,16 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 				return
 			}
 		}
+		// refuse answers an authenticated delivery that starts no run and records why on the trigger,
+		// so an operator reading the trigger sees what the sender was told. A delivery that failed its
+		// signature is not recorded: anybody holding the URL could send one.
+		refuse := func(status int, msg string) {
+			noteTriggerError(r.Context(), triggers, tg.ID, msg, log)
+			respondError(w, log, status, msg)
+		}
 		t, err := templates.Get(r.Context(), tg.TemplateID)
 		if err != nil {
-			respondError(w, log, http.StatusConflict, "trigger template is gone")
+			refuse(http.StatusConflict, "trigger template is gone")
 			return
 		}
 
@@ -396,7 +467,7 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 			hookDelivery(r, signed), time.Now())
 		if err != nil {
 			log.Error("server: resolve trigger dedupe: " + err.Error())
-			respondError(w, log, http.StatusInternalServerError, "could not fire the trigger")
+			refuse(http.StatusInternalServerError, "could not fire the trigger")
 			return
 		}
 		if existing != nil {
@@ -409,6 +480,24 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 			respondRun(w, r, log, http.StatusAccepted, existing)
 			return
 		}
+
+		// Nobody answers a webhook's survey, so every question takes its default and a required one
+		// with no usable default refuses the delivery. It is recorded in place of a fire, on the
+		// chain and on the trigger, and the sender is told why, rather than a run starting without
+		// an answer its template says it needs.
+		survey, err := t.UnattendedOptions()
+		if err != nil {
+			reason, aerr := recordUnansweredHook(w, r, audits, tg, t, err)
+			if aerr != nil {
+				log.Error("server: record webhook refusal: " + aerr.Error())
+				refuse(http.StatusServiceUnavailable,
+					"refused: the webhook could not be recorded in the audit trail")
+				return
+			}
+			refuse(http.StatusConflict, reason)
+			return
+		}
+		opts = append(opts, survey...)
 
 		// Recorded before anything launches and fail-closed, the same ordering the authenticated
 		// middleware uses for a mutation: a webhook fire that cannot be written to the tamper-evident
@@ -428,7 +517,7 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 			}
 			if aerr := audits.Append(ctx, entry); aerr != nil {
 				log.Error("server: record webhook fire: " + aerr.Error())
-				respondError(w, log, http.StatusServiceUnavailable,
+				refuse(http.StatusServiceUnavailable,
 					"refused: the webhook fire could not be recorded in the audit trail")
 				return
 			}
@@ -442,44 +531,77 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 		opts = append(opts, run.WithIdempotencyKey(key),
 			run.WithSource("trigger", tg.ID), run.WithActor("trigger "+tg.Name),
 			run.WithActorType("webhook"))
-		var created *run.Run
-		switch {
-		case len(t.Steps) > 0:
-			// A webhook that fires a workflow template runs its graph. The idempotency key still
-			// applies, so a redelivered webhook does not fire the workflow twice.
-			created, err = submitter.SubmitPipeline(ctx, t.Name, t.Inventory, t.Steps, opts...)
-		case t.Shards >= 2:
-			created, err = submitter.SubmitSplit(ctx, t.Playbook, t.Inventory, t.Shards, opts...)
-		default:
-			created, err = submitter.Submit(ctx, t.Playbook, t.Inventory, opts...)
-		}
-		if errors.Is(err, dispatch.ErrPolicyDenied) ||
-			errors.Is(err, dispatch.ErrQueueUnlicensed) {
-			respondError(w, log, http.StatusForbidden, err.Error())
+		// The launch can take longer than a sender waits for an answer, since the gate may download
+		// the modules a Terraform or OpenTofu configuration calls before it records the run. It runs
+		// apart from this request: the sender is answered when it finishes or when the bound runs
+		// out, whichever comes first. The fire is already on the chain, a redelivery joins the launch
+		// in progress or collapses onto the run it made, and a failure after the sender was answered
+		// is recorded on the chain, since nobody was told.
+		ctx = context.WithoutCancel(ctx)
+		answer, done := hooks.run(tg.ID+"\x00"+key, log,
+			func() hookAnswer { return fireTemplate(ctx, triggers, submitter, audits, t, tg, opts, log) },
+			func(a hookAnswer) { recordUnsent(ctx, audits, log, tg, "/hooks/"+tg.ID+"/failed", a) })
+		if !done {
+			hookAnswer{status: http.StatusAccepted, body: map[string]string{
+				"trigger":  tg.ID,
+				"accepted": "the run is being prepared and launches once the gate has read it",
+			}}.write(w, r, log)
 			return
 		}
-		// The sender cannot fix a credential, but whoever reads its delivery log can, and "could not
-		// launch the template" sent them to the server log to find out which one and why.
-		if errors.Is(err, credential.ErrNoSecret) || errors.Is(err, credential.ErrUnreadable) {
-			log.Warn("server: fire trigger: " + err.Error())
-			respondError(w, log, http.StatusConflict, err.Error())
-			return
-		}
-		if err != nil {
-			log.Error("server: fire trigger: " + err.Error())
-			respondError(w, log, http.StatusBadGateway, "could not launch the template")
-			return
-		}
-		// The stamp is an update by id, never a whole-row save. This handler holds a snapshot
-		// loaded before the launch, and writing it back resurrected triggers deleted mid-flight
-		// and reverted secret rotations that raced a fire: deletion is revocation, and a
-		// revocation a stale fire can undo is not one.
-		if err := triggers.TouchFired(r.Context(), tg.ID, time.Now()); err != nil {
-			log.Error("server: stamp trigger: " + err.Error())
-		}
-		respondJSON(w, log, http.StatusAccepted,
-			map[string]string{"trigger": tg.ID, "run": created.ID}, wantsPretty(r))
+		answer.write(w, r, log)
 	}
+}
+
+// fireTemplate launches a push trigger's template and returns what the sender is told. It runs
+// apart from the request that delivered the event, so it writes nothing to that request.
+func fireTemplate(ctx context.Context, triggers trigger.Store, submitter Submitter, audits audit.Store,
+	t *template.Template, tg *trigger.Trigger, opts []run.SubmitOption, log *zap.Logger) hookAnswer {
+	// A delivery that starts no run says why on the trigger, which is what an operator reads to learn
+	// why a webhook stopped launching, whether or not the sender was still waiting to be told.
+	refuse := func(status int, msg string) hookAnswer {
+		noteTriggerError(ctx, triggers, tg.ID, msg, log)
+		return hookAnswer{status: status, message: msg}
+	}
+	var created *run.Run
+	var err error
+	switch {
+	case len(t.Steps) > 0:
+		// A webhook that fires a workflow template runs its graph. The idempotency key still
+		// applies, so a redelivered webhook does not fire the workflow twice.
+		created, err = submitter.SubmitPipeline(ctx, t.Name, t.Inventory, t.Steps, opts...)
+	case t.Shards >= 2:
+		created, err = submitter.SubmitSplit(ctx, t.Playbook, t.Inventory, t.Shards, opts...)
+	default:
+		created, err = submitter.Submit(ctx, t.Playbook, t.Inventory, opts...)
+	}
+	// A fire whose composed inventory matched no hosts is skipped, not failed, and the sender is
+	// told so with a success: there is nothing to retry.
+	if errors.Is(err, inventory.ErrNoHosts) {
+		return hookSkipAnswer(ctx, log, audits, tg, t)
+	}
+	if errors.Is(err, dispatch.ErrPolicyDenied) ||
+		errors.Is(err, dispatch.ErrQueueUnlicensed) {
+		return refuse(http.StatusForbidden, err.Error())
+	}
+	// The sender cannot fix a credential, but whoever reads its delivery log can, and "could not
+	// launch the template" sent them to the server log to find out which one and why.
+	if errors.Is(err, credential.ErrNoSecret) || errors.Is(err, credential.ErrUnreadable) {
+		log.Warn("server: fire trigger: " + err.Error())
+		return refuse(http.StatusConflict, err.Error())
+	}
+	if err != nil {
+		log.Error("server: fire trigger: " + err.Error())
+		return refuse(http.StatusBadGateway, "could not launch the template")
+	}
+	// The stamp is an update by id, never a whole-row save. This handler holds a snapshot
+	// loaded before the launch, and writing it back resurrected triggers deleted mid-flight
+	// and reverted secret rotations that raced a fire: deletion is revocation, and a
+	// revocation a stale fire can undo is not one.
+	if err := triggers.TouchFired(ctx, tg.ID, time.Now()); err != nil {
+		log.Error("server: stamp trigger: " + err.Error())
+	}
+	return hookAnswer{status: http.StatusAccepted,
+		body: map[string]string{"trigger": tg.ID, "run": created.ID}}
 }
 
 // hookWindowMax bounds webhook deliveries per client address per minute. It is far looser than the
@@ -577,4 +699,28 @@ func verifyHookSignature(w http.ResponseWriter, r *http.Request, tg *trigger.Tri
 		return nil, false
 	}
 	return body, true
+}
+
+// checkReviewConfig validates a review configuration for template tpl and writes the refusal when
+// it does not hold: the configuration itself, a template a plan can run, and a token credential the
+// caller may use. Using a credential is authorized like any other object, since the trigger will
+// post with it on the caller's behalf long after this request.
+func checkReviewConfig(w http.ResponseWriter, r *http.Request, cfg *trigger.Review, tpl *template.Template,
+	creds credential.Store, authz *authorizer, log *zap.Logger) bool {
+	if err := cfg.Validate(); err != nil {
+		respondError(w, log, http.StatusBadRequest, err.Error())
+		return false
+	}
+	if reason := reviewUnsupported(tpl); reason != "" {
+		respondError(w, log, http.StatusBadRequest, reason)
+		return false
+	}
+	if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, cfg.CredentialID)) {
+		return false
+	}
+	if err := review.CheckToken(r.Context(), creds, cfg.CredentialID); err != nil {
+		respondError(w, log, http.StatusBadRequest, err.Error())
+		return false
+	}
+	return true
 }

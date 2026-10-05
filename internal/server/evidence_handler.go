@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/dossier"
 	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/run"
@@ -20,8 +21,7 @@ import (
 // producer is the install identity the tree profile's leaves bind to, which checking a tree anchor
 // requires.
 func runEvidenceHandler(store run.Store, audits audit.Store, producer audit.Identity,
-	authz *authorizer,
-	log *zap.Logger) http.HandlerFunc {
+	decisions decision.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: runEvidenceHandler: Store required")
 	}
@@ -49,6 +49,11 @@ func runEvidenceHandler(store run.Store, audits audit.Store, producer audit.Iden
 			return
 		}
 		in, err := dossier.Collect(r.Context(), store, audits, producer, got.ID, time.Now())
+		if err == nil {
+			// The reasons approvers gave travel with the evidence, with the random values that open
+			// their commitments, so the dossier can be checked against the chain offline.
+			err = dossier.AttachDecisions(r.Context(), in, decisions, store)
+		}
 		if err != nil {
 			log.Error("server: collect run evidence: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not collect the evidence")

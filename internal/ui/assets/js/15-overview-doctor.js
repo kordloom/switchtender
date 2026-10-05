@@ -80,6 +80,9 @@ async function proposeRun() {
 async function loadOverview() {
 	renderJumpTiles();
 	wireTileFilter();
+	// The Needs attention panel loads on its own, so a slow evaluation never holds back the rest of
+	// the overview and a failed one never blanks it.
+	startAttention();
 	try {
 		// Each half fails alone: one refused endpoint used to blank the whole dashboard, runs,
 		// fleet, and all, when the other half had answered fine.
@@ -142,9 +145,10 @@ function renderOverviewMetrics(runs, hosts, summary, chain) {
 	el.appendChild(statCard(total, summary && summary.scope === "visible" ? "Runs you can see" : "Total runs", ""));
 	el.appendChild(statCard(rate, "Success rate", failed ? "failed" : ""));
 	if (chain && typeof chain.count === "number") {
-		// The two tiles no competitor can show: the tamper-evident record and the approval gate.
-		// They used to be Failed and Hosts tracked, the same four numbers every AWX screen shows,
-		// so the product's actual story never appeared above the fold.
+		// The tile no competitor can show: the tamper-evident record. It and the approval gate used
+		// to replace Failed and Hosts tracked, the same numbers every AWX screen shows, so the
+		// product's actual story appeared above the fold. The gate now lives in the Needs attention
+		// panel beneath this strip.
 		// An empty chain gets neither the verified label nor the ok styling. Zero entries recompute
 		// trivially, so the card read "0 CHANGES ON THE CHAIN, VERIFIED" in green on the first
 		// screen of a fresh install: the product's headline claim, presented as proven, about
@@ -167,16 +171,8 @@ function renderOverviewMetrics(runs, hosts, summary, chain) {
 		chainCard.style.cursor = "pointer";
 		chainCard.addEventListener("click", () => { location.href = "/ui/audit"; });
 		el.appendChild(chainCard);
-		const waiting = (summary && summary.awaiting_approval) || 0;
-		const gate = statCard(waiting, "Awaiting approval", waiting ? "changed" : "");
-		gate.dataset.tip = waiting
-			? "Runs held at the approval gate. Click to review them"
-			: "Nothing is waiting at the approval gate";
-		gate.style.cursor = "pointer";
-		gate.addEventListener("click", () => {
-			location.href = "/ui/runs?q=" + encodeURIComponent("status:pending_approval");
-		});
-		el.appendChild(gate);
+		// What waits at the approval gate is the Needs attention panel's Approval needed count, which
+		// also counts workflows waiting at an approval step, so it is not repeated here.
 	} else {
 		el.appendChild(statCard(failed, "Failed", failed ? "failed" : ""));
 		el.appendChild(statCard(hosts.length, "Hosts tracked", ""));
@@ -867,6 +863,7 @@ async function loadDoctor() {
 		sum.appendChild(statCard(String(data.checked_schedules), "Schedules checked", ""));
 		sum.appendChild(statCard(String(data.checked_credentials), "Credentials checked", ""));
 		sum.appendChild(statCard(String(findings.length), "Findings", findings.length ? "failed" : "ok"));
+		if (data.ansible) sum.appendChild(ansibleCard(data.ansible));
 		sum.hidden = false;
 		if (!findings.length) {
 			showEmpty("Everything checks out. Every reference resolves and every schedule can fire.");
@@ -910,6 +907,21 @@ async function loadDoctor() {
 	} catch (e) {
 		setStatus("Doctor failed: " + e.message);
 	}
+}
+
+// ansibleCard reports the server's ansible-core beside the tested releases, so a version outside
+// them is visible without reading the findings. A server without Ansible says so plainly: smart
+// inventories over static documents still resolve, and only what needs Ansible is affected.
+function ansibleCard(a) {
+	const tested = (a.tested || []).join(", ");
+	if (!a.installed) {
+		const card = statCard("not installed", "ansible-core", "");
+		card.dataset.tip = "Constructed inventories and inputs only Ansible reads need it. Tested: " + tested;
+		return card;
+	}
+	const card = statCard(a.version, "ansible-core", a.in_range ? "ok" : "flaky");
+	card.dataset.tip = (a.in_range ? "Within" : "Outside") + " the tested releases: " + tested;
+	return card;
 }
 
 // renderJumpTiles draws every section but the overview as three group cards, each a titled list

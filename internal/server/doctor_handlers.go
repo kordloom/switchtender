@@ -1,17 +1,21 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/identity"
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/federation"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/project"
+	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/template"
 )
@@ -45,17 +49,137 @@ type doctorReport struct {
 	CheckedSchedules int `json:"checked_schedules"`
 	// CheckedCredentials is how many credentials were examined.
 	CheckedCredentials int `json:"checked_credentials"`
+	// Checked counts what each further check examined, by what it examined, such as
+	// notification_targets.
+	Checked map[string]int `json:"checked,omitempty"`
+	// Ansible is the ansible-core this server runs inventories with, and the releases the inventory
+	// engine is tested against. Absent when the server cannot tell.
+	Ansible *doctorAnsible `json:"ansible,omitempty"`
+}
+
+// doctorCheck is one further check the doctor runs beside its own, returning what it found and how
+// much it examined.
+type doctorCheck func(ctx context.Context) (doctorCheckResult, error)
+
+// doctorCheckResult is what a further doctor check found and examined.
+type doctorCheckResult struct {
+	// Findings are the problems the check found.
+	Findings []doctorFinding
+	// Checked counts what the check examined, by what it examined.
+	Checked map[string]int
+}
+
+// doctorAnsible is what doctor reports about the server's Ansible.
+type doctorAnsible struct {
+	// Installed reports whether ansible-inventory is on this server.
+	Installed bool `json:"installed"`
+	// Version is the installed ansible-core version, empty when it is not installed.
+	Version string `json:"version,omitempty"`
+	// Tested lists the ansible-core releases, by minor version, the inventory engine's conformance
+	// corpus runs against in CI.
+	Tested []string `json:"tested"`
+	// InRange reports whether the installed version is one of them.
+	InRange bool `json:"in_range"`
+}
+
+// AnsibleCoreFunc reports the ansible-core version installed on the server, or
+// roundhouse.ErrAnsibleMissing.
+type AnsibleCoreFunc func(ctx context.Context) (string, error)
+
+// ansibleCoreOf returns the dispatcher's ansible-core report when the previewer is one that has it.
+func ansibleCoreOf(previewer InventoryPreviewer) AnsibleCoreFunc {
+	if r, ok := previewer.(interface {
+		// AnsibleCore reports the server's ansible-core version.
+		AnsibleCore(ctx context.Context) (string, error)
+	}); ok {
+		return r.AnsibleCore
+	}
+	return nil
+}
+
+// ansibleFindings reports the server's ansible-core: a warning when it is outside the releases the
+// inventory engine is tested against, and, when it is missing, one warning per inventory whose
+// definition needs it, since those cannot resolve here.
+func ansibleFindings(ctx context.Context, ansible AnsibleCoreFunc, invs inventory.Store,
+	report *doctorReport, log *zap.Logger) {
+	if ansible == nil {
+		return
+	}
+	tested := strings.Join(inventory.TestedAnsibleCore, ", ")
+	version, err := ansible(ctx)
+	info := &doctorAnsible{Tested: inventory.TestedAnsibleCore}
+	report.Ansible = info
+	switch {
+	case errors.Is(err, roundhouse.ErrAnsibleMissing):
+	case err != nil:
+		log.Warn("server: doctor ansible-core version: " + err.Error())
+		return
+	default:
+		info.Installed, info.Version = true, version
+		info.InRange = inventory.AnsibleCoreTested(version)
+		if !info.InRange {
+			report.Findings = append(report.Findings, doctorFinding{
+				Severity: "warning", ObjectType: "install", ObjectID: "ansible",
+				ObjectName: "ansible-core " + version,
+				Problem: "ansible-core " + version + " is outside the releases the native " +
+					"inventory engine is tested against (" + tested + "). Every Ansible run " +
+					"against a natively resolved inventory is still checked against this " +
+					"Ansible's own reading before it starts, and refused on any difference, so " +
+					"an untested release shows up as refused runs rather than wrong ones.",
+				FixPath: "/ui/docs/inventories",
+			})
+		}
+		return
+	}
+	if invs == nil {
+		return
+	}
+	list, err := invs.List(ctx)
+	if err != nil {
+		log.Warn("server: doctor inventories: " + err.Error())
+		return
+	}
+	for _, inv := range list {
+		var why string
+		switch {
+		case inv.Kind == inventory.KindConstructed:
+			why = "it is a constructed inventory, whose groups and variables Ansible's " +
+				"constructed plugin evaluates"
+		case !inv.Composed() && (inv.ContentSource == "" || inv.ContentSource == "local"):
+			if _, rerr := inventory.ResolveNative(inv.Content); rerr != nil {
+				if reason, ok := inventory.NeedsAnsibleReason(rerr); ok {
+					why = reason
+				}
+			}
+		}
+		if why == "" {
+			continue
+		}
+		report.Findings = append(report.Findings, doctorFinding{
+			Severity: "warning", ObjectType: "inventory", ObjectID: inv.ID,
+			ObjectName: namedOr(inv.Name, inv.ID),
+			Problem: "Needs Ansible because " + why + ", and ansible-inventory is not installed " +
+				"on this server, so it cannot resolve here. Install it with: " +
+				inventory.AnsibleInstallHint,
+			FixPath: "/ui/inventories",
+		})
+	}
 }
 
 // doctorHandler verifies every registered reference still resolves: template references to
 // inventories, projects, and credentials, schedule references to templates, schedule cron
 // expressions, and credentials still waiting for a secret. Stores that are not configured are
-// skipped rather than reported.
+// skipped rather than reported. Each further check adds its own findings and counts, such as
+// notification targets still needing a secret or work that has needed attention past its alert
+// threshold, and one that cannot run is logged and reported as a finding of its own, since the rest
+// of the report still stands.
 func doctorHandler(templates template.Store, schedules schedule.Store, creds credential.Store,
-	invs inventory.Store, projs project.Store, canSign func() bool, log *zap.Logger) http.HandlerFunc {
+	invs inventory.Store, projs project.Store, canSign func() bool, runFiles *runFilesState,
+	ansible AnsibleCoreFunc, log *zap.Logger, checks ...doctorCheck) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		report := doctorReport{Findings: []doctorFinding{}}
+		ansibleFindings(ctx, ansible, invs, &report, log)
 
 		// An install that cannot sign is the doctor's most important finding, and it reported
 		// nothing at all.
@@ -79,6 +203,7 @@ func doctorHandler(templates template.Store, schedules schedule.Store, creds cre
 				FixPath: "/ui/docs/configuration",
 			})
 		}
+		report.Findings = append(report.Findings, runFilesFindings(runFiles)...)
 
 		credExists := func(id string) bool {
 			if creds == nil || id == "" {
@@ -144,13 +269,41 @@ func doctorHandler(templates template.Store, schedules schedule.Store, creds cre
 						ObjectName: namedOr(s.Name, s.ID), Problem: problem, FixPath: "/ui/schedules",
 					})
 				}
-				if _, err := s.NextFire(time.Now()); err != nil {
+				_, err := s.NextFire(time.Now())
+				switch {
+				case err == nil:
+				case s.RRule != "" && errors.Is(err, schedule.ErrExhausted):
+					// A bounded recurrence that has run its course is finished, not broken.
+					add("warning", "Recurrence has fired its last time and will not fire again.")
+				case s.RRule != "":
+					add("broken", "Recurrence rule does not evaluate, so it never fires: "+
+						err.Error())
+				default:
 					add("broken", "Cron expression "+s.Cron+" does not parse, so it never fires.")
 				}
 				if s.TemplateID != "" && templates != nil {
-					if _, err := templates.Get(ctx, s.TemplateID); errors.Is(err, template.ErrNotFound) {
+					t, err := templates.Get(ctx, s.TemplateID)
+					if errors.Is(err, template.ErrNotFound) {
 						add("broken", "Fires template "+s.TemplateID+", which does not exist.")
 					}
+					// A survey nobody can answer refuses every fire, which the schedule only says
+					// after the first one has come due. Said here, it is fixed before then.
+					if err == nil {
+						if _, uerr := t.UnattendedOptions(); uerr != nil {
+							severity := "broken"
+							if !s.Enabled {
+								severity = "warning"
+							}
+							add(severity, "Fires template "+namedOr(t.Name, t.ID)+", whose survey asks "+
+								strings.Join(template.UnansweredVars(uerr), ", ")+" with no usable "+
+								"default, so every fire is refused with nobody there to answer. Give "+
+								"the question a default.")
+						}
+					}
+				}
+				if s.SkippedFires >= schedule.SkipBadgeFires {
+					report.Findings = append(report.Findings,
+						scheduleSkipFinding(ctx, s, templates, invs))
 				}
 			}
 		}
@@ -164,6 +317,19 @@ func doctorHandler(templates template.Store, schedules schedule.Store, creds cre
 			}
 			report.CheckedCredentials = len(list)
 			for _, c := range list {
+				// A federated credential stores no secret by design. What can break it is settings
+				// that would not mint, such as a role ARN typed wrong.
+				if credential.Federated(c.Kind) {
+					if _, err := federation.ParseSettings(c.Kind, c.Settings); err != nil {
+						report.Findings = append(report.Findings, doctorFinding{
+							Severity: "broken", ObjectType: "credential", ObjectID: c.ID,
+							ObjectName: namedOr(c.Name, c.ID),
+							Problem:    "Its settings would not mint a token: " + err.Error() + ".",
+							FixPath:    "/ui/credentials",
+						})
+					}
+					continue
+				}
 				if c.Secret == "" {
 					report.Findings = append(report.Findings, doctorFinding{
 						Severity: "warning", ObjectType: "credential", ObjectID: c.ID,
@@ -172,6 +338,27 @@ func doctorHandler(templates template.Store, schedules schedule.Store, creds cre
 						FixPath:    "/ui/credentials",
 					})
 				}
+			}
+		}
+
+		for _, check := range checks {
+			res, err := check(ctx)
+			if err != nil {
+				log.Error("server: doctor check: " + err.Error())
+				report.Findings = append(report.Findings, doctorFinding{
+					Severity: "warning", ObjectType: "install", ObjectID: "doctor",
+					ObjectName: "doctor check",
+					Problem: "One of the doctor's checks could not run, so this report may be " +
+						"missing what it would have found. The server log says why.",
+				})
+				continue
+			}
+			report.Findings = append(report.Findings, res.Findings...)
+			for what, n := range res.Checked {
+				if report.Checked == nil {
+					report.Checked = map[string]int{}
+				}
+				report.Checked[what] += n
 			}
 		}
 

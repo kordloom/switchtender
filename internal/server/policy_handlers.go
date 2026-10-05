@@ -48,6 +48,9 @@ type createPolicyRequest struct {
 	Effect string `json:"effect,omitempty"`
 	// RequireDistinctApprover refuses a decision by the person who asked for the change.
 	RequireDistinctApprover bool `json:"require_distinct_approver,omitempty"`
+	// RequireReason asks for the approver's stated reason on a decision about a run this rule
+	// holds: denials or always. Empty asks for none.
+	RequireReason string `json:"require_reason,omitempty"`
 }
 
 // usesFullPolicyEngine reports whether a policy reaches past the single plain require-approval rule
@@ -139,6 +142,7 @@ func createPolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 			ActorKind: req.ActorKind, Actor: req.Actor, MinRisk: req.MinRisk,
 			Reversibility: req.Reversibility, Effect: req.Effect,
 			RequireDistinctApprover: req.RequireDistinctApprover,
+			RequireReason:           req.RequireReason,
 			CreatedAt:               time.Now(),
 		}
 		if err := p.Validate(); err != nil {
@@ -205,6 +209,7 @@ func updatePolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 			ActorKind: req.ActorKind, Actor: req.Actor, MinRisk: req.MinRisk,
 			Reversibility: req.Reversibility, Effect: req.Effect,
 			RequireDistinctApprover: req.RequireDistinctApprover,
+			RequireReason:           req.RequireReason,
 			CreatedAt:               existing.CreatedAt,
 		}
 		if err := p.Validate(); err != nil {

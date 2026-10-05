@@ -269,17 +269,19 @@ func sourceDue(src *invsource.Source, now time.Time) bool {
 
 // refreshOnLaunch refreshes the dynamic inventory source backing a run's inventory when the source
 // opts into update-on-launch and its data is stale, so the run sees current hosts. It is best effort:
-// a refresh failure is logged and the run proceeds with the last good inventory.
-func (d *Dispatcher) refreshOnLaunch(ctx context.Context, r *run.Run) {
+// a refresh failure is logged and the run proceeds with the last good inventory. It reports whether
+// it refreshed, so a caller holding the inventory reads it again. It runs when the run is submitted,
+// before the run's inventory snapshot is taken.
+func (d *Dispatcher) refreshOnLaunch(ctx context.Context, r *run.Run) bool {
 	if d.invSources == nil || r.InventoryID == "" {
-		return
+		return false
 	}
 	srcs, err := d.invSources.List(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
 			d.log.Warn("dispatch: list sources for launch refresh: " + err.Error())
 		}
-		return
+		return false
 	}
 	now := time.Now()
 	for _, src := range srcs {
@@ -287,14 +289,18 @@ func (d *Dispatcher) refreshOnLaunch(ctx context.Context, r *run.Run) {
 			continue
 		}
 		if !launchStale(src, now) {
-			return
+			return false
 		}
-		if _, err := d.RefreshSource(ctx, src.ID); err != nil && ctx.Err() == nil {
-			d.log.Warn("dispatch: update-on-launch refresh failed: "+err.Error(),
-				zap.String("source", src.ID))
+		if _, err := d.RefreshSource(ctx, src.ID); err != nil {
+			if ctx.Err() == nil {
+				d.log.Warn("dispatch: update-on-launch refresh failed: "+err.Error(),
+					zap.String("source", src.ID))
+			}
+			return false
 		}
-		return
+		return true
 	}
+	return false
 }
 
 // launchStale reports whether an update-on-launch source is stale enough to refresh before a run: a
