@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kordloom/switchtender/internal/event"
@@ -66,6 +67,30 @@ type httpTransport struct {
 	// batch is, which is the last point anything could still be reported for the run. It is kept only
 	// in memory and never written anywhere the run is serialized, matching the json:"-" on the field.
 	leases map[string]string
+	// deliveries holds what the control node delivered with each claim, sealed or refused, keyed by
+	// run id, until the run's executor takes it or discards it. Only ciphertext and a refusal reason
+	// are ever held here, never an opened secret.
+	deliveries map[string]heldDelivery
+	// slots is how many runs this worker executes at once, sent with each claim so the control node
+	// can tell a full worker from a missing one. Zero sends nothing.
+	slots atomic.Int64
+}
+
+// heldDelivery is what one claim delivered, with the claim it was delivered for.
+type heldDelivery struct {
+	// delivery is the claim answer's delivery part.
+	delivery *claimDelivery
+	// lease is the per-claim capability of the claim it came with, which the delivery is bound to.
+	lease string
+	// owner is the lease name this worker asserted for the claim, as the control node recorded it.
+	owner string
+}
+
+// wipe drops the ciphertext a held delivery carries.
+func (h heldDelivery) wipe() {
+	if h.delivery != nil {
+		h.delivery.Sealed.Wipe()
+	}
 }
 
 // logBatch accumulates one run's output between posts. A tool writes output in small chunks, so
@@ -122,11 +147,34 @@ func NewHTTPTransport(baseURL, token string, client *http.Client) Transport {
 		client = http.DefaultClient
 	}
 	return &httpTransport{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		token:   token,
-		client:  client,
-		batches: make(map[string]*logBatch),
-		leases:  make(map[string]string),
+		baseURL:    strings.TrimRight(baseURL, "/"),
+		token:      token,
+		client:     client,
+		batches:    make(map[string]*logBatch),
+		leases:     make(map[string]string),
+		deliveries: make(map[string]heldDelivery),
+	}
+}
+
+// takeDelivery removes and returns what the control node delivered with the run's claim, so a
+// delivery is handed to the executor at most once.
+func (t *httpTransport) takeDelivery(runID string) (heldDelivery, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	held, ok := t.deliveries[runID]
+	delete(t.deliveries, runID)
+	return held, ok
+}
+
+// dropDelivery wipes and forgets what the control node delivered with the run's claim, if the
+// executor never took it.
+func (t *httpTransport) dropDelivery(runID string) {
+	t.mu.Lock()
+	held, ok := t.deliveries[runID]
+	delete(t.deliveries, runID)
+	t.mu.Unlock()
+	if ok {
+		held.wipe()
 	}
 }
 
@@ -141,25 +189,41 @@ func (t *httpTransport) leaseFor(id string) string {
 // Claim leases the oldest pending run the owner's queues serve, mapping 204 to ErrNonePending.
 func (t *httpTransport) Claim(ctx context.Context, owner string, queues []string) (*run.Run, error) {
 	resp, err := t.sendJSON(ctx, http.MethodPost, "/relay/v1/claim",
-		claimRequest{Owner: owner, Queues: queues}, "")
+		claimRequest{Owner: owner, Queues: queues, Slots: int(t.slots.Load())}, "")
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	switch resp.StatusCode {
 	case http.StatusOK:
-		leased, derr := decodeRun(resp.Body)
-		if derr != nil {
-			return nil, derr
+		answer := claimResponse{Run: &run.Run{}}
+		if derr := json.NewDecoder(resp.Body).Decode(&answer); derr != nil {
+			return nil, fmt.Errorf("decode run: %w", derr)
 		}
-		// The capability rode in on a header, not the body: the field is json:"-", so decodeRun never
+		leased := answer.Run
+		// The capability rode in on a header, not the body: the field is json:"-", so the decode never
 		// saw it. It is kept in memory, keyed by run, and presented on every report made for this run.
 		// A control node that predates the capability sends no header, and the run is reported the
 		// older way.
-		if lease := resp.Header.Get(leaseHeader); lease != "" {
+		lease := resp.Header.Get(leaseHeader)
+		if lease != "" {
 			t.mu.Lock()
 			t.leases[leased.ID] = lease
 			t.mu.Unlock()
+		}
+		// What the control node sealed for this run is held, still sealed, until the run's executor
+		// opens it at the first secret the run needs. A delivery held for an earlier claim of the same
+		// run is wiped, since it was bound to a lease this worker no longer holds.
+		t.mu.Lock()
+		prior, had := t.deliveries[leased.ID]
+		delete(t.deliveries, leased.ID)
+		if answer.Delivery != nil {
+			t.deliveries[leased.ID] = heldDelivery{delivery: answer.Delivery, lease: lease,
+				owner: normalizeOwner(owner)}
+		}
+		t.mu.Unlock()
+		if had {
+			prior.wipe()
 		}
 		// The approved spec binding rides the same way and for the same reason, and is put back on
 		// the run so the executor checks the change an approver released rather than executing with
@@ -312,6 +376,8 @@ func (t *httpTransport) Save(ctx context.Context, r *run.Run) error {
 			delete(t.leases, r.ID)
 		}
 		t.mu.Unlock()
+		// The run's record is closed, so nothing delivered for it can be needed again.
+		t.dropDelivery(r.ID)
 	}
 	return flushErr
 }
@@ -598,6 +664,27 @@ func (t *httpTransport) AppendEvents(ctx context.Context, id string, events []ev
 	})
 }
 
+// MaxPlanFileBytes is the largest plan file a relay worker can hand the control node, 19 MiB. The
+// propose request carries the plan file base64 encoded, and the control node accepts at most 26 MiB
+// on that route, which leaves room for this much plan file and the request around it.
+const MaxPlanFileBytes = 19 << 20
+
+// planFileTooLarge refuses a plan file of n bytes, stating its size and the limit.
+func planFileTooLarge(n int) error {
+	return fmt.Errorf("%w: the saved plan file is %s, and a relay worker can hand the control node "+
+		"at most %s, so its apply cannot be proposed from a relay worker. Run it on a queue the "+
+		"control node executes, or split the configuration", ErrPlanFileTooLarge, mebibytes(n),
+		mebibytes(MaxPlanFileBytes))
+}
+
+// mebibytes renders n bytes in MiB, to one decimal place unless it is a whole number of them.
+func mebibytes(n int) string {
+	if n%(1<<20) == 0 {
+		return fmt.Sprintf("%d MiB", n>>20)
+	}
+	return fmt.Sprintf("%.1f MiB", float64(n)/(1<<20))
+}
+
 // proposeApplyRequest is what a worker reports about the plan it just ran. It carries findings, not a
 // run: the control node builds the apply from the plan it already holds, so a worker cannot propose an
 // apply of anything other than what it was asked to plan.
@@ -607,11 +694,20 @@ type proposeApplyRequest struct {
 	// Read reports whether that count came from a summary the parser actually found. A plan nobody
 	// could weigh against the limit has not passed it.
 	Read bool `json:"read"`
+	// PlanFile is the plan file the plan saved, which the apply carries out. The control node seals
+	// it with its own key. It holds sensitive values and is never logged on either side.
+	PlanFile []byte `json:"plan_file,omitempty"`
 }
 
-// ProposeApply asks the control node to create the apply the named plan gated.
-func (t *httpTransport) ProposeApply(ctx context.Context, planID string, destroys int, read bool) (*run.Run, error) {
-	body := proposeApplyRequest{Destroys: destroys, Read: read}
+// ProposeApply asks the control node to create the apply the named plan gated, carrying out plan.
+func (t *httpTransport) ProposeApply(ctx context.Context, planID string, destroys int, read bool,
+	plan []byte) (*run.Run, error) {
+	// A plan file past the limit is refused here, with the limit stated, rather than sent for the
+	// control node to cut off partway through the upload.
+	if len(plan) > MaxPlanFileBytes {
+		return nil, planFileTooLarge(len(plan))
+	}
+	body := proposeApplyRequest{Destroys: destroys, Read: read, PlanFile: plan}
 	resp, err := t.sendJSON(ctx, http.MethodPost, runPath(planID, "/propose-apply"), body,
 		t.leaseFor(planID))
 	if err != nil {

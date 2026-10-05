@@ -72,6 +72,10 @@ func Control(_, address string, _ syscall.RawConn) error {
 // Transport returns a transport that refuses an unsafe address at the dial.
 func Transport() *http.Transport {
 	t := http.DefaultTransport.(*http.Transport).Clone()
+	// The environment proxy is dropped: dialing a proxy would send every request to it and the dial
+	// control below would only ever see the proxy's address. An explicitly configured egress proxy is
+	// used instead, and only after the target is validated. See proxy.go.
+	t.Proxy = proxyFor(Blocked)
 	t.DialContext = (&net.Dialer{
 		Timeout:   dialTimeout,
 		KeepAlive: dialTimeout,
@@ -130,6 +134,9 @@ func ControlOffHost(_, address string, _ syscall.RawConn) error {
 // own schedule and takes a transport rather than a client with a redirect policy.
 func OffHostTransport() *http.Transport {
 	t := http.DefaultTransport.(*http.Transport).Clone()
+	// No inherited environment proxy; an explicit egress proxy is used only after the target passes
+	// BlockedOffHost. See proxy.go.
+	t.Proxy = proxyFor(BlockedOffHost)
 	t.DialContext = (&net.Dialer{
 		Timeout:   dialTimeout,
 		KeepAlive: dialTimeout,
@@ -142,6 +149,7 @@ func OffHostTransport() *http.Transport {
 // refuses this server itself, and does not follow redirects.
 func OffHostClient(timeout time.Duration) *http.Client {
 	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.Proxy = proxyFor(BlockedOffHost)
 	t.DialContext = (&net.Dialer{
 		Timeout:   dialTimeout,
 		KeepAlive: dialTimeout,

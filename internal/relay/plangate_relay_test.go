@@ -2,15 +2,21 @@ package relay_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http/httptest"
+	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"go.uber.org/zap/zaptest"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/dispatch"
+	"github.com/kordloom/switchtender/internal/handoff"
+	"github.com/kordloom/switchtender/internal/plantest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/relay"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -55,26 +61,59 @@ func TestAWorkerPlanGatesOverTheRelay(t *testing.T) {
 			if test.Rules != nil {
 				rules = test.Rules
 			}
-			ts := httptest.NewServer(relay.NewHandler(backing, relay.SinglePool(testWorkerToken), nil,
-				rules(t), nil))
+			// The control node seals the plan file the worker hands it and, when the apply is claimed,
+			// opens it for the claiming pool, which registered a delivery key for exactly that.
+			control := dispatch.New(backing, roundhouse.RunnerFunc(nil), zaptest.NewLogger(t),
+				dispatch.WithNoJanitor(),
+				dispatch.WithClaimGate(func() error { return errors.New("closed for this test") }))
+			t.Cleanup(control.Close)
+			poolKey, err := handoff.GenerateKey()
+			if err != nil {
+				t.Fatalf("GenerateKey() error = %v", err)
+			}
+			pools, err := relay.LoadPools(writePoolFile(t, "workers:\n  - name: plans\n    "+
+				"token_sha256: "+relay.HashToken(testWorkerToken)+"\n    queues: [plans]\n    "+
+				"delivery_key: "+poolKey.Public().String()+"\n"))
+			if err != nil {
+				t.Fatalf("LoadPools() error = %v", err)
+			}
+			// Delivery records which worker received which secrets, so it needs the audit trail.
+			ts := httptest.NewServer(relay.NewHandler(backing, pools, nil, rules(t), audit.NewMemStore(),
+				relay.WithSecretOpener(control), relay.WithPlanSealer(control)))
 			t.Cleanup(ts.Close)
+			ring, err := handoff.NewKeyRing(poolKey)
+			if err != nil {
+				t.Fatalf("NewKeyRing() error = %v", err)
+			}
 
 			transport := relay.NewHTTPTransport(ts.URL, testWorkerToken, nil)
+			var applied atomic.Value
 			planner := roundhouse.RunnerFunc(
-				func(_ context.Context, _ roundhouse.Spec, out io.Writer) (roundhouse.Result, error) {
+				func(_ context.Context, spec roundhouse.Spec, out io.Writer) (roundhouse.Result, error) {
 					_, err := io.WriteString(out, test.Plan+"\n")
+					if spec.DryRun {
+						return plantest.Result(test.Plan), err
+					}
+					// The apply carries out the plan file the plan saved, delivered to this worker.
+					plan, rerr := os.ReadFile(spec.PlanFile)
+					if rerr != nil {
+						return roundhouse.Result{ExitCode: 1}, rerr
+					}
+					applied.Store(string(plan))
 					return roundhouse.Result{ExitCode: 0}, err
 				})
 			worker := dispatch.New(relay.NewClient(transport), planner, zaptest.NewLogger(t),
 				dispatch.WithPolicies(relay.NewPolicyClient(transport)), dispatch.WithWorkers(1),
 				dispatch.WithNoJanitor(), dispatch.WithOwner("worker-a"),
-				dispatch.WithClaimInterval(10*time.Millisecond))
+				dispatch.WithClaimInterval(10*time.Millisecond), dispatch.WithQueues([]string{"plans"}),
+				dispatch.WithSecretDelivery(relay.NewReceiver(transport, ring)),
+				dispatch.WithRunFilesRoot(t.TempDir()))
 			t.Cleanup(worker.Close)
 
 			id := fmt.Sprintf("run_worker_plan_%d", testNum)
 			if err := backing.Save(ctx, &run.Run{
 				ID: id, Tool: run.ToolTerraform, Command: "infra/prod", Status: run.StatusPending,
-				Actor: "casey", ActorType: "session", CreatedAt: time.Now(),
+				Actor: "operator-1", ActorType: "session", CreatedAt: time.Now(), Queue: "plans",
 			}); err != nil {
 				t.Fatalf("seed Save() error = %v", err)
 			}
@@ -90,6 +129,14 @@ func TestAWorkerPlanGatesOverTheRelay(t *testing.T) {
 			}
 			if apply.HeldByPolicy != test.WantHeldBy {
 				t.Errorf("HeldByPolicy = %q, want %q", apply.HeldByPolicy, test.WantHeldBy)
+			}
+			if apply.PlanSHA256 == "" {
+				t.Error("the proposed apply binds no plan file, so it would plan again when it runs")
+			}
+			if test.WantStatus == run.StatusSucceeded {
+				if got, _ := applied.Load().(string); got != string(plantest.File) {
+					t.Errorf("the apply carried out plan file %q, want the one the plan saved", got)
+				}
 			}
 		})
 	}
@@ -126,7 +173,7 @@ func waitProposal(t *testing.T, store run.Store, planID string, want run.Status)
 			if r.Status == want {
 				return r
 			}
-			seen = fmt.Sprintf("apply %s in status %q", r.ID, r.Status)
+			seen = fmt.Sprintf("apply %s in status %q (%s)", r.ID, r.Status, r.Error)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

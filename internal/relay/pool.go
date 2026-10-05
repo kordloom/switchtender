@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/kordloom/switchtender/internal/handoff"
 )
 
 // Pool is one set of relay workers that share a token, and the queues that token may lease from.
@@ -29,6 +31,14 @@ type Pool struct {
 	// Queues are the queues this pool may lease from. Empty means every queue, which is the shape a
 	// single-pool install has and the only way to say "this pool is not confined".
 	Queues []string `yaml:"queues,omitempty" json:"queues,omitempty"`
+	// DeliveryKey is the pool's registered delivery public key, in the text form switchtender worker
+	// key new prints. Setting it opts the pool in to sealed secret delivery: a run one of its workers
+	// claims carries that run's credentials and secret answers sealed to this key. Empty keeps the
+	// pool out, and its workers fail a run that needs a secret, with the reason. It is a public key,
+	// so the file holding it is no more secret than it was.
+	DeliveryKey string `yaml:"delivery_key,omitempty" json:"delivery_key,omitempty"`
+	// key is DeliveryKey parsed, nil when the pool registered none.
+	key *handoff.PublicKey
 }
 
 // poolDoc is the shape of a worker pool file. The wrapper exists so the file can gain other
@@ -62,6 +72,7 @@ func LoadPools(path string) (*Pools, error) {
 		return nil, fmt.Errorf("worker pool file %s declares no workers", path)
 	}
 	seen := make(map[string]struct{}, len(doc.Workers))
+	keys := make(map[string]string, len(doc.Workers))
 	for i, p := range doc.Workers {
 		switch {
 		case p.Name == "":
@@ -80,8 +91,65 @@ func LoadPools(path string) (*Pools, error) {
 		}
 		seen[digest] = struct{}{}
 		doc.Workers[i].TokenSHA256 = digest
+		key, err := deliveryKey(path, p, keys)
+		if err != nil {
+			return nil, err
+		}
+		doc.Workers[i].key = key
 	}
 	return &Pools{pools: doc.Workers}, nil
+}
+
+// deliveryKey parses the delivery key a pool registered, nil when it registered none, and refuses a
+// key the pool may not hold. keys maps each key id already registered to its pool.
+//
+// Delivery goes only to a pool bound to explicit queues. A pool's queues are the runs its workers
+// can claim, so they are also the runs whose secrets its key would unlock, and a pool that may
+// claim from every queue would be handed every credential in the install. Two pools sharing one key
+// could not be told apart by the key that opens their deliveries, so that is refused as well, the
+// way two pools sharing a token is.
+func deliveryKey(path string, p Pool, keys map[string]string) (*handoff.PublicKey, error) {
+	if strings.TrimSpace(p.DeliveryKey) == "" {
+		return nil, nil
+	}
+	key, err := handoff.ParsePublicKey(p.DeliveryKey)
+	if err != nil {
+		return nil, fmt.Errorf("worker pool file %s: pool %q delivery_key: %w", path, p.Name, err)
+	}
+	if len(p.Queues) == 0 {
+		return nil, fmt.Errorf("worker pool file %s: pool %q registers a delivery_key and declares no "+
+			"queues; secrets are delivered only to a pool bound to explicit queues, so list the "+
+			"queues this pool serves", path, p.Name)
+	}
+	if other, dup := keys[key.ID()]; dup {
+		return nil, fmt.Errorf("worker pool file %s: pool %q registers the same delivery_key as pool "+
+			"%q; give each pool a key of its own", path, p.Name, other)
+	}
+	keys[key.ID()] = p.Name
+	return key, nil
+}
+
+// DeliveryKeyIDs returns the id of the delivery key each pool registered, by pool name, so the
+// control node can say at startup which key each pool's runs are sealed to and an operator can
+// confirm a rotation from the log. A pool with no key is absent.
+func (p *Pools) DeliveryKeyIDs() map[string]string {
+	out := map[string]string{}
+	if p == nil {
+		return out
+	}
+	for _, pool := range p.pools {
+		if pool.key != nil {
+			out[pool.Name] = pool.key.ID()
+		}
+	}
+	return out
+}
+
+// deliversSecrets reports whether the pool may be handed sealed secrets: it registered a key and it
+// is bound to explicit queues. The pool file refuses a key without queues at load, and this is the
+// same rule asked again at the moment of delivery, so no other path to a Pool value can skip it.
+func (p *Pool) deliversSecrets() bool {
+	return p != nil && p.key != nil && len(p.Queues) > 0
 }
 
 // SinglePool returns the pools for an install configured with one worker token and no confinement.

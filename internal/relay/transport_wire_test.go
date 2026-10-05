@@ -76,7 +76,7 @@ func callEachTransportMethod(ctx context.Context, tr relay.Transport, r *run.Run
 		"save":      tr.Save(ctx, r),
 		"events": tr.AppendEvents(ctx, r.ID,
 			[]event.Event{{Type: event.TypeRunnerOK, Host: "web01"}}),
-		"propose apply":     firstErr(tr.ProposeApply(ctx, r.ID, 1, true)),
+		"propose apply":     firstErr(tr.ProposeApply(ctx, r.ID, 1, true, nil)),
 		"save host summary": tr.SaveHostSummary(ctx, r.ID, []run.HostSummary{{Host: "web01"}}),
 		"save host facts": tr.SaveHostFacts(ctx, r.ID,
 			[]run.HostFacts{{Host: "web01", Facts: map[string]string{"os": "linux"}}}),
@@ -300,7 +300,7 @@ func TestProposeApplyDemandsACreatedResponse(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
 			t.Parallel()
 			tr, _ := scriptedTransport(t, test.Status, test.Body)
-			got, err := tr.ProposeApply(context.Background(), "run_plan", 3, true)
+			got, err := tr.ProposeApply(context.Background(), "run_plan", 3, true, nil)
 			if test.WantErr {
 				if err == nil {
 					t.Fatalf("ProposeApply() accepted %s and returned %+v", test.Name, got)

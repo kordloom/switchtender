@@ -82,7 +82,7 @@ func TestRelayCommitsRunOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("outcome.Body() error = %v", err)
 	}
-	if !audit.VerifyContentDigest(outcomeEntry.ContentDigest, outcomeEntry.Nonce, body) {
+	if !outcome.VerifyBody(outcomeEntry.ContentDigest, outcomeEntry.Nonce, body) {
 		t.Error("committed relay outcome digest does not verify against the run's evidence")
 	}
 }

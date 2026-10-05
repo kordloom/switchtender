@@ -37,7 +37,8 @@ func planFixture(t *testing.T) (client *Client, store run.Store, baseURL string)
 		t.Fatalf("Save run: %v", err)
 	}
 
-	srv := httptest.NewServer(NewHandler(store, SinglePool("swt_worker"), zap.NewNop(), policies, nil))
+	srv := httptest.NewServer(NewHandler(store, SinglePool("swt_worker"), zap.NewNop(), policies, nil,
+		WithPlanSealer(testPlanSealer{})))
 	t.Cleanup(srv.Close)
 	tr := NewHTTPTransport(srv.URL, "swt_worker", nil)
 	// The worker claims the plan the way it would in service, which is what issues the per-claim
@@ -67,7 +68,7 @@ func TestAWorkerCanProposeTheApplyItsPlanGated(t *testing.T) {
 	client, store, _ := planFixture(t)
 
 	// Test 0: A plan over the threshold produces a held apply, built from the plan the control node has.
-	proposal, err := client.ProposeApply(ctx, "run_plan", 3, true)
+	proposal, err := client.ProposeApply(ctx, "run_plan", 3, true, testPlanFile)
 	if err != nil {
 		t.Fatalf("ProposeApply = %v, want a held apply", err)
 	}
@@ -97,7 +98,7 @@ func TestAWorkerCanProposeTheApplyItsPlanGated(t *testing.T) {
 
 	// Test 1: A plan under the threshold proposes an apply that runs without waiting.
 	under, _, _ := planFixture(t)
-	queued, err := under.ProposeApply(ctx, "run_plan", 0, true)
+	queued, err := under.ProposeApply(ctx, "run_plan", 0, true, testPlanFile)
 	if err != nil {
 		t.Fatalf("ProposeApply under the threshold = %v", err)
 	}
@@ -108,7 +109,7 @@ func TestAWorkerCanProposeTheApplyItsPlanGated(t *testing.T) {
 	// Test 2: A plan whose summary could not be read is held, never queued, because a plan nobody could
 	// weigh against the limit has not passed it.
 	unreadable, _, _ := planFixture(t)
-	unread, err := unreadable.ProposeApply(ctx, "run_plan", 0, false)
+	unread, err := unreadable.ProposeApply(ctx, "run_plan", 0, false, testPlanFile)
 	if err != nil {
 		t.Fatalf("ProposeApply of an unreadable plan = %v", err)
 	}
@@ -122,7 +123,7 @@ func TestAWorkerCanProposeTheApplyItsPlanGated(t *testing.T) {
 	// Test 3: A worker without the run's lease cannot propose anything for it.
 	_, _, bareURL := planFixture(t)
 	bare := NewClient(NewHTTPTransport(bareURL, "swt_worker", nil))
-	if _, err := bare.ProposeApply(ctx, "run_plan", 3, true); err == nil {
+	if _, err := bare.ProposeApply(ctx, "run_plan", 3, true, testPlanFile); err == nil {
 		t.Error("a worker with no lease proposed an apply for somebody else's run")
 	}
 }

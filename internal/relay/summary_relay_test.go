@@ -101,7 +101,7 @@ func TestRelayRunRecordsHostsInOutcome(t *testing.T) {
 	}
 
 	entry := outcomeEntry(t, audits, "run_relay_hosts")
-	if !audit.VerifyContentDigest(entry.ContentDigest, entry.Nonce, body) {
+	if !outcome.VerifyBody(entry.ContentDigest, entry.Nonce, body) {
 		t.Error("the committed digest does not verify against the outcome body carrying the hosts")
 	}
 

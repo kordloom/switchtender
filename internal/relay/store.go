@@ -55,8 +55,9 @@ func (c *Client) Save(ctx context.Context, r *run.Run) error {
 // ProposeApply asks the control node to create the apply this worker's plan gated. It is what makes the
 // plan-content gate complete on a worker at all: a worker cannot create a run, so the dispatcher hands
 // the decision inputs to the control node, which builds the apply from the plan it already holds.
-func (c *Client) ProposeApply(ctx context.Context, planID string, destroys int, read bool) (*run.Run, error) {
-	return c.t.ProposeApply(ctx, planID, destroys, read)
+func (c *Client) ProposeApply(ctx context.Context, planID string, destroys int, read bool,
+	plan []byte) (*run.Run, error) {
+	return c.t.ProposeApply(ctx, planID, destroys, read, plan)
 }
 
 // AppendLog streams captured output to the control node.
@@ -87,15 +88,19 @@ func (c *Client) SaveTaskSummary(ctx context.Context, runID string, summaries []
 // The remaining run.Store methods are control-node queries and analytics a worker never calls, so a
 // relay Client refuses them rather than pretending to serve them across the wire.
 
-// TransitionStatusAndClaim serves exactly one shape to a worker: the fenced pending-to-running
-// move that begins execution, which rides the relay as Start. Every other transition is a
-// control-node operation: approving a held run happens where the policy and the approver are,
-// never on a worker.
-func (c *Client) TransitionStatusAndClaim(ctx context.Context, id string, from, to run.Status,
-	owner string, startedAt time.Time) (bool, error) {
-	if from == run.StatusPending && to == run.StatusRunning {
-		return c.t.Start(ctx, id, owner, startedAt)
-	}
+// StartClaimed is the fenced pending-to-running move that begins execution, which rides the relay
+// as Start. The secret is not taken from the caller: the transport presents the capability the
+// claim answer carried, which is the only copy a worker holds, and the control node holds the start
+// to it.
+func (c *Client) StartClaimed(ctx context.Context, id, owner, _ string, startedAt time.Time) (bool, error) {
+	return c.t.Start(ctx, id, owner, startedAt)
+}
+
+// TransitionStatusAndClaim is a control-node operation and is not served to workers. A worker
+// begins execution through StartClaimed, and approving a held run happens where the policy and the
+// approver are, never on a worker.
+func (c *Client) TransitionStatusAndClaim(context.Context, string, run.Status, run.Status, string,
+	time.Time) (bool, error) {
 	return false, ErrUnsupported
 }
 
@@ -153,6 +158,18 @@ func (c *Client) ReclaimStale(context.Context, time.Duration) (int, error) {
 	return 0, ErrUnsupported
 }
 
+// OwedOutcomes is a control-node sweep and is not served to workers: outcomes are committed where
+// the chain is.
+func (c *Client) OwedOutcomes(context.Context, time.Duration, int) ([]string, error) {
+	return nil, ErrUnsupported
+}
+
+// OutcomeOwed is a control-node read and is not served to workers.
+func (c *Client) OutcomeOwed(context.Context, string) (bool, error) { return false, ErrUnsupported }
+
+// SettleOutcome is a control-node write and is not served to workers.
+func (c *Client) SettleOutcome(context.Context, string) error { return ErrUnsupported }
+
 // RequestCancel is issued by the control node's API, not a worker.
 func (c *Client) RequestCancel(context.Context, string) error { return ErrUnsupported }
 
@@ -165,6 +182,38 @@ func (c *Client) TransitionStatus(context.Context, string, run.Status, run.Statu
 // the approver is, never on the far side of the relay.
 func (c *Client) StampApprovedSpec(context.Context, string, string, string) error {
 	return ErrUnsupported
+}
+
+// WipeSealed is a control-node write and is not served to workers. A worker never holds the sealed
+// material, which stays at rest on the control node, and the control node wipes it when the worker
+// reports the run's end.
+func (c *Client) WipeSealed(context.Context, string) error { return ErrUnsupported }
+
+// SweepSealed is the control node's janitor work and is not served to workers.
+func (c *Client) SweepSealed(context.Context) (int, error) { return 0, ErrUnsupported }
+
+// ParkForApproval is a control-node write and is not served to workers: a workflow is coordinated
+// on the control node, so only the control node parks one.
+func (c *Client) ParkForApproval(context.Context, string, string) (bool, error) {
+	return false, ErrUnsupported
+}
+
+// SettleHeld is a control-node write and is not served to workers: an approval step is decided
+// where the approver is, never on the far side of the relay.
+func (c *Client) SettleHeld(context.Context, string, run.Finalization) (bool, error) {
+	return false, ErrUnsupported
+}
+
+// ClaimDecision is a control-node write and is not served to workers: a decision is made where the
+// approver is, never on the far side of the relay.
+func (c *Client) ClaimDecision(context.Context, string, string, string) (bool, error) {
+	return false, ErrUnsupported
+}
+
+// SettleDecision is a control-node write and is not served to workers, for the reason
+// ClaimDecision is not.
+func (c *Client) SettleDecision(context.Context, string, string, run.DecisionSettle) (bool, error) {
+	return false, ErrUnsupported
 }
 
 // FinalizeRunning is a control-node write and is not served to workers. A relay worker reports how

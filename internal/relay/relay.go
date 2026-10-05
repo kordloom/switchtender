@@ -55,10 +55,11 @@ type Transport interface {
 	// AppendEvents streams structured events to the control node.
 	AppendEvents(ctx context.Context, id string, events []event.Event) error
 	// ProposeApply asks the control node to create the apply the named plan run gated, reporting what
-	// the plan found: how many resources it would destroy and whether its summary could be read at
-	// all. A worker cannot create runs itself, so this is the only path by which a plan-content gate
-	// completes on a worker.
-	ProposeApply(ctx context.Context, planID string, destroys int, read bool) (*run.Run, error)
+	// the plan found, how many resources it would destroy and whether its rendering could be read at
+	// all, and handing over the plan file the apply carries out. A worker cannot create runs itself,
+	// so this is the only path by which a plan-content gate completes on a worker.
+	ProposeApply(ctx context.Context, planID string, destroys int, read bool, plan []byte) (*run.Run,
+		error)
 	// SaveHostSummary records a run's per-host outcomes.
 	SaveHostSummary(ctx context.Context, runID string, summaries []run.HostSummary) error
 	// SaveHostFacts records the system facts a run gathered per host.
@@ -92,7 +93,7 @@ func (l loopback) Policies(context.Context) ([]*policy.Policy, error) {
 
 // ProposeApply reports that a loopback transport does not relay a proposal. It wraps a local store,
 // which creates runs directly, so the caller submits rather than asking anyone.
-func (l loopback) ProposeApply(context.Context, string, int, bool) (*run.Run, error) {
+func (l loopback) ProposeApply(context.Context, string, int, bool, []byte) (*run.Run, error) {
 	return nil, ErrUnsupported
 }
 

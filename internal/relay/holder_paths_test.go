@@ -246,7 +246,7 @@ func TestAChildRunsOutcomeIsLeftToItsCoordinator(t *testing.T) {
 func relayWithAudits(t *testing.T, store run.Store, audits audit.Store) string {
 	t.Helper()
 	ts := httptest.NewServer(relay.NewHandler(store, relay.SinglePool(testWorkerToken), nil, nil,
-		audits))
+		audits, relay.WithPlanSealer(planSealerStub{})))
 	t.Cleanup(ts.Close)
 	return ts.URL
 }
@@ -343,7 +343,7 @@ func TestProposeApplyRefusesARunThatIsNotAPlanInHand(t *testing.T) {
 			fixture := newRelayFixture(t, nil, planGateRules(t))
 			lease := seedPlan(t, fixture.Store, "run_plan", test.Shape)
 			status, body := leasedPost(t, fixture.URL, "/relay/v1/runs/run_plan/propose-apply",
-				lease, `{"destroys":0,"read":true}`)
+				lease, `{"destroys":0,"read":true,"plan_file":"cGxhbg=="}`)
 			if status == http.StatusCreated {
 				t.Fatalf("an apply was created from %s, so a worker minted a real change from a "+
 					"run nobody gated: %s", test.Name, body)
@@ -370,10 +370,10 @@ func TestAProposedApplyIsHeldWhenTheGateCouldNotBeEvaluated(t *testing.T) {
 		Body     string
 	}{{ // Test 0: The control node's own policy source is down.
 		Name: "policy store unreachable", Policies: unreachablePolicies{},
-		Body: `{"destroys":0,"read":true}`,
+		Body: `{"destroys":0,"read":true,"plan_file":"cGxhbg=="}`,
 	}, { // Test 1: The worker could not read the plan's summary, so nothing was weighed.
 		Name: "plan summary unreadable", Policies: planGateRules(t),
-		Body: `{"destroys":0,"read":false}`,
+		Body: `{"destroys":0,"read":false,"plan_file":"cGxhbg=="}`,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -561,7 +561,7 @@ func TestProposeApplyOnARunTheControlNodeDoesNotHold(t *testing.T) {
 	t.Parallel()
 	fixture := newRelayFixture(t, nil, nil)
 	status, body := leasedPost(t, fixture.URL, "/relay/v1/runs/run_absent/propose-apply",
-		"any-capability", `{"destroys":0,"read":true}`)
+		"any-capability", `{"destroys":0,"read":true,"plan_file":"cGxhbg=="}`)
 	if status != http.StatusNotFound {
 		t.Errorf("propose apply for an unknown plan answered %d (%s), want 404", status, body)
 	}
@@ -609,7 +609,7 @@ func TestProposeApplyRefusesARunNoRuleGates(t *testing.T) {
 			fixture := newRelayFixture(t, nil, test.Policies)
 			lease := seedPlan(t, fixture.Store, "run_plan", nil)
 			status, body := leasedPost(t, fixture.URL, "/relay/v1/runs/run_plan/propose-apply",
-				lease, `{"destroys":3,"read":true}`)
+				lease, `{"destroys":3,"read":true,"plan_file":"cGxhbg=="}`)
 			if status != http.StatusConflict {
 				t.Errorf("%s answered %d (%s), want 409", test.Name, status, body)
 			}

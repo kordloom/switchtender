@@ -70,7 +70,7 @@ func TestProposeApplyRefusesAnythingButALivePlan(t *testing.T) {
 			// A rule that gates terraform, so a refusal here is the run's shape and never an install
 			// with nothing to gate.
 			ts := httptest.NewServer(relay.NewHandler(backing, relay.SinglePool(testWorkerToken), nil,
-				planGateRules(t), nil))
+				planGateRules(t), nil, relay.WithPlanSealer(planSealerStub{})))
 			t.Cleanup(ts.Close)
 
 			claimed := time.Now().Add(-2 * time.Hour)
@@ -89,7 +89,7 @@ func TestProposeApplyRefusesAnythingButALivePlan(t *testing.T) {
 			}
 
 			code := postWithLease(t, ts.URL, "/relay/v1/runs/run_held/propose-apply", "secret-a",
-				[]byte(`{"destroys":0,"read":true}`))
+				[]byte(`{"destroys":0,"read":true,"plan_file":"cGxhbg=="}`))
 			if code < 400 {
 				t.Errorf("test %d: proposing an apply from %s answered %d, want a refusal",
 					testNum, test.Name, code)
@@ -134,7 +134,7 @@ func TestProposeApplyDemandsTheClaimCapability(t *testing.T) {
 	}
 
 	code := postWithLease(t, ts.URL, "/relay/v1/runs/run_old/propose-apply", "",
-		[]byte(`{"destroys":0,"read":true}`))
+		[]byte(`{"destroys":0,"read":true,"plan_file":"cGxhbg=="}`))
 	if code != http.StatusForbidden {
 		t.Errorf("proposing an apply while holding no capability = %d, want %d", code, http.StatusForbidden)
 	}
@@ -155,7 +155,7 @@ func TestProposeApplyStillWorksForTheLivePlanItIsFor(t *testing.T) {
 	ctx := context.Background()
 	backing := run.NewMemStore()
 	ts := httptest.NewServer(relay.NewHandler(backing, relay.SinglePool(testWorkerToken), nil,
-		planGateRules(t), nil))
+		planGateRules(t), nil, relay.WithPlanSealer(planSealerStub{})))
 	t.Cleanup(ts.Close)
 
 	claimed := time.Now()
@@ -170,7 +170,7 @@ func TestProposeApplyStillWorksForTheLivePlanItIsFor(t *testing.T) {
 	}
 
 	code := postWithLease(t, ts.URL, "/relay/v1/runs/run_plan/propose-apply", "secret-a",
-		[]byte(`{"destroys":3,"read":true}`))
+		[]byte(`{"destroys":3,"read":true,"plan_file":"cGxhbg=="}`))
 	if code != http.StatusCreated {
 		t.Fatalf("proposing the apply for a live plan = %d, want %d", code, http.StatusCreated)
 	}
@@ -195,7 +195,7 @@ func TestProposeApplyStillWorksForTheLivePlanItIsFor(t *testing.T) {
 	// Asking twice yields the one apply, not two. A worker whose response was lost retries, which is
 	// legitimate and must not mint a second real change, so the call is idempotent rather than refused.
 	second := postWithLease(t, ts.URL, "/relay/v1/runs/run_plan/propose-apply", "secret-a",
-		[]byte(`{"destroys":3,"read":true}`))
+		[]byte(`{"destroys":3,"read":true,"plan_file":"cGxhbg=="}`))
 	if second != http.StatusCreated {
 		t.Errorf("a worker retrying its proposal got %d, so a lost response would leave the plan "+
 			"gated with no apply", second)

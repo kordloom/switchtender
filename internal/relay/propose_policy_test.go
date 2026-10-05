@@ -39,7 +39,8 @@ func gatedPlan(t *testing.T, policies ...*policy.Policy) (*Client, run.Store) {
 	if err := store.Save(ctx, plan); err != nil {
 		t.Fatalf("Save run: %v", err)
 	}
-	srv := httptest.NewServer(NewHandler(store, SinglePool("swt_worker"), zap.NewNop(), rules, nil))
+	srv := httptest.NewServer(NewHandler(store, SinglePool("swt_worker"), zap.NewNop(), rules, nil,
+		WithPlanSealer(testPlanSealer{})))
 	t.Cleanup(srv.Close)
 	tr := NewHTTPTransport(srv.URL, "swt_worker", nil)
 	if _, err := tr.Claim(ctx, "worker-1", []string{"default"}); err != nil {
@@ -84,7 +85,7 @@ func TestAProposedApplyFacesTheSameRulesAsAnySubmission(t *testing.T) {
 			ID: "pol_deny", Name: "no terraform from the relay", Tool: run.ToolTerraform,
 			Effect: policy.EffectDeny, MaxDestroy: -1,
 		})
-		_, err := client.ProposeApply(ctx, "run_plan", 0, true)
+		_, err := client.ProposeApply(ctx, "run_plan", 0, true, testPlanFile)
 		if err == nil {
 			t.Fatal("a denied apply was created anyway")
 		}
@@ -106,7 +107,7 @@ func TestAProposedApplyFacesTheSameRulesAsAnySubmission(t *testing.T) {
 			ID: "pol_hold", Name: "terraform needs a person", Tool: run.ToolTerraform,
 			MaxDestroy: -1,
 		})
-		proposal, err := client.ProposeApply(ctx, "run_plan", 0, true)
+		proposal, err := client.ProposeApply(ctx, "run_plan", 0, true, testPlanFile)
 		if err != nil {
 			t.Fatalf("ProposeApply: %v", err)
 		}
@@ -130,7 +131,7 @@ func TestAProposedApplyFacesTheSameRulesAsAnySubmission(t *testing.T) {
 			ID: "pol_two", Name: "two people for terraform", Tool: run.ToolTerraform,
 			MaxDestroy: -1, RequireDistinctApprover: true,
 		})
-		proposal, err := client.ProposeApply(ctx, "run_plan", 0, true)
+		proposal, err := client.ProposeApply(ctx, "run_plan", 0, true, testPlanFile)
 		if err != nil {
 			t.Fatalf("ProposeApply: %v", err)
 		}
@@ -147,7 +148,7 @@ func TestAProposedApplyFacesTheSameRulesAsAnySubmission(t *testing.T) {
 		client, _ := gatedPlan(t, &policy.Policy{
 			ID: "pol_other", Name: "ansible needs a person", Tool: run.ToolAnsible, MaxDestroy: -1,
 		})
-		proposal, err := client.ProposeApply(ctx, "run_plan", 0, true)
+		proposal, err := client.ProposeApply(ctx, "run_plan", 0, true, testPlanFile)
 		if err != nil {
 			t.Fatalf("ProposeApply: %v", err)
 		}
