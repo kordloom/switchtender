@@ -44,3 +44,14 @@ paths = ['''cmd/cmd_init_test\.go''']
 # speaks for this project is the history one:
 #
 #   gitleaks detect --source . --log-opts="--all"
+
+[[allowlists]]
+description = """Tests of token issuance records, sealed values, reason redaction, inventory snapshot masking, and callback host keys. Their fixtures are synthetic by construction: test token ids, a test key id, and secret-shaped strings the redactor or the seal must handle."""
+paths = [
+  '''internal/audit/tokenentry_test\.go''',
+  '''internal/outcome/issuance_test\.go''',
+  '''internal/outcome/sealeddigest_test\.go''',
+  '''internal/dispatch/inventorysnapshot_test\.go''',
+  '''internal/dispatch/reasons_test\.go''',
+  '''test/migration/install_test\.go''',
+]
