@@ -13,8 +13,10 @@ import (
 
 // File is the stand-in plan file every Result carries. The executor seals it, binds its digest into
 // the apply's approval, and hands it back to the tool, so its content only has to be the same bytes
-// from one end to the other.
-var File = []byte("switchtender test plan file")
+// from one end to the other. It is a constant, so a test can only ever hand the executor a copy:
+// the executor wipes the plan bytes it is handed once it is done with them, and a shared slice
+// would be wiped under every other test comparing against it.
+const File = "switchtender test plan file"
 
 // destroyCount reads the destroy count from a plan's change summary.
 var destroyCount = regexp.MustCompile(`(?m)^Plan: .*?(\d+) to destroy`)
@@ -58,7 +60,7 @@ func JSON(destroys int) []byte {
 // says nothing changes renders a plan that destroys nothing, and one that states no count at all
 // renders nothing, which the executor treats as a plan nobody could measure.
 func Result(summary string) roundhouse.Result {
-	res := roundhouse.Result{ExitCode: 0, Drift: true, PlanFile: append([]byte(nil), File...)}
+	res := roundhouse.Result{ExitCode: 0, Drift: true, PlanFile: []byte(File)}
 	switch m := destroyCount.FindStringSubmatch(summary); {
 	case m != nil:
 		n, err := strconv.Atoi(m[1])

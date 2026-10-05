@@ -144,7 +144,7 @@ func TestAWorkerPlanGatesOverTheRelay(t *testing.T) {
 				t.Error("the proposed apply binds no plan file, so it would plan again when it runs")
 			}
 			if test.WantStatus == run.StatusSucceeded {
-				if got, _ := applied.Load().(string); got != string(plantest.File) {
+				if got, _ := applied.Load().(string); got != plantest.File {
 					t.Errorf("the apply carried out plan file %q, want the one the plan saved", got)
 				}
 			}
