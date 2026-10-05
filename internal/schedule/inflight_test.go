@@ -233,6 +233,11 @@ func TestAFireKeepsItsMarkUntilItIsRecorded(t *testing.T) {
 
 // TestTwoSweepsTakeUpAnOccurrenceOnce pins that the servers of a highly available pair, sweeping at
 // the same moment, fire an occurrence left in flight once between them.
+//
+// The grace is real and the mark is backdated past it, as a crash leaves one. A grace of zero
+// removed the very protection under test: taking up a mark stamps it afresh, and only a positive
+// grace keeps the other sweep from reading the fresh stamp as stale again, so with zero the second
+// sweep fired whenever it ran before the first had settled, which a busy runner made happen.
 func TestTwoSweepsTakeUpAnOccurrenceOnce(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -247,11 +252,17 @@ func TestTwoSweepsTakeUpAnOccurrenceOnce(t *testing.T) {
 	if won, err := store.ClaimFire(ctx, "sch_1", due, &next); err != nil || !won {
 		t.Fatalf("ClaimFire() = %v, %v, want a won claim", won, err)
 	}
+	mem := store.(*memStore)
+	mem.mu.Lock()
+	mark := mem.inflight["sch_1"]
+	mark.since = time.Now().Add(-time.Hour)
+	mem.inflight["sch_1"] = mark
+	mem.mu.Unlock()
 	sub := &countingKindSubmitter{}
 	var wg sync.WaitGroup
 	for range 2 {
 		s := NewScheduler(store, sub, zap.NewNop())
-		s.inFlightGrace = 0
+		s.inFlightGrace = time.Minute
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
