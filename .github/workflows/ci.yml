@@ -201,6 +201,8 @@ jobs:
           --health-retries 10
     env:
       SWITCHTENDER_TEST_POSTGRES_DSN: postgres://switchtender:switchtender@localhost:5432/switchtender?sslmode=disable
+      # The runner's python3 carries botocore, and the AWS cache test is only evidence when it runs.
+      SWITCHTENDER_REQUIRE_BOTOCORE: "1"
     steps:
       # Full depth with tags: the downgrade tests build the previous release from its tag, and
       # under the full-suite switch a missing tag fails them rather than skipping them.
@@ -224,12 +226,15 @@ jobs:
           echo "SWITCHTENDER_LOOMSEAL_REPO=$RUNNER_TEMP/loomseal" >> "$GITHUB_ENV"
       - name: Install ansible for the drift contract
         # The runner ships its own ansible-core under a root-owned pipx home, so a pipx install of
-        # another version either keeps the runner's or cannot replace it. A venv first on the PATH
-        # is the version this job names, whatever the image carries.
+        # another version either keeps the runner's or cannot replace it. The venv's ansible
+        # commands go first on the PATH and nothing else of it does: its python3 has no botocore,
+        # and putting it first hid the runner's from the test that probes the AWS SDK's caches.
         run: |
           python3 -m venv "$RUNNER_TEMP/ansible"
           "$RUNNER_TEMP/ansible/bin/pip" install --quiet "ansible-core==2.18.1"
-          echo "$RUNNER_TEMP/ansible/bin" >> "$GITHUB_PATH"
+          mkdir -p "$RUNNER_TEMP/ansible-commands"
+          ln -s "$RUNNER_TEMP"/ansible/bin/ansible* "$RUNNER_TEMP/ansible-commands/"
+          echo "$RUNNER_TEMP/ansible-commands" >> "$GITHUB_PATH"
       - name: Install the engines this runner does not ship
         env:
           TOFU_VERSION: "1.8.7"
@@ -302,12 +307,15 @@ jobs:
           go-version-file: go.mod
       - name: Install ansible-core ${{ matrix.ansible-core }}
         # The runner ships its own ansible-core under a root-owned pipx home, so a pipx install of
-        # another version either keeps the runner's or cannot replace it. A venv first on the PATH
-        # is the version this job names, whatever the image carries.
+        # another version either keeps the runner's or cannot replace it. The venv's ansible
+        # commands go first on the PATH and nothing else of it does: its python3 has no botocore,
+        # and putting it first hid the runner's from the test that probes the AWS SDK's caches.
         run: |
           python3 -m venv "$RUNNER_TEMP/ansible"
           "$RUNNER_TEMP/ansible/bin/pip" install --quiet "ansible-core==${{ matrix.ansible-core }}"
-          echo "$RUNNER_TEMP/ansible/bin" >> "$GITHUB_PATH"
+          mkdir -p "$RUNNER_TEMP/ansible-commands"
+          ln -s "$RUNNER_TEMP"/ansible/bin/ansible* "$RUNNER_TEMP/ansible-commands/"
+          echo "$RUNNER_TEMP/ansible-commands" >> "$GITHUB_PATH"
       # The test checks that the ansible-core it found is the one this job installed, and the full
       # suite switch turns a missing ansible-inventory into a failure rather than a skip.
       - name: Run the conformance corpus
@@ -439,12 +447,15 @@ jobs:
       # behavior without a commit.
       - name: Install ansible
         # The runner ships its own ansible-core under a root-owned pipx home, so a pipx install of
-        # another version either keeps the runner's or cannot replace it. A venv first on the PATH
-        # is the version this job names, whatever the image carries.
+        # another version either keeps the runner's or cannot replace it. The venv's ansible
+        # commands go first on the PATH and nothing else of it does: its python3 has no botocore,
+        # and putting it first hid the runner's from the test that probes the AWS SDK's caches.
         run: |
           python3 -m venv "$RUNNER_TEMP/ansible"
           "$RUNNER_TEMP/ansible/bin/pip" install --quiet "ansible-core==2.18.1"
-          echo "$RUNNER_TEMP/ansible/bin" >> "$GITHUB_PATH"
+          mkdir -p "$RUNNER_TEMP/ansible-commands"
+          ln -s "$RUNNER_TEMP"/ansible/bin/ansible* "$RUNNER_TEMP/ansible-commands/"
+          echo "$RUNNER_TEMP/ansible-commands" >> "$GITHUB_PATH"
       # The engine contract holds the real tools to what the runners believe about them, and the
       # contract turns an absent tool into a failure rather than a skip, because a skip reports as a
       # pass. That makes installing them part of the gate rather than a convenience: v1.96.0 was
