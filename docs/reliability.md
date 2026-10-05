@@ -42,7 +42,9 @@ pending is returned to the queue for another worker. Work that was mid-flight is
 so it is not silently lost, and announced like any other end of a run: its outcome reaches the
 chain, and its channels and targets hear that it stopped, a pager included. An interrupted run does
 not resume from a checkpoint. It is a clean failure a person or a schedule can run again, not a
-partial state left holding a lease forever.
+partial state left holding a lease forever. A workflow whose only remaining work is waiting for a
+person at an approval step is the one exception: the sweep parks it instead, as the section on
+workflows below describes, so a decision on its step is not lost with the process.
 
 A worker that only stalled, a paused virtual machine or a long hang on the network, cannot start a
 run the janitor took back from it. The move to running is fenced on the claim itself, the worker's
@@ -185,9 +187,17 @@ A workflow that reaches an approval step and has nothing else to do parks: it re
 waits in the store, so a restart while it waits loses nothing. Whichever replica records the decision
 resumes it from the stored step records with one compare-and-set, so the decision is acted on
 exactly once, and every replica's janitor times out an expired step and resumes a decided workflow a
-crash left parked. A parked workflow is stored under a status of its own, so an earlier release
-running against the same database, during a rolling update or after a rollback, neither approves it
-as a run held before it started nor sweeps it, and it waits for this release. The [concepts
+crash left parked. A process can also die after it lists the step and before it parks, which
+leaves the workflow running under a lease nobody renews while the step can still be decided. When
+that lease expires the sweep parks the workflow instead of interrupting it, as its coordinator would
+have, and a decision made in the meantime resumes it through the same compare-and-set. It does so
+only when nothing else is left to do but wait for a person: a workflow with another step still
+executing, or ready to start, is interrupted like any run whose worker died. Only a step's own
+decision moves a parked workflow: an approve or reject posted to the workflow itself is refused with
+409, naming the step and the call that decides it. A parked workflow is stored under a status of
+its own, so an earlier release running against the same database, during a rolling update or after a
+rollback, neither approves it as a run held before it started nor sweeps it, and it waits for this
+release. The [concepts
 page](concepts.md) describes approval steps in full.
 
 A step can retry a set number of times. Each attempt is a fresh child run, so every try keeps its own

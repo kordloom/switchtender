@@ -120,8 +120,12 @@ function updateActions(run) {
 	// and the reason is stated. Reject stays: withdrawing your own request needs nobody else, and
 	// removing it would leave the requester with no way out of a decision they no longer want.
 	const ownRequest = held && run.require_distinct_approver && signedInAs(run.actor);
-	if (approve) approve.hidden = !held || !roleAtLeast("admin") || ownRequest;
-	if (reject) reject.hidden = !held || !roleAtLeast("admin");
+	// A workflow that started and now waits at an approval step is decided step by step, in the
+	// approval panel on this page. The server refuses a decision on the workflow as a whole, since
+	// only a step's own decision may move it, so the run-wide buttons are not drawn for it.
+	const pausedWorkflow = held && run.kind === "pipeline" && !!run.started_at;
+	if (approve) approve.hidden = !held || pausedWorkflow || !roleAtLeast("admin") || ownRequest;
+	if (reject) reject.hidden = !held || pausedWorkflow || !roleAtLeast("admin");
 	if (ownRequest) {
 		setStatus("You asked for this run, and the rule that held it (" +
 			(run.held_by_policy || "an approval rule") + ") requires a different person to approve " +

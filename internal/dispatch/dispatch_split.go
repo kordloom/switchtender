@@ -446,6 +446,9 @@ func (d *Dispatcher) coordinatePipeline(parent *run.Run, resumed bool) bool {
 		// The lease watch stops first: once parked the parent is no longer running, and a heartbeat
 		// against it would read as a lost lease and cancel what has just been handed over.
 		stopWatch()
+		if d.parkHook != nil {
+			d.parkHook(parent.ID)
+		}
 		if d.park(parent) {
 			return true
 		}

@@ -145,6 +145,17 @@ type config struct {
 	// past instant, with its record, chain entry, and receipt all agreeing on that time. It never
 	// governs lease or dedupe timing, which must read the real clock the store ages leases against.
 	now func() time.Time
+	// parkHook runs between a workflow's walk stopping at an approval step and its park. Nil takes
+	// the hook SetParkHook installed, which is nil outside tests.
+	parkHook func(workflowID string)
+}
+
+// WithParkHook runs fn between a workflow's walk stopping at an approval step and the park that
+// hands the workflow to the store, the moment its step is listed for a decision while this process
+// still holds the workflow's lease. It exists so a test can hold a coordinator in that moment, and
+// nothing outside tests sets it.
+func WithParkHook(fn func(workflowID string)) Option {
+	return func(c *config) { c.parkHook = fn }
 }
 
 // WithDecisions keeps the record of each decision a person makes, its reason, its corrections, and
@@ -290,6 +301,9 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 	if cfg.now == nil {
 		cfg.now = time.Now
 	}
+	if hook := defaultParkHook.Load(); cfg.parkHook == nil && hook != nil {
+		cfg.parkHook = *hook
+	}
 	if cfg.decisions == nil {
 		cfg.decisions = decision.NewMemStore()
 	}
@@ -322,6 +336,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		wakeCh:              make(chan struct{}, 1),
 		runTimeout:          cfg.runTimeout,
 		now:                 cfg.now,
+		parkHook:            cfg.parkHook,
 		maxShards:           cfg.maxShards,
 		queues:              cfg.queues,
 		credentials:         cfg.credentials,

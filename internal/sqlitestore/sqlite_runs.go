@@ -363,7 +363,18 @@ func runIsDryRun(ctx context.Context, q rowQuerier, runID string) (bool, error) 
 
 // queryRuns runs a select that returns run rows and scans them all.
 func (s *store) queryRuns(ctx context.Context, label, query string, args ...any) ([]*run.Run, error) {
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	return queryRunsOn(ctx, s.db, label, query, args...)
+}
+
+// runsQuerier runs a select, on the database or inside a transaction.
+type runsQuerier interface {
+	// QueryContext runs the query and returns its rows.
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+// queryRunsOn runs a select that returns run rows on q and scans them all.
+func queryRunsOn(ctx context.Context, q runsQuerier, label, query string, args ...any) ([]*run.Run, error) {
+	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", label, err)
 	}
@@ -804,7 +815,8 @@ func updateReturningTopLevel(ctx context.Context, tx *sql.Tx, query string, args
 	return n, top, rows.Err()
 }
 
-// ReclaimStale requeues stale claimed pending runs and interrupts stale running runs.
+// ReclaimStale requeues stale claimed pending runs, parks stale workflows waiting only for a
+// person, and interrupts every other stale running run.
 func (s *store) ReclaimStale(ctx context.Context, ttl time.Duration) (int, error) {
 	n, _, err := s.reclaimStale(ctx, ttl)
 	return n, err
@@ -861,6 +873,14 @@ WHERE status='pending' AND claimed_by!='' AND claimed_at < ? AND cancel_requeste
 		return 0, nil, fmt.Errorf("reclaim stale: %w", err)
 	}
 	requeued += canceled
+	// A workflow whose coordinator died after opening an approval step and before parking is parked
+	// rather than interrupted: its step was already listed for a decision, and interrupting it lost
+	// a decision accepted in the meantime. It is judged before the interrupt below, on the records
+	// its coordinator left, so a step that coordinator was running still counts as running.
+	parked, err := parkStalled(ctx, tx, cut)
+	if err != nil {
+		return 0, nil, fmt.Errorf("reclaim stale: %w", err)
+	}
 	interrupted, settledStale, err := updateReturningTopLevel(ctx, tx, `
 UPDATE runs SET status='interrupted', claimed_by='', claimed_at=NULL, claim_secret='',
 ended_at=?, error='interrupted: executor lease expired'
@@ -921,7 +941,43 @@ WHERE status='running' AND cancel_requested=0 AND parent_id IS NOT NULL
 		return 0, nil, fmt.Errorf("reclaim stale: %w", err)
 	}
 	settled := append(append(settledCanceled, settledStale...), settledAbandoned...)
-	return int(requeued + interrupted + abandoned + orphaned + stopping), settled, nil
+	return int(requeued + parked + interrupted + abandoned + orphaned + stopping), settled, nil
+}
+
+// parkStalled parks, inside the sweep's transaction, every running workflow whose lease is older
+// than cut and that run.StalledAtApproval reads as waiting only for a person, with the write
+// ParkForApproval makes for a live coordinator, and returns how many it parked.
+func parkStalled(ctx context.Context, tx *sql.Tx, cut string) (int64, error) {
+	parents, err := queryRunsOn(ctx, tx, "list stale workflows", "SELECT "+runColumns+` FROM runs
+WHERE status='running' AND kind='pipeline' AND claimed_by!='' AND claimed_at < ?
+	AND cancel_requested=0`, cut)
+	if err != nil {
+		return 0, err
+	}
+	var parked int64
+	for _, p := range parents {
+		steps, err := queryRunsOn(ctx, tx, "list a stale workflow's steps",
+			"SELECT "+runColumns+" FROM runs WHERE parent_id=?", p.ID)
+		if err != nil {
+			return parked, err
+		}
+		if !run.StalledAtApproval(p, steps) {
+			continue
+		}
+		res, err := tx.ExecContext(ctx, `
+UPDATE runs SET status=?, claimed_by='', claimed_at=NULL, claim_secret=''
+WHERE id=? AND status='running' AND claimed_by!='' AND claimed_at < ? AND cancel_requested=0`,
+			run.StoredParked, p.ID, cut)
+		if err != nil {
+			return parked, err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return parked, err
+		}
+		parked += n
+	}
+	return parked, nil
 }
 
 // RequestCancel marks the run so whichever process holds it stops it.

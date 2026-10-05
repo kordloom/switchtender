@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -24,6 +25,9 @@ func approvalContract(t *testing.T, newStore func() run.Store) {
 	t.Run("settle held is one compare and swap", func(t *testing.T) { testSettleHeld(t, newStore) })
 	t.Run("a parked workflow survives the sweep", func(t *testing.T) {
 		testParkedWorkflowSurvivesTheSweep(t, newStore())
+	})
+	t.Run("the sweep parks a workflow stalled at its approval step", func(t *testing.T) {
+		testSweepParksAStalledWorkflow(t, newStore)
 	})
 	t.Run("an approval step is never claimed", func(t *testing.T) {
 		testApprovalStepIsNeverClaimed(t, newStore())
@@ -273,6 +277,150 @@ func testParkedWorkflowSurvivesTheSweep(t *testing.T, store run.Store) {
 		if got.Status != run.StatusPendingApproval {
 			t.Errorf("%s status after the sweep = %q, want pending_approval", id, got.Status)
 		}
+	}
+}
+
+// testSweepParksAStalledWorkflow pins what the lease sweep does with a workflow whose coordinator
+// died after opening its approval step and before parking. Its step is listed for a decision, so the
+// sweep parks it the way the coordinator would have, stored as parked, with a decision already made
+// or claimed left in place for the resume to act on. A workflow with other work open, or a cancel
+// requested, is interrupted as before, and one whose lease is fresh is left alone.
+func testSweepParksAStalledWorkflow(t *testing.T, newStore func() run.Store) {
+	tests := []struct {
+		// Gate is the status the approval step's record holds.
+		Gate run.Status
+		// Claim has a decision claim the approval step before the sweep.
+		Claim bool
+		// Deploy is the status of the approve path's record, empty for none.
+		Deploy run.Status
+		// Beside is the status of a step running beside the approval step, empty for none.
+		Beside run.Status
+		// Cancel requests a cancel on the workflow.
+		Cancel bool
+		// Fresh keeps the workflow's lease inside its lifetime.
+		Fresh bool
+		// WantStatus is the workflow's status after the sweep.
+		WantStatus run.Status
+		// WantParked reports whether the sweep parked the workflow.
+		WantParked bool
+		// WantGate is the approval step's status after the sweep.
+		WantGate run.Status
+	}{{ // Test 0: A step still waiting parks the workflow and stays waiting.
+		Gate: run.StatusPendingApproval, WantStatus: run.StatusPendingApproval, WantParked: true,
+		WantGate: run.StatusPendingApproval,
+	}, { // Test 1: A step decided while the lease aged parks the workflow for the resume.
+		Gate: run.StatusSucceeded, WantStatus: run.StatusPendingApproval, WantParked: true,
+		WantGate: run.StatusSucceeded,
+	}, { // Test 2: A step a decision claimed parks the workflow and stays with that decision.
+		Gate: run.StatusPendingApproval, Claim: true, WantStatus: run.StatusPendingApproval,
+		WantParked: true, WantGate: run.StatusPendingApproval,
+	}, { // Test 3: A step still executing beside the waiting step is interrupted, and so is the step.
+		Gate: run.StatusPendingApproval, Beside: run.StatusRunning,
+		WantStatus: run.StatusInterrupted, WantGate: run.StatusCanceled,
+	}, { // Test 4: A workflow somebody asked to cancel is interrupted and its step withdrawn.
+		Gate: run.StatusPendingApproval, Cancel: true, WantStatus: run.StatusInterrupted,
+		WantGate: run.StatusCanceled,
+	}, { // Test 5: A workflow whose lease is fresh is left to its coordinator.
+		Gate: run.StatusPendingApproval, Fresh: true, WantStatus: run.StatusRunning,
+		WantGate: run.StatusPendingApproval,
+	}, { // Test 6: A workflow whose approval was acted on and finished was waiting for nobody.
+		Gate: run.StatusSucceeded, Deploy: run.StatusSucceeded, WantStatus: run.StatusInterrupted,
+		WantGate: run.StatusSucceeded,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			ctx := context.Background()
+			store := newStore()
+			reporter, ok := store.(settledReporter)
+			if !ok {
+				t.Fatalf("%T does not implement ReclaimStaleSettled", store)
+			}
+			leased := time.Now().Add(-2 * time.Hour)
+			if test.Fresh {
+				leased = time.Now()
+			}
+			parent := approvalParent("run_stall", run.StatusRunning)
+			parent.ClaimedBy, parent.ClaimedAt = "gone", &leased
+			if test.Beside != "" {
+				parent.Steps = append(parent.Steps, run.PipelineStep{Name: "lint", Tool: "bash",
+					Command: "lint"})
+			}
+			started := parent.CreatedAt.Add(time.Second)
+			parent.StartedAt = &started
+			build, deploy, lint := 0, 2, 4
+			records := []*run.Run{parent, {ID: "run_stall_build", Playbook: "release",
+				ParentID: &parent.ID, StepIndex: &build, StepName: "build",
+				Status: run.StatusSucceeded, CreatedAt: started}}
+			gate := approvalStep("run_stall_gate", parent.ID)
+			gate.Status = test.Gate
+			records = append(records, gate)
+			if test.Deploy != "" {
+				fresh := time.Now()
+				records = append(records, &run.Run{ID: "run_stall_deploy", Playbook: "deploy.yml",
+					ParentID: &parent.ID, StepIndex: &deploy, StepName: "deploy",
+					Status: test.Deploy, ClaimedBy: "relay", ClaimedAt: &fresh,
+					CreatedAt: gate.CreatedAt.Add(time.Second)})
+			}
+			if test.Beside != "" {
+				fresh := time.Now()
+				records = append(records, &run.Run{ID: "run_stall_lint", Playbook: "release",
+					ParentID: &parent.ID, StepIndex: &lint, StepName: "lint",
+					Status: test.Beside, ClaimedBy: "relay", ClaimedAt: &fresh, CreatedAt: started})
+			}
+			for _, r := range records {
+				if err := store.Save(ctx, r); err != nil {
+					t.Fatalf("Save(%s) error = %v", r.ID, err)
+				}
+			}
+			if test.Claim {
+				if ok, err := store.ClaimDecision(ctx, gate.ID, "dec_stall",
+					`{"id":"dec_stall"}`); err != nil || !ok {
+					t.Fatalf("ClaimDecision() = (%v, %v), want (true, nil)", ok, err)
+				}
+			}
+			if test.Cancel {
+				if err := store.RequestCancel(ctx, parent.ID); err != nil {
+					t.Fatalf("RequestCancel() error = %v", err)
+				}
+			}
+			_, settled, err := reporter.ReclaimStaleSettled(ctx, time.Minute)
+			if err != nil {
+				t.Fatalf("ReclaimStaleSettled() error = %v", err)
+			}
+			got, err := store.Get(ctx, parent.ID)
+			if err != nil {
+				t.Fatalf("Get() error = %v", err)
+			}
+			if got.Status != test.WantStatus {
+				t.Errorf("workflow after the sweep = %q (%s), want %q", got.Status, got.Error,
+					test.WantStatus)
+			}
+			wantSettled := test.WantStatus.Terminal()
+			if named := slices.Contains(settled, parent.ID); named != wantSettled {
+				t.Errorf("settled = %v, want the workflow named %v", settled, wantSettled)
+			}
+			if test.WantParked {
+				if got.ClaimedBy != "" || got.ClaimedAt != nil {
+					t.Errorf("a parked workflow kept its lease: %q at %v", got.ClaimedBy,
+						got.ClaimedAt)
+				}
+				// Stored as parked rather than as a plain hold, so no decision can take it as a
+				// whole run held before it started.
+				if ok, err := store.ClaimDecision(ctx, parent.ID, "dec_whole",
+					`{"id":"dec_whole"}`); err != nil || ok {
+					t.Errorf("ClaimDecision() on the parked workflow = (%v, %v), want (false, nil)",
+						ok, err)
+				}
+			}
+			step, err := store.Get(ctx, gate.ID)
+			if err != nil {
+				t.Fatalf("Get(%s) error = %v", gate.ID, err)
+			}
+			if step.Status != test.WantGate || step.InFlight() != test.Claim {
+				t.Errorf("approval step after the sweep = %q in flight %v, want %q in flight %v",
+					step.Status, step.InFlight(), test.WantGate, test.Claim)
+			}
+		})
 	}
 }
 

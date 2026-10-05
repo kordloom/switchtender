@@ -213,7 +213,8 @@ type Store interface {
 	Heartbeat(ctx context.Context, id, owner string) error
 	// ReclaimStale requeues pending runs whose lease has gone unrenewed for longer than ttl and marks
 	// stale running runs interrupted, returning how many rows changed. It sweeps up after dead
-	// workers. It takes an age rather than an absolute cutoff so the store resolves it against the
+	// workers. A stale workflow that StalledAtApproval reads as waiting only for a person is parked
+	// rather than interrupted, the way its coordinator's park would have left it. It takes an age rather than an absolute cutoff so the store resolves it against the
 	// same clock that stamped the lease: a caller computing the cutoff from its own clock would
 	// interrupt healthy runs whenever the two clocks disagreed by more than ttl.
 	ReclaimStale(ctx context.Context, ttl time.Duration) (int, error)

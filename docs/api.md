@@ -53,8 +53,8 @@ Two more are enforced somewhere other than the request:
 | POST   | `/v1/runs/{id}/cancel`     | Cancel a pending or running run.                        |
 | POST   | `/v1/runs/{id}/retry`      | New split from only the failed shards of a finished one.|
 | POST   | `/v1/runs/{id}/relaunch-failed` | Re-run only the hosts a finished run left failed or unreachable. |
-| POST   | `/v1/runs/{id}/approve`    | Release a run held for approval so it runs. Given a workflow approval step's id, or a workflow waiting at exactly one, it approves the step, and an optional `state_digest` body field binds the decision to the state the approver was shown. An optional `reason` is recorded as audit evidence, as [Approver reasons](#approver-reasons) describes. |
-| POST   | `/v1/runs/{id}/reject`     | Deny a run held for approval, or deny a workflow approval step so the workflow takes its deny path. An optional `reason` is recorded the same way. |
+| POST   | `/v1/runs/{id}/approve`    | Release a run held for approval so it runs. Given a workflow approval step's id, it approves the step, and an optional `state_digest` body field binds the decision to the state the approver was shown. Given a workflow waiting at an approval step, it answers 409 naming each waiting step and the call that decides it, since only a step's own decision moves the workflow. An optional `reason` is recorded as audit evidence, as [Approver reasons](#approver-reasons) describes. |
+| POST   | `/v1/runs/{id}/reject`     | Deny a run held for approval, or deny a workflow approval step, given the step's id, so the workflow takes its deny path. A workflow waiting at an approval step is refused with 409 the way an approval is. An optional `reason` is recorded the same way. |
 | GET    | `/v1/runs/{id}/decisions`  | The run's decision records: each approval and denial a person made on it or on its approval steps, the reason given, its corrections, any redaction, and for an agent-initiated run the separation-of-duties evaluation. Admin, or the actor who asked for the run. |
 | POST   | `/v1/runs/{id}/decisions/{decision}/corrections` | Append a correction to a decision's reason, `{"text": "..."}`. A reason is never edited. Admin. |
 | POST   | `/v1/runs/{id}/decisions/{record}/redact` | Remove a reason's text and random value, `{"category": "personal_data"}` (or `secret`, `other`), recorded on the chain. Admin. |
@@ -378,8 +378,9 @@ cycle or an unknown dependency is refused then rather than on every launch.
 A step with `"type": "approval"` is an approval step: the workflow waits there until an admin
 approves or denies it. It takes a `description` and an `approval_timeout` in seconds, and a step
 names it in `if_denied` to run when it is denied or times out. `GET /v1/approvals` lists the steps
-waiting, and `POST /v1/runs/{id}/approve` or `/reject` decides one, optionally with
-`{"state_digest": "..."}` from the listing so the decision binds to what was shown. A workflow
+waiting, and `POST /v1/runs/{id}/approve` or `/reject` with the step's id decides one, optionally
+with `{"state_digest": "..."}` from the listing so the decision binds to what was shown. The same
+call with the workflow's id is refused with 409, naming the step and its call. A workflow
 reaching an approval step is announced with its own event, `workflow.step_awaiting_approval`, which
 names the step and what each answer runs next, so a receiver can tell it from a whole run held for
 approval. The [concepts page](concepts.md) describes the semantics.

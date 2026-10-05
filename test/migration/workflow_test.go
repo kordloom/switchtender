@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -196,6 +197,59 @@ func TestImportedWorkflowApprovalSurvivesRestartAndResumesOnce(t *testing.T) {
 		"approver")
 	requireReceiptDecision(t, ev.Receipts[late.ID], lstep.ID, "timed_out", "system:approval-timeout",
 		"operator-laptop")
+}
+
+// TestRunLevelDecisionLeavesAParkedWorkflowWaiting posts an approval and a denial to an imported
+// workflow parked at its approval step, addressed to the workflow rather than to the step, on this
+// release. Only a step's own decision may move a workflow, since the step carries the rules that
+// apply to it alone, so each is refused with 409 naming the step and the call that decides it. The
+// workflow stays parked with nothing run again and no path taken, and the step's own approval then
+// ships it once, the one decision the chain records. The release this one upgrades from refuses the
+// same call, so the same request means the same thing during a rollout or after a rollback. It runs
+// on SQLite and on PostgreSQL.
+func TestRunLevelDecisionLeavesAParkedWorkflowWaiting(t *testing.T) {
+	t.Parallel()
+	for _, store := range []storeKind{onSQLite, onPostgres} {
+		t.Run(string(store), func(t *testing.T) {
+			t.Parallel()
+			in := newInstall(t, installOptions{Store: store})
+			s := in.startServer("current")
+			wf := in.launched(s, "operator", "release", nil)
+			step := in.waitPending(s, "operator", wf.ID)
+			if got := in.waitStatus(s, wf.ID, "pending_approval", "succeeded", "failed",
+				"canceled"); got.Status != "pending_approval" {
+				t.Fatalf("the workflow reached %q, want it parked at its approval step: %s",
+					got.Status, describe(got.Raw))
+			}
+
+			decides := "POST /v1/runs/" + step.ID + "/approve"
+			for _, verb := range []string{"approve", "reject"} {
+				res := in.api(s, "approver", "POST", "/v1/runs/"+wf.ID+"/"+verb, map[string]any{})
+				if res.Status != http.StatusConflict || !strings.Contains(string(res.Body), decides) {
+					t.Errorf("POST /v1/runs/%s/%s = %d %s, want 409 naming %s", wf.ID, verb,
+						res.Status, res.Body, decides)
+				}
+			}
+			if got := in.getRun(s, wf.ID); got.Status != "pending_approval" {
+				t.Fatalf("after the refused decisions the workflow is %q, want it still parked",
+					got.Status)
+			}
+			if again := in.waitPending(s, "operator", wf.ID); again.ID != step.ID ||
+				again.StateDigest != step.StateDigest {
+				t.Fatalf("after the refused decisions the workflow waits at %+v, want %+v", again, step)
+			}
+			in.requireSteps(s, wf.ID, map[string]int{"build": 1, "ship": 0, "page": 0})
+
+			in.must(s, "approver", "POST", "/v1/runs/"+step.ID+"/approve",
+				map[string]any{"state_digest": step.StateDigest}, 200)
+			if done := in.waitDone(s, wf.ID); done.Status != "succeeded" {
+				t.Fatalf("the workflow after its step's approval = %s: %s", done.Status,
+					describe(done.Raw))
+			}
+			in.requireSteps(s, wf.ID, map[string]int{"build": 1, "ship": 1, "page": 0})
+			requireStepDecision(t, in.checkEvidence(s, wf.ID), step.ID, "approved", "approver-laptop")
+		})
+	}
 }
 
 // requireChildren fails the scenario unless a workflow's receipt records exactly these steps as
