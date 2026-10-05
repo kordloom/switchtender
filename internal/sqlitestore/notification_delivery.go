@@ -39,7 +39,8 @@ WHERE object_kind=? AND object_id=? RETURNING notification_id`, kind, objectID)
 
 // Record appends the event to its run's sequence and queues one delivery to each recipient in one
 // transaction. The transaction takes the write lock when it begins, so two events of one run can
-// never take the same sequence number, and a run's end announced twice is recorded once.
+// never take the same sequence number, and a run's end, start, or hold announced twice is recorded
+// once.
 func (s *notificationStore) Record(ctx context.Context, ev *notification.RunEvent,
 	recipients []notification.Recipient) (bool, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -48,10 +49,11 @@ func (s *notificationStore) Record(ctx context.Context, ev *notification.RunEven
 	}
 	defer func() { _ = tx.Rollback() }()
 	key := ev.DedupeKey()
+	first, second := ev.Once()
 	var have int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM notification_events
-WHERE run_id=? AND (dedupe_key=? OR (? AND branch='' AND event IN (?, ?)))`, ev.RunID, key,
-		ev.End(), notification.EventSuccess, notification.EventFailure).Scan(&have); err != nil {
+WHERE run_id=? AND (dedupe_key=? OR (branch=? AND event IN (?, ?)))`, ev.RunID, key, ev.Branch,
+		first, second).Scan(&have); err != nil {
 		return false, fmt.Errorf("record notification event: %w", err)
 	}
 	if have > 0 {

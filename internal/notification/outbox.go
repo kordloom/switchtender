@@ -184,14 +184,72 @@ func (o *Outbox) Record(ctx context.Context, r *run.Run, branch Branch) error {
 	if event == "" {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
-	defer cancel()
 	snapshot, err := json.Marshal(r)
 	if err != nil {
 		return fmt.Errorf("record notification event: %w", err)
 	}
+	return o.retry(ctx, func(ctx context.Context) (bool, error) {
+		return o.record(ctx, r, event, branch, snapshot)
+	})
+}
+
+// RecordUnsent records event, a start or a hold that r has moved past without it being recorded,
+// for the targets attached for it, with each delivery finished as skipped for reason rather than
+// queued. Telling a target that a run started after it ended, or that it waits for a person after
+// somebody decided, would arrive after the messages that followed it or ask for a decision already
+// made, so the run's record says the event was not sent and why instead. The event counts as the
+// run's start or hold, recorded once per run, so one already recorded stays as it was. r is the run
+// as it stands, already redacted for sending off the host, and a store that refuses the write is
+// asked again the way Record asks.
+func (o *Outbox) RecordUnsent(ctx context.Context, r *run.Run, event, reason string) error {
+	if r == nil || r.ID == "" {
+		return nil
+	}
+	// at is the run as it stood at the event, which decides who was attached for it and which
+	// channels hear it.
+	at := r.Clone()
+	at.Attention = nil
+	switch event {
+	case EventStarted:
+		at.Status = run.StatusRunning
+	case EventApproval:
+		at.Status = run.StatusPendingApproval
+	default:
+		return fmt.Errorf("record an unsent notification event: %q is not a start or a hold", event)
+	}
+	snapshot, err := json.Marshal(r)
+	if err != nil {
+		return fmt.Errorf("record an unsent notification event: %w", err)
+	}
+	return o.retry(ctx, func(ctx context.Context) (bool, error) {
+		attached, err := o.router.recipientsFor(ctx, at, event)
+		if err != nil {
+			return false, err
+		}
+		var recipients []Recipient
+		for _, rc := range attached {
+			if Hears(rc.Kind, at) {
+				rc.Skip = reason
+				recipients = append(recipients, rc)
+			}
+		}
+		if len(recipients) == 0 {
+			return false, nil
+		}
+		return o.store.Record(ctx, &RunEvent{RunID: r.ID, Event: event, Snapshot: snapshot,
+			CreatedAt: o.now(ctx)}, recipients)
+	})
+}
+
+// retry makes attempt until it succeeds, waiting longer after each failure until recordTimeout runs
+// out, and wakes the delivery loop when the attempt recorded something. It runs on a context the
+// caller's cancel does not reach, so an event is not dropped because the run that reached it is
+// being stopped.
+func (o *Outbox) retry(ctx context.Context, attempt func(context.Context) (bool, error)) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
+	defer cancel()
 	for wait := recordRetry; ; wait *= 2 {
-		recorded, err := o.record(ctx, r, event, branch, snapshot)
+		recorded, err := attempt(ctx)
 		if err == nil {
 			if recorded {
 				o.Wake()

@@ -358,7 +358,12 @@ CREATE TABLE IF NOT EXISTS schedules (
 	-- Why the most recent fire was skipped, and how many fires in a row ending with it were. A
 	-- fire whose inventory matched no hosts is skipped rather than failed.
 	last_skip     TEXT NOT NULL DEFAULT '',
-	skipped_fires INTEGER NOT NULL DEFAULT 0
+	skipped_fires INTEGER NOT NULL DEFAULT 0,
+	-- The occurrence a claim took for a fire whose run is not yet known to exist, and when it was
+	-- marked, by the database clock in Unix milliseconds. A sweep fires it again once it has been
+	-- marked too long, so a server that stops mid-fire leaves the occurrence late rather than lost.
+	inflight_at   TEXT,
+	inflight_ms   BIGINT NOT NULL DEFAULT 0
 );
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT '';
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT '';
@@ -368,6 +373,8 @@ ALTER TABLE schedules ADD COLUMN IF NOT EXISTS rrule TEXT NOT NULL DEFAULT '';
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS spring_forward TEXT NOT NULL DEFAULT '';
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS last_skip TEXT NOT NULL DEFAULT '';
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS skipped_fires INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE schedules ADD COLUMN IF NOT EXISTS inflight_at TEXT;
+ALTER TABLE schedules ADD COLUMN IF NOT EXISTS inflight_ms BIGINT NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_schedules_created ON schedules(created_at, id);
 CREATE TABLE IF NOT EXISTS users (
 	id            TEXT PRIMARY KEY,
@@ -612,6 +619,7 @@ CREATE INDEX IF NOT EXISTS idx_notification_deliveries_run
 CREATE INDEX IF NOT EXISTS idx_notification_deliveries_target
 	ON notification_deliveries(notification_id, created_ms);
 ` + runEndsSchema + `
+` + runEventsSchema + `
 CREATE TABLE IF NOT EXISTS audit_entries (
 	id        TEXT PRIMARY KEY,
 	at        TEXT NOT NULL,
@@ -1035,14 +1043,16 @@ func schemaIsCurrent(db *sql.DB) (bool, error) {
 	}
 	// The triggers that keep the owed ledgers are part of what the schema creates, and nothing above
 	// would notice one missing: runs_outcome_owed marks a finished run's outcome owed to the audit
-	// chain, and runs_owe_end marks its end owed to its named notification targets.
+	// chain, runs_owe_end marks its end owed to its named notification targets, and runs_owe_start,
+	// runs_owe_hold, and runs_owe_hold_new mark its start and its hold owed to them.
 	var triggers int
 	if err := db.QueryRow(`SELECT COUNT(DISTINCT tgname) FROM pg_trigger
-WHERE tgname IN ('runs_outcome_owed', 'runs_owe_end') AND tgrelid = to_regclass('runs')`).
+WHERE tgname IN ('runs_outcome_owed', 'runs_owe_end', 'runs_owe_start', 'runs_owe_hold',
+	'runs_owe_hold_new') AND tgrelid = to_regclass('runs')`).
 		Scan(&triggers); err != nil {
 		return false, fmt.Errorf("read the live triggers: %w", err)
 	}
-	return triggers == 2, nil
+	return triggers == 5, nil
 }
 
 // liveColumns returns the columns this database actually has, by table.

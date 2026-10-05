@@ -243,7 +243,10 @@ create-once on its side. The server keys what it launches itself the same way: a
 delivery, and a provisioning callback are deduplicated on what they carry, and each scheduled fire
 carries a key derived from its schedule and occurrence, `run.ScheduleKey`, in the server's reserved
 `st:` namespace, which no caller's key can spell. A fire that takes up an occurrence an interrupted
-fire handed back therefore finds the run that one made instead of starting a second. An approval is
+fire handed back therefore finds the run that one made instead of starting a second. A server that
+crashes before it can hand an occurrence back leaves it marked in flight, from the same write that
+claimed it, and any server's scheduler takes it up two minutes later: it records the run the key
+finds, or fires the occurrence again under the same key. An approval is
 a compare-and-set state transition, so two concurrent approvals release a held run exactly once and
 the loser gets a clear conflict.
 

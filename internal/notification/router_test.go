@@ -193,20 +193,30 @@ func TestSourceLineage(t *testing.T) {
 	}
 	lineage := SourceLineage(schedules, triggers, runs)
 	tests := []struct {
+		Want         error
 		In           *run.Run
 		WantTemplate string
-	}{
-		{In: &run.Run{Source: "template", SourceID: "tpl_a"}, WantTemplate: "tpl_a"},   // Test 0.
-		{In: &run.Run{Source: "schedule", SourceID: "sch_1"}, WantTemplate: "tpl_s"},   // Test 1.
-		{In: &run.Run{Source: "trigger", SourceID: "trg_1"}, WantTemplate: "tpl_t"},    // Test 2.
-		{In: &run.Run{Source: "rerun", SourceID: "run_origin"}, WantTemplate: "tpl_t"}, // Test 3.
-		{In: &run.Run{Source: "schedule", SourceID: "sch_gone"}},                       // Test 4.
-		{In: &run.Run{Source: "api"}},                                                  // Test 5.
-	}
+	}{{ // Test 0: A launch names its template.
+		In: &run.Run{Source: "template", SourceID: "tpl_a"}, WantTemplate: "tpl_a",
+	}, { // Test 1: Through the schedule that fired it.
+		In: &run.Run{Source: "schedule", SourceID: "sch_1"}, WantTemplate: "tpl_s",
+	}, { // Test 2: Through the trigger that fired it.
+		In: &run.Run{Source: "trigger", SourceID: "trg_1"}, WantTemplate: "tpl_t",
+	}, { // Test 3: Through a rerun to the run it reran.
+		In: &run.Run{Source: "rerun", SourceID: "run_origin"}, WantTemplate: "tpl_t",
+	}, { // Test 4: A schedule that no longer exists leaves no template to find.
+		In: &run.Run{Source: "schedule", SourceID: "sch_gone"}, Want: ErrTemplateGone,
+	}, { // Test 5: A run that names no template.
+		In: &run.Run{Source: "api"},
+	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			if diff := cmp.Diff(test.WantTemplate, lineage.TemplateOf(ctx, test.In)); diff != "" {
+			got, err := lineage.TemplateOf(ctx, test.In)
+			if !errors.Is(err, test.Want) {
+				t.Errorf("TemplateOf() error = %v, want %v", err, test.Want)
+			}
+			if diff := cmp.Diff(test.WantTemplate, got); diff != "" {
 				t.Errorf("TemplateOf() mismatch (-want +got):\n%s", diff)
 			}
 		})
@@ -328,7 +338,9 @@ func TestRouterReachesTheTemplatesOrganization(t *testing.T) {
 	mustAttach(t, store, "ntf_org", KindOrg, "org_ops", EventFailure)
 	owners := map[string]string{"tpl_ops": "org_ops", "tpl_other": "org_other"}
 	router := NewRouter(store, testSealer{}, SourceLineage(nil, nil, nil), nil,
-		WithTemplateOrgs(func(_ context.Context, id string) string { return owners[id] }))
+		WithTemplateOrgs(func(_ context.Context, id string) (string, error) {
+			return owners[id], nil
+		}))
 	without := NewRouter(store, testSealer{}, SourceLineage(nil, nil, nil), nil)
 	tests := []struct {
 		In          *run.Run

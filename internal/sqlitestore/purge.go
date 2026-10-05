@@ -133,6 +133,8 @@ var runOwnedTables = []runOwned{
 	{table: "notification_deliveries", older: "created_ms < ?", millis: true},
 	// An end still owed for a run retention removed has nothing left to announce.
 	{table: "run_ends_owed", older: "owed_ms < ?", millis: true},
+	// So does a start or hold still owed.
+	{table: "run_events_owed", older: "owed_ms < ?", millis: true},
 	// A refusal's record names no run and is bounded by its own rule in purgeReviewReports.
 	{table: "review_reports", older: "run_id <> '' AND created_at < ?"},
 }

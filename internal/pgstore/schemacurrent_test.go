@@ -87,6 +87,18 @@ func TestOpenStillRepairsWhatItSkips(t *testing.T) {
 		What:  "the trigger that owes a finished run's end to its notification targets",
 		SQL:   "DROP TRIGGER runs_owe_end ON runs",
 		Check: func(raw *sql.DB) (bool, error) { return hasRunTrigger(raw, "runs_owe_end") },
+	}, {
+		What:  "the trigger that owes a run's start to its notification targets",
+		SQL:   "DROP TRIGGER runs_owe_start ON runs",
+		Check: func(raw *sql.DB) (bool, error) { return hasRunTrigger(raw, "runs_owe_start") },
+	}, {
+		What:  "the trigger that owes a run's hold to its notification targets",
+		SQL:   "DROP TRIGGER runs_owe_hold ON runs",
+		Check: func(raw *sql.DB) (bool, error) { return hasRunTrigger(raw, "runs_owe_hold") },
+	}, {
+		What:  "the trigger that owes the hold of a run stored held to its notification targets",
+		SQL:   "DROP TRIGGER runs_owe_hold_new ON runs",
+		Check: func(raw *sql.DB) (bool, error) { return hasRunTrigger(raw, "runs_owe_hold_new") },
 	}}
 
 	for _, d := range damage {

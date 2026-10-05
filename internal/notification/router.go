@@ -19,15 +19,17 @@ const maxLineage = 8
 // Lineage resolves the template a run was launched from, or the empty string when it came from
 // none.
 type Lineage interface {
-	// TemplateOf returns the template id behind the run.
-	TemplateOf(ctx context.Context, r *run.Run) string
+	// TemplateOf returns the template id behind the run. A template that can no longer be found,
+	// because it or the schedule, trigger, or run that names it no longer exists, is an error
+	// wrapping ErrTemplateGone, and a read that fails is an error of its own.
+	TemplateOf(ctx context.Context, r *run.Run) (string, error)
 }
 
 // LineageFunc adapts a function to a Lineage.
-type LineageFunc func(ctx context.Context, r *run.Run) string
+type LineageFunc func(ctx context.Context, r *run.Run) (string, error)
 
 // TemplateOf calls f.
-func (f LineageFunc) TemplateOf(ctx context.Context, r *run.Run) string { return f(ctx, r) }
+func (f LineageFunc) TemplateOf(ctx context.Context, r *run.Run) (string, error) { return f(ctx, r) }
 
 // RunGetter reads a run by id. The run store satisfies it.
 type RunGetter interface {
@@ -38,53 +40,66 @@ type RunGetter interface {
 // SourceLineage returns the Lineage a server wires: a run names what fired it in its source, and
 // the template is that source when it is a template, the template a schedule or a trigger fires
 // when it is one of those, and the origin run's template for a rerun or a relaunch. Any of the
-// three stores may be nil, and a lookup that fails resolves to no template rather than an error,
-// since a notification is told about what can be found and the run itself is unaffected.
+// three stores may be nil, which resolves to no template. A schedule, trigger, or origin run that
+// no longer exists is ErrTemplateGone, and a read that fails is returned as the error it is, so the
+// event is recorded again once the store answers rather than recorded without the template's
+// targets.
 //
 // A run does not record its template directly. Asking the source is what lets an attachment on a
 // template reach the runs its schedules and triggers fire, which is the case AWX users rely on.
 func SourceLineage(schedules schedule.Store, triggers trigger.Store, runs RunGetter) Lineage {
-	return LineageFunc(func(ctx context.Context, r *run.Run) string {
+	return LineageFunc(func(ctx context.Context, r *run.Run) (string, error) {
 		for range maxLineage {
 			if r == nil {
-				return ""
+				return "", nil
 			}
 			switch r.Source {
 			case "template":
-				return r.SourceID
+				return r.SourceID, nil
 			case "schedule":
 				if schedules == nil {
-					return ""
+					return "", nil
 				}
 				sc, err := schedules.Get(ctx, r.SourceID)
 				if err != nil {
-					return ""
+					return "", lineageErr("schedule", r.SourceID, err,
+						errors.Is(err, schedule.ErrNotFound))
 				}
-				return sc.TemplateID
+				return sc.TemplateID, nil
 			case "trigger":
 				if triggers == nil {
-					return ""
+					return "", nil
 				}
 				tg, err := triggers.Get(ctx, r.SourceID)
 				if err != nil {
-					return ""
+					return "", lineageErr("trigger", r.SourceID, err,
+						errors.Is(err, trigger.ErrNotFound))
 				}
-				return tg.TemplateID
+				return tg.TemplateID, nil
 			case "rerun", "relaunch":
 				if runs == nil || r.SourceID == "" {
-					return ""
+					return "", nil
 				}
 				origin, err := runs.Get(ctx, r.SourceID)
 				if err != nil {
-					return ""
+					return "", lineageErr("run", r.SourceID, err, errors.Is(err, run.ErrNotFound))
 				}
 				r = origin
 			default:
-				return ""
+				return "", nil
 			}
 		}
-		return ""
+		return "", nil
 	})
+}
+
+// lineageErr describes a failed read of the object named kind and id on the way to a run's
+// template, as ErrTemplateGone when the object no longer exists.
+func lineageErr(kind, id string, err error, gone bool) error {
+	if gone {
+		return fmt.Errorf("%w: %s %s no longer exists", ErrTemplateGone, kind, id)
+	}
+	return fmt.Errorf("read %s %s: %w", kind, id, err)
 }
 
 // Router finds the named targets attached to what a run came from, for the event the run is at.
@@ -102,9 +117,10 @@ type Router struct {
 	log *zap.Logger
 }
 
-// TemplateOrgFunc returns the organization that owns a template, or the empty string when none does
-// or it cannot be read.
-type TemplateOrgFunc func(ctx context.Context, templateID string) string
+// TemplateOrgFunc returns the organization that owns a template, or the empty string when none
+// does. A template that no longer exists is an error wrapping ErrTemplateGone, and a read that
+// fails is an error of its own.
+type TemplateOrgFunc func(ctx context.Context, templateID string) (string, error)
 
 // RouterOption configures a Router.
 type RouterOption func(*Router)
@@ -139,7 +155,7 @@ func NewRouter(store Store, sealer Sealer, lineage Lineage, log *zap.Logger, opt
 // attached at more than one of them is returned once, and the list is bounded the same way a run's
 // own list is.
 func (rt *Router) Targets(ctx context.Context, r *run.Run) []run.NotifyTarget {
-	ids, err := rt.attached(ctx, r)
+	ids, err := rt.attached(ctx, r, EventOf(r))
 	if err != nil {
 		rt.log.Error("notification: read attachments: "+err.Error(), zap.String("run_id", r.ID))
 	}
@@ -163,9 +179,18 @@ func (rt *Router) Targets(ctx context.Context, r *run.Run) []run.NotifyTarget {
 // delivered. A target still waiting for its secret is returned marked to be skipped, so the run's
 // record says why that target was not told rather than leaving it out. A store that cannot be read
 // is an error rather than a shorter list: an event recorded for only the targets that happened to
-// be readable would be counted as told while the others never hear it.
+// be readable would be counted as told while the others never hear it. That includes the template
+// the run came from and the organization that owns it: a read of either that fails is an error,
+// while a template that no longer exists has nothing left to find, so its targets are passed over
+// and the router logs which run it was.
 func (rt *Router) Recipients(ctx context.Context, r *run.Run) ([]Recipient, error) {
-	ids, err := rt.attached(ctx, r)
+	return rt.recipientsFor(ctx, r, EventOf(r))
+}
+
+// recipientsFor is Recipients for the targets attached for event, which need not be the event the
+// run is at now.
+func (rt *Router) recipientsFor(ctx context.Context, r *run.Run, event string) ([]Recipient, error) {
+	ids, err := rt.attached(ctx, r, event)
 	if err != nil {
 		return nil, err
 	}
@@ -193,13 +218,13 @@ func (rt *Router) Recipients(ctx context.Context, r *run.Run) ([]Recipient, erro
 	return out, nil
 }
 
-// attached returns the ids of the targets attached, for the event the run is at, to the template,
-// the schedule, the project, or the organization the run came from, each once, in the order found.
-// The organizations are the one the run is stamped with and the one that owns its template. An
-// object whose attachments cannot be read is passed over and named in the error, beside the ids
-// the others gave.
-func (rt *Router) attached(ctx context.Context, r *run.Run) ([]string, error) {
-	event := EventOf(r)
+// attached returns the ids of the targets attached, for event, to the template, the schedule, the
+// project, or the organization the run came from, each once, in the order found. The organizations
+// are the one the run is stamped with and the one that owns its template. An object whose
+// attachments cannot be read, and a template or owner that cannot be read, is passed over and named
+// in the error, beside the ids the others gave. A template that no longer exists is passed over
+// without an error and logged, since there is nothing left to read again.
+func (rt *Router) attached(ctx context.Context, r *run.Run, event string) ([]string, error) {
 	if event == "" {
 		return nil, nil
 	}
@@ -208,11 +233,20 @@ func (rt *Router) attached(ctx context.Context, r *run.Run) ([]string, error) {
 		kind, id string
 	}
 	objects := []ref{{KindProject, r.ProjectID}, {KindOrg, r.OrgID}}
+	var errs []error
 	if rt.lineage != nil {
-		tpl := rt.lineage.TemplateOf(ctx, r)
+		tpl, err := rt.lineage.TemplateOf(ctx, r)
+		if err = rt.passOver(r, err); err != nil {
+			errs = append(errs, fmt.Errorf("find the template run %s came from: %w", r.ID, err))
+		}
 		objects = append(objects, ref{KindTemplate, tpl})
 		if rt.templateOrg != nil && tpl != "" {
-			if owner := rt.templateOrg(ctx, tpl); owner != r.OrgID {
+			owner, err := rt.templateOrg(ctx, tpl)
+			if err = rt.passOver(r, err); err != nil {
+				errs = append(errs, fmt.Errorf("find the organization that owns template %s: %w",
+					tpl, err))
+			}
+			if owner != r.OrgID {
 				objects = append(objects, ref{KindOrg, owner})
 			}
 		}
@@ -222,7 +256,6 @@ func (rt *Router) attached(ctx context.Context, r *run.Run) ([]string, error) {
 	}
 	seen := map[string]bool{}
 	var out []string
-	var errs []error
 	for _, o := range objects {
 		if o.id == "" {
 			continue
@@ -241,6 +274,16 @@ func (rt *Router) attached(ctx context.Context, r *run.Run) ([]string, error) {
 		}
 	}
 	return out, errors.Join(errs...)
+}
+
+// passOver logs a template that no longer exists, whose targets routing passes over, and returns
+// nil for it, returning any other error unchanged.
+func (rt *Router) passOver(r *run.Run, err error) error {
+	if !errors.Is(err, ErrTemplateGone) {
+		return err
+	}
+	rt.log.Warn("notification: targets passed over: "+err.Error(), zap.String("run_id", r.ID))
+	return nil
 }
 
 // target opens one notification target for delivery, logging and skipping one that cannot be.

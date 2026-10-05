@@ -896,17 +896,23 @@ type storeBundle interface {
 // run came from, reading a run's template through the schedule, trigger, or run that fired it, and
 // an organization's targets through the organization that owns that template. The sealer opens each
 // target's secrets at delivery; without a key a target that carries one fails to deliver, recorded.
+// A template that no longer exists has no owner to find, and a read that fails is an error, so the
+// event is recorded again rather than recorded without the owner's targets.
 func notificationRouter(bundle storeBundle, sealer *credential.Sealer,
 	log *zap.Logger) *notification.Router {
 	templates := bundle.Templates()
 	return notification.NewRouter(bundle.Notifications(), notificationSealerOf(sealer),
 		notification.SourceLineage(bundle.Schedules(), bundle.Triggers(), bundle.Runs()), log,
-		notification.WithTemplateOrgs(func(ctx context.Context, id string) string {
+		notification.WithTemplateOrgs(func(ctx context.Context, id string) (string, error) {
 			t, err := templates.Get(ctx, id)
-			if err != nil {
-				return ""
+			if errors.Is(err, template.ErrNotFound) {
+				return "", fmt.Errorf("%w: template %s no longer exists", notification.ErrTemplateGone,
+					id)
 			}
-			return t.OrgID
+			if err != nil {
+				return "", fmt.Errorf("read template %s: %w", id, err)
+			}
+			return t.OrgID, nil
 		}))
 }
 
@@ -1634,7 +1640,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		schedule.WithSkipNotifier(disp),
 		// A schedule waits for its own previous run rather than stacking a second copy of the same
 		// work on the same hosts.
-		schedule.WithRunActive(schedule.ActiveIn(store)))
+		schedule.WithRunActive(schedule.ActiveIn(store)),
+		// An occurrence a stopped server left in flight is recorded with the run it made, when it
+		// made one, rather than fired again.
+		schedule.WithRunByKey(schedule.KeyedIn(store)))
 	scheduler.Start()
 	defer scheduler.Close()
 

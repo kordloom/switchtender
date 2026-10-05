@@ -71,12 +71,12 @@ func (d *Dispatcher) notifyNamedOn(r *run.Run, branch named.Branch) {
 const startedSentence = "started."
 
 // notifyStarted tells the named targets attached for the started event that a top-level run began
-// executing. Only named targets hear it: the server-wide channels and a template's inline targets
-// have always reported outcomes and holds, and a start they were never configured for would arrive
-// in every channel at once.
+// executing, and settles the start the store marked owed. Only named targets hear it: the
+// server-wide channels and a template's inline targets have always reported outcomes and holds, and
+// a start they were never configured for would arrive in every channel at once.
 func (d *Dispatcher) notifyStarted(r *run.Run) {
 	if r.ParentID != nil || r.Status != run.StatusRunning {
 		return
 	}
-	d.notifyNamed(r)
+	d.announceOwed(r, run.OwedStart)
 }

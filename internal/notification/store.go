@@ -166,13 +166,15 @@ func (m *memStore) DetachObject(_ context.Context, kind, objectID string) (Clean
 }
 
 // Record appends the event to its run's sequence and queues a delivery to each recipient, unless
-// the run already holds the same moment, or already holds its end and this is an end too.
+// the run already holds the same moment, or already holds on the same branch an event Once names.
 func (m *memStore) Record(_ context.Context, ev *RunEvent, recipients []Recipient) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := ev.DedupeKey()
+	first, second := ev.Once()
 	for _, have := range m.events[ev.RunID] {
-		if have.DedupeKey() == key || (ev.End() && have.End()) {
+		if have.DedupeKey() == key || (first != "" && have.Branch == ev.Branch &&
+			(have.Event == first || have.Event == second)) {
 			return false, nil
 		}
 	}

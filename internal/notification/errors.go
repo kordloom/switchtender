@@ -31,4 +31,8 @@ var (
 	// ErrDeliveryLost is returned when a delivery's outcome is recorded by a worker whose claim on
 	// it has lapsed or been taken over, so the outcome is not recorded.
 	ErrDeliveryLost = errors.New("notification delivery is no longer claimed by this worker")
+	// ErrTemplateGone is returned when the template a run came from can no longer be found, because
+	// the template, or the schedule, trigger, or run that names it, no longer exists. Unlike a read
+	// that fails, asking again finds nothing more.
+	ErrTemplateGone = errors.New("the template the run came from no longer exists")
 )

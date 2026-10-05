@@ -47,6 +47,9 @@ type memStore struct {
 	unended map[string]bool
 	// endSeen maps an ended run in unended to when a sweep first found it ended.
 	endSeen map[string]time.Time
+	// owedEvents maps each start and hold of a top-level run not yet settled to when it became
+	// owed, the in-memory stand-in for the ledger the database stores keep.
+	owedEvents map[OwedEvent]time.Time
 	// budgets holds each allowance's open window, made on first use.
 	budgets map[string]*budgetWindow
 	// parked marks a workflow parked at an approval step, the state the database stores keep as
@@ -71,6 +74,8 @@ func NewMemStore() Store {
 		unended:   make(map[string]bool),
 		endSeen:   make(map[string]time.Time),
 		parked:    make(map[string]bool),
+
+		owedEvents: make(map[OwedEvent]time.Time),
 	}
 }
 
@@ -135,6 +140,11 @@ func (m *memStore) Save(_ context.Context, r *Run) error {
 		}
 	}
 	m.outcomes.noteSave(m.runs[r.ID], cl)
+	if prev, ok := m.runs[r.ID]; ok {
+		m.noteStatus(cl, prev.Status)
+	} else if cl.Status == StatusPendingApproval {
+		m.noteStatus(cl, "")
+	}
 	m.runs[r.ID] = cl
 	if cl.ParentID == nil && !cl.Status.Terminal() {
 		m.unended[r.ID] = true
@@ -683,6 +693,7 @@ func (m *memStore) TransitionStatusAndClaim(_ context.Context, id string, from, 
 	r.ClaimedBy = owner
 	r.ClaimedAt = &now
 	delete(m.parked, id)
+	m.noteStatus(r, from)
 	if r.StartedAt == nil && !startedAt.IsZero() {
 		at := startedAt
 		r.StartedAt = &at
@@ -703,6 +714,7 @@ func (m *memStore) StartClaimed(_ context.Context, id, owner, secret string, sta
 	now := time.Now()
 	r.Status = StatusRunning
 	r.ClaimedAt = &now
+	m.noteStatus(r, StatusPending)
 	if r.StartedAt == nil && !startedAt.IsZero() {
 		at := startedAt
 		r.StartedAt = &at
@@ -719,6 +731,7 @@ func (m *memStore) TransitionStatus(_ context.Context, id string, from, to Statu
 		return false, nil
 	}
 	r.Status = to
+	m.noteStatus(r, from)
 	if to == StatusPending {
 		m.queued[id] = time.Now()
 	}
@@ -793,6 +806,7 @@ func (m *memStore) ParkForApproval(_ context.Context, id, owner string) (bool, e
 	r.ClaimedAt = nil
 	r.ClaimSecret = ""
 	m.parked[id] = true
+	m.noteStatus(r, StatusRunning)
 	return true, nil
 }
 
@@ -849,6 +863,7 @@ func (m *memStore) SettleDecision(_ context.Context, id, decisionID string, s De
 		return false, nil
 	}
 	r.Status, r.DecisionClaim = s.Status, ""
+	m.noteStatus(r, StatusPendingApproval)
 	now := time.Now()
 	switch {
 	case s.Status == StatusRunning:

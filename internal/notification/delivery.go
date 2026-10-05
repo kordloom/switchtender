@@ -102,6 +102,26 @@ func (ev *RunEvent) End() bool {
 	return ev.Branch == "" && IsEnd(ev.Event)
 }
 
+// Once returns the events that count as the same moment as ev when the run already holds one on
+// ev's branch, so a store records ev only once: success and failure for the end of the run's own
+// lifecycle, started for its start, and approval for a hold, of the run itself or of one workflow
+// step. A run starts once, is held once in its own lifecycle, and waits at each approval step once,
+// so each of those reaches each target once however many processes announce it, from whatever copy
+// of the run: the process that moved the run, and the sweep that found the move owed when that
+// process stopped before recording it. Any other event, such as an attention alert, which can be
+// raised again, returns two empty names, and is kept once per DedupeKey alone.
+func (ev *RunEvent) Once() (string, string) {
+	switch {
+	case ev.End():
+		return EventSuccess, EventFailure
+	case ev.Event == EventStarted && ev.Branch == "":
+		return EventStarted, EventStarted
+	case ev.Event == EventApproval:
+		return EventApproval, EventApproval
+	}
+	return "", ""
+}
+
 // IsEnd reports whether an event names the end of a run, a success or a failure.
 func IsEnd(event string) bool {
 	return event == EventSuccess || event == EventFailure

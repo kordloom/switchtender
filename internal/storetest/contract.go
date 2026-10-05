@@ -143,6 +143,9 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("summary trim bounds growth", func(t *testing.T) { testTrimSummaries(t, newStore()) })
 	t.Run("terminal run fences writes", func(t *testing.T) { testTerminalFence(t, newStore()) })
 	t.Run("every run end is owed until settled", func(t *testing.T) { testEndLedger(t, newStore()) })
+	t.Run("every start and hold is owed until settled", func(t *testing.T) {
+		testEventLedger(t, newStore())
+	})
 	t.Run("reclaim attributes a stale cancel", func(t *testing.T) {
 		testReclaimAttributesAStaleCancel(t, newStore())
 	})

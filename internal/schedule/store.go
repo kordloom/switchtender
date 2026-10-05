@@ -52,6 +52,98 @@ type Store interface {
 	// an edit, a delete, or another server's claim made in between wins, and a missing row reports
 	// false without an error.
 	Release(ctx context.Context, id string, claimed *time.Time, due time.Time) (bool, error)
+	// ClaimFire is ClaimDue, or ClaimFinal when next is nil, for an occurrence the caller is about
+	// to fire: in the same write it marks oldNext in flight on the row, stamped with the store's
+	// clock, so a server that stops before the fire's run exists leaves the occurrence marked
+	// rather than lost. A row that still marks another occurrence in flight is not claimed, which
+	// the caller reads as a lost race, so the claim of the next occurrence never unmarks one whose
+	// fire is still unaccounted for. The mark is cleared by SettleInFlight and outlives every other
+	// write but Delete.
+	ClaimFire(ctx context.Context, id string, oldNext time.Time, next *time.Time) (bool, error)
+	// TakeInFlight takes up every occurrence marked in flight for at least grace by the store's
+	// clock, re-marking each one now so another server's sweep leaves it alone for another grace,
+	// and returns them, oldest occurrence first. Two servers sweeping at once never take the same
+	// occurrence.
+	TakeInFlight(ctx context.Context, grace time.Duration) ([]InFlight, error)
+	// SettleInFlight clears the in-flight mark when the row still marks occurrence, once its fire is
+	// accounted for: its run exists, or the fire recorded why it started none. A row that is gone,
+	// or that marks no occurrence or another one, is left as it is without an error.
+	SettleInFlight(ctx context.Context, id string, occurrence time.Time) error
+}
+
+// InFlight is an occurrence claimed for a fire that is not known to have created its run.
+type InFlight struct {
+	// ScheduleID is the schedule.
+	ScheduleID string
+	// Occurrence is the fire time the claim took, which names the run's idempotency key.
+	Occurrence time.Time
+}
+
+// inFlightMark is the in-memory store's in-flight marker on one schedule.
+type inFlightMark struct {
+	// occurrence is the fire time the claim took.
+	occurrence time.Time
+	// since is when the occurrence was last marked.
+	since time.Time
+}
+
+// ClaimFire claims an occurrence for a fire and marks it in flight, unless another occurrence is.
+func (m *memStore) ClaimFire(_ context.Context, id string, oldNext time.Time, next *time.Time) (bool,
+	error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sc, ok := m.schedules[id]
+	if !ok || sc.NextRunAt == nil || !sc.NextRunAt.Equal(oldNext) {
+		return false, nil
+	}
+	if mark, marked := m.inflight[id]; marked && !mark.occurrence.Equal(oldNext) {
+		return false, nil
+	}
+	sc.NextRunAt = nil
+	if next != nil {
+		to := *next
+		sc.NextRunAt = &to
+	}
+	m.inflight[id] = inFlightMark{occurrence: oldNext, since: time.Now()}
+	return true, nil
+}
+
+// TakeInFlight takes up the occurrences marked in flight for at least grace.
+func (m *memStore) TakeInFlight(_ context.Context, grace time.Duration) ([]InFlight, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	out := []InFlight{}
+	for id, mark := range m.inflight {
+		if now.Sub(mark.since) < grace {
+			continue
+		}
+		m.inflight[id] = inFlightMark{occurrence: mark.occurrence, since: now}
+		out = append(out, InFlight{ScheduleID: id, Occurrence: mark.occurrence})
+	}
+	SortInFlight(out)
+	return out, nil
+}
+
+// SettleInFlight clears the in-flight mark when it still marks occurrence.
+func (m *memStore) SettleInFlight(_ context.Context, id string, occurrence time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if mark, ok := m.inflight[id]; ok && mark.occurrence.Equal(occurrence) {
+		delete(m.inflight, id)
+	}
+	return nil
+}
+
+// SortInFlight orders occurrences oldest first, then by schedule, the order TakeInFlight returns
+// them in.
+func SortInFlight(list []InFlight) {
+	sort.Slice(list, func(i, j int) bool {
+		if !list[i].Occurrence.Equal(list[j].Occurrence) {
+			return list[i].Occurrence.Before(list[j].Occurrence)
+		}
+		return list[i].ScheduleID < list[j].ScheduleID
+	})
 }
 
 // Release sets a schedule's next fire time back to due when it still holds claimed, nil meaning no
@@ -107,15 +199,18 @@ func (m *memStore) ClaimDue(_ context.Context, id string, oldNext, newNext time.
 
 // memStore is an in-memory Store guarded by a read-write mutex.
 type memStore struct {
-	// mu guards schedules.
+	// mu guards schedules and inflight.
 	mu sync.RWMutex
 	// schedules maps schedule id to the stored schedule.
 	schedules map[string]*Schedule
+	// inflight maps a schedule id to the occurrence a claim marked in flight, kept apart from the
+	// schedule itself the way the database stores keep it out of every read.
+	inflight map[string]inFlightMark
 }
 
 // NewMemStore returns an empty in-memory Store.
 func NewMemStore() Store {
-	return &memStore{schedules: make(map[string]*Schedule)}
+	return &memStore{schedules: make(map[string]*Schedule), inflight: map[string]inFlightMark{}}
 }
 
 // Save inserts or replaces the schedule identified by s.ID.
@@ -208,5 +303,6 @@ func (m *memStore) Delete(_ context.Context, id string) error {
 		return ErrNotFound
 	}
 	delete(m.schedules, id)
+	delete(m.inflight, id)
 	return nil
 }

@@ -779,6 +779,14 @@ template is told, once, however many of those it is attached through. The templa
 template hears the runs its schedules and triggers fire, and a rerun's runs as well. A split's shards
 and a pipeline's steps are not announced one by one. The parent is.
 
+A read that fails while the template is being found, of the schedule, trigger, or run that names it,
+or of the template to learn its organization, counts as a database that cannot be read. The event
+is asked for again and is not recorded for the other targets alone, as described under
+[Delivery order](#delivery-order). A template that no longer exists is different: it has no targets
+left to find, and asking again finds nothing more. Its targets are passed over, the others are told,
+and the server logs a warning that names the run and what could not be found. That includes a
+template whose schedule, trigger, or rerun origin was deleted after the run started.
+
 A target is delivered with the same formatters and the same refusal of private addresses as every
 other channel, and with `SWITCHTENDER_EGRESS_PROXY` set it leaves through that proxy, after its
 address is checked, as every channel does. A hold reaches a PagerDuty, Grafana, or Twilio target
@@ -801,11 +809,28 @@ failed notification does not prevent later ones from being attempted after its r
 
 Each event is recorded as the run reaches it, with the run's next sequence number, in the same
 transaction that queues one delivery per attached target. A database that refuses the write for a
-moment is asked again for up to five seconds. A run's end is also marked owed in the same database
-write that ends the run, whatever ends it: the run's own server, a worker's report, the lease sweep,
-a cancel, or a decision. Every server records an end still owed a few seconds later, so a server
-that stops right after a run ends, or a database that refused the end for longer, leaves the end
-late rather than lost. A run's end is recorded once, however many times it is announced.
+moment, or cannot be read to find the targets, is asked again for up to five seconds. A run's end is
+also marked owed in the same database write that ends the run, whatever ends it: the run's own
+server, a worker's report, the lease sweep, a cancel, or a decision. Every server records an end
+still owed a few seconds later, so a server that stops right after a run ends, or a database that
+refused the end for longer, leaves the end late rather than lost. A run's end is recorded once,
+however many times it is announced.
+
+A run's start and its hold are marked owed the same way. A start is owed in the write that moves a
+run into running, whether a worker claims it, a coordinator starts it, a decision starts it, or a
+workflow resumes after an approval step. A hold is owed in the write that creates a run held, or
+moves it into a hold from a state that was not one, including a workflow parked at an approval step.
+A decision that takes a held run and lets it go again is not a new hold. Every server records a
+start or hold still owed a few seconds later. A parked workflow's hold is recorded as each approval
+step it waits at, the way the workflow announces them. A run's start, its own hold, and each
+approval step's hold are recorded once, however many times they are announced.
+
+When the sweep finds that the run has already moved past a start or hold that is still owed,
+because it ended, was decided, or moved on, the event is not sent. Telling a target that a run
+started after it ended, or asking a person to decide a run somebody already decided, would arrive
+after the messages that followed it. The event is recorded on the run as skipped, with the reason,
+for example `not sent: the run had already ended, failed, before its start could be announced`. It
+shows at `GET /v1/runs/{id}/notifications` like every other skipped delivery.
 
 A delivery waits until every earlier delivery to the same target for the same run has finished.
 Targets never wait for each other: a server attempts at most four deliveries to one target at once

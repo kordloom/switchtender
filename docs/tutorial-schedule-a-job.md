@@ -179,6 +179,16 @@ of the group. Each scheduled run carries a key naming its schedule and occurrenc
 takes up a handed back occurrence finds the run the interrupted fire made, if it made one, rather
 than starting a second.
 
+A server that stops too abruptly to hand anything back, because it crashed or lost its host, does
+not lose the occurrence either. The claim marks the occurrence in flight on the schedule in the same
+database write, and the mark stays until the fire is recorded on the schedule. Every server's
+scheduler looks for marks older than two minutes. When it finds one, it checks for the run under the
+occurrence's key. If the run exists, the fire is recorded with that run. If it does not, the
+occurrence is fired again under the same key, so a run that lands in the meantime is found rather
+than started twice. A schedule disabled since the claim does not fire, and its last error says why.
+A deleted schedule takes its mark with it. While an occurrence is marked, the schedule's next
+occurrence is not claimed, so it fires late rather than leaving the earlier one unaccounted for.
+
 A tick that runs late on the night the clocks go back, after a restart, a database failover, or with
 a `--schedule-interval` longer than a minute, still fires a time that happens twice only once.
 

@@ -324,7 +324,12 @@ CREATE TABLE IF NOT EXISTS schedules (
 	-- Why the most recent fire was skipped, and how many fires in a row ending with it were. A
 	-- fire whose inventory matched no hosts is skipped rather than failed.
 	last_skip     TEXT NOT NULL DEFAULT '',
-	skipped_fires INTEGER NOT NULL DEFAULT 0
+	skipped_fires INTEGER NOT NULL DEFAULT 0,
+	-- The occurrence a claim took for a fire whose run is not yet known to exist, and when it was
+	-- marked, by the database clock in Unix milliseconds. A sweep fires it again once it has been
+	-- marked too long, so a server that stops mid-fire leaves the occurrence late rather than lost.
+	inflight_at   TEXT,
+	inflight_ms   INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_schedules_created ON schedules(created_at, id);
 CREATE TABLE IF NOT EXISTS users (
@@ -524,6 +529,7 @@ CREATE INDEX IF NOT EXISTS idx_notification_deliveries_run
 CREATE INDEX IF NOT EXISTS idx_notification_deliveries_target
 	ON notification_deliveries(notification_id, created_ms);
 ` + runEndsSchema + `
+` + runEventsSchema + `
 CREATE TABLE IF NOT EXISTS audit_entries (
 	id        TEXT PRIMARY KEY,
 	at        TEXT NOT NULL,

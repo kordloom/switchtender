@@ -48,6 +48,9 @@ func Contract(t *testing.T, newStore func() notification.Store) {
 		testDeliveries(t, newStore())
 	})
 	t.Run("a run's end is recorded once", func(t *testing.T) { testRecordOneEnd(t, newStore()) })
+	t.Run("a run's start and each hold are recorded once", func(t *testing.T) {
+		testRecordOnceEach(t, newStore())
+	})
 	t.Run("a claimant holds at most its share of one target", func(t *testing.T) {
 		testClaimPerTarget(t, newStore())
 	})
