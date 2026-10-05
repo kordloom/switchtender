@@ -63,11 +63,13 @@ type SpecRecord struct {
 	PullCredentialID string `json:"pull_credential_id,omitempty"`
 	// InventorySnapshot binds the stored inventory the run executes against, materialized when the
 	// run was submitted: the digest of its sealed content, a digest of its content with secrets
-	// masked, and its hosts. Absent for every run that targets no stored inventory, and for one
-	// targeting a composed inventory, which InventoryResolution binds instead.
+	// masked, and its hosts. For a composed inventory it binds the result the run resolved to, its
+	// hosts with their variables, beside InventoryResolution. Absent for every run that targets no
+	// stored inventory.
 	InventorySnapshot *InventorySnapshotSpec `json:"inventory_snapshot,omitempty"`
-	// PlanSHA256 binds the sealed plan file a gated terraform or opentofu apply carries out, so an
-	// approval releases that plan and nothing planned afterward. Absent for every other run.
+	// PlanSHA256 binds the sealed plan file a terraform or opentofu apply carries out, the plan the
+	// plan gate or a drift check saved, so an approval releases that plan and nothing planned
+	// afterward. Absent for every other run.
 	PlanSHA256 string `json:"plan_sha256,omitempty"`
 	// DryRun runs the tool in its no-change mode.
 	DryRun bool `json:"dry_run,omitempty"`

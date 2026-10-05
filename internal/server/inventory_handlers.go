@@ -188,8 +188,7 @@ func createInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 		}
 		// A queue only means anything if a worker serves it, and every worker is Team. Saving one
 		// on Community stored a source whose refreshes could never be claimed.
-		if qerr := allowQueue(req.Queue); qerr != nil {
-			respondError(w, log, http.StatusForbidden, qerr.Error())
+		if !admitQueue(w, log, req.Queue) {
 			return
 		}
 		// Putting an inventory in an organization gives every member of it use, and taking it out
@@ -267,8 +266,7 @@ func updateInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 		}
 		// A queue only means anything if a worker serves it, and every worker is Team. Saving one
 		// on Community stored a source whose refreshes could never be claimed.
-		if qerr := allowQueue(req.Queue); qerr != nil {
-			respondError(w, log, http.StatusForbidden, qerr.Error())
+		if !admitQueue(w, log, req.Queue) {
 			return
 		}
 		// Both directions of an organization change are checked: entering one gives every member

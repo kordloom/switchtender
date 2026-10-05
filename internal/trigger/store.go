@@ -5,6 +5,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // memStore is an in-memory trigger Store guarded by a mutex.
@@ -66,7 +68,7 @@ func (m *memStore) RecordRefusal(_ context.Context, id string, at time.Time, rea
 	defer m.mu.Unlock()
 	if t, ok := m.triggers[id]; ok {
 		v := at
-		t.LastError, t.LastErrorAt = reason, &v
+		t.LastError, t.LastErrorAt = util.SafeText(reason), &v
 	}
 	return nil
 }

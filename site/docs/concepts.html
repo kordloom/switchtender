@@ -455,11 +455,15 @@ for the change cannot be the one who approves it, and the requirement is recorde
 moment it is held, so editing the policy afterward cannot loosen a decision already pending. A held
 run submitted by an AI agent is released the same way, only by a human admin, so an operator-bound
 agent never approves its own work. Both the request and the decision are recorded in the audit
-trail, making who asked for a change and who signed off provable.</p>
+trail, making who asked for a change and who signed off provable. A Terraform or OpenTofu apply
+marked this way is planned first instead, and the apply its plan proposes is what waits, carrying the
+saved plan the approval binds.</p>
 <p>Approval can also be required by policy rather than by choice. A policy matches runs by tool, command
 text, or target inventory, and any matching run is held automatically at submission, so the gate
-cannot be skipped by omitting the flag. Policies are enforced in the dispatcher, so a scheduled or
-triggered run is gated the same as one launched by hand.</p>
+cannot be skipped by omitting the flag. A Terraform or OpenTofu apply a policy would hold is planned
+first, and the apply its plan proposes is what waits, carrying the saved plan the approval binds.
+Policies are enforced in the dispatcher, so a scheduled or triggered run is gated the same as one
+launched by hand.</p>
 <p>A workflow is gated by the same policies as a single run. Every step is checked when the workflow is
 submitted, and a match holds the whole workflow before any step starts, so a gated command cannot be
 slipped past an approver by wrapping it in a workflow. The whole workflow is held rather than the one

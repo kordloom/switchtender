@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 )
 
 const (
@@ -86,6 +87,12 @@ type Lease struct {
 	kind string
 	// revoke ends the secret early, nil for a source that mints nothing revocable.
 	revoke func(ctx context.Context) error
+	// handle names the secret to its engine in a form that outlives this process, such as a Vault
+	// lease id and the address that issued it, so another process can revoke it with RevokeHandle.
+	// Empty for an engine that gives none. It is sensitive: never logged, and sealed at rest.
+	handle string
+	// expires is when the engine ends the secret on its own, zero when it did not say.
+	expires time.Time
 }
 
 // NewLease builds a lease for a minted secret, naming the engine and capturing how to revoke it.
@@ -99,6 +106,15 @@ func (l *Lease) Kind() string {
 		return ""
 	}
 	return l.kind
+}
+
+// Handle returns the lease's revoke handle and when the secret expires on its own, or an empty
+// handle for a nil lease and for an engine that gives none.
+func (l *Lease) Handle() (string, time.Time) {
+	if l == nil {
+		return "", time.Time{}
+	}
+	return l.handle, l.expires
 }
 
 // Revoke ends the minted secret early. A nil lease, or a lease with no revoke func, is a no-op, so a

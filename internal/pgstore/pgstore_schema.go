@@ -113,6 +113,12 @@ CREATE TABLE IF NOT EXISTS runs (
 	-- ciphertext only, wiped when the run ends.
 	plan_sha256 TEXT NOT NULL DEFAULT '',
 	plan_sealed TEXT NOT NULL DEFAULT '',
+	-- The plan file a drift check saved, ciphertext only, kept past the check's end so a reconcile
+	-- carries out exactly that plan, and dropped when a newer check of the same target lands.
+	drift_plan_sealed TEXT NOT NULL DEFAULT '',
+	-- Whether a Terraform or OpenTofu apply's own submission asked for approval, so the apply its
+	-- plan proposes is held. Set when the run is created and never cleared.
+	approval_requested INTEGER NOT NULL DEFAULT 0,
 	-- The digest of the image the container runtime pulled and ran.
 	image_digest TEXT NOT NULL DEFAULT '',
 	-- The decision that won a held run or an approval step: the id of its record and of the chain
@@ -170,6 +176,8 @@ ALTER TABLE runs ADD COLUMN IF NOT EXISTS inventory_sealed TEXT NOT NULL DEFAULT
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS resolved_hosts TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS plan_sha256 TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS plan_sealed TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS drift_plan_sealed TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS approval_requested INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS image_digest TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS decision_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS decision_claim TEXT NOT NULL DEFAULT '';
@@ -358,7 +366,12 @@ CREATE TABLE IF NOT EXISTS schedules (
 	-- Why the most recent fire was skipped, and how many fires in a row ending with it were. A
 	-- fire whose inventory matched no hosts is skipped rather than failed.
 	last_skip     TEXT NOT NULL DEFAULT '',
-	skipped_fires INTEGER NOT NULL DEFAULT 0
+	skipped_fires INTEGER NOT NULL DEFAULT 0,
+	-- The occurrence a claim took for a fire whose run is not yet known to exist, and when it was
+	-- marked, by the database clock in Unix milliseconds. A sweep fires it again once it has been
+	-- marked too long, so a server that stops mid-fire leaves the occurrence late rather than lost.
+	inflight_at   TEXT,
+	inflight_ms   BIGINT NOT NULL DEFAULT 0
 );
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT '';
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT '';
@@ -368,6 +381,8 @@ ALTER TABLE schedules ADD COLUMN IF NOT EXISTS rrule TEXT NOT NULL DEFAULT '';
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS spring_forward TEXT NOT NULL DEFAULT '';
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS last_skip TEXT NOT NULL DEFAULT '';
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS skipped_fires INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE schedules ADD COLUMN IF NOT EXISTS inflight_at TEXT;
+ALTER TABLE schedules ADD COLUMN IF NOT EXISTS inflight_ms BIGINT NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_schedules_created ON schedules(created_at, id);
 CREATE TABLE IF NOT EXISTS users (
 	id            TEXT PRIMARY KEY,
@@ -612,6 +627,8 @@ CREATE INDEX IF NOT EXISTS idx_notification_deliveries_run
 CREATE INDEX IF NOT EXISTS idx_notification_deliveries_target
 	ON notification_deliveries(notification_id, created_ms);
 ` + runEndsSchema + `
+` + runEventsSchema + `
+` + secretLeasesSchema + `
 CREATE TABLE IF NOT EXISTS audit_entries (
 	id        TEXT PRIMARY KEY,
 	at        TEXT NOT NULL,
@@ -975,9 +992,6 @@ AND column_name IN ('playbook', 'inventory', 'status')`).Scan(&ours); err != nil
 // pgUniqueViolation is the PostgreSQL SQLSTATE code for a unique constraint or index violation.
 const pgUniqueViolation = "23505"
 
-// isKeyConflict reports whether a keyed insert failed because another run already holds the
-// idempotency key. A runs insert carrying a key can only trip the idempotency-key unique index, its
-// primary-key conflict being absorbed by ON CONFLICT(id), so a unique violation on one is that race
 // schemaIsCurrent reports whether applying the schema would change nothing, so the caller can skip
 // the migration entirely.
 //
@@ -1035,14 +1049,16 @@ func schemaIsCurrent(db *sql.DB) (bool, error) {
 	}
 	// The triggers that keep the owed ledgers are part of what the schema creates, and nothing above
 	// would notice one missing: runs_outcome_owed marks a finished run's outcome owed to the audit
-	// chain, and runs_owe_end marks its end owed to its named notification targets.
+	// chain, runs_owe_end marks its end owed to its named notification targets, and runs_owe_start,
+	// runs_owe_hold, and runs_owe_hold_new mark its start and its hold owed to them.
 	var triggers int
 	if err := db.QueryRow(`SELECT COUNT(DISTINCT tgname) FROM pg_trigger
-WHERE tgname IN ('runs_outcome_owed', 'runs_owe_end') AND tgrelid = to_regclass('runs')`).
+WHERE tgname IN ('runs_outcome_owed', 'runs_owe_end', 'runs_owe_start', 'runs_owe_hold',
+	'runs_owe_hold_new') AND tgrelid = to_regclass('runs')`).
 		Scan(&triggers); err != nil {
 		return false, fmt.Errorf("read the live triggers: %w", err)
 	}
-	return triggers == 2, nil
+	return triggers == 5, nil
 }
 
 // liveColumns returns the columns this database actually has, by table.

@@ -195,7 +195,7 @@ func TestThePlanGateAsksAStoreThatCannotCreateRuns(t *testing.T) {
 	if store.destroys != 3 || !store.read {
 		t.Errorf("reported destroys=%d read=%v, want 3 and true", store.destroys, store.read)
 	}
-	if string(store.plan) != string(plantest.File) {
+	if string(store.plan) != plantest.File {
 		t.Errorf("the control node was handed plan file %q, want the one the plan saved", store.plan)
 	}
 }

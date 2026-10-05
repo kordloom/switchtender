@@ -9,7 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
+
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // DedupeWindow is how long a repeat of the same one-click action collapses onto the run it already
@@ -27,6 +28,13 @@ const internalKeyPrefix = "st:"
 
 // ErrReservedKey is returned when a caller supplies an idempotency key in the server's namespace.
 var ErrReservedKey = errors.New("reserved idempotency key")
+
+// MaxClientKeyBytes bounds the idempotency key a caller may send. The key is stored in a column
+// under a unique index, and PostgreSQL refuses an index entry past about 2.7 kilobytes, so a longer
+// key that does not compress failed the submit with a 500. A UUID is 36 bytes and the keys clients
+// derive from a request run to a few dozen more, so the bound leaves every real key room and stays
+// far below the index limit.
+const MaxClientKeyBytes = 255
 
 // clientDigestPrefix opens the stored form of a caller's idempotency key that is kept as a digest:
 // every key scoped to an organization, and a key that is not text. It sits in the reserved
@@ -57,16 +65,10 @@ func dedupeKeyIn(action, id string, bucket int64) string {
 // text, and otherwise digestMark followed by its digest. A part that already begins with digestMark
 // is digested too, so the two forms can never spell each other.
 func keyPart(s string) string {
-	if storableText(s) && !strings.HasPrefix(s, digestMark) {
+	if util.IsSafeText(s) && !strings.HasPrefix(s, digestMark) {
 		return s
 	}
 	return digestMark + digestHex(s)
-}
-
-// storableText reports whether every backend stores s as text unchanged: it is valid UTF-8 and holds
-// no NUL byte, the two things PostgreSQL refuses in a text value with SQLSTATE 22021.
-func storableText(s string) bool {
-	return utf8.ValidString(s) && !strings.ContainsRune(s, 0)
 }
 
 // digestHex returns the hex SHA-256 of s.
@@ -108,6 +110,10 @@ const orgKeySeparator = "\x00"
 // An install with no organizations stores any other key exactly as sent, so a single-tenant
 // deployment's keys keep the shape they always had.
 func ClientKey(supplied, orgID string) (string, error) {
+	if len(supplied) > MaxClientKeyBytes {
+		return "", fmt.Errorf("%w: an idempotency key may be at most %d bytes, and this one is %d",
+			ErrKeyTooLong, MaxClientKeyBytes, len(supplied))
+	}
 	if strings.HasPrefix(supplied, internalKeyPrefix) {
 		return "", fmt.Errorf("%w: an idempotency key may not begin with %q", ErrReservedKey,
 			internalKeyPrefix)
@@ -124,7 +130,7 @@ func ClientKey(supplied, orgID string) (string, error) {
 // clientStoredKey returns how a caller's key is stored, given the text earlier releases stored for
 // it: that text when every backend stores it, and its digest under clientDigestPrefix otherwise.
 func clientStoredKey(joined string) string {
-	if storableText(joined) {
+	if util.IsSafeText(joined) {
 		return joined
 	}
 	return clientDigestPrefix + digestHex(joined)
@@ -139,13 +145,13 @@ func clientStoredKey(joined string) string {
 // a repeated callback still finds the run an earlier release recorded, and every key it holds is one
 // PostgreSQL can hold too.
 func CurrentKey(stored string) (string, bool) {
-	if storableText(stored) {
+	if util.IsSafeText(stored) {
 		return stored, false
 	}
 	if rest, ok := strings.CutPrefix(stored, internalKeyPrefix); ok {
 		action, tail, found := strings.Cut(rest, ":")
 		at := strings.LastIndexByte(tail, ':')
-		if found && at >= 0 && storableText(action) {
+		if found && at >= 0 && util.IsSafeText(action) {
 			if bucket, err := strconv.ParseInt(tail[at+1:], 10, 64); err == nil {
 				return dedupeKeyIn(action, tail[:at], bucket), true
 			}

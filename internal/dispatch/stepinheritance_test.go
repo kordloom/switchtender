@@ -137,6 +137,7 @@ var stepFields = map[string]stepFieldRule{
 	// Decisions, which are made about the pipeline. A child is not approvable on its own, and these
 	// stamps cover the spec that was decided on rather than any step's.
 	"HeldByPolicy":            notOnAStep,
+	"ApprovalRequested":       notOnAStep,
 	"HoldNote":                notOnAStep,
 	"RequireDistinctApprover": notOnAStep,
 	"RequireReason":           notOnAStep,

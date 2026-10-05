@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -96,16 +97,17 @@ func snapshotOf(content string) (*run.InventorySnapshot, error) {
 // edited after an approval cannot widen or redirect the approved run, and an inventory edited
 // between a submission and its claim cannot either.
 //
-// A composed inventory is held to the hosts it resolved to by its resolution instead, so it takes no
-// snapshot here. A run derived from another, a shard of a split, a step of a workflow, or the apply
-// a plan proposes, arrives carrying its source's snapshot and keeps it: it is part of the same
-// submission, so it executes the same inventory.
+// A composed inventory took its snapshot when it was resolved, unless the run arrives held to a
+// resolution and carrying no snapshot, which snapshotHeldComposed covers. A run derived from
+// another, a shard of a split, a step of a workflow, or the apply a plan proposes, arrives carrying
+// its source's snapshot and keeps it: it is part of the same submission, so it executes the same
+// inventory.
 func (d *Dispatcher) snapshotInventory(ctx context.Context, r *run.Run) error {
 	if r.InventorySnapshot != nil && r.InventorySealed != "" {
 		return nil
 	}
 	r.InventorySnapshot, r.InventorySealed = nil, ""
-	if r.InventoryID == "" || r.InventoryResolution != nil || d.inventories == nil {
+	if r.InventoryID == "" || d.inventories == nil {
 		return nil
 	}
 	inv, err := d.inventories.Get(ctx, r.InventoryID)
@@ -113,7 +115,7 @@ func (d *Dispatcher) snapshotInventory(ctx context.Context, r *run.Run) error {
 		return fmt.Errorf("%w: %s", err, r.InventoryID)
 	}
 	if inv.Composed() {
-		return nil
+		return d.snapshotHeldComposed(ctx, r, inv)
 	}
 	// An inventory that refreshes from its source on launch refreshes now, when the run is submitted,
 	// so the snapshot taken next, the one an approver sees and the run executes, holds the refreshed
@@ -143,6 +145,154 @@ func (d *Dispatcher) snapshotInventory(ctx context.Context, r *run.Run) error {
 	return nil
 }
 
+// composedSnapshot is what a composed inventory's snapshot seals: the result a run executes and the
+// content of every input it drew hosts from, each as it was read when the run was submitted. The
+// inputs are kept so the executor still checks Ansible's reading of each one against the native
+// engine's, without reading any input again.
+type composedSnapshot struct {
+	// Content is the composed result, the inventory handed to the play.
+	Content string `json:"content"`
+	// Inputs are the inputs the hosts were drawn from, in the order the resolution names them.
+	Inputs []snapshotInput `json:"inputs"`
+}
+
+// snapshotInput is one input inventory as a composed snapshot holds it.
+type snapshotInput struct {
+	// ID names the input inventory.
+	ID string `json:"id"`
+	// Name is the input's name when the run was submitted, for the messages that name it.
+	Name string `json:"name"`
+	// Content is the input's content, its variables and secrets included, as it was read.
+	Content string `json:"content"`
+	// Engine is the engine that read the input when it was composed, native or ansible. Only an
+	// input the native engine read is checked against Ansible's reading before an Ansible run.
+	Engine string `json:"engine"`
+}
+
+// snapshotComposed seals what the composed inventory inv resolved to for r, c, as r's inventory
+// snapshot, through the same snapshot record a plain inventory takes: the composed result's hosts,
+// its digest with secrets masked, the digest of the sealed content, and the credentials inv
+// attaches. The sealed content holds the result and every input it drew from, so the run executes
+// exactly what was resolved and approved, and an input edited afterward, a variable included, does
+// not reach it.
+func (d *Dispatcher) snapshotComposed(r *run.Run, inv *inventory.Inventory, c *composed) error {
+	snap, err := snapshotOf(c.Content)
+	if err != nil {
+		return fmt.Errorf("%w: composed inventory %s: %w", ErrInventorySnapshot, inv.Name, err)
+	}
+	if snap.Dynamic {
+		return fmt.Errorf("%w: composed inventory %s resolved to content the native engine cannot read",
+			ErrInventorySnapshot, inv.Name)
+	}
+	byID := make(map[string]*composeInput, len(c.inputs))
+	for _, in := range c.inputs {
+		byID[in.inv.ID] = in
+	}
+	body := composedSnapshot{Content: c.Content}
+	for _, id := range c.Resolution.Inputs {
+		if in := byID[id]; in != nil {
+			body.Inputs = append(body.Inputs, snapshotInput{ID: id, Name: in.inv.Name,
+				Content: in.content, Engine: in.engine})
+		}
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("%w: composed inventory %s: %w", ErrInventorySnapshot, inv.Name, err)
+	}
+	defer clear(raw)
+	sealed, err := d.sealBytes(raw)
+	if err != nil {
+		return fmt.Errorf("%w: seal the snapshot of composed inventory %s: %w", ErrInventorySnapshot,
+			inv.Name, err)
+	}
+	snap.SealedSHA256 = run.SealedBlobSHA256(sealed)
+	snap.CredentialIDs = slices.Clone(inv.CredentialIDs)
+	r.InventorySnapshot, r.InventorySealed = snap, sealed
+	return nil
+}
+
+// snapshotHeldComposed snapshots the composed inventory inv for a run that arrives held to a
+// resolution and carrying no snapshot: the retry of a split's failed shards, whose parent's
+// snapshot was wiped when the parent ended. The retry is a submission of its own, so the inventory
+// is composed again now, from its inputs as they stand, held to the hosts the resolution recorded,
+// and that is what the retry records and executes. A run with no resolution takes its snapshot when
+// resolveComposed resolves it.
+func (d *Dispatcher) snapshotHeldComposed(ctx context.Context, r *run.Run, inv *inventory.Inventory) error {
+	if r.InventoryResolution == nil {
+		return nil
+	}
+	c, err := d.composedContent(ctx, inv, r.InventoryResolution)
+	if err != nil {
+		return err
+	}
+	r.InventoryResolution = c.Resolution
+	return d.snapshotComposed(r, inv, c)
+}
+
+// parseComposedSnapshot decodes opened composed snapshot content.
+func parseComposedSnapshot(content string) (*composedSnapshot, error) {
+	var out composedSnapshot
+	if err := json.Unmarshal([]byte(content), &out); err != nil {
+		return nil, fmt.Errorf("%w: the opened composed inventory snapshot does not read: %w",
+			ErrInventorySnapshot, err)
+	}
+	return &out, nil
+}
+
+// snapshotInputDigest returns the digest of a composed snapshot's inputs, the form the resolution's
+// input digest takes: each input by id and its content with secrets masked, in order.
+func snapshotInputDigest(inputs []snapshotInput) string {
+	list := make([]inventory.DigestInput, 0, len(inputs))
+	for _, in := range inputs {
+		list = append(list, inventory.DigestInput{ID: in.ID, Content: in.Content})
+	}
+	return inventory.InputDigest(list)
+}
+
+// snapshotPlay returns the inventory content the play is handed from opened snapshot content: the
+// content itself for a plain inventory, the composed result for a composed one.
+func snapshotPlay(r *run.Run, content string) (string, error) {
+	if r.InventoryResolution == nil {
+		return content, nil
+	}
+	cs, err := parseComposedSnapshot(content)
+	if err != nil {
+		return "", err
+	}
+	return cs.Content, nil
+}
+
+// composedFromSnapshot rebuilds what the cross-check before an Ansible run reads from opened
+// composed snapshot content: the result handed to the play, read by the native engine, and every
+// input with the engine that read it when it was composed. Nothing is read from the inventory
+// store.
+func composedFromSnapshot(r *run.Run, content string) (*composed, error) {
+	cs, err := parseComposedSnapshot(content)
+	if err != nil {
+		return nil, err
+	}
+	listing, err := inventory.ResolveNative(cs.Content)
+	if err != nil {
+		return nil, fmt.Errorf("%w: the composed inventory snapshot: %w", ErrInventorySnapshot, err)
+	}
+	inputs := make([]*composeInput, 0, len(cs.Inputs))
+	for _, si := range cs.Inputs {
+		in := &composeInput{inv: &inventory.Inventory{ID: si.ID, Name: si.Name}, content: si.Content,
+			engine: si.Engine}
+		if si.Engine == inventory.EngineNative {
+			if in.listing, err = inventory.ResolveNative(si.Content); err != nil {
+				return nil, fmt.Errorf("%w: input %s in the snapshot: %w", ErrInventorySnapshot, si.Name,
+					err)
+			}
+		}
+		inputs = append(inputs, in)
+	}
+	return &composed{
+		Composition: &Composition{Resolution: r.InventoryResolution, Content: cs.Content},
+		listing:     listing, inputs: inputs,
+	}, nil
+}
+
 // openSnapshot opens the sealed inventory snapshot r was submitted with, after checking that it is
 // the snapshot r's record binds. A run that carries none, one whose sealed content no longer
 // matches the digest bound when it was submitted, and one that does not open are all refused.
@@ -167,11 +317,28 @@ func (d *Dispatcher) openSnapshot(r *run.Run) (string, error) {
 	return content, nil
 }
 
-// checkSnapshotContent holds opened snapshot content to the masked digest r's record binds. It is
-// the check a relay worker can make itself, since the sealed form the other digest covers never
-// leaves the control node.
+// checkSnapshotContent holds opened snapshot content to the masked digest r's record binds, and for
+// a composed inventory its inputs to the input digest r's resolution binds. It is the check a relay
+// worker can make itself, since the sealed form the other digest covers never leaves the control
+// node.
 func checkSnapshotContent(r *run.Run, content string) error {
-	if r.InventorySnapshot == nil || maskedContentSHA256(content) != r.InventorySnapshot.ContentSHA256 {
+	if r.InventorySnapshot == nil {
+		return fmt.Errorf("%w: the opened inventory snapshot is not the content this run was "+
+			"submitted with", ErrInventorySnapshot)
+	}
+	play := content
+	if r.InventoryResolution != nil {
+		cs, err := parseComposedSnapshot(content)
+		if err != nil {
+			return err
+		}
+		if snapshotInputDigest(cs.Inputs) != r.InventoryResolution.InputDigest {
+			return fmt.Errorf("%w: the inputs in the opened composed inventory snapshot are not the "+
+				"ones this run resolved from", ErrInventorySnapshot)
+		}
+		play = cs.Content
+	}
+	if maskedContentSHA256(play) != r.InventorySnapshot.ContentSHA256 {
 		return fmt.Errorf("%w: the opened inventory snapshot is not the content this run was "+
 			"submitted with", ErrInventorySnapshot)
 	}

@@ -724,6 +724,37 @@ func (t *httpTransport) ProposeApply(ctx context.Context, planID string, destroy
 	return &proposal, nil
 }
 
+// driftPlanTooLarge refuses a drift check's plan file of n bytes, stating its size and the limit.
+func driftPlanTooLarge(n int) error {
+	return fmt.Errorf("%w: the saved plan file is %s, and a relay worker can hand the control node "+
+		"at most %s, so a reconcile cannot be proposed from this check. Run the check on a queue the "+
+		"control node executes, or split the configuration", ErrPlanFileTooLarge, mebibytes(n),
+		mebibytes(MaxPlanFileBytes))
+}
+
+// driftPlanRequest carries the plan file a drift check saved. The control node seals it with its
+// own key. It holds sensitive values and is never logged on either side.
+type driftPlanRequest struct {
+	// PlanFile is the saved plan file, empty for a check that found no drift.
+	PlanFile []byte `json:"plan_file,omitempty"`
+}
+
+// KeepDriftPlanFile hands the control node the plan file the named drift check saved.
+func (t *httpTransport) KeepDriftPlanFile(ctx context.Context, checkID string, plan []byte) error {
+	// A plan file past the limit is refused here, with the limit stated, rather than sent for the
+	// control node to cut off partway through the upload.
+	if len(plan) > MaxPlanFileBytes {
+		return driftPlanTooLarge(len(plan))
+	}
+	resp, err := t.sendJSON(ctx, http.MethodPost, runPath(checkID, "/drift-plan"),
+		driftPlanRequest{PlanFile: plan}, t.leaseFor(checkID))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	return expectNoContent("keep drift plan", resp)
+}
+
 // SaveHostSummary records a run's per-host outcomes on the control node.
 func (t *httpTransport) SaveHostSummary(ctx context.Context, runID string, summaries []run.HostSummary) error {
 	return inBatchesPart(summaries, func(batch []run.HostSummary, continues bool) error {

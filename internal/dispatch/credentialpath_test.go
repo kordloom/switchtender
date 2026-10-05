@@ -24,6 +24,8 @@ import (
 // named the omission, because the value they used was a real string, just the wrong one.
 //
 // Sealer.Open outside that one function is the shape of the mistake, so it is what this looks for.
+// openSourceConfig is the one other function allowed to unseal: it returns the source configuration
+// on purpose, to revoke a recorded dynamic secret, where resolving the source would mint a new one.
 func TestEveryCredentialIsOpenedThroughOnePath(t *testing.T) {
 	t.Parallel()
 	entries, err := os.ReadDir(".")
@@ -62,7 +64,8 @@ func TestEveryCredentialIsOpenedThroughOnePath(t *testing.T) {
 						continue
 					}
 					opens++
-					if keepsPlaintext(assign.Lhs) && fn.Name.Name != "openCredential" {
+					if keepsPlaintext(assign.Lhs) && fn.Name.Name != "openCredential" &&
+						fn.Name.Name != "openSourceConfig" {
 						offenders = append(offenders,
 							fn.Name.Name+" at "+fset.Position(assign.Pos()).String())
 					}

@@ -63,7 +63,7 @@ func SnapshotColumn(s *InventorySnapshot) string {
 }
 
 // ParseSnapshotColumn decodes a stored inventory snapshot record. An empty column is a run that
-// targets no stored inventory, or a composed one, or one created before snapshots existed. A column
+// targets no stored inventory, or one created before snapshots existed. A column
 // that does not decode is reported rather than read as empty, because the record is what an approval
 // binds: reading a corrupted one as absent would let a run execute a snapshot nothing binds.
 func ParseSnapshotColumn(s string) (*InventorySnapshot, error) {
@@ -107,12 +107,14 @@ func (r *Run) PlanMatches(sealed string) bool {
 
 // WithInventorySnapshot carries a source run's inventory snapshot onto a run derived from it, the
 // apply a plan proposes, so the derived run executes the inventory its source was submitted with
-// rather than taking a snapshot of its own. Both the record and the sealed content must be present,
-// or the derived run takes its own snapshot when it is submitted.
-func WithInventorySnapshot(snap *InventorySnapshot, sealed string) SubmitOption {
+// rather than taking a snapshot of its own. A composed inventory's snapshot travels with the
+// resolution it was taken from, res, which is nil for any other inventory. Both the record and the
+// sealed content must be present, or the derived run takes its own snapshot when it is submitted.
+func WithInventorySnapshot(snap *InventorySnapshot, sealed string, res *InventoryResolution) SubmitOption {
 	return func(r *Run) {
 		if snap != nil && sealed != "" {
 			r.InventorySnapshot, r.InventorySealed = snap.Clone(), sealed
+			r.InventoryResolution = res.Clone()
 		}
 	}
 }

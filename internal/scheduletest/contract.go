@@ -22,6 +22,7 @@ import (
 func Contract(t *testing.T, newStore func() schedule.Store) {
 	t.Helper()
 	t.Run("save and get", func(t *testing.T) { testSaveGet(t, newStore()) })
+	t.Run("unstorable fire text", func(t *testing.T) { testUnstorableFireText(t, newStore()) })
 	t.Run("get missing", func(t *testing.T) { testGetMissing(t, newStore()) })
 	t.Run("list ordered", func(t *testing.T) { testList(t, newStore()) })
 	t.Run("delete", func(t *testing.T) { testDelete(t, newStore()) })
@@ -49,6 +50,9 @@ func Contract(t *testing.T, newStore func() schedule.Store) {
 		testClaimFinalUnderConcurrency(t, newStore())
 	})
 	t.Run("release hands back only its own claim", func(t *testing.T) { testRelease(t, newStore()) })
+	t.Run("a fire's claim marks its occurrence in flight", func(t *testing.T) {
+		testInFlight(t, newStore())
+	})
 	t.Run("empty list is non-nil", func(t *testing.T) {
 		got, err := newStore().List(context.Background())
 		if err != nil {

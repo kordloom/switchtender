@@ -409,14 +409,19 @@ func (d *Dispatcher) sweepApprovalSteps() {
 // what a person recognizes and can open, and it names the step holding it, what the step asks, and
 // what each answer runs next.
 func (d *Dispatcher) notifyStepHeld(parent, node *run.Run) {
+	d.notifyHeldOn(d.stepHold(parent, node))
+}
+
+// stepHold returns the workflow as a notification about its wait at an approval step describes it,
+// and the branch that places the step within it. The step is a branch of the workflow: a named
+// target hears it after the workflow's start, after the steps it comes after, and before the
+// workflow's end, and in no invented order against a step that runs beside it.
+func (d *Dispatcher) stepHold(parent, node *run.Run) (*run.Run, named.Branch) {
 	held := parent.Clone()
 	held.Status = run.StatusPendingApproval
 	held.HeldByPolicy = node.HeldByPolicy
 	held.AwaitingStep = d.awaitingStep(parent, node)
-	// The step is a branch of the workflow: a named target hears it after the workflow's start,
-	// after the steps it comes after, and before the workflow's end, and in no invented order
-	// against a step that runs beside it.
-	d.notifyHeldOn(held, stepBranch(parent.Steps, node.StepName))
+	return held, stepBranch(parent.Steps, node.StepName)
 }
 
 // stepBranch places a workflow step within its workflow: the step, and every step it transitively

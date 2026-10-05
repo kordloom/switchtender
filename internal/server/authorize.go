@@ -436,6 +436,21 @@ func allowQueue(queue string) error {
 	return license.Allow(license.FeatureWorkers)
 }
 
+// admitQueue answers a request naming a queue this install will not take, and reports whether the
+// request may go on. A name too long to store is malformed, and a named queue on an install that
+// cannot run a worker to serve it is refused for its tier.
+func admitQueue(w http.ResponseWriter, log *zap.Logger, queue string) bool {
+	if err := run.CheckQueue(queue); err != nil {
+		respondError(w, log, http.StatusBadRequest, err.Error())
+		return false
+	}
+	if err := allowQueue(queue); err != nil {
+		respondError(w, log, http.StatusForbidden, err.Error())
+		return false
+	}
+	return true
+}
+
 // denyOnAuthzError writes the response for an authorization failure and reports whether the request
 // was denied. A forbidden grant becomes 403; any other error becomes 500. A nil error is not a
 // denial and returns false so the caller proceeds.

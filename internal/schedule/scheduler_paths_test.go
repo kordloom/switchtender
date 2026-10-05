@@ -22,13 +22,13 @@ type errStore struct {
 	Store
 	// listErr is returned by List when set.
 	listErr error
-	// claimErr is returned by ClaimDue when set.
+	// claimErr is returned by ClaimDue and ClaimFire when set.
 	claimErr error
-	// claimLost makes ClaimDue report that another caller won.
+	// claimLost makes ClaimDue and ClaimFire report that another caller won.
 	claimLost bool
 	// recordErr is returned by RecordFire when set.
 	recordErr error
-	// claims counts ClaimDue calls.
+	// claims counts ClaimDue and ClaimFire calls.
 	claims atomic.Int64
 }
 
@@ -50,6 +50,19 @@ func (e *errStore) ClaimDue(ctx context.Context, id string, oldNext, newNext tim
 		return false, nil
 	}
 	return e.Store.ClaimDue(ctx, id, oldNext, newNext)
+}
+
+// ClaimFire reports the configured outcome, or the wrapped store's.
+func (e *errStore) ClaimFire(ctx context.Context, id string, oldNext time.Time, next *time.Time) (bool,
+	error) {
+	e.claims.Add(1)
+	if e.claimErr != nil {
+		return false, e.claimErr
+	}
+	if e.claimLost {
+		return false, nil
+	}
+	return e.Store.ClaimFire(ctx, id, oldNext, next)
 }
 
 // RecordFire returns the configured error, or records through the wrapped store.

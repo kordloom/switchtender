@@ -54,6 +54,9 @@ type ApplyStores struct {
 // The plan's AWX job template ids are claimed before anything else is written, and given back if
 // the import stops before its templates are stored. See template.ClaimAWX.
 func (p *Plan) Apply(ctx context.Context, s ApplyStores) (created int, err error) {
+	if err := p.checkText(); err != nil {
+		return 0, err
+	}
 	// Refuse before writing anything if the plan has dynamic sources but nowhere to store them, so a
 	// source's backing inventory is never created without its source.
 	if len(p.Sources) > 0 && s.Sources == nil {

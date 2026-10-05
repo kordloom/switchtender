@@ -138,6 +138,14 @@ var approvalPaths = map[string]approvalPath{
 		Surface: "store contract", Why: "exercises the store with no decider and no route"},
 	"internal/storetest/contract_outcome.go:testOutcomeOwed:TransitionStatus": {
 		Surface: "store contract", Why: "exercises the store with no decider and no route"},
+	"internal/storetest/contract_events_owed.go:testEventLedger:ClaimDecision": {
+		Surface: "store contract", Why: "exercises the store with no decider and no route"},
+	"internal/storetest/contract_events_owed.go:testEventLedger:SettleDecision": {
+		Surface: "store contract", Why: "exercises the store with no decider and no route"},
+	"internal/storetest/contract_events_owed.go:testEventLedger:TransitionStatus": {
+		Surface: "store contract", Why: "exercises the store with no decider and no route"},
+	"internal/storetest/contract_events_owed.go:testEventLedger:TransitionStatusAndClaim": {
+		Surface: "store contract", Why: "exercises the store with no decider and no route"},
 }
 
 // approvalPrimitives are the calls that decide, commit, or release. A transition is one only when

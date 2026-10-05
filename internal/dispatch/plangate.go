@@ -28,20 +28,25 @@ func parsePlanDestroys(out string) (destroys int, read bool) {
 }
 
 // planGatePolicies returns the stored policies when r is a terraform or opentofu apply that a
-// plan-content policy scopes, so execute plans it before applying. It returns nil when r is not a
-// candidate: policies are off, the tool is not terraform or opentofu, the run is a dry run, the run
-// is itself a proposed apply, which must never re-gate and loop, or no plan-content policy matches. A
-// policy store failure is reported, not treated as no gate: a run that cannot be checked against the
-// plan-content policies must not apply as though it had been.
+// plan-content policy scopes or an approval rule would hold, so execute plans it before applying.
+// It returns nil when r is not a candidate: policies are off, the tool is not terraform or
+// opentofu, the run is a dry run, the run is itself a proposed apply, which must never re-gate and
+// loop, or no rule plans it first. A policy store failure is reported, not treated as no gate: a
+// run that cannot be checked against the policies must not apply as though it had been.
 func (d *Dispatcher) planGatePolicies(ctx context.Context, r *run.Run) ([]*policy.Policy, error) {
-	if d.policies == nil {
-		return nil, nil
-	}
 	tool := run.NormalizeTool(r.Tool)
 	if tool != run.ToolTerraform && tool != run.ToolOpenTofu {
 		return nil, nil
 	}
 	if r.DryRun || r.ProposedFrom != "" {
+		return nil, nil
+	}
+	if d.policies == nil {
+		// An apply whose submission asked for approval plans first with no rules in force too, or it
+		// would apply with no approval at all.
+		if policy.PlanGated(nil, r) {
+			return []*policy.Policy{}, nil
+		}
 		return nil, nil
 	}
 	policies, err := d.policies.List(ctx)
@@ -317,6 +322,13 @@ func applyOptions(r *run.Run, policies []*policy.Policy, destroys int, read bool
 	// run executes rather than from a list kept here. A list kept here is how the apply lost the
 	// plan's timeout, the way every other hand-kept copy of the spec lost a field.
 	opts := append(r.ExecutionOptions(), run.WithDryRun(false), run.WithProposedFrom(r.ID))
+	// A request that asked for approval is held as it asked: the apply its plan proposes waits for a
+	// person whatever the rules say, with the second approver the request named. A rule that holds
+	// it as well names itself below, since the rule is the more specific reason.
+	if r.ApprovalRequested {
+		opts = append(opts, run.WithRequireApproval(true), run.WithHeldByPolicy(holdRequested),
+			run.WithRequireDistinctApprover(r.RequireDistinctApprover))
+	}
 	// A plan held for destroying too much records the rule and the count, since "why did this
 	// wait" is answered by the threshold it crossed, not merely by the rule's name. A plan whose
 	// summary could not be read is held as well: this run reached here only because a plan-content
@@ -399,7 +411,8 @@ func applyOptions(r *run.Run, policies []*policy.Policy, destroys int, read bool
 	opts = append(opts, run.WithNotifications(r.Notifications), run.WithIntent(r.Intent))
 	// And the inventory the plan was made against, the snapshot the plan run was submitted with,
 	// since the apply carries out that plan.
-	opts = append(opts, run.WithInventorySnapshot(r.InventorySnapshot, r.InventorySealed))
+	opts = append(opts, run.WithInventorySnapshot(r.InventorySnapshot, r.InventorySealed,
+		r.InventoryResolution))
 	// And it is pinned to the commit the plan was read from. An approver reads a plan and releases the
 	// apply on the strength of what it said it would destroy; without a pin the apply re-syncs the
 	// project and takes whatever the branch head is by then, so an approval of one plan could release

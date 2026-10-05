@@ -40,6 +40,13 @@ func seedDrift(t *testing.T, store run.Store, runID, tool, host string, changed 
 			t.Fatalf("AppendEvents() error = %v", err)
 		}
 	}
+	// A Terraform or OpenTofu check that found drift keeps the plan it saved, as a real check does.
+	kind := run.NormalizeTool(tool)
+	if (kind == run.ToolTerraform || kind == run.ToolOpenTofu) && changed > 0 {
+		if err := store.KeepDriftPlan(ctx, runID, "sealed-plan-"+runID); err != nil {
+			t.Fatalf("KeepDriftPlan() error = %v", err)
+		}
+	}
 	done := check.Clone()
 	done.Status = run.StatusSucceeded
 	if err := store.Save(ctx, done); err != nil {
@@ -141,6 +148,73 @@ func TestReconcileDrift(t *testing.T) {
 	if tf.Status != run.StatusPendingApproval || tf.ProposedFrom != "chk_tf" {
 		t.Errorf("terraform proposal = status %q from %q, want pending_approval from chk_tf",
 			tf.Status, tf.ProposedFrom)
+	}
+}
+
+// TestAReconcileCarriesThePlanItsCheckSaved pins the Terraform and OpenTofu reconcile. It carries
+// the sealed plan its drift check kept, with the digest bound into the approval, and is pinned to
+// the commit that plan was made from, so the apply runs exactly the plan shown with the check
+// rather than planning again. A check that kept no plan, here because a later check dropped it, has
+// nothing to carry, and the request is refused with what to do next rather than proposing an apply
+// that would plan again.
+func TestAReconcileCarriesThePlanItsCheckSaved(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	seedDrift(t, store, "chk_tf", run.ToolTerraform, "infra/network", 5)
+	check, err := store.Get(ctx, "chk_tf")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	check.CommitSHA = "c0ffee1234"
+	if err := store.Save(ctx, check); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	seedDrift(t, store, "chk_old", run.ToolOpenTofu, "infra/storage", 2)
+	newer := &run.Run{ID: "chk_newer", Tool: run.ToolOpenTofu, Command: "infra/storage",
+		ProjectID: "proj1", DryRun: true, Status: run.StatusRunning, CreatedAt: time.Now()}
+	if err := store.Save(ctx, newer); err != nil {
+		t.Fatalf("Save(newer) error = %v", err)
+	}
+	if err := store.KeepDriftPlan(ctx, newer.ID, ""); err != nil {
+		t.Fatalf("KeepDriftPlan(newer) error = %v", err)
+	}
+
+	fake := &fakeSubmitter{run: &run.Run{ID: "run_prop", Status: run.StatusPendingApproval}}
+	handler := New(store, fake, zap.NewNop()).Handler()
+	post := func(body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/drift/reconcile",
+			strings.NewReader(body)))
+		return rec
+	}
+
+	rec := post(`{"host":"infra/network"}`)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("reconcile status = %d, want 202: %s", rec.Code, rec.Body.String())
+	}
+	got := fake.gotRun
+	if got.PlanSealed != "sealed-plan-chk_tf" ||
+		got.PlanSHA256 != run.SealedBlobSHA256(got.PlanSealed) {
+		t.Errorf("the reconcile carries plan %q bound by %q, want the plan the check kept",
+			got.PlanSealed, got.PlanSHA256)
+	}
+	if got.PinnedCommit != "c0ffee1234" {
+		t.Errorf("pinned commit = %q, want the commit the check planned", got.PinnedCommit)
+	}
+	if got.Source != "reconcile" || got.ProposedFrom != "chk_tf" {
+		t.Errorf("reconcile source %q from %q, want reconcile from chk_tf", got.Source, got.ProposedFrom)
+	}
+
+	fake.gotRun = nil
+	rec = post(`{"host":"infra/storage"}`)
+	if rec.Code != http.StatusConflict ||
+		!strings.Contains(rec.Body.String(), "Run the drift check again") {
+		t.Errorf("a check with no kept plan answered %d (%s), want 409 saying to run it again",
+			rec.Code, rec.Body.String())
+	}
+	if fake.gotRun != nil {
+		t.Error("a reconcile was submitted from a check that kept no plan")
 	}
 }
 

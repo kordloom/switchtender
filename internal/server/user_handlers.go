@@ -1,6 +1,9 @@
 package server
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net"
 	"net/http"
@@ -11,6 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/auth"
+	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/user"
 )
 
@@ -290,24 +294,112 @@ func forwardedClientIn(r *http.Request, header string, proxies []*net.IPNet) str
 	return ""
 }
 
-// loginHandler authenticates a username and password and mints a session token owned by the user.
-// Attempts are rate limited per client and username so stolen password lists cannot be replayed
-// at full speed.
-func loginHandler(users user.Store, tokens auth.Store, ldap *LDAPAuth, log *zap.Logger) http.HandlerFunc {
-	return loginHandlerWithClock(users, tokens, ldap, log, nil)
+// The keys sign-in budgets are kept under in the store's shared allowances.
+const (
+	// loginAddressBudget prefixes the per-address failed sign-in budget.
+	loginAddressBudget = "login-address:"
+	// loginAttemptBudget prefixes the per-address and username attempt budget. The username stands in
+	// the key as its digest, so a name of any length or content makes a key the store can index.
+	loginAttemptBudget = "login-attempt:"
+)
+
+// loginBudgets counts sign-in attempts: in the store's shared allowances when it keeps them, so
+// every replica spends from one budget, and in this process otherwise.
+//
+// A budget kept in each process is a budget per process. Behind a load balancer an attacker got the
+// whole allowance again from every replica, and again from each one after it restarted, so ten
+// replicas let a stuffing run try ten times the guesses the limit promises.
+type loginBudgets struct {
+	// shared is the store's allowances, nil when the store keeps none.
+	shared run.Budgets
+	// clock reads the store's time, which the shared windows are measured on, so replicas agree on
+	// when one closes.
+	clock run.Store
+	// attempts is this process's per address and username budget, used when shared is nil.
+	attempts *loginLimiter
+	// addresses is this process's per-address failure budget, used when shared is nil. It is kept
+	// apart from attempts so its keys cannot collide with theirs and its larger cap applies to
+	// nothing else.
+	addresses *loginLimiter
 }
 
-// loginHandlerWithClock is loginHandler with the limiters' time source stated. Production passes
-// nil, meaning the real clock. A test passes a frozen one so a burst cannot straddle a window
-// boundary and fail for how fast the machine was rather than for anything about the limiter. The
-// clock is per handler rather than a package variable, because a variable a test writes while a
-// parallel handler reads it is a data race, and the race detector finds it.
+// newLoginBudgets returns the sign-in budgets for store, shared when it keeps allowances. now is
+// the in-process limiters' clock, nil for the real one.
+func newLoginBudgets(store run.Store, now func() time.Time) *loginBudgets {
+	b := &loginBudgets{
+		attempts:  &loginLimiter{windows: make(map[string]*loginWindow), now: now},
+		addresses: &loginLimiter{windows: make(map[string]*loginWindow), now: now},
+	}
+	if shared, ok := store.(run.Budgets); ok {
+		b.shared, b.clock = shared, store
+	}
+	return b
+}
+
+// addressSpent reports whether addr has used up its failed sign-in budget, without spending any of
+// it.
+func (b *loginBudgets) addressSpent(ctx context.Context, addr string) (bool, error) {
+	if b.shared == nil {
+		return b.addresses.spent(addr, loginAddressMax), nil
+	}
+	now, err := b.clock.Now(ctx)
+	if err != nil {
+		return false, err
+	}
+	spent, err := b.shared.BudgetSpent(ctx, loginAddressBudget+addr, now)
+	return spent >= loginAddressMax, err
+}
+
+// allowAttempt spends one attempt at username from addr and reports whether its window allows it.
+func (b *loginBudgets) allowAttempt(ctx context.Context, addr, username string) (bool, error) {
+	if b.shared == nil {
+		return b.attempts.allow(addr + "\x00" + username), nil
+	}
+	now, err := b.clock.Now(ctx)
+	if err != nil {
+		return false, err
+	}
+	sum := sha256.Sum256([]byte(username))
+	spent, err := b.shared.SpendBudget(ctx, loginAttemptBudget+addr+":"+hex.EncodeToString(sum[:]),
+		loginWindowLength, now)
+	return spent <= loginWindowMax, err
+}
+
+// recordFailure pays one failed sign-in into addr's budget.
+func (b *loginBudgets) recordFailure(ctx context.Context, addr string) error {
+	if b.shared == nil {
+		b.addresses.record(addr)
+		return nil
+	}
+	now, err := b.clock.Now(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = b.shared.SpendBudget(ctx, loginAddressBudget+addr, loginWindowLength, now)
+	return err
+}
+
+// loginHandler authenticates a username and password and mints a session token owned by the user.
+// Attempts are rate limited per client and username so stolen password lists cannot be replayed at
+// full speed, and are counted in store's shared budgets when it keeps them.
+func loginHandler(users user.Store, tokens auth.Store, ldap *LDAPAuth, store run.Store,
+	log *zap.Logger) http.HandlerFunc {
+	return budgetedLoginHandler(users, tokens, ldap, log, newLoginBudgets(store, nil))
+}
+
+// loginHandlerWithClock is loginHandler with budgets this process keeps on a stated clock. A test
+// passes a frozen one so a burst cannot straddle a window boundary and fail for how fast the
+// machine was rather than for anything about the limiter. The clock is per handler rather than a
+// package variable, because a variable a test writes while a parallel handler reads it is a data
+// race, and the race detector finds it.
 func loginHandlerWithClock(users user.Store, tokens auth.Store, ldap *LDAPAuth, log *zap.Logger,
 	now func() time.Time) http.HandlerFunc {
-	limiter := &loginLimiter{windows: make(map[string]*loginWindow), now: now}
-	// The address budget is kept in its own limiter so its keys cannot collide with the per-username
-	// ones and its larger cap applies to nothing else.
-	addresses := &loginLimiter{windows: make(map[string]*loginWindow), now: now}
+	return budgetedLoginHandler(users, tokens, ldap, log, newLoginBudgets(nil, now))
+}
+
+// budgetedLoginHandler is the sign-in handler, counting attempts in budgets.
+func budgetedLoginHandler(users user.Store, tokens auth.Store, ldap *LDAPAuth, log *zap.Logger,
+	budgets *loginBudgets) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if users == nil || tokens == nil {
 			respondError(w, log, http.StatusNotFound, "accounts not enabled")
@@ -327,13 +419,27 @@ func loginHandlerWithClock(users user.Store, tokens auth.Store, ldap *LDAPAuth, 
 		// trusted proxy. Keyed on the raw peer address instead, every client behind one proxy shares
 		// a budget, and a stranger's failed guesses lock the whole install out of the approval queue.
 		// An operator running behind a proxy must set --trusted-proxy or that is what they get.
-		if addresses.spent(addr, loginAddressMax) {
+		spent, err := budgets.addressSpent(r.Context(), addr)
+		if err != nil {
+			log.Error("server: read the sign-in budget: " + err.Error())
+			respondError(w, log, http.StatusServiceUnavailable,
+				"sign-in is unavailable: this address's attempt budget could not be read")
+			return
+		}
+		if spent {
 			log.Warn("server: sign-in flood from one address", zap.String("address", addr))
 			respondError(w, log, http.StatusTooManyRequests,
 				"too many failed sign-in attempts from this address, wait a minute")
 			return
 		}
-		if !limiter.allow(addr + "\x00" + req.Username) {
+		allowed, err := budgets.allowAttempt(r.Context(), addr, req.Username)
+		if err != nil {
+			log.Error("server: spend the sign-in budget: " + err.Error())
+			respondError(w, log, http.StatusServiceUnavailable,
+				"sign-in is unavailable: this address's attempt budget could not be read")
+			return
+		}
+		if !allowed {
 			// A rate-limited attempt is logged too, since a burst against one account is exactly the
 			// signal an auditor of authentication activity is looking for.
 			log.Warn("server: sign-in rate limited", zap.String("username", req.Username))
@@ -354,7 +460,9 @@ func loginHandlerWithClock(users user.Store, tokens auth.Store, ldap *LDAPAuth, 
 			log.Warn("server: sign-in failed", zap.String("username", req.Username))
 			// Only a failure pays into the address budget, so a person who signs in correctly never
 			// spends it and an office behind one address is never locked out by its own traffic.
-			addresses.record(addr)
+			if err := budgets.recordFailure(r.Context(), addr); err != nil {
+				log.Error("server: record a failed sign-in: " + err.Error())
+			}
 			respondError(w, log, http.StatusUnauthorized, "bad credentials")
 			return
 		}
@@ -410,6 +518,10 @@ func createUserHandler(users user.Store, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusBadRequest, "role must be admin, operator, or viewer")
 			return
 		}
+		if errors.Is(err, user.ErrUsernameTooLong) {
+			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		}
 		if err != nil {
 			log.Error("server: create user: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not create user")
@@ -463,6 +575,10 @@ func updateUserHandler(users user.Store, log *zap.Logger) http.HandlerFunc {
 		req.Password = ""
 		if req.Username == "" {
 			respondError(w, log, http.StatusBadRequest, "username is required")
+			return
+		}
+		if err := user.CheckUsername(req.Username); err != nil {
+			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
 		}
 		if !user.ValidRole(req.Role) {

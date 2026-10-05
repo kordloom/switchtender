@@ -41,6 +41,8 @@ func TestAWorkerPlanGatesOverTheRelay(t *testing.T) {
 		WantStatus run.Status
 		// WantHeldBy is the reason a held apply must carry, empty for one that ran.
 		WantHeldBy string
+		// Requested marks the apply's own submission as asking for approval.
+		Requested bool
 	}{{ // Test 0: A plan that destroys past the limit proposes an apply held for a person.
 		Plan: "Plan: 0 to add, 0 to change, 3 to destroy.", WantStatus: run.StatusPendingApproval,
 		WantHeldBy: "terraform destroys need a person (plan destroys 3, limit 0)",
@@ -50,6 +52,13 @@ func TestAWorkerPlanGatesOverTheRelay(t *testing.T) {
 		// grades the apply from the count the worker's plan reported, so it holds.
 		Plan: "Plan: 0 to add, 0 to change, 3 to destroy.", Rules: irreversibleRules,
 		WantStatus: run.StatusPendingApproval, WantHeldBy: "irreversible changes need a person",
+	}, { // Test 3: A rule that holds every apply plans it first, and holds the planned apply.
+		Plan: "Plan: 1 to add, 0 to change, 0 to destroy.", Rules: blanketRules,
+		WantStatus: run.StatusPendingApproval, WantHeldBy: "terraform needs a person",
+	}, { // Test 4: An apply whose submission asked for approval plans first with no rules in force,
+		// and the control node holds the planned apply as it asked.
+		Plan: "Plan: 1 to add, 0 to change, 0 to destroy.", Rules: noRules, Requested: true,
+		WantStatus: run.StatusPendingApproval, WantHeldBy: "requested at submission",
 	}}
 
 	for testNum, test := range tests {
@@ -114,6 +123,7 @@ func TestAWorkerPlanGatesOverTheRelay(t *testing.T) {
 			if err := backing.Save(ctx, &run.Run{
 				ID: id, Tool: run.ToolTerraform, Command: "infra/prod", Status: run.StatusPending,
 				Actor: "operator-1", ActorType: "session", CreatedAt: time.Now(), Queue: "plans",
+				ApprovalRequested: test.Requested,
 			}); err != nil {
 				t.Fatalf("seed Save() error = %v", err)
 			}
@@ -134,7 +144,7 @@ func TestAWorkerPlanGatesOverTheRelay(t *testing.T) {
 				t.Error("the proposed apply binds no plan file, so it would plan again when it runs")
 			}
 			if test.WantStatus == run.StatusSucceeded {
-				if got, _ := applied.Load().(string); got != string(plantest.File) {
+				if got, _ := applied.Load().(string); got != plantest.File {
 					t.Errorf("the apply carried out plan file %q, want the one the plan saved", got)
 				}
 			}
@@ -150,6 +160,22 @@ func irreversibleRules(t *testing.T) policy.Store {
 	floor := policy.NewPolicy("irreversible changes need a person")
 	floor.Tool, floor.Reversibility = run.ToolTerraform, run.Irreversible
 	if err := rules.Save(context.Background(), floor); err != nil {
+		t.Fatalf("Save policy: %v", err)
+	}
+	return rules
+}
+
+// noRules returns no policy store, an install that holds no rules at all.
+func noRules(*testing.T) policy.Store { return nil }
+
+// blanketRules returns a policy store holding every terraform apply for a person, a rule with no
+// destroy limit and no grade floor.
+func blanketRules(t *testing.T) policy.Store {
+	t.Helper()
+	rules := policy.NewMemStore()
+	hold := policy.NewPolicy("terraform needs a person")
+	hold.Tool = run.ToolTerraform
+	if err := rules.Save(context.Background(), hold); err != nil {
 		t.Fatalf("Save policy: %v", err)
 	}
 	return rules

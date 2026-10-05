@@ -134,6 +134,8 @@ cross-process decision already happens in the store:
 - Live run pages poll the shared store, so a browser on one replica watches a run executing on
   another, painted as it happens.
 - Sessions and tokens live in the store, so a sign-in on one replica works on all of them.
+- Sign-in attempts are counted in the store on its clock, so an address or an account gets its
+  sign-in budget once across the install rather than once per replica.
 
 When a replica dies, its leases go stale and any survivor's janitor requeues the work, which the
 integration suite proves with two replicas on one PostgreSQL: shared claiming with no double-claim,
@@ -237,13 +239,17 @@ claim, so two servers running the same cron entry never double-fire.
 
 A submission is deduplicated when it carries a key. `POST /v1/runs` and `POST /v1/pipelines` take an
 `Idempotency-Key` header, kept per organization, so a client that retries a submit it already sent
-is answered with the run the first one made rather than a second run. Without the header each call
+is answered with the run the first one made rather than a second run. A key may be up to 255 bytes,
+and a longer one is refused with `400`. Without the header each call
 creates a new run with a fresh identifier, so a client that cannot send one should treat a submit as
 create-once on its side. The server keys what it launches itself the same way: a rerun, a webhook
 delivery, and a provisioning callback are deduplicated on what they carry, and each scheduled fire
 carries a key derived from its schedule and occurrence, `run.ScheduleKey`, in the server's reserved
 `st:` namespace, which no caller's key can spell. A fire that takes up an occurrence an interrupted
-fire handed back therefore finds the run that one made instead of starting a second. An approval is
+fire handed back therefore finds the run that one made instead of starting a second. A server that
+crashes before it can hand an occurrence back leaves it marked in flight, from the same write that
+claimed it, and any server's scheduler takes it up two minutes later: it records the run the key
+finds, or fires the occurrence again under the same key. An approval is
 a compare-and-set state transition, so two concurrent approvals release a held run exactly once and
 the loser gets a clear conflict.
 

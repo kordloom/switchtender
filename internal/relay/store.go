@@ -192,6 +192,21 @@ func (c *Client) WipeSealed(context.Context, string) error { return ErrUnsupport
 // SweepSealed is the control node's janitor work and is not served to workers.
 func (c *Client) SweepSealed(context.Context) (int, error) { return 0, ErrUnsupported }
 
+// KeepDriftPlan is a control-node write and is not served to workers: a worker holds no key to seal
+// a plan with, so it hands the plan file over through KeepDriftPlanFile instead.
+func (c *Client) KeepDriftPlan(context.Context, string, string) error { return ErrUnsupported }
+
+// DriftPlan is a control-node read and is not served to workers. The plan a check kept is opened
+// only on the control node, which delivers it sealed to the worker that claims the reconcile.
+func (c *Client) DriftPlan(context.Context, string) (string, error) { return "", ErrUnsupported }
+
+// KeepDriftPlanFile hands the plan file this worker's drift check saved to the control node, which
+// seals it with its own key and keeps it for a reconcile to carry. An empty plan keeps nothing and
+// drops the plan an earlier check of the same target kept.
+func (c *Client) KeepDriftPlanFile(ctx context.Context, checkID string, plan []byte) error {
+	return c.t.KeepDriftPlanFile(ctx, checkID, plan)
+}
+
 // ParkForApproval is a control-node write and is not served to workers: a workflow is coordinated
 // on the control node, so only the control node parks one.
 func (c *Client) ParkForApproval(context.Context, string, string) (bool, error) {

@@ -93,8 +93,14 @@ requester, and <code>max_destroy</code> plans a Terraform or OpenTofu apply firs
 plan destroys more than that many resources.</p>
 <p>The count is read from the plan file the plan saved, and the apply that follows carries out that
 saved plan, so the plan an approver releases is the plan that runs. If the infrastructure changed
-since the plan was made, the tool refuses the stale plan rather than applying a different one. The
+since the plan was made, the tool refuses the stale plan rather than applying a different one, and the
+apply has to be proposed again. The
 <a href="/docs/tool-terraform#a-gated-apply-carries-out-the-approved-plan">Terraform page</a> has the details.</p>
+<p>A rule with no <code>max_destroy</code> that would hold a Terraform or OpenTofu apply plans it first as well.
+The apply is planned, the apply the plan proposes carries the saved plan, and the rules decide on that
+proposal, so the rule holds the planned apply and the approval binds the plan that runs rather than a
+request that would plan again when released. An apply whose own submission asks for approval is
+planned first as well, and the apply its plan proposes is held whether or not a rule covers it.</p>
 <h3 id="requiring-the-approvers-reason">Requiring the approver's reason</h3>
 <p><code>require_reason</code> makes a decision on a run the rule holds carry the approver's stated reason.
 <code>denials</code> requires one to deny, and <code>always</code> requires one to approve or to deny. Left out, a reason

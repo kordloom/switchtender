@@ -46,7 +46,7 @@ const notifyLockSpace = 79738210
 // Record appends the event to its run's sequence and queues one delivery to each recipient in one
 // transaction. The transaction first takes an advisory lock on the run, so two events of one run
 // recorded by two processes at once never take the same sequence number, and a moment announced by
-// both, or a run's end announced twice, is recorded once.
+// both, or a run's end, start, or hold announced twice, is recorded once.
 func (s *notificationStore) Record(ctx context.Context, ev *notification.RunEvent,
 	recipients []notification.Recipient) (bool, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -59,10 +59,11 @@ func (s *notificationStore) Record(ctx context.Context, ev *notification.RunEven
 		return false, fmt.Errorf("record notification event: %w", err)
 	}
 	key := ev.DedupeKey()
+	first, second := ev.Once()
 	var have int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM notification_events
-WHERE run_id=$1 AND (dedupe_key=$2 OR ($3 AND branch='' AND event IN ($4, $5)))`, ev.RunID, key,
-		ev.End(), notification.EventSuccess, notification.EventFailure).Scan(&have); err != nil {
+WHERE run_id=$1 AND (dedupe_key=$2 OR (branch=$3 AND event IN ($4, $5)))`, ev.RunID, key,
+		ev.Branch, first, second).Scan(&have); err != nil {
 		return false, fmt.Errorf("record notification event: %w", err)
 	}
 	if have > 0 {
@@ -218,6 +219,7 @@ WHERE status = 'pending' AND claimed_by = $1 AND claim_until_ms >= $2 GROUP BY n
 // notification.ErrDeliveryLost when owner no longer holds it.
 func (s *notificationStore) Finish(ctx context.Context, d *notification.Delivery, owner string,
 	out notification.Outcome) error {
+	out.SanitizeText()
 	status, next, finished := out.Status, int64(0), int64(0)
 	switch status {
 	case notification.DeliveryDelivered, notification.DeliveryFailed,

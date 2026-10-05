@@ -127,6 +127,10 @@ func (d *Dispatcher) notifyHeldOn(r *run.Run, branch named.Branch) {
 	d.notifyNtfy(r)
 	d.notifyEmail(r)
 	d.notifyRunTargets(r)
+	if branch.Step == "" {
+		d.announceOwed(r, run.OwedHold)
+		return
+	}
 	d.notifyNamedOn(r, branch)
 }
 

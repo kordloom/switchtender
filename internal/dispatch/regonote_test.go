@@ -53,7 +53,7 @@ func TestARegoNoteIsRecordedOnTheRunWithoutHoldingIt(t *testing.T) {
 	t.Parallel()
 	body := `warn contains "no change ticket on the run" if not input.run.labels.ticket
 
-hold contains "terraform needs a person" if input.run.tool == "terraform"`
+hold contains "python needs a person" if input.run.tool == "python"`
 	tests := []struct {
 		// Settings are the policy entry's settings.
 		Settings string
@@ -73,8 +73,8 @@ hold contains "terraform needs a person" if input.run.tool == "terraform"`
 			run.WithLabels(map[string]string{"ticket": "CHG-7"})},
 	}, { // Test 2: The bundle's hold rule still holds, and the note rides beside the hold.
 		Settings:   noteSettings,
-		Opts:       []run.SubmitOption{run.WithTool("terraform"), run.WithCommand("infra/prod")},
-		WantHeldBy: "rego gate (terraform needs a person, ",
+		Opts:       []run.SubmitOption{run.WithTool("python"), run.WithCommand("print('deploy')")},
+		WantHeldBy: "rego gate (python needs a person, ",
 		WantNotes:  []string{"rego gate (no change ticket on the run, "},
 	}, { // Test 3: Under the default the same warning holds, and nothing is noted.
 		Settings:   "",

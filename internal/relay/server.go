@@ -163,6 +163,7 @@ func NewHandler(store run.Store, pools *Pools, log *zap.Logger,
 	mux.HandleFunc("POST /relay/v1/runs/{id}/log", s.appendLog)
 	mux.HandleFunc("POST /relay/v1/runs/{id}/events", s.appendEvents)
 	mux.HandleFunc("POST /relay/v1/runs/{id}/propose-apply", s.proposeApply)
+	mux.HandleFunc("POST /relay/v1/runs/{id}/drift-plan", s.keepDriftPlan)
 	mux.HandleFunc("POST /relay/v1/runs/{id}/host-summary", s.saveHostSummary)
 	mux.HandleFunc("POST /relay/v1/runs/{id}/host-facts", s.saveHostFacts)
 	mux.HandleFunc("POST /relay/v1/runs/{id}/task-summary", s.saveTaskSummary)
@@ -1295,24 +1296,28 @@ func (s *relayServer) proposeApply(w http.ResponseWriter, r *http.Request) {
 	// passed.
 	//
 	// The rules also decide whether there is a proposal to make at all. A worker plans first only when
-	// a plan-content rule sends the run through the gate, so an install with no rules, or with none
-	// that gates this run, never asked for one. Refusing then keeps this endpoint from minting an
-	// apply for a run the gate never took, while a store that cannot answer still holds, as above.
+	// a plan-content rule sends the run through the gate or an approval rule would hold the apply, so
+	// an install with no rules, or with none that gates this run, never asked for one. Refusing then
+	// keeps this endpoint from minting an apply for a run the gate never took, while a store that
+	// cannot answer still holds, as above.
 	var policies []*policy.Policy
 	read := body.Read
-	if s.policies == nil {
+	var list []*policy.Policy
+	var err error
+	if s.policies != nil {
+		list, err = s.policies.List(r.Context())
+	}
+	switch {
+	case s.policies == nil && !plan.ApprovalRequested:
 		writeErr(w, http.StatusConflict, "this install holds no approval policies, so no plan gate "+
 			"asked for an apply from this run")
 		return
-	}
-	list, err := s.policies.List(r.Context())
-	switch {
 	case err != nil:
 		s.log.Error("relay: list policies: " + err.Error())
 		read = false
 	case !policy.PlanGated(list, plan):
-		writeErr(w, http.StatusConflict, "no plan-content policy sends this run through the plan "+
-			"gate, so there is no apply to propose from it")
+		writeErr(w, http.StatusConflict, "no rule plans this run before it applies, so there is no "+
+			"apply to propose from it")
 		return
 	default:
 		policies = list
@@ -1354,6 +1359,89 @@ func (s *relayServer) proposeApply(w http.ResponseWriter, r *http.Request) {
 		s.announce(proposal)
 	}
 	s.writeJSONStatus(w, http.StatusCreated, proposal)
+}
+
+// driftCheckFrom reports why a run cannot keep a drift check's plan, or nil when it can: a
+// terraform or opentofu dry run, still executing, that is not itself a proposal.
+func driftCheckFrom(check *run.Run) error {
+	switch tool := run.NormalizeTool(check.Tool); tool {
+	case run.ToolTerraform, run.ToolOpenTofu:
+	default:
+		return fmt.Errorf("a drift check's plan is kept for a terraform or opentofu check, not for %s",
+			tool)
+	}
+	switch {
+	case !check.DryRun:
+		return errors.New("this run is not a dry run, so it is not a drift check and keeps no plan")
+	case check.Status != run.StatusRunning:
+		return fmt.Errorf("this check is %q, not running, so its plan cannot be kept now", check.Status)
+	case check.ProposedFrom != "":
+		return errors.New("this run is a proposal, not a drift check")
+	}
+	return nil
+}
+
+// keepDriftPlan keeps the plan file a worker's drift check saved, sealed with this control node's
+// key, so a reconcile proposed from the check carries out exactly that plan. The check is the run
+// the worker holds the lease on, and it is checked to be a running terraform or opentofu dry run,
+// so a worker cannot attach a plan to any other run.
+func (s *relayServer) keepDriftPlan(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		// PlanFile is the plan file the check saved, empty for a check that found no drift.
+		PlanFile []byte `json:"plan_file"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeErr(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("%s: a relay worker can hand the "+
+				"control node a plan file of at most %s", ErrPlanFileTooLarge, mebibytes(MaxPlanFileBytes)))
+			return
+		}
+		writeErr(w, http.StatusBadRequest, "invalid drift plan body")
+		return
+	}
+	// The plan file holds the plan's values in the clear, so this copy is dropped when the request
+	// ends: the sealed one kept on the check is the only one left.
+	defer clear(body.PlanFile)
+	if len(body.PlanFile) > MaxPlanFileBytes {
+		writeErr(w, http.StatusRequestEntityTooLarge, driftPlanTooLarge(len(body.PlanFile)).Error())
+		return
+	}
+	check := s.servesRun(w, r)
+	if check == nil {
+		return
+	}
+	if check.ClaimSecret == "" || !leaseHeld(check, r) {
+		writeErr(w, http.StatusForbidden, "the run's lease was not presented or did not match")
+		return
+	}
+	if err := driftCheckFrom(check); err != nil {
+		writeErr(w, http.StatusConflict, err.Error())
+		return
+	}
+	sealed := ""
+	if len(body.PlanFile) > 0 {
+		if s.planSealer == nil {
+			writeErr(w, http.StatusConflict, "this control node cannot seal a plan file, so a drift "+
+				"check on a relay worker keeps no plan for a reconcile to carry")
+			return
+		}
+		var err error
+		if sealed, err = s.planSealer.SealPlanFile(body.PlanFile); err != nil {
+			s.internal(w, "seal drift plan", err)
+			return
+		}
+	}
+	err := s.store.KeepDriftPlan(r.Context(), check.ID, sealed)
+	switch {
+	case errors.Is(err, run.ErrNoDriftCheck):
+		writeErr(w, http.StatusConflict, err.Error())
+		return
+	case err != nil:
+		s.internal(w, "keep drift plan", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // announce hands r to the announcer when the control node has one.

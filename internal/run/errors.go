@@ -31,6 +31,13 @@ var (
 	// ErrLimitWidens is returned when a launch limit would widen a template's target rather than
 	// narrow it.
 	ErrLimitWidens = errors.New("limit would widen the template's target")
+	// ErrKeyTooLong is returned when a caller's idempotency key is longer than MaxClientKeyBytes.
+	ErrKeyTooLong = errors.New("idempotency key too long")
+	// ErrQueueTooLong is returned when a queue name is longer than MaxQueueBytes.
+	ErrQueueTooLong = errors.New("queue name too long")
+	// ErrNoDriftCheck is returned when a plan is kept for a run that is not a drift check still
+	// running, the only run whose plan a reconcile carries.
+	ErrNoDriftCheck = errors.New("run is not a running drift check, so it keeps no plan")
 	// errScanLimit reports that reading one more file would pass what one playbook grade reads.
 	errScanLimit = errors.New("scan limit reached")
 	// errScanTooLarge reports a file larger than a playbook grade reads.

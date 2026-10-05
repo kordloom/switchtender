@@ -47,8 +47,13 @@ type memStore struct {
 	unended map[string]bool
 	// endSeen maps an ended run in unended to when a sweep first found it ended.
 	endSeen map[string]time.Time
+	// owedEvents maps each start and hold of a top-level run not yet settled to when it became
+	// owed, the in-memory stand-in for the ledger the database stores keep.
+	owedEvents map[OwedEvent]time.Time
 	// budgets holds each allowance's open window, made on first use.
 	budgets map[string]*budgetWindow
+	// secretLeases holds the recorded revoke handles of minted secrets by id, made on first use.
+	secretLeases map[string]SecretLease
 	// parked marks a workflow parked at an approval step, the state the database stores keep as
 	// parked: it reads as pending_approval, a resume or a cancel may move it, and no decision may
 	// claim it as a run held before it started.
@@ -56,6 +61,9 @@ type memStore struct {
 	// outcomes records the finished runs that owe the chain nothing: those stored already finished
 	// and those whose outcome was settled. See OwedOutcomes.
 	outcomes outcomeLedger
+	// driftPlans maps a drift check's id to the sealed plan file it kept, made on first use. See
+	// KeepDriftPlan.
+	driftPlans map[string]string
 }
 
 // NewMemStore returns an empty in-memory Store.
@@ -71,6 +79,8 @@ func NewMemStore() Store {
 		unended:   make(map[string]bool),
 		endSeen:   make(map[string]time.Time),
 		parked:    make(map[string]bool),
+
+		owedEvents: make(map[OwedEvent]time.Time),
 	}
 }
 
@@ -133,8 +143,15 @@ func (m *memStore) Save(_ context.Context, r *Run) error {
 		if prev.PlanSHA256 != "" {
 			cl.PlanSHA256 = prev.PlanSHA256
 		}
+		// A request's ask for approval is set when the run is created and never cleared.
+		cl.ApprovalRequested = cl.ApprovalRequested || prev.ApprovalRequested
 	}
 	m.outcomes.noteSave(m.runs[r.ID], cl)
+	if prev, ok := m.runs[r.ID]; ok {
+		m.noteStatus(cl, prev.Status)
+	} else if cl.Status == StatusPendingApproval {
+		m.noteStatus(cl, "")
+	}
 	m.runs[r.ID] = cl
 	if cl.ParentID == nil && !cl.Status.Terminal() {
 		m.unended[r.ID] = true
@@ -683,6 +700,7 @@ func (m *memStore) TransitionStatusAndClaim(_ context.Context, id string, from, 
 	r.ClaimedBy = owner
 	r.ClaimedAt = &now
 	delete(m.parked, id)
+	m.noteStatus(r, from)
 	if r.StartedAt == nil && !startedAt.IsZero() {
 		at := startedAt
 		r.StartedAt = &at
@@ -703,6 +721,7 @@ func (m *memStore) StartClaimed(_ context.Context, id, owner, secret string, sta
 	now := time.Now()
 	r.Status = StatusRunning
 	r.ClaimedAt = &now
+	m.noteStatus(r, StatusPending)
 	if r.StartedAt == nil && !startedAt.IsZero() {
 		at := startedAt
 		r.StartedAt = &at
@@ -719,6 +738,7 @@ func (m *memStore) TransitionStatus(_ context.Context, id string, from, to Statu
 		return false, nil
 	}
 	r.Status = to
+	m.noteStatus(r, from)
 	if to == StatusPending {
 		m.queued[id] = time.Now()
 	}
@@ -780,6 +800,43 @@ func (m *memStore) SweepSealed(_ context.Context) (int, error) {
 	return n, nil
 }
 
+// KeepDriftPlan keeps the sealed plan file a running drift check saved and drops every plan another
+// run with the same project and working directory kept.
+func (m *memStore) KeepDriftPlan(_ context.Context, id, sealed string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.runs[id]
+	if !ok {
+		return ErrNotFound
+	}
+	if r.Status != StatusRunning || !r.DryRun {
+		return ErrNoDriftCheck
+	}
+	for other := range m.driftPlans {
+		if o := m.runs[other]; other != id && o != nil && o.ProjectID == r.ProjectID &&
+			o.Command == r.Command {
+			delete(m.driftPlans, other)
+		}
+	}
+	if sealed != "" {
+		if m.driftPlans == nil {
+			m.driftPlans = make(map[string]string)
+		}
+		m.driftPlans[id] = sealed
+	}
+	return nil
+}
+
+// DriftPlan returns the sealed plan file the drift check kept, empty when it kept none.
+func (m *memStore) DriftPlan(_ context.Context, id string) (string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if _, ok := m.runs[id]; !ok {
+		return "", ErrNotFound
+	}
+	return m.driftPlans[id], nil
+}
+
 // ParkForApproval moves a running parent this owner holds to pending_approval and clears its lease.
 func (m *memStore) ParkForApproval(_ context.Context, id, owner string) (bool, error) {
 	m.mu.Lock()
@@ -793,6 +850,7 @@ func (m *memStore) ParkForApproval(_ context.Context, id, owner string) (bool, e
 	r.ClaimedAt = nil
 	r.ClaimSecret = ""
 	m.parked[id] = true
+	m.noteStatus(r, StatusRunning)
 	return true, nil
 }
 
@@ -849,6 +907,7 @@ func (m *memStore) SettleDecision(_ context.Context, id, decisionID string, s De
 		return false, nil
 	}
 	r.Status, r.DecisionClaim = s.Status, ""
+	m.noteStatus(r, StatusPendingApproval)
 	now := time.Now()
 	switch {
 	case s.Status == StatusRunning:

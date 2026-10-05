@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // vaultDynamicConfig is the JSON a vault_dynamic source stores: the dynamic secrets path to read and
@@ -64,7 +65,26 @@ func mintVaultDynamic(ctx context.Context, config string) (string, *Lease, error
 	if err != nil {
 		return "", nil, fmt.Errorf("%w: %v", ErrResolve, err)
 	}
-	return value, NewLease(KindVaultDynamic, revokeVaultLease(addr, token, leaseID)), nil
+	return value, vaultHandleLease(addr, token, leaseID, vaultLeaseLifetime(body), time.Now()), nil
+}
+
+// maxLeaseLifetime bounds the lifetime read from a Vault response, so an absurd lease_duration
+// cannot overflow the expiry computed from it.
+const maxLeaseLifetime = 100 * 365 * 24 * time.Hour
+
+// vaultLeaseLifetime returns how long Vault said a dynamic secret lives, from the lease_duration of
+// its read response, or zero when the response did not say.
+func vaultLeaseLifetime(body []byte) time.Duration {
+	var resp struct {
+		LeaseDuration int64 `json:"lease_duration"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil || resp.LeaseDuration <= 0 {
+		return 0
+	}
+	if resp.LeaseDuration > int64(maxLeaseLifetime/time.Second) {
+		return maxLeaseLifetime
+	}
+	return time.Duration(resp.LeaseDuration) * time.Second
 }
 
 // vaultDynamicSecret extracts the requested field and the lease id from a Vault dynamic secret read

@@ -139,6 +139,10 @@ func createTokenHandler(tokens auth.Store, users user.Store, log *zap.Logger) ht
 		}
 
 		plain, tok, err := auth.New(req.Name)
+		if errors.Is(err, auth.ErrNameTooLong) {
+			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		}
 		if err != nil {
 			log.Error("server: mint token: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not mint token")

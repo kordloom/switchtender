@@ -22,6 +22,7 @@ func Contract(t *testing.T, newStore func() notification.Store) {
 		testRoundTrip(t, newStore())
 	})
 	t.Run("update refuses a deleted target", func(t *testing.T) { testUpdate(t, newStore()) })
+	t.Run("unstorable reply text", func(t *testing.T) { testUnstorableFinishText(t, newStore()) })
 	t.Run("list is ordered and non-nil", func(t *testing.T) { testList(t, newStore()) })
 	t.Run("attachments by target and by object", func(t *testing.T) {
 		testAttachments(t, newStore())
@@ -48,6 +49,9 @@ func Contract(t *testing.T, newStore func() notification.Store) {
 		testDeliveries(t, newStore())
 	})
 	t.Run("a run's end is recorded once", func(t *testing.T) { testRecordOneEnd(t, newStore()) })
+	t.Run("a run's start and each hold are recorded once", func(t *testing.T) {
+		testRecordOnceEach(t, newStore())
+	})
 	t.Run("a claimant holds at most its share of one target", func(t *testing.T) {
 		testClaimPerTarget(t, newStore())
 	})

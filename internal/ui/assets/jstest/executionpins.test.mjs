@@ -1,5 +1,5 @@
 // Tests for whether a held run says, where the decision is made, what the approval binds about the
-// image it runs in, the inventory it runs against, and the plan file a gated apply carries out.
+// image it runs in, the inventory it runs against, and the saved plan an apply carries out.
 //
 // An approver releases exactly what they were shown. An image held only to a tag, an inventory that
 // is a dynamic source, and an apply that carries out a saved plan each change what that means, so
@@ -72,4 +72,47 @@ test("a gated apply says it carries out the saved plan", () => {
 	const header = page.document.getElementById("run-header");
 	assert.ok(header.textContent.includes("Plan file"),
 		"the header does not show the plan file: " + header.textContent);
+});
+
+test("a gated apply says a stale plan means submitting the apply again", () => {
+	const page = loadPage("detail");
+	page.app.renderHeader(held({ tool: "terraform", command: "infra", plan_sha256: "b".repeat(64),
+		proposed_from: "run_plan", source: "api" }));
+	const callout = page.document.getElementById("risk-callout");
+	assert.ok(callout.textContent.includes("submitted again to plan it afresh"),
+		"the callout does not say a stale plan is proposed again: " + callout.textContent);
+	const header = page.document.getElementById("run-header");
+	assert.ok(header.textContent.includes("Planned by"),
+		"the header does not name the plan run: " + header.textContent);
+	assert.ok(!header.textContent.includes("Proposed from drift check"),
+		"a gated apply is described as a drift reconcile: " + header.textContent);
+});
+
+test("a reconcile says it carries out the plan its drift check saved", () => {
+	const page = loadPage("detail");
+	page.app.renderHeader(held({ tool: "terraform", command: "infra", plan_sha256: "c".repeat(64),
+		proposed_from: "run_check", source: "reconcile" }));
+	const callout = page.document.getElementById("risk-callout");
+	assert.ok(callout.textContent.includes("releases the plan the drift check saved"),
+		"the callout does not say the reconcile carries out the check's plan: " + callout.textContent);
+	assert.ok(callout.textContent.includes("proposed again from a new drift check"),
+		"the callout does not say a stale plan is proposed again: " + callout.textContent);
+	const header = page.document.getElementById("run-header");
+	assert.ok(header.textContent.includes("Proposed from drift check"),
+		"the header does not name the drift check: " + header.textContent);
+});
+
+test("a composed inventory snapshot says an edit to an input does not reach the run", () => {
+	const page = loadPage("detail");
+	page.app.renderHeader(held({ inventory_id: "inv_smart",
+		inventory_resolution: { kind: "smart", inputs: ["inv_a"], hosts: ["web1", "web2"] },
+		inventory_snapshot: { sealed_sha256: "s", content_sha256: "c", hosts: ["web1", "web2"] } }));
+	const callout = page.document.getElementById("risk-callout");
+	assert.ok(callout.textContent.includes("composed inventory as it resolved"),
+		"the callout does not describe the composed snapshot: " + callout.textContent);
+	assert.ok(callout.textContent.includes("a variable included, does not reach it"),
+		"the callout does not say an input edit does not reach the run: " + callout.textContent);
+	const header = page.document.getElementById("run-header");
+	assert.ok(header.textContent.includes("2 hosts as resolved at submission"),
+		"the header does not show the composed snapshot: " + header.textContent);
 });

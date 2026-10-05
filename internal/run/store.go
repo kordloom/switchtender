@@ -290,6 +290,15 @@ type Store interface {
 	// some, and reports how many it wiped. It is the backstop for an end that did not wipe its own,
 	// such as a cancel before start or a sweep that settled the run.
 	SweepSealed(ctx context.Context) (int, error)
+	// KeepDriftPlan keeps the plan file the drift check id saved, sealed, past the check's end, so
+	// a reconcile proposed from the check carries out exactly that plan. It drops the plan every
+	// other run with the same project and working directory kept, since a newer check of a target
+	// replaces what an older one found, and an empty sealed keeps nothing, which is what a check that
+	// found no drift records. The plan is written only while id is a running dry run, and
+	// ErrNoDriftCheck reports a run that is not one. Neither WipeSealed nor SweepSealed removes it.
+	KeepDriftPlan(ctx context.Context, id, sealed string) error
+	// DriftPlan returns the sealed plan file the drift check id kept, empty when it kept none.
+	DriftPlan(ctx context.Context, id string) (string, error)
 	// ParkForApproval moves a running pipeline parent owned by owner to pending_approval and clears
 	// its lease in one write, reporting whether it changed a row. A workflow parks when nothing is
 	// left to do but wait for a person at an approval step, so no process holds it while it waits:

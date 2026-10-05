@@ -756,18 +756,24 @@ func runMeta(r *run.Run) []metaRow {
 	add("Queue", r.Queue)
 	add("Image", imageText(r.Image))
 	add("Pulled image digest", r.ImageDigest)
-	// What the approval bound about where the run reached: the inventory as it was submitted, or a
-	// dynamic source that resolves at execution, and then what it resolved to.
+	// What the approval bound about where the run reached: the inventory as it was submitted, the
+	// result a composed inventory resolved to, or a dynamic source that resolves at execution, and
+	// then what it resolved to.
 	if snap := r.InventorySnapshot; snap != nil {
-		add("Inventory snapshot", snapshotText(snap))
+		add("Inventory snapshot", snapshotText(snap, r.InventoryResolution != nil))
 	}
 	if len(r.ResolvedHosts) > 0 {
 		add("Resolved at execution", strings.Join(r.ResolvedHosts, ", "))
 	}
-	// A gated apply carries out the saved plan its approval bound, never a plan made again.
+	// An apply carries out the saved plan its approval bound, never a plan made again: the one the
+	// plan gate saved, or for a reconcile the one the drift check saved.
 	if r.PlanSHA256 != "" {
+		madeBy := "the plan gate"
+		if r.Source == "reconcile" {
+			madeBy = "the drift check it reconciles"
+		}
 		add("Plan file", "applies the saved plan sha256:"+r.PlanSHA256[:min(12, len(r.PlanSHA256))]+
-			", sealed until the apply ended")
+			" made by "+madeBy+", sealed until the apply ended")
 	}
 	add("Held by", r.HeldByPolicy)
 	add("Why it was held", r.HoldNote)
@@ -867,12 +873,17 @@ func imageText(image string) string {
 	}
 }
 
-// snapshotText states an inventory snapshot: the hosts it names, or that it is a dynamic source
-// whose hosts resolve at execution.
-func snapshotText(snap *run.InventorySnapshot) string {
-	if snap.Dynamic {
+// snapshotText states an inventory snapshot: the hosts it names, the hosts a composed inventory
+// resolved to with their variables, or that it is a dynamic source whose hosts resolve at
+// execution.
+func snapshotText(snap *run.InventorySnapshot, composed bool) string {
+	switch {
+	case snap.Dynamic:
 		return "a dynamic source: its hosts resolve at execution, so the definition is bound and the " +
 			"hosts it reached are recorded below"
+	case composed:
+		return fmt.Sprintf("the composed result, %d host(s) with their variables as resolved at "+
+			"submission: %s", len(snap.Hosts), strings.Join(snap.Hosts, ", "))
 	}
 	return fmt.Sprintf("%d host(s) as submitted: %s", len(snap.Hosts), strings.Join(snap.Hosts, ", "))
 }

@@ -50,6 +50,11 @@ type Scheduler struct {
 	// skips tells a schedule's attached notification targets when a fire is skipped, nil when
 	// nothing is told.
 	skips SkipNotifier
+	// runByKey finds the run an occurrence's idempotency key holds, nil when the sweep of in-flight
+	// occurrences fires again without looking and leaves the key to find a run that landed.
+	runByKey RunByKey
+	// inFlightGrace is how long an occurrence stays marked in flight before the sweep takes it up.
+	inFlightGrace time.Duration
 	// log records scheduler activity.
 	log *zap.Logger
 	// interval is how often due schedules are checked.
@@ -172,7 +177,7 @@ func NewScheduler(store Store, submitter Submitter, log *zap.Logger, opts ...Sch
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Scheduler{
 		store: store, submitter: submitter, log: log, interval: DefaultInterval,
-		ctx: ctx, cancel: cancel, done: make(chan struct{}),
+		ctx: ctx, cancel: cancel, done: make(chan struct{}), inFlightGrace: defaultInFlightGrace,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -226,8 +231,10 @@ func (s *Scheduler) settleContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.WithoutCancel(s.ctx), settleTimeout)
 }
 
-// tick fires every schedule due at now and advances its next run time.
+// tick fires every schedule due at now and advances its next run time, after taking up any
+// occurrence whose fire a stopped server left unaccounted for.
 func (s *Scheduler) tick(now time.Time) {
+	s.sweepInFlight(now)
 	schedules, err := s.store.List(s.ctx)
 	if err != nil {
 		if s.ctx.Err() == nil {
@@ -281,8 +288,11 @@ func (s *Scheduler) fireDue(sc *Schedule, now time.Time) {
 	if s.ctx.Err() != nil {
 		return
 	}
-	// Win the row before firing so concurrent scheduler instances never double-launch.
-	won, err := s.claim(sc, next, final)
+	// Win the row before firing so concurrent scheduler instances never double-launch. The claim
+	// marks the occurrence in flight in the same write, and the mark stays until the fire is
+	// accounted for, so a server that stops anywhere between the claim and the record leaves the
+	// occurrence for the sweep of in-flight occurrences rather than losing it.
+	won, err := s.claimFire(sc, next, final)
 	if err != nil {
 		s.log.Error("schedule: claim due: "+err.Error(), zap.String("schedule_id", sc.ID))
 		return
@@ -296,25 +306,47 @@ func (s *Scheduler) fireDue(sc *Schedule, now time.Time) {
 	case skipped(err):
 		// A fire whose inventory matched no hosts is skipped, not failed. skip owns its record.
 		s.skip(sc, now)
+		s.settleInFlight(sc.ID, due)
 		return
 	case err != nil && runID == "" && s.ctx.Err() != nil:
 		s.handBack(sc, due, next, final, now, err)
 		return
 	}
+	s.recordFire(sc.ID, due, now, runID, err)
+}
+
+// recordFire records what the fire of the occurrence due came to, the run it created or why it
+// created none, and then clears the occurrence's in-flight mark. A record that fails keeps the
+// mark, so the sweep of in-flight occurrences records the fire once the store answers.
+//
+// Only what the fire owns is written back. The schedule the fire read came from a listing taken
+// before the run, and writing it whole reverted anything an operator changed meanwhile: a disable
+// came back enabled, an edit was rolled back, and a delete was re-inserted as a live schedule that
+// kept firing. NextRunAt is deliberately not written either, because the claim already advanced it
+// and rewriting it here is what reverted an edited cron.
+func (s *Scheduler) recordFire(id string, due, now time.Time, runID string, fireErr error) {
 	failure := ""
-	if err != nil {
-		s.log.Error("schedule: fire: "+err.Error(), zap.String("schedule_id", sc.ID))
-		failure = util.Clip(err.Error(), maxFailure)
+	if fireErr != nil {
+		s.log.Error("schedule: fire: "+fireErr.Error(), zap.String("schedule_id", id))
+		failure = util.Clip(fireErr.Error(), maxFailure)
 	}
-	// Only what the fire owns is written back. sc came from the List above, so it is a snapshot
-	// taken before the run and writing it whole reverted anything an operator changed meanwhile: a
-	// disable came back enabled, an edit was rolled back, and a delete was re-inserted as a live
-	// schedule that kept firing. NextRunAt is deliberately not written either, because ClaimDue
-	// already advanced it and rewriting it here is what reverted an edited cron.
 	ctx, cancel := s.settleContext()
 	defer cancel()
-	if err := s.store.RecordFire(ctx, sc.ID, now, runID, failure); err != nil {
-		s.log.Error("schedule: record fire: "+err.Error(), zap.String("schedule_id", sc.ID))
+	if err := s.store.RecordFire(ctx, id, now, runID, failure); err != nil {
+		s.log.Error("schedule: record fire: "+err.Error(), zap.String("schedule_id", id))
+		return
+	}
+	s.settleInFlight(id, due)
+}
+
+// settleInFlight clears the in-flight mark a claim put on the occurrence due, once its fire is
+// accounted for. A clear that fails leaves the mark, and the sweep of in-flight occurrences then
+// finds the run under the occurrence's key, or fires it again under the same key.
+func (s *Scheduler) settleInFlight(id string, due time.Time) {
+	ctx, cancel := s.settleContext()
+	defer cancel()
+	if err := s.store.SettleInFlight(ctx, id, due); err != nil {
+		s.log.Error("schedule: clear an in-flight fire: "+err.Error(), zap.String("schedule_id", id))
 	}
 }
 
@@ -349,7 +381,9 @@ func (s *Scheduler) handBack(sc *Schedule, due, next time.Time, final bool, now 
 	s.log.Warn("schedule: "+reason, zap.String("schedule_id", sc.ID))
 	if err := s.store.RecordFire(ctx, sc.ID, now, "", util.Clip(reason, maxFailure)); err != nil {
 		s.log.Error("schedule: record fire: "+err.Error(), zap.String("schedule_id", sc.ID))
+		return
 	}
+	s.settleInFlight(sc.ID, due)
 }
 
 // claim wins a due schedule's row for this instance: it advances the next fire time to next, or,
@@ -364,6 +398,18 @@ func (s *Scheduler) claim(sc *Schedule, next time.Time, final bool) (bool, error
 		return s.store.ClaimFinal(ctx, sc.ID, *sc.NextRunAt)
 	}
 	return s.store.ClaimDue(ctx, sc.ID, *sc.NextRunAt, next)
+}
+
+// claimFire wins a due schedule's row for this instance to fire the occurrence it read, the way
+// claim does, and marks that occurrence in flight in the same write.
+func (s *Scheduler) claimFire(sc *Schedule, next time.Time, final bool) (bool, error) {
+	ctx, cancel := s.settleContext()
+	defer cancel()
+	var to *time.Time
+	if !final {
+		to = &next
+	}
+	return s.store.ClaimFire(ctx, sc.ID, *sc.NextRunAt, to)
 }
 
 // overlaps returns the id of a run the schedule fired that is still going, or the empty string.

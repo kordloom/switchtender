@@ -33,7 +33,8 @@ func WithNotificationOutbox(o *named.Outbox) Option {
 }
 
 // startOutbox starts delivering from the outbox, when one is configured, until the dispatcher
-// closes, and starts the sweep of owed run ends when the store keeps a ledger of them.
+// closes, and starts the sweep of owed run ends, starts, and holds when the store keeps a ledger of
+// them.
 func (d *Dispatcher) startOutbox() {
 	if d.outbox == nil {
 		return
@@ -43,9 +44,11 @@ func (d *Dispatcher) startOutbox() {
 		defer d.notifyWG.Done()
 		d.outbox.Serve(d.ctx, d.sendNamed)
 	}()
-	if ledger, ok := d.store.(run.EndLedger); ok {
+	ends, owesEnds := d.store.(run.EndLedger)
+	events, owesEvents := d.store.(run.EventLedger)
+	if owesEnds || owesEvents {
 		d.notifyWG.Add(1)
-		go d.watchEnds(ledger)
+		go d.watchOwed(ends, events)
 	}
 }
 

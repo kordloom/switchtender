@@ -394,6 +394,15 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		d.wg.Add(1)
 		go d.presenceLoop()
 	}
+	// A control node revokes the secrets minted for runs, those it executes and those it opened for
+	// relay workers, from the handles recorded for them, and so does every other replica, so a
+	// process that crashed or stopped mid-run leaves nothing to live out its TTL. Only a process that
+	// can open the handles sweeps them.
+	if keeper, ok := store.(run.SecretLeases); ok && !cfg.noJanitor && d.credentials != nil &&
+		d.sealer != nil && d.sealer.Enabled() {
+		d.wg.Add(1)
+		go d.secretLeaseLoop(keeper)
+	}
 	if slots, ok := store.(slotReporter); ok {
 		slots.SetClaimSlots(cfg.workers)
 	}

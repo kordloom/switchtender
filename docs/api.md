@@ -75,7 +75,7 @@ Two more are enforced somewhere other than the request:
 | POST   | `/v1/ai/draft`             | Advisory AI draft of a bash, python, powershell, or go step script from a description. Operator role. |
 | POST   | `/v1/ai/ask`               | Advisory AI answer to a fleet question, from run, health, and drift metadata. Rate limited. |
 | POST   | `/v1/ai/propose-run`       | Turn a plain-language request into a run proposal, validated and held for approval. Operator role. |
-| POST   | `/v1/drift/reconcile`      | Build a reconcile proposal for a drifted host, held for approval. Operator role. |
+| POST   | `/v1/drift/reconcile`      | Build a reconcile proposal for a drifted host, held for approval. A Terraform or OpenTofu proposal carries the plan the check saved, and a check that kept none answers `409`. Operator role. |
 | POST   | `/v1/pipelines`            | Submit ordered playbook steps as one pipeline.          |
 | POST   | `/v1/schedules`            | Cron or RFC 5545 recurrence schedule for a run, split, pipeline, or template. The response records `created_by`. |
 | GET    | `/v1/schedules`            | List schedules.                                         |
@@ -533,6 +533,25 @@ bound. See [the Ansible guide](tool-ansible.md#provisioning-callbacks) for how a
 how the launch is recorded, and [the migration
 guide](migration.md#the-awx-compatible-callback-address) for the AWX-compatible address.
 
+### What a request may carry
+
+A NUL byte or text that is not valid UTF-8 in the request path or a query parameter is refused with
+`400` before the request is routed, so it never reaches a store. A JSON body is held to the same
+rule: a string holding a NUL, written `\u0000`, is refused with `400` naming the field, such as
+`steps[1].name`. An import is checked the same way before it writes anything: an export holding
+such text in any object it would create is refused with `400` naming the object and the field.
+
+Some values are stored under an index and have a bound. Past it the request is refused with `400`
+stating the bound.
+
+| Value                                      | Bound     |
+|--------------------------------------------|-----------|
+| `Idempotency-Key` header                   | 255 bytes |
+| A run's, template's, or inventory's queue  | 255 bytes |
+| Username                                   | 255 bytes |
+| Token name                                 | 255 bytes |
+| The id a grant or a membership names       | 512 bytes |
+
 ## List responses
 
 Every list response is an envelope: the rows under a name, `count` for how many were returned, and
@@ -779,6 +798,14 @@ template is told, once, however many of those it is attached through. The templa
 template hears the runs its schedules and triggers fire, and a rerun's runs as well. A split's shards
 and a pipeline's steps are not announced one by one. The parent is.
 
+A read that fails while the template is being found, of the schedule, trigger, or run that names it,
+or of the template to learn its organization, counts as a database that cannot be read. The event
+is asked for again and is not recorded for the other targets alone, as described under
+[Delivery order](#delivery-order). A template that no longer exists is different: it has no targets
+left to find, and asking again finds nothing more. Its targets are passed over, the others are told,
+and the server logs a warning that names the run and what could not be found. That includes a
+template whose schedule, trigger, or rerun origin was deleted after the run started.
+
 A target is delivered with the same formatters and the same refusal of private addresses as every
 other channel, and with `SWITCHTENDER_EGRESS_PROXY` set it leaves through that proxy, after its
 address is checked, as every channel does. A hold reaches a PagerDuty, Grafana, or Twilio target
@@ -801,11 +828,28 @@ failed notification does not prevent later ones from being attempted after its r
 
 Each event is recorded as the run reaches it, with the run's next sequence number, in the same
 transaction that queues one delivery per attached target. A database that refuses the write for a
-moment is asked again for up to five seconds. A run's end is also marked owed in the same database
-write that ends the run, whatever ends it: the run's own server, a worker's report, the lease sweep,
-a cancel, or a decision. Every server records an end still owed a few seconds later, so a server
-that stops right after a run ends, or a database that refused the end for longer, leaves the end
-late rather than lost. A run's end is recorded once, however many times it is announced.
+moment, or cannot be read to find the targets, is asked again for up to five seconds. A run's end is
+also marked owed in the same database write that ends the run, whatever ends it: the run's own
+server, a worker's report, the lease sweep, a cancel, or a decision. Every server records an end
+still owed a few seconds later, so a server that stops right after a run ends, or a database that
+refused the end for longer, leaves the end late rather than lost. A run's end is recorded once,
+however many times it is announced.
+
+A run's start and its hold are marked owed the same way. A start is owed in the write that moves a
+run into running, whether a worker claims it, a coordinator starts it, a decision starts it, or a
+workflow resumes after an approval step. A hold is owed in the write that creates a run held, or
+moves it into a hold from a state that was not one, including a workflow parked at an approval step.
+A decision that takes a held run and lets it go again is not a new hold. Every server records a
+start or hold still owed a few seconds later. A parked workflow's hold is recorded as each approval
+step it waits at, the way the workflow announces them. A run's start, its own hold, and each
+approval step's hold are recorded once, however many times they are announced.
+
+When the sweep finds that the run has already moved past a start or hold that is still owed,
+because it ended, was decided, or moved on, the event is not sent. Telling a target that a run
+started after it ended, or asking a person to decide a run somebody already decided, would arrive
+after the messages that followed it. The event is recorded on the run as skipped, with the reason,
+for example `not sent: the run had already ended, failed, before its start could be announced`. It
+shows at `GET /v1/runs/{id}/notifications` like every other skipped delivery.
 
 A delivery waits until every earlier delivery to the same target for the same run has finished.
 Targets never wait for each other: a server attempts at most four deliveries to one target at once
@@ -992,6 +1036,7 @@ presents the worker bearer token.
 | POST   | `/relay/v1/runs/{id}/log`          | Append captured output.                       |
 | POST   | `/relay/v1/runs/{id}/events`       | Append structured events.                     |
 | POST   | `/relay/v1/runs/{id}/propose-apply`| Report a plan's findings so the control node holds its apply. |
+| POST   | `/relay/v1/runs/{id}/drift-plan`   | Hand over the plan a drift check saved, which the control node seals and keeps for a reconcile. |
 | POST   | `/relay/v1/runs/{id}/host-summary` | Save the run's per-host summaries.            |
 | POST   | `/relay/v1/runs/{id}/host-facts`   | Save the facts the run gathered per host.     |
 | POST   | `/relay/v1/runs/{id}/task-summary` | Save the run's per-task summaries.            |

@@ -421,10 +421,10 @@ type Store interface {
 	// Record appends ev to its run's sequence of notification events and queues one delivery to
 	// each recipient, in one transaction, assigning ev the run's next sequence number. An event the
 	// run already holds under the same DedupeKey is not recorded again and Record reports false, so
-	// a moment announced twice, by a retry or by two processes, is delivered once. The run's end,
-	// an event whose End reports true, is recorded once per run whatever its snapshot says, so an
-	// end announced by the process that finished the run and again by the sweep that found it owed
-	// reaches each target once.
+	// a moment announced twice, by a retry or by two processes, is delivered once. An event Once
+	// names is recorded once per run and branch whatever its snapshot says: the run's end, its
+	// start, its hold, and each approval step's hold. So one announced by the process that moved
+	// the run and again by the sweep that found it owed reaches each target once.
 	Record(ctx context.Context, ev *RunEvent, recipients []Recipient) (bool, error)
 	// Claim leases up to limit deliveries to owner until now plus lease, and returns them with the
 	// run snapshot each one delivers. A delivery is claimable when it is pending, due by now, not

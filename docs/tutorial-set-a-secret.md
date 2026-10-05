@@ -110,9 +110,9 @@ give it a dynamic secrets path, such as a database or cloud role, as JSON:
 
 At launch SwitchTender reads that path, which mints a new credential, injects the chosen field into the
 run, and records the Vault lease. When the run reaches a terminal state the lease is revoked, so the
-credential lives only as long as the run. If the process dies before it can revoke, the credential
-still expires on the lease's own TTL. The minted value is masked
-in the run's output like any other secret.
+credential lives only as long as the run. If the process dies before it can revoke, any control node
+revokes the lease once the run is marked interrupted, from a sealed handle the database keeps for
+it. The minted value is masked in the run's output like any other secret.
 
 AWS STS mints short-lived role credentials the same way. Set the source to AWS STS and give it an IAM
 `role_arn` to assume, with an optional `region`, `duration_seconds`, and `external_id`. Use it with an

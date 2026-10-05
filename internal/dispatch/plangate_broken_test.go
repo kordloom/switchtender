@@ -137,7 +137,7 @@ func TestAPlanWhoseRenderingCouldNotBeReadIsHeld(t *testing.T) {
 	store := run.NewMemStore()
 	runner := &brokenPlanRunner{
 		output: "Plan: 0 to add, 0 to change, 0 to destroy.\n",
-		plan:   &roundhouse.Result{ExitCode: 0, Drift: true, PlanFile: plantest.File},
+		plan:   &roundhouse.Result{ExitCode: 0, Drift: true, PlanFile: []byte(plantest.File)},
 	}
 	d := New(store, runner, nil, WithNoJanitor(), WithPolicies(destroyGuardStore(t, 3)),
 		WithClaimInterval(time.Millisecond))
@@ -259,7 +259,7 @@ func TestTheGateWeighsTheSavedPlanNotThePrintedSummary(t *testing.T) {
 	store := run.NewMemStore()
 	runner := &brokenPlanRunner{
 		output: "Plan: 0 to add, 0 to change, 0 to destroy.\n",
-		plan: &roundhouse.Result{ExitCode: 0, Drift: true, PlanFile: plantest.File,
+		plan: &roundhouse.Result{ExitCode: 0, Drift: true, PlanFile: []byte(plantest.File),
 			PlanJSON: plantest.JSON(9)},
 	}
 	d := New(store, runner, nil, WithNoJanitor(), WithPolicies(destroyGuardStore(t, 3)),

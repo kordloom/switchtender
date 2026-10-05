@@ -75,8 +75,9 @@ type ApplyPreview struct {
 	// RequireDistinctApprover reports that the approver must be a different person from whoever
 	// requests the apply.
 	RequireDistinctApprover bool `json:"require_distinct_approver,omitempty"`
-	// PlanGated reports that a plan-content rule scopes the apply, so it is planned and weighed on
-	// its destroy count before it may run.
+	// PlanGated reports that the apply is planned before it may run, because a plan-content rule
+	// scopes it or an approval rule would hold it, so the decision is made on the proposal carrying
+	// the saved plan.
 	PlanGated bool `json:"plan_gated,omitempty"`
 }
 
@@ -85,8 +86,9 @@ type ApplyPreview struct {
 // could not be read, which the plan gate treats as a plan that must be held.
 //
 // It walks the same functions the dispatcher walks, in the same order: a deny rule at submission,
-// a blanket hold at submission, and, for a terraform or opentofu apply a plan-content rule scopes,
-// the proposal the plan gate would build from this plan, gated exactly as a real one is. The apply
+// then, for a terraform or opentofu apply a plan-content rule scopes or any rule would hold, the
+// proposal the plan gate would build from this plan, gated exactly as a real one is, and for every
+// other apply a blanket hold at submission. The apply
 // is graded as a submission is, reading an Ansible playbook from the project's checkout, which
 // holds the branch rather than the pull request until the pull request merges. Nothing is stored
 // and nothing executes. A rule store that cannot be read is an error, never a preview of no rules.
@@ -107,20 +109,20 @@ func (d *Dispatcher) PreviewApply(ctx context.Context, apply *run.Run, destroys 
 		return ApplyPreview{Outcome: ApplyDenied, Rule: maskPolicyText(gr, p.Label()),
 			Stage: StageSubmission}, nil
 	}
-	gated := policy.PlanGated(policies, apply)
+	// A terraform or opentofu apply any rule would hold is planned first, so its hold lands at the
+	// plan gate, on the proposal carrying the saved plan, and never at submission.
+	if policy.PlanGated(policies, apply) {
+		return previewProposal(policies, apply, destroys, read), nil
+	}
 	if p := policy.Requiring(policies, gr); p != nil {
 		return ApplyPreview{
 			Outcome:                 ApplyHeld,
 			Rule:                    maskPolicyText(gr, p.Label()),
 			Stage:                   StageSubmission,
-			PlanGated:               gated,
 			RequireDistinctApprover: policy.RequireDistinct(policies, gr),
 		}, nil
 	}
-	if !gated {
-		return ApplyPreview{Outcome: ApplyRuns}, nil
-	}
-	return previewProposal(policies, apply, destroys, read), nil
+	return ApplyPreview{Outcome: ApplyRuns}, nil
 }
 
 // RedactRunText returns text with every secret value this server can attribute to r masked, the

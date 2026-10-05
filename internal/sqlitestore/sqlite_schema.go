@@ -114,6 +114,12 @@ CREATE TABLE IF NOT EXISTS runs (
 	-- ciphertext only, wiped when the run ends.
 	plan_sha256 TEXT NOT NULL DEFAULT '',
 	plan_sealed TEXT NOT NULL DEFAULT '',
+	-- The plan file a drift check saved, ciphertext only, kept past the check's end so a reconcile
+	-- carries out exactly that plan, and dropped when a newer check of the same target lands.
+	drift_plan_sealed TEXT NOT NULL DEFAULT '',
+	-- Whether a Terraform or OpenTofu apply's own submission asked for approval, so the apply its
+	-- plan proposes is held. Set when the run is created and never cleared.
+	approval_requested INTEGER NOT NULL DEFAULT 0,
 	-- The digest of the image the container runtime pulled and ran.
 	image_digest TEXT NOT NULL DEFAULT '',
 	-- The decision that won a held run or an approval step: the id of its record and of the chain
@@ -324,7 +330,12 @@ CREATE TABLE IF NOT EXISTS schedules (
 	-- Why the most recent fire was skipped, and how many fires in a row ending with it were. A
 	-- fire whose inventory matched no hosts is skipped rather than failed.
 	last_skip     TEXT NOT NULL DEFAULT '',
-	skipped_fires INTEGER NOT NULL DEFAULT 0
+	skipped_fires INTEGER NOT NULL DEFAULT 0,
+	-- The occurrence a claim took for a fire whose run is not yet known to exist, and when it was
+	-- marked, by the database clock in Unix milliseconds. A sweep fires it again once it has been
+	-- marked too long, so a server that stops mid-fire leaves the occurrence late rather than lost.
+	inflight_at   TEXT,
+	inflight_ms   INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_schedules_created ON schedules(created_at, id);
 CREATE TABLE IF NOT EXISTS users (
@@ -524,6 +535,8 @@ CREATE INDEX IF NOT EXISTS idx_notification_deliveries_run
 CREATE INDEX IF NOT EXISTS idx_notification_deliveries_target
 	ON notification_deliveries(notification_id, created_ms);
 ` + runEndsSchema + `
+` + runEventsSchema + `
+` + secretLeasesSchema + `
 CREATE TABLE IF NOT EXISTS audit_entries (
 	id        TEXT PRIMARY KEY,
 	at        TEXT NOT NULL,
@@ -1055,7 +1068,8 @@ func migrateRuns(db *sql.DB) error {
 		"actor_user_id", "template_id", "inventory_resolution", "sealed_vars", "git_ref",
 		"dry_run_scans", "hold_note", "sealed_digests", "policy_notes", "inventory_check",
 		"initiator", "require_reason", "inventory_snapshot", "inventory_sealed", "resolved_hosts",
-		"plan_sha256", "plan_sealed", "image_digest", "decision_id", "decision_claim"} {
+		"plan_sha256", "plan_sealed", "image_digest", "decision_id", "decision_claim",
+		"drift_plan_sealed"} {
 		if _, err := db.Exec(
 			"ALTER TABLE runs ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''"); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {
@@ -1069,7 +1083,7 @@ func migrateRuns(db *sql.DB) error {
 		return fmt.Errorf("add queued_at column: %w", err)
 	}
 	for _, column := range []string{"verbosity", "forks", "diff_mode", "distinct_approver",
-		"use_fact_cache", "fact_cache_timeout"} {
+		"use_fact_cache", "fact_cache_timeout", "approval_requested"} {
 		if _, err := db.Exec(
 			"ALTER TABLE runs ADD COLUMN " + column + " INTEGER NOT NULL DEFAULT 0"); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {

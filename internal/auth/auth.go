@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -17,6 +18,16 @@ const tokenPrefix = "swt_"
 
 // ErrNotFound is returned when a token does not exist in the store.
 var ErrNotFound = errors.New("token not found")
+
+// ErrNameTooLong is returned when a token's name is longer than MaxNameBytes.
+var ErrNameTooLong = errors.New("token name too long")
+
+// MaxNameBytes bounds a token's name. The name is the actor every run and audit entry the token
+// makes is recorded and indexed under, and PostgreSQL refuses an index entry past about 2.7
+// kilobytes, so a token minted with a longer name that did not compress had every change it asked
+// for refused, because the audit trail could not record it. A label such as ci or deploy-bot is a
+// few bytes.
+const MaxNameBytes = 255
 
 // Token is one API token's stored form. The secret itself never persists, only its hash.
 type Token struct {
@@ -97,6 +108,10 @@ type Store interface {
 
 // New mints a token: the plaintext to hand to the caller exactly once, and the stored record.
 func New(name string) (string, *Token, error) {
+	if len(name) > MaxNameBytes {
+		return "", nil, fmt.Errorf("%w: a token name may be at most %d bytes, and this one is %d",
+			ErrNameTooLong, MaxNameBytes, len(name))
+	}
 	var b [24]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", nil, err

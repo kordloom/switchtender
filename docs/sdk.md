@@ -197,7 +197,8 @@ one method turns a system instruction and a user prompt into text.
 A `SecretResolver` fetches a value from a source's config at run time. A `SecretMinter` does the
 same for a dynamic engine and also returns a lease built with `NewSecretLease`, naming the engine
 and capturing how to revoke the minted credential. Pass a nil revoke func when the secret only
-expires on the engine's own TTL.
+expires on the engine's own TTL. A lease built this way is revoked only by the process that minted
+it, so a secret minted for a run whose process dies first expires on the engine's own TTL.
 
 See also the [secrets guide](secrets.md), [Bash runs](tool-bash.md) for how a tool's command and
 variables behave, and the [HTTP API](api.md) for submitting runs to your new tool.

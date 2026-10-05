@@ -56,6 +56,12 @@ func (d *Dispatcher) requiresApproval(ctx context.Context, r *run.Run) (bool, er
 	// the run whose record has to say what it was warned about.
 	r.PolicyNotes = policyNotes(policies, gr)
 	if p := policy.Requiring(policies, gr); p != nil {
+		// A terraform or opentofu apply a rule holds is planned first, and the request is not held:
+		// the apply its plan proposes is, carrying the saved plan, after the rules decide on it. A
+		// request held here would be approved without its plan and then plan when it ran.
+		if r.Status != run.StatusPendingApproval && policy.PlanGated(policies, gr) {
+			return false, nil
+		}
 		r.HeldByPolicy = maskPolicyText(gr, p.Label())
 		r.HoldNote = exemptionHoldNote(policies, gr, p)
 		// The label names the first rule for the evidence; the flag is the OR of every matching
@@ -96,6 +102,23 @@ func maskPolicyText(r *run.Run, text string) string {
 	m.set(runOwnSecrets(r.ExtraVars, r.Command))
 	masked, _ := util.RedactAssignments(m.redactString(text), maskToken)
 	return masked
+}
+
+// planFirstOnRequest turns a Terraform or OpenTofu apply whose own submission asked for approval
+// from a held request into one that plans first, and records the ask on it. Held as it was, the
+// request would be approved and then plan when it ran, so the approver would never see the plan
+// that applied. Planned first, the apply its plan proposes is held instead, carrying the saved
+// plan, and the approval binds the plan that applies. Any other run is left as it was submitted.
+func planFirstOnRequest(r *run.Run) {
+	tool := run.NormalizeTool(r.Tool)
+	if tool != run.ToolTerraform && tool != run.ToolOpenTofu {
+		return
+	}
+	if r.Status != run.StatusPendingApproval || r.DryRun || r.ProposedFrom != "" ||
+		r.ParentID != nil || r.PlanSHA256 != "" {
+		return
+	}
+	r.Status, r.ApprovalRequested = run.StatusPending, true
 }
 
 // recordHold makes sure a held run says what held it.

@@ -126,6 +126,9 @@ func TestEveryLaterColumnIsHealable(t *testing.T) {
 		"projects.repo_url (TEXT NOT NULL)",
 		"run_events.data (TEXT NOT NULL)",
 		"run_events.run_id (TEXT NOT NULL)",
+		// The ledger of owed starts and holds arrived whole as a new table, so CREATE TABLE IF NOT
+		// EXISTS builds it complete on an upgraded database. Original-era by construction.
+		"run_events_owed.event (TEXT NOT NULL)",
 		"run_host_summary.changed (INTEGER NOT NULL)",
 		"run_host_summary.failures (INTEGER NOT NULL)",
 		"run_host_summary.host (TEXT NOT NULL)",

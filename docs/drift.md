@@ -27,10 +27,12 @@ dry run on a cadence and the Drift page stays current.
 
 Drift comes from a dry run that has a no-change check. Ansible's `--check` reports, host by host, which
 tasks would change, and each host's changed count feeds the Drift page. Terraform and OpenTofu run
-`plan` with a detailed exit code, which distinguishes a clean plan from one with pending changes; a dry
+`plan` with a detailed exit code, which distinguishes a clean plan from one with pending changes. A dry
 run that finds changes is recorded as drift keyed on its working directory rather than a host, with the
-plan's changed-resource count. Bash, Python, PowerShell, and Go have no desired-state check, so they do
-not report drift.
+plan's changed-resource count, and one that finds none records the directory in sync, so the Drift
+page shows where the directory stands after its latest check rather than the last drift any check saw.
+A check that fails records nothing. Bash, Python, PowerShell, and Go have no desired-state check, so
+they do not report drift.
 
 A check run is only a no-change check when its playbook lets it be one. A play, block, task, role,
 or include that sets `check_mode: false` runs for real under `--check`, and what it changes is
@@ -61,8 +63,20 @@ target is an Ansible host or a Terraform working directory.
 
 A drifted row on the Drift page carries a Propose reconcile button. It builds the fix for you from the
 check that observed the drift, run for real instead of as a check: an Ansible check reruns its playbook
-limited to the drifted host, applying exactly the divergent tasks, and a Terraform or OpenTofu check
-applies its working directory. The construction is deterministic. No model builds it.
+limited to the drifted host, applying exactly the divergent tasks, and a Terraform or OpenTofu check's
+apply carries out the plan file the check saved. The construction is deterministic. No model builds
+it.
+
+A Terraform or OpenTofu check keeps the plan it saved, sealed, when it finds drift, and the reconcile
+carries that plan with its digest bound into the approval, so the approver releases the plan shown
+with the check and the apply runs `apply <planfile>` rather than planning again. A later check of the
+same working directory replaces the kept plan, and a later check that finds the directory in sync
+takes it off the page's drifted rows. A check that kept none, because it ran before plans were kept,
+cannot be reconciled from and the request is refused with `409`: run the check again, then propose
+the reconcile. If the state changed after the check made its
+plan, the tool refuses the stale plan when the approved reconcile runs, applies nothing, and the run
+says to run the check again and propose the reconcile from it. The
+[Terraform page](tool-terraform.md#a-gated-apply-carries-out-the-approved-plan) has the details.
 
 The proposal never starts on its own. It is created held for approval, so an approver reviews it and
 releases or rejects it, and the audit trail records that a machine proposed it and who decided. When

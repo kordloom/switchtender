@@ -171,8 +171,7 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 			opts = append(opts, run.WithInventory(req.InventoryID))
 		}
 		if req.Queue != "" {
-			if qerr := allowQueue(req.Queue); qerr != nil {
-				respondError(w, log, http.StatusForbidden, qerr.Error())
+			if !admitQueue(w, log, req.Queue) {
 				return
 			}
 			opts = append(opts, run.WithQueue(req.Queue))
@@ -309,8 +308,7 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 			popts = append(popts, run.WithProject(req.ProjectID))
 		}
 		if req.Queue != "" {
-			if qerr := allowQueue(req.Queue); qerr != nil {
-				respondError(w, log, http.StatusForbidden, qerr.Error())
+			if !admitQueue(w, log, req.Queue) {
 				return
 			}
 			popts = append(popts, run.WithQueue(req.Queue))

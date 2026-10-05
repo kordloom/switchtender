@@ -340,9 +340,9 @@ type Run struct {
 	// InventorySnapshot records the stored inventory this run executes against, materialized when the
 	// run was submitted: the digest of the sealed content, a digest of the content with its secrets
 	// masked, and the hosts it names. It is part of the spec an approver decides on, and the run
-	// executes that snapshot rather than whatever the store holds when it is claimed. Nil for a run
-	// that targets no stored inventory, and for one that targets a composed inventory, which
-	// InventoryResolution holds to its hosts instead.
+	// executes that snapshot rather than whatever the store holds when it is claimed. A composed
+	// inventory's snapshot holds the result it resolved to, its hosts with their variables, so the run
+	// reads no input again. Nil for a run that targets no stored inventory.
 	InventorySnapshot *InventorySnapshot `json:"inventory_snapshot,omitempty"`
 	// InventorySealed is the materialized inventory content, sealed with the server's key, while the
 	// run waits. It is never serialized, written once when the run is created, and wiped when the run
@@ -382,10 +382,11 @@ type Run struct {
 	// terraform or opentofu change says what it removes, so the apply is graded from it rather than
 	// from a command line that names only a directory.
 	PlanDestroys *int `json:"plan_destroys,omitempty"`
-	// PlanSHA256 is the hex SHA-256 of the sealed plan file a gated terraform or opentofu apply
-	// carries out, as stored. It is part of the spec an approver decides on, so an approval releases
-	// that exact plan, and the apply runs the plan file rather than planning again. Empty for every
-	// other run.
+	// PlanSHA256 is the hex SHA-256 of the sealed plan file a terraform or opentofu apply carries
+	// out, as stored: the plan the plan gate saved for a gated apply, or the plan a drift check saved
+	// for a reconcile. It is part of the spec an approver decides on, so an approval releases that
+	// exact plan, and the apply runs the plan file rather than planning again. Empty for every other
+	// run.
 	PlanSHA256 string `json:"plan_sha256,omitempty"`
 	// PlanSealed is the plan file the apply carries out, sealed with the server's key while the apply
 	// waits. A plan file holds the values the configuration was planned with, sensitive ones
@@ -396,6 +397,12 @@ type Run struct {
 	// renamed or deleted long before anyone reads the evidence, and "which rule stopped this
 	// change" is the question a change-management review asks. Empty when nothing held the run.
 	HeldByPolicy string `json:"held_by_policy,omitempty"`
+	// ApprovalRequested records that this run's own submission asked for approval, through
+	// require_approval or an AI proposal, on a Terraform or OpenTofu apply. Such a request is not held
+	// itself, since approving it would release a plan made only when it ran. It is planned first, and
+	// the apply its plan proposes is held carrying the saved plan, so the approver approves the plan
+	// that applies. It is set when the run is submitted and never cleared. False for every other run.
+	ApprovalRequested bool `json:"approval_requested,omitempty"`
 	// RequireDistinctApprover refuses a decision on this run by the person who asked for it. It is
 	// copied from the rule that held the run, at the moment of the hold, rather than read from the
 	// rule when the decision is made: an admin who edits or deletes the rule afterward must not be

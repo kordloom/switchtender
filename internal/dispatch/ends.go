@@ -54,13 +54,19 @@ func (d *Dispatcher) settleEnd(id string) {
 	}
 }
 
-// watchEnds sweeps the owed run ends until the dispatcher closes.
-func (d *Dispatcher) watchEnds(ledger run.EndLedger) {
+// watchOwed sweeps the owed run ends, and the owed starts and holds, of whichever ledgers the store
+// keeps, until the dispatcher closes.
+func (d *Dispatcher) watchOwed(ends run.EndLedger, events run.EventLedger) {
 	defer d.notifyWG.Done()
 	ticker := time.NewTicker(endSweepInterval)
 	defer ticker.Stop()
 	for {
-		d.sweepOwedEnds(d.ctx, ledger)
+		if events != nil {
+			d.sweepOwedEvents(d.ctx, events)
+		}
+		if ends != nil {
+			d.sweepOwedEnds(d.ctx, ends)
+		}
 		select {
 		case <-d.ctx.Done():
 			return

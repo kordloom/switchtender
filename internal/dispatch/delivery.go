@@ -364,15 +364,10 @@ func (d *Dispatcher) NeedsSecrets(ctx context.Context, r *run.Run) bool {
 // run or an apply the plan gate plans first.
 func (d *Dispatcher) OpenSecrets(ctx context.Context, r *run.Run) (*handoff.Payload, func(), error) {
 	p := &handoff.Payload{RunID: r.ID}
-	var leases []*secretsource.Lease
-	release := func() {
-		for _, lease := range leases {
-			d.revokeLease(lease)
-		}
-	}
+	leases := &runLeases{d: d, r: r}
 	fail := func(err error) (*handoff.Payload, func(), error) {
 		p.Wipe()
-		release()
+		leases.release()
 		return nil, nil, err
 	}
 	ids := d.effectiveCredentialIDs(ctx, r)
@@ -393,7 +388,9 @@ func (d *Dispatcher) OpenSecrets(ctx context.Context, r *run.Run) (*handoff.Payl
 		}
 		c, plain, lease, err := d.openCredential(ctx, id)
 		if lease != nil {
-			leases = append(leases, lease)
+			if lerr := leases.add(ctx, id, lease); lerr != nil {
+				return fail(lerr)
+			}
 		}
 		switch {
 		case errors.Is(err, errFederatedCredential):
@@ -431,7 +428,9 @@ func (d *Dispatcher) OpenSecrets(ctx context.Context, r *run.Run) (*handoff.Payl
 	if pull != "" && p.Credential(pull) == nil {
 		c, plain, lease, err := d.openCredential(ctx, pull)
 		if lease != nil {
-			leases = append(leases, lease)
+			if lerr := leases.add(ctx, pull, lease); lerr != nil {
+				return fail(lerr)
+			}
 		}
 		if err != nil {
 			return fail(fmt.Errorf("pull credential %s: %w", pull, err))
@@ -459,16 +458,16 @@ func (d *Dispatcher) OpenSecrets(ctx context.Context, r *run.Run) (*handoff.Payl
 		}
 		p.PlanFile = plan
 	}
-	if len(leases) == 0 {
+	if leases.empty() {
 		return p, nil, nil
 	}
-	return p, release, nil
+	return p, leases.release, nil
 }
 
 // deliveryMode reports whether r will execute as a plan on the worker that claims it: a dry run, or
-// an apply a plan-content rule sends through the plan gate. The worker reads the same rules across
-// the relay and refuses a token minted for the other mode, so a rule edited in between fails the
-// run closed rather than handing a plan's token to an apply.
+// an apply a rule plans first. The worker reads the same rules across the relay and refuses a token
+// minted for the other mode, so a rule edited in between fails the run closed rather than handing a
+// plan's token to an apply.
 func (d *Dispatcher) deliveryMode(ctx context.Context, r *run.Run) (bool, error) {
 	if r.DryRun {
 		return true, nil

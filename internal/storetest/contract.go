@@ -35,6 +35,12 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("sealed material is wiped when a run ends", func(t *testing.T) {
 		testSealedMaterialWipes(t, newStore())
 	})
+	t.Run("a drift check's plan is kept for a reconcile", func(t *testing.T) {
+		testDriftPlanKept(t, newStore())
+	})
+	t.Run("a request's ask for approval is kept", func(t *testing.T) {
+		testApprovalRequestedKept(t, newStore())
+	})
 	t.Run("git ref round trip", func(t *testing.T) { testGitRefRoundTrip(t, newStore()) })
 	t.Run("dry run scans round trip", func(t *testing.T) {
 		testDryRunScansRoundTrip(t, newStore())
@@ -143,11 +149,15 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("summary trim bounds growth", func(t *testing.T) { testTrimSummaries(t, newStore()) })
 	t.Run("terminal run fences writes", func(t *testing.T) { testTerminalFence(t, newStore()) })
 	t.Run("every run end is owed until settled", func(t *testing.T) { testEndLedger(t, newStore()) })
+	t.Run("every start and hold is owed until settled", func(t *testing.T) {
+		testEventLedger(t, newStore())
+	})
 	t.Run("reclaim attributes a stale cancel", func(t *testing.T) {
 		testReclaimAttributesAStaleCancel(t, newStore())
 	})
 	approvalContract(t, newStore)
 	callbackContract(t, newStore)
+	secretLeaseContract(t, newStore)
 }
 
 // sampleRun returns a fully populated terminal run with deterministic times.

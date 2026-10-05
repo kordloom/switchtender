@@ -92,9 +92,11 @@ pinned onto it by the digest its registry serves, so a project's image changed a
 cannot move the approved run into another container. When the registry does not answer, the run is
 bound to the tag and the approver is told the tag is not pinned to a digest, and the outcome records
 the digest that was pulled. A static inventory is snapshotted at submission and the run executes
-that snapshot, so an inventory edited after an approval cannot widen or redirect the run. A gated
-Terraform or OpenTofu apply carries out the saved plan file its approval bound, and the tool refuses
-that plan if the infrastructure changed since. A dynamic inventory source is the one input that
+that snapshot, so an inventory edited after an approval cannot widen or redirect the run. A smart or
+constructed inventory is snapshotted the same way, the result it resolved to and every input it drew
+from, so an input edited after an approval, a host variable included, does not reach the run. A
+Terraform or OpenTofu apply that a rule gates or holds, and a drift reconcile, carries out the saved
+plan file its approval bound, and the tool refuses that plan if the infrastructure changed since. A dynamic inventory source is the one input that
 resolves at execution by nature: the approval binds its definition and the outcome records the hosts
 it reached.</p>
 <p><strong>&quot;The requester cannot release their own change.&quot;</strong> A rule can require a distinct approver, and

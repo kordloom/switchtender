@@ -61,9 +61,10 @@ func (d *Dispatcher) executeLeased(base context.Context, r *run.Run) run.Status 
 }
 
 // execute runs r and returns its terminal status. A terraform or opentofu apply that a plan-content
-// policy scopes is planned first and its apply proposed for approval; every other run executes in a
-// single phase, unchanged. The run carries this process's lease while it executes: a watcher renews
-// it and honors cancel requests written to the store by any process.
+// policy scopes, or that an approval rule would hold, is planned first and its apply proposed for
+// approval; every other run executes in a single phase, unchanged. The run carries this process's
+// lease while it executes: a watcher renews it and honors cancel requests written to the store by
+// any process.
 func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 	// An approved run executes exactly the spec that was approved. The digest was committed to the
 	// chain when the decision was made and stamped on the run; a mismatch here means the row
@@ -122,15 +123,30 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 // executeRun runs r's spec once, streaming output to the store, and finalizes it from the runner
 // outcome. It is the single-phase path taken by every run a plan-content policy does not gate.
 func (d *Dispatcher) executeRun(ctx context.Context, r *run.Run) run.Status {
-	return d.streamSpec(ctx, r, r.DryRun, nil,
+	// An apply carrying out a saved plan is watched for the tool refusing the plan as stale, so the
+	// run says the proposal has to be made again rather than failing with only an exit code.
+	var stale *staleWatch
+	var tee io.Writer
+	if isPlanTool(r.Tool) && !r.DryRun && r.PlanSHA256 != "" {
+		stale = &staleWatch{}
+		tee = stale
+	}
+	return d.streamSpec(ctx, r, r.DryRun, tee,
 		func(res roundhouse.Result, runErr error, mask *masker, fold *run.SummaryFold) run.Status {
+			// A drift check's plan file and its rendering hold the plan's values in the clear, so they
+			// are dropped here: the sealed copy kept for a reconcile is the only one left.
+			defer clear(res.PlanFile)
+			defer clear(res.PlanJSON)
 			// Write the summaries and any drift while the run is still non-terminal. The store fences
 			// auxiliary writes to a terminal run, so finalizing first would reject the run's own final
 			// summaries; ordering the writes before finalize lets them land and drops only a
 			// reclaimed-but-alive worker's late writes.
 			d.summarize(r, fold, noHostFailure(r, res, runErr, fold))
-			if res.Drift {
-				d.recordPlanDrift(r)
+			d.recordPlanCheck(r, res, runErr)
+			d.keepDriftPlan(r, res, runErr, mask)
+			if stale.refused(res, runErr) {
+				d.finalize(r, run.StatusFailed, &res.ExitCode, staleRefusal(r))
+				return run.StatusFailed
 			}
 			return d.outcome(ctx, r, res, runErr, mask, fold)
 		})
@@ -278,7 +294,7 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	src := d.secretsFor(r)
 	defer src.wipe()
 	if r.Image != "" {
-		pullCleanup, perr := d.resolvePullFrom(ctx, src, r.PullCredentialID, &spec)
+		pullCleanup, perr := d.resolvePullFrom(ctx, src, r, r.PullCredentialID, &spec)
 		// Deferred here, beside the other execution credentials, so a minted login is live for the
 		// pull and released once the run is over. It is deferred before the error is checked, so a
 		// resolve that failed partway still hands back whatever it minted.

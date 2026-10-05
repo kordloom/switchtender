@@ -165,7 +165,7 @@ func (d *Dispatcher) materializeFrom(ctx context.Context, src secretSource, r *r
 
 	var paths []string
 	var secrets []string
-	var leases []*secretsource.Lease
+	leases := &runLeases{d: d, r: r}
 	// runDir returns the run's private directory.
 	runDir := func() (*runfiles.Dir, error) {
 		return dir, nil
@@ -188,20 +188,18 @@ func (d *Dispatcher) materializeFrom(ctx context.Context, src secretSource, r *r
 			d.log.Warn("dispatch: remove run credential directory: "+err.Error(),
 				zap.String("run_id", r.ID))
 		}
-		for _, lease := range leases {
-			revokeCtx, cancel := context.WithTimeout(context.Background(), revokeTimeout)
-			if err := lease.Revoke(revokeCtx); err != nil {
-				d.log.Warn("dispatch: revoke ephemeral secret failed: "+err.Error(),
-					zap.String("engine", lease.Kind()))
-			}
-			cancel()
-		}
+		// What the opening minted is handed back, and its recorded handles are taken, so no other
+		// replica revokes it again. A process killed mid-run never gets here, and those handles are
+		// what any replica's sweep revokes the secrets from once the run is marked interrupted.
+		leases.release()
 	}
 	federated := map[credential.Kind]string{}
 	for _, id := range ids {
 		c, plain, lease, err := src.credential(ctx, id)
 		if lease != nil {
-			leases = append(leases, lease)
+			if lerr := leases.add(ctx, id, lease); lerr != nil {
+				return cleanup, secrets, lerr
+			}
 		}
 		if err != nil && !errors.Is(err, errFederatedCredential) {
 			return cleanup, secrets, err
@@ -698,6 +696,26 @@ func (d *Dispatcher) openCredential(ctx context.Context, id string) (*credential
 		return nil, "", nil, fmt.Errorf("resolve credential %s: %w", id, err)
 	}
 	return c, value, lease, nil
+}
+
+// openSourceConfig fetches a credential and unseals what it stores, its source configuration,
+// without resolving the source. It has one caller: revoking a dynamic secret from a recorded handle
+// needs the configuration that minted it, such as a Vault address and token, and resolving the
+// source instead would mint a fresh secret only to revoke the old one with it. The value is handed
+// to secretsource.RevokeHandle and never used as a credential.
+func (d *Dispatcher) openSourceConfig(ctx context.Context, id string) (string, error) {
+	if d.credentials == nil || d.sealer == nil {
+		return "", credential.ErrNoKey
+	}
+	c, err := d.credentials.Get(ctx, id)
+	if err != nil {
+		return "", fmt.Errorf("credential %s: %w", id, err)
+	}
+	config, err := d.sealer.Open(c.Secret)
+	if err != nil {
+		return "", fmt.Errorf("credential %s: %w", id, credential.ErrNoKey)
+	}
+	return config, nil
 }
 
 // revokeLease hands a dynamic source's minted secret back, on its own timeout so a slow engine

@@ -183,8 +183,13 @@ func TestFileStoreThresholdIsThreeWay(t *testing.T) {
 				t.Errorf("Requires() = %v, want %v: an omitted threshold is a blanket gate and a "+
 					"stated one is not", !wantBlanket, wantBlanket)
 			}
-			if policy.PlanGated(all, r) == wantBlanket {
-				t.Errorf("PlanGated() = %v, want %v", wantBlanket, !wantBlanket)
+			// Every rule here would hold the apply, so it is planned first either way, and only a
+			// stated threshold weighs what the plan destroys.
+			if !policy.PlanGated(all, r) {
+				t.Error("PlanGated() = false, want the apply planned first")
+			}
+			if policy.PlanExceeds(all, r, 1<<20) == wantBlanket {
+				t.Errorf("PlanExceeds() = %v, want %v", wantBlanket, !wantBlanket)
 			}
 		})
 	}

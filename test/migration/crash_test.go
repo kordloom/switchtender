@@ -26,6 +26,15 @@ func TestKilledServerDuringApprovalWaitResumesCorrectly(t *testing.T) {
 			wf := in.launched(holder, "operator", "release", nil)
 			step := in.waitPending(holder, "operator", wf.ID)
 			in.requireSteps(holder, wf.ID, map[string]int{"build": 1, "ship": 0, "page": 0})
+			// The step is listed as soon as the walk reaches it, and the workflow parks a moment
+			// later, once nothing else is left to run. The park is the wait the store keeps, so the
+			// kill lands after it. Killed before it, the coordinator still held the workflow's
+			// lease, and the lease sweep ended the workflow after its approval was accepted.
+			if got := in.waitStatus(holder, wf.ID, "pending_approval", "succeeded", "failed",
+				"canceled"); got.Status != "pending_approval" {
+				t.Fatalf("the workflow reached %q, want it parked at its approval step: %s",
+					got.Status, describe(got.Raw))
+			}
 			holder.kill()
 
 			if survivor == nil {

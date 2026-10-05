@@ -451,13 +451,23 @@ func (p *Policy) Label() string {
 // graded from its command until a plan says what it destroys, which made every apply costly and
 // medium: a rule holding irreversible changes, or high risk ones, never matched an apply that
 // destroyed everything, and the apply ran. Planned first, the apply it proposes carries the plan's
-// destroy count, its grade says what the plan found, and the rule decides on that. A floor the
-// apply already clears held it at submission, so planning it would only ask the same question
-// twice.
+// destroy count, its grade says what the plan found, and the rule decides on that.
+//
+// And so does any approval rule that would hold the apply, or the apply's own submission asking for
+// approval. An apply held before it was planned was approved as a request and planned only when it
+// ran, so the approver never saw the plan that applied. Planned first, the apply it proposes
+// carries the saved plan, the rules decide on that proposal, it is held when its submission asked,
+// and the approval binds the plan that runs. A run still held at submission, and a run already
+// released by a decision, are left to the hold they had, and so is a step of a workflow, which its
+// workflow's approval governs.
 func PlanGated(policies []*Policy, r *run.Run) bool {
 	tool := run.NormalizeTool(r.Tool)
 	graded := (tool == run.ToolTerraform || tool == run.ToolOpenTofu) && !r.DryRun &&
 		r.ProposedFrom == ""
+	if graded && r.ParentID == nil && r.Status != run.StatusPendingApproval && r.DecisionID == "" &&
+		r.ApprovedSpecDigest == "" && (r.ApprovalRequested || Requiring(policies, r) != nil) {
+		return true
+	}
 	for _, p := range policies {
 		// A Rego policy plans an apply when its plan_gate rule says so, or when it cannot decide:
 		// the apply it then proposes faces the same policy again, which refuses it, so an
