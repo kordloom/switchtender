@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"time"
 )
@@ -164,11 +165,22 @@ func (d *Dir) Remove() error {
 	return err
 }
 
-// removeLocked deletes a run directory whose lock the caller holds through lock. Everything but the
-// lock file goes first, while the lock is still held, so no other process can see a directory with
-// secret material in it and no lock. The lock file goes last, after it is released and closed,
-// because an open file cannot be deleted on every platform.
+// removeLocked deletes a run directory whose lock the caller holds through lock, and releases the
+// lock once the directory is gone.
 func removeLocked(path string, lock *os.File) error {
+	return removeHeld(path, func() {
+		_ = unlockFile(lock)
+		_ = lock.Close()
+	})
+}
+
+// removeHeld deletes a run directory whose lock the caller holds, and calls release to give the
+// lock up. Everything but the lock file goes first, so no other process can see a directory with
+// secret material in it and no lock. The lock file and the directory go next, before the release. A
+// Create that made its lock file and stalled before locking it takes the lock the moment it is
+// released, and had its lock file still been at its path then, it would have kept a directory
+// deleted a moment later.
+func removeHeld(path string, release func()) error {
 	var errs []error
 	entries, err := os.ReadDir(path)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -182,10 +194,18 @@ func removeLocked(path string, lock *os.File) error {
 			errs = append(errs, err)
 		}
 	}
-	_ = unlockFile(lock)
-	_ = lock.Close()
-	if err := removeTree(path); err != nil {
-		errs = append(errs, err)
+	if runtime.GOOS == "windows" {
+		// Windows refuses to delete a file that is still open, so there the lock file and the
+		// directory go after the release.
+		release()
+		if err := removeTree(path); err != nil {
+			errs = append(errs, err)
+		}
+	} else {
+		if err := removeTree(path); err != nil {
+			errs = append(errs, err)
+		}
+		release()
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("remove run directory: %w", errors.Join(errs...))
