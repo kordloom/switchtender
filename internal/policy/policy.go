@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/idgen"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -57,7 +58,8 @@ type Policy struct {
 	// any. Case is ignored because "drop database" and "DROP DATABASE" are the same statement, so a
 	// case-sensitive rule refuses one spelling and waves the other through.
 	CommandContains string `json:"command_contains,omitempty"`
-	// InventoryID matches a run targeting this stored inventory. Empty matches any.
+	// InventoryID matches a run targeting this stored inventory, directly or through a composed
+	// inventory that drew hosts from it. Empty matches any.
 	InventoryID string `json:"inventory_id,omitempty"`
 	// Queue matches a run routed to this worker queue. Empty matches any.
 	//
@@ -87,18 +89,32 @@ type Policy struct {
 	// Effect is what a matched blanket policy does: require_approval holds the run, deny refuses
 	// the submission. Empty means require_approval.
 	Effect string `json:"effect,omitempty"`
-	// ExcludeDryRun leaves dry-run runs unmatched, so a no-change preview does not need approval.
+	// ExcludeDryRun leaves dry-run runs unmatched, so a no-change preview does not need approval. A
+	// dry run that is not a no-change preview stays matched: an Ansible dry run whose playbook sets
+	// check_mode to anything but true somewhere runs that work for real under --check, and one whose
+	// playbook could not be read in full may, so neither is exempt.
 	ExcludeDryRun bool `json:"exclude_dry_run,omitempty"`
 	// RequireDistinctApprover refuses a decision made by the person who asked for the change, which
 	// is separation of duties: an approval gate the requester can release themselves records a
 	// signature but stops nothing. The requirement is copied onto each run this rule holds, so a
 	// later edit to the rule cannot weaken a decision that is already pending.
 	RequireDistinctApprover bool `json:"require_distinct_approver,omitempty"`
+	// RequireReason makes a decision on a run this rule holds carry the approver's stated reason:
+	// "denials" for a denial, "always" for an approval and a denial alike. Empty asks for none, the
+	// default. Like the distinct-approver requirement it is copied onto each run the rule holds, so a
+	// later edit to the rule cannot weaken a decision already pending. It sets no criterion, so it is
+	// allowed beside a Rego policy, where it applies to every run that policy holds.
+	RequireReason string `json:"require_reason,omitempty"`
 	// MaxDestroy holds a matched terraform or opentofu run for approval when its plan would destroy
 	// more than this many resources. A negative value disables the plan-content check, the safe
 	// default, so a policy without a threshold is a blanket rule rather than one that holds on any
 	// destroy.
 	MaxDestroy int `json:"max_destroy"`
+	// Rego is the compiled Rego bundle that decides for this policy, nil for a criteria rule. A Rego
+	// policy sets no criteria of its own: its package decides whether a run is denied, held, needs a
+	// distinct approver, or must be planned first, and every function below asks it. It is only
+	// ever read from the policy file, and a database store refuses to save one.
+	Rego *RegoProgram `json:"rego,omitempty"`
 	// CreatedAt is when the policy was created.
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -106,6 +122,10 @@ type Policy struct {
 // Matches reports whether the policy's criteria match r. Every non-empty criterion must match,
 // so a policy narrows the runs it gates rather than widening them.
 func (p *Policy) Matches(r *run.Run) bool {
+	if p.Rego != nil {
+		d := p.Rego.Decide(r)
+		return d.Err != nil || len(d.Deny) > 0 || len(d.Hold) > 0
+	}
 	return p.matchesBeforeGrade(r) && p.meetsGradeFloors(r)
 }
 
@@ -113,7 +133,10 @@ func (p *Policy) Matches(r *run.Run) bool {
 // r. Those two are grades computed from the run, and a terraform or opentofu apply has no honest
 // grade until its plan has said what it destroys, so the plan gate asks this question first.
 func (p *Policy) matchesBeforeGrade(r *run.Run) bool {
-	if p.ExcludeDryRun && r.DryRun {
+	// The run's effective mode, not the flag it was submitted with. A dry run whose playbook forces
+	// real work is a change, and exempting it on the strength of the flag let any change through a
+	// rule that excludes dry runs by asking for it as a preview.
+	if p.ExcludeDryRun && r.ChangeFree() {
 		return false
 	}
 	if p.Tool != "" && run.NormalizeTool(p.Tool) != run.NormalizeTool(r.Tool) {
@@ -122,7 +145,9 @@ func (p *Policy) matchesBeforeGrade(r *run.Run) bool {
 	if p.CommandContains != "" && !containsFold(r.Command, p.CommandContains) {
 		return false
 	}
-	if p.InventoryID != "" && p.InventoryID != r.InventoryID {
+	// A run reaches an inventory's hosts by naming it, or through a smart or constructed inventory
+	// that drew hosts from it, and a rule scoped to the inventory governs both.
+	if p.InventoryID != "" && !r.TargetsInventory(p.InventoryID) {
 		return false
 	}
 	if p.Queue != "" && p.Queue != r.Queue {
@@ -203,8 +228,12 @@ func (p *Policy) matchesActor(r *run.Run) bool {
 // grade was added, the engine evaluated it, and this was not updated, so a rule holding on
 // irreversibility was free through --policy-file while the identical rule through the API was
 // refused as Team. The feature this product sells hardest was the one leaking.
+//
+// A Rego policy is the full engine by construction: it can deny, scope to actors, and demand a
+// second approver, and nothing about it can be read before it runs to say that it does not.
 func (p *Policy) Advanced() bool {
-	return p.Effect == EffectDeny ||
+	return p.Rego != nil ||
+		p.Effect == EffectDeny ||
 		p.MinRisk != "" ||
 		p.Reversibility != "" ||
 		p.RequireDistinctApprover ||
@@ -233,8 +262,17 @@ func (p *Policy) Denies() bool { return p.Effect == EffectDeny }
 
 // Denying returns the first deny policy matching r, or nil when none does, so the rule that
 // refused a submission can be named in the refusal and in the evidence.
+//
+// A Rego policy that refuses r is returned as a copy labeled with its reasons and its bundle digest,
+// and so is one that could not decide: a gate that cannot be evaluated has not been passed.
 func Denying(policies []*Policy, r *run.Run) *Policy {
 	for _, p := range policies {
+		if p.Rego != nil {
+			if d := p.Rego.Decide(r); d.Err != nil || len(d.Deny) > 0 {
+				return p.regoVerdict(EffectDeny, d.Deny, d.Err)
+			}
+			continue
+		}
 		if p.Denies() && p.Matches(r) {
 			return p
 		}
@@ -245,6 +283,13 @@ func Denying(policies []*Policy, r *run.Run) *Policy {
 // Validate checks the policy's declared vocabulary, so a rule with a typo is refused where it is
 // written rather than silently matching nothing, or worse, everything.
 func (p *Policy) Validate() error {
+	if !decision.ValidRequirement(p.RequireReason) {
+		return fmt.Errorf("require_reason must be %q or %q, not %q", decision.RequireDenials,
+			decision.RequireAlways, p.RequireReason)
+	}
+	if p.Rego != nil {
+		return p.validateRego()
+	}
 	switch p.Effect {
 	case "", EffectRequireApproval, EffectDeny:
 	default:
@@ -288,13 +333,42 @@ func Requires(policies []*Policy, r *run.Run) bool {
 // the answer has to be recorded when the hold happens, since a policy can be renamed or deleted
 // long before anyone reads the register. Deny policies are not approval rules and are skipped;
 // Denying finds those, and the dispatcher consults it first.
+//
+// A Rego policy holding r is returned as a copy labeled with its reasons and bundle digest. One that
+// could not decide holds too, though the dispatcher's deny pass has already refused it by then.
 func Requiring(policies []*Policy, r *run.Run) *Policy {
 	for _, p := range policies {
+		if p.Rego != nil {
+			if d := p.Rego.Decide(r); d.Err != nil || len(d.Hold) > 0 {
+				return p.regoVerdict(EffectRequireApproval, d.Hold, d.Err)
+			}
+			continue
+		}
 		if p.MaxDestroy < 0 && !p.Denies() && p.Matches(r) {
 			return p
 		}
 	}
 	return nil
+}
+
+// Noting returns what the Rego policies set to warn: note recorded about r, one entry for each such
+// policy whose warn rule fired, named as a hold is named: the policy, its messages, and its bundle.
+//
+// A note holds and refuses nothing. It is the warning a policy chose to record on the run rather
+// than wait on, so the run page, the outcome record, and a receipt can say what was flagged and
+// that the run went ahead. A policy that could not decide notes nothing here, because Denying has
+// already refused the run for it: setting warn to note softens a warning, never a failure.
+func Noting(policies []*Policy, r *run.Run) []string {
+	var out []string
+	for _, p := range policies {
+		if p == nil || p.Rego == nil || p.Rego.Warn() != RegoWarnNote {
+			continue
+		}
+		if d := p.Rego.Decide(r); d.Err == nil && len(d.Note) > 0 {
+			out = append(out, p.noteLabel(d.Note))
+		}
+	}
+	return out
 }
 
 // RequireDistinct reports whether any matching non-deny rule demands a distinct approver.
@@ -304,13 +378,58 @@ func Requiring(policies []*Policy, r *run.Run) *Policy {
 // lower a control nobody meant to lower. Separation of duties composes by OR: if any rule that
 // covers this run demands a second person, the run demands a second person. Plan-content rules
 // count too, since the plan gate holds under the same requirement.
+//
+// A Rego policy demands one when its require_distinct_approver rule holds for r, or when it could
+// not decide, since the stricter answer is the only safe one to a question nobody could answer.
 func RequireDistinct(policies []*Policy, r *run.Run) bool {
 	for _, p := range policies {
+		if p.Rego != nil {
+			if d := p.Rego.Decide(r); d.Err != nil || d.RequireDistinctApprover {
+				return true
+			}
+			continue
+		}
 		if p.RequireDistinctApprover && !p.Denies() && p.Matches(r) {
 			return true
 		}
 	}
 	return false
+}
+
+// ReasonRequirement returns the strictest reason requirement among the rules that would hold r, so
+// it composes the way separation of duties does: if any rule covering the run asks for a reason,
+// the run asks for one. A Rego policy asks when it holds r or cannot decide; a deny rule never
+// holds anything and is skipped. Plan-content rules count too, since the plan gate holds under the
+// same rules.
+func ReasonRequirement(policies []*Policy, r *run.Run) string {
+	out := ""
+	for _, p := range policies {
+		if p.RequireReason == "" || p.Denies() {
+			continue
+		}
+		if p.Rego != nil {
+			if d := p.Rego.Decide(r); d.Err != nil || len(d.Hold) > 0 {
+				out = decision.Stricter(out, p.RequireReason)
+			}
+			continue
+		}
+		if p.Matches(r) {
+			out = decision.Stricter(out, p.RequireReason)
+		}
+	}
+	return out
+}
+
+// ExceedingReason returns the strictest reason requirement among the plan-content rules a plan of
+// this size violates, which is what the apply the plan gate holds carries.
+func ExceedingReason(policies []*Policy, r *run.Run, destroys int) string {
+	out := ""
+	for _, p := range policies {
+		if p.MaxDestroy >= 0 && p.RequireReason != "" && p.Matches(r) && destroys > p.MaxDestroy {
+			out = decision.Stricter(out, p.RequireReason)
+		}
+	}
+	return out
 }
 
 // Label returns how a policy should be named in evidence: its name, or its id when it has none.
@@ -340,6 +459,17 @@ func PlanGated(policies []*Policy, r *run.Run) bool {
 	graded := (tool == run.ToolTerraform || tool == run.ToolOpenTofu) && !r.DryRun &&
 		r.ProposedFrom == ""
 	for _, p := range policies {
+		// A Rego policy plans an apply when its plan_gate rule says so, or when it cannot decide:
+		// the apply it then proposes faces the same policy again, which refuses it, so an
+		// undecidable policy never lets an unplanned apply through.
+		if p.Rego != nil {
+			if graded {
+				if d := p.Rego.Decide(r); d.Err != nil || d.PlanGate {
+					return true
+				}
+			}
+			continue
+		}
 		if p.MaxDestroy >= 0 && p.Matches(r) {
 			return true
 		}
@@ -386,7 +516,8 @@ func ExceedingDistinct(policies []*Policy, r *run.Run, destroys int) bool {
 
 // Store persists approval policies. Implementations must be safe for concurrent use.
 type Store interface {
-	// Save stores a policy, inserting or replacing by id.
+	// Save stores a policy, inserting or replacing by id. A Rego policy is refused with
+	// ErrRegoNotStored, since it is read from the policy file and has nowhere else to live.
 	Save(ctx context.Context, p *Policy) error
 	// Get returns the policy with the given id, or ErrNotFound when it does not exist.
 	Get(ctx context.Context, id string) (*Policy, error)
@@ -426,4 +557,17 @@ func reversibilityOf(r *run.Run) string {
 		return r.Reversibility.Class
 	}
 	return run.AssessReversibility(r).Class
+}
+
+// validateRego checks a Rego policy's shape. Its package decides everything, so a criterion set
+// beside it would read as narrowing the rule while changing nothing, and is refused.
+func (p *Policy) validateRego() error {
+	criteria := p.Tool != "" || p.CommandContains != "" || p.InventoryID != "" || p.Queue != "" ||
+		p.ActorKind != "" || p.Actor != "" || p.MinRisk != "" || p.Reversibility != "" ||
+		p.Effect != "" || p.ExcludeDryRun || p.RequireDistinctApprover || p.MaxDestroy >= 0
+	if criteria {
+		return fmt.Errorf("%w: a Rego policy decides in its package and cannot also set criteria",
+			ErrRego)
+	}
+	return nil
 }
