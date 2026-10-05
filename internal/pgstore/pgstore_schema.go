@@ -620,6 +620,7 @@ CREATE INDEX IF NOT EXISTS idx_notification_deliveries_target
 	ON notification_deliveries(notification_id, created_ms);
 ` + runEndsSchema + `
 ` + runEventsSchema + `
+` + secretLeasesSchema + `
 CREATE TABLE IF NOT EXISTS audit_entries (
 	id        TEXT PRIMARY KEY,
 	at        TEXT NOT NULL,

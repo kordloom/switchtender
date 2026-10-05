@@ -203,6 +203,7 @@ WHERE status = 'pending' AND claimed_by = ? AND claim_until_ms >= ? GROUP BY not
 // notification.ErrDeliveryLost when owner no longer holds it.
 func (s *notificationStore) Finish(ctx context.Context, d *notification.Delivery, owner string,
 	out notification.Outcome) error {
+	out.SanitizeText()
 	status, next, finished := out.Status, int64(0), int64(0)
 	switch status {
 	case notification.DeliveryDelivered, notification.DeliveryFailed,

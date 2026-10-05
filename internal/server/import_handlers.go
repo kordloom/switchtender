@@ -226,6 +226,10 @@ func importHandler(stores importStoresFunc, log *zap.Logger) http.HandlerFunc {
 				respondError(w, log, http.StatusConflict, err.Error())
 				return
 			}
+			if errors.Is(err, importer.ErrUnstorableText) {
+				respondError(w, log, http.StatusBadRequest, err.Error())
+				return
+			}
 			if err != nil {
 				log.Error("server: apply import: " + err.Error())
 				respondError(w, log, http.StatusInternalServerError, "could not apply import")

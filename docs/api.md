@@ -533,6 +533,25 @@ bound. See [the Ansible guide](tool-ansible.md#provisioning-callbacks) for how a
 how the launch is recorded, and [the migration
 guide](migration.md#the-awx-compatible-callback-address) for the AWX-compatible address.
 
+### What a request may carry
+
+A NUL byte or text that is not valid UTF-8 in the request path or a query parameter is refused with
+`400` before the request is routed, so it never reaches a store. A JSON body is held to the same
+rule: a string holding a NUL, written `\u0000`, is refused with `400` naming the field, such as
+`steps[1].name`. An import is checked the same way before it writes anything: an export holding
+such text in any object it would create is refused with `400` naming the object and the field.
+
+Some values are stored under an index and have a bound. Past it the request is refused with `400`
+stating the bound.
+
+| Value                                      | Bound     |
+|--------------------------------------------|-----------|
+| `Idempotency-Key` header                   | 255 bytes |
+| A run's, template's, or inventory's queue  | 255 bytes |
+| Username                                   | 255 bytes |
+| Token name                                 | 255 bytes |
+| The id a grant or a membership names       | 512 bytes |
+
 ## List responses
 
 Every list response is an envelope: the rows under a name, `count` for how many were returned, and

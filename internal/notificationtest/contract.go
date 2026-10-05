@@ -22,6 +22,7 @@ func Contract(t *testing.T, newStore func() notification.Store) {
 		testRoundTrip(t, newStore())
 	})
 	t.Run("update refuses a deleted target", func(t *testing.T) { testUpdate(t, newStore()) })
+	t.Run("unstorable reply text", func(t *testing.T) { testUnstorableFinishText(t, newStore()) })
 	t.Run("list is ordered and non-nil", func(t *testing.T) { testList(t, newStore()) })
 	t.Run("attachments by target and by object", func(t *testing.T) {
 		testAttachments(t, newStore())

@@ -162,6 +162,9 @@ func addTeamMemberHandler(store team.Store, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusBadRequest, "user_id is required")
 			return
 		}
+		if refuseLongReference(w, log, "user_id", req.UserID) {
+			return
+		}
 		if err := store.AddMember(r.Context(), id, req.UserID); err != nil {
 			log.Error("server: add team member: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not add member")

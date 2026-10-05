@@ -22,10 +22,16 @@ const replacement = "�"
 // bytes a playbook printed, it is to keep the record of what the run did. A visible replacement
 // character says something was unrepresentable; a stranded run says nothing at all.
 func SafeText(s string) string {
-	if utf8.ValidString(s) && !strings.ContainsRune(s, 0) {
+	if IsSafeText(s) {
 		return s
 	}
 	return strings.ReplaceAll(strings.ToValidUTF8(s, replacement), "\x00", replacement)
+}
+
+// IsSafeText reports whether every store keeps s as text unchanged: it is valid UTF-8 and holds no
+// NUL byte, the two things PostgreSQL refuses in a text value with SQLSTATE 22021.
+func IsSafeText(s string) bool {
+	return utf8.ValidString(s) && !strings.ContainsRune(s, 0)
 }
 
 // SafeTexts returns in with SafeText applied to every element, and the same slice when none changed.

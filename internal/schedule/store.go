@@ -5,6 +5,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // Store persists schedules. Implementations must be safe for concurrent use.
@@ -245,7 +247,7 @@ func (m *memStore) RecordFire(_ context.Context, id string, at time.Time, runID,
 	if runID != "" {
 		sc.LastRunID = runID
 	}
-	sc.LastError = failure
+	sc.LastError = util.SafeText(failure)
 	sc.LastSkip = ""
 	sc.SkippedFires = 0
 	return nil
@@ -262,7 +264,7 @@ func (m *memStore) RecordSkip(_ context.Context, id string, at time.Time, reason
 	when := at
 	sc.LastRunAt = &when
 	sc.LastError = ""
-	sc.LastSkip = reason
+	sc.LastSkip = util.SafeText(reason)
 	sc.SkippedFires++
 	return nil
 }

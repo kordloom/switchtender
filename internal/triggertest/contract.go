@@ -22,6 +22,7 @@ func Contract(t *testing.T, newStore func() trigger.Store) {
 	t.Run("signing secret", func(t *testing.T) { testSigning(t, newStore()) })
 	t.Run("review configuration", func(t *testing.T) { testReview(t, newStore()) })
 	t.Run("refusal record", func(t *testing.T) { testRefusal(t, newStore()) })
+	t.Run("unstorable refusal text", func(t *testing.T) { testUnstorableRefusal(t, newStore()) })
 }
 
 // testRefusal verifies the record of why a delivery started no run: RecordRefusal sets the reason and

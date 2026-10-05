@@ -52,6 +52,8 @@ type memStore struct {
 	owedEvents map[OwedEvent]time.Time
 	// budgets holds each allowance's open window, made on first use.
 	budgets map[string]*budgetWindow
+	// secretLeases holds the recorded revoke handles of minted secrets by id, made on first use.
+	secretLeases map[string]SecretLease
 	// parked marks a workflow parked at an approval step, the state the database stores keep as
 	// parked: it reads as pending_approval, a resume or a cancel may move it, and no decision may
 	// claim it as a run held before it started.

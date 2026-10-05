@@ -77,8 +77,14 @@ A source that authenticates with an attached managed identity holds no stored ke
 ## Ephemeral secrets
 
 A Vault dynamic source mints a new credential for each run and revokes it the moment the run ends, so
-a leaked value is useless minutes later. If the process dies before it can revoke, the credential
-still expires on the lease's own TTL. This is a control-plane capability neither incumbent offers.
+a leaked value is useless minutes later. The lease is also recorded in the database as a sealed
+revoke handle, so a process that dies before it can revoke does not leave the credential alive:
+once the janitor marks the run interrupted, any control node revokes it from the handle, whether
+the run executed on a control node or on a relay worker. A dynamic source a plugin adds gives no
+handle, and a credential it minted then expires on the lease's own TTL, as AWS STS credentials
+always do. The plan gate's own scan of a run at submission is the one other exception: a secret it
+opens is held for that scan alone and revoked when the scan ends, so a process that dies mid-scan
+leaves it to its TTL. This is a control-plane capability neither incumbent offers.
 
 ## Scope
 

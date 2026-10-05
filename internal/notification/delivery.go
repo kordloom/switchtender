@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // Delivery statuses.
@@ -266,6 +268,15 @@ type Outcome struct {
 	At time.Time
 	// NextAttemptAt is when a retried delivery may next be attempted.
 	NextAttemptAt time.Time
+}
+
+// SanitizeText replaces anything in the attempt's text that a text column cannot hold. The error is
+// what a mail server or an endpoint answered, which is somebody else's bytes: an SMTP reply holding
+// a NUL failed this write on PostgreSQL, the delivery stayed claimed until its claim ran out, and
+// it was retried and failed the same way for as long as the server ran.
+func (o *Outcome) SanitizeText() {
+	o.Error = util.SafeText(o.Error)
+	o.Note = util.SafeText(o.Note)
 }
 
 // DeliveryFilter selects deliveries to list.

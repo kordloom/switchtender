@@ -40,6 +40,10 @@ func createGrantHandler(store grant.Store, log *zap.Logger) http.HandlerFunc {
 		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
+		if refuseLongReference(w, log, "subject", req.Subject) ||
+			refuseLongReference(w, log, "object", req.Object) {
+			return
+		}
 		if !grant.ValidSubject(req.Subject) {
 			respondError(w, log, http.StatusBadRequest, "subject must be a user_ or team_ id")
 			return

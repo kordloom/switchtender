@@ -309,6 +309,7 @@ func (m *memStore) Finish(_ context.Context, d *Delivery, owner string, out Outc
 		return ErrDeliveryLost
 	}
 	have.Attempts++
+	out.SanitizeText()
 	have.LastError, have.Note = out.Error, out.Note
 	have.ClaimedBy, have.ClaimUntil = "", nil
 	switch out.Status {

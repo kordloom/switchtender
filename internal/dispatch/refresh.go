@@ -16,6 +16,7 @@ import (
 	"github.com/kordloom/switchtender/internal/invsource"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // WithSourceSync enables a background loop that refreshes dynamic inventory sources on their
@@ -43,9 +44,12 @@ func (d *Dispatcher) RefreshSource(ctx context.Context, id string) (*invsource.S
 		return nil, err
 	}
 
+	// A failure's text is what the inventory tool or plugin said, somebody else's bytes, so it is
+	// made storable before it is saved: unclean, the save failed on PostgreSQL, the error discarding
+	// it was dropped, and the broken source read as merely stale.
 	data, refreshErr := d.dumpSource(ctx, src)
 	if refreshErr != nil {
-		src.LastError = refreshErr.Error()
+		src.LastError = util.SafeText(refreshErr.Error())
 		_ = d.invSources.Save(ctx, src)
 		return src, refreshErr
 	}
@@ -56,7 +60,7 @@ func (d *Dispatcher) RefreshSource(ctx context.Context, id string) (*invsource.S
 	}
 	static, err := staticFromDump(data)
 	if err != nil {
-		src.LastError = "parse inventory dump: " + err.Error()
+		src.LastError = util.SafeText("parse inventory dump: " + err.Error())
 		_ = d.invSources.Save(ctx, src)
 		return src, fmt.Errorf("parse inventory dump: %w", err)
 	}

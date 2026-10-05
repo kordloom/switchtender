@@ -712,7 +712,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/tokens", listTokensHandler(s.tokens, s.log))
 	mux.Handle("POST /v1/tokens", createTokenHandler(s.tokens, s.users, s.log))
 	mux.Handle("DELETE /v1/tokens/{id}", deleteTokenHandler(s.tokens, s.log))
-	mux.Handle("POST /v1/auth/login", loginHandler(s.users, s.tokens, s.ldap, s.log))
+	mux.Handle("POST /v1/auth/login", loginHandler(s.users, s.tokens, s.ldap, s.store, s.log))
 	if s.oidc != nil {
 		mux.HandleFunc("GET /auth/oidc/login", s.oidc.login)
 		mux.HandleFunc("GET /auth/oidc/callback", s.oidc.callback)
@@ -880,7 +880,7 @@ func (s *Server) Handler() http.Handler {
 		handler = relayGate(relay.NewHandler(s.relayStore, pools, s.log, s.policies, s.audits,
 			opts...), handler)
 	}
-	return securityHeaders(bodyLimit(handler))
+	return securityHeaders(requestTextGuard(s.log, bodyLimit(handler)))
 }
 
 // orgResolver returns an OrgResolver that reads a grantable object's owning organization from the

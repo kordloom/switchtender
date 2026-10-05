@@ -196,8 +196,10 @@ const (
 // later claim reached the same control node, so a pool whose only worker died kept the minted
 // secret alive for as long as the control node ran, and a replica whose run finished through
 // another replica, or that was drained out of the load balancer, never revoked what it minted. A
-// control node that stops or restarts still loses what it held, since the means to revoke lives in
-// its memory, and those secrets expire on their own lifetimes, the same as a crashed executor's.
+// control node that stops or restarts loses what it held here, so the opener also records a revoke
+// handle in the store for every secret whose engine gives one, and any replica's sweep revokes it
+// once the claim ends. Only a secret whose engine gives no handle still expires on its own lifetime
+// when the node that minted it stops first.
 type heldReleases struct {
 	// mu guards byRun, lastSweep, and timer.
 	mu sync.Mutex

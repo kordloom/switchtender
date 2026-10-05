@@ -22,6 +22,7 @@ import (
 func Contract(t *testing.T, newStore func() schedule.Store) {
 	t.Helper()
 	t.Run("save and get", func(t *testing.T) { testSaveGet(t, newStore()) })
+	t.Run("unstorable fire text", func(t *testing.T) { testUnstorableFireText(t, newStore()) })
 	t.Run("get missing", func(t *testing.T) { testGetMissing(t, newStore()) })
 	t.Run("list ordered", func(t *testing.T) { testList(t, newStore()) })
 	t.Run("delete", func(t *testing.T) { testDelete(t, newStore()) })

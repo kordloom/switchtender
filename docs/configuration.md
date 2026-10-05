@@ -808,11 +808,21 @@ The rules it follows:
   file, and refuses to start with one.
 - Credential sources resolve on the control node, so a worker in an isolated segment needs no route
   to Vault or a cloud secret manager. A dynamic secret minted for the run is revoked when the worker
-  reports the run finished, or within thirty seconds of its claim ending any other way, which the
-  control node that minted it checks on its own timer: a worker that died, a run the janitor
-  interrupted, or a finish recorded through another replica. A control node stopped or restarted in
-  between forgets what it held, and such a secret then expires on its own lifetime, as it does when
-  any executor dies mid-run.
+  reports the run finished, or within about thirty seconds of its claim ending any other way: a
+  worker that died, a run the janitor interrupted or requeued, or a finish recorded through another
+  replica.
+- For a Vault dynamic secret the control node also records a revoke handle in the database: the
+  lease id and the Vault address, sealed with the encryption key, beside the run and the credential
+  that minted it. The secret itself is never stored, and the handle is never logged or returned by
+  the API. Every control node with the encryption key sweeps these records, so a secret is revoked
+  once its claim ends even when the node that minted it was stopped or restarted in between. The
+  revoke uses the credential's token, or `VAULT_TOKEN` for a credential that names the Vault in
+  `VAULT_ADDR`, and is refused when the credential now names another Vault. A revoke that fails is
+  retried with backoff until the lease would have expired anyway.
+- Two kinds of dynamic source give no handle. A dynamic source a plugin adds, whether compiled in
+  through the SDK or loaded as an external plugin, is revoked only by the control node that minted
+  it, so when that node stops first its secret expires on its own lifetime. AWS STS credentials
+  cannot be revoked early at all and always expire on their own lifetime.
 - A federated credential's token is minted on the control node, whose signing key never leaves it,
   for the mode the worker will execute: a plan for a dry run or for an apply a plan-content rule plans
   first, and an apply otherwise. A worker about to execute in the other mode refuses the token.

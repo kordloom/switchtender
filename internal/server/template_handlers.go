@@ -300,8 +300,7 @@ func createTemplateHandler(store template.Store, sealer *credential.Sealer, auth
 		}
 		// A template that targets a queue launches runs only a worker serving it can claim, and every
 		// worker is Team. Saved on Community it produced a template whose every launch stranded.
-		if qerr := allowQueue(req.Queue); qerr != nil {
-			respondError(w, log, http.StatusForbidden, qerr.Error())
+		if !admitQueue(w, log, req.Queue) {
 			return
 		}
 		t := &template.Template{
@@ -457,8 +456,7 @@ func updateTemplateHandler(store template.Store, sealer *credential.Sealer, auth
 			return
 		}
 		// Same gate on update, or the queue a create refuses can be added afterward.
-		if qerr := allowQueue(req.Queue); qerr != nil {
-			respondError(w, log, http.StatusForbidden, qerr.Error())
+		if !admitQueue(w, log, req.Queue) {
 			return
 		}
 		t := &template.Template{

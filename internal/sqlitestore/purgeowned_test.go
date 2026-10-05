@@ -18,10 +18,11 @@ var purgedBeforeRun = []string{"run_events", "run_logs"}
 
 // outliveRun are the tables whose rows outlive their run on purpose: the summaries and facts that
 // power the views across runs, stream tickets that expire on their own clock, the retained
-// readability decision, and the runs table itself.
+// readability decision, the runs table itself, and the records of minted secrets, which the sweep
+// deletes only once it has revoked the secret, a run that is gone being one reason it does.
 var outliveRun = []string{
 	"runs", "run_auth", "run_host_summary", "run_task_summary", "host_facts", "host_facts_history",
-	"host_fact_cache", "stream_tickets",
+	"host_fact_cache", "stream_tickets", "secret_leases",
 }
 
 // TestEveryTableHoldingARunIdIsPurgedOrKeptOnPurpose guards the class of defect behind rows that

@@ -10,6 +10,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/sqlutil"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // scheduleColumns is the shared select list for schedule reads.
@@ -183,7 +184,8 @@ UPDATE schedules SET
 	last_run_at=$1, last_run_id=COALESCE(NULLIF($2::text, ''), last_run_id), last_error=$3,
 	last_skip='', skipped_fires=0
 WHERE id=$4`
-	if _, err := s.db.ExecContext(ctx, q, sqlutil.FormatTime(at), runID, failure, id); err != nil {
+	if _, err := s.db.ExecContext(ctx, q, sqlutil.FormatTime(at), runID, util.SafeText(failure),
+		id); err != nil {
 		return fmt.Errorf("record schedule fire: %w", err)
 	}
 	return nil
@@ -198,7 +200,8 @@ func (s *scheduleStore) RecordSkip(ctx context.Context, id string, at time.Time,
 UPDATE schedules SET
 	last_run_at=$1, last_error='', last_skip=$2, skipped_fires=skipped_fires+1
 WHERE id=$3`
-	if _, err := s.db.ExecContext(ctx, q, sqlutil.FormatTime(at), reason, id); err != nil {
+	if _, err := s.db.ExecContext(ctx, q, sqlutil.FormatTime(at), util.SafeText(reason),
+		id); err != nil {
 		return fmt.Errorf("record schedule skip: %w", err)
 	}
 	return nil

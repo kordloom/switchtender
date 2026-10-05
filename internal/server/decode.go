@@ -1,10 +1,12 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"go.uber.org/zap"
@@ -70,20 +72,144 @@ func decodeForeign(data []byte, dst any) error {
 	return json.Unmarshal(data, dst)
 }
 
-// strictDecode decodes one JSON value from body into dst with unknown fields refused. It is the
-// single place the decoder is configured, so no call site can forget the setting.
+// strictDecode decodes one JSON value from body into dst with unknown fields refused, and refuses a
+// value whose strings hold a NUL character. It is the single place the decoder is configured, so no
+// call site can forget either rule.
+//
+// JSON spells a NUL as the escape \u0000, which is legal in any string, and encoding/json decodes
+// it into the byte itself. SQLite stores that byte and PostgreSQL refuses it with SQLSTATE 22021,
+// so a NUL in an inventory's, a template's, or a team's name was created on one backend and
+// answered 500 on the other. No field this server reads can hold one, so the body is refused and
+// the field named.
 func strictDecode(body io.Reader, dst any) error {
-	dec := json.NewDecoder(body)
+	var raw json.RawMessage
+	if err := json.NewDecoder(body).Decode(&raw); err != nil {
+		return err
+	}
+	if bytes.Contains(raw, []byte(`\u0000`)) {
+		if err := findNUL(raw); err != nil {
+			return err
+		}
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	return dec.Decode(dst)
 }
 
+// nulFieldError reports a request body whose strings hold a NUL character.
+type nulFieldError struct {
+	// path is where the string sits, such as steps[2].name, empty for the body's own value.
+	path string
+	// inName is true when the NUL is in a field's name rather than its value, and then path names
+	// the object holding that field.
+	inName bool
+}
+
+// Error describes where the NUL sits.
+func (e *nulFieldError) Error() string {
+	where := strconv.Quote(util.Clip(e.path, unknownFieldNameCap))
+	switch {
+	case e.inName && e.path == "":
+		return "a field name in the request body holds a NUL character"
+	case e.inName:
+		return "a field name in " + where + " in the request body holds a NUL character"
+	case e.path == "":
+		return "the request body holds a NUL character"
+	default:
+		return "the field " + where + " in the request body holds a NUL character"
+	}
+}
+
+// bodyFrame is one open object or array while findNUL walks a body.
+type bodyFrame struct {
+	// object is true for an object and false for an array.
+	object bool
+	// key is the name of the object's field being read.
+	key string
+	// wantKey is true when the object's next string is a field name.
+	wantKey bool
+	// index is the position of the array's element being read.
+	index int
+}
+
+// findNUL walks the JSON document data and returns a nulFieldError for the first string, field name
+// or value, that holds a NUL character, or nil when none does. data is already known to be valid
+// JSON, so the walk only tracks where it is.
+func findNUL(data []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	var stack []bodyFrame
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil
+		}
+		top := len(stack) - 1
+		if name, ok := tok.(string); ok && top >= 0 && stack[top].object && stack[top].wantKey {
+			if strings.ContainsRune(name, 0) {
+				return &nulFieldError{path: bodyPath(stack[:top]), inName: true}
+			}
+			stack[top].key, stack[top].wantKey = name, false
+			continue
+		}
+		if top >= 0 && !stack[top].object && tok != json.Delim(']') {
+			stack[top].index++
+		}
+		switch t := tok.(type) {
+		case json.Delim:
+			switch t {
+			case '{':
+				stack = append(stack, bodyFrame{object: true, wantKey: true})
+			case '[':
+				stack = append(stack, bodyFrame{index: -1})
+			default:
+				stack = stack[:top]
+				valueRead(stack)
+			}
+		case string:
+			if strings.ContainsRune(t, 0) {
+				return &nulFieldError{path: bodyPath(stack)}
+			}
+			valueRead(stack)
+		default:
+			valueRead(stack)
+		}
+	}
+}
+
+// valueRead records that the innermost object's current field has its whole value, so the next
+// string in it is a name.
+func valueRead(stack []bodyFrame) {
+	if n := len(stack); n > 0 && stack[n-1].object {
+		stack[n-1].wantKey = true
+	}
+}
+
+// bodyPath renders the position stack describes, as steps[2].name.
+func bodyPath(stack []bodyFrame) string {
+	var b strings.Builder
+	for _, f := range stack {
+		if !f.object {
+			b.WriteString("[" + strconv.Itoa(f.index) + "]")
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteByte('.')
+		}
+		b.WriteString(f.key)
+	}
+	return b.String()
+}
+
 // decodeErrorMessage renders a decode failure for the caller. An unknown field is named, because a
-// caller who misspelled a control needs to know which word was wrong; anything else is the generic
-// bad body message.
+// caller who misspelled a control needs to know which word was wrong, and so is a field holding a
+// NUL character. Anything else is the generic bad body message.
 func decodeErrorMessage(err error) string {
 	if name, ok := strings.CutPrefix(err.Error(), unknownFieldPrefix); ok {
 		return "unknown field " + util.Clip(name, unknownFieldNameCap) + " in the request body"
+	}
+	var nul *nulFieldError
+	if errors.As(err, &nul) {
+		return nul.Error()
 	}
 	return badBodyMessage
 }

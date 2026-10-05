@@ -134,6 +134,8 @@ cross-process decision already happens in the store:
 - Live run pages poll the shared store, so a browser on one replica watches a run executing on
   another, painted as it happens.
 - Sessions and tokens live in the store, so a sign-in on one replica works on all of them.
+- Sign-in attempts are counted in the store on its clock, so an address or an account gets its
+  sign-in budget once across the install rather than once per replica.
 
 When a replica dies, its leases go stale and any survivor's janitor requeues the work, which the
 integration suite proves with two replicas on one PostgreSQL: shared claiming with no double-claim,
@@ -237,7 +239,8 @@ claim, so two servers running the same cron entry never double-fire.
 
 A submission is deduplicated when it carries a key. `POST /v1/runs` and `POST /v1/pipelines` take an
 `Idempotency-Key` header, kept per organization, so a client that retries a submit it already sent
-is answered with the run the first one made rather than a second run. Without the header each call
+is answered with the run the first one made rather than a second run. A key may be up to 255 bytes,
+and a longer one is refused with `400`. Without the header each call
 creates a new run with a fresh identifier, so a client that cannot send one should treat a submit as
 create-once on its side. The server keys what it launches itself the same way: a rerun, a webhook
 delivery, and a provisioning callback are deduplicated on what they carry, and each scheduled fire

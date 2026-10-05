@@ -194,6 +194,9 @@ func addOrgMemberHandler(store org.Store, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusBadRequest, "user_id is required")
 			return
 		}
+		if refuseLongReference(w, log, "user_id", req.UserID) {
+			return
+		}
 		role := req.Role
 		if role == "" {
 			role = org.RoleMember

@@ -9,6 +9,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/sqlutil"
 	"github.com/kordloom/switchtender/internal/trigger"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // triggerColumns is the shared select list for trigger reads.
@@ -174,7 +175,7 @@ func (s *triggerStore) TouchFired(ctx context.Context, id string, at time.Time) 
 func (s *triggerStore) RecordRefusal(ctx context.Context, id string, at time.Time, reason string) error {
 	if _, err := s.db.ExecContext(ctx,
 		"UPDATE triggers SET last_error = ?, last_error_at = ? WHERE id = ?",
-		reason, sqlutil.FormatTime(at), id); err != nil {
+		util.SafeText(reason), sqlutil.FormatTime(at), id); err != nil {
 		return fmt.Errorf("record trigger refusal: %w", err)
 	}
 	return nil

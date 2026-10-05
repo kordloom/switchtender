@@ -329,12 +329,15 @@ func (d *Dispatcher) applyDefaultImage(spec *roundhouse.Spec) {
 // The returned cleanup is always safe to call, including on the error paths.
 func (d *Dispatcher) resolvePullCredential(ctx context.Context, id string,
 	spec *roundhouse.Spec) (cleanup func(), err error) {
-	return d.resolvePullFrom(ctx, storeSource{d: d}, id, spec)
+	return d.resolvePullFrom(ctx, storeSource{d: d}, nil, id, spec)
 }
 
 // resolvePullFrom is resolvePullCredential with the login taken from src, so a relay worker pulls
-// with the login the control node delivered rather than one it has no store to open.
-func (d *Dispatcher) resolvePullFrom(ctx context.Context, src secretSource, id string,
+// with the login the control node delivered rather than one it has no store to open. r is the
+// claimed run the login is opened to execute, whose claim a minted login's recorded handle is bound
+// to, or nil for a login opened outside any claim, such as the plan gate's at submission, which is
+// held for one bounded scan and recorded nowhere.
+func (d *Dispatcher) resolvePullFrom(ctx context.Context, src secretSource, r *run.Run, id string,
 	spec *roundhouse.Spec) (cleanup func(), err error) {
 	cleanup = func() {}
 	if id == "" {
@@ -350,7 +353,11 @@ func (d *Dispatcher) resolvePullFrom(ctx context.Context, src secretSource, id s
 		return cleanup, fmt.Errorf("pull credential %s: %w", id, err)
 	}
 	if lease != nil {
-		cleanup = func() { d.revokeLease(lease) }
+		leases := &runLeases{d: d, r: r}
+		cleanup = leases.release
+		if lerr := leases.add(ctx, id, lease); lerr != nil {
+			return cleanup, fmt.Errorf("pull credential %s: %w", id, lerr)
+		}
 	}
 	spec.RegistryUsername, spec.RegistryPassword = credential.RegistryLogin(plain)
 	return cleanup, nil

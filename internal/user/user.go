@@ -48,7 +48,26 @@ var (
 	// ErrBadProfile is returned when a profile field is unusable: too long, or a link that is not an
 	// ordinary web address.
 	ErrBadProfile = errors.New("invalid profile field")
+	// ErrUsernameTooLong is returned when a username is longer than MaxUsernameBytes.
+	ErrUsernameTooLong = errors.New("username too long")
 )
+
+// MaxUsernameBytes bounds a username. A username is stored under a unique index and is the actor
+// every run and audit entry the account makes is indexed by, and PostgreSQL refuses an index entry
+// past about 2.7 kilobytes. A longer name that did not compress, from an administrator or from a
+// directory's claim, created an account that could not be saved or one whose every action the audit
+// trail then refused. An email address, the longest name a directory sends, is at most 254 bytes.
+const MaxUsernameBytes = 255
+
+// CheckUsername returns ErrUsernameTooLong, stating the limit, for a username longer than
+// MaxUsernameBytes.
+func CheckUsername(username string) error {
+	if len(username) > MaxUsernameBytes {
+		return fmt.Errorf("%w: a username may be at most %d bytes, and this one is %d",
+			ErrUsernameTooLong, MaxUsernameBytes, len(username))
+	}
+	return nil
+}
 
 // Profile field bounds. They are generous for real names, addresses, and notes, and exist so an
 // account cannot be used to store unbounded text in a column an admin page renders.
@@ -196,6 +215,9 @@ type Store interface {
 func New(username, password string, role Role) (*User, error) {
 	if !ValidRole(role) {
 		return nil, ErrBadRole
+	}
+	if err := CheckUsername(username); err != nil {
+		return nil, err
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
