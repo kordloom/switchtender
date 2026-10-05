@@ -992,9 +992,6 @@ AND column_name IN ('playbook', 'inventory', 'status')`).Scan(&ours); err != nil
 // pgUniqueViolation is the PostgreSQL SQLSTATE code for a unique constraint or index violation.
 const pgUniqueViolation = "23505"
 
-// isKeyConflict reports whether a keyed insert failed because another run already holds the
-// idempotency key. A runs insert carrying a key can only trip the idempotency-key unique index, its
-// primary-key conflict being absorbed by ON CONFLICT(id), so a unique violation on one is that race
 // schemaIsCurrent reports whether applying the schema would change nothing, so the caller can skip
 // the migration entirely.
 //
