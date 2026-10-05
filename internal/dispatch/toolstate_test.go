@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -60,15 +62,27 @@ mkdir -p "$dir" && printf '[core]\n%s\n' "$3" > "$dir/config"
 dir="${KUBECACHEDIR:-$HOME/.kube/cache}/discovery/fake"
 mkdir -p "$dir" && printf '{}' > "$dir/servergroups.json"
 `
-	// botocoreProbe resolves the paths botocore reads its config and credentials from and writes a
-	// login token through botocore's own cache, the way it saves one after aws login.
-	botocoreProbe = `import botocore.session, botocore.utils
+	// botocoreProbe resolves the paths botocore reads its config and credentials from. Then, for
+	// each botocore.utils function its arguments name, it writes an entry through botocore's own
+	// cache in the directory the function returns, the way botocore saves a token after aws login.
+	// It skips a function this botocore does not define.
+	botocoreProbe = `import sys, botocore.session, botocore.utils
 s = botocore.session.Session()
 for name in ("config_file", "credentials_file"):
     print(s.get_config_variable(name))
-botocore.utils.JSONFileCache(botocore.utils.get_login_token_cache_directory())["run"] = {"t": "x"}
+for name in sys.argv[1:]:
+    where = getattr(botocore.utils, name, None)
+    if where is not None:
+        botocore.utils.JSONFileCache(where())["run"] = {"t": "x"}
 `
 )
+
+// botocoreCaches maps each botocore function that returns the directory of a cache SwitchTender
+// moves to where under the run directory's tools directory that cache belongs. A botocore older
+// than a function has no such cache, so it has nothing there to misplace.
+var botocoreCaches = map[string]string{
+	"get_login_token_cache_directory": filepath.Join("aws", "login-cache"),
+}
 
 // toolStateVars are the variables SwitchTender sets to move tool state into a run directory. The
 // control run removes them, to show where the tool writes without them.
@@ -115,6 +129,18 @@ func botocorePython() string {
 		}
 	}
 	return ""
+}
+
+// botocoreCachesIn returns the functions of botocoreCaches that the botocore under python defines.
+func botocoreCachesIn(python string) []string {
+	const has = "import sys, botocore.utils; sys.exit(not hasattr(botocore.utils, sys.argv[1]))"
+	var out []string
+	for _, name := range slices.Sorted(maps.Keys(botocoreCaches)) {
+		if exec.Command(python, "-c", has, name).Run() == nil {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // filesUnder lists the regular files below dir, relative to it.
@@ -223,6 +249,10 @@ func TestCredentialedRunsKeepToolStateInTheRunDirectory(t *testing.T) {
 	t.Parallel()
 	kube := fakeKubeAPI(t)
 	python := botocorePython()
+	var caches []string
+	if python != "" {
+		caches = botocoreCachesIn(python)
+	}
 	kubeconfig := "apiVersion: v1\nkind: Config\nclusters:\n- name: c\n  cluster:\n    server: " +
 		kube.URL + "\ncontexts:\n- name: c\n  context:\n    cluster: c\n    user: u\n" +
 		"current-context: c\nusers:\n- name: u\n  user:\n    token: kube-token-secret\n"
@@ -273,7 +303,8 @@ func TestCredentialedRunsKeepToolStateInTheRunDirectory(t *testing.T) {
 				if err := os.WriteFile(probe, []byte(botocoreProbe), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				extra = append(extra, []string{python, probe})
+				extra = append(extra, append([]string{python, probe},
+					slices.Sorted(maps.Keys(botocoreCaches))...))
 			}
 			c := test.Cred
 			c.ID, c.Name = "cred_tool", "tool-state"
@@ -308,13 +339,17 @@ func TestCredentialedRunsKeepToolStateInTheRunDirectory(t *testing.T) {
 			if look.err != nil {
 				t.Fatalf("the tool failed (installed: %v): %v", real, look.err)
 			}
-			t.Logf("%s: installed tool %v, botocore %q, wrote %v", test.Tool, real, python, look.inTools)
+			t.Logf("%s: installed tool %v, botocore %q with caches %v, wrote %v", test.Tool, real,
+				python, caches, look.inTools)
 			if len(look.inTools) == 0 {
 				t.Errorf("the tool wrote nothing under the run directory's tools directory")
 			}
-			if len(extra) > 0 && !containsString(look.inTools,
-				filepath.Join("aws", "login-cache", "run.json")) {
-				t.Errorf("botocore's login cache did not land in the run directory: %v", look.inTools)
+			for _, name := range caches {
+				want := filepath.Join(botocoreCaches[name], "run.json")
+				if len(extra) > 0 && !slices.Contains(look.inTools, want) {
+					t.Errorf("the botocore cache %s names did not land in the run directory: %v",
+						name, look.inTools)
+				}
 			}
 			for _, f := range look.inTools {
 				if !strings.HasPrefix(f, test.WantArea+string(filepath.Separator)) {
