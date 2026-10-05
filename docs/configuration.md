@@ -20,7 +20,7 @@ believes it has a control it does not have.
 | Capability | Tier | Turned on by |
 |------------|------|--------------|
 | Directory sign-in (OIDC, SAML, LDAP, JWT) | Pro | Any `--oidc-*`, `--saml-*`, `--ldap-*`, or `--jwt-*` flag. `serve` refuses to start with one set and no license. |
-| The full policy engine: deny rules, risk floors, actor scoping, distinct-approver separation of duties | Team | Creating a policy that uses one. A single require-approval policy stays Community. |
+| The full policy engine: deny rules, risk and reversibility floors, actor scoping, distinct-approver separation of duties, and Rego policies | Team | Creating a policy that uses one. A single require-approval policy or one exemption stays Community. |
 | More approval policies at once | Pro holds five, Team is uncapped | Creating policies. Community holds one. |
 | The period change register | Team | `audit report`, and `GET /v1/audit/register`. |
 | Distributed workers | Team | Every `switchtender worker`, whether it shares the database or reaches the server over the mesh relay with `--server`. |
@@ -112,7 +112,7 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--ldap-user-filter` | `(uid=%s)` | Search filter with one `%s` for the username. |
 | `--ldap-default-role` | `viewer` | Role for an account created on first directory sign-in. |
 | `--ldap-role-map` | none | Map a directory group to a role as `groupDN=role`. A matched group sets the role on every sign-in. Repeatable. |
-| `--public-url` | none | Public base URL of this server, such as `https://switchtender.example.com`. A [pull request review](pull-request-review.md) links its comment and commit status to the run under it. Empty posts run ids without links. |
+| `--public-url` | none | Public base URL of this server, such as `https://switchtender.example.com`. A [pull request review](pull-request-review.md) links its comment and commit status to the run under it. Empty posts run ids without links. Linking a forge account through `--forge-oauth` needs it, since the forge sends the person back to this address. |
 | `--saml-idp-metadata-url` | none | SAML IdP metadata URL to enable SAML sign-in. Empty leaves SAML off. |
 | `--saml-base-url` | none | Public base URL of this server, used to build the SAML entity id and ACS endpoint. |
 | `--saml-cert` | none | Path to the service provider certificate, PEM. |
@@ -236,7 +236,7 @@ node over the mesh relay, with no database access of its own.
 
 | Flag | Default | Purpose |
 |------|---------|---------|
-| `--db` | `switchtender.db` | SQLite file path, or a `postgres://` DSN. Ignored with `--server`. |
+| `--db` | `switchtender.db` | SQLite file path, or a `postgres://` DSN. With `--server` the worker opens no database, and the value only places the [managed Ansible runtime](ansible-runtime.md#where-it-lives), in `ansible/` beside it. |
 | `--server` | none | Control node base URL to lease runs from over the mesh relay, for example `https://switchtender.example.com`. When set, the worker needs no database and dials one outbound connection. Token from `SWITCHTENDER_WORKER_TOKEN`. |
 | `--name` | host and pid | Worker name stamped on the runs it executes. |
 | `--queue` | none | Queue this worker serves. Repeatable. Without any, it serves the default pool. |
@@ -294,9 +294,10 @@ supports must be installed.
   installs offline from a directory of wheels, relative to where the command runs, checked against
   the same hashes. `--index-url` downloads from a mirror instead of PyPI. pip's own environment
   variables and configuration files are not read. Installing an installed release verifies it and
-  changes nothing else.
+  makes it the one runs use, reinstalling nothing.
 - `ansible list` prints the installed releases and which one is current.
-- `ansible remove [--version <release>]` removes one release, or every release and the directory.
+- `ansible remove [--version <release>]` removes one release, or every release and the directory
+  when nothing else is in it.
 - `ansible lock [--version <release>]` prints the requirements lock a release installs from.
 
 Every `ansible` subcommand takes `--dir` for the runtime directory, which defaults to
@@ -317,7 +318,7 @@ Manages API tokens. A public bind on an empty database mints an initial admin to
   manage identity, access, or secrets, and can never approve its own held run. Every action it takes
   is recorded in the chain as `actor_type: agent` with the account it acts for beside it, which is
   what `actor_kind: agent` policy rules match on. Every run such a token asks for waits for a
-  person's approval unless a written policy exempts it, as
+  person's approval unless a rule with `effect: exempt` covers it, as
   [Agent runs are held by default](policy.md#agent-runs-are-held-by-default) describes. It requires
   `--user`, so the chain always records the human the agent acts for. Without one the command
   refuses. Mint every agent token with it: a token without `--agent` is indistinguishable from a
@@ -534,11 +535,12 @@ key satisfies trivially.
 
 ## mcp
 
-Serves the Model Context Protocol over stdio, so an agent can list templates, propose a run, and read
-what happened. Every tool call is an ordinary authenticated API request carrying the token given
-here, so it passes the same authorization, the same approval policy, and the same fail-closed audit
-append as a request from a person. A run it proposes waits for a person's approval unless a written
-policy exempts it. See [Agents](agents.md).
+Serves the Model Context Protocol over stdio, so an agent can list templates, propose a run, and
+read what happened. Every tool call is an ordinary authenticated API request carrying the token
+given here, so it passes the same authorization, the same approval policy, and the same fail-closed
+audit append as a request from a person. A run it proposes waits for a person's approval unless a
+rule with `effect: exempt` covers it, as [agent runs are held by
+default](policy.md#agent-runs-are-held-by-default) describes. See [Agents](agents.md).
 
     export SWITCHTENDER_MCP_TOKEN=swt_...
     switchtender mcp --server https://switchtender.internal

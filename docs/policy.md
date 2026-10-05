@@ -343,7 +343,8 @@ A person's staging run without a ticket label goes ahead carrying the note
 held by `production-advice`. A run in any other project is decided by neither entry.
 `GET /v1/projects` lists each project's id.
 An agent's run is [held by default](#agent-runs-are-held-by-default) whatever these entries decide,
-unless an exemption covers it, and it still carries the staging note, so the approver sees it.
+unless a rule with `effect: exempt` covers it, and it still carries the staging note, so the
+approver sees it.
 
 The same shape scopes a warning to one job instead of a project. A rule reads the playbook the job
 runs, `input.run.playbook`, or `input.run.template_id`, which names the template however the run was
@@ -412,8 +413,8 @@ an empty value when the run has none, so a module never meets a missing field.
 | `run.change_free` | Whether the run is a dry run that changes nothing: `dry_run` is true and `dry_run_findings` is empty. |
 | `run.kind` | Empty for a plain run, or `split` or `pipeline` for a coordinator. |
 | `run.step_name` | The pipeline step's name, for a step. |
-| `run.source` | What fired the run: `manual`, `api`, `template`, `schedule`, `rerun`, `reconcile`, or `propose`. |
-| `run.source_id` | The template or schedule behind `run.source`, or the origin run of a rerun. |
+| `run.source` | What fired the run: `api`, `template`, `schedule`, `trigger`, `callback`, `rerun`, `relaunch`, `reconcile`, `propose`, `review` for a pull request plan, or `review_apply` for an apply a pull request comment proposed. |
+| `run.source_id` | The template or schedule behind `run.source`, the origin run of a rerun, or the plan run a comment's apply was proposed from. |
 | `run.template_id` | The job template the run executes, however it was fired: launched directly, by a schedule, by a trigger, or by a callback, and carried to a rerun, a retry, a shard, and a pipeline step. Empty for a run no template launched. |
 | `run.proposed_from` | The plan run an apply was proposed from, empty otherwise. |
 | `run.intent` | The plain-language request an AI proposal was built from. |
@@ -423,8 +424,8 @@ an empty value when the run has none, so a module never meets a missing field.
 | `run.extra_var_names` | The names of the extra variables, sorted. Values are withheld, since they are where secrets ride. |
 | `run.credential_ids` | The stored credentials the run executes with, by id. |
 | `actor.name` | The token label or username that fired the run. For an agent, its token's label. |
-| `actor.type` | How it authenticated: `agent`, `session`, `token`, `cli`, or `webhook`. |
-| `actor.kind` | `agent`, `human`, or `other` for a webhook, a schedule, or an unknown source. |
+| `actor.type` | How it authenticated: `agent`, `session`, `token`, `cli`, `forge_comment` for a person commenting from the forge account linked to their SwitchTender account, `webhook`, or `host` for a provisioning callback. |
+| `actor.kind` | `agent`, `human` for a session, a person's token, the command line, or a forge comment, or `other` for a webhook, a schedule, a callback, or an unknown source. |
 | `actor.account` | The id of the account behind the credential. For an agent, the account it acts for. A YAML rule's `account` matches the account's username instead. |
 | `plan.planned` | Whether a plan has been read for this apply. |
 | `plan.destroys` | How many resources the plan destroys, or null when nothing was planned. |

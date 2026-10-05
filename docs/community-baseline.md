@@ -17,5 +17,5 @@ list is free forever; paid tiers only ever add.
 - One approval policy, digest-bound: a held run is approved as the exact content the approver saw
 - The full evidence engine: hash chain, RFC 3161 anchoring, signed per-run receipts, the run dossier, and offline verification with the open verifier
 - Sealed credentials with secrets masking in logs
-- The MCP agent gate: an AI agent gets one operator-bound token and can only propose runs through the same approvals a person faces, and every run it proposes waits for a person unless a written policy exempts it
+- The MCP agent gate: an AI agent gets one operator-bound token and can only propose runs through the same approvals a person faces
 - Advisory AI, read-only; community support on GitHub

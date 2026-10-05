@@ -16,6 +16,7 @@ the app at `/ui/docs`.
 | Guide | What |
 |-------|------|
 | [Quickstart](quickstart.md) | Zero to a first run in a few minutes.|
+| [Upgrading](upgrading.md) | What an install on v1.102.0 notices when it upgrades, and what to do about each change.|
 | [Switching from AWX](switching-from-awx.md) | Import projects, inventories, templates, workflows, surveys, schedules, notification templates, and organizations with a dry run first, or set up from scratch.|
 | [Tutorials](tutorials.md) | Task-focused walk-throughs for everyday work.|
 | [Concepts](concepts.md) | Runs, splits, pipelines, projects, templates, and the rest.|

@@ -9,16 +9,19 @@ checks every file pip installs against a hash this binary carries:
     switchtender ansible install
 
 Runs, inventory resolution, the inventory cross-check, project requirements installs, and doctor
-use it from the next run on, with no restart. A run looks up its Ansible once, when it starts, and
-its inventory reads, its play, and its evidence all use that one, whatever an install or a remove
-does while it runs. It is still a separate program: the server starts its `ansible-playbook` and
-`ansible-inventory` the same way it starts the ones on PATH.
+use it from the next run on, with no restart. A smart or constructed inventory is resolved when the
+run is submitted, with the Ansible in use at that moment. When the run starts, it looks up its
+Ansible once more, and its cross-check, its play, and their evidence use that one, whatever an
+install or a remove does while it runs. It is still a separate program: the server starts its
+`ansible-playbook` and `ansible-inventory` the same way it starts the ones on PATH.
 
 The container image already ships Ansible on PATH and does not need it.
 
 ## What it needs
 
-A `python3` that the release supports as a control node, with its `venv` module:
+A `python3` that the release supports as a control node, with its `venv` module, and access to
+PyPI, a mirror named with `--index-url`, or a directory of wheels, as described under
+[offline installs](#offline-installs):
 
 | ansible-core | Python |
 |--------------|--------|
@@ -30,10 +33,13 @@ A `python3` that the release supports as a control node, with its `venv` module:
 | 2.21.4 | 3.12 to 3.14 |
 
 The install tries `python3` on PATH, then `python3.N` for each version in the range, newest first.
-`--python` names an interpreter instead. When none fits, the install stops before it changes
-anything and says which range the release needs and which interpreters it found. On Debian and
-Ubuntu the `venv` module is a separate package, such as `python3.12-venv`, and the install names the
-package when it is missing.
+`--python` names an interpreter instead. When none fits, the install stops before it builds an
+environment and says which range the release needs and which interpreters it found. The default
+release needs Python 3.12 or newer, so on an older Python pick an older release: `--version 2.19`
+on Python 3.11, and `--version 2.17` on Python 3.10. The `python3` macOS ships is 3.9, which no
+pinned release supports, so install a newer Python there first. On Debian and Ubuntu the `venv`
+module is a separate package, such as `python3.12-venv`, and the install names the package when it
+is missing.
 
 ansible-core does not run on Windows as a control node, so the install refuses there.
 
@@ -54,9 +60,9 @@ environment count as installed and makes it current. An install never deletes or
 existing environment. A failed install removes only the directory it was building and leaves
 `current` as it was, so the runtime in use before stays in use.
 
-Running the install again for an installed release verifies it and stops, as long as this
-binary's lock for that release has not changed. Installing another release keeps the first one and
-makes the new one current.
+Running the install again for an installed release verifies it and makes it the one in use, with
+nothing reinstalled, as long as this binary's lock for that release has not changed. Installing
+another release keeps the first one and makes the new one current.
 
 The install prints pip's progress to standard error and the result as JSON to standard output.
 
@@ -83,6 +89,18 @@ new one verifies.
 Run the install as the account the server runs as, pointed at the same database or directory. The
 install prints the directory it used. Doctor shows the directory the server looks in, and an error
 that says Ansible is needed gives the install line with that directory in it.
+
+`switchtender desktop` keeps its database in a per-user directory, `~/Library/Application
+Support/SwitchTender` on macOS and `~/.config/SwitchTender` on Linux, so point the install at the
+`ansible` directory inside it:
+
+    switchtender ansible install --dir "$HOME/Library/Application Support/SwitchTender/ansible"
+
+Each worker runs its plays with its own Ansible, so install on every worker host as the worker's
+account. A worker looks in `ansible/` beside its `--db` value, and a relay worker started with
+`--server` does too, although it opens no database. A worker on a shared PostgreSQL database looks
+in `switchtender/ansible` in its account's configuration directory. `--ansible-runtime-dir` on
+`worker` makes the location explicit.
 
 The runtime directory, every directory above it, and everything in an environment must belong to
 the account that uses it or to root, and no other account may be able to write them. The install
@@ -174,18 +192,21 @@ and configuration files are not read.
 
 `list` prints every installed environment, the Python each one runs, and which one is current.
 `remove` with a version removes every environment of that release, and when one of them was in use
-the newest one left becomes current. `remove` alone removes every release and the runtime
-directory, and runs go back to the Ansible on PATH. Only directories the installer made are
-removed. A remove refuses, removing nothing, while a play or an inventory read is running from an
-environment it would delete. Run it again once they finish.
+the newest one left becomes current. `remove` alone removes every release, and the runtime directory
+too when nothing else is in it, and runs go back to the Ansible on PATH. Only directories the
+installer made are removed. A remove refuses, removing nothing, while a play or an inventory read is
+running from an environment it would delete. Run it again once they finish.
 
 ## Evidence and doctor
 
 When Ansible resolves a smart or constructed inventory, or cross-checks a natively resolved one
 before a play, the run's record names the ansible-core version and where it came from: `managed`,
-`configured`, `path`, or `image`. Both come from the one lookup the run made when it started, the
-same one its play runs from. The run dossier reads, for example, "Ansible, ansible-core 2.21.4 from
-the managed runtime". The outcome record commits to both.
+`configured`, `path`, or `image`. A cross-check comes from the lookup the run made when it started,
+the same one its play runs from. A smart or constructed inventory's resolution comes from the
+lookup made when the run was submitted, so a run that waited for approval while the runtime changed
+records the release that resolved its inventory, which can differ from the one its play ran. The
+run dossier reads, for example, "Ansible, ansible-core 2.21.4 from the managed runtime". The outcome
+record commits to both.
 
 Doctor, at `/ui/doctor` and `GET /v1/doctor`, reports the server's ansible-core version, where its
 commands come from, their directory, and the runtime directory it looks in, and warns when the

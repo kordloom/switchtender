@@ -183,7 +183,7 @@
 			<div class="section-head reveal">
 				<h2>Evidence you can <span class="grad">hand to an auditor.</span></h2>
 				<p class="proof-dare">Don't take the receipts on faith. Pull the live demo's signed history with <code>curl</code> and check it with LoomSeal: Apache-2.0, a published format with conformance vectors, and a second implementation in Python. We publish LoomSeal too, so what you are trusting is the format and the vectors, not our word.</p>
-				<p class="proof-dare">Or make it prove itself the hard way: <code>scripts/prove.sh</code> in <a href="https://github.com/kordloom/switchtender">the repository</a> starts a server, gives an AI agent a token of its own, has it propose a real deletion, watches policy hold it, refuses the agent's attempt to approve itself, lets a person with their own token release it, performs the deletion for real, then verifies the signed record against the server's published key and requires verification to fail after altering one recorded byte. About a minute, and every step is a real request the server decides. The <a href="https://github.com/kordloom/switchtender/actions/workflows/supertest.yml">supertest</a> does the same and more against a fresh Kubernetes cluster on every push to main.</p>
+				<p class="proof-dare">Or make it prove itself the hard way: <code>scripts/prove.sh</code> in <a href="https://github.com/kordloom/switchtender">the repository</a> starts a server, gives an AI agent a token of its own, writes no approval policy, has the agent propose a real deletion, watches the built-in hold on agent runs stop it, refuses the agent's attempt to approve itself, lets a person with their own token release it, performs the deletion for real, then verifies the signed record against the server's published key and requires verification to fail after the script rewrites who asked. About a minute, and every step is a real request the server decides. The <a href="https://github.com/kordloom/switchtender/actions/workflows/supertest.yml">supertest</a> does the same and more against a fresh Kubernetes cluster on every push to main.</p>
 				<p>Most controllers keep an activity log: rows in their own database, editable by whoever holds the database. SwitchTender writes every change into a hash chain, then gives you six ways to carry the proof out of the building. What changed, who asked, and who approved it become things you show, not things you say. Every claim on this page is defended adversary by adversary, limits included, in the <a href="/docs/threat-model">threat model</a>.</p>
 			</div>
 			<div class="cards cards-3">
@@ -295,7 +295,7 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 				<article class="card reveal">
 					<div class="ic ic-tools"></div>
 					<h3>Multi-tool engine</h3>
-					<p>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, each with a dry run. One engine, one UI, one audit trail, on the host or in a pinned container image. Need an eighth? Write it in Go and plug it in.</p>
+					<p>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go. One engine, one UI, one audit trail, on the host or in a pinned container image. Ansible check mode and a Terraform or OpenTofu plan preview a change before it runs. Need an eighth? Write it in Go and plug it in.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-shards"></div>
@@ -325,7 +325,7 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 				<article class="card reveal">
 					<div class="ic ic-gate"></div>
 					<h3>Enforced approvals</h3>
-					<p>Hold risky runs for sign-off, gated by policy on tool, command, or target. Operators request, admins release. No skipping the gate. An approval binds what will run: a static, smart, or constructed inventory as snapshotted at submission, the container image by the digest its registry serves, or by its tag, said plainly, when the registry does not answer, and for a Terraform or OpenTofu apply the saved plan the apply carries out, however it came to be held. Community holds one policy. The full engine, with deny rules, risk floors, actor scoping, and distinct-approver separation of duties, is Team.</p>
+					<p>Hold risky runs for sign-off, gated by policy on tool, command, or target, and an agent token's runs are held with no policy written. Operators request, admins release. No skipping the gate. An approval binds what will run: a static, smart, or constructed inventory as snapshotted at submission, the container image by the digest its registry serves, or by its tag, said plainly, when the registry does not answer, and for a Terraform or OpenTofu apply the saved plan the apply carries out, however it came to be held. Community holds one plain rule, a require-approval policy or one exemption. The full engine, with deny rules, risk floors, actor scoping, and distinct-approver separation of duties, is Team.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-roles"></div>
@@ -400,7 +400,7 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 				<article class="card reveal">
 					<div class="ic ic-lineage"></div>
 					<h3>Plans on pull requests</h3>
-					<p>A review trigger plans a GitHub or GitLab pull request at its head commit in the tool's no-change mode and posts the result on the pull request as one comment per template, updated in place on every push, with a commit status beside it.</p>
+					<p>A review trigger plans a GitHub or GitLab pull request at its head commit in the tool's no-change mode and posts the result on the pull request as one comment per template, updated in place on every push, with a commit status beside it. A person whose GitHub or GitLab account is linked can comment <code>/switchtender apply</code> to approve and apply the reported plan, with the same role, grants, and separation of duties as the approval queue. <a href="/docs/pull-request-review">How it works</a>.</p>
 				</article>
 			</div>
 		</section>
@@ -421,7 +421,7 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 			<div class="section-head reveal">
 				<span class="eyebrow">AI agent change governance</span>
 				<h2>Agents are principals here, not API keys.</h2>
-				<p>An agent's token is minted as an agent's, naming the human it acts for, and capped below admin so it can never approve its own work or touch identity, access, or secrets. Agents can propose changes. Only authorized humans can approve them. An agent's run waits for a person's approval unless a written policy exempts it, and the receipt then proves who approved exactly the change that ran, or which rule exempted it. A dry run the scans prove change-free may proceed. On Team, rules can also refuse outright and require an approver other than the human the agent acts for. Every agent run lands in the chain as the agent's, on behalf of its human. <strong>We govern what agents are allowed to do.</strong></p>
+				<p>An agent's token is minted as an agent's, naming the human it acts for, and capped below admin so it can never approve its own work or touch identity, access, or secrets. Agents can propose changes. Only authorized humans can approve them. An agent's run waits for a person's approval with no policy written, unless <a href="/docs/policy#agent-runs-are-held-by-default">a rule with <code>effect: exempt</code></a> covers it, and the receipt then proves who approved exactly the change that ran, or which rule exempted it. A dry run the scans prove change-free may proceed, and its receipt records the dry run rather than an approval. On Team, rules can also refuse outright and require an approver other than the human the agent acts for. Every agent run lands in the chain as the agent's, on behalf of its human. <strong>We govern what agents are allowed to do.</strong></p>
 			</div>
 			<div class="hero-cta center reveal">
 				<a class="btn big" href="/agents">Run an agent with proof</a>
@@ -487,7 +487,7 @@ func main() {
 					<tbody>
 						<tr><td>Deploy without Kubernetes</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><span class="muted">VM installer</span></td><td><i class="y"></i></td><td><i class="y"></i></td></tr>
 						<tr><td>Live host-by-task matrix</td><td class="us"><i class="y"></i></td><td><span class="muted">per-host summary</span></td><td><span class="muted">per-host summary</span></td><td><i class="n"></i></td><td><span class="muted">per-node, per-step</span></td></tr>
-						<tr><td>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</td><td class="us"><i class="y"></i></td><td><span class="muted">Ansible only</span></td><td><span class="muted">Ansible only</span></td><td><span class="muted">no Go, no uniform dry run</span></td><td><span class="muted">scripts, no native IaC</span></td></tr>
+						<tr><td>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</td><td class="us"><i class="y"></i></td><td><span class="muted">Ansible only</span></td><td><span class="muted">Ansible only</span></td><td><span class="muted">no Go</span></td><td><span class="muted">scripts, no native IaC</span></td></tr>
 						<tr><td>Duration-balanced job splitting</td><td class="us"><i class="y"></i></td><td><span class="muted">round-robin</span></td><td><span class="muted">round-robin</span></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Fleet memory: flaky hosts, trends</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Tamper-evident, signed audit</td><td class="us"><i class="y"></i></td><td><span class="muted">activity log</span></td><td><span class="muted">activity log</span></td><td><i class="n"></i></td><td><span class="muted">activity log</span></td></tr>
@@ -519,6 +519,10 @@ func main() {
 				<pre><code><span class="c"># install (or grab a release binary)</span>
 go install github.com/kordloom/switchtender@latest
 
+<span class="c"># Ansible runs need ansible-core: skip this if it is on your PATH,</span>
+<span class="c"># or install a pinned, hash-checked one beside the database</span>
+switchtender ansible install
+
 <span class="c"># serve: SQLite by default, PostgreSQL optional</span>
 switchtender serve --addr :8080 --db switchtender.db
 
@@ -540,7 +544,7 @@ open http://localhost:8080/ui/</code></pre>
 
 <section class="cta wrap reveal">
 			<h2>Every finished run leaves a receipt.</h2>
-			<p>Who asked, who approved, what changed on every host, and proof that none of it was edited after the fact. Human or AI agent, the record is the same, and anyone can check it offline without trusting your server or ours.</p>
+			<p>Who asked, who approved it when a person had to, what changed on every host, and proof that none of it was edited after the fact. Human or AI agent, the record is the same, and anyone can check it offline without trusting your server or ours.</p>
 				<p class="hero-note" style="text-align:center;margin-top:8px">Self-hosted, nothing phones home, and a lapsed license takes nothing with it. You never bet your operations on our survival.</p>
 			<div class="hero-cta center">
 				<a class="btn big" href="/get-started">Get started</a>

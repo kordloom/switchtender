@@ -38,7 +38,7 @@ just live behind a smaller, faster surface.
 | Workflow | Pipeline, ordered steps or a dependency graph.|
 | Instance group | Worker queue.|
 | Execution node on a Receptor mesh | Relay worker, which dials out to the control node and receives each run's credentials sealed to its pool's delivery key. See [Delivering secrets to relay workers](configuration.md#delivering-secrets-to-relay-workers).|
-| Execution environment | A container image pinned on a project.|
+| Execution environment | A container image pinned on a template, a run, or a project, once `--allow-container-ee` is on and the host has Docker or Podman. Without one, a run uses the server's own ansible-core: the one on the PATH, or a pinned one `switchtender ansible install` sets up beside the database. See [managed Ansible runtime](ansible-runtime.md).|
 | Fact cache, `use_fact_cache` | The template's `use_fact_cache`, the same jsonfile cache with a timeout per template.|
 | Provisioning callback | The template's `allow_callbacks` and host config key, at `/v1/templates/{id}/callback`, and for a template imported from AWX also at its old AWX address, `/api/v2/job_templates/{awx id}/callback/`.|
 
@@ -197,9 +197,12 @@ schedule its template.
   approval node with an always edge is the exception: it would run the next node whatever the
   approver decides, so that workflow is reported and not imported rather than imported without its
   gate. Who may approve follows your roles and approval policies rather than the AWX approval role.
-- Import creates objects that belong to no organization. Under the default access model that leaves
-  them usable by every operator, which matches how a single-team install already works. If you run
-  with strict grants, imported objects have no grants yet, so assign them after importing.
+- Import places a template or an inventory in an organization only when the export brings that
+  organization across, through a smart inventory it owns or notification templates attached to it,
+  as the [migration guide](migration.md) describes. Everything else belongs to no organization.
+  Under the default access model that leaves it usable by every operator, which matches how a
+  single-team install already works. If you run with strict grants, imported objects have no
+  grants yet and AWX memberships are not imported, so assign access after importing.
 - A provisioning callback keeps the template's own limit unless the template's `callback_limit` is
   `replace`: a calling host the limit does not select gets no run, where AWX launches for it. The
   import report names every template this applies to.

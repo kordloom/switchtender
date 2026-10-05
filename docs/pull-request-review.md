@@ -52,7 +52,8 @@ Its commit status stays `pending` until then.
 The plan is the template's own run with three changes:
 
 - It runs in the tool's no-change mode: `terraform plan` or `tofu plan` with a detailed exit code,
-  `ansible-playbook --check --diff`, and a syntax check for Bash, Python, PowerShell, and Go.
+  `ansible-playbook --check --diff`, and for Bash, Python, PowerShell, and Go a check of the script
+  that does not run it, which previews nothing.
 - It is pinned to the head commit the webhook named and fetched from the ref the base repository
   publishes that commit under: `refs/pull/N/head` on GitHub and `refs/merge-requests/N/head` on
   GitLab. If the pull request moved on before the plan started, the plan refuses to run rather than
@@ -207,7 +208,7 @@ cannot be recorded is refused, the same as a push trigger's fire:
 | `/hooks/<trigger>/review/<N>/report` | A comment and status are about to be posted. The entry commits to the plan run, the phase, the commit, the status state, and the SHA-256 of the exact comment body, or to `comment_skipped` with the reason no comment is written: `superseded` when a newer push's plan holds the comment, `fork` for a fork's refusal, `no_hosts` for a plan skipped because its inventory matched no hosts. A report that cannot be recorded is not posted, and a report retried after a failed write is not recorded twice. |
 | `/hooks/<trigger>/review/<N>/failed` | The plan could not be launched after the forge was already answered, so the failure is recorded here and in the server log. |
 | `/hooks/<trigger>/review/<N>/comment/<comment>/<command>` | A new comment carrying `/switchtender plan` or `/switchtender apply` arrived, before anything acts on it. The entry commits to the forge, the repository, the pull request, the comment's and its author's numeric ids, the SHA-256 of the comment body, and the command. A comment that cannot be recorded does nothing. |
-| `/hooks/<trigger>/review/<N>/comment/<comment>/<command>/<result>` | How the command ended: `accepted` for a plan handed to the review's own plan path, which records its own entries, `applied`, or `refused/` with the reason, such as `refused/unlinked`, `refused/fork`, `refused/bot`, `refused/head_moved`, or `refused/separation_of_duties`, and the run it launched or decided. |
+| `/hooks/<trigger>/review/<N>/comment/<comment>/<command>/<result>` | How the command ended: `accepted` for a plan handed to the review's own plan path, which records its own entries, `applied`, or `refused/` with the reason, such as `refused/unlinked`, `refused/fork`, `refused/bot`, `refused/head_moved`, or `refused/separation_of_duties`, or `failed/` with the step that failed on the server's side, such as `failed/forge`, and the run it launched or decided. |
 | `/runs/<run>/decision/approved` | An apply was approved from a comment. The entry commits to the comment as described in [what the evidence holds](#what-the-evidence-holds). |
 
 ## How reporting holds up
@@ -355,8 +356,8 @@ queue. Its result is reported in the same comment and commit status as every oth
 current head, one its author could have read:
 
 - `/switchtender apply PLAN` applies exactly that plan, while it is still the head's current plan.
-  A plan of an older commit, or one a newer plan of the same commit replaced, is refused, and the
-  reply names the plan to use.
+  A plan of an older commit is refused with both commits named, and one that a newer plan of the
+  same commit replaced is refused with the newer plan's id.
 - A bare `/switchtender apply` is taken only when the head has one reported plan and it was reported
   before the comment was written. Otherwise nothing is applied, and the reply names the plan id to
   comment with.
@@ -386,7 +387,7 @@ author from approving their own change, whoever asked for the apply first.
 | The forge does not hold the comment as delivered, or it is more than 24 hours old | Nothing, and no reply. |
 | The commenter's forge account is not linked | One reply saying how to link, pointing at the Linked accounts page when `--public-url` is set, once per commenter on each pull request. |
 | GitHub marks the comment as written by an app on its author's behalf | One reply. An agent working through an app may propose changes and never approve them. |
-| The commenter is a bot: a GitHub account of type Bot, or a GitLab bot user | One reply saying bots cannot plan or apply, linked or not. |
+| The commenter is a bot: a GitHub account of type Bot, or a GitLab bot user | One reply saying bots cannot plan or apply. A bot account cannot be linked, so a bot that is not linked gets the reply for an unlinked account instead. |
 | The pull request is closed | One reply. |
 | SwitchTender has reported no plan for the pull request | One reply. Comment `/switchtender plan` first. |
 | The pull request's head moved since the plan | One reply naming both commits. Nothing is applied until the new head's plan is reported. |
@@ -397,7 +398,10 @@ author from approving their own change, whoever asked for the apply first.
 | The account lacks the role or a grant | One reply. An operator's apply is proposed and left waiting. |
 | A rule requires a different approver than the pull request's author or the person who asked for the apply | The apply stays held, and one reply says so. Another linked approver's `/switchtender apply` approves it, or an approver releases it in SwitchTender. |
 | A rule requires a reason to approve | The apply stays held. A comment carries no reason, so approve it in SwitchTender. |
-| The plan's apply was already decided | One reply naming the apply's run. |
+| The plan's apply was already decided, or was decided while the comment was on its way | One reply naming the apply's run. |
+| A rule refuses the apply, or routes it to a queue this install's license does not cover | One reply. Nothing is applied. |
+| The template cannot be planned for a pull request, such as a workflow template | One reply saying why. |
+| Something failed on SwitchTender's side, such as a call to the forge | One reply saying the command did nothing. Comment again to retry. |
 
 ### What a comment costs
 
@@ -430,12 +434,14 @@ comment afterward cannot plan, apply, or change what was approved.
 
 ### What the evidence holds
 
-The decision's chain entry commits the forge, the repository, the pull request, the comment's
-numeric id, its author's numeric id, and the SHA-256 of the comment body as the forge holds it, and
-the plan run whose plan it approved. The decision is recorded under the commenter's SwitchTender
-account with the decider type `forge_comment`. The run's decisions, its evidence dossier, and its
-page in SwitchTender show that the decision came from a comment, with those ids and the
-fingerprint. An edit to the comment or its deletion afterward changes none of it.
+The decision's chain entry commits the forge and its API base, the repository, the pull request,
+the comment's numeric id, its author's numeric id, and the SHA-256 of the comment body as the forge
+holds it, and the plan run whose plan it approved. The decision is recorded under the commenter's
+SwitchTender account with the decider type `forge_comment`. The run's decisions, its evidence
+dossier, and its page in SwitchTender show that the decision came from a comment, with those ids and
+the fingerprint, and a receipt for the run discloses the same comment in the decision's body, where
+a verifier checks it against the digest the chain committed. An edit to the comment or its deletion
+afterward changes none of it.
 
 ### Security
 

@@ -92,22 +92,26 @@ one-command AWX import is the on-ramp.
 Eight stages, one gate, no side doors. Five of them are the ones a change-control review asks about:
 
 **1. Request.** Every change enters through one submission path: the API, the UI, a template launch,
-a schedule, a webhook, or an AI agent over MCP. The request is recorded on the tamper-evident hash
-chain before anything acts on it, with who asked, how they authenticated, and a commitment to
-exactly what was asked. A change that cannot be recorded is refused, not performed silently.
+a schedule, a webhook, a pull request comment, or an AI agent over MCP. The request is recorded on
+the tamper-evident hash chain before anything acts on it, with who asked, how they authenticated,
+and a commitment to exactly what was asked. A change that cannot be recorded is refused, not
+performed silently.
 
 **2. Policy.** A separable, fail-closed engine decides before execution: proceed, hold for a
 person's sign-off, or refuse outright. Policies match on the tool, the command, the target
 inventory, the assessed risk of the operation, and who is asking, so an agent's request can face
-rules a person's request does not. Policies live in the database or in a reviewed YAML file, and a
-gate that cannot be evaluated refuses the run rather than waving it through. Terraform and OpenTofu
-get a second, content-aware gate: the plan runs first, and an apply that would destroy more than the
-policy allows is held with the plan attached.
+rules a person's request does not, and a run an agent asks for is held for a person even when no
+rule is written. Policies live in the database or in a reviewed YAML file, and a gate that cannot be
+evaluated refuses the run rather than waving it through. Terraform and OpenTofu get a second,
+content-aware gate: the plan runs first, and an apply that would destroy more than the policy allows
+is held with the plan attached.
 
-**3. Approval.** A held run cannot be claimed by any executor until an approver releases it. The
-decision is itself a chain entry: it names the approver and commits a digest of the exact spec being
-released, so an approval binds to content, not to a run id whose meaning could drift. The executor
-recomputes that digest before running and refuses a spec that changed after the decision.
+**3. Approval.** A held run cannot be claimed by any executor until an approver releases it, in the
+UI, over the API, or with a `/switchtender apply` comment on a GitHub or GitLab pull request,
+written from the forge account the approver linked. The decision is itself a chain entry: it names
+the approver and commits a digest of the exact spec being released, so an approval binds to content,
+not to a run id whose meaning could drift. The executor recomputes that digest before running and
+refuses a spec that changed after the decision.
 
 **4. Execution.** Local workers, shared-database workers, or relay workers across a network
 boundary, with opt-in container execution for every built-in tool. The same policies gate execution wherever the
@@ -146,30 +150,34 @@ guessed from traffic:
   to. It can launch and propose work, but it can never manage identity, access, or secrets, and it
   can never approve a run, including its own. That holds by construction. The person the agent acts
   for may approve its runs unless a Team rule requires a different approver.
-- **Its own rules.** An agent's run waits for a person's approval unless a written policy exempts
-  it, on every tier, and a dry run the scans prove change-free may proceed. Policies can also name
-  what an agent may never do and what needs a person first. Scoping rules by actor, grading them by
-  risk, and refusing outright are the full policy engine, which Team covers:
+- **Its own rules.** An agent's run waits for a person's approval on every tier with no policy
+  written, unless a rule with `effect: exempt` covers it, and a dry run the scans prove change free
+  may proceed ([Agent runs are held by default](docs/policy.md#agent-runs-are-held-by-default)).
+  Rules can do what the default hold does not: refuse what an agent may never ask for, so no person
+  can release it either, and require that someone other than the person the agent acts for approve
+  a change nobody can take back. An exemption lifts only the default hold, so a rule like these
+  still applies to a run it covers. Scoping rules by actor, grading them by risk or reversibility,
+  requiring a distinct approver, and refusing outright are the full policy engine, which Team
+  covers:
 
       policies:
         - name: agents-never-drop-databases
           actor_kind: agent
           command_contains: "drop database"
           effect: deny
-        - name: agent-destructive-needs-a-person
+        - name: agent-irreversible-needs-another-person
           actor_kind: agent
-          min_risk: high
-        - name: agent-terraform-needs-a-person
-          actor_kind: agent
-          tool: terraform
+          reversibility: irreversible
+          require_distinct_approver: true
 
 - **Attributed forever.** Every action lands in the chain as `actor_type: agent`, on behalf of the
   named human, committed by the entry hash, so a change an agent made cannot later be presented as
   a person's.
 - **The same receipt.** The run an agent requested and a person approved produces the same signed,
   offline-verifiable receipt as any other change, showing the agent asked, the person approved
-  exactly this spec, and this is what happened. A run a written policy exempted shows which rule
-  let it through instead.
+  exactly this spec, and this is what happened. A run a rule with `effect: exempt` let through
+  names that rule instead, and a dry run the scans let through records that it was a dry run and
+  what the scans read, with no approval in it.
 
 The MCP server (`switchtender mcp`) is how an agent talks to the gate: it can list templates,
 propose runs, and read results, and it deliberately has no approve tool, no credential access, and
@@ -192,10 +200,11 @@ in the run's summary, with screenshots of the deployed UI in the artifacts.
 
 Two smaller proofs travel with the repository. `scripts/prove.sh` walks the whole claim in about a
 minute against a server it starts itself, with a real token for the agent and another for the
-person: the agent proposes a destructive change, policy holds it, the agent is refused when it tries
-to approve itself, a person approves the exact content, the deletion really happens, and the signed
-record verifies against the server's published key until one recorded byte is altered. And before you
-migrate anything:
+person, and with no approval policy written: the agent proposes a destructive change, the built-in
+hold on agent runs holds it, the agent is refused when it tries to approve itself, a person approves
+the exact content, the deletion really happens, and the signed record verifies against the server's
+published key, then fails verification once the script rewrites who asked. And before you migrate
+anything:
 
     switchtender assess awx export.json
 
@@ -249,6 +258,13 @@ covers that, the cosign signature CI-built releases carry, installing the Linux 
 container image, which is verified with cosign instead. Or build from source:
 
     go build -o switchtender .
+
+Ansible runs need ansible-core, which the binary does not carry. If `ansible-playbook` is not on
+your PATH, install a pinned, hash-checked one beside the database, from the directory you will serve
+in. It needs a `python3` the release supports, 3.12 to 3.14 for the default, and
+[Ansible runtime](docs/ansible-runtime.md) covers older Pythons and offline installs:
+
+    switchtender ansible install
 
 Then serve:
 
@@ -317,6 +333,7 @@ The docs live in [docs/](docs/) and also render inside the app at `/ui/docs`.
 | Guide | What |
 |-------|------|
 | [Quickstart](docs/quickstart.md) | Zero to a first run in a few minutes |
+| [Upgrading](docs/upgrading.md) | What an existing install notices on upgrade, and what to do |
 | [Switching from AWX](docs/switching-from-awx.md) | Import what you have, or set up from scratch |
 | [Concepts](docs/concepts.md) | Runs, splits, pipelines, projects, templates, and the rest |
 | [Configuration](docs/configuration.md) | Every command, flag, and environment variable |
@@ -363,8 +380,8 @@ required.
 
 Version 1.x. Source-available under the Business Source License 1.1. The execution engine, the
 control plane, and the one-command migration off AWX, Semaphore, Rundeck, Jenkins, and cron are
-complete. The HTTP API is served under a stable `/v1` base path and follows semantic versioning, so
-no breaking change lands within the 1.x line.
+complete. The HTTP API is served under a stable `/v1` base path. A change an existing install
+notices on upgrade is listed in [Upgrading](docs/upgrading.md), with what to do about it.
 
 ## History
 
@@ -378,16 +395,18 @@ from v1.101.0 on is built and signed from this repository.
 
 Business Source License 1.1. Read the source, run it, and use it in production. Community is free
 and complete for leaving AWX: all seven engines, the importers, RBAC with organizations and teams,
-one digest-bound approval policy, the MCP agent gate, and the whole evidence engine with signed
-receipts and offline verification. Pro adds directory sign-in (OIDC, SAML, LDAP, JWT) and five
-approval policies at $500 a year. Team adds the full policy engine, creating a new PostgreSQL
-schema (opening one that exists, and running active-active HA on it, is never gated), distributed
-workers, the change register, and one-click drift reconcile. Every paid feature
-unlocks in the same binary with a signed license file: no license server, no phone-home, flat
-per org. The one
-reserved right is offering SwitchTender to third parties as a hosted or managed service that
-provides its primary functionality. Each version converts to Apache-2.0 two years after its
-release.
+the agent gate, which holds an agent token's runs for a person with no rule written, one plain rule
+of your own, either a require-approval policy or one exemption, approvals bound to the exact content
+released, and the whole evidence engine with signed receipts and offline verification. Pro adds
+directory sign-in (OIDC, SAML, LDAP, JWT) and five approval policies at $500 a year for up to 500
+hosts. Team, from $9,900 a year by fleet band, adds the full policy engine, creating a new
+PostgreSQL schema (opening one that exists, and running active-active HA on it, is never gated),
+distributed workers, the change register, and one-click drift reconcile. Enterprise, from $75,000 a
+year, adds services that come from outside your install, such as the hosted witness and evidence
+custody. Every paid feature unlocks in the same binary with a signed license file: no license
+server, no phone-home, flat per org. The one reserved right is offering SwitchTender to third
+parties as a hosted or managed service that provides its primary functionality. Each version
+converts to Apache-2.0 two years after its release.
 
 See `LICENSE` for the exact terms and [`LICENSING.md`](LICENSING.md) for what self-hosting grants,
 how a commercial license works, and how to ask about support.

@@ -9,10 +9,12 @@
 
 ## Runs
 
-A run is one execution of a playbook against an inventory. SwitchTender shells out to
-`ansible-playbook` and captures both a human log and a structured event stream through an embedded
-callback plugin, so a run is queryable data, not just scrollback. Every run records its status,
-timing, exit code, the extra vars going in, and the `set_stats` outputs coming out.
+A run is one execution of a tool: a playbook against an inventory, a script, or a Terraform or
+OpenTofu working directory. For Ansible, SwitchTender shells out to `ansible-playbook`, from the
+PATH or from the pinned ansible-core [`switchtender ansible install`](ansible-runtime.md) sets up,
+and captures both a human log and a structured event stream through an embedded callback plugin, so
+a run is queryable data, not just scrollback. Every run records its status, timing, exit code, the
+extra vars going in, and the `set_stats` outputs coming out.
 
 ## Splits
 
@@ -296,10 +298,10 @@ question. Held as rows they are changed by anyone the API lets through, and the 
 indistinguishable from the row before it.
 
 One rule needs no file and no row. A run an AI agent asked for is held for a person by default,
-named `requested by an agent, held by default`, until a stored rule with `effect: exempt` says that
-run may go ahead. People's runs are unaffected. [Agent runs are held by
-default](policy.md#agent-runs-are-held-by-default) covers the exemption, what it risks, and the
-upgrade.
+named `requested by an agent, held by default`, unless a stored rule with `effect: exempt` covers it
+or it is a dry run the gate proves changes nothing. People's runs are unaffected. [Agent runs are
+held by default](policy.md#agent-runs-are-held-by-default) covers the exemption, what it risks, and
+the upgrade.
 
 Point `--policy-file` at a YAML file and that file becomes the source of truth:
 
@@ -472,22 +474,22 @@ An operator can request the run, but only an admin can release it, so duties are
 `require_distinct_approver` on the policy and the separation covers admins too: the person who asked
 for the change cannot be the one who approves it, and the requirement is recorded on the run at the
 moment it is held, so editing the policy afterward cannot loosen a decision already pending. A run
-submitted by an AI agent is held this way by default, with no policy written first, unless an
-exemption covers it, and it is released the same way, only by a human admin, so an operator-bound
-agent never approves its own work. See
-[Agent runs are held by default](policy.md#agent-runs-are-held-by-default). Both the request and
-the decision are recorded in the audit trail, making who asked for a change and who signed off
-provable. A Terraform or OpenTofu apply marked this way is planned first instead, and the apply its
-plan proposes is what waits, carrying the saved plan the approval binds.
+submitted by an AI agent is held this way by default, with no policy written first, unless a rule
+with `effect: exempt` covers it, and it is released the same way, only by a human admin, so an
+operator-bound agent never approves its own work. See [Agent runs are held by
+default](policy.md#agent-runs-are-held-by-default). Both the request and the decision are recorded
+in the audit trail, making who asked for a change and who signed off provable. A Terraform or
+OpenTofu apply marked this way is planned first instead, and the apply its plan proposes is what
+waits, carrying the saved plan the approval binds.
 
 A pull request comment is one more way to decide. A person whose GitHub or GitLab account is linked
 to their SwitchTender account can comment `/switchtender apply` on a pull request, naming the plan
-id its report showed, which approves the apply of that plan as their SwitchTender account, with the
-same admin role, grants, and separation of duties as the queue. The comment is read back from the
-forge before it decides, a bot's comment or one an app wrote for its author is refused, and the
-decision's chain entry records the comment's and its author's numeric ids, the SHA-256 of its body,
-and the plan it approved. See [planning and applying from a
-comment](pull-request-review.md#planning-and-applying-from-a-comment).
+id its report showed, or naming none when the head has one plan reported before the comment, which
+approves the apply of that plan as their SwitchTender account, with the same admin role, grants, and
+separation of duties as the queue. The comment is read back from the forge before it decides, a
+bot's comment or one an app wrote for its author is refused, and the decision's chain entry records
+the comment's and its author's numeric ids, the SHA-256 of its body, and the plan it approved. See
+[planning and applying from a comment](pull-request-review.md#planning-and-applying-from-a-comment).
 
 Approval can also be required by policy rather than by choice. A policy matches runs by tool, command
 text, or target inventory, and any matching run is held automatically at submission, so the gate

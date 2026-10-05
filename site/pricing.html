@@ -4,10 +4,10 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Pricing | SwitchTender</title>
-	<meta name="description" content="Automation is free. Audit season is not. Running every tool and proving what ran cost nothing, on any number of hosts. You pay for directory sign-in, more than one approval policy, active-active HA, and the period change register assembled from your real run history.">
+	<meta name="description" content="Automation is free. Audit season is not. Running every tool and proving what ran cost nothing, on any number of hosts. You pay for directory sign-in, more than one approval rule, creating the PostgreSQL schema that active-active HA runs on, and the period change register assembled from your real run history.">
 	<link rel="canonical" href="https://switchtender.com/pricing">
 	<meta property="og:title" content="Pricing | SwitchTender">
-	<meta property="og:description" content="Automation is free. Audit season is not. Running every tool and proving what ran cost nothing, on any number of hosts. You pay for directory sign-in, more than one approval policy, active-active HA, and the period change register assembled from your real run history.">
+	<meta property="og:description" content="Automation is free. Audit season is not. Running every tool and proving what ran cost nothing, on any number of hosts. You pay for directory sign-in, more than one approval rule, creating the PostgreSQL schema that active-active HA runs on, and the period change register assembled from your real run history.">
 	<meta property="og:type" content="website">
 	<meta property="og:url" content="https://switchtender.com/pricing">
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
@@ -239,10 +239,10 @@
 							<li>Live host-by-task matrix, balanced splits, fleet memory, and drift detection</li>
 							<li>Drag-and-drop workflow editor, pipelines, schedules, webhooks, notifications</li>
 							<li>Local users with roles, organizations, and teams</li>
-							<li><b>One approval policy</b>, digest-bound: a held run is approved as the exact content the approver saw</li>
+							<li><b>One plain rule</b>, either a require-approval policy or one exemption, with every approval digest-bound: a held run is approved as the exact content the approver saw</li>
 							<li>The full evidence engine: hash chain, RFC 3161 anchoring, signed per-run receipts, the run dossier, and offline verification with the open verifier</li>
 							<li>Sealed credentials with secrets masking in logs</li>
-							<li>The <b>MCP agent gate</b>: an AI agent gets one operator-bound token, its runs wait for a person's approval unless a written policy exempts them, and it can never approve one</li>
+							<li>The <b>MCP agent gate</b>: an AI agent gets one operator-bound token, its runs wait for a person's approval with no policy written, unless <a href="/docs/policy#agent-runs-are-held-by-default" style="color: var(--accent);">a rule with <code>effect: exempt</code></a> covers them, and it can never approve one</li>
 							<li>Advisory AI that can propose a run and never runs one, and community support on GitHub</li>
 						</ul>
 					</div>
@@ -258,7 +258,7 @@
 						<a class="ghost" href="mailto:licensing@switchtender.com?subject=Buy%20SwitchTender%20Pro">Buy Pro</a>
 					</div>
 					<div class="tier-body">
-						<div class="tier-payoff">Community gates changes with one policy, which is one sentence about your whole estate. Pro is for when production needs a rule of its own, and people should sign in from the directory you already run. <b>A lapsed license takes nothing</b>: sign-in falls back to local accounts, and your data, evidence, and every Community feature keep working.</div>
+						<div class="tier-payoff">Community gives you the built-in hold on agent runs and one rule of your own, and one rule is one sentence about your whole estate. Pro is for when production needs a rule of its own, and people should sign in from the directory you already run. <b>A lapsed license takes nothing</b>: sign-in falls back to local accounts, and your data, evidence, and every Community feature keep working.</div>
 						<p class="tier-inherit">Everything in Community, plus:</p>
 						<ul class="tier-list">
 							<li><b>Five approval policies</b> instead of one, so production, Terraform, and a risky command can each have a rule of their own where one rule has to choose. Deny rules, risk and reversibility floors, separation of duties, and agent scoping are the full engine, in Team</li>

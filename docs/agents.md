@@ -51,8 +51,9 @@ launch templates. It cannot approve runs, manage configuration, or read the audi
 held run is admin-only, so an operator-bound agent can never approve its own work.
 
 Agents can propose changes. Only authorized humans can approve them. Separation of duties can
-require an independent human when policy demands it. An approval comes from a person's session or a
-person's own token, never from an agent's.
+require an independent human when policy demands it. An approval comes from a person's session, a
+person's own token, or a pull request comment from the forge account a person linked, never from an
+agent's.
 
 That holds on two independent locks. The door caps an agent's token below the role every approval
 route needs. Behind it, the dispatcher refuses any approval whose decider is an agent, for a held run
@@ -130,31 +131,32 @@ review, fails the build when a new path appears without a test proving an agent 
            tool: terraform
            command_contains: destroy
 
-   Policies also see who is asking, how risky the operation grades, and can refuse outright rather
-   than hold. That is what turns a policy file into an agent's authorization scope: what it may do
-   freely, what needs a person first, and what it may never do at all:
+   Policies also see who is asking, how risky the operation grades, and how hard it is to undo, and
+   they can refuse outright rather than hold. The default hold already makes an agent's runs wait
+   for a person, so the rules worth writing for an agent are the ones it does not cover: what the
+   agent may never do at all, and which of its changes need a second person:
 
        policies:
          - name: agents-never-drop-databases
            actor_kind: agent
            command_contains: "drop database"
            effect: deny
-         - name: agent-destructive-needs-a-person
+         - name: agent-high-risk-needs-another-person
            actor_kind: agent
            min_risk: high
-         - name: agent-terraform-needs-a-person
-           actor_kind: agent
-           tool: terraform
+           require_distinct_approver: true
 
    `actor_kind: agent` scopes a rule to runs an agent submitted, identified by its minted token,
    never guessed from traffic. `actor: prod-remediator` pins a rule to one named principal, and
    `account: dev-lead` to the account a token is bound to, which tells apart two agents that share
-   a label. `min_risk` matches on the run's assessed risk grade, so "destructive operations need a person"
-   is one line. `effect: deny` refuses the submission outright, and the refused request is still on the
+   a label. `min_risk` matches on the run's assessed risk grade. `effect: deny` refuses the
+   submission outright, so no person can release it either, and the refused request is still on the
    chain, because the gate records every mutation before anything acts on it.
    `require_distinct_approver: true` refuses a decision made by whoever asked for the change, which
-   matters for admins, since an agent or operator can never approve anything. The requirement is
-   copied onto each run the rule holds, so editing the rule later cannot weaken a pending decision.
+   for an agent's run is the account the agent is bound to, so the person the agent acts for cannot
+   release its high-risk work alone. The requirement is copied onto each run the rule holds, so
+   editing the rule later cannot weaken a pending decision. A rule that holds still applies to a run
+   an exemption covers, since an exemption lifts only the default hold.
 
    Every criterion in that file is the full policy engine, which a Team license covers: actor
    scoping, risk floors, deny rules, and distinct-approver separation of duties. A server started
@@ -270,9 +272,10 @@ Every mutation response other than signing in or out carries an `Audit-Receipt: 
 The agent, or the system driving it, can retain receipts and later check each one against the chain,
 so the party an entry belongs to can detect an omission.
 
-Runs record their source, one of api, template, schedule, rerun, reconcile, propose, or trigger,
-along with the actor. `actor:agent-bot` in run search pulls everything the agent ran, and
-`source:api` separates direct API submissions from scheduled or triggered work.
+Runs record their source, one of api, template, schedule, trigger, callback, rerun, relaunch,
+reconcile, propose, review, or review_apply, along with the actor. `actor:agent-bot` in run search
+pulls everything the agent ran, and `source:api` separates direct API submissions from scheduled or
+triggered work.
 
 An approval is a chain entry of its own. When a person releases a held run, the chain gains a
 DECISION entry naming the approver and committing a digest of the exact spec released, and the

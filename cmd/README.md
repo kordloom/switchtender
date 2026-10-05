@@ -26,6 +26,15 @@ same database, a PostgreSQL DSN for separate machines, and they compete for work
 
     switchtender worker --db postgres://user:pass@host:5432/switchtender?sslmode=disable --name worker-1
 
+## ansible
+
+Installs a pinned ansible-core into a Python virtual environment beside the database, checking every
+file pip installs against a hash the binary carries, so runs that need Ansible have it without an
+Ansible on the PATH. `list` shows what is installed and `remove` takes it away. The full page is
+[managed Ansible runtime](../docs/ansible-runtime.md).
+
+    switchtender ansible install --db switchtender.db
+
 ## import
 
 Migrates from AWX, Semaphore, Rundeck, Jenkins, Chef, Puppet, or cron. Reports what it would create

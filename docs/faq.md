@@ -25,12 +25,14 @@ lapsed license never locks a server out of its own data.
 
 ## What is a dry run?
 
-A run in the tool's no-change mode. Ansible runs in check mode, Terraform runs plan instead of
-apply, and Bash and Python are syntax checked without executing. A dry run set on a sharded run is
-carried to every shard. The mode is a promise about the tool, not about what it is given: a task
-can set `check_mode: false`, and a plan runs the program an `external` data source names. So a rule
-that excludes dry runs exempts only a dry run the gate read in full and found running nothing. See
-[dry runs and `exclude_dry_run`](concepts.md#dry-runs-and-exclude-dry-run).
+A run in the tool's no-change mode. Ansible runs in check mode, and Terraform and OpenTofu run plan
+instead of apply, and those are the only dry runs that preview a change. A Bash, Python, or
+PowerShell dry run only checks the script's syntax, and a Go dry run runs `go vet`, so none of the
+four executes the script or says what it would change. A dry run set on a sharded run is carried to
+every shard. The mode is a promise about the tool, not about what it is given: a task can set
+`check_mode: false`, and a plan runs the program an `external` data source names. So a rule that
+excludes dry runs exempts only a dry run the gate read in full and found running nothing. See [dry
+runs and `exclude_dry_run`](concepts.md#dry-runs-and-exclude-dry-run).
 
 ## How do I migrate from AWX?
 
@@ -152,8 +154,10 @@ land in the audit trail.
 Yes, through the API, holding one credential: a token bound to an operator account. The agent
 submits and manages runs like any operator, every mutation it makes is chained before it executes,
 and a run held for approval waits for a human admin, since an operator token cannot approve. Every
-run an agent token asks for is held that way by default, unless a written policy exempts it.
-[Run an AI agent through the gate](agents.md) covers the setup.
+run an agent token asks for is held that way by default, unless a rule with `effect: exempt` covers
+it or it is a dry run the gate proves change free, as [agent runs are held by
+default](policy.md#agent-runs-are-held-by-default) describes. [Run an AI agent through the
+gate](agents.md) covers the setup.
 
 ## Can I extend SwitchTender?
 
@@ -239,9 +243,9 @@ The approval is not a convention someone can skip. A policy decides which runs a
 is enforced in the core, and the approval is bound to the exact plan that was reviewed, so a run
 cannot be approved as one thing and executed as another.
 
-A Community install holds one approval policy and Pro holds five. Team removes the cap and adds the
-rest of the policy engine: outright denials, risk floors, actor-scoped rules, and distinct-approver
-separation of duties.
+A Community install holds one plain rule, either a require-approval policy or one exemption, and
+Pro holds five. Team removes the cap and adds the rest of the policy engine: outright denials, risk
+floors, actor-scoped rules, distinct-approver separation of duties, and Rego policies.
 
 ## How fine-grained is access control?
 
@@ -272,10 +276,11 @@ outliving the company is a documented path rather than a hope. The [continuity](
 ## What is the license?
 
 Business Source License 1.1: free to self-host and modify, with a restriction on offering it as a
-competing hosted service, and it converts to Apache 2.0 two years after each release. The
-Community tier is free and complete on its own. Pro adds directory sign-in and five approval
-policies instead of one. Team adds the full policy engine, the period change register, distributed
-workers, initializing a new PostgreSQL database, and one-click drift reconcile. Both unlock with a
-signed license file the binary verifies offline, flat per organization by fleet band, and a lapsed
-license takes nothing: paid features stop while your data, evidence, and every Community feature
-keep working. There is no license server and nothing ever phones home.
+competing hosted service, and it converts to Apache 2.0 two years after each release. The Community
+tier is free and complete on its own, with the built-in hold on agent runs and one plain rule of
+your own. Pro adds directory sign-in and five approval policies instead of one. Team adds the full
+policy engine, the period change register, distributed workers, initializing a new PostgreSQL
+database, and one-click drift reconcile. Both unlock with a signed license file the binary verifies
+offline, flat per organization by fleet band, and a lapsed license takes nothing: paid features stop
+while your data, evidence, and every Community feature keep working. There is no license server and
+nothing ever phones home.

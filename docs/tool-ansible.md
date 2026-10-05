@@ -12,6 +12,12 @@ that names no tool is an Ansible run. It is also the most instrumented one, beca
 callback plugin reports every task on every host as a structured event, and those events paint the
 live host-by-task matrix, feed fleet memory, and drive drift detection.
 
+The server and each worker need ansible-core, which the binary does not carry. They take the
+`ansible-playbook` and `ansible-inventory` from `--ansible-bin` when it is set, then from the pinned
+ansible-core `switchtender ansible install` sets up, then from the PATH, as
+[which Ansible a run uses](ansible-runtime.md#which-ansible-a-run-uses) describes. A run in a
+container image uses the image's own.
+
 ## What runs
 
 The playbook path is the run's target, resolved inside the project checkout when the run sources a

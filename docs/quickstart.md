@@ -11,10 +11,15 @@ No install needed to look around. The [live demo](https://demo.switchtender.com/
 
 ## Requirements
 
-The tools your runs use, on the PATH: `ansible-playbook` and `ansible-inventory` for Ansible, and
-`terraform`, `tofu`, `python3`, `pwsh` (PowerShell 7), or `go` for the rest. Bash runs use the
-system shell. Nothing else for the default SQLite setup. Building from source instead of installing
-the release binary needs Go 1.26, and Docker Compose is an alternative, where
+An Ansible run needs ansible-core, which the binary does not carry. Use the `ansible-playbook` and
+`ansible-inventory` already on your PATH, or, once the binary is installed, let
+`switchtender ansible install` put a pinned, hash-checked ansible-core beside the database, as
+[install Ansible](#install-ansible) shows. That install needs a `python3` from 3.10 to 3.14 with its
+`venv` module, and it does not run on Windows.
+
+The other tools come from the PATH: `terraform`, `tofu`, `python3`, `pwsh` (PowerShell 7), or `go`.
+Bash runs use the system shell. Nothing else for the default SQLite setup. Building from source
+instead of installing the release binary needs Go 1.26, and Docker Compose is an alternative, where
 `docker compose --profile stack up --build` builds the image from this repository. That image
 already carries Ansible, Python, Terraform, and OpenTofu.
 
@@ -30,6 +35,23 @@ directory is often not on PATH, so the script says so and prints its closing com
 path; add the line it gives you to run `switchtender` by name. Running in about a minute. Prefer to build it
 yourself, or want to hack on it? `go build -o switchtender .` from a clone produces the same
 binary; the commands below assume it is on your PATH, so prefix a locally built binary with `./`.
+
+## Install Ansible
+
+Skip this when `ansible-playbook` is already on your PATH, or when you only run the other tools.
+Otherwise run the install in the directory you will start the server in, as the account that will
+run it:
+
+    switchtender ansible install
+
+It downloads ansible-core 2.21.4 from PyPI, checks every file against a hash the binary carries, and
+installs it into `ansible/` beside `switchtender.db`, where the server finds it with no restart.
+That release needs Python 3.12 to 3.14. On Python 3.11 add `--version 2.19`, and on 3.10
+`--version 2.17`. The `python3` macOS ships is 3.9, so install a newer Python there first. Debian
+and Ubuntu package the `venv` module separately, such as `python3.12-venv`, and the install names
+the package when it is missing. The directory and every directory above it must be writable only by
+that account or root, or the install refuses it. [Managed Ansible runtime](ansible-runtime.md)
+covers offline installs, workers, and the desktop app.
 
 ## Run the server
 
