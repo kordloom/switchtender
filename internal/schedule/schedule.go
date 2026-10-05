@@ -1,6 +1,7 @@
-// Package schedule holds recurring run schedules and the logic that fires them on a cron cadence.
-// A schedule fires a single run, a split, or a pipeline through the same submit paths a client uses,
-// so scheduled work is indistinguishable from manual work once it lands.
+// Package schedule holds recurring run schedules and the logic that fires them on a cron cadence or
+// an RFC 5545 recurrence. A schedule fires a single run, a split, or a pipeline through the same
+// submit paths a client uses, so scheduled work is indistinguishable from manual work once it
+// lands.
 package schedule
 
 import (
@@ -31,6 +32,23 @@ var (
 	// ErrBadTimezone is a timezone this system does not know, kept distinct from ErrBadCron so a
 	// typo in the zone is never reported as a fault in the expression.
 	ErrBadTimezone = errors.New("bad timezone")
+	// ErrBadSpringForward is a spring-forward setting other than jump, later, or skip.
+	ErrBadSpringForward = errors.New("bad spring-forward setting")
+)
+
+// Spring-forward settings say what a schedule does with a time that does not exist because the
+// clocks went forward over it, such as 02:30 on the night 02:00 becomes 03:00. A schedule that
+// names none takes the default for its kind.
+const (
+	// SpringForwardJump fires at the instant the clock jumps. It is the default for a cron
+	// expression.
+	SpringForwardJump = "jump"
+	// SpringForwardLater fires the length of the jump later, the time read with the offset in force
+	// before it, so a 02:30 fires at 03:30. It is the default for a recurrence rule, and it is how
+	// AWX and RFC 5545 read one.
+	SpringForwardLater = "later"
+	// SpringForwardSkip does not fire that night at all.
+	SpringForwardSkip = "skip"
 )
 
 // Schedule is a recurring run definition. It fires a pipeline when Steps is set, a split when Shards
@@ -40,13 +58,26 @@ type Schedule struct {
 	ID string `json:"id"`
 	// Name identifies the schedule.
 	Name string `json:"name"`
-	// Cron is the cron expression that sets the cadence.
+	// Cron is the cron expression that sets the cadence. Empty when RRule sets it instead.
 	Cron string `json:"cron"`
-	// Timezone is the IANA name, such as America/New_York, the cron expression is read in. Empty
-	// means the server's local time, so a schedule made before this field behaves as before. A
-	// named zone makes "0 9 * * 1" mean nine in that zone through daylight saving changes, not nine
-	// wherever the server happens to sit.
+	// RRule is an RFC 5545 recurrence that sets the cadence instead of Cron: a DTSTART, one or more
+	// RRULE lines, and any EXRULE, RDATE, and EXDATE lines. It says what a cron expression cannot,
+	// such as the last Friday of each quarter or every other Tuesday, and it is the form AWX stores
+	// its schedules in. A schedule carries one of Cron and RRule, never both.
+	RRule string `json:"rrule,omitempty"`
+	// Timezone is the IANA name, such as America/New_York, the cron expression is read in. A named
+	// zone makes "0 9 * * 1" mean nine in that zone through daylight saving changes, not nine
+	// wherever the server happens to sit. A recurrence whose DTSTART names a zone is read in that
+	// zone, and the two must agree when both are set. A schedule created or imported without one is
+	// pinned to the server's zone by name, so every server reads it alike, and a row that still names
+	// none is read in UnnamedZone.
 	Timezone string `json:"timezone,omitempty"`
+	// SpringForward says what happens to a time the clocks skip on the night they go forward:
+	// jump fires when the clock jumps, later fires the length of the jump later, and skip does not
+	// fire that night. Empty takes the default for the cadence, jump for a cron expression and
+	// later for a recurrence rule. A time that happens twice, on the night the clocks go back,
+	// fires once at the first of the two whatever this says.
+	SpringForward string `json:"spring_forward,omitempty"`
 	// Playbook is the playbook to run for a single or split schedule.
 	Playbook string `json:"playbook,omitempty"`
 	// Inventory is the inventory to target.
@@ -88,6 +119,12 @@ type Schedule struct {
 	// that failed used to move LastRunAt and nothing else, so a schedule that had not started a run
 	// in weeks looked exactly like one that ran on time.
 	LastError string `json:"last_error,omitempty"`
+	// LastSkip is why the most recent fire was skipped, such as no hosts matched, and is empty when
+	// it was not. A skip is not a failure: the schedule fired on time and found nothing to reach.
+	LastSkip string `json:"last_skip,omitempty"`
+	// SkippedFires counts the fires in a row, ending with the most recent, that were skipped. A fire
+	// that starts a run or fails resets it.
+	SkippedFires int `json:"skipped_fires,omitempty"`
 }
 
 // Clone returns a deep copy so callers cannot mutate stored state through shared pointers.
@@ -120,12 +157,28 @@ func (s *Schedule) Clone() *Schedule {
 	return &out
 }
 
-// Validate reports whether the schedule has a parseable cron, a valid timezone, and a target to run.
+// Validate reports whether the schedule has a parseable cron or recurrence, a valid timezone, and a
+// target to run. A recurrence that has already fired its last time does not validate, since storing
+// it would create a schedule that never fires.
 func (s *Schedule) Validate() error {
+	return s.ValidateAt(time.Now())
+}
+
+// ValidateAt is Validate with now standing in for the current time, which decides whether a
+// recurrence has already fired its last time. An import passes the time it is converting at, so the
+// answer depends on the export and that time, never on when the conversion happens to run.
+func (s *Schedule) ValidateAt(now time.Time) error {
 	if err := s.validTimezone(); err != nil {
 		return err
 	}
-	if _, err := s.NextFire(time.Now()); err != nil {
+	if err := s.validSpringForward(); err != nil {
+		return err
+	}
+	if s.Cron != "" && s.RRule != "" {
+		return fmt.Errorf("%w: a schedule takes a cron expression or a recurrence rule, not both",
+			ErrBadRecurrence)
+	}
+	if _, err := s.NextFire(now); err != nil {
 		return err
 	}
 	if s.Playbook == "" && len(s.Steps) == 0 && s.TemplateID == "" {
@@ -159,14 +212,71 @@ func (s *Schedule) validTimezone() error {
 	return nil
 }
 
+// validSpringForward reports whether the spring-forward setting is empty or one of the three
+// settings, so an unknown one is refused where it is written rather than read as a default.
+func (s *Schedule) validSpringForward() error {
+	switch s.SpringForward {
+	case "", SpringForwardJump, SpringForwardLater, SpringForwardSkip:
+		return nil
+	}
+	return fmt.Errorf("%w: %q is not one of %s, %s, or %s", ErrBadSpringForward, s.SpringForward,
+		SpringForwardJump, SpringForwardLater, SpringForwardSkip)
+}
+
+// SpringForwardSetting returns what the schedule does with a time the clocks skip: its own setting,
+// or when it names none, the default for its cadence, jump for a cron expression and later for a
+// recurrence rule.
+func (s *Schedule) SpringForwardSetting() string {
+	switch {
+	case s.SpringForward != "":
+		return s.SpringForward
+	case s.RRule != "":
+		return SpringForwardLater
+	}
+	return SpringForwardJump
+}
+
 // effectiveCron returns the cron expression with the schedule's timezone applied, so the same
-// expression fires in the schedule's zone rather than the server's. An unset timezone leaves the
-// expression as the caller wrote it, keeping the server's local time.
+// expression fires in the schedule's zone rather than the server's. An expression that carries its
+// own zone descriptor is left as written, and one that names no zone anywhere is read in
+// UnnamedZone.
+//
+// The expression with no zone used to be handed to the cron library as it was, and the library
+// reads such an expression in the zone of the time it is asked about. The scheduler asks with its
+// own clock's time, so each server read the schedule in its own zone, and a highly available pair
+// whose servers disagreed fired a daily schedule twice in one day.
 func (s *Schedule) effectiveCron() string {
-	if s.Timezone == "" {
+	switch {
+	case s.Timezone != "":
+		return "CRON_TZ=" + s.Timezone + " " + s.Cron
+	case hasZoneDescriptor(s.Cron):
 		return s.Cron
 	}
-	return "CRON_TZ=" + s.Timezone + " " + s.Cron
+	return "CRON_TZ=" + UnnamedZone + " " + s.Cron
+}
+
+// hasZoneDescriptor reports whether a cron expression begins with the zone descriptor the cron
+// library reads, CRON_TZ= or TZ=.
+func hasZoneDescriptor(spec string) bool {
+	return strings.HasPrefix(spec, "CRON_TZ=") || strings.HasPrefix(spec, "TZ=")
+}
+
+// NamesZone reports whether the schedule says which zone it is read in: through its timezone, a
+// zone descriptor on its cron expression, or a zone on its recurrence's DTSTART.
+func (s *Schedule) NamesZone() bool {
+	return s.Timezone != "" || hasZoneDescriptor(s.Cron) || RecurrenceZone(s.RRule) != ""
+}
+
+// PinZone writes zone onto a schedule that names none, and leaves one that does as it is.
+//
+// A schedule created or imported without a zone is read in the server's zone, and pinning records
+// that zone by name at the moment it is written. Left unnamed, the zone was whichever one the
+// server evaluating the schedule sat in, so two servers sharing one database could read the same
+// schedule hours apart.
+func (s *Schedule) PinZone(zone string) {
+	if !s.NamesZone() {
+		s.Timezone = zone
+	}
 }
 
 // NextFire returns the next time this schedule fires after the given time, in its own timezone.
@@ -175,16 +285,140 @@ func (s *Schedule) effectiveCron() string {
 // other. The cron parser rejects an unknown zone with its own generic message, which every caller
 // then rendered as "invalid cron expression": an operator who typed America/New_york was told their
 // perfectly good "0 2 * * *" was wrong, and had no reason to look at the field that actually was.
+//
+// A schedule driven by a recurrence returns ErrExhausted once its COUNT or UNTIL has run out.
 func (s *Schedule) NextFire(after time.Time) (time.Time, error) {
 	// The preview endpoint builds a Schedule and calls this directly without Validate, so the zone
 	// is checked here too rather than only on the save path. validTimezone is the one definition.
 	if err := s.validTimezone(); err != nil {
 		return time.Time{}, err
 	}
-	return NextFire(s.effectiveCron(), after)
+	// The same holds for the spring-forward setting: an unknown one is refused, never read as
+	// whichever default the cadence would have.
+	if err := s.validSpringForward(); err != nil {
+		return time.Time{}, err
+	}
+	if s.RRule != "" {
+		return s.nextRecurrence(after)
+	}
+	return nextCronFire(s.effectiveCron(), after, s.SpringForwardSetting())
 }
 
-// NextFire returns the next time the cron expression fires after the given time.
+// nextRecurrence returns the recurrence's next fire after the given time, read in the zone its
+// DTSTART names or, for a floating DTSTART, in the schedule's own zone.
+//
+// A DTSTART that names one zone on a schedule that names another is refused rather than resolved
+// in favor of either. Picking one silently is how an imported 02:00 window fires at 02:00 somewhere
+// nobody meant, and the two fields disagreeing is a mistake whoever wrote them should see.
+func (s *Schedule) nextRecurrence(after time.Time) (time.Time, error) {
+	loc, err := s.recurrenceFallback()
+	if err != nil {
+		return time.Time{}, err
+	}
+	rc, err := parseRecurrence(s.RRule, loc, s.SpringForwardSetting())
+	if err != nil {
+		return time.Time{}, err
+	}
+	if zone := rc.Zone(); zone != "" && s.Timezone != "" && zone != s.Timezone {
+		return time.Time{}, fmt.Errorf("%w: the rule's DTSTART is in %s and the schedule's "+
+			"timezone is %s; make them agree or leave the timezone empty", ErrBadRecurrence, zone,
+			s.Timezone)
+	}
+	return rc.Next(after)
+}
+
+// recurrenceFallback returns the zone a floating DTSTART is read in: the schedule's timezone, or
+// UnnamedZone when it names none. The server's own zone stood here, which made the same stored rule
+// fire at different instants on servers in different zones.
+func (s *Schedule) recurrenceFallback() (*time.Location, error) {
+	zone := s.Timezone
+	if zone == "" {
+		zone = UnnamedZone
+	}
+	loc, err := time.LoadLocation(zone)
+	if err != nil {
+		return nil, fmt.Errorf("%w: unknown timezone %q", ErrBadTimezone, zone)
+	}
+	return loc, nil
+}
+
+// NextFireAfter returns the time the schedule fires next once a tick at now has fired its
+// occurrence due: the first fire after now that is not the second reading of a wall clock time this
+// fire already covered.
+//
+// On the night the clocks go back a wall clock time happens twice, and a schedule documents that
+// such a time fires once, at the first of the two. NextFire guards that by skipping a fire that
+// shares a wall clock minute with the time it is asked about, which holds only while the tick lands
+// inside the minute it fired. A tick a minute or more late, from a restart, a database failover, a
+// suspended host, or a tick interval longer than a minute, asked from a later minute, so the guard
+// let the second 01:30 through and a nightly job ran twice on one night. The fire covered every
+// reading from due to now, so a next fire whose wall clock reading already happened in that
+// stretch is the repeat and is skipped.
+func (s *Schedule) NextFireAfter(due, now time.Time) (time.Time, error) {
+	next, err := s.NextFire(now)
+	if err != nil || s.RRule != "" || due.After(now) {
+		return next, err
+	}
+	loc, interval, lerr := s.cronClock()
+	if lerr != nil || interval {
+		return next, nil
+	}
+	for range maxRepeatSkips {
+		twin, ok := earlierReading(next, loc)
+		if !ok || twin.Before(due) || twin.After(now) {
+			return next, nil
+		}
+		if next, err = s.NextFire(next); err != nil {
+			return next, err
+		}
+	}
+	return next, nil
+}
+
+// maxRepeatSkips bounds how many repeated readings NextFireAfter steps over. One night repeats an
+// hour at most a couple of times over in any zone, so a schedule that keeps landing on repeats past
+// this is not one the loop should spin on.
+const maxRepeatSkips = 128
+
+// cronClock returns the zone a cron schedule's wall clock is read in, and whether the expression is
+// an interval, which counts elapsed time and has no wall clock to repeat.
+func (s *Schedule) cronClock() (*time.Location, bool, error) {
+	parsed, err := cron.ParseStandard(s.effectiveCron())
+	if err != nil {
+		return nil, false, err
+	}
+	if _, interval := parsed.(cron.ConstantDelaySchedule); interval {
+		return nil, true, nil
+	}
+	spec, ok := parsed.(*cron.SpecSchedule)
+	if !ok || spec.Location == nil {
+		return nil, false, fmt.Errorf("%w: %q has no zone to read it in", ErrBadCron, s.Cron)
+	}
+	return spec.Location, false, nil
+}
+
+// earlierReading returns the earlier instant whose wall clock reading in loc is the same as t's,
+// and whether there is one, which happens only inside the stretch of a night the clocks went back.
+func earlierReading(t time.Time, loc *time.Location) (time.Time, bool) {
+	local := t.In(loc)
+	_, offset := local.Zone()
+	start, _ := local.ZoneBounds()
+	if start.IsZero() {
+		return time.Time{}, false
+	}
+	_, before := start.Add(-time.Second).In(loc).Zone()
+	if before <= offset {
+		return time.Time{}, false
+	}
+	twin := t.Add(time.Duration(offset-before) * time.Second)
+	if !twin.Before(start) {
+		return time.Time{}, false
+	}
+	return twin, true
+}
+
+// NextFire returns the next time the cron expression fires after the given time, firing a time the
+// clocks skip at the instant they jump, which is a cron schedule's default.
 //
 // A parseable expression that can never come due is refused here rather than passed on. The cron
 // library gives up after scanning five years and returns the zero time with no error, and the
@@ -193,6 +427,19 @@ func (s *Schedule) NextFire(after time.Time) (time.Time, error) {
 // rewritten to zero again: one authenticated call produced a run every fifteen seconds forever,
 // with nothing logged and no rate limit in front of it.
 func NextFire(spec string, after time.Time) (time.Time, error) {
+	return nextCronFire(spec, after, SpringForwardJump)
+}
+
+// nextCronFire returns the next time the cron expression fires after the given time, placing a
+// time the clocks skip by the spring-forward setting.
+//
+// Both daylight-saving corrections are worked out in the zone the expression is read in. They used
+// to read the zone off the time they were handed, which is the caller's and not the schedule's: a
+// server running in UTC, which is how a container runs, asks with UTC times, UTC never moves, and
+// so a schedule pinned to America/Chicago fired twice on the night the clocks went back and not at
+// all on the night they went forward, while every test, written in the schedule's own zone, passed.
+// The answer is handed back in the caller's zone, which is what the cron library does.
+func nextCronFire(spec string, after time.Time, setting string) (time.Time, error) {
 	if err := checkSpec(spec); err != nil {
 		return time.Time{}, err
 	}
@@ -213,13 +460,14 @@ func NextFire(spec string, after time.Time) (time.Time, error) {
 	if _, interval := sched.(cron.ConstantDelaySchedule); interval {
 		return next, nil
 	}
+	zone := cronZone(sched, after)
 	// On the day a zone falls back, the same local minute comes round twice, an hour apart, and the
 	// cron library returns both. The scheduler advances from the moment it fired, so a nightly job
 	// inside the repeated hour fired, advanced to the same wall-clock minute in the new offset, and
 	// fired again: two full executions of the same non-idempotent playbook on one nominal day. A
 	// cron slot is minute-granular, so two distinct instants sharing a local minute can only be that
-	// repeat, and the second one is skipped.
-	if sameLocalMinute(next, after) {
+	// repeat, and the second one is skipped. Every spring-forward setting keeps this.
+	if sameLocalMinute(next.In(zone), after.In(zone)) {
 		next = sched.Next(next)
 		if next.IsZero() {
 			return time.Time{}, fmt.Errorf("%w: %q parses but never comes due after the "+
@@ -231,11 +479,8 @@ func NextFire(spec string, after time.Time) (time.Time, error) {
 	// the next one, so a nightly job set for the skipped hour simply does not run that day, silently
 	// and once a year. Firing at the instant the clock jumped is the closest real time to what was
 	// asked for, and it is what a person who wrote "run at 02:00 nightly" means on the one night
-	// 02:00 is not a time.
-	if skipped, ok := skippedBySpringForward(spec, after, next); ok {
-		return skipped, nil
-	}
-	return next, nil
+	// 02:00 is not a time. That is the default; the schedule's setting can choose otherwise.
+	return cronSpringForward(spec, zone, after, next, setting).In(after.Location()), nil
 }
 
 // checkSpec refuses the two expressions the cron parser does not turn away on its own, before it is
@@ -297,8 +542,9 @@ func checkInterval(expr string) error {
 	return nil
 }
 
-// skippedBySpringForward reports the instant to fire at when the zone jumped over the scheduled wall
-// clock between after and next, and whether that happened at all.
+// skippedBySpringForward reports the instant to fire at when loc, the zone the expression is read
+// in, jumped over the scheduled wall clock between after and next, and whether that happened at
+// all.
 //
 // It only looks when the offset actually grew across the gap, so an ordinary advance does no extra
 // work. The schedule is then re-read in UTC, which has no transitions, to learn the wall clock the
@@ -306,8 +552,7 @@ func checkInterval(expr string) error {
 // real zone is what answers the question: Go resolves a local time that does not exist to the
 // instant the jump landed on, so a slot inside the lost hour comes back as the transition itself,
 // and a slot outside it comes back unchanged and is left alone.
-func skippedBySpringForward(spec string, after, next time.Time) (time.Time, bool) {
-	loc := next.Location()
+func skippedBySpringForward(spec string, loc *time.Location, after, next time.Time) (time.Time, bool) {
 	_, afterOffset := after.In(loc).Zone()
 	_, nextOffset := next.In(loc).Zone()
 	if nextOffset <= afterOffset {

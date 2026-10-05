@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -46,6 +47,9 @@ type Scheduler struct {
 	// audits records each fire as a chain entry before the run exists, nil when no trail is kept.
 	// With it, a scheduled run carries a creation receipt like any other and can be receipted.
 	audits audit.Store
+	// skips tells a schedule's attached notification targets when a fire is skipped, nil when
+	// nothing is told.
+	skips SkipNotifier
 	// log records scheduler activity.
 	log *zap.Logger
 	// interval is how often due schedules are checked.
@@ -211,61 +215,155 @@ func (s *Scheduler) Close() {
 	<-s.done
 }
 
+// settleTimeout bounds each write that settles a claim the scheduler made: the claim itself, the
+// record of the fire, and handing back an occurrence a stop cut short. These run on a context Close
+// does not cancel, so they need a bound of their own.
+const settleTimeout = 15 * time.Second
+
+// settleContext returns the context a claim and its records are written on. It outlives Close,
+// because a claim that is won and then never recorded is an occurrence that silently did not run.
+func (s *Scheduler) settleContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(s.ctx), settleTimeout)
+}
+
 // tick fires every schedule due at now and advances its next run time.
 func (s *Scheduler) tick(now time.Time) {
 	schedules, err := s.store.List(s.ctx)
 	if err != nil {
-		s.log.Error("schedule: list: " + err.Error())
+		if s.ctx.Err() == nil {
+			s.log.Error("schedule: list: " + err.Error())
+		}
 		return
 	}
 	for _, sc := range schedules {
+		// A scheduler told to stop claims nothing more. A fire it has already claimed settles
+		// whichever way it ends, so a stop never leaves a claim behind with no account of it.
+		if s.ctx.Err() != nil {
+			return
+		}
 		if !sc.Enabled || sc.NextRunAt == nil || sc.NextRunAt.After(now) {
 			continue
 		}
-
-		next, err := sc.NextFire(now)
-		if err != nil {
-			s.log.Error("schedule: next fire: "+err.Error(), zap.String("schedule_id", sc.ID))
-			continue
-		}
-		// A schedule does not start a second copy of work its own previous run has not finished.
-		// This is checked before the row is claimed so a skipped tick still advances the next run
-		// time, which is what keeps the schedule on its cadence instead of firing the moment the
-		// slow run ends.
-		if waiting := s.overlaps(sc); waiting != "" {
-			if _, err := s.store.ClaimDue(s.ctx, sc.ID, *sc.NextRunAt, next); err != nil {
-				s.log.Error("schedule: advance past overlap: "+err.Error(),
-					zap.String("schedule_id", sc.ID))
-			}
-			s.log.Warn("schedule: a run this schedule fired is still going, skipping this fire",
-				zap.String("schedule_id", sc.ID), zap.String("run_id", waiting))
-			continue
-		}
-		// Win the row before firing so concurrent scheduler instances never double-launch.
-		won, err := s.store.ClaimDue(s.ctx, sc.ID, *sc.NextRunAt, next)
-		if err != nil {
-			s.log.Error("schedule: claim due: "+err.Error(), zap.String("schedule_id", sc.ID))
-			continue
-		}
-		if !won {
-			continue
-		}
-
-		runID, err := s.fire(s.ctx, sc)
-		failure := ""
-		if err != nil {
-			s.log.Error("schedule: fire: "+err.Error(), zap.String("schedule_id", sc.ID))
-			failure = util.Clip(err.Error(), maxFailure)
-		}
-		// Only what the fire owns is written back. sc came from the List above, so it is a snapshot
-		// taken before the run and writing it whole reverted anything an operator changed meanwhile:
-		// a disable came back enabled, an edit was rolled back, and a delete was re-inserted as a
-		// live schedule that kept firing. NextRunAt is deliberately not written either, because
-		// ClaimDue already advanced it and rewriting it here is what reverted an edited cron.
-		if err := s.store.RecordFire(s.ctx, sc.ID, now, runID, failure); err != nil {
-			s.log.Error("schedule: record fire: "+err.Error(), zap.String("schedule_id", sc.ID))
-		}
+		s.fireDue(sc, now)
 	}
+}
+
+// fireDue claims and fires one schedule whose occurrence came due, on a tick at now.
+func (s *Scheduler) fireDue(sc *Schedule, now time.Time) {
+	due := *sc.NextRunAt
+	// A recurrence bounded by COUNT or UNTIL has a last occurrence, and this may be it. It is still
+	// fired, since it came due, and the row is claimed by clearing its next fire time rather than
+	// advancing it, so the schedule stops instead of logging an error every tick.
+	//
+	// The next fire is worked out from the occurrence that came due as well as from now. Worked out
+	// from now alone, a tick that landed late on the night the clocks go back took the second
+	// reading of the wall clock time it had just fired as the next fire, and fired it again.
+	next, err := sc.NextFireAfter(due, now)
+	final := errors.Is(err, ErrExhausted)
+	if err != nil && !final {
+		s.log.Error("schedule: next fire: "+err.Error(), zap.String("schedule_id", sc.ID))
+		return
+	}
+	// A schedule does not start a second copy of work its own previous run has not finished. This is
+	// checked before the row is claimed so a skipped tick still advances the next run time, which is
+	// what keeps the schedule on its cadence instead of firing the moment the slow run ends.
+	if waiting := s.overlaps(sc); waiting != "" {
+		if _, err := s.claim(sc, next, final); err != nil {
+			s.log.Error("schedule: advance past overlap: "+err.Error(),
+				zap.String("schedule_id", sc.ID))
+		}
+		s.log.Warn("schedule: a run this schedule fired is still going, skipping this fire",
+			zap.String("schedule_id", sc.ID), zap.String("run_id", waiting))
+		return
+	}
+	// The overlap check reads the run store, and a stop that landed during it ends the tick here,
+	// before anything is claimed.
+	if s.ctx.Err() != nil {
+		return
+	}
+	// Win the row before firing so concurrent scheduler instances never double-launch.
+	won, err := s.claim(sc, next, final)
+	if err != nil {
+		s.log.Error("schedule: claim due: "+err.Error(), zap.String("schedule_id", sc.ID))
+		return
+	}
+	if !won {
+		return
+	}
+
+	runID, err := s.fire(s.ctx, sc)
+	switch {
+	case skipped(err):
+		// A fire whose inventory matched no hosts is skipped, not failed. skip owns its record.
+		s.skip(sc, now)
+		return
+	case err != nil && runID == "" && s.ctx.Err() != nil:
+		s.handBack(sc, due, next, final, now, err)
+		return
+	}
+	failure := ""
+	if err != nil {
+		s.log.Error("schedule: fire: "+err.Error(), zap.String("schedule_id", sc.ID))
+		failure = util.Clip(err.Error(), maxFailure)
+	}
+	// Only what the fire owns is written back. sc came from the List above, so it is a snapshot
+	// taken before the run and writing it whole reverted anything an operator changed meanwhile: a
+	// disable came back enabled, an edit was rolled back, and a delete was re-inserted as a live
+	// schedule that kept firing. NextRunAt is deliberately not written either, because ClaimDue
+	// already advanced it and rewriting it here is what reverted an edited cron.
+	ctx, cancel := s.settleContext()
+	defer cancel()
+	if err := s.store.RecordFire(ctx, sc.ID, now, runID, failure); err != nil {
+		s.log.Error("schedule: record fire: "+err.Error(), zap.String("schedule_id", sc.ID))
+	}
+}
+
+// handBack returns an occurrence whose fire a stop cut short before it started a run, so the next
+// scheduler to tick, this one after a restart or the other server of a pair, fires it.
+//
+// The claim moved the next fire time before the fire, and the fire ran on the context Close
+// cancels. A stop between the two therefore canceled the submit and then the write recording why
+// nothing ran, and the occurrence was gone: a bounded rule ended finished with no run, no error,
+// and no last fire, while the chain held a fire entry for it. The occurrence is put back with a
+// compare-and-set on what the claim wrote, so an edit or a delete made meanwhile wins, and the fire
+// that takes it up again carries the same idempotency key, so a submit that did land before the
+// stop is found rather than repeated. The schedule says what happened either way.
+func (s *Scheduler) handBack(sc *Schedule, due, next time.Time, final bool, now time.Time, cause error) {
+	ctx, cancel := s.settleContext()
+	defer cancel()
+	var claimed *time.Time
+	if !final {
+		claimed = &next
+	}
+	back, err := s.store.Release(ctx, sc.ID, claimed, due)
+	if err != nil {
+		s.log.Error("schedule: hand back an interrupted fire: "+err.Error(),
+			zap.String("schedule_id", sc.ID))
+	}
+	reason := "the server stopped while this fire was starting its run, and the schedule changed " +
+		"before the fire could be handed back, so this occurrence did not run: " + cause.Error()
+	if back {
+		reason = "the server stopped while this fire was starting its run, so the occurrence was " +
+			"handed back and fires when a scheduler next checks: " + cause.Error()
+	}
+	s.log.Warn("schedule: "+reason, zap.String("schedule_id", sc.ID))
+	if err := s.store.RecordFire(ctx, sc.ID, now, "", util.Clip(reason, maxFailure)); err != nil {
+		s.log.Error("schedule: record fire: "+err.Error(), zap.String("schedule_id", sc.ID))
+	}
+}
+
+// claim wins a due schedule's row for this instance: it advances the next fire time to next, or,
+// for the last occurrence of a bounded recurrence, clears it. Either way the write is a
+// compare-and-set on the next fire time this tick read, so only one instance of a highly available
+// pair wins it. The write runs on the settle context, since a claim canceled midway may have landed
+// with nobody to fire what it took.
+func (s *Scheduler) claim(sc *Schedule, next time.Time, final bool) (bool, error) {
+	ctx, cancel := s.settleContext()
+	defer cancel()
+	if final {
+		return s.store.ClaimFinal(ctx, sc.ID, *sc.NextRunAt)
+	}
+	return s.store.ClaimDue(ctx, sc.ID, *sc.NextRunAt, next)
 }
 
 // overlaps returns the id of a run the schedule fired that is still going, or the empty string.
@@ -334,23 +432,115 @@ func (s *Scheduler) recordFireEntry(ctx context.Context, sc *Schedule) (context.
 	return run.WithAuditReceipt(ctx, audit.Receipt(entry)), nil
 }
 
+// refusalRecord is the canonical body a refused fire's entry commits: which schedule came due, the
+// template it would have fired, and why it fired nothing.
+type refusalRecord struct {
+	// ScheduleID and Name identify the schedule.
+	ScheduleID string `json:"schedule_id"`
+	Name       string `json:"name,omitempty"`
+	// TemplateID is the template the schedule fires.
+	TemplateID string `json:"template_id"`
+	// Unanswered are the required survey questions nobody was present to answer.
+	Unanswered []string `json:"unanswered"`
+	// Reason is the refusal as the schedule records it.
+	Reason string `json:"reason"`
+}
+
+// refuseUnanswered records that a fire was refused because the template's survey has a required
+// question with no usable default, and returns the reason the schedule records as its last error.
+//
+// The refusal is its own chain entry, naming the questions in its path, so the trail shows the
+// schedule came due and refused instead of a fire that ran nothing. The run it would have created
+// never exists, so a chain that cannot record the refusal changes nothing about the outcome, and
+// the reason says the record is missing.
+func (s *Scheduler) refuseUnanswered(ctx context.Context, sc *Schedule, t *template.Template, cause error) error {
+	reason := t.RefuseUnattended("scheduled fire", cause)
+	if s.audits == nil {
+		return reason
+	}
+	vars := template.UnansweredVars(cause)
+	body, err := json.Marshal(refusalRecord{
+		ScheduleID: sc.ID, Name: sc.Name, TemplateID: t.ID, Unanswered: vars, Reason: reason.Error(),
+	})
+	if err != nil {
+		return reason
+	}
+	digest, nonce, err := audit.ContentDigestOf(body)
+	if err != nil {
+		return reason
+	}
+	entry := &audit.Entry{
+		ID:    audit.NewID(),
+		Actor: "system:scheduler", ActorType: "system",
+		Method:        audit.MethodSchedule,
+		Path:          "/schedules/" + sc.ID + "/refused/survey/" + strings.Join(vars, ","),
+		ContentDigest: digest, Nonce: nonce,
+	}
+	if err := s.audits.Append(ctx, entry); err != nil {
+		return fmt.Errorf("%w (the refusal could not be recorded in the audit trail: %v)", reason, err)
+	}
+	return reason
+}
+
+// loadTemplate returns the template a schedule fires, nil for a schedule that names none.
+func (s *Scheduler) loadTemplate(ctx context.Context, sc *Schedule) (*template.Template, error) {
+	if sc.TemplateID == "" {
+		return nil, nil
+	}
+	if s.templates == nil {
+		return nil, fmt.Errorf("schedule %s names a template but templates are not configured", sc.ID)
+	}
+	t, err := s.templates.Get(ctx, sc.TemplateID)
+	if err != nil {
+		return nil, fmt.Errorf("schedule %s: %w", sc.ID, err)
+	}
+	return t, nil
+}
+
 // fire submits the schedule's target and returns the created run id.
+//
+// A template's survey is resolved before the fire is recorded. Nobody is present to answer it, so
+// every question takes its default, and a required question without one refuses the fire: the
+// refusal is recorded in place of a fire and becomes the schedule's last error, and no run exists.
+// A template that will not load is still reported after the fire entry, as it always was.
+//
+// The run carries an idempotency key naming the schedule and the occurrence it fires, the next fire
+// time sc was read with, so whichever fire of one occurrence reaches the store second, such as the
+// one that takes up an occurrence a stop handed back, finds the run the first one made rather than
+// starting another.
 func (s *Scheduler) fire(ctx context.Context, sc *Schedule) (string, error) {
+	t, loadErr := s.loadTemplate(ctx, sc)
+	var survey []run.SubmitOption
+	if t != nil {
+		opts, err := t.UnattendedOptions()
+		if err != nil {
+			return "", s.refuseUnanswered(ctx, sc, t, err)
+		}
+		survey = opts
+	}
 	ctx, err := s.recordFireEntry(ctx, sc)
 	if err != nil {
 		return "", err
 	}
+	if loadErr != nil {
+		return "", loadErr
+	}
+	occurrence := ""
+	if sc.NextRunAt != nil {
+		occurrence = run.ScheduleKey(sc.ID, *sc.NextRunAt)
+	}
+	key := run.WithIdempotencyKey(occurrence)
 	// The run belongs to the organization whose schedule fired it. Nothing else can supply that: the
 	// tick loop carries no actor for the submit path to infer an org from, and an inline schedule's run
 	// names no stored object for grants to reach, so an unstamped run is ownerless, which under strict
 	// grants means denied to every non-admin. The tenant that owns the schedule could see the schedule
 	// and none of the runs it produced.
-	base := []run.SubmitOption{run.WithSource("schedule", sc.ID), run.WithOrgID(sc.OrgID)}
+	base := []run.SubmitOption{run.WithSource("schedule", sc.ID), run.WithOrgID(sc.OrgID), key}
 
 	var created *run.Run
 	switch {
-	case sc.TemplateID != "":
-		created, err = s.fireTemplate(ctx, sc)
+	case t != nil:
+		created, err = s.fireTemplate(ctx, sc, t, append(survey, key))
 	case len(sc.Steps) > 0:
 		created, err = s.submitter.SubmitPipeline(ctx, sc.Name, sc.Inventory, sc.Steps, base...)
 	case sc.Shards >= 2:
@@ -366,23 +556,18 @@ func (s *Scheduler) fire(ctx context.Context, sc *Schedule) (string, error) {
 	return created.ID, nil
 }
 
-// fireTemplate launches the schedule's stored template with its full preset: project,
-// credentials, extra vars, and shards.
-func (s *Scheduler) fireTemplate(ctx context.Context, sc *Schedule) (*run.Run, error) {
-	if s.templates == nil {
-		return nil, fmt.Errorf("schedule %s names a template but templates are not configured", sc.ID)
-	}
-	t, err := s.templates.Get(ctx, sc.TemplateID)
-	if err != nil {
-		return nil, fmt.Errorf("schedule %s: %w", sc.ID, err)
-	}
+// fireTemplate launches the schedule's stored template t with its full preset, project,
+// credentials, extra vars, and shards, plus extra, the options UnattendedOptions resolved for it
+// and the fire's idempotency key.
+func (s *Scheduler) fireTemplate(ctx context.Context, sc *Schedule, t *template.Template,
+	extra []run.SubmitOption) (*run.Run, error) {
 	// The schedule's own organization owns the run, and the template's stands in when an older schedule
 	// carries none, so a run fired from a template is never left ownerless either.
 	owner := sc.OrgID
 	if owner == "" {
 		owner = t.OrgID
 	}
-	opts := append(t.LaunchOptions(),
+	opts := append(append(t.LaunchOptions(), extra...),
 		run.WithSource("schedule", sc.ID), run.WithOrgID(owner))
 	switch {
 	case len(t.Steps) > 0:

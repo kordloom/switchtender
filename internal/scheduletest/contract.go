@@ -32,11 +32,23 @@ func Contract(t *testing.T, newStore func() schedule.Store) {
 	t.Run("record fire never resurrects a deleted schedule", func(t *testing.T) {
 		testRecordFire(t, newStore())
 	})
+	t.Run("record skip counts skips in a row", func(t *testing.T) {
+		testRecordSkip(t, newStore())
+	})
 	t.Run("update refuses a deleted schedule", func(t *testing.T) { testUpdate(t, newStore()) })
 	t.Run("missing row and zero value", func(t *testing.T) { testMissingAndZero(t, newStore()) })
 	t.Run("claim due on a missing row is a lost race", func(t *testing.T) {
 		testClaimDueMissing(t, newStore())
 	})
+	t.Run("recurrence rule round trips", func(t *testing.T) { testRecurrenceRoundTrip(t, newStore()) })
+	t.Run("spring-forward setting round trips", func(t *testing.T) {
+		testSpringForwardRoundTrip(t, newStore())
+	})
+	t.Run("claim final", func(t *testing.T) { testClaimFinal(t, newStore()) })
+	t.Run("claim final holds under concurrency", func(t *testing.T) {
+		testClaimFinalUnderConcurrency(t, newStore())
+	})
+	t.Run("release hands back only its own claim", func(t *testing.T) { testRelease(t, newStore()) })
 	t.Run("empty list is non-nil", func(t *testing.T) {
 		got, err := newStore().List(context.Background())
 		if err != nil {
@@ -60,6 +72,9 @@ func testSaveGet(t *testing.T, store schedule.Store) {
 		Steps:      []run.PipelineStep{{Name: "one", Playbook: "one.yml", ContinueOnFailure: true}},
 		TemplateID: "tpl_x", OrgID: "org_owner",
 		Enabled: true, CreatedAt: time.Date(2026, 7, 5, 0, 0, 0, 0, time.UTC), NextRunAt: &next,
+		// The skip state round trips too: a backup restores schedules through Save, and a store
+		// that dropped it would restore a schedule that had stopped reaching hosts with no badge.
+		LastSkip: "no hosts matched", SkippedFires: 4,
 	}
 	if err := store.Save(ctx, want); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -320,6 +335,88 @@ func testRecordFire(t *testing.T, store schedule.Store) {
 	}
 }
 
+// testRecordSkip pins that a skipped fire is recorded apart from a failure: it moves the fire time,
+// clears the stored failure, keeps the last run id, sets the reason, and counts one more skip in a
+// row, on the skipping schedule alone. A fire that starts a run or fails clears the reason and the
+// count, and a skip never brings back a deleted schedule.
+func testRecordSkip(t *testing.T, store schedule.Store) {
+	t.Helper()
+	ctx := context.Background()
+	created := time.Date(2026, 10, 1, 1, 0, 0, 0, time.UTC)
+	next := created.Add(time.Hour)
+	for _, id := range []string{"sch_skip", "sch_other"} {
+		if err := store.Save(ctx, &schedule.Schedule{
+			ID: id, Name: id, Cron: "0 * * * *", TemplateID: "tpl_x", Enabled: true,
+			CreatedAt: created, NextRunAt: &next, LastRunID: "run_before",
+		}); err != nil {
+			t.Fatalf("Save(%s) error = %v", id, err)
+		}
+	}
+	// A failed fire first, so the skip has a failure to clear.
+	if err := store.RecordFire(ctx, "sch_skip", created, "", "credential has no secret"); err != nil {
+		t.Fatalf("RecordFire() error = %v", err)
+	}
+	const why = "no hosts matched"
+	for i := 1; i <= 2; i++ {
+		at := created.Add(time.Duration(i) * time.Minute)
+		if err := store.RecordSkip(ctx, "sch_skip", at, why); err != nil {
+			t.Fatalf("RecordSkip() error = %v", err)
+		}
+		got, err := store.Get(ctx, "sch_skip")
+		if err != nil {
+			t.Fatalf("Get() error = %v", err)
+		}
+		if got.SkippedFires != i || got.LastSkip != why || got.LastError != "" {
+			t.Errorf("after skip %d: skip = %q x%d, error = %q, want %q x%d and no error", i,
+				got.LastSkip, got.SkippedFires, got.LastError, why, i)
+		}
+		if got.LastRunAt == nil || !got.LastRunAt.Equal(at) || got.LastRunID != "run_before" {
+			t.Errorf("after skip %d: last run %v %q, want %v and the run before kept", i,
+				got.LastRunAt, got.LastRunID, at)
+		}
+		if !got.Enabled || got.NextRunAt == nil || !got.NextRunAt.Equal(next) {
+			t.Errorf("a skip rewrote fields it does not own: enabled=%v next=%v", got.Enabled,
+				got.NextRunAt)
+		}
+	}
+	other, err := store.Get(ctx, "sch_other")
+	if err != nil {
+		t.Fatalf("Get(sch_other) error = %v", err)
+	}
+	if other.SkippedFires != 0 || other.LastSkip != "" || other.LastRunAt != nil {
+		t.Errorf("a skip on one schedule wrote to another: %q x%d at %v", other.LastSkip,
+			other.SkippedFires, other.LastRunAt)
+	}
+
+	// A fire that starts a run ends the run of skips, and so does one that fails.
+	for _, fire := range []struct{ runID, failure string }{{"run_after", ""}, {"", "refused"}} {
+		if err := store.RecordSkip(ctx, "sch_skip", created, why); err != nil {
+			t.Fatalf("RecordSkip() error = %v", err)
+		}
+		if err := store.RecordFire(ctx, "sch_skip", created, fire.runID, fire.failure); err != nil {
+			t.Fatalf("RecordFire() error = %v", err)
+		}
+		got, err := store.Get(ctx, "sch_skip")
+		if err != nil {
+			t.Fatalf("Get() error = %v", err)
+		}
+		if got.SkippedFires != 0 || got.LastSkip != "" {
+			t.Errorf("a fire (run %q, failure %q) left skip = %q x%d, want it cleared", fire.runID,
+				fire.failure, got.LastSkip, got.SkippedFires)
+		}
+	}
+
+	if err := store.Delete(ctx, "sch_skip"); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if err := store.RecordSkip(ctx, "sch_skip", created, why); err != nil {
+		t.Errorf("RecordSkip() on a deleted schedule error = %v, want nil", err)
+	}
+	if _, err := store.Get(ctx, "sch_skip"); !errors.Is(err, schedule.ErrNotFound) {
+		t.Errorf("Get() after delete then skip = %v, want ErrNotFound; the schedule came back", err)
+	}
+}
+
 // testMissingAndZero sweeps every method against a row that is not there, an empty store, and a
 // zero-value argument, and pins the single answer all backends have to give.
 //
@@ -370,6 +467,16 @@ func testMissingAndZero(t *testing.T, store schedule.Store) {
 	}, { // Test 7: RecordFire with a zero-value id, time, and run id.
 		Name: "record fire zero values",
 		Call: func(s schedule.Store) error { return s.RecordFire(ctx, "", time.Time{}, "", "") },
+		Want: nil,
+	}, { // Test 8: RecordSkip names a row that is not there.
+		Name: "record skip missing",
+		Call: func(s schedule.Store) error {
+			return s.RecordSkip(ctx, "nope", time.Now(), "no hosts matched")
+		},
+		Want: nil,
+	}, { // Test 9: RecordSkip with a zero-value id, time, and reason.
+		Name: "record skip zero values",
+		Call: func(s schedule.Store) error { return s.RecordSkip(ctx, "", time.Time{}, "") },
 		Want: nil,
 	}}
 
@@ -517,5 +624,184 @@ func testUpdate(t *testing.T, store schedule.Store) {
 	}
 	if _, err := store.Get(ctx, "sch_1"); !errors.Is(err, schedule.ErrNotFound) {
 		t.Error("an update re-created a deleted schedule")
+	}
+}
+
+// testRecurrenceRoundTrip verifies a schedule driven by an RFC 5545 recurrence stores and reads
+// back its rule whole, beside an empty cron, and that an edit through Update keeps it.
+//
+// A backend that drops the column hands the scheduler a schedule with neither a cron expression nor
+// a rule, which never fires, and nothing about the row looks wrong until somebody notices the job
+// has not run.
+func testRecurrenceRoundTrip(t *testing.T, store schedule.Store) {
+	ctx := context.Background()
+	next := time.Date(2026, 12, 25, 22, 0, 0, 0, time.UTC)
+	rule := "DTSTART;TZID=America/New_York:20260101T170000\n" +
+		"RRULE:FREQ=MONTHLY;BYMONTH=3,6,9,12;BYDAY=-1FR\n" +
+		"EXDATE;TZID=America/New_York:20261225T170000"
+	want := &schedule.Schedule{
+		ID: "sch_rrule", Name: "quarter close", RRule: rule, Timezone: "America/New_York",
+		TemplateID: "tpl_close", Enabled: true,
+		CreatedAt: time.Date(2026, 7, 5, 0, 0, 0, 0, time.UTC), NextRunAt: &next,
+	}
+	if err := store.Save(ctx, want); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	got, err := store.Get(ctx, "sch_rrule")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if diff := cmp.Diff(want, got, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("Get() mismatch (-want +got):\n%s", diff)
+	}
+
+	edited := got.Clone()
+	edited.RRule = "DTSTART:20260105T020000Z RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=TU"
+	if err := store.Update(ctx, edited); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	list, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(list) != 1 || list[0].RRule != edited.RRule || list[0].Cron != "" {
+		t.Errorf("List() after Update = %+v, want the edited rule and no cron", list)
+	}
+}
+
+// testClaimFinal verifies the last occurrence of a bounded recurrence is claimed by clearing the
+// next fire time, once, and only by a caller holding the time the row still has.
+func testClaimFinal(t *testing.T, store schedule.Store) {
+	ctx := context.Background()
+	last := time.Date(2026, 7, 6, 1, 0, 0, 0, time.UTC)
+	if err := store.Save(ctx, &schedule.Schedule{
+		ID: "sch_last", RRule: "DTSTART:20260701T010000Z RRULE:FREQ=DAILY;COUNT=6",
+		Playbook: "p.yml", Enabled: true, CreatedAt: time.Now(), NextRunAt: &last,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	tests := []struct {
+		WantWon bool
+		Old     time.Time
+	}{{ // Test 0: A stale next time loses and leaves the row alone.
+		Old: last.Add(-time.Hour), WantWon: false,
+	}, { // Test 1: The time the row holds wins.
+		Old: last, WantWon: true,
+	}, { // Test 2: A second caller with the same time loses, so the last fire happens once.
+		Old: last, WantWon: false,
+	}}
+	for testNum, test := range tests {
+		won, err := store.ClaimFinal(ctx, "sch_last", test.Old)
+		if err != nil {
+			t.Fatalf("test %d: ClaimFinal() error = %v", testNum, err)
+		}
+		if won != test.WantWon {
+			t.Errorf("test %d: ClaimFinal() = %v, want %v", testNum, won, test.WantWon)
+		}
+	}
+	got, err := store.Get(ctx, "sch_last")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.NextRunAt != nil {
+		t.Errorf("NextRunAt = %v after the final claim, want none so it never comes due again",
+			got.NextRunAt)
+	}
+	if won, err := store.ClaimFinal(ctx, "sch_gone", last); err != nil || won {
+		t.Errorf("ClaimFinal() on a missing row = %v, %v, want a lost race and no error", won, err)
+	}
+}
+
+// testClaimFinalUnderConcurrency verifies racing schedulers claim a final occurrence exactly once.
+// It is the last fire of a bounded rule, so a leak here runs the closing job of a series twice.
+func testClaimFinalUnderConcurrency(t *testing.T, store schedule.Store) {
+	ctx := context.Background()
+	const racers = 8
+	base := time.Date(2026, 8, 2, 3, 0, 0, 0, time.UTC)
+	for round := range 20 {
+		id := fmt.Sprintf("sch_final_%d", round)
+		last := base.Add(time.Duration(round) * time.Hour)
+		if err := store.Save(ctx, &schedule.Schedule{
+			ID: id, RRule: "DTSTART:20260801T030000Z RRULE:FREQ=HOURLY;COUNT=24",
+			Playbook: "site.yml", Enabled: true, NextRunAt: &last, CreatedAt: base,
+		}); err != nil {
+			t.Fatalf("Save(%s) error = %v", id, err)
+		}
+		var wins atomic.Int64
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		for range racers {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				won, err := store.ClaimFinal(ctx, id, last)
+				if err != nil {
+					t.Errorf("ClaimFinal(%s) error = %v", id, err)
+					return
+				}
+				if won {
+					wins.Add(1)
+				}
+			}()
+		}
+		close(start)
+		wg.Wait()
+		if got := wins.Load(); got != 1 {
+			t.Fatalf("round %d: %d of %d schedulers claimed the same final occurrence", round,
+				got, racers)
+		}
+	}
+}
+
+// testSpringForwardRoundTrip verifies the spring-forward setting stores, reads back through Get and
+// List, changes through Update, and clears back to the default through Update.
+//
+// A backend that drops the column hands the scheduler a schedule with the default setting, so a
+// nightly job its owner set to skip the night the clocks go forward fires anyway, once a year, and
+// nothing about the row looks wrong until it has.
+func testSpringForwardRoundTrip(t *testing.T, store schedule.Store) {
+	ctx := context.Background()
+	next := time.Date(2027, 3, 14, 7, 30, 0, 0, time.UTC)
+	want := &schedule.Schedule{
+		ID: "sch_gap", Name: "nightly", Cron: "30 2 * * *", Timezone: "America/New_York",
+		SpringForward: schedule.SpringForwardSkip, TemplateID: "tpl_nightly", Enabled: true,
+		CreatedAt: time.Date(2026, 7, 5, 0, 0, 0, 0, time.UTC), NextRunAt: &next,
+	}
+	if err := store.Save(ctx, want); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	got, err := store.Get(ctx, "sch_gap")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if diff := cmp.Diff(want, got, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("Get() mismatch (-want +got):\n%s", diff)
+	}
+	tests := []struct {
+		In       string
+		WantList string
+	}{
+		// Test 0: Changed.
+		{In: schedule.SpringForwardLater, WantList: schedule.SpringForwardLater},
+		// Test 1: Again.
+		{In: schedule.SpringForwardJump, WantList: schedule.SpringForwardJump},
+		// Test 2: Cleared back to the cadence's default.
+		{In: "", WantList: ""},
+	}
+	for testNum, test := range tests {
+		edited := got.Clone()
+		edited.SpringForward = test.In
+		if err := store.Update(ctx, edited); err != nil {
+			t.Fatalf("test %d: Update() error = %v", testNum, err)
+		}
+		list, err := store.List(ctx)
+		if err != nil {
+			t.Fatalf("test %d: List() error = %v", testNum, err)
+		}
+		if len(list) != 1 || list[0].SpringForward != test.WantList {
+			t.Errorf("test %d: List() after Update = %+v, want spring_forward %q", testNum, list,
+				test.WantList)
+		}
 	}
 }
