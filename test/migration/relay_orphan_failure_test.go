@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -127,5 +126,8 @@ func rlyEndTask(pid int, mark string) {
 	if err != nil || !strings.Contains(string(out), mark) {
 		return
 	}
-	_ = syscall.Kill(pid, syscall.SIGKILL)
+	if p, err := os.FindProcess(pid); err == nil {
+		_ = p.Kill()
+		_ = p.Release()
+	}
 }
