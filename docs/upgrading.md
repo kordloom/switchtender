@@ -24,33 +24,51 @@ no separate migration step.
 ## Agent runs are held by default
 
 A run an agent token asks for now waits for a person before it executes, with no policy written,
-under a built-in rule named `requested by an agent, held by default`. A dry run the gate proves
-changes nothing still goes ahead, and a person's runs are unaffected. Under v1.102.0 such a run went
-ahead unless a policy held it.
+under a built-in rule named `requested by an agent, held by default`. Its dry runs wait too, since a
+check or a plan still runs code with the server's credentials, whatever the dry-run scan finds. Its
+Terraform or OpenTofu apply takes two approvals: it is held before anything plans, and once a person
+releases it, the apply its plan proposes is held again, carrying the saved plan. A person's runs are
+unaffected. Under v1.102.0 such a run went ahead unless a policy held it.
 
 What to do:
 
 - Write a rule with `effect: exempt` for the routine agent work that should keep running unattended,
-  and leave everything else held. A Community install's one rule can be that exemption. [Agent runs
-  are held by default](policy.md#agent-runs-are-held-by-default) covers what an exemption matches
-  and what it risks.
+  and leave everything else held. An exemption that names an agent's `actor` must also name the
+  `account` its token is bound to, and one that names the `actor` alone is refused. A Community
+  install's one rule can be that exemption. [Agent runs are held by
+  default](policy.md#agent-runs-are-held-by-default) covers what an exemption matches and what it
+  risks.
+- Plan for two approvals on each Terraform or OpenTofu apply an agent asks for, or cover the routine
+  ones with an exemption, which lets an apply plan and apply as the rules allow for a person's.
 - A token minted without `--agent` is recorded as a person's and is never held. Mint a replacement
   with `switchtender token new --user <account> --agent` for any agent holding such a token, then
   revoke the old one.
 - Make sure a person with the admin role is there to approve, since an agent never can.
 
-## Dry runs a rule exempts must change nothing
+## Dry runs a rule exempts are scanned first
 
 Under v1.102.0, `exclude_dry_run` let through any run submitted as a dry run. It now lets through
-only a dry run the gate read in full and found running nothing. An Ansible dry run whose playbook
-sets `check_mode` to anything but true, a Terraform or OpenTofu plan whose configuration declares an
-`external` data source, and a dry run whose playbook, configuration, or modules could not be read in
-full are matched as the real run would be, and held with a note naming what the scan found. The gate
-does not download modules for a plan routed to a named queue, so such a plan that calls registry or
-remote modules is not exempt either.
+only a dry run the gate read in full without finding a known way for it to act for real. These are
+matched as the real run would be, and a hold the scan caused carries a note naming what it found:
 
-What to do: read the hold note, then rework the task or the data source it names, or vendor the
-module into the repository and call it by a local path. [When a dry run you expected to pass is
+- An Ansible dry run whose playbook sets `check_mode` to anything but true, or runs a `pipe` lookup,
+  written as `lookup`, `query`, or `q` or as a `with_pipe` loop, in a play's vars or environment or
+  anywhere in a task. The lookup runs its command on the controller under `--check`.
+- A Terraform or OpenTofu plan whose configuration declares an `external` or `aws_lambda_invocation`
+  data source, or an `http` data source with a write method or a request body. A method the scan
+  cannot read counts as a write.
+- A dry run whose playbook, configuration, or modules could not be read in full. The gate does not
+  download modules for a plan routed to a named queue, so such a plan that calls registry or remote
+  modules is not exempt either.
+- A dry run of a tool a plugin or the SDK added, which nothing scans.
+
+The scan finds the known ways a preview acts. It does not prove one harmless, since lookups,
+plugins, and providers run code during a check or a plan, so a rule with `exclude_dry_run` trusts
+the playbooks and configurations it lets through.
+
+What to do: read the hold note, then rework the task, the lookup, or the data source it names, or
+vendor the module into the repository and call it by a local path. Keep `exclude_dry_run` to rules
+over code your team reviews. [When a dry run you expected to pass is
 held](concepts.md#when-a-dry-run-you-expected-to-pass-is-held) walks through the common cases.
 
 ## A held Terraform or OpenTofu apply is planned first
@@ -58,8 +76,9 @@ held](concepts.md#when-a-dry-run-you-expected-to-pass-is-held) walks through the
 Under v1.102.0, only a `max_destroy` rule, or a risk or reversibility floor, planned an apply first.
 An apply any other rule held, or one submitted with a request for approval, waited without a plan.
 It is now planned at once, with the run's credentials, and the apply the plan proposes is what
-waits, carrying the saved plan the approval binds. An agent's apply whose configuration runs a
-program while it plans is held at submission instead, before anything executes.
+waits, carrying the saved plan the approval binds. An agent's apply is held before anything plans
+and again carrying the saved plan, as [agent runs are held by
+default](#agent-runs-are-held-by-default) describes.
 
 What to do: expect a plan run to start as soon as such an apply is submitted, and approve the apply
 it proposes. [A gated apply carries out the approved

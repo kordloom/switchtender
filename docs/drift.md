@@ -36,11 +36,15 @@ they do not report drift.
 
 A check run is only a no-change check when its playbook lets it be one. A play, block, task, role,
 or include that sets `check_mode: false` runs for real under `--check`, and what it changes is
-counted on the Drift page beside what the rest would change. The gate does not treat such a check
-as a preview: a rule that excludes dry runs still holds it, and the run records which tasks forced
-it. A plan is the same when its configuration declares an `external` data source, whose program
-runs while the plan does: the run records the data source by its address, and the rule holds it.
-See [dry runs and `exclude_dry_run`](concepts.md#dry-runs-and-exclude-dry-run).
+counted on the Drift page beside what the rest would change. A `pipe` lookup runs its command on the
+controller under `--check` too. The gate does not treat such a check as a preview: a rule that
+excludes dry runs still holds it, and the run records which tasks forced it or ran the lookup. A
+plan is the same when its configuration declares an `external` or `aws_lambda_invocation` data
+source, or an `http` data source with a write method or a request body, which act while the plan
+runs: the run records the data source by its address, and the rule holds it. The scan finds these
+known cases and does not prove a check harmless, and a check an agent asks for waits for a person
+whatever the scan finds, unless an exemption covers it. See [dry runs and
+`exclude_dry_run`](concepts.md#dry-runs-and-exclude-dry-run).
 
 ## Changes made around the gate
 

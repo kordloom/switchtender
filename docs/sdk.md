@@ -175,10 +175,12 @@ the same `Extension`, compiled in or dropped in.
 ### Execution tools
 
 A `ToolRunner` receives the run as a `ToolSpec` and a writer for its output. `Command` carries the
-tool's input, the same field the bash and python tools read their script from. `DryRun` asks for
-the tool's no-change mode. `ExtraVars`, `Env`, and `Dir` carry the run's variables, environment,
-and working directory. Return the process exit code in `ToolResult`. Return an error only when the
-tool could not be launched or supervised.
+tool's input, the same field the bash and python tools read their script from. `DryRun` asks for the
+tool's no-change mode. Nothing scans what a registered tool does in that mode, so the gate never
+reads its dry run as change free, and a rule with `exclude_dry_run` matches it as the real run.
+`ExtraVars`, `Env`, and `Dir` carry the run's variables, environment, and working directory. Return
+the process exit code in `ToolResult`. Return an error only when the tool could not be launched or
+supervised.
 
 ### Notification channels
 

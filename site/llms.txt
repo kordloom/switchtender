@@ -30,7 +30,7 @@ beside the database. Try `switchtender demo` for a seeded read-only tour.
 - [Homepage](https://switchtender.com/): what it is and the live matrix
 - [Pricing](https://switchtender.com/pricing): Community free forever with one plain rule, a require-approval policy or one exemption, Pro $500/year to 500 hosts for SSO and five approval policies, Team from $9,900/year flat per org by fleet band, Enterprise from $75,000/year for services outside your install, scoped on the order form
 - [Get started](https://switchtender.com/get-started): install and first run
-- [AI agents](https://switchtender.com/agents): give an agent one operator-bound token, hold its runs for a person by default with no policy written, and prove what it did
+- [AI agents](https://switchtender.com/agents): give an agent one operator-bound token, hold its runs for a person by default with no policy written, dry runs included, take two approvals for its Terraform or OpenTofu apply, and prove what it did
 - [Quickstart](https://switchtender.com/docs/quickstart): first job in minutes
 - [FAQ](https://switchtender.com/docs/faq): the questions everyone asks
 
@@ -56,7 +56,7 @@ beside the database. Try `switchtender demo` for a seeded read-only tour.
 - [Tools](https://switchtender.com/docs/features): Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go
 - [Reliability](https://switchtender.com/docs/reliability): sharding, retries, drift detection
 - [Secrets](https://switchtender.com/docs/secrets)
-- [Approval policies](https://switchtender.com/docs/policy): agent runs held by default, YAML rules and Rego policies (Rego is Team), evaluated offline, and dry runs read for real changes before a rule lets them through
+- [Approval policies](https://switchtender.com/docs/policy): agent runs held by default, YAML rules and Rego policies (Rego is Team), evaluated offline, and dry runs scanned for the known ways a preview acts before a rule lets them through, which the scan cannot prove harmless
 - [Managed Ansible runtime](https://switchtender.com/docs/ansible-runtime): `switchtender ansible install` puts a pinned ansible-core beside the database, every file checked against a hash the binary carries
 - [Inventories](https://switchtender.com/docs/inventories): static, dynamic, smart, and constructed inventories, static and smart ones read natively the way ansible-core 2.16 to 2.21 reads them, and the snapshot an approval binds
 - [Federated cloud credentials](https://switchtender.com/docs/federation): short-lived AWS, Google Cloud, and Azure access minted per run with nothing stored, and signing keys that rotate

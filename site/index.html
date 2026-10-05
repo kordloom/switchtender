@@ -395,7 +395,7 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 				<article class="card reveal">
 					<div class="ic ic-drift"></div>
 					<h3>A dry run has to be dry</h3>
-					<p>A rule that lets dry runs through lets through only the ones the gate can show change nothing. It reads the playbook for tasks that set <code>check_mode: false</code>, and the Terraform or OpenTofu configuration and its modules for external data sources a plan would run. A dry run that could act for real is held like the real run, with a note naming what was found.</p>
+					<p>A rule that lets dry runs through first reads each one for the known ways a check or a plan acts: tasks that set <code>check_mode: false</code>, <code>pipe</code> lookups that run a command on the controller, and the <code>external</code>, <code>aws_lambda_invocation</code>, and writing <code>http</code> data sources a plan would call, in the configuration and every module it calls. A dry run that could act for real is held like the real run, with a note naming what was found. The scan cannot prove a preview harmless, since lookups, plugins, and providers run code too, so the rule trusts the code it lets through, and an agent's dry run waits for a person either way, unless an exemption covers it.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-lineage"></div>
@@ -421,7 +421,7 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 			<div class="section-head reveal">
 				<span class="eyebrow">AI agent change governance</span>
 				<h2>Agents are principals here, not API keys.</h2>
-				<p>An agent's token is minted as an agent's, naming the human it acts for, and capped below admin so it can never approve its own work or touch identity, access, or secrets. Agents can propose changes. Only authorized humans can approve them. An agent's run waits for a person's approval with no policy written, unless <a href="/docs/policy#agent-runs-are-held-by-default">a rule with <code>effect: exempt</code></a> covers it, and the receipt then proves who approved exactly the change that ran, or which rule exempted it. A dry run the scans prove change-free may proceed, and its receipt records the dry run rather than an approval. On Team, rules can also refuse outright and require an approver other than the human the agent acts for. Every agent run lands in the chain as the agent's, on behalf of its human. <strong>We govern what agents are allowed to do.</strong></p>
+				<p>An agent's token is minted as an agent's, naming the human it acts for, and capped below admin so it can never approve its own work or touch identity, access, or secrets. Agents can propose changes. Only authorized humans can approve them. An agent's run waits for a person's approval with no policy written, unless <a href="/docs/policy#agent-runs-are-held-by-default">a rule with <code>effect: exempt</code></a> covers it, and the receipt then proves who approved exactly the change that ran, or which rule exempted it. Its dry runs wait too, and its Terraform or OpenTofu apply waits twice, once before it plans and again carrying the saved plan. On Team, rules can also refuse outright and require an approver other than the human the agent acts for. Every agent run lands in the chain as the agent's, on behalf of its human. <strong>We govern what agents are allowed to do.</strong></p>
 			</div>
 			<div class="hero-cta center reveal">
 				<a class="btn big" href="/agents">Run an agent with proof</a>

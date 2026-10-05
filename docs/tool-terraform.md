@@ -31,6 +31,12 @@ submission asks for approval, through `require_approval` or an AI proposal, is p
 way: the request is not held, and the apply its plan proposes waits for a person with the saved plan,
 whatever the rules say.
 
+An apply an AI agent asks for is the exception. It is held before anything plans, since planning
+runs provider code with the server's credentials. Once a person releases it, it plans, and the apply
+its plan proposes is held again with the saved plan, so it takes two approvals. An apply an
+exemption covers takes the path above, the way a person's does, as [agent runs are held by
+default](policy.md#agent-runs-are-held-by-default) describes.
+
 If anything changed the state after the plan was made, Terraform itself refuses the stale plan with
 `Saved plan is stale`, and the apply fails without changing anything rather than planning again and
 applying what nobody weighed. The run then says the proposal has to be made again: submit the apply
@@ -62,23 +68,28 @@ with nothing saved in between.
 ## What a plan runs, and what the gate reads
 
 A plan changes no infrastructure, but it is not free of execution. It runs the provider plugins the
-configuration names, with the run's credentials, and every `external` data source runs the program
-it names while the plan runs, with the same credentials and environment. Providers are trusted code
-the team chose and installed, and the gate does not judge them. Before it exempts a plan from a rule
-with `exclude_dry_run`, it reads the configuration and every module it calls for external data
-sources, and for anything it cannot read. A plan that declares one, or that the gate cannot read in
-full, is held as the real run it may be and named by address, such as
+configuration names, with the run's credentials, and it reads every data source with the same
+credentials and environment: an `external` data source runs the program it names, an
+`aws_lambda_invocation` data source invokes its function, and an `http` data source sends its
+request. Providers are trusted code the team chose and installed, and the gate does not judge them.
+Before it exempts a plan from a rule with `exclude_dry_run`, it reads the configuration and every
+module it calls for `external` and `aws_lambda_invocation` data sources, for `http` data sources
+whose method is anything but GET or HEAD or that carry a request body, and for anything it cannot
+read. A method it cannot read as a plain value counts as a write. A plan that declares one, or that
+the gate cannot read in full, is held as the real run it may be and named by address, such as
 `module.network.data.external.lookup`, and a pull request's plan of it is refused rather than run.
-Before it reads registry and remote modules, the gate downloads them with `terraform get` in a
-private copy of the configuration, with the run's own credentials and only where the plan runs, and
-reads them where the get installed them. A `.terraform` the gate did not install, committed or left
-in a working directory, is never read, and no setting makes it trusted: vendor a module and call it
-by a local path to have it read from the repository. The get installs no provider and runs nothing the
+An agent's plan waits for a person whatever the scan finds, unless an exemption covers it. Before it
+reads registry and remote modules, the gate downloads them with `terraform get` in a private copy of
+the configuration, with the run's own credentials and only where the plan runs, and reads them where
+the get installed them. A `.terraform` the gate did not install, committed or left in a working
+directory, is never read, and no setting makes it trusted: vendor a module and call it by a local
+path to have it read from the repository. The get installs no provider and runs nothing the
 configuration names. A module it could not download is left unread. The run then executes exactly
 the modules the gate read: their digest is in the scan evidence and the approval, the gate's copy is
 put in place, and `terraform init` runs with `-get=false`, so it resolves no version again. A run
-that cannot get the same modules is refused. The scan targets explicit program execution and
-unreadable configuration only. See [dry runs and
+that cannot get the same modules is refused. The scan targets those three data sources and
+unreadable configuration only, so it does not prove a plan harmless, and a rule that exempts plans
+trusts the configurations it lets through. See [dry runs and
 `exclude_dry_run`](concepts.md#dry-runs-and-exclude-dry-run).
 
 ## How values reach the configuration

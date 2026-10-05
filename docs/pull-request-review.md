@@ -25,9 +25,9 @@ pull request can approve or release a change.
 
 A plan faces your approval rules like any other run. There is no built-in exemption, because a plan
 is not free of side effects: a Terraform plan runs provider code and data sources with the
-template's credentials, and an Ansible check runs for real any task that sets `check_mode: false`.
-So a rule that holds every Terraform run holds the plan of every pull request too, and the pull
-request waits for a person.
+template's credentials, and an Ansible check runs for real any task that sets `check_mode: false`
+and any command a `pipe` lookup names. So a rule that holds every Terraform run holds the plan of
+every pull request too, and the pull request waits for a person.
 
 To let plans run unattended, add one line to the rule that holds them:
 
@@ -38,10 +38,15 @@ To let plans run unattended, add one line to the rule that holds them:
 
 `exclude_dry_run: true` leaves dry runs, and so pull request plans, out of that rule. The apply
 after merge is not a dry run and is still held. The line does not change what a plan refuses: a
-playbook that forces real tasks under check mode is still refused on a pull request, and so is a
-Terraform or OpenTofu configuration that runs an external data source, or that cannot be read in
-full, as described in [plans that are not change free](#plans-that-are-not-change-free). See [dry
-runs and `exclude_dry_run`](concepts.md#dry-runs-and-exclude-dry-run) for how the gate decides.
+playbook that forces real tasks under check mode or runs a `pipe` lookup is still refused on a pull
+request, and so is a Terraform or OpenTofu configuration with an `external` or
+`aws_lambda_invocation` data source, an `http` data source that writes, or anything the review
+cannot read in full, as described in [plans that are not change
+free](#plans-that-are-not-change-free). A plan of a tool a plugin or the SDK added is refused
+before it runs, since nothing can read what it runs. The scan
+finds the known ways a plan acts, and it does not prove a plan harmless, so the line trusts the
+playbooks and configurations it lets through. See [dry runs and
+`exclude_dry_run`](concepts.md#dry-runs-and-exclude-dry-run) for how the gate decides.
 
 A plan a rule holds is reported as waiting for approval. Its comment names the rule and, when
 `--public-url` is set, links to the plan in SwitchTender, where an approver releases or rejects it.
@@ -145,23 +150,28 @@ already have. Even then, remember that a Terraform plan executes provider code a
 ## Plans that are not change free
 
 An Ansible plan is `ansible-playbook --check`, and a play, block, task, role, or include that sets
-`check_mode: false` runs that work for real even under `--check`. A Terraform or OpenTofu plan runs
-the program every `external` data source names, with the template's credentials. Before it plans,
-the review reads the playbook, or the configuration and every module it calls, at the pull request's
-head, the same way the approval gate does. A playbook that forces real tasks is not planned, since
-its plan would change hosts from a branch nobody merged, and neither is a configuration that
-declares an external data source, since its plan would run that program. Neither is one that cannot
-be read in full, such as a playbook including a file named only at run time, since what was not
-read could do the same. No run is created, the refusal is recorded on the chain, and the pull
-request gets a comment naming what was found, or what could not be read, and an `error` status.
+`check_mode: false` runs that work for real even under `--check`, as does the command a `pipe`
+lookup names, which runs on the controller while a template renders. A Terraform or OpenTofu plan
+runs the program every `external` data source names, invokes every `aws_lambda_invocation` data
+source's function, and sends every `http` data source's request, with the template's credentials.
+Before it plans, the review reads the playbook, or the configuration and every module it calls, at
+the pull request's head, the same way the approval gate does. A playbook that forces real tasks or
+runs a `pipe` lookup is not planned, since its plan would act from a branch nobody merged, and
+neither is a configuration that declares an `external` or `aws_lambda_invocation` data source, or an
+`http` data source whose method is anything but GET or HEAD or that carries a request body, since
+its plan would run that program or send that call. Neither is one that cannot be read in full, such
+as a playbook including a file named only at run time, since what was not read could do the same.
+Nor is a plan of a tool a plugin or the SDK added, whose plan runs whatever the plugin coded and
+which the review cannot read at all. No run is created, the refusal is recorded on the chain, and the pull request gets a comment naming
+what was found, or what could not be read, and an `error` status.
 
 The pull request's commit does not hold the registry and remote modules its configuration calls, so
 the review downloads them first, the same way the approval gate does. It runs `terraform get` or
 `tofu get` in a private copy of the configuration at the pull request's head, with the template's
 own credentials, only where the plan would run, and within the gate's time and size bounds, then
-reads what the get installed. The get installs no provider and runs no program. A module hiding an
-external data source is refused by its address like any other, and a download that fails leaves
-the configuration unread, so the plan is refused and the comment says why. A plan that goes ahead
+reads what the get installed. The get installs no provider and runs no program. A module hiding one
+of those data sources is refused by its address like any other, and a download that fails leaves the
+configuration unread, so the plan is refused and the comment says why. A plan that goes ahead
 records the download, its exit status, and the digest of the modules it read in the plan run's
 `dry_run_scans`, and the plan executes exactly those modules.
 
@@ -201,7 +211,7 @@ cannot be recorded is refused, the same as a push trigger's fire:
 |---|---|
 | `/hooks/<trigger>/review/<N>/accepted` | A pull request event passed its checks, before the pre-check downloads anything with the template's credentials. |
 | `/hooks/<trigger>/review/<N>/planned` | A plan is about to launch. The plan run carries this entry's receipt. |
-| `/hooks/<trigger>/review/<N>/refused` | A fork's pull request, or one whose plan is not change free, such as a playbook forcing real tasks under check mode or a configuration with an external data source, was not planned. |
+| `/hooks/<trigger>/review/<N>/refused` | A fork's pull request, or one whose plan is not change free, such as a playbook forcing real tasks under check mode or running a `pipe` lookup, or a configuration with an `external`, `aws_lambda_invocation`, or writing `http` data source, was not planned. |
 | `/hooks/<trigger>/review/<N>/refused/survey/<questions>` | The template's survey has a required question with no default, so the pull request was not planned. |
 | `/hooks/<trigger>/review/<N>/skipped` | The template's inventory matched no hosts, so the plan was skipped. The entry commits to the trigger, the template, the inventory, and the reason. |
 | `/runs/<run>/outcome/<status>` | The plan run finished, committed like every run's outcome. |
@@ -535,13 +545,15 @@ signing secret with `POST /v1/triggers/{id}/rotate-secret` and update the forge'
   in SwitchTender, not from a comment.
 - A comment acts on the plan of the trigger its webhook arrived through. When several review
   triggers watch one repository, each acts on its own template's plan, and each answers the comment.
-- Ansible's check mode is only as safe as the playbook. A playbook that sets `check_mode: false` is
-  refused, as described above, but a custom module that claims to support check mode and acts
-  anyway is not something the read can see. Review the playbooks a
-  review trigger plans, and do not allow forks on one whose playbooks you have not read.
+- Ansible's check mode is only as safe as the playbook. A playbook that sets `check_mode: false` or
+  runs a `pipe` lookup is refused, as described above, but another lookup or plugin that runs code
+  on the controller, or a custom module that claims to support check mode and acts anyway, is not
+  something the read can see. Review the playbooks a review trigger plans, and do not allow forks on
+  one whose playbooks you have not read.
 - A Terraform or OpenTofu plan runs provider code with the template's credentials. Providers are
-  trusted code the team chose, and the review does not judge them: it refuses external data sources
-  and configuration it cannot read, nothing else.
+  trusted code the team chose, and the review does not judge them: it refuses `external` and
+  `aws_lambda_invocation` data sources, `http` data sources that write, and configuration it cannot
+  read, nothing else.
 - The apply preview grades an Ansible playbook from the project's checkout, which holds the branch
   until the pull request merges. A rule with a reversibility floor that depends on what the pull
   request changes in the playbook can decide differently when the apply is submitted.

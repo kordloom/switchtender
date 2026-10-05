@@ -15,8 +15,9 @@ tool, not only Ansible.
 1. Open Runs and select Launch run.
 2. Pick the tool. For Ansible, choose a playbook and an inventory. For Bash, Terraform, OpenTofu, Python, PowerShell, or Go,
    enter the script, or the working directory for Terraform.
-3. Optional: turn on Dry run to preview without making changes. Ansible runs `--check`, Terraform
-   runs `plan`, and Bash and Python run a syntax check.
+3. Optional: turn on Dry run. Ansible runs `--check` and Terraform or OpenTofu runs `plan`, which
+   preview the change, while Bash, Python, PowerShell, and Go only check the script without running
+   it.
 4. Select Launch. The run detail page paints each host and task as it happens, with drill-down into
    stdout, stderr, return code, and diff.
 

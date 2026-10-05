@@ -151,14 +151,18 @@ guessed from traffic:
   can never approve a run, including its own. That holds by construction. The person the agent acts
   for may approve its runs unless a Team rule requires a different approver.
 - **Its own rules.** An agent's run waits for a person's approval on every tier with no policy
-  written, unless a rule with `effect: exempt` covers it, and a dry run the scans prove change free
-  may proceed ([Agent runs are held by default](docs/policy.md#agent-runs-are-held-by-default)).
-  Rules can do what the default hold does not: refuse what an agent may never ask for, so no person
-  can release it either, and require that someone other than the person the agent acts for approve
-  a change nobody can take back. An exemption lifts only the default hold, so a rule like these
-  still applies to a run it covers. Scoping rules by actor, grading them by risk or reversibility,
-  requiring a distinct approver, and refusing outright are the full policy engine, which Team
-  covers:
+  written, its dry runs included, since a check or a plan still runs code with the server's
+  credentials. An agent's Terraform or OpenTofu apply takes two approvals: one before anything
+  plans, and one for the apply its plan proposes, carrying the saved plan. A rule with
+  `effect: exempt` lifts that hold for the routine work it covers, and one that names the agent's
+  `actor` label must also name the `account` its token is bound to
+  ([Agent runs are held by default](docs/policy.md#agent-runs-are-held-by-default)). Rules can do
+  what the default hold does not: refuse what an agent may never ask for, so no person can release
+  it either, and require that someone other than the person the agent acts for approve a change
+  nobody can take back. An exemption lifts only the default hold, so a rule like these still
+  applies to a run it covers. Scoping rules by actor or account, grading them by risk or
+  reversibility, requiring a distinct approver, and refusing outright are the full policy engine,
+  which Team covers:
 
       policies:
         - name: agents-never-drop-databases
@@ -176,8 +180,7 @@ guessed from traffic:
 - **The same receipt.** The run an agent requested and a person approved produces the same signed,
   offline-verifiable receipt as any other change, showing the agent asked, the person approved
   exactly this spec, and this is what happened. A run a rule with `effect: exempt` let through
-  names that rule instead, and a dry run the scans let through records that it was a dry run and
-  what the scans read, with no approval in it.
+  names that rule instead.
 
 The MCP server (`switchtender mcp`) is how an agent talks to the gate: it can list templates,
 propose runs, and read results, and it deliberately has no approve tool, no credential access, and

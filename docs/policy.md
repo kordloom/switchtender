@@ -291,8 +291,9 @@ The setting covers `warn` and nothing else.
 - Setting `warn: note` on a package with no `warn` rule is refused at load. It would read as
   softening the rules that are there while changing nothing.
 
-A dry run whose playbook forces real tasks is judged twice, as [described below](#dry-runs-that-are-not-change-free),
-and a policy that notes records what either pass warned about.
+A dry run the scan did not find change free is judged twice, as [described
+below](#dry-runs-that-are-not-change-free), and a policy that notes records what either pass warned
+about.
 
 #### Per project: staging notes, production holds
 
@@ -409,8 +410,8 @@ an empty value when the run has none, so a module never meets a missing field.
 | `run.queue` | The worker queue the run is routed to. |
 | `run.project_id` | The git project the run reads from. |
 | `run.dry_run` | Whether the run was asked for as a no-change preview: the tool's dry-run flag, `--check` for Ansible. |
-| `run.dry_run_findings` | For a dry run, why the gate's scan did not find it change free. For Ansible, each play, block, task, role, or include that sets `check_mode` to anything but true, naming the file. For Terraform and OpenTofu, each external data source by its address, naming the file and line. For both, whatever the scan could not read. Empty for a dry run read in full that runs nothing, and for any other run. |
-| `run.change_free` | Whether the run is a dry run that changes nothing: `dry_run` is true and `dry_run_findings` is empty. |
+| `run.dry_run_findings` | For a dry run, why the gate's scan did not find it change free. For Ansible, each play, block, task, role, or include that sets `check_mode` to anything but true, and each play or task that runs a `pipe` lookup, naming the file. For Terraform and OpenTofu, each `external` or `aws_lambda_invocation` data source, and each `http` data source with a write method or a request body, by its address, naming the file and line. For both, whatever the scan could not read. Empty for a dry run read in full that found none of these, for a dry run of a tool nothing scans, and for any other run. |
+| `run.change_free` | Whether the gate reads the run as a dry run that changes nothing: `dry_run` is true, `dry_run_findings` is empty, and the tool is one the gate scans or a built-in one whose dry run runs nothing. A dry run of a tool a plugin or the SDK added is never change free. |
 | `run.kind` | Empty for a plain run, or `split` or `pipeline` for a coordinator. |
 | `run.step_name` | The pipeline step's name, for a step. |
 | `run.source` | What fired the run: `api`, `template`, `schedule`, `trigger`, `callback`, `rerun`, `relaunch`, `reconcile`, `propose`, `review` for a pull request plan, or `review_apply` for an apply a pull request comment proposed. |
@@ -484,7 +485,7 @@ names the policy, the limit, and the bundle:
 
 The limit applies to each evaluation, and one submission can evaluate a policy several times. The
 gate asks it separately whether to refuse, whether to hold, what to note, whether a second approver
-is needed, and whether to plan an apply first, and a dry run whose playbook forces real tasks is
+is needed, and whether to plan an apply first, and a dry run the scan did not find change free is
 evaluated twice for each. A person is waiting on every one of them, so a policy that needs more than
 the default is worth making cheaper before its limit is raised.
 
@@ -553,21 +554,40 @@ carrying one is refused at restore.
 
 A dry run is a promise about the tool, not about what it is given. An Ansible dry run is
 `ansible-playbook --check`, and a playbook can set `check_mode: false` on a play, block, task, role,
-or include to run that work for real anyway. A Terraform or OpenTofu dry run is `plan`, and a plan
-runs the program every `external` data source names, with the run's credentials. The gate reads the
-playbook, or the configuration and every module it calls, before it judges a dry run, and records
-what it found in `run.dry_run_findings`: each forcing task by its file, each external data source by
-its address, file, and line. Anything it could not read is recorded there too, since it could run
-work for real as well: a role that is not in the project, a registry module the gate could not
-download, a module source only known at run time, or a file that does not parse.
+or include to run that work for real anyway, and a `pipe` lookup runs its command on the controller
+whenever a template renders, under `--check` too. A Terraform or OpenTofu dry run is `plan`, and a
+plan reads every data source with the run's credentials: an `external` data source runs the program
+it names, an `aws_lambda_invocation` data source invokes its function, and an `http` data source
+sends its request. The gate reads the playbook, or the configuration and every module it calls,
+before it judges a dry run, and records what it found in `run.dry_run_findings`:
 
-A dry run with anything in `run.dry_run_findings` is evaluated twice: once with the input as it
-is, and once as the real run it may be, with `run.dry_run` false. The stricter answer stands:
-every deny, every hold, a demand for a distinct approver, and a plan gate from either pass. A
-module that exempts previews by reading `run.dry_run`, the way a YAML rule sets `exclude_dry_run`,
-therefore holds such a dry run exactly where the YAML rule does, and lets a change-free dry run
-through exactly where the YAML rule does. A module that wants to say so directly reads
-`run.change_free`:
+- Each task that forces real work with `check_mode`, by its file.
+- Each `pipe` lookup in a play's `vars` or `environment` or anywhere in a task, written as `lookup`,
+  `query`, or `q`, with or without the `ansible.builtin.` prefix, or as a `with_pipe` loop, by its
+  play or task and file.
+- Each `external` or `aws_lambda_invocation` data source, and each `http` data source whose method
+  is anything but GET or HEAD or that carries a `request_body`, by its address, file, and line. A
+  method the scan cannot read as a plain value counts as a write.
+
+Input the scan could not read is recorded there too, because unread input can act for real as well:
+a role that is not in the project, a registry module the gate could not download, a module source
+only known at run time, or a file that does not parse. A dry run of a tool a plugin or the SDK added
+is never change free, since the plugin runs its dry run as it was coded and nothing scans it.
+
+The scan finds the known ways a check or a plan acts. It does not prove a preview harmless: other
+lookups and plugins run code on the controller under `--check`, a module that claims to support
+check mode can act anyway, and a plan runs provider code, all with the run's credentials. A rule
+that exempts dry runs trusts the playbooks and configurations it lets through, so keep it to code
+your team reviews. An agent's dry run is held by the [built-in
+hold](#agent-runs-are-held-by-default) whatever the scan finds, unless an exemption covers it, and
+the scan is recorded on it as evidence.
+
+A dry run that is not change free is evaluated twice: once with the input as it is, and once as the
+real run it may be, with `run.dry_run` false. The stricter answer stands: every deny, every hold, a
+demand for a distinct approver, and a plan gate from either pass. A module that exempts previews by
+reading `run.dry_run`, the way a YAML rule sets `exclude_dry_run`, therefore holds such a dry run
+exactly where the YAML rule does, and lets a change-free dry run through exactly where the YAML rule
+does. A module that wants to say so directly reads `run.change_free`:
 
     hold contains "a change in production waits for a person" if {
         input.run.labels.env == "prod"

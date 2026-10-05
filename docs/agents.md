@@ -105,18 +105,17 @@ review, fails the build when a new path appears without a test proving an agent 
    authentication is on before the agent holds any credential. Make sure a human admin account
    exists too, so the agent's held runs have somebody who can approve them.
 
-3. Decide what a human must approve. You do not need a policy for the agent's own runs: every run
-   an agent token asks for waits for a person's approval unless a written policy exempts it. The
-   hold applies to tokens minted with `switchtender token new --user <account> --agent`, and a token
-   minted without `--agent` gets no agent hold. A dry run waits too, since check mode and a plan
-   still run code with this server's credentials, and a Terraform or OpenTofu apply takes two
-   approvals: one before it plans, and one for the apply its plan proposes with the saved plan.
-   To let routine work through, write an exemption, a rule with `effect: exempt`, which Community
-   covers. An exemption that names the agent's `actor` label must also name the `account` its
-   token is bound to, since a label repeats across accounts. The receipt proves who approved each
-   run or which rule exempted it.
-   [Agent runs are held by default](policy.md#agent-runs-are-held-by-default) covers the exemption
-   and what it risks.
+3. Decide what a human must approve. You do not need a policy for the agent's own runs: every run an
+   agent token asks for waits for a person's approval unless a rule with `effect: exempt` covers it.
+   The hold applies to tokens minted with `switchtender token new --user <account> --agent`, and a
+   token minted without `--agent` gets no agent hold. A dry run waits too, since check mode and a
+   plan still run code with this server's credentials, and a Terraform or OpenTofu apply takes two
+   approvals: one before it plans, and one for the apply its plan proposes with the saved plan. To
+   let routine work through, write an exemption, a rule with `effect: exempt`, which Community
+   covers. An exemption that names the agent's `actor` label must also name the `account` its token
+   is bound to, since a label repeats across accounts. The receipt proves who approved each run or
+   which rule exempted it. [Agent runs are held by
+   default](policy.md#agent-runs-are-held-by-default) covers the exemption and what it risks.
 
    Policies gate people's runs too. An approval policy with no criteria matches every run, so one
    empty policy is a gate-everything switch:
@@ -184,11 +183,11 @@ Protocol, which many agent runtimes speak natively. Put the operator-bound token
 
 The agent gets a small, deliberate set of tools: list job templates, propose a run, read a run and
 its log, pull a run's evidence dossier, list recent runs, and list the workflow approval steps
-waiting for a person. Every tool call is an ordinary
-authenticated API request under that same token, so it passes the same authorization, the same
-approval policy, and the same fail-closed audit append as a call from a person. A proposed run lands
-in the chain under the agent's account before it executes, and it waits for a human to release it
-unless a written policy exempts it.
+waiting for a person. Every tool call is an ordinary authenticated API request under that same
+token, so it passes the same authorization, the same approval policy, and the same fail-closed audit
+append as a call from a person. A proposed run lands in the chain under the agent's account before
+it executes, and it waits for a human to release it, a dry run included, unless a rule with
+`effect: exempt` covers it.
 
 The tool set is narrow on purpose. There is no approve tool, so an agent cannot release its own work
 however it is prompted, and no credential, account, token, grant, or policy tool, so it cannot widen
@@ -290,11 +289,13 @@ This is the golden path a governed agent change takes, with the commands to watc
 
 1. The agent proposes a change through MCP or the API. The request lands on the chain before
    anything acts, attributed `actor_type: agent`, on behalf of its human.
-2. Policy sees an agent asking. A deny rule refuses it outright, with the rule named. Unless a
-   written policy exempts it, the run is held: it is born `pending_approval` and no executor can
-   claim it.
+2. Policy sees an agent asking. A deny rule refuses it outright, with the rule named. Unless a rule
+   with `effect: exempt` covers it, the run is held, a dry run included: it is born
+   `pending_approval` and no executor can claim it.
 3. A person reviews the held run, its assessed risk, and its parameters, and approves. The DECISION
-   entry commits who approved, the account they approved under, and the digest of exactly what.
+   entry commits who approved, the account they approved under, and the digest of exactly what. For
+   a Terraform or OpenTofu apply, that approval lets it plan, and the apply its plan proposes waits
+   for a second approval carrying the saved plan, which is the plan step 4 applies.
 4. The run executes, on whichever worker claims it, after re-checking the approved digest. The
    outcome lands on the chain: status, exit code, per-host results, the log digest, and the same
    spec digest.
