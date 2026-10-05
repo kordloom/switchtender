@@ -32,6 +32,11 @@ type InjectionFile struct {
 	EnvVars []string
 	// Content is the file's contents.
 	Content string
+	// MaskByField reports that the injection's Secrets already name the sensitive values inside
+	// Content, so the content is not handed to the masker whole. The masker redacts every line of a
+	// value it is given, and for a structured file such as a kubeconfig that would redact the file's
+	// ordinary keys, such as "clusters:", wherever they appear in a run's output.
+	MaskByField bool
 }
 
 // Injector turns a credential's resolved plaintext secret into runtime material. It must not perform
@@ -50,6 +55,7 @@ func init() {
 	RegisterInjector(KindGCP, gcpInject)
 	RegisterInjector(KindVMware, vmwareInject)
 	RegisterInjector(KindOpenStack, openstackInject)
+	RegisterInjector(KindKubeconfig, kubeconfigInject)
 }
 
 // RegisterInjector registers an injector for a typed credential kind, letting a host add a credential

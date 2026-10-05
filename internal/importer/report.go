@@ -36,6 +36,9 @@ type Report struct {
 	// Suppressed is how many warnings were never listed because the plan hit its cap, so a long
 	// report is not mistaken for a complete one.
 	Suppressed int `json:"suppressed,omitempty"`
+	// Organizations states what became of each AWX organization's own notification attachments:
+	// imported, matched existing, fell back to its templates, or unresolved.
+	Organizations []OrgNotification `json:"organizations,omitempty"`
 }
 
 // Count is one kind of object and how many of it an import would create.
@@ -63,9 +66,10 @@ var dropVocabulary = regexp.MustCompile(`(?i)\b(skip|skipped|drop|dropped|discar
 // Report summarizes what this plan would do.
 func (p *Plan) Report() Report {
 	r := Report{
-		NeedsSecret:  len(p.Credentials),
-		CreatedTotal: p.objects(),
-		Suppressed:   p.suppressed,
+		NeedsSecret:   len(p.Credentials),
+		CreatedTotal:  p.objects(),
+		Suppressed:    p.suppressed,
+		Organizations: p.orgNotifications(),
 	}
 	for _, c := range []Count{
 		{Kind: "projects", N: len(p.Projects)},
@@ -74,6 +78,10 @@ func (p *Plan) Report() Report {
 		{Kind: "templates", N: len(p.Templates)},
 		{Kind: "schedules", N: len(p.Schedules)},
 		{Kind: "credentials", N: len(p.Credentials)},
+		{Kind: "credential types", N: len(p.CredentialTypes)},
+		{Kind: "notification targets", N: len(p.Notifications)},
+		{Kind: "notification attachments", N: len(p.Attachments)},
+		{Kind: "organizations", N: len(p.Orgs)},
 	} {
 		if c.N > 0 {
 			r.Created = append(r.Created, c)

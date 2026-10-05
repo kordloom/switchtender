@@ -30,11 +30,11 @@ func TestAWorkflowOnlyExportIsAssessed(t *testing.T) {
 		WantLeftOut string
 		// Want is the error expected.
 		Want error
-	}{{ // Test 0: A workflow waiting on a person, with no templates in the export.
+	}{{ // Test 0: A workflow holding only an approval node has no work for it to release.
 		Name: "gated workflow alone",
 		Export: `{"workflow_job_templates": [{"name": "Release", "workflow_nodes": [
 			{"identifier": "approve", "related": {"create_approval_template": {"name": "Ship it"}}}]}]}`,
-		WantGates: []string{"Release"}, WantLeftOut: "is an approval gate",
+		WantLeftOut: "carries only approval nodes",
 	}, { // Test 1: A workflow whose templates were not exported with it.
 		Name: "workflow without its templates",
 		Export: `{"workflow_job_templates": [{"name": "Nightly", "workflow_nodes": [
@@ -88,6 +88,12 @@ func TestTheReportDoesNotDenyTheGatesItNames(t *testing.T) {
 	}, { // Test 1: Neither, which really has nothing to gate.
 		Name:      "neither",
 		WantInDoc: []string{"nothing here to gate"},
+	}, { // Test 2: A gate the move keeps is named as kept.
+		Name:       "kept gate",
+		Governance: Governance{Templates: 1, CarriedGates: []string{"Release"}},
+		WantInDoc: []string{"1 workflow waits for a person at an approval node today. That gate " +
+			"comes\n  across as an approval step", "      - Release\n"},
+		WantNotInDoc: []string{"does not\n  come across"},
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -130,11 +136,12 @@ func TestHeadlineOf(t *testing.T) {
 		WantResult: "This export holds no templates, so there is nothing here to gate.",
 	}, { // Test 1: One gated workflow and no templates.
 		Name: "one gate", Governance: Governance{ApprovalGates: []string{"Release"}}, WantKind: "gap",
-		WantResult: gateOne + " Write an approval policy before it is rebuilt, or it runs with no gate.",
+		WantResult: gateOne +
+			" Rebuild it with an approval step before it runs, or it runs with no gate.",
 	}, { // Test 2: Two gated workflows and no templates.
 		Name: "two gates", Governance: Governance{ApprovalGates: []string{"A", "B"}}, WantKind: "gap",
 		WantResult: "2 workflows wait for a person at an approval node today, and those gates do " +
-			"not come across. Write an approval policy before they are rebuilt, or they run with no gate.",
+			"not come across. Rebuild them with approval steps before they run, or they run with no gate.",
 	}, { // Test 3: One template, irreversible.
 		Name: "one irreversible", Governance: Governance{Templates: 1, WouldGate: 1}, WantKind: "gap",
 		WantResult: "Your one template can do something nobody can undo, and today it runs whenever " +
@@ -169,6 +176,12 @@ func TestHeadlineOf(t *testing.T) {
 		Governance: Governance{Templates: 5, ApprovalGates: []string{"Release"}}, WantKind: "gap",
 		WantResult: "None of your 5 templates grades irreversible. A policy on risk or on tool is " +
 			"the one to write here, not one on reversibility. " + gateOne,
+	}, { // Test 10: A gate the move keeps is said, and it is not a gap.
+		Name:       "reversible and a kept gate",
+		Governance: Governance{Templates: 5, CarriedGates: []string{"Release"}}, WantKind: "clear",
+		WantResult: "None of your 5 templates grades irreversible. A policy on risk or on tool is " +
+			"the one to write here, not one on reversibility. 1 workflow waits for a person at an " +
+			"approval node, and that gate comes across as an approval step.",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {

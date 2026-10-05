@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"math"
 	"reflect"
 	"slices"
 	"sort"
@@ -39,6 +40,7 @@ type awxWorkflow struct {
 
 // awxWorkflowRelated holds a workflow's nested assets.
 type awxWorkflowRelated struct {
+	awxNotifyRelated
 	// WorkflowNodes are the graph's nodes.
 	WorkflowNodes []awxWorkflowNode `json:"workflow_nodes"`
 	// SurveySpec is the workflow survey.
@@ -336,6 +338,13 @@ func (p *Plan) addWorkflows(export awxExport, now time.Time,
 			p.refused++
 		}
 		p.addWorkflowSchedules(wf, id, inventoryIDs, now)
+		if id != "" {
+			p.awxNotify().templateOrg[id] = wf.Organization.Name
+			if wf.Related != nil {
+				p.attachAWXNotifications(fmt.Sprintf("workflow %q", wf.Name),
+					&wf.Related.awxNotifyRelated, id, now)
+			}
+		}
 	}
 }
 
@@ -380,18 +389,23 @@ func (p *Plan) addWorkflow(wf awxWorkflow, name string, jobs awxJobs, now time.T
 		return ""
 	}
 
-	// An approval node is a person the workflow waits for partway through. Approval here is a policy
-	// that holds a run before it starts, and an import writes no policies, so bringing the other
-	// nodes across would run them with the gate gone. Checked first and named as a gate, because read
-	// as an ordinary node it looked like a step that runs nothing, which hid the one part of the
-	// workflow a reviewer most needs to know did not come across.
+	// An approval node is a person the workflow waits for partway through, and it imports as an
+	// approval step: the steps after it wait for the decision, and its failure edges become the
+	// steps that run when it is denied or times out. An always edge is the one shape that cannot
+	// come across, since it would run the next step whatever the approver said, which is no gate,
+	// so a workflow carrying one is refused and the gate is named as lost rather than weakened.
 	for _, n := range nodes {
-		if gate := n.approvalGate(); gate != nil {
+		gate := n.approvalGate()
+		if gate == nil {
+			continue
+		}
+		if len(n.alwaysEdges()) > 0 {
 			p.gates = append(p.gates, name)
-			p.warn("workflow %q was not imported: node %s is an approval gate, %q. Approval here "+
-				"is a policy that holds a run before it starts, not a step partway through, so "+
-				"importing the rest would run it with no gate. Write a policy that holds its steps, "+
-				"then rebuild it on the Workflows page.", name, nodeLabel(n), oneLine(gate.Name))
+			p.warn("workflow %q was not imported: approval node %s, %q, runs other nodes whatever "+
+				"the approver decides. An approval step here releases its approve path only on an "+
+				"approval and its deny path only on a denial or a timeout, so carrying that edge "+
+				"would run work nobody approved. Rebuild it on the Workflows page with the work on "+
+				"the path it belongs to.", name, nodeLabel(n), oneLine(gate.Name))
 			return ""
 		}
 	}
@@ -401,6 +415,9 @@ func (p *Plan) addWorkflow(wf awxWorkflow, name string, jobs awxJobs, now time.T
 	// job template, and resolved by name it imported as that job template: the node ran some other
 	// playbook, and a nested workflow's own approval gates were dropped with it.
 	for _, n := range nodes {
+		if n.approvalGate() != nil {
+			continue
+		}
 		if work := n.otherWork(); work != "" {
 			p.warn("workflow %q was not imported: node %s runs %s, %q, and a pipeline step runs a "+
 				"playbook. Rebuild it on the Workflows page with that work written as steps.",
@@ -410,10 +427,11 @@ func (p *Plan) addWorkflow(wf awxWorkflow, name string, jobs awxJobs, now time.T
 	}
 
 	// A failure edge runs work precisely because something failed. A pipeline step runs when its
-	// dependencies allow it, and there is no run-because-it-failed step, so a workflow using one
-	// cannot be expressed and is refused rather than imported without its error handling.
+	// dependencies allow it, and there is no run-because-it-failed step for a job, so a workflow
+	// using one cannot be expressed and is refused rather than imported without its error handling.
+	// An approval node's failure edge is its deny path, which an approval step does carry.
 	for _, n := range nodes {
-		if len(n.failures()) > 0 {
+		if n.approvalGate() == nil && len(n.failures()) > 0 {
 			p.warn("workflow %q was not imported: node %s runs other nodes on failure, which a "+
 				"pipeline cannot express. Rebuild it on the Workflows page, where a step can be set "+
 				"to continue on failure.", name, nodeLabel(n))
@@ -421,11 +439,47 @@ func (p *Plan) addWorkflow(wf awxWorkflow, name string, jobs awxJobs, now time.T
 		}
 	}
 
+	// The per-node settings a workflow template holds once are read from the nodes that run a job.
+	// An approval node runs none, and reading one as a job template with no tags, limit, or
+	// inventory would make every real node look like it disagreed with it.
+	jobNodes := make([]awxWorkflowNode, 0, len(nodes))
+	gateNames := []string{}
+	for _, n := range nodes {
+		if n.approvalGate() != nil {
+			gateNames = append(gateNames, nodeLabel(n))
+			continue
+		}
+		jobNodes = append(jobNodes, n)
+	}
+	if len(jobNodes) == 0 {
+		p.warn("workflow %q was not imported: it carries only approval nodes, so there is no work "+
+			"for an approval to release", name)
+		return ""
+	}
+
 	// Every node must resolve to a job template in this export, or its step has no work to do.
 	steps := make([]run.PipelineStep, 0, len(nodes))
 	stepName := make(map[string]string, len(nodes))
 	projectID := ""
 	for _, n := range nodes {
+		if gate := n.approvalGate(); gate != nil {
+			label := nodeLabel(n)
+			keys := n.keys()
+			if len(keys) == 0 {
+				p.warn("workflow %q was not imported: a node carries neither an id nor an identifier, "+
+					"so its place in the graph cannot be resolved", name)
+				return ""
+			}
+			for _, k := range keys {
+				if _, taken := stepName[k]; taken {
+					p.warn("workflow %q was not imported: two nodes share the key %q", name, k)
+					return ""
+				}
+				stepName[k] = label
+			}
+			steps = append(steps, approvalStepOf(label, gate))
+			continue
+		}
 		jt, ok := jobs.get(n.UnifiedJobTemplate)
 		if !ok {
 			p.warn("workflow %q was not imported: node %s runs %s, which is not a job template in "+
@@ -508,10 +562,25 @@ func (p *Plan) addWorkflow(wf awxWorkflow, name string, jobs awxJobs, now time.T
 		if n.continues() {
 			steps[i].ContinueOnFailure = true
 		}
+		// An approval node's failure edges are its deny path: the node they point at runs when the
+		// approver denies the step or its timeout passes.
+		if n.approvalGate() != nil {
+			for _, next := range n.failures() {
+				j, ok := byKey[string(next)]
+				if !ok {
+					p.warn("workflow %q was not imported: node %s points at node %q, which is not in "+
+						"the workflow", name, nodeLabel(n), oneLine(string(next)))
+					return ""
+				}
+				steps[j].IfDenied = append(steps[j].IfDenied, steps[i].Name)
+			}
+		}
 	}
 	for i := range steps {
 		sort.Strings(steps[i].DependsOn)
 		steps[i].DependsOn = dedupeStrings(steps[i].DependsOn)
+		sort.Strings(steps[i].IfDenied)
+		steps[i].IfDenied = dedupeStrings(steps[i].IfDenied)
 	}
 
 	// The graph is validated through the same rule the dispatcher runs it through, so an import can
@@ -524,27 +593,27 @@ func (p *Plan) addWorkflow(wf awxWorkflow, name string, jobs awxJobs, now time.T
 	// What a pipeline holds once but AWX scoped per node. Each is resolved before the template
 	// exists, so a workflow that cannot be expressed is refused whole rather than planned and then
 	// abandoned.
-	limit, err := workflowLimit(nodes, jobs)
+	limit, err := workflowLimit(jobNodes, jobs)
 	if err != nil {
 		p.warn("workflow %q was not imported: %v", name, err)
 		return ""
 	}
-	vars, err := p.workflowVars(wf, nodes, jobs)
+	vars, err := p.workflowVars(wf, jobNodes, jobs)
 	if err != nil {
 		p.warn("workflow %q was not imported: %v", name, err)
 		return ""
 	}
-	tags, skipTags, err := workflowTags(nodes, jobs)
+	tags, skipTags, err := workflowTags(jobNodes, jobs)
 	if err != nil {
 		p.warn("workflow %q was not imported: %v", name, err)
 		return ""
 	}
-	nodeInventory, err := workflowInventory(nodes, jobs)
+	nodeInventory, err := workflowInventory(jobNodes, jobs)
 	if err != nil {
 		p.warn("workflow %q was not imported: %v", name, err)
 		return ""
 	}
-	timeout := p.workflowTimeout(name, nodes, jobs)
+	timeout := p.workflowTimeout(name, jobNodes, jobs)
 
 	tpl := &template.Template{
 		ID: template.NewID(), Name: name, Steps: steps, ProjectID: projectID, CreatedAt: now,
@@ -571,7 +640,7 @@ func (p *Plan) addWorkflow(wf awxWorkflow, name string, jobs awxJobs, now time.T
 	}
 	tpl.Limit = limit
 	tpl.ExtraVars = vars
-	creds, widened := p.workflowCredentials(name, nodes, jobs, credentialIDs)
+	creds, widened := p.workflowCredentials(name, jobNodes, jobs, credentialIDs)
 	tpl.CredentialIDs = creds
 	if widened {
 		p.warn("workflow %q imported with the credentials of all its nodes on every step. AWX gave "+
@@ -584,6 +653,14 @@ func (p *Plan) addWorkflow(wf awxWorkflow, name string, jobs awxJobs, now time.T
 	p.Templates = append(p.Templates, tpl)
 	p.warn("workflow %q imported as a workflow template with %d steps. Check the graph before you "+
 		"run it: AWX node convergence and per-node prompts do not carry across.", name, len(steps))
+	if len(gateNames) > 0 {
+		p.carriedGates = append(p.carriedGates, name)
+		p.warn("workflow %q keeps its approval %s, %s, as approval %s: the workflow stops there "+
+			"until an admin approves or denies, and a denial or a timeout takes the failure path. "+
+			"Who may approve follows your roles and approval policies, not the AWX approval role.",
+			name, "node"+plural(len(gateNames)), strings.Join(gateNames, ", "),
+			"step"+plural(len(gateNames)))
+	}
 	return tpl.ID
 }
 
@@ -896,4 +973,30 @@ func workflowInventory(nodes []awxWorkflowNode, jobs awxJobs) (awxRef, error) {
 		}
 	}
 	return found, nil
+}
+
+// approvalStepOf maps an AWX approval node to an approval step. AWX shows its approver the
+// approval's name and description, so both reach the step's description, and its timeout carries as
+// the step's, which takes the deny path when it passes exactly as AWX takes the failure path.
+func approvalStepOf(label string, gate *awxApprovalTemplate) run.PipelineStep {
+	description := gate.Name
+	if gate.Description != "" {
+		if description != "" {
+			description += ": "
+		}
+		description += gate.Description
+	}
+	if len(description) > run.MaxApprovalDescription {
+		// Cut on the byte limit the step is validated against, then drop any rune the cut split.
+		description = strings.ToValidUTF8(description[:run.MaxApprovalDescription], "")
+	}
+	timeout := gate.Timeout
+	if timeout < 0 {
+		timeout = 0
+	}
+	if timeout > math.MaxInt32 {
+		timeout = math.MaxInt32
+	}
+	return run.PipelineStep{Name: label, Type: run.StepApproval, Description: description,
+		ApprovalTimeout: int(timeout)}
 }

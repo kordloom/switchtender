@@ -12,8 +12,10 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 
 	"github.com/kordloom/switchtender/internal/importer"
+	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/template"
 )
 
@@ -287,13 +289,13 @@ func TestJenkinsPollTriggerIsNotImportedAsASchedule(t *testing.T) {
 	assertWarns(t, plan.Warnings, "polled source control", "NOT imported")
 }
 
-// TestJenkinsPasswordParameterIsNotImportedAsPlainText covers the same rule the AWX, Semaphore, and
-// Rundeck importers hold.
+// TestJenkinsPasswordParameterImportsAsSecret covers the same rule the AWX, Semaphore, and Rundeck
+// importers hold.
 //
-// Jenkins stores a password parameter encrypted. A survey answer is kept in plain text on the run
-// and injected as an extra var, so importing one would quietly downgrade a secret to a stored
-// plaintext value on every launch.
-func TestJenkinsPasswordParameterIsNotImportedAsPlainText(t *testing.T) {
+// Jenkins stores a password parameter encrypted. It imports as a secret field, whose answer is
+// sealed rather than kept on the run in plain text. Its stored default is Jenkins ciphertext, which
+// cannot come across and must not travel into the plan in any form.
+func TestJenkinsPasswordParameterImportsAsSecret(t *testing.T) {
 	t.Parallel()
 	doc := freestyle(`<properties><hudson.model.ParametersDefinitionProperty><parameterDefinitions>
 		<hudson.model.PasswordParameterDefinition><name>API_TOKEN</name>
@@ -308,13 +310,12 @@ func TestJenkinsPasswordParameterIsNotImportedAsPlainText(t *testing.T) {
 		t.Fatalf("FromJenkins() error = %v", err)
 	}
 	tpl := plan.Templates[0]
-	for _, f := range tpl.Survey {
-		if f.Var == "API_TOKEN" {
-			t.Fatalf("the password parameter was imported as a survey field: %+v", f)
-		}
+	want := []template.SurveyField{
+		{Var: "API_TOKEN", Label: "API_TOKEN", Type: template.FieldSecret},
+		{Var: "KEEP", Label: "KEEP", Type: template.FieldText},
 	}
-	if len(tpl.Survey) != 1 || tpl.Survey[0].Var != "KEEP" {
-		t.Errorf("survey = %+v, want only the non-secret parameter", tpl.Survey)
+	if diff := cmp.Diff(want, tpl.Survey, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("survey mismatch (-want +got):\n%s", diff)
 	}
 	// The encrypted value must not travel into the plan in any form, warnings included.
 	for _, w := range plan.Warnings {
@@ -322,7 +323,7 @@ func TestJenkinsPasswordParameterIsNotImportedAsPlainText(t *testing.T) {
 			t.Fatalf("warning leaked the stored secret: %q", w)
 		}
 	}
-	assertWarns(t, plan.Warnings, "password parameter and was NOT imported")
+	assertWarns(t, plan.Warnings, `secret field "API_TOKEN" arrives without its default`)
 }
 
 // TestJenkinsRemoteTriggerTokenIsNotImported covers the other secret a job config carries.
@@ -615,6 +616,8 @@ func TestFromJenkinsAgainstRealJenkinsOutput(t *testing.T) {
 		{Var: "DRY_RUN", Label: "DRY_RUN", Type: template.FieldBool, Help: "Skip writes",
 			Default: "true"},
 		{Var: "NOTES", Label: "NOTES", Type: template.FieldMultiline, Help: "Free notes"},
+		// The password parameter arrives as a secret field. Its encrypted default does not.
+		{Var: "API_TOKEN", Label: "API_TOKEN", Type: template.FieldSecret, Help: "Token"},
 	}
 	if diff := cmp.Diff(wantSurvey, nightly.Survey); diff != "" {
 		t.Errorf("survey mismatch (-want +got):\n%s", diff)
@@ -648,7 +651,7 @@ func TestFromJenkinsAgainstRealJenkinsOutput(t *testing.T) {
 	}
 
 	assertWarns(t, plan.Warnings,
-		"Pipeline job", "polled source control", "password parameter and was NOT imported",
+		"Pipeline job", "polled source control", `secret field "API_TOKEN" arrives without its default`,
 		"$WORKSPACE", "Windows batch step", "python3", "acme/infra.git")
 	// The encrypted parameter must not travel into the plan in any form.
 	for _, w := range plan.Warnings {
@@ -1208,13 +1211,15 @@ func TestFromJenkinsAgainstAWildJenkins(t *testing.T) {
 		}
 	}
 
-	// Every parameter kind: the three that cannot be represented are refused, the rest survive.
+	// Every parameter kind: the two that cannot be represented are refused, the rest survive, and
+	// the password parameter arrives as a secret field.
 	params := findTemplate(t, plan, "every-parameter")
 	var kept []string
 	for _, f := range params.Survey {
-		kept = append(kept, f.Var)
+		kept = append(kept, f.Var+":"+string(f.Type))
 	}
-	if diff := cmp.Diff([]string{"STR", "TXT", "BOOL", "CH"}, kept); diff != "" {
+	if diff := cmp.Diff([]string{"STR:text", "TXT:multiline", "BOOL:bool", "CH:choice", "PW:secret"},
+		kept); diff != "" {
 		t.Errorf("survey mismatch (-want +got):\n%s", diff)
 	}
 
@@ -1245,7 +1250,7 @@ func TestFromJenkinsAgainstAWildJenkins(t *testing.T) {
 
 	assertWarns(t, plan.Warnings,
 		"matrix job", "Pipeline job", "no-builders", "step 13 is a Windows batch step",
-		"password parameter and was NOT imported", "uploads a file at launch",
+		`secret field "PW" arrives without its default`, "uploads a file at launch",
 		"disabled in Jenkins")
 }
 
@@ -1376,8 +1381,8 @@ func TestAJenkinsTimerKeepsTheZoneItWasWrittenIn(t *testing.T) {
 	if len(plan.Schedules) != 2 {
 		t.Fatalf("schedules = %d, want 2: %v", len(plan.Schedules), plan.Warnings)
 	}
-	if got := plan.Schedules[0].Timezone; got != "" {
-		t.Errorf("the rule before TZ= imported in %q, want the server's own zone", got)
+	if got, want := plan.Schedules[0].Timezone, schedule.ServerZone(); got != want {
+		t.Errorf("the rule before TZ= imported in %q, want %q, the server's own zone", got, want)
 	}
 	if got := plan.Schedules[1]; got.Timezone != "Europe/Berlin" || got.Cron != "30 6 * * 0" {
 		t.Errorf("the rule after TZ= imported as %q in %q, want 30 6 * * 0 in Europe/Berlin",

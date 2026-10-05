@@ -498,9 +498,8 @@ func jenkinsTargets(targets string) string {
 
 // jenkinsSurvey maps a job's parameters to survey fields.
 //
-// A password parameter is refused rather than imported. Jenkins stores its value encrypted, while a
-// survey answer is kept in plain text on the run and injected as an extra var, so importing one
-// would quietly downgrade a secret. The parameter is dropped and named.
+// A password parameter imports as a secret field, whose answer is sealed rather than kept on the
+// run in plain text, which keeps the protection Jenkins gave it.
 func (p *Plan) jenkinsSurvey(name string, proj jenkinsProject) []template.SurveyField {
 	var fields []template.SurveyField
 	for _, param := range proj.Properties.Params.Items {
@@ -517,15 +516,18 @@ func (p *Plan) jenkinsSurvey(name string, proj jenkinsProject) []template.Survey
 	return fields
 }
 
-// jenkinsField maps one parameter to a survey field, refusing the kinds that must not be imported.
+// jenkinsField maps one parameter to a survey field, refusing the kinds that have no equivalent.
 func (p *Plan) jenkinsField(name string, param jenkinsParam) (template.SurveyField, bool) {
 	switch param.XMLName.Local {
 	case "hudson.model.PasswordParameterDefinition",
 		"com.michelin.cio.hudson.plugins.maskedpassword.MaskedPasswordParameterDefinition":
-		p.warn("job %q parameter %q is a password parameter and was NOT imported. Store its value "+
-			"as a credential instead: importing it as a survey field would keep the answer in "+
-			"plain text on every run.", name, param.Name)
-		return template.SurveyField{}, false
+		// Jenkins keeps a password parameter's value encrypted, and a secret field seals its answer
+		// the same way. The default is stored in Jenkins' own encryption, so it cannot come across.
+		p.secretSurveyDefault(fmt.Sprintf("job %q", name), param.Name, param.DefaultValue)
+		return template.SurveyField{
+			Var: param.Name, Label: param.Name, Type: template.FieldSecret,
+			Help: strings.TrimSpace(param.Description),
+		}, true
 	case "hudson.model.FileParameterDefinition":
 		p.warn("job %q parameter %q uploads a file at launch, which a survey cannot do, so it was "+
 			"not imported", name, param.Name)

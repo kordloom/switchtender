@@ -341,17 +341,30 @@ func (p *Plan) addRundeckJob(job rundeckJob, inventoryName string, now time.Time
 	if job.Schedule == nil {
 		return
 	}
-	spec, ok := p.rundeckCron(job, name)
-	if !ok {
-		return
-	}
 	// A schedule disabled in Rundeck comes across disabled rather than being left behind. Dropping it
 	// was safe and lossy: the cadence somebody had written and parked was gone, so re-enabling it later
 	// meant writing it again from memory, and the four formats disagreed about the same situation while
 	// AWX, Jenkins and Semaphore all carry theirs switched off. addSchedule says which ones arrive off.
+	enabled := !disabled && (job.ScheduleEnabled == nil || *job.ScheduleEnabled)
+	// The Quartz forms cron has no reading for, the third Friday or the last day of the month, were
+	// refused outright. A recurrence says each of them exactly, so they come across as one rather
+	// than being left for somebody to rebuild by hand. Anything else keeps the cron conversion.
+	if fields, quartz := rundeckQuartzFields(job.Schedule); quartz && quartzNeedsRecurrence(fields) {
+		if rule, ok := quartzToRRule(fields, now); ok {
+			p.addSchedule(&schedule.Schedule{
+				ID: schedule.NewID(), Name: name, RRule: rule, TemplateID: tmpl.ID,
+				Enabled: enabled, CreatedAt: now,
+			}, "rundeck", now)
+			return
+		}
+	}
+	spec, ok := p.rundeckCron(job, name)
+	if !ok {
+		return
+	}
 	p.addSchedule(&schedule.Schedule{
 		ID: schedule.NewID(), Name: name, Cron: spec, TemplateID: tmpl.ID,
-		Enabled: !disabled && (job.ScheduleEnabled == nil || *job.ScheduleEnabled), CreatedAt: now,
+		Enabled: enabled, CreatedAt: now,
 	}, "rundeck", now)
 }
 
@@ -522,10 +535,8 @@ func rundeckStepType(t string) string {
 
 // rundeckSurvey maps a job's options to survey fields.
 //
-// A secure option is refused rather than imported. Rundeck stores such a value obscured, and a
-// survey field here is plain text whose answer is kept on the run and injected as an extra var, so
-// importing one would quietly turn a password prompt into a stored plaintext value. Downgrading a
-// secret without saying so is worse than not importing it, so the option is dropped and named.
+// A secure option imports as a secret field. Rundeck stores such a value obscured, and a secret
+// field's answer is sealed with the credential key and never kept on the run in plain text.
 func (p *Plan) rundeckSurvey(job rundeckJob, name string) []template.SurveyField {
 	var fields []template.SurveyField
 	taken := map[string]string{}
@@ -545,10 +556,15 @@ func (p *Plan) rundeckSurvey(job rundeckJob, name string) []template.SurveyField
 			continue
 		}
 		taken[variable] = opt.Name
+		// A secure option imports as a secret field, whose answer is sealed rather than kept on the
+		// run in plain text. It keeps no default, choices, or pattern: Rundeck reads a secure
+		// default from its key storage, which an export does not carry.
 		if opt.Secure {
-			p.warn("job %q option %q is a secure option and was NOT imported. Store its value as a "+
-				"credential instead: importing it as a survey field would keep the answer in plain "+
-				"text on every run.", name, opt.Name)
+			p.secretSurveyDefault(fmt.Sprintf("job %q", name), opt.Name, opt.Value)
+			fields = append(fields, template.SurveyField{
+				Var: variable, Label: opt.Name, Type: template.FieldSecret,
+				Required: opt.Required, Help: opt.Description,
+			})
 			continue
 		}
 		field := template.SurveyField{

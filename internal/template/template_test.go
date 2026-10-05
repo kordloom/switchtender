@@ -7,7 +7,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
+
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/scrub"
 	"github.com/kordloom/switchtender/internal/template"
 	"github.com/kordloom/switchtender/internal/templatetest"
 )
@@ -98,6 +102,11 @@ func TestLaunchOptionsCarryThePreset(t *testing.T) {
 	}
 	if r.ExtraVars["env"] != "prod" {
 		t.Errorf("ExtraVars = %v, want env=prod", r.ExtraVars)
+	}
+	// A run identity token names the template a run executes, and a cloud trust policy keys on it,
+	// so every launch path has to stamp it, not only the API's.
+	if r.TemplateID != "tpl_1" {
+		t.Errorf("TemplateID = %q, want tpl_1", r.TemplateID)
 	}
 }
 
@@ -248,6 +257,12 @@ func TestValidateSurvey(t *testing.T) {
 			{Var: "a", Type: template.FieldType("wat")}}, true},
 		// Test 6: An empty survey is valid.
 		{"empty", nil, false},
+		// Test 7: A secret field with bounds and a sealed default is valid.
+		{"secret", []template.SurveyField{
+			{Var: "a", Type: template.FieldSecret, MinLength: 8, SealedDefault: "sealed"}}, false},
+		// Test 8: A secret field holding a plain default would store the secret as text.
+		{"secret with a plain default", []template.SurveyField{
+			{Var: "a", Type: template.FieldSecret, Default: "hunter22"}}, true},
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -281,6 +296,8 @@ func TestASurveyFieldTypeReadsTheWordsPeopleWrite(t *testing.T) {
 		{In: `"Integer"`, Want: template.FieldInt},        // Test 4: Case does not matter here.
 		{In: `"int"`, Want: template.FieldInt},            // Test 5: The stored name is unchanged.
 		{In: `"choice"`, Want: template.FieldChoice},      // Test 6.
+		{In: `"password"`, Want: template.FieldSecret},    // Test 7: AWX's name for the secret type.
+		{In: `"secret"`, Want: template.FieldSecret},      // Test 8.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -295,7 +312,140 @@ func TestASurveyFieldTypeReadsTheWordsPeopleWrite(t *testing.T) {
 		})
 	}
 	err := template.ValidateSurvey([]template.SurveyField{{Var: "rate", Type: "float"}})
-	if !errors.Is(err, template.ErrSurveyField) || !strings.Contains(err.Error(), "text, multiline, int, bool, or choice") {
+	if !errors.Is(err, template.ErrSurveyField) ||
+		!strings.Contains(err.Error(), "text, multiline, secret, int, bool, or choice") {
 		t.Errorf("an unknown type was refused with %v, want the types that exist named", err)
+	}
+}
+
+// TestASecretAnswerIsNeverAPlainVar pins the split ResolveSurveyAnswers makes. A secret field is
+// validated like a text field, but its answer comes back apart from the plain vars, and an
+// unanswered one carries its sealed default without opening it.
+func TestASecretAnswerIsNeverAPlainVar(t *testing.T) {
+	t.Parallel()
+	fields := []template.SurveyField{
+		{Var: "env", Type: template.FieldText, Default: "stage"},
+		{Var: "db_password", Type: template.FieldSecret, MinLength: 8},
+		{Var: "api_token", Type: template.FieldSecret, SealedDefault: "sealed-token"},
+	}
+	tests := []struct {
+		// Answers are the launch answers.
+		Answers map[string]any
+		// WantVars are the plain vars returned.
+		WantVars map[string]any
+		// WantSecrets are the secret answers returned.
+		WantSecrets template.SecretAnswers
+		// Want is the error returned.
+		Want error
+	}{{ // Test 0: A typed answer goes to Plain and a missing one takes its sealed default.
+		Answers:  map[string]any{"db_password": "correct-horse"},
+		WantVars: map[string]any{"env": "stage"},
+		WantSecrets: template.SecretAnswers{
+			Plain:  map[string]string{"db_password": "correct-horse"},
+			Sealed: map[string]string{"api_token": "sealed-token"},
+		},
+	}, { // Test 1: An answer to the secret field overrides its sealed default.
+		Answers:  map[string]any{"api_token": "typed-token"},
+		WantVars: map[string]any{"env": "stage"},
+		WantSecrets: template.SecretAnswers{
+			Plain: map[string]string{"api_token": "typed-token"},
+		},
+	}, { // Test 2: A secret answer is held to its length bound like a text answer.
+		Answers: map[string]any{"db_password": "short"}, Want: template.ErrSurvey,
+	}, { // Test 3: A secret answer must be text.
+		Answers: map[string]any{"db_password": 12345678}, Want: template.ErrSurvey,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			vars, secrets, err := template.ResolveSurveyAnswers(fields, test.Answers)
+			if !errors.Is(err, test.Want) {
+				t.Fatalf("ResolveSurveyAnswers() error = %v, want %v", err, test.Want)
+			}
+			if diff := cmp.Diff(test.WantVars, vars, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("vars mismatch (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff(test.WantSecrets, secrets, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("secrets mismatch (-want +got):\n%s", diff)
+			}
+			plain, err := template.ResolveSurvey(fields, test.Answers)
+			if !errors.Is(err, test.Want) {
+				t.Fatalf("ResolveSurvey() error = %v, want %v", err, test.Want)
+			}
+			for _, f := range fields {
+				if _, ok := plain[f.Var]; ok && f.Secret() {
+					t.Errorf("ResolveSurvey() returned the secret field %q as a plain var", f.Var)
+				}
+			}
+		})
+	}
+}
+
+// TestSealDefaultsNeverKeepsASecretAsText pins how a secret default is prepared for storage and
+// shown to a reader.
+func TestSealDefaultsNeverKeepsASecretAsText(t *testing.T) {
+	t.Parallel()
+	seal := func(s string) (string, error) { return "sealed(" + s + ")", nil }
+	existing := []template.SurveyField{
+		{Var: "token", Type: template.FieldSecret, SealedDefault: "sealed(old)"},
+	}
+	tests := []struct {
+		// Field is the incoming field.
+		Field template.SurveyField
+		// Seal is the sealing function, nil for no key.
+		Seal func(string) (string, error)
+		// WantSealed is the sealed default stored.
+		WantSealed string
+		// Want is the error returned.
+		Want error
+	}{{ // Test 0: A plain default is sealed.
+		Field: template.SurveyField{Var: "token", Type: template.FieldSecret, Default: "new"},
+		Seal:  seal, WantSealed: "sealed(new)",
+	}, { // Test 1: The mask keeps the stored default.
+		Field: template.SurveyField{Var: "token", Type: template.FieldSecret, Default: scrub.Marker},
+		Seal:  seal, WantSealed: "sealed(old)",
+	}, { // Test 2: A sealed default sent by a caller is discarded.
+		Field: template.SurveyField{Var: "token", Type: template.FieldSecret, SealedDefault: "planted"},
+		Seal:  seal,
+	}, { // Test 3: No key, no secret default.
+		Field: template.SurveyField{Var: "token", Type: template.FieldSecret, Default: "new"},
+		Want:  template.ErrSurveyField,
+	}, { // Test 4: The mask for a field with nothing stored stands for nothing.
+		Field: template.SurveyField{Var: "other", Type: template.FieldSecret, Default: scrub.Marker},
+		Seal:  seal, Want: template.ErrSurveyField,
+	}, { // Test 5: A field that is not secret keeps its plain default and loses any sealed one.
+		Field: template.SurveyField{
+			Var: "env", Type: template.FieldText, Default: "prod", SealedDefault: "x",
+		},
+		Seal: seal,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			got, err := template.SealDefaults([]template.SurveyField{test.Field}, existing, test.Seal)
+			if !errors.Is(err, test.Want) {
+				t.Fatalf("SealDefaults() error = %v, want %v", err, test.Want)
+			}
+			if err != nil {
+				return
+			}
+			if got[0].SealedDefault != test.WantSealed {
+				t.Errorf("sealed default = %q, want %q", got[0].SealedDefault, test.WantSealed)
+			}
+			if got[0].Secret() && got[0].Default != nil {
+				t.Errorf("a secret field kept a plain default: %v", got[0].Default)
+			}
+			if !got[0].Secret() && got[0].Default != test.Field.Default {
+				t.Errorf("a plain default changed: %v", got[0].Default)
+			}
+			masked := template.MaskSurvey(got)
+			if masked[0].SealedDefault != "" {
+				t.Errorf("the masked field shows its ciphertext: %+v", masked[0])
+			}
+			if got[0].Secret() && test.WantSealed != "" && masked[0].Default != scrub.Marker {
+				t.Errorf("the masked field reads %v, want the mask that says a default is set",
+					masked[0].Default)
+			}
+		})
 	}
 }

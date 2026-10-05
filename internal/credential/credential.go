@@ -68,6 +68,28 @@ const (
 	// optional connection defaulting to network_cli) inject the ansible_user, ansible_password,
 	// ansible_network_os, and ansible_connection variables through a file.
 	KindNetwork Kind = "network"
+	// KindAWSOIDC is AWS workload identity federation. It stores no secret: its settings name an
+	// IAM role, and each run receives a short-lived identity token SwitchTender signs, exchanged
+	// for role credentials through AssumeRoleWithWebIdentity by the tool or, when configured, by
+	// SwitchTender.
+	KindAWSOIDC Kind = "aws_oidc"
+	// KindGCPOIDC is Google Cloud workload identity federation. It stores no secret: its settings
+	// name a workload identity pool provider and an optional service account to impersonate, and
+	// each run receives an external_account credentials file over a short-lived identity token.
+	KindGCPOIDC Kind = "gcp_oidc"
+	// KindAzureOIDC is a Microsoft Entra federated identity credential. It stores no secret: its
+	// settings name the application and tenant, and each run receives a short-lived identity token
+	// in a file under the Azure workload identity variables.
+	KindAzureOIDC Kind = "azure_oidc"
+	// KindOIDCToken hands a run a short-lived identity token SwitchTender signs, for any relying
+	// party that verifies OpenID Connect tokens. It stores no secret: its settings name the
+	// audience.
+	KindOIDCToken Kind = "oidc_token"
+	// KindKubeconfig is a Kubernetes kubeconfig document, written to a private file and bound to the
+	// KUBECONFIG variable kubectl and helm read, the K8S_AUTH_KUBECONFIG variable the
+	// kubernetes.core collection reads, and the KUBE_CONFIG_PATH variable Terraform's kubernetes and
+	// helm providers read.
+	KindKubeconfig Kind = "kubeconfig"
 )
 
 // TokenEnvVar is the environment variable a token credential is exposed under at run time.
@@ -100,13 +122,29 @@ var (
 var builtinKinds = []Kind{
 	KindSSHKey, KindSSHPassword, KindVaultPassword, KindBecomePassword, KindBecome, KindNetwork,
 	KindEnv, KindToken, KindRegistry, KindAWS, KindAzure, KindGCP, KindVMware, KindOpenStack,
+	KindKubeconfig,
 }
 
-// ValidKind reports whether k names a supported credential kind: a built-in, or a typed or custom
-// kind with a registered injector, so a host that registers its own credential type does not need to
-// touch this function.
+// federatedKinds are the credential kinds that hold no secret at all. Each run mints a short-lived
+// identity token instead, so nothing durable is stored, sealed, or resolved from a secret source.
+var federatedKinds = []Kind{KindAWSOIDC, KindGCPOIDC, KindAzureOIDC, KindOIDCToken}
+
+// ValidKind reports whether k names a supported credential kind: a built-in, a federated kind, or a
+// typed or custom kind with a registered injector, so a host that registers its own credential type
+// does not need to touch this function.
 func ValidKind(k Kind) bool {
-	return slices.Contains(builtinKinds, k) || Injectable(k)
+	return slices.Contains(builtinKinds, k) || slices.Contains(federatedKinds, k) || Injectable(k)
+}
+
+// Federated reports whether k is a federated kind, one that stores no secret and mints a run
+// identity token at execution instead.
+func Federated(k Kind) bool {
+	return slices.Contains(federatedKinds, k)
+}
+
+// FederatedKinds returns the federated credential kinds in display order.
+func FederatedKinds() []Kind {
+	return slices.Clone(federatedKinds)
 }
 
 // Kinds returns the built-in credential kinds in display order. Custom registered kinds are also
@@ -115,11 +153,15 @@ func Kinds() []Kind {
 	return slices.Clone(builtinKinds)
 }
 
-// KindList joins the built-in kinds into a comma-separated string for a user-facing error hint.
+// KindList joins the built-in and federated kinds into a comma-separated string for a user-facing
+// error hint.
 func KindList() string {
-	out := make([]string, len(builtinKinds))
-	for i, k := range builtinKinds {
-		out[i] = string(k)
+	out := make([]string, 0, len(builtinKinds)+len(federatedKinds))
+	for _, k := range builtinKinds {
+		out = append(out, string(k))
+	}
+	for _, k := range federatedKinds {
+		out = append(out, string(k))
 	}
 	return strings.Join(out, ", ")
 }

@@ -3,6 +3,7 @@ package importer
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -30,16 +31,20 @@ type awxExport struct {
 	JobTemplates []awxJobTemplate `json:"job_templates"`
 	// Credentials are the credentials, with secrets omitted by AWX.
 	Credentials []awxCredential `json:"credentials"`
+	// CredentialTypes are the custom credential types, which a credential's credential_type names.
+	CredentialTypes []awxCredentialType `json:"credential_types"`
 	// InventorySources are dynamic inventory sources exported at the top level. Some exports nest them
 	// under each inventory's related block instead.
 	InventorySources []awxInventorySource `json:"inventory_sources"`
 	// The rest are counted, not mapped. They are decoded as raw messages so the report can say how
 	// many of each an export held and what will not come across, rather than staying silent about
 	// the part of an AWX install a team's orchestration actually lives in.
-	Workflows             []awxWorkflow     `json:"workflow_job_templates"`
-	Organizations         []json.RawMessage `json:"organizations"`
-	Teams                 []json.RawMessage `json:"teams"`
-	NotificationTemplates []json.RawMessage `json:"notification_templates"`
+	Workflows     []awxWorkflow     `json:"workflow_job_templates"`
+	Organizations []json.RawMessage `json:"organizations"`
+	Teams         []json.RawMessage `json:"teams"`
+	// NotificationTemplates are the named notification channels, imported as notification targets
+	// and attached wherever the export attaches them.
+	NotificationTemplates []awxNotificationTemplate `json:"notification_templates"`
 }
 
 // awxProject is an AWX project.
@@ -56,6 +61,9 @@ type awxProject struct {
 	ScmBranch string `json:"scm_branch"`
 	// Credential references the source control credential a private repository syncs with.
 	Credential awxRef `json:"credential"`
+	// Related carries the notification templates attached to the project, which hear about project
+	// updates and are reported rather than imported.
+	Related *awxProjectRelated `json:"related"`
 }
 
 // awxInventory is an AWX inventory with its hosts and groups.
@@ -72,6 +80,31 @@ type awxInventory struct {
 	Variables json.RawMessage `json:"variables"`
 	// Related carries dynamic inventory sources when the export nests them under the inventory.
 	Related *awxInventoryRelated `json:"related"`
+	// Kind is empty for an ordinary inventory, smart for one defined by a host filter, or
+	// constructed for one the constructed plugin builds from input inventories.
+	Kind string `json:"kind"`
+	// HostFilter is a smart inventory's filter over the hosts of the organization's inventories.
+	HostFilter string `json:"host_filter"`
+	// InputInventories are a constructed inventory's inputs, when the export carries them at the
+	// top level.
+	InputInventories []awxRef `json:"input_inventories"`
+	// SourceVars are a constructed inventory's plugin options, when the export flattens them onto
+	// the inventory the way AWX's constructed_inventories endpoint serves them.
+	SourceVars json.RawMessage `json:"source_vars"`
+	// Limit narrows a constructed inventory, when the export flattens it onto the inventory.
+	Limit string `json:"limit"`
+}
+
+// inputInventories returns a constructed inventory's inputs from whichever place the export
+// carried them.
+func (i awxInventory) inputInventories() []awxRef {
+	if len(i.InputInventories) > 0 {
+		return i.InputInventories
+	}
+	if i.Related != nil {
+		return i.Related.InputInventories
+	}
+	return nil
 }
 
 // awxInventoryRelated holds an inventory's nested related assets.
@@ -82,6 +115,8 @@ type awxInventoryRelated struct {
 	Hosts []awxHost `json:"hosts"`
 	// Groups are the inventory's groups when the export nests them, which awxkit does.
 	Groups []awxGroup `json:"groups"`
+	// InputInventories are a constructed inventory's inputs when the export nests them.
+	InputInventories []awxRef `json:"input_inventories"`
 }
 
 // hosts returns the inventory's hosts from whichever place the export carried them.
@@ -125,8 +160,20 @@ type awxInventorySource struct {
 	SourceProject awxRef `json:"source_project"`
 	// Credential references the credential that authenticates the plugin.
 	Credential awxRef `json:"credential"`
-	// Inventory references the inventory this source feeds, kept only for context.
+	// Inventory references the inventory this source feeds. A constructed source is matched to its
+	// constructed inventory by it.
 	Inventory awxRef `json:"inventory"`
+	// SourceVars are the source's plugin options, a YAML or JSON string. A constructed source's are
+	// the constructed inventory's options; any other source's are reported, since a source here
+	// takes its options from its config file.
+	SourceVars json.RawMessage `json:"source_vars"`
+	// Limit narrows a constructed source to the hosts a pattern matches.
+	Limit string `json:"limit"`
+}
+
+// constructed reports whether the source is the one AWX keeps behind a constructed inventory.
+func (s awxInventorySource) constructed() bool {
+	return strings.EqualFold(s.Source, "constructed")
 }
 
 // awxHost is an inventory host with optional variables.
@@ -280,6 +327,15 @@ type awxJobTemplate struct {
 	SurveyEnabled *bool `json:"survey_enabled"`
 	// BecomeEnabled is whether AWX runs the playbook with privilege escalation.
 	BecomeEnabled bool `json:"become_enabled"`
+	// UseFactCache is whether AWX keeps the facts each job gathers and serves them to the next.
+	UseFactCache bool `json:"use_fact_cache"`
+	// AllowCallbacks is whether a host in the inventory may launch the template against itself.
+	AllowCallbacks bool `json:"allow_callbacks"`
+	// HostConfigKey is the key a host presents to call back. AWX exports it in the clear.
+	HostConfigKey string `json:"host_config_key"`
+	// ID is the AWX job template id, which an export taken from the API carries. It is kept raw so
+	// a value that is not a number cannot keep the template from importing.
+	ID json.RawMessage `json:"id"`
 	// Credentials references credentials by natural key when the export carries them at the top
 	// level.
 	Credentials []awxRef `json:"credentials"`
@@ -311,6 +367,7 @@ func (t awxJobTemplate) checkMode() bool { return strings.EqualFold(t.JobType, "
 
 // awxRelated holds a job template's nested related assets.
 type awxRelated struct {
+	awxNotifyRelated
 	// SurveySpec is the survey.
 	SurveySpec *awxSurvey `json:"survey_spec"`
 	// Schedules are the template's schedules.
@@ -449,6 +506,12 @@ func (r *awxRef) UnmarshalJSON(b []byte) error {
 // by generated id. It never fails on a single unmappable asset: it records a warning and continues,
 // so a partial export still migrates what it can.
 func FromAWX(data []byte, now time.Time) (*Plan, error) {
+	return fromAWX(data, now, nil)
+}
+
+// fromAWX is FromAWX with ids, AWX's job template list, standing in for the AWX id an export does
+// not carry. ids is nil when there is no list.
+func fromAWX(data []byte, now time.Time, ids *awxTemplateIDs) (*Plan, error) {
 	data, err := textOf(data)
 	if err != nil {
 		return nil, err
@@ -466,7 +529,7 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 	if err := refuseJSONTail(data); err != nil {
 		return nil, err
 	}
-	plan := &Plan{}
+	plan := &Plan{awxIDs: ids}
 	// A skipped entry counts as refused, so an export whose every entry was malformed reports each
 	// one and why, rather than claiming nothing in it was recognized.
 	for _, s := range skipped {
@@ -511,7 +574,15 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 	inventoryName := orgQualifier(awxOrgNames(allInventories, func(inv awxInventory) (string, string) {
 		return inv.Organization.Name, inv.Name
 	})...)
+	var composed []awxInventory
 	for _, inv := range allInventories {
+		// A smart or constructed inventory holds no hosts of its own and names other inventories,
+		// so it is created once every inventory it can name has an id.
+		if kind := strings.ToLower(strings.TrimSpace(inv.Kind)); kind == inventory.KindSmart ||
+			kind == inventory.KindConstructed {
+			composed = append(composed, inv)
+			continue
+		}
 		hosts, groups := inv.hosts(), inv.groups()
 		// An inventory that arrives with nothing in it is reported, whatever the reason.
 		//
@@ -544,12 +615,52 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 			nestedSources = append(nestedSources, inv.Related.InventorySources...)
 		}
 	}
+	constructedSources := map[string]awxInventorySource{}
+	for _, inv := range composed {
+		if inv.Related == nil {
+			continue
+		}
+		for _, src := range inv.Related.InventorySources {
+			if src.constructed() {
+				constructedSources[inv.Organization.Name+orgKeySep+inv.Name] = src
+			} else {
+				nestedSources = append(nestedSources, src)
+			}
+		}
+	}
+	for _, src := range export.InventorySources {
+		if src.constructed() {
+			constructedSources[src.Inventory.Org+orgKeySep+src.Inventory.Name] = src
+		}
+	}
+	for _, inv := range composed {
+		plan.addComposed(inv, inventoryName(inv.Organization.Name, inv.Name), now, inventoryIDs,
+			constructedSources)
+	}
 
 	credentialIDs := awxIDs{}
 	credentialName := orgQualifier(awxOrgNames(export.Credentials, func(c awxCredential) (string, string) {
 		return c.Organization.Name, c.Name
 	})...)
+	customTypes := plan.addCredentialTypes(export.CredentialTypes, now)
 	for _, c := range export.Credentials {
+		// A credential of a custom type the export also carries becomes a credential of the imported
+		// type. It arrives as an empty shell like every other credential, and its type decides how
+		// its values reach a run, files included, exactly as the type did in AWX.
+		if typ, ok := customTypes[c.CredentialType.Name]; ok {
+			obj := &credential.Credential{
+				ID: credential.NewID(), Name: credentialName(c.Organization.Name, c.Name),
+				TypeID: typ.ID, CreatedAt: now,
+			}
+			if credentialIDs.set(c.Organization.Name, c.Name, obj.ID) {
+				plan.warn("credential %q appears more than once; the later one is what templates "+
+					"naming it will use, and the two may not be the same kind", obj.Name)
+			}
+			plan.Credentials = append(plan.Credentials, obj)
+			plan.warn("%s", typedCredentialWarning(c.Name, typ))
+			plan.noteKubeconfigSwitch(c.Name, obj.Name, typ)
+			continue
+		}
 		kind, exact := mapCredentialKind(c.CredentialType.Name, c.Inputs)
 		if !exact {
 			plan.warn("credential %q type %q mapped to %q; verify it is correct",
@@ -643,11 +754,21 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 	}
 
 	for _, s := range export.InventorySources {
+		// The source AWX keeps behind a constructed inventory became that inventory's options above.
+		if s.constructed() {
+			continue
+		}
 		plan.addSource(s, now, projectIDs, credentialIDs)
 	}
+	// Notification templates come before the objects attached to them, so each attachment can be
+	// wired to the target its template became.
+	plan.addNotificationTemplates(export.NotificationTemplates, now)
+	plan.reportProjectNotifications(export.Projects)
 	for _, s := range nestedSources {
 		plan.addSource(s, now, projectIDs, credentialIDs)
 	}
+	// Placed once every inventory exists, so a smart inventory's organization takes in all of them.
+	plan.placeAWXSmartInventories(export, inventoryIDs, now)
 
 	templateName := orgQualifier(awxOrgNames(export.JobTemplates, func(jt awxJobTemplate) (string, string) {
 		return jt.Organization.Name, jt.Name
@@ -659,12 +780,14 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 	// Workflows come after the job templates they run, since each node's step inlines the playbook
 	// of the template it points at.
 	plan.addWorkflows(export, now, projectIDs, inventoryIDs, credentialIDs)
+	plan.attachAWXOrganizations(export.Organizations, now)
+	plan.reportAWXPlacement()
 	reportUnmapped(plan, export)
 	// What the struct never had a field for, which reportUnmapped cannot see: it names the kinds this
 	// importer knows it drops, and a field it does not know about is exactly the one nobody wrote down.
 	reportUnread(plan, data, export)
 	if err := plan.requireObjects("projects, inventories, credentials, job templates, " +
-		"workflows, or schedules"); err != nil {
+		"workflows, schedules, or notification templates"); err != nil {
 		return nil, err
 	}
 	return plan, nil
@@ -706,6 +829,11 @@ func (p *Plan) addSource(s awxInventorySource, now time.Time, projectIDs, creden
 			p.warn("inventory source %q references unknown credential %s", s.Name,
 				credentialIDs.unresolved(s.Credential))
 		}
+	}
+	if vars := sourceVarsText(s.SourceVars); vars != "" {
+		p.warn("inventory source %q carries source_vars in AWX, which were not imported: a source "+
+			"here reads its options from its config file, so move them into %s", s.Name,
+			quoteName(src.Source))
 	}
 	inv := &inventory.Inventory{
 		ID: inventory.NewID(), Name: s.Name + " (dynamic)", Content: "{}", CreatedAt: now,
@@ -789,6 +917,7 @@ func (p *Plan) addTemplate(jt awxJobTemplate, name string, now time.Time,
 				"sets become: false", name)
 		}
 	}
+	p.mapFactCacheAndCallbacks(jt, tpl, name)
 	if spec := jt.surveySpec(); jt.SurveyEnabled != nil && !*jt.SurveyEnabled && spec != nil &&
 		len(spec.Spec) > 0 {
 		// A survey switched off in AWX is never asked there, and its defaults are not applied either.
@@ -801,8 +930,54 @@ func (p *Plan) addTemplate(jt awxJobTemplate, name string, now time.Time,
 	}
 
 	p.Templates = append(p.Templates, tpl)
+	p.awxNotify().templateOrg[tpl.ID] = jt.Organization.Name
 	if jt.Related != nil {
 		p.addSchedules(fmt.Sprintf("template %q", name), jt.Related.Schedules, tpl.ID, inventoryIDs, now)
+		// After the schedules, so an attachment also reaches the copy an overriding schedule fires.
+		p.attachAWXNotifications(fmt.Sprintf("template %q", name), &jt.Related.awxNotifyRelated,
+			tpl.ID, now)
+	}
+}
+
+// mapFactCacheAndCallbacks carries AWX's fact cache switch and provisioning callback settings onto
+// an imported template. Both come across as they are, and what an operator has to do afterward is
+// said in the report: a callback URL is an address on the old server baked into every host's boot
+// script, so it changes, and a key only comes across sealed on an install that has an encryption
+// key.
+func (p *Plan) mapFactCacheAndCallbacks(jt awxJobTemplate, tpl *template.Template, name string) {
+	tpl.UseFactCache = jt.UseFactCache
+	if jt.UseFactCache && tpl.InventoryID == "" {
+		p.warn("template %q uses the fact cache in AWX, and its inventory did not come across, so "+
+			"its runs gather facts without the cache until it names a stored inventory", name)
+	}
+	tpl.AllowCallbacks = jt.AllowCallbacks
+	key := strings.TrimSpace(jt.HostConfigKey)
+	// awxkit writes an encrypted field as this marker when the exporting account could not read it.
+	if key == "$encrypted$" {
+		key = ""
+	}
+	if key != "" {
+		if p.callbackKeys == nil {
+			p.callbackKeys = map[string]string{}
+		}
+		p.callbackKeys[tpl.ID] = key
+	}
+	if !jt.AllowCallbacks {
+		return
+	}
+	switch key {
+	case "":
+		p.warn("template %q accepts provisioning callbacks in AWX, and the export carries no host "+
+			"config key, so it refuses every callback until a key is minted for it", name)
+	default:
+		p.warn("template %q accepts provisioning callbacks in AWX. Its host config key comes "+
+			"across sealed when this install has an encryption key; without one, mint a key after "+
+			"the import", name)
+	}
+	p.mapAWXCallback(jt, tpl, name)
+	if tpl.InventoryID == "" {
+		p.warn("template %q accepts provisioning callbacks in AWX, and its inventory did not come "+
+			"across, so no host can be matched until it names a stored inventory", name)
 	}
 }
 
@@ -856,45 +1031,43 @@ func (p *Plan) mapSurvey(jt awxJobTemplate) []template.SurveyField {
 	}
 	var fields []template.SurveyField
 	for _, f := range survey.Spec {
-		// AWX's password survey type prompts for a secret and stores it obscured. A survey field here
-		// is plain text whose answer is kept on the run and injected as an extra var, so importing one
-		// would quietly turn a password prompt into a stored plaintext value, and AWX exports the
-		// field's default alongside it. Refusing and naming it is honest; a silent downgrade hands the
-		// operator a migration that looks complete and is less safe than what they left.
-		if strings.EqualFold(f.Type, "password") {
-			p.warn("survey field %q of template %q is a password prompt and was NOT imported. Store "+
-				"its value as a credential instead: importing it as a survey field would keep the "+
-				"answer in plain text on every run.", f.Variable, jt.Name)
-			continue
-		}
 		fieldType, exact := mapSurveyType(f.Type)
 		if !exact {
 			p.warn("survey field %q of template %q: type %q mapped to %q",
 				f.Variable, jt.Name, f.Type, fieldType)
 		}
-		fields = append(fields, template.SurveyField{
+		field := template.SurveyField{
 			Var: f.Variable, Label: f.QuestionName, Type: fieldType,
 			Required: f.Required, Default: f.Default, Choices: choicesFrom(f.Choices),
-		})
+		}
+		// A password prompt imports as a secret field, whose answer is sealed the way AWX encrypts
+		// it. Its default is the one part that cannot come across: AWX exports it as $encrypted$.
+		if field.Secret() {
+			field.Default, field.Choices = nil, nil
+			p.secretSurveyDefault(fmt.Sprintf("template %q", jt.Name), f.Variable, f.Default)
+		}
+		fields = append(fields, field)
 	}
 	return fields
 }
 
-// addSchedules maps the schedules of one imported object into the plan, converting each RRULE to
-// cron and warning on any that cron cannot express.
+// addSchedules maps the schedules of one imported object into the plan. A rule cron says exactly
+// becomes a cron expression, which is the easier form to read and edit; every other rule comes
+// across as the RFC 5545 recurrence it is, evaluated the way AWX evaluates it.
 //
 // owner names the thing the schedules belong to, already quoted, such as template "patch" or
 // workflow "rollout". Both kinds arrive here so the two paths cannot drift apart on which rules
 // they accept or how they report a refusal, and the report says which object lost its cadence.
+//
+// Before recurrences existed, a rule cron could not say was skipped with a warning: a COUNT or an
+// UNTIL, an EXDATE that takes a holiday out, the last Friday of the quarter, every third day. Those
+// are the schedules an AWX estate keeps for exactly the cases a nightly cron does not cover, so
+// leaving them behind left the part of the migration nobody would notice until it did not run.
 func (p *Plan) addSchedules(owner string, schedules []awxSchedule, templateID string,
 	inventoryIDs awxIDs, now time.Time) {
 	for _, s := range schedules {
-		cron, ok := RRULEToCron(s.RRule)
-		if !ok {
-			// A rule that bounds itself is the common case here, and its remedy is different from a
-			// cadence cron cannot express, so it says so: a cron entry has no end, and creating one
-			// from a rule that was meant to stop would leave a job firing forever.
-			p.warn("schedule %q of %s skipped: %s (%q)", s.Name, owner, rruleProblem(s.RRule), s.RRule)
+		if strings.TrimSpace(s.RRule) == "" {
+			p.warn("schedule %q of %s has no recurrence rule, so it was not imported", s.Name, owner)
 			continue
 		}
 		enabled := s.Enabled == nil || *s.Enabled
@@ -912,36 +1085,96 @@ func (p *Plan) addSchedules(owner string, schedules []awxSchedule, templateID st
 				zone = ""
 			}
 		}
-		target := templateID
-		if overridden, complete := p.scheduleTemplate(owner, s, templateID, inventoryIDs, now); overridden != "" {
-			target = overridden
-			if !complete && enabled {
-				enabled = false
-				p.warn("schedule %q of %s arrives switched off, because it overrides an inventory "+
-					"that did not come across. Point its template at the right inventory, then "+
-					"switch it on.", s.Name, owner)
-			}
+		cron, rule := awxCadence(s.RRule, zone, now)
+		target, held := templateID, ""
+		if overridden, why := p.scheduleTemplate(owner, s, templateID, inventoryIDs, now); overridden != "" {
+			target, held = overridden, why
 		}
+		added := len(p.Schedules)
 		p.addSchedule(&schedule.Schedule{
-			ID: schedule.NewID(), Name: s.Name, Cron: cron, Timezone: zone, TemplateID: target,
-			Enabled: enabled, CreatedAt: now,
+			ID: schedule.NewID(), Name: s.Name, Cron: cron, RRule: rule, Timezone: zone,
+			TemplateID: target, Enabled: enabled, CreatedAt: now,
+			SpringForward: awxSpringForward(cron),
 		}, "this AWX export", now)
+		// Switched off once it is added rather than before, so the report gives the reason it was
+		// held here instead of saying it was switched off at the source, which it was not.
+		if held != "" && enabled && len(p.Schedules) > added {
+			p.Schedules[len(p.Schedules)-1].Enabled = false
+			p.warn("schedule %q of %s arrives switched off. %s Then switch it on.", s.Name, owner, held)
+		}
 	}
 }
 
+// awxCadence picks how an AWX rule is carried: as the cron expression RRULEToCron gives when that
+// expression fires at the same moments the rule does, and as the rule itself otherwise. It returns
+// one of the two and leaves the other empty.
+//
+// The two are compared rather than trusted. RRULEToCron reads the rule's time of day and weekdays
+// and nothing about when it starts, so a rule whose DTSTART is next month converted to a cron
+// firing from tonight, and the comparison is what catches that and anything like it. A rule this
+// system cannot evaluate keeps the cron conversion, which is what imported before recurrences
+// existed.
+func awxCadence(rrule, zone string, now time.Time) (string, string) {
+	rule := strings.TrimSpace(rrule)
+	cron, ok := RRULEToCron(rrule)
+	if !ok {
+		return "", rule
+	}
+	asCron := &schedule.Schedule{Cron: cron, Timezone: zone, SpringForward: awxSpringForward(cron)}
+	asRule := &schedule.Schedule{RRule: rule, Timezone: zone}
+	cronAt, ruleAt := now, now
+	for range cadenceChecks {
+		ruleNext, err := asRule.NextFire(ruleAt)
+		if err != nil {
+			if errors.Is(err, schedule.ErrExhausted) {
+				return "", rule
+			}
+			return cron, ""
+		}
+		cronNext, err := asCron.NextFire(cronAt)
+		if err != nil || !cronNext.Equal(ruleNext) {
+			return "", rule
+		}
+		cronAt, ruleAt = cronNext, ruleNext
+	}
+	return cron, ""
+}
+
+// cadenceChecks is how many upcoming fires a cron conversion must agree with its rule on before the
+// cron form is used. It spans more than a week of daily fires, so a weekday the conversion dropped
+// shows up.
+const cadenceChecks = 12
+
 // scheduleTemplate gives a schedule that overrides its template a copy of the template with the
-// overrides applied, and returns the copy's id and whether every override came across. It returns
-// an empty id for a schedule that overrides nothing, which fires its template as it is.
+// overrides applied, and returns the copy's id and, when part of what it overrides did not come
+// across, the sentences saying what and what to do about it, which keep the schedule switched off.
+// It returns an empty id for a schedule that overrides nothing, which fires its template as it is.
 //
 // A schedule fires a stored template with that template's own settings. An AWX schedule carries more:
 // its survey answers and extra variables, and any limit, tags, or check mode it was saved with.
 // Dropping them ran the schedule wider or with different answers than the one AWX ran, a nightly
 // check against one host became a real run against every host, and a copy is the one way to keep
 // the difference without changing what the template does when somebody launches it by hand.
+//
+// A variable the template's survey asks is the schedule's answer to that question rather than a
+// plain extra var, and it becomes the copy's default for the question. A schedule fires with each
+// question's default, and refuses one that is required with none, so an answer left as a plain extra
+// var would have refused every fire of a schedule AWX ran without complaint. A secret answer cannot
+// come across, since an export never carries one readably, so it is not carried as whatever stood in
+// for it, and the schedule waits switched off until the question has a default.
 func (p *Plan) scheduleTemplate(owner string, s awxSchedule, templateID string, inventoryIDs awxIDs,
-	now time.Time) (string, bool) {
-	vars := decodeVars(s.ExtraData)
+	now time.Time) (string, string) {
+	idx := slices.IndexFunc(p.Templates, func(t *template.Template) bool { return t.ID == templateID })
+	var survey []template.SurveyField
+	if idx >= 0 {
+		survey = p.Templates[idx].Survey
+	}
+	answers, vars := splitScheduleAnswers(decodeVars(s.ExtraData), survey)
 	var changes []string
+	if len(answers) > 0 {
+		changes = append(changes, "its answers to the survey ("+
+			strings.Join(slices.Sorted(maps.Keys(answers)), ", ")+")")
+	}
 	if len(vars) > 0 {
 		changes = append(changes, "its own variables ("+strings.Join(slices.Sorted(maps.Keys(vars)), ", ")+")")
 	}
@@ -973,12 +1206,8 @@ func (p *Plan) scheduleTemplate(owner string, s awxSchedule, templateID string, 
 	if s.Inventory.Name != "" {
 		changes = append(changes, "inventory "+s.Inventory.Name)
 	}
-	if len(changes) == 0 {
-		return "", true
-	}
-	idx := slices.IndexFunc(p.Templates, func(t *template.Template) bool { return t.ID == templateID })
-	if idx < 0 {
-		return "", true
+	if len(changes) == 0 || idx < 0 {
+		return "", ""
 	}
 	orig := p.Templates[idx]
 	copied := *orig
@@ -994,6 +1223,20 @@ func (p *Plan) scheduleTemplate(owner string, s awxSchedule, templateID string, 
 		copied.ExtraVars = map[string]any{}
 	}
 	maps.Copy(copied.ExtraVars, vars)
+	var held []string
+	if unreadable := answerSurvey(copied.Survey, answers); len(unreadable) > 0 {
+		quoted := make([]string, len(unreadable))
+		for i, v := range unreadable {
+			quoted[i] = strconv.Quote(v)
+		}
+		them := "it"
+		if len(unreadable) > 1 {
+			them = "each"
+		}
+		held = append(held, fmt.Sprintf("Its answer to the secret survey question%s %s did not "+
+			"come across, because an export never carries a secret answer readably, so give %s a "+
+			"default on %q.", plural(len(unreadable)), strings.Join(quoted, ", "), them, copied.Name))
+	}
 	if set(s.Limit) {
 		copied.Limit = *s.Limit
 	}
@@ -1018,21 +1261,57 @@ func (p *Plan) scheduleTemplate(owner string, s awxSchedule, templateID string, 
 	if s.Timeout != nil && *s.Timeout > 0 {
 		copied.Timeout = int(*s.Timeout)
 	}
-	complete := true
 	if s.Inventory.Name != "" {
 		if id, ok := inventoryIDs.get(s.Inventory); ok {
 			copied.InventoryID = id
 		} else {
-			complete = false
+			held = append(held, "It overrides an inventory that did not come across, so point its "+
+				"template at the right inventory.")
 			p.warn("schedule %q of %s references unknown inventory %s", s.Name, owner,
 				inventoryIDs.unresolved(s.Inventory))
 		}
 	}
 	p.Templates = append(p.Templates, &copied)
+	p.awxNotify().copies[templateID] = append(p.awxNotify().copies[templateID], copied.ID)
 	p.warn("schedule %q of %s runs with %s, so it imports firing %q, a copy of the template with "+
 		"them applied. A later change to the original template does not reach the copy.",
 		s.Name, owner, strings.Join(changes, ", "), copied.Name)
-	return copied.ID, complete
+	return copied.ID, strings.Join(held, " ")
+}
+
+// splitScheduleAnswers separates a schedule's variables into its answers to the template's survey,
+// keyed by question, and the plain variables left over.
+func splitScheduleAnswers(vars map[string]any, survey []template.SurveyField) (map[string]any, map[string]any) {
+	answers, rest := map[string]any{}, map[string]any{}
+	for name, v := range vars {
+		if slices.ContainsFunc(survey, func(f template.SurveyField) bool { return f.Var == name }) {
+			answers[name] = v
+			continue
+		}
+		rest[name] = v
+	}
+	return answers, rest
+}
+
+// answerSurvey makes each answer the default of its question in survey, which a schedule fires
+// with, and returns the secret questions it could not answer, sorted. A secret answer is never
+// carried as a default or a variable: what an export holds in its place is not the answer, and a
+// play handed it would run with a placeholder for a password.
+func answerSurvey(survey []template.SurveyField, answers map[string]any) []string {
+	var unreadable []string
+	for i := range survey {
+		v, ok := answers[survey[i].Var]
+		if !ok {
+			continue
+		}
+		if survey[i].Secret() {
+			unreadable = append(unreadable, survey[i].Var)
+			continue
+		}
+		survey[i].Default = v
+	}
+	slices.Sort(unreadable)
+	return unreadable
 }
 
 // convertHosts adapts AWX hosts to the shared import host shape, decoding host variables and leaving
@@ -1124,12 +1403,10 @@ func reportUnmapped(plan *Plan, export awxExport) {
 		What  string
 		Why   string
 	}{
-		{len(export.Organizations), "organization",
+		{plan.awxUnplacedOrganizations(export.Organizations), plan.awxUnplacedOrgNoun(),
 			"create %s with POST /v1/orgs and add members, which carries the same ownership"},
 		{len(export.Teams), "team",
 			"create %s with POST /v1/teams and grant access per object"},
-		{len(export.NotificationTemplates), "notification template",
-			"set notifications on each template, or configure the server-wide channels"},
 	} {
 		if item.Count == 0 {
 			continue

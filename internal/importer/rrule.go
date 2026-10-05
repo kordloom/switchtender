@@ -14,7 +14,8 @@ var weekdayCron = map[string]string{
 
 // RRULEToCron converts the common AWX schedule RRULE shapes into a standard five-field cron
 // expression, reporting whether the conversion succeeded. Intervals a cron cannot express, such as
-// every three days, are refused so the caller can warn rather than emit a wrong cadence.
+// every three days, are refused, and the caller then carries the rule across as a recurrence rather
+// than emitting a wrong cadence.
 func RRULEToCron(rrule string) (string, bool) {
 	// A rule that is more than one rule cannot become one cron expression. parseRRULE folds every
 	// RRULE line into one map, so a schedule carrying two of them silently imported as whichever keys
@@ -133,25 +134,6 @@ func RRULEToCron(rrule string) (string, bool) {
 		return fmt.Sprintf("%s %s %s * *", minute, hour, day), true
 	default:
 		return "", false
-	}
-}
-
-// rruleProblem says why a rule could not become a cron expression, so a skipped schedule tells the
-// operator what to do rather than only that something failed.
-func rruleProblem(rrule string) string {
-	if why, compound := rruleCompound(rrule); compound {
-		return why
-	}
-	parts := parseRRULE(rrule)
-	switch {
-	case parts["COUNT"] != "":
-		return "it runs a fixed number of times and a cron entry never stops, so set it by hand " +
-			"if it is still needed"
-	case parts["UNTIL"] != "":
-		return "it stops on a date and a cron entry never stops, so set it by hand and remove it " +
-			"when that date passes"
-	default:
-		return "its cadence cannot be expressed as cron"
 	}
 }
 
