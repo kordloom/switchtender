@@ -1,0 +1,13 @@
+---
+- name: Rotate the database password
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Record a digest of the answer the play received
+      ansible.builtin.copy:
+        content: "{{ db_password | hash('sha256') }}\n"
+        dest: "{{ marker_dir }}/survey-{{ inventory_hostname }}"
+        mode: "0600"
+    - name: Print the answer, which the log has to mask
+      ansible.builtin.debug:
+        msg: "rotating to {{ db_password }}"

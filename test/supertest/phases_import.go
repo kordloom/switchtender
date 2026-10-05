@@ -24,6 +24,8 @@ var awxObjects = []struct {
 	{Path: "/v1/inventories", Member: "inventories", Name: "Production"},
 	{Path: "/v1/credentials", Member: "credentials", Name: "prod-ssh"},
 	{Path: "/v1/schedules", Member: "schedules", Name: "Nightly"},
+	// Every third day is a cadence cron cannot say. It comes across as the recurrence it is.
+	{Path: "/v1/schedules", Member: "schedules", Name: "Every 3 days"},
 }
 
 // checkAnAWXEstateMigrates proves the deployed install turns somebody else's export into objects of

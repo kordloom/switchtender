@@ -1,0 +1,17 @@
+---
+- name: Record every file the run was given, then fail
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Record the credential file, the identity token file, the fact cache directory, and the inventory file
+      ansible.builtin.copy:
+        content: |
+          {{ lookup('ansible.builtin.env', 'SERVICE_TOKEN_FILE') }}
+          {{ lookup('ansible.builtin.env', 'AWS_WEB_IDENTITY_TOKEN_FILE') }}
+          {{ lookup('ansible.builtin.env', 'ANSIBLE_CACHE_PLUGIN_CONNECTION') }}
+          {{ inventory_file }}
+        dest: "{{ marker_dir }}/{{ marker_name | default('cleanup') }}-{{ inventory_hostname }}"
+        mode: "0600"
+    - name: Fail the run
+      ansible.builtin.fail:
+        msg: failing on purpose after the files were written

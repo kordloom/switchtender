@@ -1,0 +1,23 @@
+---
+- name: Use the service token the credential type writes to a file
+  hosts: all
+  gather_facts: false
+  vars:
+    token_path: "{{ lookup('ansible.builtin.env', 'SERVICE_TOKEN_FILE') }}"
+  tasks:
+    - name: Record where the file was and a digest of what it held
+      ansible.builtin.copy:
+        content: "{{ token_path }}\n{{ lookup('ansible.builtin.file', token_path) | hash('sha256') }}\n"
+        dest: "{{ marker_dir }}/{{ marker_name | default('token') }}-{{ inventory_hostname }}"
+        mode: "0600"
+    - name: Print the file, which the log has to mask
+      ansible.builtin.debug:
+        msg: "{{ lookup('ansible.builtin.file', token_path) }}"
+    - name: Fail when asked to
+      ansible.builtin.fail:
+        msg: failing on purpose
+      when: mode | default('ok') == 'fail'
+    - name: Wait to be canceled when asked to
+      ansible.builtin.command: sleep 300
+      changed_when: false
+      when: mode | default('ok') == 'wait'

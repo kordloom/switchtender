@@ -1,0 +1,15 @@
+---
+- name: Print the kubeconfig the credential hands over
+  hosts: all
+  gather_facts: false
+  vars:
+    kube_path: "{{ lookup('ansible.builtin.env', 'K8S_AUTH_KUBECONFIG') }}"
+  tasks:
+    - name: Record where the file was
+      ansible.builtin.copy:
+        content: "{{ kube_path }}\n"
+        dest: "{{ marker_dir }}/{{ marker_name | default('kube') }}-{{ inventory_hostname }}"
+        mode: "0600"
+    - name: Print the kubeconfig, as kubectl config view --raw does
+      ansible.builtin.debug:
+        msg: "{{ lookup('ansible.builtin.file', kube_path) }}"
