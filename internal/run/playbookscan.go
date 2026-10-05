@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"path"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -278,6 +279,11 @@ func (s *playbookScan) scanPlays(file string, plays []map[string]any, depth int)
 	basedir := path.Dir(file)
 	for _, play := range plays {
 		s.checkMode(file, playLabel(play), play)
+		// A play's own vars and environment are templated on the controller before any host is
+		// addressed, so a controller-side lookup in one runs for real under --check. The tasks are
+		// walked below, each on its own, so only the play-level values are read here.
+		s.controllerExec(file, playLabel(play), play["vars"])
+		s.controllerExec(file, playLabel(play), play["environment"])
 		for _, key := range sortedKeys(play) {
 			// An imported playbook is a play-level entry naming another playbook, resolved against
 			// the directory of the one importing it.
@@ -509,6 +515,9 @@ func (s *playbookScan) scanTaskList(ctx scanContext, raw any) {
 // scanTask grades one task mapping and follows what it pulls in.
 func (s *playbookScan) scanTask(ctx scanContext, task map[string]any) {
 	where := util.Clip(util.SafeText(ctx.file), 2*maxScanLabel)
+	// Every value on the task, its module arguments, its vars, and its loop are templated on the
+	// controller, so a controller-side lookup anywhere in it runs for real under --check.
+	s.controllerExec(ctx.file, taskLabel(task), task)
 	for _, key := range sortedKeys(task) {
 		if taskKeywords[key] {
 			continue
@@ -560,6 +569,53 @@ func (s *playbookScan) checkMode(file, what string, holder map[string]any) {
 	}
 	finding := util.Clip(util.SafeText(file), 2*maxScanLabel) + ": " + what + " sets check_mode to " +
 		checkModeText(value)
+	if s.listed[finding] {
+		return
+	}
+	s.listed[finding] = true
+	s.out.Forced = append(s.out.Forced, finding)
+}
+
+// controllerLookup matches a pipe lookup in a Jinja expression. The pipe lookup runs its argument
+// as a command on the controller while a template is rendered, which happens before any host is
+// addressed and is not suppressed by --check, so it runs for real during a dry run. It matches the
+// lookup, query, and q spellings and the fully qualified name, ignoring case.
+var controllerLookup = regexp.MustCompile(
+	`(?i)\b(?:lookup|query|q)\s*\(\s*['"]\s*(?:ansible\.builtin\.)?pipe\s*['"]`)
+
+// controllerExec records a finding when value holds a controller-side lookup that runs a command
+// during templating, which --check does not prevent. It walks strings, lists, and mappings so a
+// lookup nested in a module argument, a var, or a loop is found, and it treats a with_pipe loop key
+// as the same execution. A dry run reaching here is not a preview, so the finding costs it the
+// change-free classification an exemption from the hold would otherwise rest on.
+func (s *playbookScan) controllerExec(file, where string, value any) {
+	switch v := value.(type) {
+	case string:
+		if controllerLookup.MatchString(v) {
+			s.forceControllerExec(file, where)
+		}
+	case map[string]any:
+		for _, key := range sortedKeys(v) {
+			// with_pipe is the loop form of the pipe lookup and runs the same command on the
+			// controller, with nothing in the value itself to match, so the key is read directly.
+			if shortName(key) == "with_pipe" {
+				s.forceControllerExec(file, where)
+			}
+			s.controllerExec(file, where, v[key])
+		}
+	case []any:
+		for _, item := range v {
+			s.controllerExec(file, where, item)
+		}
+	}
+}
+
+// forceControllerExec records one controller-execution finding, deduped like every other, so a
+// lookup repeated across a task's arguments is reported once.
+func (s *playbookScan) forceControllerExec(file, where string) {
+	finding := util.Clip(util.SafeText(file), 2*maxScanLabel) + ": " + where +
+		" runs a command on the controller with a pipe lookup during templating, which --check does " +
+		"not prevent"
 	if s.listed[finding] {
 		return
 	}

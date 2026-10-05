@@ -170,6 +170,15 @@ func (r *Run) ChangeFree() bool {
 	if r == nil || !r.DryRun {
 		return false
 	}
+	// A dry run the gate never scanned is proven to change nothing only for a built-in tool, whose
+	// no-change mode is a fixed syntax, compile, or parse check that executes nothing: bash -n,
+	// py_compile, go vet, a PowerShell parse. Ansible, Terraform, and OpenTofu always carry a scan
+	// here, so an empty scan set means one of those inert built-ins, or a tool a plugin added. A
+	// plugin tool defines its own dry run and runs it on the host as whatever the plugin coded, so
+	// nothing proves it changes nothing and it is not read as a preview.
+	if len(r.DryRunScans) == 0 {
+		return IsBuiltinTool(r.Tool)
+	}
 	return ScansChangeFree(r.DryRunScans)
 }
 
