@@ -114,7 +114,7 @@
 			<div class="cards cards-3">
 				<article class="card reveal">
 					<h3>The platform tax</h3>
-					<p>Running AWX means running Kubernetes, the AWX Operator, Postgres, and Redis, then keeping all of it patched. That's ongoing platform work every month, keeping the cluster, operator, and datastores patched, just to run playbooks. SwitchTender is one process and one database. Upgrading is replacing a binary. We <a href="/docs/benchmarks#head-to-head">measured both</a> at SwitchTender v1.76.0: a 110.5&nbsp;MiB image against about 1.5&nbsp;GiB across the four long-lived containers, before the first job runs.</p>
+					<p>Running AWX means running Kubernetes, the AWX Operator, Postgres, and Redis, then keeping all of it patched. That's ongoing platform work every month, keeping the cluster, operator, and datastores patched, just to run playbooks. SwitchTender is one process and one database. Upgrading is replacing a binary. We <a href="/docs/benchmarks#head-to-head">measured both</a>: a 293.9&nbsp;MiB SwitchTender image, Terraform and OpenTofu included, against about 1.5&nbsp;GiB of images across AWX's four long-lived containers, before the first job runs.</p>
 				</article>
 				<article class="card reveal">
 					<h3>Ansible-only</h3>
@@ -147,7 +147,7 @@
 				</article>
 				<article class="card reveal">
 					<h3>SSO is leaving the free tier</h3>
-					<p>On AWX's development branch, LDAP, SAML, and OIDC are <a href="https://forum.ansible.com/t/transitioning-authentication-and-authorization-rbac-to-the-new-awx-architecture/8602">removed from core</a> into a shared library built for the paid platform’s gateway. SwitchTender ships all three in the same binary you already downloaded, unlocked by Pro at $500 a year, flat per organization.</p>
+					<p>On AWX's development branch, LDAP, SAML, and OIDC are <a href="https://forum.ansible.com/t/transitioning-authentication-and-authorization-rbac-to-the-new-awx-architecture/8602">removed from core</a> into a shared library built for the paid platform's gateway. SwitchTender ships all three in the same binary you already downloaded, unlocked by Pro at $500 a year, flat per organization.</p>
 				</article>
 				<article class="card reveal">
 					<h3>In Red Hat's words</h3>
@@ -176,12 +176,14 @@
 						<tr><td>Live host-by-task matrix</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Tools</td><td class="us">Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</td><td><span class="muted">Ansible only</span></td></tr>
 						<tr><td>Job templates, surveys, schedules</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
+						<tr><td>Smart and constructed inventories</td><td class="us"><i class="y"></i> <span class="muted">AWX filter syntax</span></td><td><i class="y"></i></td></tr>
+						<tr><td>Provisioning callbacks</td><td class="us"><i class="y"></i> <span class="muted">also at the AWX address</span></td><td><i class="y"></i></td></tr>
 						<tr><td>Drag-and-drop workflow editor</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
 						<tr><td>RBAC, teams, per-object grants</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
 						<tr><td>LDAP, SAML, OIDC sign-in</td><td class="us"><i class="y"></i> <span class="muted">Pro, $500/yr</span></td><td><span class="muted">Today, yes. Removed on the development branch</span></td></tr>
 						<tr><td>Execution environments</td><td class="us">All seven tools, Docker or Podman</td><td><span class="muted">Ansible only, Podman</span></td></tr>
 						<tr><td>Instance groups</td><td class="us"><i class="y"></i> <span class="muted">worker queues, Team</span></td><td><i class="y"></i></td></tr>
-						<tr><td>High availability</td><td class="us">Active-active on Postgres <span class="muted">creating the schema is Team; opening an existing one is never gated</span></td><td><span class="muted">Via Kubernetes</span></td></tr>
+						<tr><td>High availability</td><td class="us">Active-active on Postgres <span class="muted">creating the schema is Team, opening an existing one is never gated</span></td><td><span class="muted">Via Kubernetes</span></td></tr>
 						<tr><td>Duration-balanced job splitting</td><td class="us"><i class="y"></i></td><td><span class="muted">Round-robin slicing</span></td></tr>
 						<tr><td>Fleet memory: flaky hosts, trends</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Tamper-evident, signed audit</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
@@ -193,7 +195,7 @@
 					</tbody>
 				</table>
 			</div>
-			<p class="gs-note reveal">Checked against AWX&rsquo;s own documentation on 2026-08-10, for AWX 24.6.1, still current at 24.6.1 on 2026-09-07. A comparison decays the day it is written, so check a row against the current release before you rely on it. <a href="/docs/comparison">Full table and sources</a>.</p>
+			<p class="gs-note reveal">Checked against AWX's own documentation on 2026-08-10, for AWX 24.6.1, still current at 24.6.1 on 2026-09-07. A comparison decays the day it is written, so check a row against the current release before you rely on it. <a href="/docs/comparison">Full table and sources</a>.</p>
 		</section>
 
 		<section class="section wrap">
@@ -213,7 +215,7 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>Move in one command</h2>
-				<p>Export from AWX, import into SwitchTender. Projects, inventories (smart and constructed included), templates, workflows with their approval steps, surveys, schedules, notification templates, and the organizations those belong to come across, with a dry run first so you see the plan before anything is written. Password survey fields arrive as secret fields. Credential secrets never come across, because AWX will not export a vault password, SSH key, or cloud secret in the clear, and neither do the defaults of password fields. Teams, organization memberships, and projects on anything but git are named in the plan as not imported, so you re-enter what is needed once against the imported credential shells. The import lists exactly which ones need it.</p>
+				<p>Export from AWX, import into SwitchTender. Projects, inventories (smart and constructed included), templates, workflows with their approval steps, surveys, schedules, notification templates, and the organizations those belong to come across, with a dry run first so you see the plan before anything is written. Password survey fields arrive as secret fields. Credential secrets never come across, because AWX will not export a vault password, SSH key, or cloud secret in the clear, and neither do the defaults of password fields. Teams, organization memberships, and projects on anything but git are named in the plan as not imported, so you re-enter what is needed once against the imported credential shells. The import lists exactly which ones need it. A template that took provisioning callbacks answers at its old AWX callback address too, once the import knows its AWX id, so the boot scripts and cloud-init data that carry it keep working once the AWX hostname points here. Smart inventories keep AWX's <code>host_filter</code> syntax, and a static inventory is read inside the binary exactly as Ansible reads it, checked against every ansible-core minor from 2.16 to 2.21.</p>
 			</div>
 			<div class="gs-steps">
 				<ol>

@@ -119,7 +119,7 @@
 				</article>
 				<article class="card reveal">
 					<h3>The platform to stand up</h3>
-					<p>A supported AAP install means OpenShift or a RHEL fleet, Postgres, and the platform's own operators, then keeping all of it patched. SwitchTender is one process and one database. Upgrading is replacing a binary.</p>
+					<p>A supported AAP install means OpenShift or a fleet of RHEL hosts, Postgres, and the platform's own operators, then keeping all of it patched. SwitchTender is one process and one database. Upgrading is replacing a binary.</p>
 				</article>
 				<article class="card reveal">
 					<h3>Ansible only</h3>
@@ -158,7 +158,7 @@
 						<tr><td>Execution environments</td><td class="us">All seven tools, Docker or Podman</td><td><span class="muted">Ansible only, Podman</span></td></tr>
 						<tr><td>Reach isolated networks</td><td class="us">Outbound worker relay <span class="muted">(Team)</span></td><td><span class="muted">Automation Mesh, multi-hop</span></td></tr>
 						<tr><td>Event-Driven Ansible</td><td class="us"><i class="n"></i></td><td><i class="y"></i></td></tr>
-						<tr><td>High availability</td><td class="us">Active-active on Postgres <span class="muted">creating the schema is Team; opening an existing one is never gated</span></td><td><span class="muted">Via the platform</span></td></tr>
+						<tr><td>High availability</td><td class="us">Active-active on Postgres <span class="muted">creating the schema is Team, opening an existing one is never gated</span></td><td><span class="muted">Via the platform</span></td></tr>
 						<tr><td>Duration-balanced job splitting</td><td class="us"><i class="y"></i></td><td><span class="muted">Round-robin slicing</span></td></tr>
 						<tr><td>Fleet memory: flaky hosts, trends</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Tamper-evident, signed audit</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
@@ -169,7 +169,7 @@
 					</tbody>
 				</table>
 			</div>
-			<p class="gs-note reveal">Checked against Red Hat&rsquo;s own documentation on 2026-08-10, for Ansible Automation Platform 2.7. A comparison decays the day it is written, so check a row against the current release before you rely on it. <a href="/docs/comparison">Full table and sources</a>.</p>
+			<p class="gs-note reveal">Checked against Red Hat's own documentation on 2026-08-10, for Ansible Automation Platform 2.7. A comparison decays the day it is written, so check a row against the current release before you rely on it. <a href="/docs/comparison">Full table and sources</a>.</p>
 		</section>
 
 		<section class="section wrap">
@@ -182,7 +182,7 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>Move in one command</h2>
-				<p>Automation Controller is AWX's data model, so its export imports into SwitchTender the same way AWX's does. Projects, inventories, templates, surveys, and schedules come across, with a dry run first so you see the plan before anything is written.</p>
+				<p>Automation Controller is AWX's data model, so its export imports into SwitchTender the same way AWX's does. Projects, inventories (smart and constructed included), templates, workflows with their approval steps, surveys, schedules, notification templates, and the organizations those belong to come across, with a dry run first so you see the plan before anything is written. A template that took provisioning callbacks answers at its old callback address too, once the import knows its id, so the boot scripts that carry that address keep working when the hostname points here.</p>
 			</div>
 			<div class="gs-steps">
 				<ol>

@@ -142,8 +142,8 @@
 
 		<section class="strip wrap reveal">
 			<div><b>1</b><span>binary, zero Kubernetes</span></div>
-			<div><b>30ms</b><span><a href="/docs/benchmarks">cold boot on a laptop</a></span></div>
-			<div><b>~35MB</b><span><a href="/docs/benchmarks">memory at idle on Linux</a></span></div>
+			<div><b>42ms</b><span><a href="/docs/benchmarks">cold boot on a laptop</a></span></div>
+			<div><b>~47MiB</b><span><a href="/docs/benchmarks">memory at idle on Linux</a></span></div>
 			<div><b>7</b><span>tools, one engine</span></div>
 		</section>
 
@@ -200,7 +200,7 @@
 				<article class="card reveal">
 					<div class="ic ic-lineage"></div>
 					<h3>The change register</h3>
-					<p><code>switchtender audit report</code> renders a period's changes, up to five thousand, and says on its face when the period held more, the sample a SOC 2 CC8.1 or ISO/IEC 27001 A.8.32 review asks for; the <a href="/docs/compliance">control mapping</a> and a <a href="/docs/sample-evidence-pack">sample pack</a> show exactly what an assessor gets. Point <code>--evidence-dir</code> at an archive and registers write themselves on a cadence, so the evidence exists before anyone asks. The register needs Team. The receipts, dossiers, and signed bundles beside it are free.</p>
+					<p><code>switchtender audit report</code> renders a period's changes, up to five thousand, and says on its face when the period held more, the sample that SOC 2 CC8.1 and ISO/IEC 27001 A.8.32 reviews ask for. The <a href="/docs/compliance">control mapping</a> and a <a href="/docs/sample-evidence-pack">sample pack</a> show exactly what an assessor gets. Point <code>--evidence-dir</code> at an archive and registers write themselves on a cadence, so the evidence exists before anyone asks. The register needs Team. The receipts, dossiers, and signed bundles beside it are free.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-doctor"></div>
@@ -270,7 +270,7 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 				<article class="card reveal">
 					<div class="ic ic-audit"></div>
 					<h3>Provable audit</h3>
-					<p>Every change links into a tamper-evident SHA-256 hash chain; a change that can't be recorded is refused rather than made quietly. Export the chain as a signed <a href="https://loomseal.com" rel="noopener">LoomSeal</a> bundle and verify it offline with an open, independent verifier, without trusting the server.</p>
+					<p>Every change links into a tamper-evident SHA-256 hash chain, and a change that can't be recorded is refused rather than made quietly. Export the chain as a signed <a href="https://loomseal.com" rel="noopener">LoomSeal</a> bundle and verify it offline with an open, independent verifier, without trusting the server. From LoomSeal 1.7.0 on, the verifier also checks what a run's receipt discloses, its spec, its outcome, and each approval decision, against what the chain committed, so a receipt edited and signed again fails.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-gate"></div>
@@ -315,7 +315,7 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 				<article class="card reveal">
 					<div class="ic ic-schedule"></div>
 					<h3>Schedules you can trust before you save</h3>
-					<p>Type a cron expression and see its next firings before you save it. A scheduled launch carries its template's approvals, notifications, and timeout, and every run records which schedule started it.</p>
+					<p>Type a cron expression, or an RFC 5545 recurrence rule for what cron cannot say, such as the last Friday of each quarter, and see its next firings before you save it. A scheduled launch carries its template's approvals, notifications, and timeout, and every run records which schedule started it. A server that stops mid-fire hands the occurrence back or another server takes it up, and the occurrence's key keeps it from running twice.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-drift"></div>
@@ -325,7 +325,7 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 				<article class="card reveal">
 					<div class="ic ic-gate"></div>
 					<h3>Enforced approvals</h3>
-					<p>Hold risky runs for sign-off, gated by policy on tool, command, or target. Operators request, admins release. No skipping the gate. Community holds one policy. The full engine, with deny rules, risk floors, actor scoping, and distinct-approver separation of duties, is Team.</p>
+					<p>Hold risky runs for sign-off, gated by policy on tool, command, or target. Operators request, admins release. No skipping the gate. An approval binds what will run: a static, smart, or constructed inventory as snapshotted at submission, the container image by the digest its registry serves, and for a Terraform or OpenTofu apply the saved plan the apply carries out, however it came to be held. Community holds one policy. The full engine, with deny rules, risk floors, actor scoping, and distinct-approver separation of duties, is Team.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-roles"></div>
@@ -335,7 +335,7 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 				<article class="card reveal">
 					<div class="ic ic-shards"></div>
 					<h3>Reach isolated networks</h3>
-					<p>A worker dials out to the control node with a token and opens no inbound port, so it runs jobs inside an air-gapped segment, a DMZ, or a customer network the control node can't reach. One binary, one outbound connection. Running any worker process needs Team.</p>
+					<p>A worker dials out to the control node with a token and opens no inbound port, so it runs jobs inside an air-gapped segment, a DMZ, or a customer network the control node can't reach. One binary, one outbound connection. A pool that registers a delivery key receives each run's secrets sealed to that key, opened in memory and removed when the run ends, so the worker holds no database and no encryption key. Running any worker process needs Team.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-ai"></div>
@@ -365,12 +365,42 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 				<article class="card reveal">
 					<div class="ic ic-bell"></div>
 					<h3>Notifications everywhere</h3>
-					<p>A finished run, or one held for approval, reaches Slack, Teams, Discord, Mattermost, Rocket.Chat, ntfy, email, or a webhook; a failure pages PagerDuty or texts through Twilio, and every run lands on your Grafana dashboards as an annotation. Eleven channels, server-wide or per template, so each team pages its own people.</p>
+					<p>A finished run, or one held for approval, reaches Slack, Teams, Discord, Mattermost, Rocket.Chat, ntfy, email, or a webhook. A failure pages PagerDuty or texts through Twilio, and every run lands on your Grafana dashboards as an annotation. Eleven channels, server-wide or per template, so each team pages its own people. A named target's deliveries are queued in the database in the same write as the event, sent in the run's order, retried, and made by the next server to start if one stops.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-secret"></div>
 					<h3>Secrets kept out of the log</h3>
 					<p>Sealed at rest, sourced live from Vault, AWS, Google, Azure, CyberArk, or 1Password, and kept off the command line so nothing shows in the process table. A tool that prints a secret shows <code>***</code>, even when it re-encodes it as base64, hex, or an escaped string. Typed cloud credentials inject the exact variables each tool expects.</p>
+				</article>
+				<article class="card reveal">
+					<div class="ic ic-matrix"></div>
+					<h3>Inventories read the way Ansible reads them</h3>
+					<p>Static INI, YAML, and JSON inventories, and the smart inventories filtered over them, resolve inside the binary with Ansible's own quirks, from value typing to host ranges, so the server needs no Ansible to read them. CI holds that reading to every ansible-core minor from 2.16 to 2.21, and before an Ansible run the executor's own <code>ansible-inventory</code> reads the same inputs, so any difference refuses the run.</p>
+				</article>
+				<article class="card reveal">
+					<div class="ic ic-relaunch"></div>
+					<h3>Hosts that configure themselves</h3>
+					<p>A new machine posts the template's callback key to its callback URL at boot, and the template runs against that host alone. It is AWX's provisioning callback, matched to the caller by AWX's rules and gated like any launch. A template imported from AWX answers at its old AWX address too, when the import knows its AWX id, so boot scripts keep working once the hostname points here.</p>
+				</article>
+				<article class="card reveal">
+					<div class="ic ic-secret"></div>
+					<h3>Cloud access with nothing stored</h3>
+					<p>A federated credential holds no secret. Each run that uses one gets a short-lived identity token, signed here and naming the run, its project, template, environment, and who launched it, which AWS, Google Cloud, or Azure exchanges for credentials that expire on their own. The signing key rotates on a fixed schedule that gives each cloud a day to fetch the new key, or at once in an emergency.</p>
+				</article>
+				<article class="card reveal">
+					<div class="ic ic-gate"></div>
+					<h3>Policies in Rego</h3>
+					<p>Write approval policy in the Open Policy Agent language, so an OPA or Conftest rule you already have ports without a rewrite. Evaluation never leaves the process: network, clock, and random builtins are removed, so a run gets the same answer on every server, and the decision records the digest of the exact bundle. Rego policies are Team.</p>
+				</article>
+				<article class="card reveal">
+					<div class="ic ic-drift"></div>
+					<h3>A dry run has to be dry</h3>
+					<p>A rule that lets dry runs through lets through only the ones the gate can show change nothing. It reads the playbook for tasks that set <code>check_mode: false</code>, and the Terraform or OpenTofu configuration and its modules for external data sources a plan would run. A dry run that could act for real is held like the real run, with a note naming what was found.</p>
+				</article>
+				<article class="card reveal">
+					<div class="ic ic-lineage"></div>
+					<h3>Plans on pull requests</h3>
+					<p>A review trigger plans a GitHub or GitLab pull request at its head commit in the tool's no-change mode and posts the result on the pull request as one comment per template, updated in place on every push, with a commit status beside it.</p>
 				</article>
 			</div>
 		</section>
@@ -472,7 +502,7 @@ func main() {
 						<tr><td>Typed cloud credentials, pluggable types</td><td class="us"><i class="y"></i></td><td><span class="muted">typed, not pluggable</span></td><td><span class="muted">typed, not pluggable</span></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Organizations, teams, per-object grants</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td><td><i class="y"></i></td><td><span class="muted">teams, four fixed roles</span></td><td><span class="muted">policy files, no GUI editor</span></td></tr>
 						<tr><td>Instance groups: pin work to worker pools</td><td class="us"><i class="y"></i> <span class="muted">Team</span></td><td><i class="y"></i></td><td><i class="y"></i></td><td><span class="muted">Pro</span></td><td><span class="muted">enterprise</span></td></tr>
-						<tr><td>Active-active HA on PostgreSQL</td><td class="us"><i class="y"></i> <span class="muted">creating the schema is Team; opening an existing one is never gated</span></td><td><span class="muted">via Kubernetes</span></td><td><span class="muted">via Kubernetes</span></td><td><span class="muted">enterprise</span></td><td><span class="muted">enterprise</span></td></tr>
+						<tr><td>Active-active HA on PostgreSQL</td><td class="us"><i class="y"></i> <span class="muted">creating the schema is Team, opening an existing one is never gated</span></td><td><span class="muted">via Kubernetes</span></td><td><span class="muted">via Kubernetes</span></td><td><span class="muted">enterprise</span></td><td><span class="muted">enterprise</span></td></tr>
 					</tbody>
 				</table>
 				<p class="compare-note">Every row was checked against each vendor's own documentation on 10 August 2026, at AWX 24.6.1, Ansible Automation Platform 2.7, Semaphore 2.19.7, Ascender 25.4.0, and Rundeck 6.0.1. Versions were re-checked on 7 September 2026: AWX is unchanged, Semaphore is now 2.19.12, Ascender 25.6.1, and Rundeck 6.1.0. All five of these products keep shipping, so a table like this starts going stale the day it's written. If a row is wrong, <a href="https://github.com/kordloom/switchtender/issues">open an issue</a> and we'll fix it.</p>
