@@ -1,0 +1,11 @@
+---
+- name: A dry run that still changes something
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Write a marker even under check mode
+      ansible.builtin.copy:
+        content: "{{ inventory_hostname }}\n"
+        dest: "{{ marker_dir }}/{{ marker_name | default('forced') }}-{{ inventory_hostname }}"
+        mode: "0600"
+      check_mode: false

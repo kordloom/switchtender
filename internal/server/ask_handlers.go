@@ -180,7 +180,10 @@ func buildFleetSnapshot(ctx context.Context, store run.Store,
 				target = util.Clip(strings.SplitN(scrubbed, "\n", 2)[0], 60)
 			}
 			line := fmt.Sprintf("- %s %s %s %s", r.ID, run.NormalizeTool(r.Tool), r.Status, target)
-			if r.DryRun {
+			switch {
+			case r.DryRun && !r.ChangeFree():
+				line += " (dry run, but the gate did not find it change free)"
+			case r.DryRun:
 				line += " (check mode)"
 			}
 			if r.ProposedFrom != "" {

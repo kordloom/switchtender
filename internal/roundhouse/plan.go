@@ -3,6 +3,7 @@ package roundhouse
 import (
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/kordloom/switchtender/internal/run"
@@ -52,6 +53,31 @@ func buildContainerPlan(spec Spec) (containerPlan, func(), error) {
 	return plan, cleanup, nil
 }
 
+// buildModulesPlan produces the container plan that runs the get of spec's Terraform or OpenTofu
+// working directory and nothing else, with the mounts, working directory, and credential files the
+// plan of a run of that directory would have.
+func buildModulesPlan(spec Spec) (containerPlan, func(), error) {
+	noCleanup := func() {}
+	tool := run.NormalizeTool(spec.Tool)
+	if tool != run.ToolTerraform && tool != run.ToolOpenTofu {
+		return containerPlan{}, noCleanup, fmt.Errorf("%w: %s", ErrUnknownTool, spec.Tool)
+	}
+	plan, cleanup, err := toolContainerPlan(spec)
+	if err != nil {
+		return plan, cleanup, err
+	}
+	bin := "terraform"
+	if tool == run.ToolOpenTofu {
+		bin = "tofu"
+	}
+	plan.argv = []string{"sh", "-c", bin + " " + strings.Join(terraformGetArgs(), " ")}
+	plan.extraEnv = checkpointEnv(spec.Env)
+	for _, f := range spec.CredentialFiles {
+		plan.mounts = append(plan.mounts, planMount{path: f})
+	}
+	return plan, cleanup, nil
+}
+
 // toolContainerPlan produces the per-tool part of the plan: the argv, the working directory, and the
 // mounts the tool's own inputs need.
 func toolContainerPlan(spec Spec) (containerPlan, func(), error) {
@@ -84,6 +110,11 @@ func toolContainerPlan(spec Spec) (containerPlan, func(), error) {
 		for _, f := range spec.ExtraVarsFiles {
 			mounts = append(mounts, planMount{path: f})
 		}
+		// The fact cache is read and written by the play, so it is the one Ansible input mounted
+		// writable. Without the mount the plugin points at a path the container does not have.
+		if spec.FactCacheDir != "" {
+			mounts = append(mounts, planMount{path: spec.FactCacheDir, writable: true})
+		}
 		return containerPlan{
 			argv:    append([]string{"ansible-playbook"}, pargs...),
 			workdir: spec.Dir,
@@ -108,14 +139,25 @@ func toolContainerPlan(spec Spec) (containerPlan, func(), error) {
 			return containerPlan{}, noCleanup, err
 		}
 		// Terraform is a two-phase run, so it goes through a shell: init, then apply or plan, sharing
-		// the same argument lists as the host runner. All arguments are fixed literals, not input.
-		script := bin + " " + strings.Join(terraformInitArgs(), " ") + " && " +
-			bin + " " + strings.Join(terraformActionArgs(spec.DryRun), " ")
+		// the same argument lists as the host runner. Every argument is a fixed literal or a path the
+		// executor chose, never input, and each is quoted for the shell.
+		script := bin + " " + shellJoin(terraformInitArgs(spec.ModulesInstalled)) + " && " +
+			bin + " " + shellJoin(terraformActionArgs(spec))
+		mounts := []planMount{{path: dir, writable: true}}
+		// A plan saves its plan file into the run's private directory and an apply reads one from it,
+		// so that directory's plan location is mounted for the tool: writable for the plan that saves
+		// it, read-only for the apply that carries it out.
+		if spec.DryRun && spec.PlanOut != "" {
+			mounts = append(mounts, planMount{path: filepath.Dir(spec.PlanOut), writable: true})
+		}
+		if !spec.DryRun && spec.PlanFile != "" {
+			mounts = append(mounts, planMount{path: spec.PlanFile})
+		}
 		return containerPlan{
 			argv:     []string{"sh", "-c", script},
 			workdir:  dir,
-			mounts:   []planMount{{path: dir, writable: true}},
-			extraEnv: terraformVars(spec.ExtraVars),
+			mounts:   mounts,
+			extraEnv: append(checkpointEnv(spec.Env), terraformVars(spec.ExtraVars)...),
 		}, noCleanup, nil
 	case run.ToolPython:
 		return scriptToolPlan(spec, "switchtender-py-*.py", func(p string) []string {
@@ -141,7 +183,7 @@ func scriptToolPlan(spec Spec, pattern string, argv func(path string) []string) 
 	if spec.Command == "" {
 		return containerPlan{}, func() {}, ErrNoCommand
 	}
-	path, cleanup, err := writeScriptFile(pattern, spec.Command)
+	path, cleanup, err := writeScriptFileIn(spec.RunDir, pattern, spec.Command)
 	if err != nil {
 		return containerPlan{}, func() {}, err
 	}
@@ -165,4 +207,50 @@ func isBuiltinTool(tool string) bool {
 func isTerraformTool(tool string) bool {
 	t := run.NormalizeTool(tool)
 	return t == run.ToolTerraform || t == run.ToolOpenTofu
+}
+
+// buildShowPlan produces the container plan that renders a saved Terraform or OpenTofu plan file as
+// JSON and nothing else, with the working directory the plan was made in, its providers, and the
+// plan file mounted read-only. Its standard output is the rendering, which the caller captures.
+func buildShowPlan(spec Spec, planFile string) (containerPlan, func(), error) {
+	noCleanup := func() {}
+	tool := run.NormalizeTool(spec.Tool)
+	if tool != run.ToolTerraform && tool != run.ToolOpenTofu {
+		return containerPlan{}, noCleanup, fmt.Errorf("%w: %s", ErrUnknownTool, spec.Tool)
+	}
+	dir, err := toolWorkDir(spec.Dir, spec.Command)
+	if err != nil {
+		return containerPlan{}, noCleanup, err
+	}
+	bin := "terraform"
+	if tool == run.ToolOpenTofu {
+		bin = "tofu"
+	}
+	mounts := []planMount{{path: dir}, {path: planFile}}
+	for _, f := range spec.CredentialFiles {
+		mounts = append(mounts, planMount{path: f})
+	}
+	return containerPlan{
+		argv:     append([]string{bin}, terraformShowArgs(planFile)...),
+		workdir:  dir,
+		mounts:   mounts,
+		extraEnv: checkpointEnv(spec.Env),
+	}, noCleanup, nil
+}
+
+// shellSafe matches an argument a POSIX shell reads as itself, which needs no quoting.
+var shellSafe = regexp.MustCompile(`^[A-Za-z0-9_./=:@%+,-]+$`)
+
+// shellJoin joins arguments for a POSIX shell, quoting each one the shell would otherwise split or
+// expand, such as a path holding a space.
+func shellJoin(args []string) string {
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		if shellSafe.MatchString(a) {
+			quoted[i] = a
+			continue
+		}
+		quoted[i] = "'" + strings.ReplaceAll(a, "'", `'"'"'`) + "'"
+	}
+	return strings.Join(quoted, " ")
 }

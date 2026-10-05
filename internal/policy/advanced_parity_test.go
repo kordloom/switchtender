@@ -28,6 +28,9 @@ func TestEveryMatchingCriterionBeyondTheBlanketGateIsLicensed(t *testing.T) {
 		"id": true, "name": true, "created_at": true, "queue": true,
 		"tool": true, "command_contains": true, "inventory_id": true,
 		"exclude_dry_run": true, "max_destroy": true,
+		// Asking the approver to say why narrows nothing a rule matches and loosens nothing: it
+		// adds a record to a decision the blanket gate already asks for, so it is part of the gate.
+		"require_reason": true,
 	}
 
 	rt := reflect.TypeOf(Policy{})
@@ -52,6 +55,14 @@ func TestEveryMatchingCriterionBeyondTheBlanketGateIsLicensed(t *testing.T) {
 			}
 		case reflect.Bool:
 			v.SetBool(true)
+		case reflect.Pointer:
+			// The only pointer is the Rego bundle, which can deny, scope to actors, and demand a
+			// second approver, so carrying one at all crosses the line.
+			if name != "rego" {
+				t.Errorf("field %q is a pointer this guard does not know; classify it above", name)
+				continue
+			}
+			v.Set(reflect.ValueOf(mustCompileRego(t, "hold contains \"held\" if true")))
 		default:
 			t.Errorf("field %q is neither a string nor a bool, so this guard cannot classify it; "+
 				"decide whether it is part of the blanket gate and add it above", name)

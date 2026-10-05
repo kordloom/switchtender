@@ -129,6 +129,12 @@ func runAuditAnchor(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	// Both shapes cover the newest entry. A token dated before that entry by more than a verifier
+	// allows fails every bundle the anchor reaches from now on, so it is refused here, where the
+	// operator can still act on why, rather than saved.
+	if err := audit.CheckAnchorTime(a, chain[len(chain)-1].At); err != nil {
+		return err
+	}
 	if err := anchors.SaveAnchor(cmd.Context(), a); err != nil {
 		return fmt.Errorf("save anchor: %w", err)
 	}

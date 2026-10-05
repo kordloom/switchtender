@@ -1,0 +1,10 @@
+---
+- name: Mark every host the run reaches
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Write a marker for this host
+      ansible.builtin.copy:
+        content: "{{ inventory_hostname }}\n"
+        dest: "{{ marker_dir }}/{{ marker_name | default('mark') }}-{{ inventory_hostname }}"
+        mode: "0600"

@@ -192,7 +192,9 @@ func TestMapSurveyTypeFallsBackToTextWithoutClaimingExactness(t *testing.T) {
 		{AWXType: "", WantType: template.FieldText, WantExact: false},              // Test 6.
 		{AWXType: "something_new", WantType: template.FieldText, WantExact: false}, // Test 7.
 		{AWXType: "TEXT", WantType: template.FieldText, WantExact: false},          // Test 8: case matters.
-		{AWXType: "password", WantType: template.FieldText, WantExact: false},      // Test 9.
+		{AWXType: "password", WantType: template.FieldSecret, WantExact: true},     // Test 9.
+		// Test 10: case folded, the way the refusal it replaced was.
+		{AWXType: "PASSWORD", WantType: template.FieldSecret, WantExact: true},
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.AWXType), func(t *testing.T) {

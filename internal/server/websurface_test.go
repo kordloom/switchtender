@@ -29,6 +29,7 @@ func TestHeadIsNotRefusedOnPublicRoutes(t *testing.T) {
 
 	for _, path := range []string{
 		"/healthz", "/readyz", "/ui/", "/.well-known/loomseal.json",
+		"/.well-known/openid-configuration", "/.well-known/jwks.json",
 	} {
 		for _, method := range []string{http.MethodGet, http.MethodHead} {
 			req := httptest.NewRequest(method, path, nil)

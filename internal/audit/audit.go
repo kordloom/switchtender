@@ -102,7 +102,10 @@ type InstallReader interface {
 type Store interface {
 	// Append records one entry, assigning its chain fields from the current head. It refuses an
 	// entry for which IsSpanMarker is true with ErrReservedSpan: the marker means "the server
-	// minted this beat", so only AppendSpanBeat may write it.
+	// minted this beat", so only AppendSpanBeat may write it. It refuses a run's outcome entry, one
+	// OutcomeRunID recognizes, with ErrOutcomeRecorded when the chain already holds an outcome for
+	// that run, checked under the same serialization as the append, so a run has one outcome entry
+	// however many processes try to commit it.
 	Append(ctx context.Context, e *Entry) error
 	// AppendSpanBeat atomically mints and appends the next span beat: one past the newest
 	// well-formed span entry's beat, or beat one when the chain holds none, with count set to how
@@ -110,12 +113,16 @@ type Store interface {
 	// and the append are one serialized step, since a duplicate or missing beat number fails every
 	// bundle built over the chain. It returns the appended entry.
 	//
-	// A time that does not strictly advance past the newest beat is refused with ErrClockBehind and
-	// nothing is written. A beat's time is a signed claim about when the population was counted, so
-	// recording a time the clock did not read would put a false statement in an attestation. A
-	// backward clock therefore skips the beat, and the longer interval is reported by a verifier as
-	// a gap with its bounds and duration. The beat number is not consumed, so the next accepted
-	// beat takes it and the numbering stays contiguous.
+	// A time that does not strictly advance past the newest beat, or that would put the beat behind
+	// the chain's newest entry, is refused with ErrClockBehind and nothing is written. A beat's time
+	// is a signed claim about when the population was counted, so recording a time the clock did not
+	// read would put a false statement in an attestation. A backward clock therefore skips the beat,
+	// and the longer interval is reported by a verifier as a gap with its bounds and duration. The
+	// beat number is not consumed, so the next accepted beat takes it and the numbering stays
+	// contiguous.
+	//
+	// A zero time asks the store to read its own clock under the append lock, the clock
+	// StampAppendTime is given, so no append can land between the reading and the beat.
 	AppendSpanBeat(ctx context.Context, at time.Time, cadenceS int) (*Entry, error)
 	// SpanBeats returns the newest limit span beat entries, those for which IsSpanMarker is true,
 	// answered oldest first so a watcher reads the present end of the stream in chain order. The
@@ -144,8 +151,8 @@ func NewID() string {
 	return idgen.New("aud_", 6)
 }
 
-// EntryHash returns the hex SHA-256 that commits to an entry's content and its PrevHash. The time is
-// hashed in the canonical form the stores persist, so a hash computed at append matches one
+// EntryHash returns the hex SHA-256 that commits to an entry's content and its PrevHash. The time
+// is hashed in the canonical form the stores persist, so a hash computed at append matches one
 // recomputed after a database round-trip.
 //
 // The input is the canonical JSON object of the entry's defined claim fields, empty ones omitted,
@@ -184,9 +191,9 @@ func entryClaim(e *Entry) map[string]any {
 		e.InstallID)
 }
 
-// claimObject builds the exact map a chain link is computed over: the fields the link commits to, in
-// the shape both EntryHash and bundle verification serialize. Sharing it is what keeps producing a
-// link and recomputing one from a bundled claim on a single definition, so they cannot drift.
+// claimObject builds the exact map a chain link is computed over: the fields the link commits to,
+// in the shape both EntryHash and bundle verification serialize. Sharing it is what keeps producing
+// a link and recomputing one from a bundled claim on a single definition, so they cannot drift.
 func claimObject(seq int64, at, actor, method, path, prev, actorType, onBehalfOf, contentDigest,
 	installID string) map[string]any {
 	claim := map[string]any{"seq": seq, "at": at, "actor": actor, "method": method, "path": path, "prev": prev}
@@ -267,8 +274,8 @@ func secretKey(key string) bool {
 	return util.SecretKey(key)
 }
 
-// freeTextSecretKeys hold arbitrary text that can embed a connection secret, so their whole value is
-// redacted rather than trusted to key matching. An inventory's content routinely carries an
+// freeTextSecretKeys hold arbitrary text that can embed a connection secret, so their whole value
+// is redacted rather than trusted to key matching. An inventory's content routinely carries an
 // ansible_password or an API token in an assignment no JSON key names.
 var freeTextSecretKeys = map[string]bool{"content": true}
 
@@ -286,16 +293,16 @@ const redactedMarker = "«redacted»"
 // nonce beside the entry and never exports it, and commits the digest into the chain.
 //
 // A JSON body is redacted and canonicalized before it is committed: the value of any secret-bearing
-// key becomes a fixed marker, so the commitment proves the non-secret shape and content of the change
-// without carrying the secret. Keying it with a per-entry nonce is what prevents a holder of a bundle
-// or a SIEM event, which carry the digest but not the nonce, from guessing a payload whose secret
-// slipped past redaction and confirming it by recomputation. A body that is not JSON, or one too
-// large to parse economically, is committed as its exact bytes; the mutating endpoints that carry a
-// secret all take JSON, and the oversized case is an upload with no secret in it.
+// key becomes a fixed marker, so the commitment proves the non-secret shape and content of the
+// change without carrying the secret. Keying it with a per-entry nonce is what prevents a holder of
+// a bundle or a SIEM event, which carry the digest but not the nonce, from guessing a payload whose
+// secret slipped past redaction and confirming it by recomputation. A body that is not JSON, or one
+// too large to parse economically, is committed as its exact bytes; the mutating endpoints that
+// carry a secret all take JSON, and the oversized case is an upload with no secret in it.
 //
-// A request with no body carries no digest at all rather than the digest of the empty string. Using a
-// commitment over "" would make "there was no body" indistinguishable from "the body was empty", and
-// an absent field is the honest statement of the first.
+// A request with no body carries no digest at all rather than the digest of the empty string. Using
+// a commitment over "" would make "there was no body" indistinguishable from "the body was empty",
+// and an absent field is the honest statement of the first.
 func ContentDigestOf(body []byte) (digest, nonce string, err error) {
 	if len(body) == 0 {
 		return "", "", nil
@@ -311,6 +318,36 @@ func ContentDigestOf(body []byte) (digest, nonce string, err error) {
 	// committed too, so a nonce that was later swapped no longer matches what the chain fixed, which
 	// keeps a disclosure honest. See VerifyContentDigest for how a holder of the body and nonce
 	// checks one entry without being handed any other.
+	return keyedDigestOf(keyedDigestPrefix, input)
+}
+
+// keyedDigestPrefix opens the keyed digest form, taken over the body as this package reduces it.
+const keyedDigestPrefix = "sha256s:"
+
+// ExactDigestPrefix opens the exact digest form: the keyed commitment taken over a body exactly as
+// given, for a body that was reduced before its bytes were fixed and is disclosed in that same
+// form.
+const ExactDigestPrefix = "sha256e:"
+
+// ExactDigestOf returns the exact-form keyed commitment to body and the nonce it is keyed under:
+// "sha256e:", the hex SHA-256 of the nonce, and the hex HMAC-SHA256 of body exactly as given.
+//
+// It is for a value a receipt discloses beside its digest, such as a run's outcome record. The
+// caller reduces the value once, redaction included, then commits and discloses those same bytes,
+// so the commitment covers exactly what a reader is shown and any verifier checks it without this
+// product's redaction rules, which change between releases. The keyed form reduces what it is
+// handed at verification time too, which only this product can repeat. The distinct prefix keeps an
+// entry committed this way from being read under the older form, and the reverse.
+func ExactDigestOf(body []byte) (digest, nonce string, err error) {
+	if len(body) == 0 {
+		return "", "", nil
+	}
+	return keyedDigestOf(ExactDigestPrefix, body)
+}
+
+// keyedDigestOf commits input under a fresh random nonce in the form prefix names: the prefix, the
+// hex SHA-256 of the nonce, and the hex HMAC-SHA256 of input under the nonce.
+func keyedDigestOf(prefix string, input []byte) (digest, nonce string, err error) {
 	var raw [32]byte
 	if _, err := rand.Read(raw[:]); err != nil {
 		return "", "", err
@@ -318,7 +355,7 @@ func ContentDigestOf(body []byte) (digest, nonce string, err error) {
 	nonceHash := sha256.Sum256(raw[:])
 	mac := hmac.New(sha256.New, raw[:])
 	mac.Write(input)
-	return "sha256s:" + hex.EncodeToString(nonceHash[:]) + ":" + hex.EncodeToString(mac.Sum(nil)),
+	return prefix + hex.EncodeToString(nonceHash[:]) + ":" + hex.EncodeToString(mac.Sum(nil)),
 		hex.EncodeToString(raw[:]), nil
 }
 
@@ -375,9 +412,9 @@ func UnkeyedDigestOfReduced(body []byte) string {
 // canonicalForDigest reduces a request body to the bytes the digest commits to: the redacted,
 // canonical JSON when it parses, or the raw body when it is too large to canonicalize economically.
 // A body that parses is never digested raw, so a secret the redaction removed is not committed by a
-// re-encoding failure falling back to the original bytes. A value JCS cannot canonicalize falls back
-// to a plain deterministic JSON encoding of the same redacted tree, and a tree that will not encode
-// at all reduces to the marker.
+// re-encoding failure falling back to the original bytes. A value JCS cannot canonicalize falls
+// back to a plain deterministic JSON encoding of the same redacted tree, and a tree that will not
+// encode at all reduces to the marker.
 //
 // The size bailout is safe here and only here: a digest of an oversized body discloses nothing,
 // while CanonicalRedacted, whose bytes are published, refuses rather than skipping the redaction.
@@ -402,32 +439,61 @@ func canonicalForDigest(body []byte) []byte {
 // a party handed one entry's body and nonce proves that entry without being shown any other: the body
 // is redacted and canonicalized the same way it was at record time, and the keyed commitment is
 // recomputed. It accepts the legacy unkeyed form so an entry written before the nonce existed still
-// verifies from the body alone.
+// verifies from the body alone. A digest in the exact form is checked over body exactly as given,
+// since that form commits bytes that were reduced before they were fixed.
 func VerifyContentDigest(digest, nonce string, body []byte) bool {
+	if strings.HasPrefix(digest, ExactDigestPrefix) {
+		return verifyKeyed(digest, ExactDigestPrefix, nonce, body)
+	}
 	input := canonicalForDigest(body)
 	switch {
-	case strings.HasPrefix(digest, "sha256s:"):
-		parts := strings.Split(strings.TrimPrefix(digest, "sha256s:"), ":")
-		if len(parts) != 2 {
-			return false
-		}
-		raw, err := hex.DecodeString(nonce)
-		if err != nil || len(raw) == 0 {
-			return false
-		}
-		nonceHash := sha256.Sum256(raw)
-		if !hmac.Equal([]byte(hex.EncodeToString(nonceHash[:])), []byte(parts[0])) {
-			return false
-		}
-		mac := hmac.New(sha256.New, raw)
-		mac.Write(input)
-		return hmac.Equal([]byte(hex.EncodeToString(mac.Sum(nil))), []byte(parts[1]))
+	case strings.HasPrefix(digest, keyedDigestPrefix):
+		return verifyKeyed(digest, keyedDigestPrefix, nonce, input)
 	case strings.HasPrefix(digest, "sha256:"):
 		sum := sha256.Sum256(input)
 		return hmac.Equal([]byte("sha256:"+hex.EncodeToString(sum[:])), []byte(digest))
 	default:
 		return false
 	}
+}
+
+// VerifyCanonicalDigest reports whether canonical, the exact bytes a disclosure is checked over, is
+// what digest committed, with no reduction applied: the keyed or the exact form over canonical, or
+// the unkeyed form over canonical. It is the check an open verifier makes of a disclosed record, by
+// the bytes it carries rather than by this product's redaction rules, so a receipt that passes here
+// passes there.
+func VerifyCanonicalDigest(digest, nonce string, canonical []byte) bool {
+	switch {
+	case strings.HasPrefix(digest, keyedDigestPrefix):
+		return verifyKeyed(digest, keyedDigestPrefix, nonce, canonical)
+	case strings.HasPrefix(digest, ExactDigestPrefix):
+		return verifyKeyed(digest, ExactDigestPrefix, nonce, canonical)
+	case strings.HasPrefix(digest, "sha256:"):
+		sum := sha256.Sum256(canonical)
+		return hmac.Equal([]byte("sha256:"+hex.EncodeToString(sum[:])), []byte(digest))
+	default:
+		return false
+	}
+}
+
+// verifyKeyed checks a keyed digest in the form prefix names: the nonce must hash to the digest's
+// first part, and the HMAC-SHA256 of input under the nonce must be its second.
+func verifyKeyed(digest, prefix, nonce string, input []byte) bool {
+	parts := strings.Split(strings.TrimPrefix(digest, prefix), ":")
+	if len(parts) != 2 {
+		return false
+	}
+	raw, err := hex.DecodeString(nonce)
+	if err != nil || len(raw) == 0 {
+		return false
+	}
+	nonceHash := sha256.Sum256(raw)
+	if !hmac.Equal([]byte(hex.EncodeToString(nonceHash[:])), []byte(parts[0])) {
+		return false
+	}
+	mac := hmac.New(sha256.New, raw)
+	mac.Write(input)
+	return hmac.Equal([]byte(hex.EncodeToString(mac.Sum(nil))), []byte(parts[1]))
 }
 
 // redactSecrets walks a parsed JSON value and returns it with every secret removed: the value of a
@@ -530,10 +596,10 @@ func Link(prev, e *Entry) {
 // StampAppendTime gives an entry its recorded time at the moment the chain assigns its position,
 // and keeps that time from going backwards against the entry before it.
 //
-// A caller that already chose a time keeps it: the demo backdates a whole seeded history on purpose,
-// and a span beat's time is a signed claim about when the clock was read. A zero time means "now",
-// which is what every server request passes, and stamping it here rather than in the handler is what
-// makes the recorded time and the sequence agree.
+// A caller that already chose a time in the past keeps it: the demo backdates a whole seeded
+// history on purpose, and a span beat's time is a signed claim about when the clock was read. A
+// zero time means "now", which is what every server request passes, and stamping it here rather
+// than in the handler is what makes the recorded time and the sequence agree.
 //
 // They did not agree. The handler read the clock, then the store took its mutex and assigned the
 // sequence, so under ordinary concurrency two requests could be stamped in one order and sequenced
@@ -541,8 +607,16 @@ func Link(prev, e *Entry) {
 // install where no clock moved and nothing was tampered with. The chain still recomputed, because
 // the link commits to the time it was given, so this never showed as a break. It showed as an audit
 // trail that reads as though it were edited.
+//
+// now is the store's clock, read under the append lock: the process clock for the in-memory and
+// SQLite stores, and the database's clock on PostgreSQL, the one clock every replica sharing a
+// chain agrees on. A caller-chosen time later than now is held to now. Every caller that chooses a
+// time reads it from its own clock, and a replica whose clock ran half an hour fast committed its
+// outcome half an hour in the future. The pin below then dragged every later entry, from every
+// replica, forward to that time, so an anchor a correct timestamp authority took over the next head
+// was refused for preceding the entry it covers, and every bundle drawn from the chain failed.
 func StampAppendTime(prev, e *Entry, now time.Time) {
-	if e.At.IsZero() {
+	if e.At.IsZero() || e.At.After(now) {
 		e.At = now
 	}
 	// The pin applies to every entry, a caller-chosen time included. Two servers appending to one
@@ -553,15 +627,39 @@ func StampAppendTime(prev, e *Entry, now time.Time) {
 	// one writer whose time is a signed claim that must never be adjusted, the span beat, refuses
 	// behind-clock appends before reaching here and is never clamped. Equal times are fine and
 	// ordinary at clock granularity.
+	//
+	// The pin has a ceiling. A head ahead of now is what a store clock that stepped backward leaves,
+	// and holding entries at the head absorbs a step of up to MaxTimeAhead. A head further ahead
+	// than that is not followed: the entry is recorded at the ceiling, and the inversion is reported
+	// by a verifier as a time problem, which is honest, rather than dated in a future no clock read.
 	if prev != nil && e.At.Before(prev.At) {
 		e.At = prev.At
+		if ceiling := now.Add(MaxTimeAhead); e.At.After(ceiling) {
+			e.At = ceiling
+		}
 	}
 }
+
+// MaxTimeAhead is the furthest an entry's recorded time may run ahead of the clock of the store
+// that appends it, which only the pin against the head ever does.
+//
+// It stays well inside AnchorClockSkew, the allowance a verifier gives a timestamp authority whose
+// time precedes the entry it covers. An anchor a correct authority takes over any head therefore
+// verifies, with the rest of the allowance left for the authority's own clock.
+const MaxTimeAhead = 2 * time.Minute
+
+// AnchorClockSkew is how far a timestamp authority's time may precede the entry an anchor covers
+// before the anchor is refused. A token commits to a link that hashes the entry's own time, so an
+// authority cannot honestly have signed it earlier. Both clocks are real and neither is
+// authoritative, so a few minutes are allowed and a backdated month is not, the same allowance
+// the reference verifier applies.
+const AnchorClockSkew = 5 * time.Minute
 
 // Verify walks entries in chain order, oldest first, and reports whether the whole chain is intact.
 // When it is broken it returns the one-based position of the first entry whose sequence, link, or
 // hash does not check out. An entry with no hash breaks the chain, so a blanked entry cannot hide
-// from verification. It requires the slice to start at genesis; use VerifyRange for part of a chain.
+// from verification. It requires the slice to start at genesis; use VerifyRange for part of a
+// chain.
 func Verify(entries []*Entry) (ok bool, brokeAt int) {
 	v := NewChainScanner(true)
 	for _, e := range entries {

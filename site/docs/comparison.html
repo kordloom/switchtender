@@ -80,7 +80,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison" class="active">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison" class="active">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -177,7 +177,7 @@ set rather than by not finding it.</p>
 </tr>
 <tr>
 <td>Approval gates</td>
-<td>Yes, by policy</td>
+<td>Yes, by policy, on a run or at a step inside a workflow</td>
 <td>Yes [21]</td>
 <td>Yes [22]</td>
 <td>Not documented [23]</td>
@@ -346,7 +346,7 @@ than &quot;structured versus scrollback&quot;.</p>
 </tr>
 <tr>
 <td>Notification channels</td>
-<td>Eleven server-wide: webhook, email, Slack, Mattermost, Rocket.Chat, Discord, Teams, ntfy, PagerDuty, Grafana, and Twilio. All eleven take a per-template target, so a team pages its own channel; a Twilio or email target names only a recipient and sends through the server-held account, so the account secret never lives in a template.</td>
+<td>Eleven server-wide: webhook, email, Slack, Mattermost, Rocket.Chat, Discord, Teams, ntfy, PagerDuty, Grafana, and Twilio. All eleven take a per-template target, so a team pages its own channel; a Twilio or email target names only a recipient and sends through the server-held account, so the account secret never lives in a template. A named target is defined once and attached to templates, schedules, projects, and organizations, the way AWX attaches a notification template.</td>
 <td>A similar set plus IRC, without Discord or ntfy, attached per job template.</td>
 <td>Fewer, some in a paid tier.</td>
 </tr>
@@ -375,15 +375,15 @@ than &quot;structured versus scrollback&quot;.</p>
 </tr>
 <tr>
 <td>Credentials</td>
-<td>Sealed with AES-256-GCM under a key derived by Argon2id, decrypted only at execution into the run's environment or a temporary file created mode 0600, kept off the command line either way, and deleted when the run ends. Fourteen credential kinds and eleven sources, nine of them external secret managers: HashiCorp Vault static and dynamic, AWS Secrets Manager and STS, Azure Key Vault, GCP Secret Manager, CyberArk Conjur and CCP, and 1Password. Several credentials of different kinds attach to one run. AWX matches this through credential plugins. Semaphore's built-in key store holds an SSH key or a username and password, and secrets can instead live in an external HashiCorp Vault, OpenBao, AWS Secrets Manager, Azure Key Vault, or Devolutions Server.</td>
+<td>Sealed with AES-256-GCM under a key derived by Argon2id, decrypted only at execution into the run's environment or a temporary file created mode 0600, kept off the command line either way, and deleted when the run ends. Fifteen credential kinds, kubeconfig among them, and custom types that inject environment variables, extra vars, and templated files the way AWX's do. Four federated kinds store nothing at all: each run gets a short-lived OpenID Connect token SwitchTender signs, exchanged for AWS, Google Cloud, or Azure access, so no durable cloud key is kept. Eleven sources, nine of them external secret managers: HashiCorp Vault static and dynamic, AWS Secrets Manager and STS, Azure Key Vault, GCP Secret Manager, CyberArk Conjur and CCP, and 1Password. Several credentials of different kinds attach to one run. AWX matches this through credential plugins. Semaphore's built-in key store holds an SSH key or a username and password, and secrets can instead live in an external HashiCorp Vault, OpenBao, AWS Secrets Manager, Azure Key Vault, or Devolutions Server.</td>
 </tr>
 <tr>
 <td>Scheduling</td>
-<td>All three schedule runs. SwitchTender uses cron with highly available claiming so two servers do not double-fire.</td>
+<td>All three schedule runs. SwitchTender takes a cron expression or an RFC 5545 recurrence rule, the form AWX uses, with a timezone, and claims each fire so two servers do not double-fire.</td>
 </tr>
 <tr>
 <td>Surveys and prompts</td>
-<td>All three collect typed values at launch.</td>
+<td>All three collect typed values at launch. SwitchTender and AWX also take a secret answer, sealed at rest and never shown back.</td>
 </tr>
 <tr>
 <td>Inbound webhooks</td>
@@ -417,48 +417,16 @@ than &quot;structured versus scrollback&quot;.</p>
 <td>AWX and Semaphore have years of production use and large communities. Every SwitchTender release is proven end to end on real machines before it ships, as <a href="/docs/supertest">the supertest</a> sets out. AWX's years now cut both ways: its last release was July 2024, and <a href="https://forum.ansible.com/t/awx-modernization-moving-forward/45134">mid-refactor development builds have moved external authentication out of core</a> into a shared library.</td>
 </tr>
 <tr>
-<td>Approval steps inside a workflow</td>
-<td>A whole run is held for approval. AWX places an approval node at a point in the graph, so the first half runs, waits, and continues.</td>
-</tr>
-<tr>
-<td>Recurrence beyond cron</td>
-<td>AWX schedules take an RRULE, so &quot;the last Friday of the quarter&quot; is expressible. SwitchTender takes a cron expression with a timezone, and a cadence cron cannot say is reported and skipped on import rather than converted wrongly.</td>
-</tr>
-<tr>
-<td>Secret survey answers</td>
-<td>AWX offers a password survey field whose answer is stored encrypted. A survey answer here is stored in plain text on the run, so a secret belongs in a credential instead, and every importer that carries surveys refuses to downgrade one rather than accept it quietly: an AWX password field, a Semaphore secret variable, a Rundeck secure option, and a Jenkins password parameter are each named in the report and left out.</td>
-</tr>
-<tr>
-<td>Constructed and smart inventories</td>
-<td>An inventory is static content or a refreshed dynamic source. AWX composes one inventory from others by filter.</td>
-</tr>
-<tr>
-<td>Credential file injectors</td>
-<td>A custom credential type contributes environment variables and extra vars. AWX also writes a templated file and hands the play its path, which is how a kubeconfig or a cloud config is delivered.</td>
-</tr>
-<tr>
-<td>Fact caching</td>
-<td>AWX caches gathered facts between runs and can serve them to later plays.</td>
-</tr>
-<tr>
-<td>Provisioning callbacks</td>
-<td>A host can ask AWX to run its own job at boot. SwitchTender launches from a webhook trigger, which is not the same host-initiated flow.</td>
-</tr>
-<tr>
-<td>Reusable notification objects</td>
-<td>Channels are configured server-wide or per template. AWX defines a notification template once and attaches it to many objects.</td>
-</tr>
-<tr>
 <td>Policy language</td>
-<td>Approval policy is a YAML file matching on tool, command, inventory, and destroy count, held in git and fail-closed. It is not a general policy language, so a Rego or Sentinel rule does not port.</td>
+<td>Approval policies are YAML or Rego, the Open Policy Agent language, so OPA and Conftest rules port. A Sentinel rule does not, because Sentinel is proprietary to HashiCorp, and has to be rewritten in Rego.</td>
 </tr>
 <tr>
-<td>VCS-native review flow</td>
-<td>Spacelift, env0, Atlantis, and Terraform Cloud comment a plan onto the pull request that proposed it. SwitchTender gates in its own approval queue instead.</td>
+<td>Approving from a pull request</td>
+<td>A plan is commented onto the pull request that proposed it, with the decision the apply would get, but the apply is approved in SwitchTender's own queue. Atlantis applies from a comment on the pull request itself.</td>
 </tr>
 <tr>
-<td>Federated cloud credentials</td>
-<td>Those tools mint short-lived cloud credentials over OIDC, so nothing durable is stored. SwitchTender stores a credential encrypted at rest.</td>
+<td>A few AWX forms</td>
+<td>An approval node joined by an &quot;always&quot; edge, injector templates that use Jinja beyond plain substitution, and IRC notifications do not come across. The import report names each one rather than bringing it over changed.</td>
 </tr>
 </tbody>
 </table>

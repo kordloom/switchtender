@@ -37,6 +37,12 @@ func maskTemplate(t *template.Template) *template.Template {
 	}
 	cp := *t
 	cp.Notifications = maskedNotifications(t.Notifications)
+	// A secret survey field's default is sealed, and every reader sees only whether one is set. This
+	// holds for an admin too: no caller is ever handed a secret answer, or the ciphertext of one.
+	cp.Survey = template.MaskSurvey(t.Survey)
+	// A served template says whether a callback key exists and never carries the key, even sealed.
+	cp.HostConfigKeySet = t.HostConfigKey != ""
+	cp.HostConfigKey = ""
 	return &cp
 }
 

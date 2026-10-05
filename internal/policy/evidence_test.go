@@ -279,9 +279,19 @@ func TestEveryPolicyFieldMovesTheDigestOrIsExemptByName(t *testing.T) {
 		case reflect.Int:
 			v.SetInt(v.Int() + 7)
 		default:
-			if field.Type == reflect.TypeOf(time.Time{}) {
+			switch field.Type {
+			case reflect.TypeOf(time.Time{}):
 				v.Set(reflect.ValueOf(base.CreatedAt.Add(time.Hour)))
-			} else {
+			case reflect.TypeOf(&policy.RegoProgram{}):
+				// Attaching a Rego bundle changes what the rule decides, so it has to show.
+				prog, err := policy.CompileRego("", "", []policy.RegoModule{{
+					File: "ratchet.rego", Source: "package switchtender\n\nhold contains \"x\" if true\n",
+				}})
+				if err != nil {
+					t.Fatalf("CompileRego() error = %v", err)
+				}
+				v.Set(reflect.ValueOf(prog))
+			default:
 				t.Fatalf("Policy.%s has kind %s this walk cannot edit; teach it that kind",
 					field.Name, field.Type.Kind())
 			}

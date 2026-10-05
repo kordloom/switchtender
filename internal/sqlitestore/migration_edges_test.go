@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
@@ -299,6 +301,7 @@ func TestUpgradedDatabaseStillClaimsAndSweeps(t *testing.T) {
 		"DROP INDEX IF EXISTS idx_runs_leased",
 		"DROP INDEX IF EXISTS idx_runs_actor",
 		"DROP INDEX IF EXISTS idx_runs_source",
+		"DROP INDEX IF EXISTS idx_runs_callback_live",
 		"DROP INDEX IF EXISTS idx_runs_status_parent",
 		"ALTER TABLE runs DROP COLUMN queue",
 		"ALTER TABLE runs DROP COLUMN claim_secret",
@@ -346,5 +349,104 @@ func TestUpgradedDatabaseStillClaimsAndSweeps(t *testing.T) {
 	if hits, err := store.ListPage(ctx, run.ListFilter{Source: "api"}, 0, 0); err != nil ||
 		len(hits) != 1 {
 		t.Errorf("ListPage(source) on a healed database = (%d, %v), want one run", len(hits), err)
+	}
+}
+
+// TestUpgradedDatabaseHealsTheNewRunColumns pins that a database from before the run columns the
+// template identity, composed inventory, secret survey, fact cache, and pull request review features
+// added, the columns recording what the gate's scan of a dry run read and why it held one, and the
+// sealed answers' digests, policy notes, the inventory cross-check, and the agent identity, reason
+// rule, and queue time the approvals work added, opens, takes a run carrying every one of them, and
+// reads each back unchanged. A column an upgrade missed fails the save outright, since every save
+// names it.
+func TestUpgradedDatabaseHealsTheNewRunColumns(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "upgrade.db")
+	db := openStoreAt(t, path)
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	rawExec(t, path,
+		"ALTER TABLE runs DROP COLUMN template_id",
+		"ALTER TABLE runs DROP COLUMN inventory_resolution",
+		"ALTER TABLE runs DROP COLUMN sealed_vars",
+		"ALTER TABLE runs DROP COLUMN use_fact_cache",
+		"ALTER TABLE runs DROP COLUMN fact_cache_timeout",
+		"ALTER TABLE runs DROP COLUMN git_ref",
+		"ALTER TABLE runs DROP COLUMN dry_run_scans",
+		"ALTER TABLE runs DROP COLUMN hold_note",
+		"ALTER TABLE runs DROP COLUMN sealed_digests",
+		"ALTER TABLE runs DROP COLUMN policy_notes",
+		"ALTER TABLE runs DROP COLUMN inventory_check",
+		"ALTER TABLE runs DROP COLUMN initiator",
+		"ALTER TABLE runs DROP COLUMN require_reason",
+		"ALTER TABLE runs DROP COLUMN queued_at")
+
+	store := openStoreAt(t, path).Runs()
+	want := &run.Run{
+		ID: "run_upgraded", Playbook: "site.yml", InventoryID: "inv_smart", Status: run.StatusPending,
+		CreatedAt: baseTime, TemplateID: "tpl_deploy",
+		InventoryResolution: &run.InventoryResolution{Kind: "smart", Inputs: []string{"inv_a"},
+			Hosts: []string{"web1"}},
+		SealedNames: []string{"db_password"}, SealedVars: map[string]string{"db_password": "sealed"},
+		SealedDigests: run.SealedDigestsOf(map[string]string{"db_password": "sealed"}),
+		PolicyNotes:   []string{`policy "advice" noted: staging, change`},
+		InventoryCheck: &run.InventoryCheck{AnsibleCore: "2.18.1", InputDigest: "sha256:in",
+			ResolvedDigest: "sha256:out"},
+		Initiator:     &run.Initiator{InitiatedBy: "deploy-bot", BoundTo: "user_7"},
+		RequireReason: "denials",
+		UseFactCache:  true, FactCacheTimeout: 600, GitRef: "refs/pull/7/head", DryRun: true,
+		DryRunScans: []run.DryRunScan{run.DryRunScan{Tool: run.ToolAnsible,
+			Scanner: run.CheckModeScanner, Version: run.CheckModeScannerVersion,
+			Findings: []string{`site.yml: task "Restart, then wait" sets check_mode to false`},
+		}.Classified()},
+		HoldNote: `This dry run was not shown to change nothing, so "prod" does not exempt it.`,
+	}
+	if err := store.Save(ctx, want); err != nil {
+		t.Fatalf("Save() on a healed database error = %v", err)
+	}
+	got, err := store.Get(ctx, want.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	// pick is the part of a run the healed columns hold.
+	type pick struct {
+		// TemplateID is the run's template.
+		TemplateID string
+		// Resolution is the composed inventory's resolved host set.
+		Resolution *run.InventoryResolution
+		// SealedVars are the sealed secret answers.
+		SealedVars map[string]string
+		// UseFactCache is the fact cache switch.
+		UseFactCache bool
+		// FactCacheTimeout is the fact freshness bound.
+		FactCacheTimeout int
+		// GitRef is the ref a review plan fetches.
+		GitRef string
+		// DryRunScans is what the gate's scan of the dry run read.
+		DryRunScans []run.DryRunScan
+		// HoldNote is why the gate held the dry run.
+		HoldNote string
+		// SealedDigests bind the sealed answers by their ciphertext.
+		SealedDigests []run.SealedDigest
+		// PolicyNotes are what a policy noted rather than held on.
+		PolicyNotes []string
+		// InventoryCheck is the executor's inventory cross-check.
+		InventoryCheck *run.InventoryCheck
+		// Initiator is an agent-initiated run's identity evidence.
+		Initiator *run.Initiator
+		// RequireReason is what the holding rules ask of a decision on the run.
+		RequireReason string
+	}
+	of := func(r *run.Run) pick {
+		return pick{TemplateID: r.TemplateID, Resolution: r.InventoryResolution,
+			SealedVars: r.SealedVars, UseFactCache: r.UseFactCache,
+			FactCacheTimeout: r.FactCacheTimeout, GitRef: r.GitRef, DryRunScans: r.DryRunScans,
+			HoldNote: r.HoldNote, SealedDigests: r.SealedDigests, PolicyNotes: r.PolicyNotes,
+			InventoryCheck: r.InventoryCheck, Initiator: r.Initiator, RequireReason: r.RequireReason}
+	}
+	if diff := cmp.Diff(of(want), of(got)); diff != "" {
+		t.Errorf("healed run mismatch (-want +got):\n%s", diff)
 	}
 }

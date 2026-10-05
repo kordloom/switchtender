@@ -169,6 +169,7 @@ var parityRoutes = []parityRoute{{
 // blind spot.
 var parityExclusions = map[string]string{
 	"credential-types": "no credential-type fixture yet",
+	"notifications":    "no notification target fixture yet",
 	"changes":          "changes are derived from runs and are covered by derived_views_agree",
 }
 

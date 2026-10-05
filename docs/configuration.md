@@ -46,8 +46,12 @@ believes it has a control it does not have.
 | `SWITCHTENDER_LDAP_PASSWORD` | serve | Password for the `--ldap-bind-dn` service account. |
 | `SWITCHTENDER_WORKER_TOKEN` | serve, worker | Mesh relay bearer token. The server reads it when `--worker-token` is unset, and a relay worker started with `--server` presents it on every call. |
 | `SWITCHTENDER_GALAXY_SERVER` | serve, worker | Default for `--galaxy-server`, a private Ansible Galaxy or Automation Hub URL. |
+| `SWITCHTENDER_PUBLIC_URL` | serve | Default for `--public-url`, this server's public address for links in pull request reviews. |
 | `SWITCHTENDER_GALAXY_TOKEN` | serve, worker | Token for the `--galaxy-server` URL, read from the environment so it never lands on the command line. |
+| `SWITCHTENDER_FEDERATION_ISSUER` | serve, worker | Default for `--federation-issuer`, the external URL this install is an OpenID Connect issuer at for federated cloud credentials. Every process on one database must see the same value. |
 | `SWITCHTENDER_PLUGINS_DIR` | serve, worker | Directory of extension plugin binaries, read when `--plugins-dir` is unset. |
+| `SWITCHTENDER_EGRESS_PROXY` | serve, worker | Proxy for the server's own outbound requests: notifications, federation token exchange, forge review calls, external secret sources, git remotes, and the registry lookups `--image-digest-lookup` makes. An http, https, or socks5 URL. The ambient `HTTP_PROXY` and `HTTPS_PROXY` are never used, so a forgotten proxy variable cannot route these requests somewhere that skips the cloud metadata and loopback checks. When this is set, each target is resolved and held to those checks before the request reaches the proxy, and an IP-literal target is refused. The proxy's own egress policy is then the boundary for a hostname that rebinds after the check, so point it at the hosts the server is meant to reach. |
+| `SWITCHTENDER_RUNFILES_DIR` | serve, worker | Default for `--runfiles-dir`, the private directory runs stage their keys, tokens, and secret files under. See [Run files](run-files.md). |
 | `SWITCHTENDER_ADMIN_PASSWORD` | init | Password for the first admin account. When unset, init generates one and prints it once. |
 | `SWITCHTENDER_DESKTOP_NO_BROWSER` | desktop | Set to any value to skip opening the browser, for a headless or remote run. |
 | `SWITCHTENDER_NOTIFY_NTFY_TOKEN` | serve | Bearer token for a protected ntfy topic, read when `--notify-ntfy-token` is unset. A run cannot read it, and a flag shows in the process list. |
@@ -105,6 +109,7 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--ldap-user-filter` | `(uid=%s)` | Search filter with one `%s` for the username. |
 | `--ldap-default-role` | `viewer` | Role for an account created on first directory sign-in. |
 | `--ldap-role-map` | none | Map a directory group to a role as `groupDN=role`. A matched group sets the role on every sign-in. Repeatable. |
+| `--public-url` | none | Public base URL of this server, such as `https://switchtender.example.com`. A [pull request review](pull-request-review.md) links its comment and commit status to the run under it. Empty posts run ids without links. |
 | `--saml-idp-metadata-url` | none | SAML IdP metadata URL to enable SAML sign-in. Empty leaves SAML off. |
 | `--saml-base-url` | none | Public base URL of this server, used to build the SAML entity id and ACS endpoint. |
 | `--saml-cert` | none | Path to the service provider certificate, PEM. |
@@ -127,13 +132,17 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--workers` | `4` | Concurrent runs this process executes at once. At least 1: the server executes its own runs, so there is no value that makes it execute none. |
 | `--max-shards` | `512` | Most groups a split fans out into. A split is always bounded by the host count. |
 | `--run-timeout` | `0` | Default cap on how long a run may execute before it is canceled and failed, for example `1h`. A run may set a shorter timeout. Zero leaves runs uncapped. |
-| `--notify-webhook` | none | URL that receives a JSON notification when a run finishes or is held for approval. Repeatable. |
-| `--notify-slack` | none | Slack incoming webhook URL that receives a message when a run finishes or is held for approval. Repeatable. |
-| `--notify-mattermost` | none | Mattermost incoming webhook URL that receives a message when a run finishes or is held for approval. Repeatable. |
-| `--notify-rocketchat` | none | Rocket.Chat incoming webhook URL that receives a message when a run finishes or is held for approval. Repeatable. |
-| `--notify-discord` | none | Discord incoming webhook URL that receives a message when a run finishes or is held for approval. Repeatable. |
-| `--notify-teams` | none | Microsoft Teams incoming webhook URL that receives an Adaptive Card when a run finishes or is held for approval. Repeatable. |
-| `--notify-ntfy` | none | ntfy topic URL that receives a notification when a run finishes or is held for approval, such as https://ntfy.sh/my-topic. Repeatable. |
+| `--module-fetch-timeout` | `2m` | How long one module download may run, from `1s` to `1h`. The approval gate downloads the registry and remote modules a Terraform or OpenTofu plan calls before it reads the plan, while the submission waits, and a run downloads them again when the gate's copy is not kept where it executes. Past the bound the download stops and the plan stays unclassified, so it is held or refused. |
+| `--module-fetch-max-mib` | `512` | How many MiB one module download may write, from `1` to `65536`. The download also stops past 50,000 files. Past either bound the plan stays unclassified, so it is held or refused. |
+| `--module-keep-for` | `168h` | How long the module trees the gate downloads are kept for the run it judged, from `1h` to `2160h`. A run held for approval longer than this downloads its modules again when it starts, and is refused unless they match what the gate read. |
+| `--module-keep-max-mib` | `2048` | How many MiB the kept module trees may occupy together, from `1` to `1048576`. Past it the oldest tree is dropped first, and its run downloads its modules again when it starts. |
+| `--notify-webhook` | none | URL that receives a JSON notification when a run finishes, is held for approval, waits at a workflow approval step, or needs attention past its alert threshold. Repeatable. |
+| `--notify-slack` | none | Slack incoming webhook URL that receives a message when a run finishes, is held for approval, waits at a workflow approval step, or needs attention past its alert threshold. Repeatable. |
+| `--notify-mattermost` | none | Mattermost incoming webhook URL that receives a message when a run finishes, is held for approval, waits at a workflow approval step, or needs attention past its alert threshold. Repeatable. |
+| `--notify-rocketchat` | none | Rocket.Chat incoming webhook URL that receives a message when a run finishes, is held for approval, waits at a workflow approval step, or needs attention past its alert threshold. Repeatable. |
+| `--notify-discord` | none | Discord incoming webhook URL that receives a message when a run finishes, is held for approval, waits at a workflow approval step, or needs attention past its alert threshold. Repeatable. |
+| `--notify-teams` | none | Microsoft Teams incoming webhook URL that receives an Adaptive Card when a run finishes, is held for approval, waits at a workflow approval step, or needs attention past its alert threshold. Repeatable. |
+| `--notify-ntfy` | none | ntfy topic URL that receives a notification when a run finishes, is held for approval, waits at a workflow approval step, or needs attention past its alert threshold, such as https://ntfy.sh/my-topic. Repeatable. |
 | `--notify-ntfy-token` | none | Optional bearer token for a protected ntfy topic, applied to every `--notify-ntfy` URL. |
 | `--notify-pagerduty` | none | PagerDuty Events API routing key that triggers an incident when a run fails. Repeatable. |
 | `--notify-grafana` | none | Grafana base URL that receives an annotation when a run finishes. Repeatable. |
@@ -143,7 +152,8 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--notify-twilio-from` | none | Twilio sender phone number that texts run failures. |
 | `--notify-twilio-to` | none | Phone number that receives an SMS when a run fails. Repeatable. |
 | `--allow-container-ee` | `false` | Allow runs whose project pins a container image to execute inside it. Needs Docker on the executor. |
-| `--default-image` | none | Fallback execution image for runs that pin none at the run, template, or project level. Empty leaves an unpinned run on the host. |
+| `--default-image` | none | Fallback execution image for runs that pin none at the run, template, or project level. It is resolved when a run is submitted and pinned onto it, so an approval covers it. Empty leaves an unpinned run on the host. |
+| `--image-digest-lookup` | `true` | Resolve a submitted run's image tag to the digest its registry serves, so the run executes by that digest and an approval covers that exact image. A run whose registry does not answer stays bound to its tag, and the approval view says so. A registry that does not answer within 10 seconds is not asked again for a minute, so a dead registry delays one submission a minute rather than every one. The lookup ends when the request submitting the run ends, and the submission stops with it. Turn off where no registry is reachable from the server. |
 | `--require-image-digest` | `false` | Reject a container run whose image is not pinned to an `@sha256:` digest. |
 | `--container-memory` | `2g` | Memory cap for containerized runs, as docker `--memory`. Empty removes the cap. |
 | `--container-cpus` | `2` | CPU cap for containerized runs, as docker `--cpus`. Empty removes the cap. |
@@ -151,16 +161,19 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--container-network` | `bridge` | Network mode for containerized runs, as docker `--network`, for example bridge or none. A run with network access can reach the host's cloud metadata service and read the instance identity, which on a cloud host is a credential. Use none for runs that do not need the network, and block the link-local metadata address at the host firewall where they do. |
 | `--container-runtime` | `docker` | Container CLI for containerized runs: docker or podman. |
 | `--container-pull-policy` | `missing` | Image pull policy for containerized runs, as docker `--pull`: always, missing, or never. |
+| `--container-runfiles-size` | `64m` | Size of the in-memory filesystem a containerized run's private directory is mounted as, nosuid and nodev with exec allowed. It counts against `--container-memory` as it fills. See [Run files](run-files.md). |
+| `--runfiles-dir` | none | Private directory each run stages its keys, tokens, and secret files under. Empty picks the systemd runtime directory, then a private `XDG_RUNTIME_DIR`, then the temporary directory, which the doctor warns about. It must be on a known local filesystem, a tmpfs for preference, and startup refuses one that is not. Also `SWITCHTENDER_RUNFILES_DIR`. See [Run files](run-files.md). |
 | `--galaxy-server` | none | Private Ansible Galaxy or Automation Hub URL for project collection installs. Token from `SWITCHTENDER_GALAXY_TOKEN`. |
+| `--federation-issuer` | none | External https URL this install is an OpenID Connect issuer at, so a run reaches AWS, Google Cloud, or Azure with short-lived federated credentials and nothing durable is stored. Serves the discovery document and public keys under it and needs the encryption key and salt, which seal the signing key. Falls back to `SWITCHTENDER_FEDERATION_ISSUER`. See [Federated cloud credentials](federation.md). |
 | `--strict-grants` | `false` | Deny non-admins access to an object that has no grants, instead of deferring to the global role. Off by default, which means separation between organizations is not enforced until you turn it on: see below. |
 | `--read-only` | `false` | Reject every mutating request, for a safely exposable instance. |
 | `--matrix-cap` | `50000` | Largest host matrix, in cells, the UI draws before showing a notice. 0 means no limit. |
 | `--plugins-dir` | none | Directory of extension plugin binaries loaded at startup. Also `SWITCHTENDER_PLUGINS_DIR`. See [Extend in Go](sdk.md). |
 | `--worker-token` | none | Bearer token that authenticates mesh relay workers and enables the relay endpoints. Also `SWITCHTENDER_WORKER_TOKEN`. Keep it secret. On its own, every worker holding it may lease from every queue. |
-| `--worker-pools` | none | YAML file binding each worker token to the queues it may lease from, so a queue is a boundary rather than a routing hint. |
-| `--retain-runs` | none | Delete terminal runs older than this, for example `90d`. Empty keeps them forever. Deleting a run does not make what it left behind unreadable: summaries, drift, and host state history outlive it, and the purge retains the record of who could read the run so those rows stay readable to exactly the same people. That record is dropped automatically once nothing references it. |
-| `--retain-events` | none | Drop run events and logs older than this, for example `30d`. Empty keeps them forever. |
-| `--retain-history` | none | Keep only this many per-host and per-task summaries for each host and each task, for example `500`. Summaries outlive the runs they came from, so this is the only bound on them. Zero keeps every summary forever. A smaller value is raised to 500, the deepest window the fleet views will answer. |
+| `--worker-pools` | none | YAML file binding each worker token to the queues it may lease from, so a queue is a boundary rather than a routing hint. A pool may also register a `delivery_key` to receive its runs' secrets sealed to it: see [Delivering secrets to relay workers](#delivering-secrets-to-relay-workers). |
+| `--retain-runs` | none | Delete terminal runs older than this, for example `90d`. Empty keeps them forever. Deleting a run does not make what it left behind unreadable: summaries, drift, and host state history outlive it, and the purge retains the record of who could read the run so those rows stay readable to exactly the same people. That record is dropped automatically once nothing references it. A run whose outcome is not yet on the audit chain is kept, with its steps or shards and everything they hold, until the outcome is committed. |
+| `--retain-events` | none | Drop run events and logs older than this, for example `30d`. Empty keeps them forever. A run whose outcome is not yet on the audit chain keeps its events and logs until the outcome is committed, since the outcome commits to its log. |
+| `--retain-history` | none | Keep only this many per-host and per-task summaries for each host and each task, for example `500`. Summaries outlive the runs they came from, so this is the only bound on them. Zero keeps every summary forever. A smaller value is raised to 500, the deepest window the fleet views will answer. The summaries of a run whose outcome is not yet on the audit chain are kept until it is. |
 | `--facts-interval` | `24h` | Minimum spacing between retained host state snapshots. The estate history keeps the newest gather in each period, which is what answers what a host looked like on a date. Zero keeps every gather, at roughly a hundred times the disk. |
 | `--retain-facts` | `400` | Keep only this many host state snapshots for each host. A fact set is hundreds of kilobytes, so unlike summaries this is bounded by default. Zero keeps every snapshot forever. |
 | `--retention-interval` | `1h` | How often the retention sweeper runs. |
@@ -176,10 +189,14 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--smtp-from` | none | Sender address for notification emails. |
 | `--smtp-to` | none | Recipient address for notification emails. Repeatable. |
 | `--smtp-username` | none | SMTP username. The password comes from `SWITCHTENDER_SMTP_PASSWORD`. |
-| `--notify-on` | `failure` | When to email: `failure` for failed runs only, or `finish` for every finished run and every run held for approval. |
-| `--policy-file` | none | YAML file holding the approval policies. When set, the file is the source of truth and the API refuses policy edits. |
+| `--notify-on` | `failure` | When to email: `failure` for failed runs only, or `finish` for every finished run, every run held for approval, and every workflow waiting at an approval step. An attention alert is emailed under either setting. |
+| `--policy-file` | none | YAML file holding the approval policies and naming any Rego modules they load, read relative to the file. When set, the file is the source of truth and the API refuses policy edits. See [Approval policies](policy.md). |
+| `--attention-file` | none | YAML file setting when waiting work shows as blocked on the overview's Needs attention panel and when it alerts, as organization defaults with per-organization, per-queue, and per-template overrides. Empty uses the built-in thresholds. A malformed file stops the server. See [Attention thresholds](#attention-thresholds). |
 | `--trusted-proxy` | none | CIDR of a reverse proxy whose client IP header to believe, repeatable. Required behind a proxy: without it every request appears to come from the proxy itself, so the failed sign-in budget, the webhook rate limit, and the per-client stream budget all become one budget shared by everyone behind it, and one stranger's failed guesses can lock sign-in for the whole install. |
 | `--client-ip-header` | none | Header carrying the real client address from a trusted proxy. Defaults to the leftmost `X-Forwarded-For` entry. |
+| `--callback-rate-limit` | `30` | Provisioning callbacks one client address may make in a minute, the native and the AWX-compatible callback address counted together. A refusal answers `429`, names the limit and this flag, and is logged once per address a minute. See [callback rate limits](tool-ansible.md#callback-rate-limits) for hosts behind one NAT address. |
+| `--callback-key-failure-limit` | `10` | Wrong host config keys one client address may present in a minute. Past it, every callback from that address is refused for the rest of the minute, the right key included, so a key cannot be guessed at a useful rate. |
+| `--fact-cache-admin-only` | `false` | Restrict reading cached facts to admins. By default an operator with read on the inventory and on the run that gathered the facts may read them, with secret-looking values masked. |
 | `--span-cadence` | `0` | Append a span beat to the audit chain this often, for example `60s`. Whole seconds only. Zero appends none. |
 | `--anchor-tsa-url` | none | RFC 3161 timestamp authority the chain anchors against. Empty anchors nothing. |
 
@@ -220,10 +237,14 @@ node over the mesh relay, with no database access of its own.
 | `--queue` | none | Queue this worker serves. Repeatable. Without any, it serves the default pool. |
 | `--workers` | `4` | Concurrent runs this process executes at once. At least 1: a worker with no slots would lease nothing and sit idle. |
 | `--run-timeout` | `0` | Default cap on how long a run may execute before it is canceled and failed, for example `1h`. Zero leaves runs uncapped. |
+| `--module-fetch-timeout` | `2m` | How long one module download may run, from `1s` to `1h`. A run downloads its modules again here when the copy the gate read is not kept on this machine, and goes ahead only if they are the ones the gate read. |
+| `--module-fetch-max-mib` | `512` | How many MiB one module download may write, from `1` to `65536`, and at most 50,000 files. |
+| `--module-keep-for` | `168h` | How long a module tree kept in this worker's run-files root is offered to the run the gate read it for, from `1h` to `2160h`. A worker sharing its run-files root with a server executes the trees that server's gate kept. |
+| `--module-keep-max-mib` | `2048` | How many MiB the module trees this worker keeps may occupy together, from `1` to `1048576`, the oldest dropped first. |
 | `--facts-interval` | `24h` | Minimum spacing between retained host state snapshots. Applies only with `--db`: a worker using `--server` reports what it gathered to the control node, which spaces the history with its own setting. |
 | `--retain-facts` | `400` | Snapshots kept per host. Applies only with `--db`, for the same reason. |
 | `--allow-container-ee` | `false` | Allow container execution environments on this worker. Needs Docker. |
-| `--default-image` | none | Fallback execution image for runs that pin none at the run, template, or project level. |
+| `--default-image` | none | Fallback execution image for runs that pinned none when they were submitted. It never applies to an approved run: one approved to run on the host is refused rather than moved into this image. |
 | `--require-image-digest` | `false` | Reject a container run whose image is not pinned to an `@sha256:` digest. |
 | `--plugins-dir` | none | Directory of extension plugin binaries loaded at startup. Also `SWITCHTENDER_PLUGINS_DIR`. |
 | `--container-memory` | `2g` | Memory cap for containerized runs, as docker `--memory`. Empty removes the cap. |
@@ -232,8 +253,25 @@ node over the mesh relay, with no database access of its own.
 | `--container-network` | `bridge` | Network mode for containerized runs, as docker `--network`. |
 | `--container-runtime` | `docker` | Container CLI for containerized runs: docker or podman. |
 | `--container-pull-policy` | `missing` | Image pull policy for containerized runs, as docker `--pull`: always, missing, or never. |
+| `--container-runfiles-size` | `64m` | Size of the in-memory filesystem a containerized run's private directory is mounted as, nosuid and nodev with exec allowed. It counts against `--container-memory` as it fills. See [Run files](run-files.md). |
+| `--runfiles-dir` | none | Private directory each run stages its keys, tokens, and secret files under. Empty picks the systemd runtime directory, then a private `XDG_RUNTIME_DIR`, then the temporary directory, which the doctor warns about. It must be on a known local filesystem, a tmpfs for preference, and startup refuses one that is not. Also `SWITCHTENDER_RUNFILES_DIR`. See [Run files](run-files.md). |
 | `--galaxy-server` | none | Private Ansible Galaxy or Automation Hub URL for project collection installs. Token from `SWITCHTENDER_GALAXY_TOKEN`. |
-| `--policy-file` | none | YAML file holding the approval policies, the same file the control node reads. |
+| `--federation-issuer` | none | The same issuer URL serve is given. The worker signs the identity tokens of the runs it executes with the keys every process on the database shares, under this URL. Falls back to `SWITCHTENDER_FEDERATION_ISSUER`. |
+| `--policy-file` | none | YAML file holding the approval policies, the same file the control node reads, with the Rego modules it names beside it. |
+| `--delivery-key` | none | Private key file a relay worker opens the run secrets its control node seals to the worker's pool with, made by `switchtender worker key new`. Repeatable, so a worker holds its pool's old and new key while the pool rotates. Only with `--server`. A file another account can read is refused. See [Delivering secrets to relay workers](#delivering-secrets-to-relay-workers). |
+
+### worker key
+
+`switchtender worker key new --out FILE` generates a delivery key for a relay worker pool. It writes
+the private key to `--out`, mode 0600, and never over an existing file, then prints the public key
+and its key id as one JSON line:
+
+    {"key_id":"f4e8a76a457da19cf3742de37986d439","delivery_key":"x25519:x9f9/kkB6Jq3Wqht/7TWzDGUeTRfbABrj1CO+8/6hHc=","file":"/etc/switchtender/delivery.key"}
+
+`switchtender worker key public FILE` prints the same line for a key file that already exists, and
+refuses one another account can read. The file is a standard PKCS #8 X25519 private key, so `openssl
+genpkey -algorithm X25519 -out FILE` makes an equivalent one, and `openssl pkey -in FILE -pubout
+-outform DER | tail -c 32 | base64` prints the base64 that follows `x25519:`.
 
 ## token
 
@@ -311,8 +349,13 @@ numbers looking more settled than they are.
 Migrates from AWX, Semaphore, Chef, Puppet, Rundeck, Jenkins, or cron. Which objects each one carries across is in
 [what each source brings over](migration.md#what-each-source-brings-over).
 
-- `import awx <export.json> [--apply]` brings projects, inventories static and dynamic, credential
-  shells, job templates and workflows, surveys, and schedules.
+- `import awx <export.json> [--awx-template-ids <list.json>] [--apply]` brings projects,
+  inventories static and dynamic, credential shells, job templates and workflows, surveys, and
+  schedules. `--awx-template-ids` takes AWX's job template list, `GET /api/v2/job_templates/` saved
+  as JSON, repeatable for each page. A job template that accepted provisioning callbacks is then
+  bound to its AWX id, so it also answers at its old AWX callback address. An export that carries
+  each job template's `id` needs no list. See
+  [the AWX-compatible callback address](migration.md#the-awx-compatible-callback-address).
 - `import semaphore <export.json> [--apply]` brings the same kinds from a Semaphore export, apart
   from the dynamic inventory sources AWX alone carries.
 - `import chef <nodes.json> [--apply]` brings one inventory of the fleet: every node a host,
@@ -622,6 +665,49 @@ local one of the same name. Those are still signed in to, because refusing them 
 directory user on upgrade, and each is logged so an administrator can set the source and remove the
 ambiguity.
 
+## Attention thresholds
+
+The overview's Needs attention panel, `GET /v1/attention`, sorts waiting work into four answers to
+what is stopping it: a lost worker, no worker for its queue, an approval, or a block behind another
+run. Five thresholds decide when work shows as blocked and when each answer alerts. An alert is
+listed by the doctor and told, once per condition, to the server-wide chat channels, webhooks, ntfy,
+and email, to a run's own targets of those kinds, and to the named targets attached for the
+`attention` event, on every kind including PagerDuty. The [API
+reference](api.md#what-needs-attention) describes the answer.
+
+| Threshold | Default | What it sets |
+|-----------|---------|--------------|
+| `blocked_after` | `15m` | How long a run waits behind another run or a full worker before it shows as blocked at all. It cannot be off. |
+| `alert_no_worker` | `15m` | How long a run waits with no connected worker serving its queue before it alerts. |
+| `alert_blocked` | `15m` | How long a run stays blocked before it alerts. |
+| `alert_worker_lost` | `1m` | How long after a lost worker last reported its run alerts, when the lease sweep has not reclaimed it by then. The default is two lease periods. |
+| `alert_approval` | off | How long an approval waits before it alerts. Off unless a file turns it on, since an approval waiting is the gate working. |
+
+Each value is a Go duration such as `90s`, `15m`, or `4h`, or `off`. Zero is refused rather than
+read as off. The file states the organization's defaults and may override them for one organization
+on the install, one queue, or one template, and the most specific wins: a template over a queue, a
+queue over an organization, an organization over the defaults. Each override replaces only what it
+states. The default queue is written as `""`.
+
+    defaults:
+      alert_no_worker: 10m
+      alert_approval: 8h
+    orgs:
+      org_ab12cd34ef56:
+        alert_approval: 2h
+    queues:
+      prod:
+        alert_no_worker: 2m
+        blocked_after: 5m
+      "":
+        alert_blocked: 30m
+    templates:
+      tpl_0123456789ab:
+        alert_approval: 30m
+
+An unknown key, a value that is not a duration, and `blocked_after: off` are refused when the server
+starts, so a typo never silently leaves an alert on its default or off.
+
 ## Confining relay workers to their queues
 
 A relay worker runs in a segment the control node cannot reach, which means the least trusted machine
@@ -675,19 +761,129 @@ alone. On an install without relay workers, a queued run therefore waits as `pen
 even after approval. To gate runs the server itself executes, write the policy without `queue`.
 
 
+## Delivering secrets to relay workers
+
+A relay worker holds no database and no encryption key, so on its own it cannot open a credential,
+and a run that needs one fails on it. A pool opts in to sealed delivery by registering a delivery
+key. When one of its workers claims a run, the control node opens that run's secrets and nothing
+else: its credentials and those of the inventory it targets, the registry login its image is pulled
+with, its custom credential types' field values, from which the worker renders their files, its
+secret survey answers, and, for a federated credential, an identity token minted for the run. It
+seals them to the pool's key, bound to that claim, and sends them with the claim. The worker opens
+them in memory when the run first needs one, writes them into the run's private directory exactly as
+a worker with database access does, and removes them when the run ends, whether it succeeded, failed,
+was canceled, timed out, or never started.
+
+To opt a pool in:
+
+1. Generate its key, on a worker or wherever you then copy the private key from:
+
+       switchtender worker key new --out /etc/switchtender/delivery.key
+
+2. Register the printed public key on the pool in the worker pool file every control node reads with
+   `--worker-pools`:
+
+       workers:
+         - name: dmz
+           token_sha256: 9f2c...
+           queues: [dmz]
+           delivery_key: x25519:x9f9/kkB6Jq3Wqht/7TWzDGUeTRfbABrj1CO+8/6hHc=
+
+3. Restart each control node so it reads the file, and start every worker of the pool with the
+   private key:
+
+       switchtender worker --server https://switchtender.example.com --queue dmz \
+         --delivery-key /etc/switchtender/delivery.key
+
+The rules it follows:
+
+- Delivery is off until a pool registers a key. A pool without one is sent nothing, and a run that
+  needs a secret fails on its workers with a message naming the pool and how to register a key,
+  which is what every relay worker did before delivery existed.
+- Only a pool bound to explicit queues is sent secrets. A pool's queues are the runs it can claim,
+  and so the runs whose secrets its key unlocks, and a pool with no queues could claim anything. A
+  pool file that gives a key to a pool with no `queues`, or the same key to two pools, stops the
+  server at startup.
+- A worker refuses a key file another account can read, the way ssh refuses an unprotected identity
+  file, and refuses to start with one.
+- Credential sources resolve on the control node, so a worker in an isolated segment needs no route
+  to Vault or a cloud secret manager. A dynamic secret minted for the run is revoked when the worker
+  reports the run finished, or within thirty seconds of its claim ending any other way, which the
+  control node that minted it checks on its own timer: a worker that died, a run the janitor
+  interrupted, or a finish recorded through another replica. A control node stopped or restarted in
+  between forgets what it held, and such a secret then expires on its own lifetime, as it does when
+  any executor dies mid-run.
+- A federated credential's token is minted on the control node, whose signing key never leaves it,
+  for the mode the worker will execute: a plan for a dry run or for an apply a plan-content rule plans
+  first, and an apply otherwise. A worker about to execute in the other mode refuses the token.
+- Anything that goes wrong is refused rather than worked around. A secret that does not open on the
+  control node, a delivery that cannot be recorded in the audit trail, a delivery sealed to a key the
+  worker does not hold, or one that does not open for the claim fails the run with the reason. A run
+  never executes with a secret missing.
+
+The seal is HPKE (RFC 9180) in base mode with DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, and
+ChaCha20-Poly1305, from the Go standard library. HPKE was chosen over NaCl's anonymous sealed box
+because it authenticates associated data, so the binding is checked by the decryption itself. Each
+delivery uses a fresh ephemeral key, and the run id, a hash of the claim's lease, the worker's lease
+name, the pool, the key id, and a random delivery id are all authenticated. So:
+
+- A worker of another pool holds another key and cannot open the delivery.
+- A delivery presented for another run, for a later claim of the same run, or by another worker does
+  not open.
+- A worker opens a given delivery once and refuses it if it is presented again.
+- A worker opens a delivery only after the control node has accepted its fenced start under the same
+  lease, so a claim answer replayed after its run started or finished elsewhere is never decrypted.
+  The start is refused once the janitor has taken the claim back, and to a worker that never claimed
+  the run.
+- Only ciphertext crosses the relay, so a proxy or load balancer that logs relay traffic logs nothing
+  readable without the pool's private key.
+
+The worker holds the opened values only until it has written them where the tool reads them, then
+drops them. Go cannot overwrite a string in place, so what is dropped is the reference, and the
+decrypted bytes themselves are zeroed. Disable core dumps on worker hosts, as on any host that runs
+credentialed work, and see [Secrets](secrets.md) for how the run's private directory is handled.
+
+### Rotating a pool's key
+
+A worker can hold several keys, and a delivery names the key it was sealed to, so a rotation needs no
+moment where runs fail:
+
+1. Generate the new key and install it on every worker of the pool beside the old one, restarting
+   each with both: `--delivery-key old.key --delivery-key new.key`.
+2. Replace the pool's `delivery_key` with the new public key in the worker pool file on every control
+   node, and restart them. Deliveries are sealed to the new key from then on, and every worker opens
+   them.
+3. Remove the old key from the workers and restart them with the new one alone.
+
+Each control node logs, at startup, the key id every pool registered, and each worker logs the key
+ids it holds, so the step a fleet has reached shows in the logs. Every delivery's audit record names
+the key id it was sealed to.
+
+When a key may be compromised, replace the pool's `delivery_key` and restart the control nodes first,
+then install the new key on the workers. Until a worker has it, credentialed runs on that pool fail
+rather than run. Treat the secrets of runs the pool executed as exposed and rotate them at their
+source, and rotate the pool's worker token too, since whoever read the key file could read the token
+beside it.
+
 ## What a relay worker writes into the audit trail
 
 A relay worker runs where the control node cannot see it, so two moments are recorded: the run
-leaving for that machine, and the outcome coming back.
+leaving for that machine, and the outcome coming back. A run whose secrets were delivered records a
+third, between them, naming which pool and worker received which credential ids and secret answer
+names, under which key, and never a value:
 
-    RELAY  /relay/claim/run_4f21a9      worker:build-dmz-01
-    RELAY  /relay/finished/run_4f21a9/succeeded
+    RELAY  /relay/claim/run_4f21a9                       pool:dmz worker:build-dmz-01
+    RELAY  /relay/delivered/run_4f21a9/key/f4e8a76a457da19cf3742de37986d439/credentials/cred_1a2b3c,cred_4d5e6f/answers/db_password
+                                                         pool:dmz worker:build-dmz-01
+    RELAY  /relay/finished/run_4f21a9/succeeded          pool:dmz worker:build-dmz-01
 
 Captured output, structured events, per-host and per-task summaries, and heartbeats are not recorded.
 They are the content and liveness of a run that is already stored on the run itself, they arrive
 several times a second, and writing each into a hash chain would drown the record it exists to make
 readable.
 
-This append does not fail closed, unlike every mutation through the API. Refusing a worker's report
-because the audit store is unhealthy does not un-finish the run; it loses the outcome of work that
-already ran on real hosts. A failure to record is logged loudly instead.
+The claim and finish records do not fail closed, unlike every mutation through the API. Refusing a
+worker's report because the audit store is unhealthy does not un-finish the run. It loses the outcome
+of work that already ran on real hosts, so a failure to record is logged loudly instead. The delivery
+record is the exception: it is written before anything is sent, and a delivery that cannot be
+recorded is not sent, so the run fails on the worker with that reason.

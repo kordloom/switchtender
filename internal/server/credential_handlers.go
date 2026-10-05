@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/federation"
 	"github.com/kordloom/switchtender/internal/user"
 )
 
@@ -151,6 +152,12 @@ func createCredentialHandler(store credential.Store, types credential.TypeStore,
 			createTypedCredential(w, r, store, types, sealer, authz, &req, log)
 			return
 		}
+		// A federated credential stores no secret at all, so it takes its own path too: its
+		// settings are checked against what the kind mints with, and nothing is sealed.
+		if credential.Federated(req.Kind) {
+			createFederatedCredential(w, r, store, authz, &req, log)
+			return
+		}
 		if req.Secret == "" {
 			respondError(w, log, http.StatusBadRequest, "secret is required")
 			return
@@ -246,6 +253,10 @@ type updateCredentialRequest struct {
 	// Settings replaces the credential's non-secret fields when present. An omitted field keeps the
 	// stored settings, and a present empty object clears them. Optional.
 	Settings map[string]string `json:"settings,omitempty"`
+	// Fields replaces a typed credential's field values when present, sealed together as one object
+	// the way create seals them. It applies only to a credential of a custom type, which is how a
+	// typed credential an import created as an empty shell gets its values. Never echoed back.
+	Fields map[string]string `json:"fields,omitempty"`
 }
 
 // createTypedCredential stores a credential of a custom type: its field values are validated against
@@ -272,30 +283,9 @@ func createTypedCredential(w http.ResponseWriter, r *http.Request, store credent
 		respondError(w, log, http.StatusInternalServerError, "could not read credential type")
 		return
 	}
-	// Only fields the type declares are accepted, so a caller cannot smuggle a value under a name
-	// the injectors do not read and would not expect to be stored.
-	declared := make(map[string]bool, len(typ.Fields))
-	for _, f := range typ.Fields {
-		declared[f.Name] = true
-	}
-	for name := range req.Fields {
-		if !declared[name] {
-			respondError(w, log, http.StatusBadRequest,
-				"field "+name+" is not declared by this credential type")
-			return
-		}
-	}
-	values, err := json.Marshal(req.Fields)
-	if err != nil {
-		log.Error("server: encode credential fields: " + err.Error())
-		respondError(w, log, http.StatusInternalServerError, "could not store credential")
-		return
-	}
-	sealed, err := sealer.Seal(string(values))
+	sealed, ok := sealTypedFields(w, log, typ, sealer, req.Fields, "could not store credential")
 	req.Fields = nil
-	if err != nil {
-		log.Error("server: seal credential: " + err.Error())
-		respondError(w, log, http.StatusInternalServerError, "could not store credential")
+	if !ok {
 		return
 	}
 	if authz.denyForeignOrg(w, r, log, orgForCreate(req.OrgID)) {
@@ -313,10 +303,150 @@ func createTypedCredential(w http.ResponseWriter, r *http.Request, store credent
 	respondJSON(w, log, http.StatusCreated, c, wantsPretty(r))
 }
 
+// sealTypedFields checks a typed credential's field values against its type and seals them as one
+// JSON object, responding with the failure and reporting false when it cannot. Only fields the type
+// declares are accepted, so a caller cannot smuggle a value under a name the injectors do not read
+// and would not expect to be stored.
+func sealTypedFields(w http.ResponseWriter, log *zap.Logger, typ *credential.CredentialType,
+	sealer *credential.Sealer, fields map[string]string, failure string) (string, bool) {
+	declared := make(map[string]bool, len(typ.Fields))
+	for _, f := range typ.Fields {
+		declared[f.Name] = true
+	}
+	for name := range fields {
+		if !declared[name] {
+			respondError(w, log, http.StatusBadRequest,
+				"field "+name+" is not declared by this credential type")
+			return "", false
+		}
+	}
+	values, err := json.Marshal(fields)
+	if err != nil {
+		log.Error("server: encode credential fields: " + err.Error())
+		respondError(w, log, http.StatusInternalServerError, failure)
+		return "", false
+	}
+	sealed, err := sealer.Seal(string(values))
+	if err != nil {
+		log.Error("server: seal credential: " + err.Error())
+		respondError(w, log, http.StatusInternalServerError, failure)
+		return "", false
+	}
+	return sealed, true
+}
+
+// leaveCustomType checks a request that moves a typed credential onto the built-in kind it names,
+// responding with the failure and reporting false when it cannot. The request has to carry that
+// kind's secret: the sealed field object does not fit a built-in kind, so it is replaced whole and
+// never reinterpreted. Fields beside a kind would leave it unclear which the caller meant.
+func leaveCustomType(w http.ResponseWriter, log *zap.Logger, req *updateCredentialRequest, secret string) bool {
+	if req.Fields != nil {
+		respondError(w, log, http.StatusBadRequest, "send fields to keep this credential's custom "+
+			"type, or kind with that kind's secret to move it to a built-in kind, not both")
+		return false
+	}
+	if secret == "" {
+		respondError(w, log, http.StatusBadRequest, "moving a credential off its custom type to "+
+			string(req.Kind)+" needs the "+string(req.Kind)+" secret in the same request, since its "+
+			"field values do not fit a built-in kind")
+		return false
+	}
+	return true
+}
+
+// updateTypedFields reseals a typed credential's field values from req.Fields, responding with the
+// failure and reporting false when it cannot. The single-secret parts of an update, secret,
+// passphrase, source, vault id, and settings, do not apply to a typed credential and are refused
+// rather than ignored. A kind does not reach here: with its secret it moves the credential to that
+// kind instead.
+func updateTypedFields(w http.ResponseWriter, r *http.Request, log *zap.Logger, c *credential.Credential,
+	req *updateCredentialRequest, secret, passphrase string, types credential.TypeStore,
+	sealer *credential.Sealer) bool {
+	if secret != "" || passphrase != "" || req.Kind != "" || req.Source != "" ||
+		req.VaultID != nil || req.Settings != nil {
+		respondError(w, log, http.StatusBadRequest, "this credential belongs to a custom type: "+
+			"send its values as fields, or send kind with that kind's secret to move it to a "+
+			"built-in kind")
+		return false
+	}
+	if req.Fields == nil {
+		return true
+	}
+	if types == nil {
+		respondError(w, log, http.StatusNotFound, "credential types not enabled")
+		return false
+	}
+	if !sealer.Enabled() {
+		respondError(w, log, http.StatusConflict,
+			"credentials disabled: set SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT on the server")
+		return false
+	}
+	typ, err := types.Get(r.Context(), c.TypeID)
+	if err != nil {
+		log.Error("server: read credential type: " + err.Error())
+		respondError(w, log, http.StatusInternalServerError, "could not read credential type")
+		return false
+	}
+	sealed, ok := sealTypedFields(w, log, typ, sealer, req.Fields, "could not update credential")
+	req.Fields = nil
+	if !ok {
+		return false
+	}
+	c.Secret = sealed
+	return true
+}
+
+// createFederatedCredential stores a credential of a federated kind. It holds no secret: each run
+// mints a short-lived identity token, so a secret, a passphrase, a vault label, or an external
+// source sent with one is refused rather than stored and ignored. Its settings are checked against
+// what the kind reads, so a misspelled key or a malformed role ARN fails here and not at a cloud's
+// door.
+func createFederatedCredential(w http.ResponseWriter, r *http.Request, store credential.Store,
+	authz *authorizer, req *createCredentialRequest, log *zap.Logger) {
+	hasSecret := req.Secret != "" || req.Passphrase != ""
+	req.Secret, req.Passphrase = "", ""
+	if hasSecret {
+		respondError(w, log, http.StatusBadRequest, string(req.Kind)+" stores no secret: each run mints "+
+			"its own short-lived token, so send settings and leave secret out")
+		return
+	}
+	if credential.NormalizeSource(req.Source) != credential.SourceLocal {
+		respondError(w, log, http.StatusBadRequest, string(req.Kind)+" reads from no source, since it "+
+			"stores no secret")
+		return
+	}
+	if strings.TrimSpace(req.VaultID) != "" {
+		respondError(w, log, http.StatusBadRequest, "vault_id applies only to vault_password credentials")
+		return
+	}
+	if err := credential.ValidateSettings(req.Settings); err != nil {
+		respondError(w, log, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, err := federation.ParseSettings(req.Kind, req.Settings); err != nil {
+		respondError(w, log, http.StatusBadRequest, err.Error())
+		return
+	}
+	if authz.denyForeignOrg(w, r, log, orgForCreate(req.OrgID)) {
+		return
+	}
+	c := &credential.Credential{
+		ID: credential.NewID(), Name: req.Name, Kind: req.Kind, Source: credential.SourceLocal,
+		OrgID: orgForCreate(req.OrgID), Settings: req.Settings, CreatedAt: time.Now(),
+	}
+	if err := store.Save(r.Context(), c); err != nil {
+		log.Error("server: save credential: " + err.Error())
+		respondError(w, log, http.StatusInternalServerError, "could not store credential")
+		return
+	}
+	respondJSON(w, log, http.StatusCreated, c, wantsPretty(r))
+}
+
 // updateCredentialHandler renames a credential and, only when a new secret is supplied, reseals it
-// with the new material and kind. Renaming never requires re-sending the secret.
-func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, authz *authorizer,
-	log *zap.Logger) http.HandlerFunc {
+// with the new material and kind. Renaming never requires re-sending the secret. A credential of a
+// custom type takes its new values as fields instead of a secret.
+func updateCredentialHandler(store credential.Store, types credential.TypeStore, sealer *credential.Sealer,
+	authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil || sealer == nil {
 			respondError(w, log, http.StatusNotFound, "credentials not enabled")
@@ -350,15 +480,28 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 			respondError(w, log, http.StatusInternalServerError, "could not read credential")
 			return
 		}
-		// A typed credential is not updated through this path, which speaks kind and a single secret
-		// and would clear the type and reinterpret its sealed field object as a raw value. It is
-		// recreated instead, so the update cannot silently corrupt it.
-		if c.TypeID != "" {
-			respondError(w, log, http.StatusConflict,
-				"this credential belongs to a custom type; delete and recreate it to change its fields")
+		if c.TypeID == "" && req.Fields != nil {
+			respondError(w, log, http.StatusBadRequest,
+				"fields apply to a credential of a custom type; a built-in kind takes a secret")
 			return
 		}
 
+		// A federated credential holds no secret, so a secret sent to one is refused rather than
+		// sealed beside settings that ignore it. Sending a secret with a stored kind is how one is
+		// turned back into a stored credential, and that stays allowed. Turning a stored credential
+		// into a federated one would leave its sealed secret behind with nothing reading it, so
+		// that is a new credential instead.
+		if credential.Federated(req.Kind) && !credential.Federated(c.Kind) {
+			respondError(w, log, http.StatusConflict, "create a new credential for "+string(req.Kind)+
+				"; a stored credential does not become a federated one in place")
+			return
+		}
+		if credential.Federated(c.Kind) && secret != "" &&
+			(req.Kind == "" || credential.Federated(req.Kind)) {
+			respondError(w, log, http.StatusBadRequest, string(c.Kind)+" stores no secret: each run "+
+				"mints its own short-lived token, so send settings and leave secret out")
+			return
+		}
 		// Moving a credential into an organization grants every member use of it, and moving it out
 		// takes that away from the members it had. Both directions change who may use a secret, so
 		// both are checked.
@@ -374,6 +517,31 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 			if authz.denyForeignOrg(w, r, log, c.OrgID) {
 				return
 			}
+		}
+		// A typed credential takes its values as fields, sealed the way create seals them. The
+		// single-secret path below would clear the type and reinterpret the sealed field object as a
+		// raw value, so it is reached only by a request that names a built-in kind and carries that
+		// kind's secret, which replaces the field values whole: the one-step switch an import offers
+		// a custom type shaped like a kubeconfig.
+		if c.TypeID != "" && req.Kind != "" {
+			if !leaveCustomType(w, log, &req, secret) {
+				return
+			}
+			c.TypeID = ""
+		}
+		if c.TypeID != "" {
+			if !updateTypedFields(w, r, log, c, &req, secret, passphrase, types, sealer) {
+				return
+			}
+			c.Name = req.Name
+			c.OrgID = orgID
+			if err := store.Update(r.Context(), c); err != nil {
+				log.Error("server: update credential: " + err.Error())
+				respondError(w, log, http.StatusInternalServerError, "could not update credential")
+				return
+			}
+			respondJSON(w, log, http.StatusOK, c, wantsPretty(r))
+			return
 		}
 		// The kind only changes when a new secret is sent, since a kind change re-seals the secret
 		// in the new format. So the vault_id rules must be checked against the kind that will
@@ -408,6 +576,12 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 			if err := credential.ValidateSettings(req.Settings); err != nil {
 				respondError(w, log, http.StatusBadRequest, err.Error())
 				return
+			}
+			if credential.Federated(finalKind) {
+				if _, err := federation.ParseSettings(finalKind, req.Settings); err != nil {
+					respondError(w, log, http.StatusBadRequest, err.Error())
+					return
+				}
 			}
 			c.Settings = req.Settings
 			if len(c.Settings) == 0 {
@@ -512,7 +686,8 @@ func listCredentialsHandler(store credential.Store, sealer *credential.Sealer, r
 		}
 		views := make([]credentialView, 0, len(visible))
 		for _, c := range visible {
-			v := credentialView{Credential: c, NeedsSecret: c.Secret == ""}
+			// A federated credential never has a secret and never needs one.
+			v := credentialView{Credential: c, NeedsSecret: c.Secret == "" && !credential.Federated(c.Kind)}
 			if u, ok := refMap[c.ID]; ok {
 				v.UsedBy = u
 			}

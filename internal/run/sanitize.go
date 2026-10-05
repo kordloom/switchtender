@@ -37,6 +37,25 @@ func (r *Run) Sanitize() {
 	r.HeldByPolicy = util.SafeText(r.HeldByPolicy)
 	r.Tags = util.SafeTexts(r.Tags)
 	r.SkipTags = util.SafeTexts(r.SkipTags)
+	r.HoldNote = util.SafeText(r.HoldNote)
+	for i := range r.DryRunScans {
+		s := &r.DryRunScans[i]
+		s.Step = util.SafeText(s.Step)
+		s.Source = util.SafeText(s.Source)
+		s.Inputs = util.SafeTexts(s.Inputs)
+		s.Findings = util.SafeTexts(s.Findings)
+		s.Unread = util.SafeTexts(s.Unread)
+		if s.Fetch != nil {
+			s.Fetch.Error = util.SafeText(s.Fetch.Error)
+		}
+	}
+	r.PolicyNotes = util.SafeTexts(r.PolicyNotes)
+	r.ResolvedHosts = util.SafeTexts(r.ResolvedHosts)
+	r.ImageDigest = util.SafeText(r.ImageDigest)
+	if s := r.InventorySnapshot; s != nil {
+		s.Hosts = util.SafeTexts(s.Hosts)
+		s.DynamicReason = util.SafeText(s.DynamicReason)
+	}
 	r.ExtraVars = util.SafeAnyMap(r.ExtraVars)
 	r.Outputs = util.SafeAnyMap(r.Outputs)
 	r.Labels = util.SafeStringMap(r.Labels)
@@ -98,11 +117,33 @@ func (f *Finalization) SanitizeText() {
 	f.Error = util.SafeText(f.Error)
 	f.Warning = util.SafeText(f.Warning)
 	f.Image = util.SafeText(f.Image)
+	f.ImageDigest = util.SafeText(f.ImageDigest)
+	f.ResolvedHosts = util.SafeTexts(f.ResolvedHosts)
 	f.Outputs = util.SafeAnyMap(f.Outputs)
 	if f.ExitCode != nil {
 		bounded := boundInt32(*f.ExitCode)
 		f.ExitCode = &bounded
 	}
+}
+
+// SanitizeText replaces anything in a decision's failure text that a text column cannot hold.
+func (s *DecisionSettle) SanitizeText() {
+	if s == nil {
+		return
+	}
+	s.Error = util.SafeText(s.Error)
+}
+
+// Check refuses a settlement no decision can make: one into a status other than pending, running,
+// or terminal, and one into running that names no owner to hold the lease.
+func (s DecisionSettle) Check() error {
+	switch {
+	case s.Status == StatusPending, s.Status.Terminal():
+		return nil
+	case s.Status == StatusRunning && s.Owner != "":
+		return nil
+	}
+	return ErrBadSettle
 }
 
 // SanitizeText replaces anything in the progress write's text fields that a text column cannot hold.

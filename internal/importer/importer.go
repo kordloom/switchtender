@@ -31,7 +31,10 @@ import (
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
+	"github.com/kordloom/switchtender/internal/notification"
+	"github.com/kordloom/switchtender/internal/org"
 	"github.com/kordloom/switchtender/internal/project"
+	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/template"
 	"github.com/kordloom/switchtender/internal/util"
@@ -53,26 +56,70 @@ type Plan struct {
 	Schedules []*schedule.Schedule
 	// Credentials are credential shells to create; their secrets must be re-entered.
 	Credentials []*credential.Credential
+	// CredentialTypes are the custom credential types to create, which credentials of those types
+	// name. They carry no secret, so they come across whole.
+	CredentialTypes []*credential.CredentialType
+	// Notifications are the named notification targets to create. Their secrets are not in the plan
+	// a preview returns: each address and key is held unexported until Apply seals it.
+	Notifications []*notification.Notification
+	// Attachments tie the notification targets to the templates, workflows, and organizations that
+	// name them.
+	Attachments []*notification.Attachment
+	// Orgs are the organizations the import creates so what came from an AWX organization has one to
+	// be in: its smart inventories, its templates, and its own notification attachments. Whether each
+	// is created, matched to one the install already holds, or given up is settled when the plan is
+	// applied, and the report states which.
+	Orgs []*org.Org
 	// Warnings names what could not be mapped cleanly or needs human follow up.
 	Warnings []string
 	// suppressed counts the warnings past the cap, so the total is still knowable.
 	suppressed int
-	// gates names the workflows refused because they wait on an approval node, so an assessment can
-	// say which approvals the estate has today that an import does not carry.
+	// gates names the workflows refused because an approval node in them could not be carried, so
+	// an assessment can say which approvals the estate has today that an import does not carry.
 	gates []string
+	// carriedGates names the workflows whose approval nodes import as approval steps, so an
+	// assessment can say the gate comes across rather than leaving a reader to assume it does not.
+	carriedGates []string
 	// refused counts the objects the export held that were recognized and then refused, each with a
 	// warning saying why, so a document of nothing else reads as an export rather than as nothing.
 	refused int
 	// becomeFor maps an imported credential to the become password shell split out of it, so a
 	// template that attaches the one attaches both.
 	becomeFor map[string]string
+	// notifySecrets holds each notification target's plaintext configuration until Apply seals it.
+	// It is unexported so a preview, which returns the plan as JSON, never carries a secret.
+	notifySecrets map[string]run.NotifyTarget
+	// notify is the AWX notification import's working state.
+	notify *awxNotifyState
+	// orgNotify carries each AWX organization's own notification attachments from the mapping to
+	// the apply, which settles where they go.
+	orgNotify []*orgNotifyPlan
+	// awxOrgByName holds the organization the import plans for each AWX organization, by name, so
+	// every part of the import that places an object there shares one.
+	awxOrgByName map[string]*org.Org
+	// orgNames names every organization something in the plan is placed in, planned or already held,
+	// by id, so the plan can say where each object landed after the apply settles it.
+	orgNames map[string]string
+	// callbackKeys holds each imported template's provisioning callback key in the clear, keyed by
+	// template id, until Apply seals it. It is unexported so the plaintext never reaches a report, a
+	// rendering, or anything else that prints a plan.
+	callbackKeys map[string]string
+	// awxBindings tie the AWX job template ids of templates that accepted callbacks in AWX to the
+	// templates the import creates, so their AWX-compatible callback address reaches them. They are
+	// not objects of their own: the report names each one beside the template it reaches.
+	awxBindings []template.AWXBinding
+	// awxIDs is AWX's job template list, for an export that carries no ids. Nil when none was given.
+	awxIDs *awxTemplateIDs
+	// awxConflicts names AWX ids the export gives to more than one template, which Apply refuses.
+	awxConflicts []string
 }
 
 // objects counts everything the plan would create, which is what makes an import a success or a
 // document nothing recognized.
 func (p *Plan) objects() int {
 	return len(p.Projects) + len(p.Inventories) + len(p.Sources) + len(p.Templates) +
-		len(p.Schedules) + len(p.Credentials)
+		len(p.Schedules) + len(p.Credentials) + len(p.CredentialTypes) + len(p.Notifications) +
+		len(p.Attachments) + len(p.Orgs)
 }
 
 // ErrNothingRecognized is returned when a document parses but yields no objects at all.
@@ -144,8 +191,19 @@ func (p *Plan) Suppressed() int { return p.suppressed }
 // schedule was reported as created and then never fired. A migrated nightly job that silently does
 // not run is the worst shape this could take: nothing looks broken until the thing it was supposed
 // to do has not happened for a month.
+//
+// A schedule the export gave no zone is read in this server's zone, and that zone is written onto
+// it by name before anything is worked out from it. Left unnamed, every server of a highly
+// available pair read it in its own zone, so a pair whose servers disagreed fired the schedule at
+// two times.
 func (p *Plan) addSchedule(sc *schedule.Schedule, source string, now time.Time) {
-	if err := sc.Validate(); err != nil {
+	sc.PinZone(schedule.ServerZone())
+	if err := sc.ValidateAt(now); err != nil {
+		if errors.Is(err, schedule.ErrExhausted) {
+			p.warn("schedule %q from %s was not imported: its recurrence has already fired its "+
+				"last time, so it would never run", sc.Name, source)
+			return
+		}
 		p.warn("schedule %q from %s was not imported: %v", sc.Name, source, err)
 		return
 	}
@@ -163,7 +221,44 @@ func (p *Plan) addSchedule(sc *schedule.Schedule, source string, now time.Time) 
 		p.warn("schedule %q from %s is switched off at the source, so it comes across switched off "+
 			"and will not fire until somebody enables it", sc.Name, source)
 	}
+	p.noteUnanswerableSchedule(sc, source)
 	p.Schedules = append(p.Schedules, sc)
+}
+
+// noteUnanswerableSchedule reports a schedule whose template's survey has a required question with no
+// default. Nobody answers a survey when a schedule fires, so every such fire stops with that reason,
+// and the report is where an operator migrating can see it before the first one comes due.
+func (p *Plan) noteUnanswerableSchedule(sc *schedule.Schedule, source string) {
+	if sc.TemplateID == "" {
+		return
+	}
+	var tpl *template.Template
+	for _, t := range p.Templates {
+		if t.ID == sc.TemplateID {
+			tpl = t
+			break
+		}
+	}
+	if tpl == nil {
+		return
+	}
+	_, err := tpl.UnattendedOptions()
+	if err == nil {
+		return
+	}
+	vars := template.UnansweredVars(err)
+	quoted := make([]string, len(vars))
+	for i, v := range vars {
+		quoted[i] = strconv.Quote(v)
+	}
+	which := "the question"
+	if len(vars) > 1 {
+		which = "each question"
+	}
+	p.warn("schedule %q from %s fires template %q, whose survey has no usable default for the "+
+		"required question%s %s, so each fire stops with that reason and starts no run. Give %s a "+
+		"default on the template", sc.Name, source, tpl.Name, plural(len(vars)),
+		strings.Join(quoted, ", "), which)
 }
 
 // parseExtraVars decodes AWX or Semaphore extra vars, which arrive as a YAML or JSON string, into a
@@ -493,13 +588,17 @@ type importGroup struct {
 	Children []string
 }
 
-// mapSurveyType converts an AWX survey field type to a SwitchTender field type, reporting whether the
-// mapping is exact. Unknown types fall back to text.
+// mapSurveyType converts an AWX survey field type to a SwitchTender field type, reporting whether
+// the mapping is exact. Unknown types fall back to text.
 //
-// The password type is absent deliberately. Its caller refuses such a field rather than mapping it,
-// because there is no field kind here that keeps an answer secret, and mapping it to text would
-// downgrade a password prompt to a stored plaintext value without saying so.
+// A password field maps to the secret type exactly: its answer is sealed with the credential key
+// and never kept on a run in plain text, which is what AWX does with it.
 func mapSurveyType(awxType string) (template.FieldType, bool) {
+	// The password check is case folded, the way the refusal it replaced was, so a field never falls
+	// back to text and stores a secret answer in the clear because of how its type was capitalized.
+	if strings.EqualFold(awxType, "password") {
+		return template.FieldSecret, true
+	}
 	switch awxType {
 	case "text", "textarea":
 		return template.FieldText, true
@@ -520,6 +619,22 @@ func mapSurveyType(awxType string) (template.FieldType, bool) {
 	default:
 		return template.FieldText, false
 	}
+}
+
+// secretSurveyDefault reports a secret prompt whose default needs entering again. A secret field's
+// default is sealed when a template is saved through the API, and an export carries it only as a
+// placeholder or in the source system's own encryption, so an import never holds a value it could
+// seal. The field itself comes across whole and its default is entered once, the way a credential
+// shell's secret is, so this is something to review rather than something that did not come across.
+func (p *Plan) secretSurveyDefault(owner, field string, def any) {
+	if def == nil {
+		return
+	}
+	if s, ok := def.(string); ok && strings.TrimSpace(s) == "" {
+		return
+	}
+	p.warn("%s secret field %q arrives without its default, because an export never carries a "+
+		"secret readably. Set the default on the template if launches rely on it", owner, field)
 }
 
 // awxPublicInputs lists the AWX credential inputs that are never secret, so their values can be

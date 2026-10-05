@@ -81,12 +81,13 @@ test("creating a project stores it and shows it in the list", async ({ page }) =
   await page.locator("#project-repo").fill("https://example.com/e2e.git");
   await page.locator('#project-form button[type="submit"]').click();
 
-  // The new project appears on the page.
-  await expect(page.getByText(name, { exact: false }).first()).toBeVisible({ timeout: 15_000 });
+  // The new project appears in the list.
+  const listed = page.locator("#projects").getByText(name, { exact: false }).first();
+  await expect(listed).toBeVisible({ timeout: 15_000 });
 
   // It is really stored, not only drawn: a reload reads it back from the server.
   await page.reload();
-  await expect(page.getByText(name, { exact: false }).first()).toBeVisible();
+  await expect(listed).toBeVisible();
   assertNoErrors();
 });
 
@@ -102,9 +103,12 @@ test("creating an inventory stores it and shows it in the list", async ({ page }
   await page.locator("#inv-content").fill("[all]\nweb-e2e-1\n");
   await page.locator('#inventory-form button[type="submit"]').click();
 
-  await expect(page.getByText(name, { exact: false }).first()).toBeVisible({ timeout: 15_000 });
+  // The list, not the page: the dialog's picker of input inventories names every inventory too, as
+  // an option hidden with the dialog, and it comes first.
+  const listed = page.locator("#inventories").getByText(name, { exact: false }).first();
+  await expect(listed).toBeVisible({ timeout: 15_000 });
   await page.reload();
-  await expect(page.getByText(name, { exact: false }).first()).toBeVisible();
+  await expect(listed).toBeVisible();
   assertNoErrors();
 });
 
@@ -121,7 +125,8 @@ test("a held run against a stored inventory opens with its header and its decisi
   await page.locator("#inv-name").fill(name);
   await page.locator("#inv-content").fill("[all]\nweb-e2e-1\n");
   await page.locator('#inventory-form button[type="submit"]').click();
-  await expect(page.getByText(name, { exact: false }).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator("#inventories").getByText(name, { exact: false }).first())
+    .toBeVisible({ timeout: 15_000 });
 
   await page.goto("/ui/runs");
   await page.locator("#launch-open").click();

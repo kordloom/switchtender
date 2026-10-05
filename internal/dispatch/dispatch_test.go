@@ -1760,44 +1760,61 @@ func (s *startRecorder) startedAt(playbook string) time.Time {
 	return s.starts[playbook]
 }
 
+// idleSignalStore signals each claim that finds no work, so a test knows the claim loop has gone
+// idle rather than guessing how long that takes.
+type idleSignalStore struct {
+	run.Store
+	// idle receives once for each empty claim, dropped when nobody is waiting for it.
+	idle chan struct{}
+}
+
+// Claim claims from the wrapped store and signals a claim that found nothing.
+func (s *idleSignalStore) Claim(ctx context.Context, owner string, queues []string) (*run.Run, error) {
+	r, err := s.Store.Claim(ctx, owner, queues)
+	if errors.Is(err, run.ErrNonePending) {
+		select {
+		case s.idle <- struct{}{}:
+		default:
+		}
+	}
+	return r, err
+}
+
 // TestSubmitStartsWithoutWaitingOutTheBackoff pins that a run submitted to an idle dispatcher starts
 // promptly instead of waiting for the claim loop's backoff to expire.
 //
 // The backoff keeps idle dispatchers off the store's single writer, but nothing woke the loop when
 // work arrived, so its whole wait landed on the user: submit-to-start measured a mean of 1.74s and a
 // worst of 2.75s on an idle controller, against 250ms before the backoff existed. With the loop
-// woken on submit the same measurement is a mean of 2.6ms and a worst of 8.8ms. The bound below is
-// deliberately loose enough for a loaded CI machine and still far under a single backed-off wait.
+// woken on submit the same measurement is a mean of 2.6ms and a worst of 8.8ms.
+//
+// The interval here is an hour, so a loop that waited out even its first idle wait could not start
+// the run before the generous deadline below, and only the submit waking it can. The loop is known
+// to be idle because its first claim reported finding nothing, not because enough time passed, so
+// no clock reading decides the result on a busy machine.
 func TestSubmitStartsWithoutWaitingOutTheBackoff(t *testing.T) {
 	t.Parallel()
-	const base = 200 * time.Millisecond
 	rec := &startRecorder{starts: map[string]time.Time{}}
-	d := New(run.NewMemStore(), rec, nil, WithClaimInterval(base), WithNoJanitor(), WithNotifyClient(http.DefaultClient))
+	store := &idleSignalStore{Store: run.NewMemStore(), idle: make(chan struct{}, 1)}
+	d := New(store, rec, nil, WithClaimInterval(time.Hour), WithNoJanitor(),
+		WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
-	// Let the loop back off to its ceiling, which is the state a quiet controller sits in.
-	time.Sleep(2 * time.Second)
-
-	sent := time.Now()
+	select {
+	case <-store.idle:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the claim loop never made its first claim")
+	}
 	if _, err := d.Submit(context.Background(), "wake.yml", "inv"); err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	var started time.Time
-	for time.Now().Before(deadline) {
-		if started = rec.startedAt("wake.yml"); !started.IsZero() {
-			break
+	deadline := time.Now().Add(30 * time.Second)
+	for rec.startedAt("wake.yml").IsZero() {
+		if time.Now().After(deadline) {
+			t.Fatal("the submitted run did not start: the claim loop waited out its idle backoff " +
+				"instead of being woken by the submit")
 		}
-		time.Sleep(time.Millisecond)
-	}
-	if started.IsZero() {
-		t.Fatal("the submitted run never started")
-	}
-	// A loop that waits out its backoff cannot beat the base interval, and at the ceiling it takes
-	// several times that. Anything under one base interval proves the submit woke it.
-	if latency := started.Sub(sent); latency >= base {
-		t.Errorf("submit-to-start = %v, want under the %v base interval: the claim loop waited out "+
-			"its idle backoff instead of being woken by the submit", latency, base)
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 

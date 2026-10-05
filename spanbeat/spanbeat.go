@@ -39,14 +39,29 @@ type AppendedBeat struct {
 // chain, so any audit backend satisfies it through a small adapter and nothing here imports the
 // chain.
 //
-// A store whose clock has not passed the last beat must return an error whose chain carries a value
-// with a ClockBehind method. The emitter then logs the gap and keeps its cadence rather than
-// treating it as a hard failure, because a beat's time is a signed claim and a time the clock did
-// not read would be a false statement in an attestation.
+// A store whose clock has not passed the last beat, or whose newest entry is dated after the time
+// it was given, must return an error whose chain carries a value with a ClockBehind method. The
+// emitter then logs the gap and keeps its cadence rather than treating it as a hard failure,
+// because a beat's time is a signed claim and a time the clock did not read would be a false
+// statement in an attestation. A store that can read its own clock under its append lock should
+// also satisfy ClockedStore.
 type Store interface {
 	// AppendSpanBeat writes one beat recorded at the given time, carrying the cadence in whole
 	// seconds, and returns what it wrote.
 	AppendSpanBeat(ctx context.Context, at time.Time, cadenceSeconds int) (AppendedBeat, error)
+}
+
+// ClockedStore is a Store that reads the time of a beat from its own clock, under the same lock
+// that serializes its appends. A beat timed by the emitter before that lock races every other
+// append: a request that takes the lock in between is dated after the beat's time, and the store
+// then refuses the beat rather than write it behind that entry. Under steady writes that refusal
+// repeats, and the record goes silent on a healthy install. The emitter appends through
+// AppendSpanBeatNow whenever the store offers it.
+type ClockedStore interface {
+	Store
+	// AppendSpanBeatNow writes one beat recorded at the store's own clock, read under the lock that
+	// serializes its appends, carrying the cadence in whole seconds, and returns what it wrote.
+	AppendSpanBeatNow(ctx context.Context, cadenceSeconds int) (AppendedBeat, error)
 }
 
 // clockBehind is satisfied by an append error meaning the clock has not passed the last beat. The
@@ -155,15 +170,18 @@ func NewEmitter(store Store, cadence time.Duration, log *zap.Logger, opts ...Opt
 // rather than an unexplained gap.
 func (e *Emitter) Start() {
 	e.wg.Go(func() {
-		e.beat(time.Now())
+		e.beat()
 		ticker := time.NewTicker(e.cadence)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-e.ctx.Done():
 				return
-			case now := <-ticker.C:
-				e.beat(now)
+			case <-ticker.C:
+				// The tick's own time is not the beat's. A tick can wait in the channel while the
+				// previous beat's anchor request is in flight, and a beat dated when the tick fired
+				// would land behind whatever the chain recorded meanwhile.
+				e.beat()
 			}
 		}
 	})
@@ -173,22 +191,23 @@ func (e *Emitter) Start() {
 // either is logged and the loop carries on: a missed beat shows up in the feed as a widening gap,
 // which is exactly the signal the beats exist to give.
 //
-// A clock that has not passed the last beat is not a failure to retry differently. The store refuses
-// the beat, because a beat's time is a signed claim and writing a time the clock did not read would
-// be a false statement in an attestation. The refusal is logged at warning level, the loop keeps its
-// cadence, and the beat lands on a later tick once real time passes the last beat. What the record
-// shows in the meantime is a gap, which a verifier reports with its bounds and duration rather than
-// failing.
-func (e *Emitter) beat(now time.Time) {
-	b, err := e.store.AppendSpanBeat(e.ctx, now, int(e.cadence/time.Second))
+// A clock that has not passed the last beat, or the chain's newest entry, is not a failure to retry
+// differently. The store refuses the beat, because a beat's time is a signed claim and writing a
+// time the clock did not read would be a false statement in an attestation. The refusal is logged
+// at warning level, the loop keeps its cadence, and the beat lands on a later tick once real time
+// passes the chain. What the record shows in the meantime is a gap, which a verifier reports with
+// its bounds and duration rather than failing. The one retry appendBeat makes is for a race with
+// another append, not for a clock.
+func (e *Emitter) beat() {
+	b, err := e.appendBeat()
 	if err != nil {
 		var behind clockBehind
 		if errors.As(err, &behind) {
 			beat, last, clock := behind.ClockBehind()
 			suppressed.Add(1)
-			e.log.Warn("spanbeat: this clock has not passed the last beat, so no beat was written "+
-				"and the record will show an unattested window until it does. Fix the clock, and "+
-				"prefer NTP slewing over stepping",
+			e.log.Warn("spanbeat: this clock has not passed the last beat or the chain's newest "+
+				"entry, so no beat was written and the record will show an unattested window until "+
+				"it does. Fix the clock, and prefer NTP slewing over stepping",
 				zap.Int64("beat", beat), zap.Duration("behind", last.Sub(clock)),
 				zap.Time("last_beat", last), zap.Time("clock", clock))
 			return
@@ -205,6 +224,31 @@ func (e *Emitter) beat(now time.Time) {
 	if err := e.anchor(e.ctx, b); err != nil {
 		e.log.Error("spanbeat: anchor beat: " + err.Error())
 	}
+}
+
+// appendBeat appends one beat, timed by the store when it can read its own clock under its append
+// lock, and otherwise by this process's clock read just before the append.
+//
+// A store that has to be handed a time can still refuse the beat over an append that took its lock
+// between the reading and the beat, which is a race and not a clock fault. When a fresh reading has
+// already passed the time the store held the beat against, the beat is tried once more at that
+// reading, which the clock did read. A refusal that a fresh reading does not clear is a clock that
+// is behind, and it is reported as one.
+func (e *Emitter) appendBeat() (AppendedBeat, error) {
+	cadence := int(e.cadence / time.Second)
+	if clocked, ok := e.store.(ClockedStore); ok {
+		return clocked.AppendSpanBeatNow(e.ctx, cadence)
+	}
+	b, err := e.store.AppendSpanBeat(e.ctx, time.Now(), cadence)
+	var behind clockBehind
+	if err == nil || !errors.As(err, &behind) {
+		return b, err
+	}
+	_, last, _ := behind.ClockBehind()
+	if now := time.Now(); now.After(last) {
+		return e.store.AppendSpanBeat(e.ctx, now, cadence)
+	}
+	return b, err
 }
 
 // Close stops the beat loop and waits for it to finish.

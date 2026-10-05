@@ -18,6 +18,8 @@ import (
 	"github.com/kordloom/switchtender/beatfeed"
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
+	"github.com/kordloom/switchtender/internal/federation"
+	"github.com/kordloom/switchtender/internal/notification"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/user"
 )
@@ -61,6 +63,12 @@ type authGate struct {
 	latched bool
 	// checkedAt is when enforced was last refreshed.
 	checkedAt time.Time
+	// cleanups reads, before a delete is recorded, the notification attachments it takes with it,
+	// so the delete's own chain entry states them. Nil records every delete as its path alone.
+	cleanups func(ctx context.Context, r *http.Request) (*notification.Cleanup, error)
+	// secretVars names a template's secret survey questions, so a launch's answers to them stay out
+	// of its fingerprint. Nil withholds every answer a launch carries.
+	secretVars secretSurveyVarsFunc
 }
 
 // reboundRequest reports whether a browser sent this request for a host name that no loopback
@@ -153,6 +161,7 @@ func sameOriginAs(origin string, r *http.Request) bool {
 // wrap guards next with token authentication.
 func (g *authGate) wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(withCleanupHolder(r.Context()))
 		if crossSiteWrite(r) {
 			respondError(w, g.log, http.StatusForbidden,
 				"a state-changing request from another site is refused")
@@ -194,7 +203,7 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			// is fail-closed, filling the store that way eventually refuses every real mutation in
 			// the install. A hook that resolves to a trigger is recorded by the handler, where the
 			// trigger is known and the entry can say which one fired.
-			if !isSignIn(r) && !isHook(r) {
+			if !isSignIn(r) && !isHook(r) && !isCallback(r) {
 				who := recordedActor{Name: unauthenticatedActor(r), Type: actorTypeUnauthenticated}
 				receipt, ok := g.record(w, who, r)
 				if !ok {
@@ -244,7 +253,7 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 				return
 			}
 			ctx := run.WithAuditReceipt(context.WithValue(r.Context(), actorKey{}, actor), receipt)
-			ctx = withRecorded(g.stampSubmitterOrg(ctx, actor), who)
+			ctx = withRecorded(g.stampInventoryAccess(g.stampSubmitterOrg(ctx, actor)), who)
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
@@ -298,9 +307,23 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			return
 		}
 		ctx := run.WithAuditReceipt(context.WithValue(r.Context(), actorKey{}, actor), receipt)
-		ctx = withRecorded(g.stampSubmitterOrg(ctx, actor), who)
+		ctx = withRecorded(g.stampInventoryAccess(g.stampSubmitterOrg(ctx, actor)), who)
+		ctx = run.WithInitiatorContext(ctx, agentInitiator(tok, boundUser))
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// agentInitiator returns the identity evidence an agent's token gives the runs it asks for: the
+// agent by its label and id, the account it is bound to, and whoever minted it. It is nil for any
+// token not held by an agent, so a person's request carries none.
+func agentInitiator(tok *auth.Token, boundUser string) *run.Initiator {
+	if tok == nil || !tok.IsAgent() {
+		return nil
+	}
+	return &run.Initiator{
+		InitiatedBy: tok.Name, CredentialID: tok.ID, BoundTo: boundUser,
+		ProvisionedBy: tok.CreatedBy, ProvisionedByType: tok.CreatedByType,
+	}
 }
 
 // stampSubmitterOrg carries the actor's owning organization on the context so a run created while
@@ -318,6 +341,19 @@ func (g *authGate) stampSubmitterOrg(ctx context.Context, actor Actor) context.C
 		return ctx
 	}
 	return run.WithSubmitterOrg(ctx, orgID)
+}
+
+// stampInventoryAccess carries the check a composed inventory uses to decide which input
+// inventories it may draw hosts from for this actor. A smart or constructed inventory is resolved
+// inside the dispatcher, which knows nothing of grants, so without this a person allowed to use one
+// composed inventory would reach the hosts of every inventory it composes, including ones they
+// could not target by name. With no authorizer there are no object grants to honor, and nothing is
+// carried.
+func (g *authGate) stampInventoryAccess(ctx context.Context) context.Context {
+	if g.authz == nil {
+		return ctx
+	}
+	return run.WithInventoryAccess(ctx, g.authz.mayUse)
 }
 
 // recordedActor is the identity written into one audit entry.
@@ -384,8 +420,9 @@ func (g *authGate) digestBody(w http.ResponseWriter, r *http.Request) (digest, n
 		return "", "", false
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
-	// ContentLength is left as the client sent it; the restored body is the same bytes.
-	digest, nonce, err = audit.ContentDigestOf(body)
+	// ContentLength is left as the client sent it; the restored body is the same bytes. A decision's
+	// free text and the secrets whose names say nothing are withheld from what is digested.
+	digest, nonce, err = audit.ContentDigestOf(g.withheldBody(r, body))
 	if err != nil {
 		// The nonce comes from the system random source. If it cannot be read the change is refused
 		// rather than recorded under a weaker digest, the same fail-closed stance the trail takes
@@ -481,6 +518,31 @@ func hookPath(p string) bool {
 	}
 	segments := strings.FieldsFunc(lower, func(r rune) bool { return r == '/' })
 	return len(segments) > 1 && segments[0] == "hooks"
+}
+
+// isCallback reports whether the request is a host's provisioning callback: a POST to exactly
+// /v1/templates/{id}/callback, or to the AWX-compatible address isAWXCallbackPath describes. It
+// matches only a path already in its clean form, with one plain segment for the id, so no spelling
+// a traversal later resolves elsewhere is ever let past the gate on the strength of looking like a
+// callback.
+//
+// Like a webhook, a callback is not recorded by the gate. The key is in the body, so anybody on the
+// network can present a guess, and recording each one would let a stranger append to the chain
+// without bound. The handler records the callback once the key matches and it knows the host.
+func isCallback(r *http.Request) bool {
+	if r.Method != http.MethodPost {
+		return false
+	}
+	p := r.URL.Path
+	if isAWXCallbackPath(p) {
+		return true
+	}
+	if path.Clean(p) != p || !strings.HasPrefix(p, "/v1/templates/") {
+		return false
+	}
+	rest := strings.Split(strings.TrimPrefix(p, "/v1/templates/"), "/")
+	return len(rest) == 2 && rest[1] == "callback" && rest[0] != "" && rest[0] != "." &&
+		rest[0] != ".."
 }
 
 // isSignIn reports whether the request is an authentication attempt.
@@ -620,6 +682,9 @@ func (g *authGate) record(w http.ResponseWriter, who recordedActor, r *http.Requ
 		ActorType: who.Type, OnBehalfOf: who.OnBehalfOf,
 		Method: r.Method, Path: auditPath(r), ContentDigest: digest, Nonce: nonce,
 	}
+	if !g.recordCleanup(w, r, entry) {
+		return "", false
+	}
 	if err := g.audits.Append(r.Context(), entry); err != nil {
 		g.log.Error("server: append audit entry: "+err.Error(),
 			zap.String("method", r.Method), zap.String("path", auditPath(r)))
@@ -630,6 +695,33 @@ func (g *authGate) record(w http.ResponseWriter, who recordedActor, r *http.Requ
 	receipt = audit.Receipt(entry)
 	w.Header().Set(AuditReceiptHeader, receipt)
 	return receipt, true
+}
+
+// recordCleanup states, in a delete's own entry, the notification attachments the delete takes with
+// it, and hands the same statement to the handler, which holds the delete to it. The count and the
+// targets ride the entry's path, which the chain link commits to, so the cleanup is part of the
+// delete's record rather than events of its own. A delete that removes no attachment records its
+// path unchanged. When what the delete removes cannot be read, the change is refused before
+// anything is recorded or made, the same stance the trail takes on an append it cannot make.
+func (g *authGate) recordCleanup(w http.ResponseWriter, r *http.Request, entry *audit.Entry) bool {
+	if g.cleanups == nil {
+		return true
+	}
+	c, err := g.cleanups(r.Context(), r)
+	if err != nil {
+		g.log.Error("server: read the notification attachments a delete removes: "+err.Error(),
+			zap.String("path", auditPath(r)))
+		respondError(w, g.log, http.StatusServiceUnavailable,
+			"refused: what the delete would remove could not be read, so the change was not "+
+				"recorded or made")
+		return false
+	}
+	if c == nil {
+		return true
+	}
+	entry.Path += c.PathSuffix()
+	noteRecordedCleanup(r.Context(), *c)
+	return true
 }
 
 // errNoAccounts is returned when a token names an owning account but no account store is wired, so
@@ -682,8 +774,18 @@ func requiredRole(r *http.Request) user.Role {
 	// unreachable, since the MCP server refuses an admin token by design and so could never call the
 	// evidence tool it advertises. The gate lets an operator through and the handler decides whether
 	// this is their own run; a viewer is stopped here.
+	// A run's decision records carry the reasons approvers gave, which are audit evidence like the
+	// trail they are committed to, under the same exception: the actor who asked may read them, which
+	// is how an agent learns why its change was refused. Writing a correction or a redaction is admin
+	// work, by the default below.
 	if strings.HasPrefix(p, "/runs/") &&
-		(strings.HasSuffix(p, "/evidence") || strings.HasSuffix(p, "/receipt")) {
+		(strings.HasSuffix(p, "/evidence") || strings.HasSuffix(p, "/receipt") ||
+			(strings.HasSuffix(p, "/decisions") && r.Method == http.MethodGet)) {
+		return user.RoleOperator
+	}
+	// What a run's named notification targets were told names those targets, and listing targets is
+	// operator ground, so the record of what reached them is too.
+	if strings.HasPrefix(p, "/runs/") && strings.HasSuffix(p, "/notifications") {
 		return user.RoleOperator
 	}
 	// An account carries a profile of personal data, so listing accounts is management data even
@@ -724,10 +826,17 @@ func requiredRole(r *http.Request) user.Role {
 	// below defaults to admin, it quietly lowered every write on these three families from admin to
 	// operator. Nothing tested it, because the test that came with it asserted GET paths only.
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		// A host's cached facts carry what the host reported about itself, including the remote
+		// user's environment, so reading them is operator ground like the credential list.
+		if strings.HasPrefix(p, "/inventories/") &&
+			(strings.HasSuffix(p, "/facts") || strings.Contains(p, "/facts/")) {
+			return user.RoleOperator
+		}
 		if p == "/schedules" || strings.HasPrefix(p, "/schedules/") ||
 			p == "/triggers" || strings.HasPrefix(p, "/triggers/") ||
 			p == "/inventory-sources" || strings.HasPrefix(p, "/inventory-sources/") ||
-			p == "/credentials" || strings.HasPrefix(p, "/credentials/") {
+			p == "/credentials" || strings.HasPrefix(p, "/credentials/") ||
+			p == "/notifications" || strings.HasPrefix(p, "/notifications/") {
 			// Credentials belong to the same family: their secrets never serialize, but which
 			// stored keys exist and what they are named is launch configuration, and it was
 			// reachable by every viewer through the fallthrough below while the token and
@@ -775,6 +884,17 @@ func requiredRole(r *http.Request) user.Role {
 		// crash-recovery story tells to rerun the interrupted run.
 		return user.RoleOperator
 	case strings.HasPrefix(p, "/templates/") && strings.HasSuffix(p, "/launch"):
+		return user.RoleOperator
+	case strings.HasPrefix(p, "/inventories/") && strings.HasSuffix(p, "/preview"):
+		// Previewing a composed inventory shows the hosts a launch by the caller would reach, drawn
+		// only from inventories the caller may use, so it takes the role that launches. It is a
+		// POST because resolving runs ansible-inventory and may read an input's content source.
+		return user.RoleOperator
+	case strings.HasPrefix(p, "/notifications/") && strings.Contains(p, "/attachments"):
+		// Attaching a notification target is decided per object by the handler: use of the target
+		// and management of what it is attached to, so an operator holding a manage grant on a
+		// template can route its runs without being an admin. Every other notification write is
+		// admin work by the default below, delegable by a manage grant on the target.
 		return user.RoleOperator
 	default:
 		return user.RoleAdmin
@@ -839,6 +959,7 @@ func (g *authGate) allowed(ctx context.Context, actor Actor, r *http.Request) (b
 // They match the grant package's grantable object kinds.
 var delegatedObjectKinds = map[string]bool{
 	"projects": true, "templates": true, "inventories": true, "credentials": true,
+	"notifications": true,
 }
 
 // delegatedObject returns the object id an edit or delete targets when the request is a manage-
@@ -899,6 +1020,11 @@ func (g *authGate) protects(r *http.Request) bool {
 	if method == http.MethodGet && p == "/.well-known/loomseal.json" {
 		return false
 	}
+	// The federation discovery document and public key set are what a cloud fetches to verify a
+	// run's identity token. The cloud has no account here, and both hold public material only.
+	if method == http.MethodGet && (p == federation.DiscoveryPath || p == federation.JWKSPath) {
+		return false
+	}
 	// The span beat feed is how an outside watcher notices a chain that went quiet or lost its
 	// tail. Like the trust document, it exists for a party with no account here, and a feed that
 	// needs a token cannot be watched by the one the record is meant to convince.
@@ -928,6 +1054,11 @@ func (g *authGate) protects(r *http.Request) bool {
 	// every probe, and because redaction had already decided it was not a hook, the presented token
 	// went into the chain verbatim and travels in every bundle handed to a third party.
 	if isHook(r) {
+		return false
+	}
+	// A provisioning callback carries its template's host config key in the body and no account,
+	// for the same reason a webhook carries its token: the caller is a machine booting.
+	if isCallback(r) {
 		return false
 	}
 	return true

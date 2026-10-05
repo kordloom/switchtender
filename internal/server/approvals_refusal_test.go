@@ -55,6 +55,15 @@ func (s *stubApprover) Reject(_ context.Context, id, reason string, by outcome.D
 	return s.result, nil
 }
 
+// DecideRun records a decision carrying a reason the way Approve and Reject do.
+func (s *stubApprover) DecideRun(ctx context.Context, id string,
+	dec dispatch.RunDecision) (*run.Run, error) {
+	if dec.Approve {
+		return s.Approve(ctx, id, dec.By)
+	}
+	return s.Reject(ctx, id, dec.Reason, dec.By)
+}
+
 // heldRun returns a run waiting on approval, optionally one whose rule demands a second person.
 func heldRun(t *testing.T, distinct bool) *run.Run {
 	t.Helper()

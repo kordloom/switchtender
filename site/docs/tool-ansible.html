@@ -60,7 +60,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible" class="active">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible" class="active">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -74,11 +74,22 @@ live host-by-task matrix, feed fleet memory, and drive drift detection.</p>
 project, so relative paths and roles behave the way they do in the repository. A project's
 <code>requirements.yml</code> roles and collections install on sync before the play starts. A dry run passes
 <code>--check</code>, which reports what would change without changing it; drift detection is built from
-exactly those check runs.</p>
+exactly those check runs. Ansible still runs any play, block, task, role, or include that sets
+<code>check_mode: false</code> for real under <code>--check</code>. The gate reads for that before it treats a dry run
+as a preview, and a dry run that forces real work is held by a rule that excludes dry runs as
+though it were a real run. The hold names the forcing task and the two clean fixes: rework the
+task so check mode is safe, or drop <code>exclude_dry_run</code> from that rule. See
+<a href="/docs/concepts#dry-runs-and-exclude-dry-run">dry runs and <code>exclude_dry_run</code></a>, which covers the
+common read-only command and a role the project does not hold.</p>
 <p>Ansible runs are the ones that split. A split run shards the inventory across parallel slices,
 packs hosts onto shards by their measured durations from past runs, and merges every slice back
 into one matrix. Failed shards retry alone, and <code>relaunch-failed</code> re-runs only the hosts a finished
 run left failed or unreachable.</p>
+<p>A run against a smart inventory the native engine resolved is checked once more just before the play
+starts: the executor's own <code>ansible-inventory</code>, with the run's environment, project <code>ansible.cfg</code>,
+and image, reads the inventory, and the run is refused with the exact difference if it reads anything
+other than what the native engine resolved. See
+<a href="/docs/inventories#which-engine-resolves-an-inventory">which engine resolves an inventory</a>.</p>
 <p>A run or template may carry the usual Ansible controls without a hand-built command: <code>tags</code> and
 <code>skip_tags</code> select or exclude tagged plays and tasks, <code>forks</code> sets how many hosts run at once,
 <code>verbosity</code> from one to four raises logging as <code>-v</code> through <code>-vvvv</code>, and <code>diff_mode</code> shows the
@@ -96,6 +107,157 @@ reaches disk or a command line and no prompt blocks the run.</li>
 <li>Credentials attached to the run's inventory arrive the same way, so a fleet's secrets reach the
 play without naming them on the run.</li>
 </ul>
+<h2 id="fact-cache">Fact cache</h2>
+<p>A template with <code>use_fact_cache</code> on keeps the facts each launch gathers and serves them to the next
+launch, the way AWX's setting of the same name does. Before the play starts, the facts the
+template's stored inventory holds for its hosts are written into a private directory, and Ansible's
+<code>jsonfile</code> cache plugin is pointed at it. Each host is written in both layouts the plugin has used:
+a file named after the host, which ansible-core 2.18 and earlier read, and the <code>s1_</code> file
+ansible-core 2.19 and later read, so the cache works whichever release executes the run. A play with <code>gather_facts: false</code> then
+reads <code>ansible_facts</code> from the cache, and a play that gathers rewrites the files. When the run ends,
+the files Ansible rewrote are stored as those hosts' new facts, and a host whose file a play removed
+with <code>meta: clear_facts</code> loses its cached facts. The directory is removed when the run is over. It
+sits in a locked run directory beside the run's credential files, so a process killed mid-run leaves
+it to the same sweep every server and worker on the host runs, as <a href="/docs/run-files">Run files</a>
+describes.</p>
+<ul>
+<li><code>fact_cache_timeout</code> is how many seconds cached facts stay fresh enough to serve, counted from
+when they were gathered, the time Ansible wrote the host's cache file, rather than from when the
+run that gathered them ended. A host whose facts are older is left out of the cache, so the play
+gathers it again. Zero serves cached facts however old they are.</li>
+<li>When two launches gather the same host, the cache keeps the later gather, whichever launch
+finishes last.</li>
+<li>Facts are kept per host of a stored inventory, so the template needs <code>inventory_id</code>. Deleting the
+inventory deletes its cached facts, and a run still going when it is deleted keeps none.</li>
+<li>A run keeps facts only for hosts its inventory names or that its recap shows it reached, so a play
+cannot plant facts for a host the inventory does not hold.</li>
+<li>A host's fact document larger than one mebibyte is not kept, and the run says so in its warning.</li>
+<li>Facts are runtime data. They are never written to the audit chain, a receipt, an evidence bundle,
+a log, or a backup.</li>
+<li>A relay worker reaches the control node without a database, so a run it executes uses no cache
+and says so on the run. A worker that opens the database directly uses the cache like the server.</li>
+</ul>
+<h3 id="cached-facts-and-approvals">Cached facts and approvals</h3>
+<p>A cached fact stands in for one the play would have gathered. A play that reads its facts from the
+cache acts on each host as it was when the facts were cached, not as it is now: a <code>when:</code> condition
+on the distribution version, the package manager a task picks, or an interface address a template
+renders all read the cached value, so a host rebuilt or reconfigured since then is handled as it
+was. That makes the setting part of what an approver decides on, so it is bound like the rest of
+the run's spec.</p>
+<ul>
+<li>With the cache on, the run's spec records it and its timeout, as
+<code>&quot;fact_cache&quot;: {&quot;timeout_seconds&quot;: 3600}</code>, or <code>0</code> for no timeout. An approval binds to that spec,
+and the executor refuses an approved run whose fact cache setting changed after the approval.</li>
+<li>A held run shows &quot;uses cached facts (timeout 3600s)&quot;, or &quot;uses cached facts (no timeout)&quot;, where
+the approver decides, and the run's dossier states it in the same words. Its receipt discloses
+the spec, so the setting travels with the evidence.</li>
+<li>With the cache off, the spec carries no fact cache field at all. A run that does not use the
+cache keeps exactly the digest it always had, so receipts and approvals issued before the setting
+was bound still match their runs.</li>
+</ul>
+<h3 id="reading-cached-facts">Reading cached facts</h3>
+<p>The cached facts of an inventory are readable at <code>GET /v1/inventories/{id}/facts</code> and per host at
+<code>GET /v1/inventories/{id}/facts/{host}</code>, and on the Inventories page. Reading them takes the
+operator role and read on the inventory, and a host is listed only when the caller may also read
+the run that gathered its facts. Values whose keys look like secrets are masked for anyone below
+admin. A server started with <code>--fact-cache-admin-only</code> restricts reading cached facts to admins,
+for an install where even masked facts are more than operators should see. Clearing a host's cached
+facts, <code>DELETE /v1/inventories/{id}/facts/{host}</code>, takes the admin role and manage on the inventory
+whatever that setting says. A container run mounts the cache directory writable, so an execution
+environment reads and writes it the same way.</p>
+<h2 id="provisioning-callbacks">Provisioning callbacks</h2>
+<p>A template with <code>allow_callbacks</code> on lets a host in its stored inventory launch it against itself,
+which is how a machine configures itself at boot. It is AWX's provisioning callback.</p>
+<ol>
+<li>Turn on <code>allow_callbacks</code> on the template and mint a key on the template page, or with
+<code>POST /v1/templates/{id}/callback-key</code>. The key is shown once. Minting again rotates it, and
+turning callbacks off revokes it.</li>
+<li>Give the key to the hosts, usually in their boot script or cloud-init user data.</li>
+<li>The host posts the key to the template's callback URL:</li>
+</ol>
+<pre><code class="language-bash">curl -k -f -i -H 'Content-Type: application/json' -X POST \
+  -d '{&quot;host_config_key&quot;: &quot;hck_...&quot;}' \
+  https://switchtender.example.com/v1/templates/tpl_9d41c2/callback
+</code></pre>
+<p>An AWX boot script that posts <code>host_config_key</code> as JSON or as a form works once its URL points
+here, since a template's id changes when it is imported.</p>
+<p>The server matches the caller to one host of the template's inventory by AWX's rules. The caller's
+names are the address the request came from and what that address reverse resolves to. A host
+matches when its <code>ansible_host</code>, or its inventory name when it sets none, is one of those. When that
+does not single out one host, every inventory name is resolved forward, and a host whose name
+resolves to the caller's address matches. Behind a reverse proxy the caller's address is read from
+<code>X-Forwarded-For</code> or <code>--client-ip-header</code> only when the proxy is listed with <code>--trusted-proxy</code>,
+exactly as the sign-in limiter reads it, so a stranger cannot claim another host's address.</p>
+<ul>
+<li>A caller that matches no host, or more than one, is refused, and the run is never created.</li>
+<li>The run is limited to the matched host by its inventory name and runs the template as it is
+saved. A callback cannot pass <code>extra_vars</code>. Every survey question takes its default, a secret
+question's sealed default included, the same as on a schedule or a webhook, and a template whose
+survey has a required question with no default is refused, because nobody is there to answer it.</li>
+<li>While a callback run for the same host and template is pending, held for approval, or running, a
+second callback is refused with 409 rather than stacked, which is AWX's replay protection. AWX
+answers 400 in the same case, so a boot script that checks for exactly 400 needs a change.</li>
+<li>Callbacks are rate limited per address, and wrong keys spend a smaller budget of their own. See
+<a href="#callback-rate-limits">rate limits</a>.</li>
+<li>The launch goes through the approval policies and deny rules like any other launch. A policy can
+hold callback runs for approval, and a deny rule refuses them.</li>
+<li>The callback is written to the audit chain before the run is created, as actor
+<code>host &lt;name&gt; from &lt;address&gt;</code> with actor type <code>host</code>. The run carries the same actor, source
+<code>callback</code>, and the template id, so its evidence shows it was host initiated and from where.</li>
+<li>The key is sealed with the server encryption key at rest and is never returned after it is
+minted. An install without an encryption key cannot mint one.</li>
+<li>The inventory must be stored or synced. An inventory resolved from Vault, a secret manager, or a
+command when a run starts holds no host list to match against, so its callbacks are refused.</li>
+<li>The host list is read by the native inventory engine exactly as Ansible reads the document,
+ranges, ports, and quoting included. A document only Ansible can read, such as a plugin
+configuration, is refused for callbacks with the reason.</li>
+</ul>
+<h3 id="the-templates-own-limit">The template's own limit</h3>
+<p>A template's <code>limit</code> still applies to a callback unless the template says otherwise, in its
+<code>callback_limit</code> setting:</p>
+<ul>
+<li><code>intersect</code>, the default: the calling host must also be one the limit selects. A host outside it
+is refused with 403 and a reason naming the setting, nothing is launched, and the server log
+names the template, the host, and the limit.</li>
+<li><code>replace</code>: the calling host replaces the limit, the way AWX does.</li>
+</ul>
+<p>A template with no limit launches for the matched host either way. Whether a host falls within a
+limit is decided by <code>ansible-inventory</code> on the server, over the stored inventory, so groups and
+their children, exclusions, intersections, and patterns read exactly as they do when the template
+launches. The answer is reused for thirty seconds per inventory and limit, so a fleet booting at
+once runs <code>ansible-inventory</code> once rather than once per host. A server without <code>ansible-inventory</code>
+refuses a callback that needs the check with 409 and says so, and one whose evaluation fails answers
+503 rather than guessing. An imported AWX template gets the default, and the import report names
+each one that had both a limit and callbacks.</p>
+<h3 id="callback-rate-limits">Callback rate limits</h3>
+<p>Callbacks are counted per client address, on the native and the AWX-compatible address together,
+so alternating between them gains nothing.</p>
+<ul>
+<li><code>--callback-rate-limit</code>, 30 by default, is how many callbacks one address may make in a minute.</li>
+<li><code>--callback-key-failure-limit</code>, 10 by default, is how many wrong keys one address may present in
+a minute. Past it, every callback from that address is refused for the rest of the minute, the
+right key included, so a key cannot be guessed at any useful rate.</li>
+</ul>
+<p>A refusal answers 429 with <code>Retry-After: 60</code>, names the limit and the flag that sets it, and is
+logged once per address and limit a minute rather than once per request.</p>
+<p>Both limits count the address the server sees, and so does host matching. Behind a NAT every host
+reaches the server from the NAT's address, so the hosts share one budget, and none of them can be
+matched to an inventory host by address either. Route callbacks so they arrive from each host's own
+address, or through a reverse proxy that passes the original address in a header and is listed with
+<code>--trusted-proxy</code> (and <code>--client-ip-header</code> when the header is not <code>X-Forwarded-For</code>). That fixes
+the matching and gives each host its own budget. Raise the limits only for a fleet that still meets
+them once the address path is right.</p>
+<h3 id="the-awx-compatible-callback-address">The AWX-compatible callback address</h3>
+<p>A template imported from an AWX job template that accepted callbacks also answers at the address AWX
+gave it, <code>POST /api/v2/job_templates/{awx id}/callback/</code>, when the import knew its AWX id. A boot
+script written for AWX keeps working once the AWX hostname resolves to this server. It is the only
+AWX path served. A callback there passes the same key check, host matching, limits, gate, and
+evidence as one to the template's own address, and the evidence records which address a host used.
+The switch is per template, on by default after the import, and the template page shows when a host
+last called through it, which is how to tell when it is safe to turn off. Move images to the
+template's own address when you can. The <a href="/docs/migration#the-awx-compatible-callback-address">migration
+guide</a> covers how the id is bound and what to
+check before the cutover.</p>
 <h2 id="example">Example</h2>
 <pre><code>- name: Site deploy
   hosts: all

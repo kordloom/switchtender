@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -38,6 +39,23 @@ type memStore struct {
 	factsHistory map[string][]HostFacts
 	// tasks maps run id to its per task duration summaries.
 	tasks map[string][]TaskSummary
+	// queued maps a run id to when it last re-entered the queue, the moment an approval released
+	// it or the lease sweep put it back. A run created pending has no entry.
+	queued map[string]time.Time
+	// unended holds the top-level runs saved before they ended whose end is not yet settled, the
+	// in-memory stand-in for the ledger of owed ends the database stores keep.
+	unended map[string]bool
+	// endSeen maps an ended run in unended to when a sweep first found it ended.
+	endSeen map[string]time.Time
+	// budgets holds each allowance's open window, made on first use.
+	budgets map[string]*budgetWindow
+	// parked marks a workflow parked at an approval step, the state the database stores keep as
+	// parked: it reads as pending_approval, a resume or a cancel may move it, and no decision may
+	// claim it as a run held before it started.
+	parked map[string]bool
+	// outcomes records the finished runs that owe the chain nothing: those stored already finished
+	// and those whose outcome was settled. See OwedOutcomes.
+	outcomes outcomeLedger
 }
 
 // NewMemStore returns an empty in-memory Store.
@@ -49,12 +67,18 @@ func NewMemStore() Store {
 		events:    make(map[string][]event.Event),
 		summaries: make(map[string][]HostSummary),
 		tasks:     make(map[string][]TaskSummary),
+		queued:    make(map[string]time.Time),
+		unended:   make(map[string]bool),
+		endSeen:   make(map[string]time.Time),
+		parked:    make(map[string]bool),
 	}
 }
 
 // Save inserts or replaces the run identified by r.ID. A non-empty idempotency key already held by a
-// different run is rejected with ErrDuplicateKey so a concurrent retry cannot create a second run. A
-// stored cancel request survives the replace so a stale snapshot cannot erase a concurrent cancel.
+// different run is rejected with ErrDuplicateKey so a concurrent retry cannot create a second run, and
+// a second unfinished callback run for one template and host with ErrCallbackPending, the unique index
+// the SQL backends hold. A stored cancel request survives the replace so a stale snapshot cannot
+// erase a concurrent cancel.
 func (m *memStore) Save(_ context.Context, r *Run) error {
 	// Cleaned here so every backend stores the same bytes for the same input.
 	r.Sanitize()
@@ -65,11 +89,56 @@ func (m *memStore) Save(_ context.Context, r *Run) error {
 			return ErrDuplicateKey
 		}
 	}
+	if LiveCallback(r) {
+		for id, other := range m.runs {
+			if id != r.ID && LiveCallback(other) && sameCallbackLane(other, r) {
+				return ErrCallbackPending
+			}
+		}
+	}
 	cl := r.Clone()
 	if prev, ok := m.runs[r.ID]; ok && prev.CancelRequested {
 		cl.CancelRequested = true
 	}
+	// The decision that claimed or won a run is written only by ClaimDecision and SettleDecision,
+	// the rule both database stores apply, so a whole-row save from a copy taken before the claim
+	// can neither erase the claim nor credit a different decision.
+	cl.DecisionID, cl.DecisionClaim = "", ""
+	if prev, ok := m.runs[r.ID]; ok {
+		cl.DecisionID, cl.DecisionClaim = prev.DecisionID, prev.DecisionClaim
+	}
+	if cl.Status != StatusPendingApproval {
+		delete(m.parked, r.ID)
+	}
+	// The sealed answers and their digests are written once and kept by every later save, the rule
+	// both database stores apply, so a whole-row save from a copy that never carried them cannot
+	// erase them, and the digests stay the ones the run was created with.
+	if prev, ok := m.runs[r.ID]; ok {
+		if len(prev.SealedVars) > 0 {
+			cl.SealedVars = maps.Clone(prev.SealedVars)
+			cl.SealedNames = SealedVarNames(prev.SealedVars)
+		}
+		if len(prev.SealedDigests) > 0 {
+			cl.SealedDigests = slices.Clone(prev.SealedDigests)
+		}
+		// The sealed inventory snapshot and plan file are written by the insert that created the run
+		// and never by a later save: a copy decoded from JSON does not carry them, and a copy that
+		// does must not bring one back after the run's end wiped it. The records that bind them are
+		// written once, like the answer digests, since an approval binds them.
+		cl.InventorySealed = prev.InventorySealed
+		cl.PlanSealed = prev.PlanSealed
+		if prev.InventorySnapshot != nil {
+			cl.InventorySnapshot = prev.InventorySnapshot.Clone()
+		}
+		if prev.PlanSHA256 != "" {
+			cl.PlanSHA256 = prev.PlanSHA256
+		}
+	}
+	m.outcomes.noteSave(m.runs[r.ID], cl)
 	m.runs[r.ID] = cl
+	if cl.ParentID == nil && !cl.Status.Terminal() {
+		m.unended[r.ID] = true
+	}
 	if _, ok := m.logs[r.ID]; !ok {
 		m.logs[r.ID] = nil
 	}
@@ -496,6 +565,11 @@ func (m *memStore) reclaimStale(_ context.Context, ttl time.Duration) (int, []st
 				now := time.Now()
 				r.Status = StatusCanceled
 				r.EndedAt = &now
+				if r.ParentID == nil {
+					settled = append(settled, id)
+				}
+			} else {
+				m.queued[id] = time.Now()
 			}
 			changed++
 		case StatusRunning:
@@ -533,7 +607,9 @@ func (m *memStore) resolveOrphans() int {
 	}
 	changed := 0
 	for _, r := range m.runs {
-		if r.ParentID == nil || !orphaned[*r.ParentID] {
+		// A step a decision claimed is left to that decision, which settles it before anything
+		// records how its workflow ended.
+		if r.ParentID == nil || !orphaned[*r.ParentID] || r.InFlight() {
 			continue
 		}
 		switch r.Status {
@@ -575,7 +651,7 @@ func (m *memStore) CancelPending(_ context.Context, id string) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.runs[id]
-	if !ok || r.ClaimedBy != "" {
+	if !ok || r.ClaimedBy != "" || r.InFlight() {
 		return false, nil
 	}
 	if r.Status != StatusPending && r.Status != StatusPendingApproval {
@@ -584,6 +660,7 @@ func (m *memStore) CancelPending(_ context.Context, id string) (bool, error) {
 	now := time.Now()
 	r.Status = StatusCanceled
 	r.EndedAt = &now
+	delete(m.parked, id)
 	return true, nil
 }
 
@@ -598,12 +675,33 @@ func (m *memStore) TransitionStatusAndClaim(_ context.Context, id string, from, 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.runs[id]
-	if !ok || r.Status != from || r.CancelRequested {
+	if !ok || r.Status != from || r.CancelRequested || r.InFlight() {
 		return false, nil
 	}
 	now := time.Now()
 	r.Status = to
 	r.ClaimedBy = owner
+	r.ClaimedAt = &now
+	delete(m.parked, id)
+	if r.StartedAt == nil && !startedAt.IsZero() {
+		at := startedAt
+		r.StartedAt = &at
+	}
+	return true, nil
+}
+
+// StartClaimed moves a pending run to running for the claim that still holds it, in one locked
+// step.
+func (m *memStore) StartClaimed(_ context.Context, id, owner, secret string, startedAt time.Time) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.runs[id]
+	if !ok || owner == "" || r.Status != StatusPending || r.CancelRequested ||
+		r.ClaimedBy != owner || r.ClaimSecret != secret {
+		return false, nil
+	}
+	now := time.Now()
+	r.Status = StatusRunning
 	r.ClaimedAt = &now
 	if r.StartedAt == nil && !startedAt.IsZero() {
 		at := startedAt
@@ -617,11 +715,27 @@ func (m *memStore) TransitionStatus(_ context.Context, id string, from, to Statu
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.runs[id]
-	if !ok || r.Status != from {
+	if !ok || r.Status != from || r.InFlight() || m.parked[id] {
 		return false, nil
 	}
 	r.Status = to
+	if to == StatusPending {
+		m.queued[id] = time.Now()
+	}
 	return true, nil
+}
+
+// QueuedTimes returns when each pending run last re-entered the queue, for the runs that did.
+func (m *memStore) QueuedTimes(_ context.Context) (map[string]time.Time, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make(map[string]time.Time, len(m.queued))
+	for id, at := range m.queued {
+		if r, ok := m.runs[id]; ok && r.Status == StatusPending {
+			out[id] = at
+		}
+	}
+	return out, nil
 }
 
 // StampApprovedSpec records the spec digest an approver decided on, touching nothing else.
@@ -635,6 +749,123 @@ func (m *memStore) StampApprovedSpec(_ context.Context, id, digest, binding stri
 	r.ApprovedSpecDigest = digest
 	r.ApprovedSpecBinding = binding
 	return nil
+}
+
+// WipeSealed removes the run's sealed inventory snapshot and sealed plan file, keeping the digests
+// that bound them.
+func (m *memStore) WipeSealed(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.runs[id]
+	if !ok {
+		return ErrNotFound
+	}
+	r.InventorySealed = ""
+	r.PlanSealed = ""
+	return nil
+}
+
+// SweepSealed wipes the sealed material of every ended run still carrying some.
+func (m *memStore) SweepSealed(_ context.Context) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, r := range m.runs {
+		if r.Status.Terminal() && (r.InventorySealed != "" || r.PlanSealed != "") {
+			r.InventorySealed = ""
+			r.PlanSealed = ""
+			n++
+		}
+	}
+	return n, nil
+}
+
+// ParkForApproval moves a running parent this owner holds to pending_approval and clears its lease.
+func (m *memStore) ParkForApproval(_ context.Context, id, owner string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.runs[id]
+	if !ok || owner == "" || r.Status != StatusRunning || r.ClaimedBy != owner || r.CancelRequested {
+		return false, nil
+	}
+	r.Status = StatusPendingApproval
+	r.ClaimedBy = ""
+	r.ClaimedAt = nil
+	r.ClaimSecret = ""
+	m.parked[id] = true
+	return true, nil
+}
+
+// SettleHeld ends a run waiting unclaimed in pending_approval, in one locked write.
+func (m *memStore) SettleHeld(_ context.Context, id string, fin Finalization) (bool, error) {
+	if !fin.Status.Terminal() {
+		return false, ErrNotTerminal
+	}
+	fin.SanitizeText()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.runs[id]
+	if !ok || r.Status != StatusPendingApproval || r.ClaimedBy != "" || r.InFlight() ||
+		m.parked[id] {
+		return false, nil
+	}
+	ended := fin.EndedAt
+	r.Status = fin.Status
+	r.Error = fin.Error
+	r.EndedAt = &ended
+	r.InventorySealed = ""
+	r.PlanSealed = ""
+	return true, nil
+}
+
+// ClaimDecision records the decision that will settle a held run, in one locked write.
+func (m *memStore) ClaimDecision(_ context.Context, id, decisionID, claim string) (bool, error) {
+	if decisionID == "" || claim == "" {
+		return false, ErrNoDecision
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.runs[id]
+	if !ok || r.Status != StatusPendingApproval || r.ClaimedBy != "" || r.CancelRequested ||
+		r.DecisionClaim != "" || m.parked[id] {
+		return false, nil
+	}
+	r.DecisionID, r.DecisionClaim = decisionID, claim
+	return true, nil
+}
+
+// SettleDecision moves a run the named decision claimed out of pending_approval, in one locked
+// write.
+func (m *memStore) SettleDecision(_ context.Context, id, decisionID string, s DecisionSettle) (bool,
+	error) {
+	if err := s.Check(); err != nil {
+		return false, err
+	}
+	s.SanitizeText()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.runs[id]
+	if !ok || !r.InFlight() || r.DecisionID != decisionID {
+		return false, nil
+	}
+	r.Status, r.DecisionClaim = s.Status, ""
+	now := time.Now()
+	switch {
+	case s.Status == StatusRunning:
+		r.ClaimedBy = s.Owner
+		r.ClaimedAt = &now
+		if r.StartedAt == nil {
+			started := now
+			r.StartedAt = &started
+		}
+	case s.Status == StatusPending:
+		m.queued[id] = now
+	case s.Status.Terminal() && !s.EndedAt.IsZero():
+		ended := s.EndedAt
+		r.Error = s.Error
+		r.EndedAt = &ended
+	}
+	return true, nil
 }
 
 // FinalizeRunning moves a running run to its terminal status and records the exit code, failure
@@ -659,11 +890,17 @@ func (m *memStore) FinalizeRunning(_ context.Context, id string, fin Finalizatio
 	r.ExitCode = fin.ExitCode
 	r.Error = fin.Error
 	r.Image = fin.Image
+	r.InventoryCheck = fin.InventoryCheck.Clone()
 	r.CommitSHA = fin.CommitSHA
 	r.PullCredentialID = fin.PullCredentialID
 	r.Outputs = fin.Outputs
 	r.Warning = fin.Warning
+	r.ImageDigest = fin.ImageDigest
+	r.ResolvedHosts = slices.Clone(fin.ResolvedHosts)
 	r.EndedAt = &ended
+	// The run's sealed material is wiped by the write that ends it.
+	r.InventorySealed = ""
+	r.PlanSealed = ""
 	return true, nil
 }
 

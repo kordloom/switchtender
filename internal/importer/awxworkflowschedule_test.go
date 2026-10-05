@@ -73,6 +73,8 @@ func TestWorkflowSchedulesImport(t *testing.T) {
 			want := &schedule.Schedule{
 				ID: got.ID, Name: test.WantName, Cron: test.WantCron, Timezone: test.WantZone,
 				TemplateID: tpl.ID, Enabled: true, CreatedAt: importNow, NextRunAt: got.NextRunAt,
+				// A rule carried as cron keeps AWX's reading of a time the clocks skip.
+				SpringForward: schedule.SpringForwardLater,
 			}
 			if diff := cmp.Diff(want, got, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("schedule mismatch (-want +got):\n%s", diff)
@@ -88,23 +90,27 @@ func TestWorkflowSchedulesImport(t *testing.T) {
 	}
 }
 
-// TestWorkflowScheduleCronCannotExpressIsReported pins that a workflow schedule cron cannot express
-// is refused and named, the same way a job template's is, rather than dropped in silence.
-func TestWorkflowScheduleCronCannotExpressIsReported(t *testing.T) {
+// TestWorkflowScheduleCronCannotExpressComesAcross pins that a workflow schedule cron cannot
+// express comes across as its recurrence, the same way a job template's does, rather than being
+// dropped.
+func TestWorkflowScheduleCronCannotExpressComesAcross(t *testing.T) {
 	t.Parallel()
+	const rule = "DTSTART:20260101T020000Z RRULE:FREQ=YEARLY"
 	doc := scheduledWorkflowExport(`"related": {"schedules": [{"name": "quarterly",
-		"rrule": "DTSTART:20260101T020000Z RRULE:FREQ=YEARLY"}]},`)
+		"rrule": "` + rule + `"}]},`)
 	plan, err := FromAWX([]byte(doc), importNow)
 	if err != nil {
 		t.Fatalf("FromAWX() error = %v", err)
 	}
-	if len(plan.Schedules) != 0 {
-		t.Fatalf("schedules = %d, want 0: a rule cron cannot express must not become one",
-			len(plan.Schedules))
+	if len(plan.Schedules) != 1 {
+		t.Fatalf("schedules = %d, want 1.\nwarnings: %v", len(plan.Schedules), plan.Warnings)
 	}
-	if _, ok := warningContaining(t, plan.Warnings, `schedule "quarterly"`, `workflow "rollout"`,
-		"cadence cannot be expressed as cron"); !ok {
-		t.Errorf("the refused workflow schedule was not reported.\nwarnings: %v", plan.Warnings)
+	if got := plan.Schedules[0]; got.RRule != rule || got.Cron != "" ||
+		got.TemplateID != workflowTemplate(t, plan).ID {
+		t.Errorf("schedule = %+v, want the yearly rule on the workflow template", got)
+	}
+	if w, ok := warningContaining(t, plan.Warnings, `schedule "quarterly"`); ok {
+		t.Errorf("the schedule came across and is still reported: %s", w)
 	}
 }
 

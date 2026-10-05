@@ -173,7 +173,7 @@ async function fillCredentialPicker() {
 		for (const c of creds) {
 			const opt = document.createElement("option");
 			opt.value = c.id;
-			opt.textContent = c.name + " (" + c.kind + ")";
+			opt.textContent = c.name + " (" + credKindLabel(c) + ")";
 			picker.appendChild(opt);
 		}
 		// A labeled box with nothing in it reads as broken. The Project and Stored inventory selects
@@ -260,6 +260,13 @@ const CRED_KINDS = {
 		hint: "The service account JSON, written to a private file and bound to " +
 			"GOOGLE_APPLICATION_CREDENTIALS.",
 	},
+	kubeconfig: {
+		placeholder: "apiVersion: v1\nkind: Config\nclusters:\n- name: prod\n  cluster:\n    server: " +
+			"https://k8s.example.com:6443",
+		hint: "The whole kubeconfig YAML, written to a private file and bound to KUBECONFIG, " +
+			"K8S_AUTH_KUBECONFIG, and KUBE_CONFIG_PATH. Only its tokens, keys, and passwords are masked " +
+			"in run output.",
+	},
 	openstack: {
 		placeholder: "auth_url=https://keystone.example:5000/v3\nusername=deploy\npassword=the password\nproject_name=prod",
 		hint: "Fields: auth_url, username, password, and project_name required; user_domain_name, " +
@@ -271,7 +278,42 @@ const CRED_KINDS = {
 		hint: "Fields: host, user, and password required, validate_certs optional. Injects the VMWARE_ " +
 			"variables.",
 	},
+	// The federated kinds store no secret. Each run is handed a short-lived identity token this server
+	// signs, so the dialog hides the secret and source and asks for settings instead.
+	aws_oidc: {
+		federated: true,
+		settings: "role_arn=arn:aws:iam::123456789012:role/deploy\nregion=us-east-1\nenvironment=prod",
+		hint: "Nothing is stored. Each run assumes the role with a short-lived token through " +
+			"AssumeRoleWithWebIdentity. Settings: role_arn required; region, environment, delivery, " +
+			"audience, session_name, session_duration, sts_endpoint, and token_ttl optional.",
+	},
+	gcp_oidc: {
+		federated: true,
+		settings: "provider=projects/123456789/locations/global/workloadIdentityPools/ci/providers/st\n" +
+			"service_account=deployer@my-project.iam.gserviceaccount.com",
+		hint: "Nothing is stored. Each run gets an external_account credentials file over a short-lived " +
+			"token. Settings: provider required; service_account, environment, delivery, audience, " +
+			"sts_endpoint, iam_endpoint, and token_ttl optional.",
+	},
+	azure_oidc: {
+		federated: true,
+		settings: "client_id=the application id\ntenant_id=the tenant id\nsubscription_id=the id",
+		hint: "Nothing is stored. Each run gets a short-lived token in AZURE_FEDERATED_TOKEN_FILE. " +
+			"Settings: client_id and tenant_id required; subscription_id, environment, audience, " +
+			"authority_host, and token_ttl optional.",
+	},
+	oidc_token: {
+		federated: true,
+		settings: "audience=https://vault.example.com\nenvironment=prod",
+		hint: "Nothing is stored. Each run gets a short-lived identity token in the file " +
+			"SWITCHTENDER_OIDC_TOKEN_FILE names. Settings: audience required; environment and " +
+			"token_ttl optional.",
+	},
 };
+
+// SETTINGS_PLACEHOLDER is the settings box's example for a kind that stores a secret, where settings
+// are optional metadata.
+const SETTINGS_PLACEHOLDER = "user=deploy\nbecome_method=sudo";
 
 // CRED_SOURCES describes where a secret comes from. A source other than local means the stored value
 // is a lookup rather than the secret, so its placeholder shows the lookup's shape and the kind's own
@@ -324,14 +366,200 @@ const CRED_SOURCES = {
 	},
 };
 
+// CRED_TYPE_PREFIX marks a kind select value naming a custom credential type rather than a built-in
+// kind, as in "type:ctype_1".
+const CRED_TYPE_PREFIX = "type:";
+
+// CRED_TYPE_EXAMPLE prefills the type editor for a new type: a kubeconfig written to a private file
+// whose path reaches the run through KUBECONFIG.
+const CRED_TYPE_EXAMPLE = [
+	"{",
+	'  "name": "Kubeconfig",',
+	'  "fields": [{"name": "kubeconfig", "label": "Kubeconfig", "secret": true, "multiline": true}],',
+	'  "file": {"template": "{{ kubeconfig }}"},',
+	'  "env": {"KUBECONFIG": "{{ tower.filename }}"}',
+	"}",
+].join("\n");
+
+// credTypes maps each custom credential type's id to its definition. loadCredentialTypes fills it,
+// and it stays empty where types are switched off or this session cannot read them.
+let credTypes = new Map();
+
+// selectedCredTypeID returns the id of the custom type the credential dialog's kind select names,
+// or an empty string when a built-in kind is chosen.
+function selectedCredTypeID() {
+	const v = document.getElementById("cred-kind").value || "";
+	return v.startsWith(CRED_TYPE_PREFIX) ? v.slice(CRED_TYPE_PREFIX.length) : "";
+}
+
+// credKindLabel names what a credential holds: its built-in kind, or the custom type it was made
+// from. A typed credential has no kind of its own, so before the types load it reads as a custom
+// type rather than as a blank.
+function credKindLabel(c) {
+	if (!c.type_id) return c.kind;
+	const t = credTypes.get(c.type_id);
+	return t ? "custom: " + t.name : "custom type";
+}
+
+// credTypeFieldsSummary lists a type's field names, marking the secret and multiline ones.
+function credTypeFieldsSummary(t) {
+	return (t.fields || []).map((f) => {
+		const marks = [];
+		if (f.secret) marks.push("secret");
+		if (f.multiline) marks.push("multiline");
+		return f.name + (marks.length ? " (" + marks.join(", ") + ")" : "");
+	}).join(", ");
+}
+
+// credTypeInjects summarizes what a type hands a run: environment variable names, extra var names,
+// and the files it writes. A file is named by its template key, the bare key reading as "template".
+function credTypeInjects(t) {
+	const parts = [];
+	const env = Object.keys(t.env || {}).sort();
+	if (env.length) parts.push("env: " + env.join(", "));
+	const vars = Object.keys(t.extra_vars || {}).sort();
+	if (vars.length) parts.push("extra vars: " + vars.join(", "));
+	const files = Object.keys(t.file || {}).sort()
+		.map((k) => (k === "template" ? k : k.replace(/^template\./, "")));
+	if (files.length) parts.push((files.length === 1 ? "file: " : "files: ") + files.join(", "));
+	return parts.length ? parts.join(" \u00b7 ") : "none";
+}
+
+// fillCredTypeOptions rebuilds the Custom types group in the credential dialog's kind select, one
+// option per loaded type. With no types the group is left out, so the select offers only kinds this
+// server can store.
+function fillCredTypeOptions() {
+	const select = document.getElementById("cred-kind");
+	if (!select) return;
+	const current = select.value;
+	const old = document.getElementById("cred-kind-custom");
+	if (old) old.remove();
+	if (credTypes.size === 0) return;
+	const group = credTypeGroup(select);
+	for (const t of credTypes.values()) {
+		const opt = document.createElement("option");
+		opt.value = CRED_TYPE_PREFIX + t.id;
+		opt.textContent = t.name;
+		group.appendChild(opt);
+	}
+	select.value = current;
+}
+
+// credTypeGroup returns the Custom types group in the kind select, adding it when missing.
+function credTypeGroup(select) {
+	let group = document.getElementById("cred-kind-custom");
+	if (group) return group;
+	group = document.createElement("optgroup");
+	group.id = "cred-kind-custom";
+	group.setAttribute("label", "Custom types");
+	select.appendChild(group);
+	return group;
+}
+
+// ensureCredTypeOption makes sure the kind select can name a type, adding a stand-in option for one
+// whose definition did not load, so editing a typed credential never falls back to a built-in kind.
+function ensureCredTypeOption(typeID) {
+	const select = document.getElementById("cred-kind");
+	const value = CRED_TYPE_PREFIX + typeID;
+	if (Array.from(select.options).some((o) => o.value === value)) return;
+	const opt = document.createElement("option");
+	opt.value = value;
+	opt.textContent = "custom type";
+	credTypeGroup(select).appendChild(opt);
+}
+
+// clearCredTypeFields empties the typed field controls, so the next sync draws them fresh.
+function clearCredTypeFields() {
+	const box = document.getElementById("cred-type-fields");
+	if (!box) return;
+	box.textContent = "";
+	delete box.dataset.typeId;
+}
+
+// renderCredTypeFields draws one control per field of the chosen custom type: a textarea for a
+// multiline field, a password input for a secret one, and a text input otherwise. Values already
+// typed survive a sync that leaves the type unchanged. With no type chosen the container hides.
+function renderCredTypeFields(typeID) {
+	const box = document.getElementById("cred-type-fields");
+	if (!box) return;
+	if (!typeID) {
+		box.hidden = true;
+		clearCredTypeFields();
+		return;
+	}
+	box.hidden = false;
+	if (box.dataset.typeId === typeID) return;
+	box.textContent = "";
+	box.dataset.typeId = typeID;
+	const t = credTypes.get(typeID);
+	const editing = Boolean(document.getElementById("cred-form").dataset.editId);
+	if (!t) {
+		const note = document.createElement("p");
+		note.className = "field-hint";
+		note.textContent = "This credential's type could not be read, so only its name can change here.";
+		box.appendChild(note);
+		return;
+	}
+	if (editing) {
+		const note = document.createElement("p");
+		note.className = "field-hint";
+		note.textContent = "Leave every field blank to keep the stored values. Entering any " +
+			"replaces them all.";
+		box.appendChild(note);
+	}
+	for (const f of t.fields || []) {
+		const label = document.createElement("label");
+		label.className = "field-label";
+		label.appendChild(document.createTextNode(f.label || f.name));
+		const control = document.createElement(f.multiline ? "textarea" : "input");
+		if (f.multiline) {
+			control.className = "input mono";
+			control.rows = 6;
+		} else {
+			control.className = "input";
+			control.setAttribute("type", f.secret ? "password" : "text");
+		}
+		control.setAttribute("autocomplete", "off");
+		control.id = "cred-type-field-" + f.name;
+		control.dataset.field = f.name;
+		label.appendChild(control);
+		box.appendChild(label);
+	}
+}
+
+// credTypeFieldValues reads every typed field control into a map by field name, exactly as entered.
+// A multiline value keeps its inner newlines and surrounding whitespace.
+function credTypeFieldValues() {
+	const out = {};
+	const box = document.getElementById("cred-type-fields");
+	if (!box) return out;
+	for (const control of box.querySelectorAll("input, textarea")) {
+		if (control.dataset.field) out[control.dataset.field] = control.value;
+	}
+	return out;
+}
+
 // syncCredFields matches the secret field to the kind and source chosen, so the box always shows the
-// shape of the thing being pasted into it and says what the run will do with it.
+// shape of the thing being pasted into it and says what the run will do with it. A custom type
+// replaces the source, secret, and settings fields with its own declared fields.
 function syncCredFields() {
 	const kind = document.getElementById("cred-kind").value;
 	const source = document.getElementById("cred-source").value || "local";
 	const kindSpec = CRED_KINDS[kind] || {};
 	const sourceSpec = CRED_SOURCES[source] || {};
 	const secret = document.getElementById("cred-secret");
+	const typeID = selectedCredTypeID();
+	const form = document.getElementById("cred-form");
+	// A hidden required field blocks the submit with nowhere to show why, so a typed credential
+	// drops the requirement, and a built-in kind takes it back when creating, or when an edit moves a
+	// typed credential onto it, since that replaces the type's field values whole.
+	const leavingType = Boolean(form && form.dataset.editId && form.dataset.editTypeId);
+	secret.required = !typeID && (!(form && form.dataset.editId) || leavingType);
+	for (const id of ["cred-source-field", "cred-secret-field", "cred-settings-field"]) {
+		const el = document.getElementById(id);
+		if (el) el.hidden = Boolean(typeID);
+	}
+	renderCredTypeFields(typeID);
 	// On edit the placeholder explains that a blank keeps what is stored, which outranks either shape.
 	if (!secret.required) {
 		secret.placeholder = "Leave blank to keep the current secret";
@@ -345,8 +573,25 @@ function syncCredFields() {
 		hint.textContent = (kindSpec.hint || "") +
 			(kindSpec.ansibleOnly ? " Takes effect under Ansible only." : "");
 	}
+	if (hint && typeID) {
+		const t = credTypes.get(typeID);
+		hint.textContent = t
+			? "A custom type. Injects " + credTypeInjects(t) + "."
+			: "A custom type this session cannot read.";
+	}
 	const sourceHint = document.getElementById("cred-source-hint");
 	if (sourceHint) sourceHint.textContent = sourceSpec.hint || "";
+	// A federated kind has no secret and no source, so both are hidden and the secret box is taken
+	// out of the form's validation, and the settings box shows what that kind needs instead. A custom
+	// type hides them too, since its own fields replace them.
+	const federated = !!kindSpec.federated;
+	const secretField = document.getElementById("cred-secret-field");
+	if (secretField) secretField.hidden = federated || Boolean(typeID);
+	const sourceField = document.getElementById("cred-source-field");
+	if (sourceField) sourceField.hidden = federated || Boolean(typeID);
+	secret.disabled = federated;
+	const settings = document.getElementById("cred-settings");
+	if (settings) settings.placeholder = federated ? kindSpec.settings : SETTINGS_PLACEHOLDER;
 	toggleCredPassphrase();
 }
 
@@ -359,8 +604,15 @@ function openCredentialEdit(c) {
 	// What the stored record is, so a submit can tell a real change from leaving the fields alone.
 	form.dataset.editKind = c.kind;
 	form.dataset.editSource = c.source || "local";
+	form.dataset.editTypeId = c.type_id || "";
 	document.getElementById("cred-name").value = c.name;
-	document.getElementById("cred-kind").value = c.kind;
+	if (c.type_id) {
+		ensureCredTypeOption(c.type_id);
+		document.getElementById("cred-kind").value = CRED_TYPE_PREFIX + c.type_id;
+	} else {
+		document.getElementById("cred-kind").value = c.kind;
+	}
+	clearCredTypeFields();
 	document.getElementById("cred-source").value = c.source || "local";
 	const sec = document.getElementById("cred-secret");
 	sec.value = "";
@@ -435,6 +687,12 @@ function wireCredentialForm() {
 		delete form.dataset.editId;
 		delete form.dataset.editKind;
 		delete form.dataset.editSource;
+		delete form.dataset.editTypeId;
+		// A stand-in option for a type that never loaded cannot create anything, so a new credential
+		// starts from a built-in kind instead.
+		const typeID = selectedCredTypeID();
+		if (typeID && !credTypes.has(typeID)) document.getElementById("cred-kind").value = "ssh_key";
+		clearCredTypeFields();
 		document.getElementById("cred-name").value = "";
 		document.getElementById("cred-source").value = "local";
 		const sec = document.getElementById("cred-secret");
@@ -462,40 +720,12 @@ function wireCredentialForm() {
 		if (inFlight) return;
 		const status = document.getElementById("cred-status");
 		const editId = form.dataset.editId;
-		const payload = {
-			name: document.getElementById("cred-name").value.trim(),
-			kind: document.getElementById("cred-kind").value,
-			source: document.getElementById("cred-source").value,
-		};
-		const secret = document.getElementById("cred-secret").value;
-		if (secret) payload.secret = secret;
-		if (payload.kind === "vault_password") {
-			payload.vault_id = document.getElementById("cred-vault-id").value.trim();
-		}
-		const passphrase = document.getElementById("cred-passphrase").value;
-		if (passphrase && payload.kind === "ssh_key" && payload.source === "local") {
-			payload.passphrase = passphrase;
-		}
-		// A kind or source change re-seals the secret in a different form, so the server only applies
-		// one when a new secret comes with it. The dialog sent the change anyway and reported "Saved",
-		// which is the one answer that is not true: an admin moving a credential from local storage to
-		// a secrets manager, with the secret box left blank as its placeholder invites, was told it had
-		// moved while the plaintext key stayed sealed locally and kept being injected. Say what is
-		// actually required instead of reporting a change that did not happen.
-		if (editId && !secret &&
-			(payload.kind !== form.dataset.editKind || payload.source !== form.dataset.editSource)) {
-			status.textContent = "Changing the kind or source re-seals the secret, so enter the " +
-				"secret again to make that change.";
-			return;
-		}
-		// On edit the form state is the whole truth: sending the parsed map replaces the stored
-		// settings, and an emptied textarea sends {} which clears them. On create an empty map is
-		// simply omitted.
-		const settingsField = document.getElementById("cred-settings");
-		if (settingsField) {
-			const settings = parseCredSettings(settingsField.value);
-			if (editId || Object.keys(settings).length) payload.settings = settings;
-		}
+		// A typed credential edited onto a built-in kind is saved the built-in way, kind and secret
+		// together, which is how the server moves it off its type in one step.
+		const payload = selectedCredTypeID()
+			? typedCredPayload(form, status)
+			: builtinCredPayload(form, status);
+		if (!payload) return;
 		inFlight = true;
 		if (submitBtn) submitBtn.disabled = true;
 		try {
@@ -515,6 +745,81 @@ function wireCredentialForm() {
 			if (submitBtn) submitBtn.disabled = false;
 		}
 	});
+}
+
+// builtinCredPayload reads the credential dialog into the body a built-in kind is saved with, or
+// returns null after saying in status why the save cannot go ahead.
+function builtinCredPayload(form, status) {
+	const editId = form.dataset.editId;
+	const payload = {
+		name: document.getElementById("cred-name").value.trim(),
+		kind: document.getElementById("cred-kind").value,
+		source: document.getElementById("cred-source").value,
+	};
+	const federated = !!(CRED_KINDS[payload.kind] || {}).federated;
+	// A federated credential stores nothing, so whatever was left in the hidden boxes stays here.
+	const secret = federated ? "" : document.getElementById("cred-secret").value;
+	if (secret) payload.secret = secret;
+	if (federated) delete payload.source;
+	if (federated && editId && payload.kind !== form.dataset.editKind) {
+		status.textContent = "A federated credential keeps its kind. Create a new credential for " +
+			"another kind.";
+		return null;
+	}
+	if (payload.kind === "vault_password") {
+		payload.vault_id = document.getElementById("cred-vault-id").value.trim();
+	}
+	const passphrase = document.getElementById("cred-passphrase").value;
+	if (passphrase && payload.kind === "ssh_key" && payload.source === "local") {
+		payload.passphrase = passphrase;
+	}
+	// A kind or source change re-seals the secret in a different form, so the server only applies
+	// one when a new secret comes with it. The dialog sent the change anyway and reported "Saved",
+	// which is the one answer that is not true: an admin moving a credential from local storage to
+	// a secrets manager, with the secret box left blank as its placeholder invites, was told it had
+	// moved while the plaintext key stayed sealed locally and kept being injected. Say what is
+	// actually required instead of reporting a change that did not happen.
+	if (editId && !secret && !federated && form.dataset.editTypeId) {
+		status.textContent = "Moving a credential off its custom type replaces its field values, " +
+			"so enter the secret for the new kind.";
+		return null;
+	}
+	if (editId && !secret && !federated &&
+		(payload.kind !== form.dataset.editKind || payload.source !== form.dataset.editSource)) {
+		status.textContent = "Changing the kind or source re-seals the secret, so enter the " +
+			"secret again to make that change.";
+		return null;
+	}
+	// On edit the form state is the whole truth: sending the parsed map replaces the stored
+	// settings, and an emptied textarea sends {} which clears them. On create an empty map is
+	// simply omitted.
+	const settingsField = document.getElementById("cred-settings");
+	if (settingsField) {
+		const settings = parseCredSettings(settingsField.value);
+		if (editId || Object.keys(settings).length) payload.settings = settings;
+	}
+	return payload;
+}
+
+// typedCredPayload reads the credential dialog into the body a custom type's credential is saved
+// with, or returns null after saying in status why the save cannot go ahead.
+//
+// A create sends every field. An edit stores its values sealed together, so the server replaces all
+// of them or none: every field left blank sends only the name and keeps the stored values, and any
+// field entered sends them all, a blank one as an empty string.
+function typedCredPayload(form, status) {
+	const editId = form.dataset.editId;
+	const typeID = selectedCredTypeID();
+	const name = document.getElementById("cred-name").value.trim();
+	if (editId && typeID !== (form.dataset.editTypeId || "")) {
+		status.textContent = "A custom type is chosen when a credential is created. Create a new " +
+			"credential for this type.";
+		return null;
+	}
+	const fields = credTypeFieldValues();
+	if (!editId) return { name, type_id: typeID, fields };
+	if (Object.values(fields).every((v) => v.trim() === "")) return { name };
+	return { name, fields };
 }
 
 // loadCredentials populates the credential table with delete actions. keepPanel leaves the panel of
@@ -565,7 +870,7 @@ async function loadCredentials(keepPanel) {
 			// The row opens as a drawer too, so the settings a tooltip carries are reachable on
 			// touch and readable whole rather than clipped into one hover line.
 			inspectable(tr, c.name, [
-				{ label: "Kind", value: c.kind },
+				{ label: "Kind", value: credKindLabel(c) },
 				{ label: "Source", value: c.source || "local" },
 				{ label: "Settings", value: settingsEntries.map(([k, v]) => k + "=" + v).join("\n"), block: true },
 			]);
@@ -574,7 +879,11 @@ async function loadCredentials(keepPanel) {
 			const kind = td("");
 			const kindChip = document.createElement("span");
 			kindChip.className = "cred-kind";
-			kindChip.textContent = c.kind;
+			kindChip.textContent = credKindLabel(c);
+			if (c.type_id) {
+				kindChip.dataset.typeId = c.type_id;
+				kindChip.dataset.tip = "A custom type, whose fields are set in the edit dialog";
+			}
 			const kindSpec = CRED_KINDS[c.kind];
 			if (kindSpec) {
 				kindChip.dataset.tip = kindSpec.hint +
@@ -600,6 +909,11 @@ async function loadCredentials(keepPanel) {
 			secretChip.dataset.tip = c.needs_secret
 				? "No secret stored yet, so any run using this credential fails"
 				: "A secret is stored, encrypted at rest and never shown again";
+			if (kindSpec && kindSpec.federated) {
+				secretChip.textContent = "minted per run";
+				secretChip.dataset.tip = "Nothing is stored. Each run gets a short-lived identity token " +
+					"this server signs";
+			}
 			secret.appendChild(secretChip);
 			tr.appendChild(secret);
 			// The server computes used_by with the same reading its delete guard uses, across
@@ -702,9 +1016,34 @@ function renderNeedsSecret(creds) {
 		name.textContent = c.name;
 		const kind = document.createElement("span");
 		kind.className = "cred-needs-kind";
-		kind.textContent = c.kind;
+		kind.textContent = credKindLabel(c);
+		if (c.type_id) kind.dataset.typeId = c.type_id;
 		meta.appendChild(name);
 		meta.appendChild(kind);
+
+		// A custom type holds several fields sealed together, which one pasted secret cannot fill,
+		// so its row hands over to the edit dialog that draws each field.
+		if (c.type_id) {
+			const why = document.createElement("span");
+			why.className = "muted";
+			why.textContent = "Its type declares several fields, entered in the edit dialog.";
+			const open = document.createElement("button");
+			open.className = "button primary";
+			open.dataset.mutates = "true";
+			open.dataset.tip = "Click to enter this credential's field values";
+			open.textContent = "Set fields";
+			open.disabled = readOnly;
+			open.addEventListener("click", () => openCredentialEdit(c));
+			const note = document.createElement("span");
+			note.className = "cred-needs-status muted";
+			if (readOnly) note.textContent = readOnlyReason();
+			row.appendChild(meta);
+			row.appendChild(why);
+			row.appendChild(open);
+			row.appendChild(note);
+			list.appendChild(row);
+			continue;
+		}
 
 		const input = document.createElement("textarea");
 		input.className = "input mono cred-needs-input";
@@ -778,6 +1117,165 @@ function dropNeedsSecret(id) {
 		row.remove();
 		settleNeedsSecret(panel);
 	}
+}
+
+// relabelTypedKinds rewrites the kind of every typed credential already drawn in the table and the
+// panel, for the types arriving after the credentials did.
+function relabelTypedKinds() {
+	const drawn = document.querySelectorAll("#credentials [data-type-id], #cred-needs [data-type-id]");
+	for (const el of drawn) {
+		el.textContent = credKindLabel({ type_id: el.dataset.typeId });
+	}
+}
+
+// loadCredentialTypes fills the Credential types section and the custom options in the credential
+// dialog. Types are for admins and can be switched off, so a 403 or 404 hides the section without a
+// word: neither is something this page went wrong at.
+async function loadCredentialTypes() {
+	const section = document.getElementById("ctype-section");
+	if (!section) return;
+	if (!roleAtLeast("admin")) {
+		section.hidden = true;
+		return;
+	}
+	const status = document.getElementById("ctype-list-status");
+	let types;
+	try {
+		const data = await getJSON("/credential-types");
+		types = data.types || [];
+	} catch (err) {
+		if (err.status === 403 || err.status === 404) {
+			section.hidden = true;
+			return;
+		}
+		section.hidden = false;
+		if (status) status.textContent = "Failed to load credential types: " + err.message;
+		return;
+	}
+	credTypes = new Map(types.map((t) => [t.id, t]));
+	fillCredTypeOptions();
+	relabelTypedKinds();
+	renderCredTypes(types);
+	section.hidden = false;
+}
+
+// renderCredTypes draws the credential types table, one row per type with its fields, what it
+// injects, and Edit and Delete actions.
+function renderCredTypes(types) {
+	const tbody = document.getElementById("ctypes");
+	const table = document.getElementById("ctype-table");
+	const status = document.getElementById("ctype-list-status");
+	if (!tbody || !table) return;
+	tbody.textContent = "";
+	if (types.length === 0) {
+		table.hidden = true;
+		if (status) {
+			status.textContent = "No credential types yet. Define one to give a credential its own " +
+				"fields and injectors.";
+		}
+		return;
+	}
+	if (status) status.textContent = "";
+	for (const t of types) {
+		const tr = document.createElement("tr");
+		tr.appendChild(td(t.name));
+		tr.appendChild(td(credTypeFieldsSummary(t)));
+		tr.appendChild(td(credTypeInjects(t)));
+		const actions = document.createElement("td");
+		const del = document.createElement("button");
+		del.className = "button danger";
+		del.dataset.mutates = "true";
+		del.dataset.tip = "Click to delete this credential type permanently";
+		del.textContent = "Delete";
+		del.addEventListener("click", async (e) => {
+			e.preventDefault();
+			if (!window.confirm("Delete credential type " + t.name + "?")) return;
+			try {
+				await authedDelete("/credential-types/" + encodeURIComponent(t.id));
+				loadCredentialTypes();
+			} catch (err) {
+				if (status) status.textContent = "Delete failed: " + err.message;
+			}
+		});
+		actions.appendChild(editButton(() => openCredTypeEditor(t),
+			"Click to edit this credential type"));
+		actions.appendChild(document.createTextNode(" "));
+		actions.appendChild(del);
+		tr.appendChild(actions);
+		tbody.appendChild(tr);
+	}
+	table.hidden = false;
+}
+
+// openCredTypeEditor fills the type editor and shows it. A stored type is shown as the JSON it is
+// saved from, without the id, creation time, and origin the server assigns, and saves with PUT.
+// With no type the editor starts from an example and saves with POST.
+function openCredTypeEditor(t) {
+	const form = document.getElementById("ctype-form");
+	const box = document.getElementById("ctype-json");
+	if (t) {
+		form.dataset.editId = t.id;
+		const def = Object.assign({}, t);
+		delete def.id;
+		delete def.created_at;
+		delete def.origin;
+		box.value = JSON.stringify(def, null, 2);
+		setModalTitle("ctype", "Edit credential type");
+	} else {
+		delete form.dataset.editId;
+		box.value = CRED_TYPE_EXAMPLE;
+		setModalTitle("ctype", "Add a credential type");
+	}
+	document.getElementById("ctype-status").textContent = "";
+	document.getElementById("ctype-modal").hidden = false;
+}
+
+// wireCredentialTypes hooks the type editor up to POST /credential-types for a new type and PUT
+// /credential-types/{id} when editing. The definition is parsed here first, so malformed JSON is
+// reported without a request, and the server's own refusal is shown as it wrote it.
+function wireCredentialTypes() {
+	const form = document.getElementById("ctype-form");
+	if (!form) return;
+	const openBtn = document.getElementById("ctype-open");
+	if (openBtn) openBtn.addEventListener("click", () => openCredTypeEditor(null));
+	const submitBtn = form.querySelector('button[type="submit"]');
+	// inFlight drops a second submit while the first is still saving, the same guard the credential
+	// dialog uses, so a double click on Save creates the type once.
+	let inFlight = false;
+	form.addEventListener("submit", async (e) => {
+		e.preventDefault();
+		if (inFlight) return;
+		const status = document.getElementById("ctype-status");
+		let def;
+		try {
+			def = JSON.parse(document.getElementById("ctype-json").value);
+		} catch (err) {
+			status.textContent = "Invalid JSON: " + err.message;
+			return;
+		}
+		if (!def || typeof def !== "object" || Array.isArray(def)) {
+			status.textContent = "Invalid JSON: the definition must be an object.";
+			return;
+		}
+		const editId = form.dataset.editId;
+		inFlight = true;
+		if (submitBtn) submitBtn.disabled = true;
+		try {
+			if (editId) {
+				await postAction("/credential-types/" + encodeURIComponent(editId), def, "PUT");
+			} else {
+				await postAction("/credential-types", def);
+			}
+			status.textContent = "Saved.";
+			closeModal("ctype");
+			loadCredentialTypes();
+		} catch (err) {
+			status.textContent = "Save failed: " + err.message;
+		} finally {
+			inFlight = false;
+			if (submitBtn) submitBtn.disabled = false;
+		}
+	});
 }
 
 // fillSelect loads options into a select from a list endpoint.

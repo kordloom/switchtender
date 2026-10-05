@@ -5,14 +5,10 @@ package inventory
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/kordloom/switchtender/internal/idgen"
 )
-
-// ErrNotFound is returned when an inventory does not exist in the store.
-var ErrNotFound = errors.New("inventory not found")
 
 // Inventory is one stored inventory document, INI or YAML, exactly as Ansible reads it.
 type Inventory struct {
@@ -42,8 +38,40 @@ type Inventory struct {
 	// When set, members of the organization gain access to the inventory and, under strict grants, it
 	// is hidden from non-members who lack an explicit grant.
 	OrgID string `json:"org_id,omitempty"`
+	// Kind says how the inventory gets its hosts: empty for static content or a refreshed dynamic
+	// source, KindSmart for a host filter over other inventories, or KindConstructed for the
+	// constructed plugin run over a list of input inventories. A composed kind holds no content of
+	// its own and is resolved at every launch.
+	Kind string `json:"kind,omitempty"`
+	// HostFilter is a smart inventory's filter, in AWX host_filter syntax, over the hosts of every
+	// other inventory the launching actor may use.
+	HostFilter string `json:"host_filter,omitempty"`
+	// InputIDs are a constructed inventory's input inventories, in the order their content is read.
+	InputIDs []string `json:"input_inventory_ids,omitempty"`
+	// SourceVars is a constructed inventory's plugin options as YAML: strict, compose, groups, and
+	// keyed_groups, the same document AWX keeps as source_vars.
+	SourceVars string `json:"source_vars,omitempty"`
+	// Limit narrows a constructed inventory to the hosts an Ansible pattern matches, after its
+	// groups are built, so a limit may name a group the options construct.
+	Limit string `json:"limit,omitempty"`
 	// CreatedAt is when the inventory was created.
 	CreatedAt time.Time `json:"created_at"`
+}
+
+// Inventory kinds. The empty kind is a static or source-maintained inventory.
+const (
+	// KindStatic is an inventory whose hosts are its own content.
+	KindStatic = ""
+	// KindSmart is an inventory defined by a host filter over other inventories.
+	KindSmart = "smart"
+	// KindConstructed is an inventory built by the constructed plugin from input inventories.
+	KindConstructed = "constructed"
+)
+
+// Composed reports whether the inventory is resolved from other inventories at launch rather than
+// holding hosts of its own.
+func (i *Inventory) Composed() bool {
+	return i != nil && (i.Kind == KindSmart || i.Kind == KindConstructed)
 }
 
 // Store persists inventories. Implementations must be safe for concurrent use.

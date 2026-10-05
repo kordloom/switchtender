@@ -50,6 +50,17 @@ The operator role bounds what the door allows. An operator can submit, cancel, a
 launch templates. It cannot approve runs, manage configuration, or read the audit page. Approving a
 held run is admin-only, so an operator-bound agent can never approve its own work.
 
+Agents can propose changes. Only authorized humans can approve them. Separation of duties can
+require an independent human when policy demands it. An approval comes from a person's session or a
+person's own token, never from an agent's.
+
+That holds on two independent locks. The door caps an agent's token below the role every approval
+route needs. Behind it, the dispatcher refuses any approval whose decider is an agent, for a held run
+and for a workflow approval step alike, so a token that somehow reached the route still releases
+nothing and records nothing. Each lock is tested on its own, and a test that enumerates every path
+that can release work, the API, MCP, workflow steps, callbacks, relay proposals, and pull request
+review, fails the build when a new path appears without a test proving an agent cannot use it.
+
 ## Onboarding an agent
 
 1. Pick the person the agent answers to. Its token is bound to that person's account, so every
@@ -84,6 +95,10 @@ held run is admin-only, so an operator-bound agent can never approve its own wor
    run. That cap is enforced at the door, so it holds however the agent reaches the API, not only
    through the client below. `--agent` requires `--user`, because an agent acting on behalf of nobody
    is exactly the accountability gap the identity closes. The TTL forces rotation, here monthly.
+
+   The token records who minted it. An organization admin can provision an agent for somebody
+   else's account, so the account the agent acts under and the person who issued it can differ, and
+   every run the agent asks for records both.
 
    A public bind on an empty database already minted an initial admin token at first start, so
    authentication is on before the agent holds any credential. Make sure a human admin account
@@ -151,7 +166,8 @@ Protocol, which many agent runtimes speak natively. Put the operator-bound token
     switchtender mcp --server https://switchtender.internal
 
 The agent gets a small, deliberate set of tools: list job templates, propose a run, read a run and
-its log, pull a run's evidence dossier, and list recent runs. Every tool call is an ordinary
+its log, pull a run's evidence dossier, list recent runs, and list the workflow approval steps
+waiting for a person. Every tool call is an ordinary
 authenticated API request under that same token, so it passes the same authorization, the same
 approval policy, and the same fail-closed audit append as a call from a person. A proposed run lands
 in the chain under the agent's account before it executes, and a policy-covered run waits for a human
@@ -170,7 +186,9 @@ directly:
 - An agent cannot supply extra vars. Extra vars sit at Ansible's highest precedence, above everything
   the template and the inventory set, so an agent that could send them could rewrite what a vetted
   template does while the audit trail recorded the template's name. Survey answers are the supported
-  channel: the operator declares which fields a caller may fill, and the template says so.
+  channel: the operator declares which fields a caller may fill, and the template says so. That
+  includes a secret field, so an agent can supply a password a template asks for. The answer is
+  sealed at once, and no caller, the agent included, can read it back.
 - A `limit` can only narrow. A template that pins its own target refuses a different one, and a
   pattern meaning every host is refused outright, because the risk grade approval policies key on is
   computed partly from how wide a run reaches.
@@ -186,13 +204,23 @@ directly:
 
 A held run does not block the agent. The submission answers at once with the run, and the run's
 `status` says where it stands: `pending_approval` until a person decides, then it runs and ends
-`succeeded` or `failed`, or it ends `rejected` with the reason the person gave in `error`. The agent
+`succeeded` or `failed`, or it ends `rejected`, with `error` reading "rejected by an approver". The
+reason the person gave, when they gave one, is in `GET /v1/runs/{id}/decisions`, which the agent may
+read for a run it proposed, and in the run's evidence that the `get_run_evidence` tool returns. The
+agent
 learns the decision by reading the run again, with `GET /v1/runs/{id}` or the `get_run` tool, and
 `GET /v1/runs?status=pending_approval` lists everything still waiting. An agent that would rather
 not poll can stream the run instead: `POST /v1/runs/{id}/stream-ticket` returns a short-lived ticket,
 and `GET /v1/runs/{id}/stream?ticket=...` delivers the run's events as it is released, executes, and
 ends. Reading is all it can do about the decision: an agent that tries to approve its own run is
 refused with 403.
+
+A workflow the agent launched can also stop partway, at an approval step. The workflow's steps up
+to it run, and then it waits. `GET /v1/approvals`, or the `list_pending_approvals` tool, shows the
+step waiting, what already ran, and what an approval or a denial runs next, so the agent can tell a
+workflow waiting for a person from one that is stuck. It cannot approve or deny the step either: the
+decision route is an admin route, an agent's token never reaches it, and the dispatcher refuses an
+agent's approval a second time, the same lock it holds for a held run.
 
 The person who decides is told when the run is held: the chat channels and webhooks the server
 sends finished runs to also carry each hold, naming the rule that held it and who asked, and so
@@ -207,7 +235,17 @@ to wherever the approver already is.
 
 The actor on every chain entry the agent produces is its token's label, `agent-bot` above, and, for
 a token minted with `--agent`, the entry also carries `actor_type: agent` and `on_behalf_of` naming
-the human account behind it, `dev-lead` above. The chain hash commits to all three along with the
+the human account behind it, `dev-lead` above.
+
+Every run an agent asks for also records its identity evidence, committed with the run's outcome:
+initiated by, the agent, bound to, the account it acts under, and provisioned by, whoever minted its
+token. Each approval of it records approved by, the decider, and the separation-of-duties
+evaluation: whether a rule required an independent approver, the account that counts as the
+requester, which for an agent's run is the account it is bound to, whether the decider is
+independent of it, and the result. The account an agent is bound to may approve the agent's runs and
+workflows unless a separation-of-duties rule requires an independent approver, and then that account
+is refused as the requester. The dossier shows all of it in one section, and `switchtender verify`
+prints it from the receipt. The chain hash commits to all three along with the
 method, path, time, and sequence, so who acted, what kind of actor it was, and whose authority it
 used are part of what the chain proves, not fields someone could rewrite later. That is the
 difference between a log, which is the operator's word for what happened, and a signed chain, which
@@ -274,8 +312,10 @@ that proposes text and never executes, with anything runnable born held for a hu
 about an external agent, yours, that operates SwitchTender through the API the way a person would.
 The advisory AI is a feature you switch on; an agent is a client you let in.
 
-**Can the agent approve its own runs?** No. Approving a held run is admin-only, and the agent's
-token is operator-bound. A held run the agent submits waits for a human admin.
+**Can the agent approve its own runs?** No. Approving a held run is admin-only, the agent's token is
+operator-bound, and the dispatcher refuses an agent's approval even if one reached the route. A held
+run the agent submits waits for a human admin. The account the agent is bound to may be that admin,
+unless a separation-of-duties rule requires an independent approver.
 
 That answer is a claim, so it is also tested. [Red team: can an agent get a change past the
 gate?](agent-red-team.md) is the transcript of an agent holding an admin-role token trying

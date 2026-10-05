@@ -46,7 +46,7 @@ func createGrantHandler(store grant.Store, log *zap.Logger) http.HandlerFunc {
 		}
 		if !grant.ValidObject(req.Object) {
 			respondError(w, log, http.StatusBadRequest,
-				"object must be a proj_, tpl_, inv_, or cred_ id")
+				"object must be a proj_, tpl_, inv_, cred_, or ntf_ id")
 			return
 		}
 		if !grant.ValidAccess(req.Access) {

@@ -1,0 +1,4 @@
+web:
+  hosts:
+    - h1
+    - h2

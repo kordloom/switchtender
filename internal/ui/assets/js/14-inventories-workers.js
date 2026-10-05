@@ -8,6 +8,10 @@ async function loadInventories() {
 		}
 		const tbody = document.getElementById("inventories");
 		for (const i of inventories) {
+			if (i.kind) {
+				tbody.appendChild(composedInventoryRow(i));
+				continue;
+			}
 			const tr = document.createElement("tr");
 			tr.appendChild(td(i.name));
 			const parsed = parseInventory(i.content);
@@ -52,15 +56,85 @@ async function loadInventories() {
 				{ label: "Download", tip: "Download the inventory as a file", onClick: () =>
 					downloadBlob(i.name.replace(/\s+/g, "-") + (parsed.format === "yaml" ? ".yml" : ".ini"),
 						"text/plain", i.content || "") },
-			]);
+			].concat(roleAtLeast(factCacheReaderRole()) ? [
+				{ label: "Cached facts", tip: "The facts a template with the fact cache on kept for these hosts",
+					onClick: () => { closeDrill(); openInventoryFacts(i); } },
+			] : []));
 			tbody.appendChild(tr);
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
 		showListControls();
+		openRequestedPreview(inventories);
 	} catch (e) {
 		setStatus("Failed to load inventories: " + e.message);
 	}
+}
+
+// composedInventoryRow builds the table row for a smart or constructed inventory. It has no content
+// to count, since its hosts are resolved at each launch, so the row says so and offers a preview of
+// what a launch would reach right now.
+function composedInventoryRow(i) {
+	const tr = document.createElement("tr");
+	tr.appendChild(td(i.name));
+	const fmt = td("");
+	const chip = document.createElement("span");
+	chip.className = "tool-badge";
+	chip.textContent = i.kind;
+	chip.dataset.tip = i.kind === "smart"
+		? "Smart inventory: a host filter over the inventories the launching user may use"
+		: "Constructed inventory: the constructed plugin run over its input inventories";
+	fmt.appendChild(chip);
+	tr.appendChild(fmt);
+	const hostsCell = td("at launch");
+	hostsCell.dataset.tip = "Resolved when a run launches; the run records the hosts it reached";
+	tr.appendChild(hostsCell);
+	tr.appendChild(td("\u2014"));
+	tr.appendChild(tdTime(i.created_at));
+	const actions = deleteCell("/inventories/" + i.id, "inventory " + i.name, tr, "No inventories yet.");
+	actions.insertBefore(editButton(() => openInventoryEdit(i), "Click to edit this inventory's definition"), actions.firstChild);
+	tr.appendChild(actions);
+	const fields = [{ label: "Kind", value: i.kind }];
+	if (i.kind === "smart") {
+		fields.push({ label: "Host filter", value: i.host_filter, block: true });
+	} else {
+		fields.push({ label: "Inputs", value: (i.input_inventory_ids || []).join(", ") });
+		if (i.limit) fields.push({ label: "Limit", value: i.limit });
+		if (i.source_vars) fields.push({ label: "Plugin options", value: i.source_vars, block: true });
+	}
+	fields.push({ label: "Created", value: fmtTime(i.created_at) }, { label: "ID", value: i.id, copy: true });
+	inspectable(tr, i.name, fields, [
+		{ label: "Edit", primary: true, mutates: true, tip: "Click to edit this inventory", onClick: () => { closeDrill(); openInventoryEdit(i); } },
+		{ label: "Preview hosts", tip: "Resolve it now, as a launch by you would",
+			onClick: () => openInventoryPreview(i) },
+	]);
+	return tr;
+}
+
+// openInventoryPreview resolves a smart or constructed inventory now, as a launch by the reader
+// would, and shows the hosts it reaches in a drawer.
+async function openInventoryPreview(i) {
+	try {
+		const res = await postAction("/inventories/" + i.id + "/preview");
+		closeDrill();
+		inspectDrawer(i.name + ": hosts right now", [
+			{ label: "Hosts", value: String(res.count) },
+			{ label: "From", value: (res.inputs || []).map((x) => x.name).join(", ") },
+			{ label: "Names", value: (res.hosts || []).join("\n"), block: true },
+		], []);
+	} catch (err) {
+		setStatus("Preview failed: " + err.message);
+	}
+}
+
+// openRequestedPreview opens the host preview the page address names with ?preview=<id>. A launch
+// refused because its inventory matched no hosts links here, so the link lands on the hosts the
+// inventory reaches right now rather than on the whole list.
+function openRequestedPreview(inventories) {
+	const want = new URLSearchParams(location.search).get("preview");
+	if (!want) return;
+	const inv = inventories.find((x) => x.id === want);
+	if (inv && inv.kind) openInventoryPreview(inv);
 }
 
 // parseInterval reads a duration the way an operator writes one: 30s, 15m, 2h, or a bare number of

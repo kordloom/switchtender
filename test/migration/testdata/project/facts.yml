@@ -1,0 +1,20 @@
+---
+- name: Gather facts on request and report the facts the play sees
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Gather facts when asked
+      ansible.builtin.setup:
+      when: gather | default(false) | bool
+    - name: Plant a cacheable fact, read from a file so it is no launch input, when asked
+      ansible.builtin.set_fact:
+        scenario_canary: "{{ lookup('ansible.builtin.file', marker_dir + '/canary-source') }}"
+        cacheable: true
+      when: gather | default(false) | bool
+    - name: Record what the play sees
+      ansible.builtin.copy:
+        content: |
+          {{ ansible_facts.date_time.iso8601_micro | default('absent') }}
+          {{ ansible_facts.scenario_canary | default('absent') }}
+        dest: "{{ marker_dir }}/{{ marker_name | default('facts') }}-{{ inventory_hostname }}"
+        mode: "0600"

@@ -1,0 +1,8 @@
+---
+- name: The ship step of the release
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Append a line to the ship marker, one per execution
+      ansible.builtin.shell: echo "{{ inventory_hostname }}" >> "{{ marker_dir }}/ship-{{ inventory_hostname }}"
+      changed_when: true

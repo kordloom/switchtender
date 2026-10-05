@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kordloom/switchtender/internal/imageref"
 )
 
 // containerKillAttempts and containerKillInterval bound how persistently a canceled run tries to
@@ -76,10 +79,72 @@ func newContainerRunner(runtime, pullPolicy string, requireDigest bool, baseEnv 
 // Ansible, the events sidecar, so the run behaves like a host run while staying isolated. A canceled
 // context kills the container by name so a stopped run does not leak a container.
 func (c *containerRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Result, error) {
+	terraform := isTerraformTool(spec.Tool)
+	if terraform && !spec.DryRun && spec.PlanFile != "" && spec.AddSecrets != nil {
+		// Rendered first so the masker holds the plan's sensitive values before the apply prints
+		// anything. A plan that will not render is left for the apply to refuse.
+		if rendered, err := c.showPlan(ctx, spec, spec.PlanFile, out); err == nil {
+			spec.AddSecrets(PlanSensitiveValues(rendered))
+		}
+	}
+	res, err := c.runBuilt(ctx, spec, out, buildContainerPlan)
+	if terraform && spec.DryRun && spec.PlanOut != "" && err == nil && res.ExitCode == 0 {
+		c.readPlan(ctx, spec, out, &res)
+	}
+	return res, err
+}
+
+// readPlan reads back the plan a containerized dry run saved to spec.PlanOut, which sits in a host
+// directory mounted into the container, and renders it as JSON in a second container, storing both
+// on res. A plan that was not saved, or that will not render, is left off.
+func (c *containerRunner) readPlan(ctx context.Context, spec Spec, out io.Writer, res *Result) {
+	plan, err := os.ReadFile(spec.PlanOut)
+	if err != nil || len(plan) == 0 {
+		return
+	}
+	res.PlanFile = plan
+	rendered, err := c.showPlan(ctx, spec, spec.PlanOut, out)
+	if err != nil {
+		return
+	}
+	if spec.AddSecrets != nil {
+		spec.AddSecrets(PlanSensitiveValues(rendered))
+	}
+	res.PlanJSON = rendered
+}
+
+// showPlan renders a saved plan file as JSON inside spec's image. Its standard output is captured
+// and never reaches out, since it carries the plan's values in the clear.
+func (c *containerRunner) showPlan(ctx context.Context, spec Spec, planFile string,
+	out io.Writer) ([]byte, error) {
+	if err := c.validateRunImage(spec.Image); err != nil {
+		return nil, err
+	}
+	plan, cleanup, err := buildShowPlan(spec, planFile)
+	defer cleanup()
+	if err != nil {
+		return nil, err
+	}
+	var captured cappedCapture
+	res, err := c.runPlanTo(ctx, spec, plan, &captured, out)
+	if err != nil {
+		return nil, err
+	}
+	if res.ExitCode != 0 {
+		return nil, fmt.Errorf("%w: show exited %d", ErrLaunch, res.ExitCode)
+	}
+	return captured.bytes()
+}
+
+// runBuilt executes spec inside spec.Image with the container plan build produces for it. Run builds
+// the tool's own plan, and a module download builds the plan that runs only the tool's get, so both
+// share the image checks, the registry login, the environment file, the limits, and the cleanup.
+func (c *containerRunner) runBuilt(ctx context.Context, spec Spec, out io.Writer,
+	build func(Spec) (containerPlan, func(), error)) (Result, error) {
 	if err := c.validateRunImage(spec.Image); err != nil {
 		return Result{ExitCode: -1}, err
 	}
-	plan, cleanup, err := buildContainerPlan(spec)
+	plan, cleanup, err := build(spec)
 	// Deferred before the error is checked. The plan writes temp files for some tools and returns a
 	// usable cleanup even when it then fails, so checking first and deferring after left those files
 	// behind on exactly the path where something already went wrong.
@@ -87,7 +152,19 @@ func (c *containerRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Re
 	if err != nil {
 		return Result{ExitCode: -1}, err
 	}
+	return c.runPlan(ctx, spec, plan, out)
+}
 
+// runPlan runs plan inside spec's image: the registry login, the environment file, the mounts, and
+// the cancellation handling every container run shares.
+func (c *containerRunner) runPlan(ctx context.Context, spec Spec, plan containerPlan, out io.Writer) (Result, error) {
+	return c.runPlanTo(ctx, spec, plan, out, out)
+}
+
+// runPlanTo is runPlan with the container's standard output sent to stdout and everything else,
+// standard error and the runtime's own messages, sent to out.
+func (c *containerRunner) runPlanTo(ctx context.Context, spec Spec, plan containerPlan, stdout,
+	out io.Writer) (Result, error) {
 	// A registry login is scoped to this run.
 	//
 	// The runtime writes the credential into its config directory, and that directory was the
@@ -97,7 +174,7 @@ func (c *containerRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Re
 	// directory means the credential exists for the length of the run and is removed with it.
 	runEnv := c.baseEnv
 	if spec.RegistryUsername != "" {
-		configDir, cleanupConfig, err := newRuntimeConfigDir()
+		configDir, cleanupConfig, err := newRuntimeConfigDirIn(spec.RunDir)
 		if err != nil {
 			return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
 		}
@@ -125,10 +202,18 @@ func (c *containerRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Re
 	}
 
 	cmd := exec.CommandContext(ctx, c.runtime, args...)
-	cmd.Stdout = out
+	cmd.Stdout = stdout
 	cmd.Stderr = out
 	// The same config the login wrote to, so the pull this command performs can see it.
 	cmd.Env = runEnv
+	configureContainerClient(cmd)
+	// The container runs under the daemon, not under this process, so an executor killed outright
+	// left it running the play with nobody to remove it. The shim the client runs under stops and
+	// removes it by name when this process dies, the way a cancel does below.
+	orphaned := [][]string{
+		{cmd.Path, "stop", "--time", strconv.Itoa(int(containerStopGrace / time.Second)), name},
+		{cmd.Path, "rm", "-f", name},
+	}
 
 	// A canceled run must stop the container itself: killing the client leaves the container running
 	// under the daemon, so remove it by name. A cancel during a slow image pull can land before the
@@ -178,9 +263,9 @@ func (c *containerRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Re
 		}
 	}()
 
-	runErr := cmd.Run()
+	runErr := runSupervised(cmd, orphaned)
 	if runErr == nil {
-		return Result{ExitCode: 0}, nil
+		return Result{ExitCode: 0, ImageDigest: c.pulledDigest(spec.Image, runEnv)}, nil
 	}
 	if ctx.Err() != nil {
 		return Result{ExitCode: -1}, ctx.Err()
@@ -188,14 +273,60 @@ func (c *containerRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Re
 	var exitErr *exec.ExitError
 	if errors.As(runErr, &exitErr) {
 		code := exitErr.ExitCode()
+		digest := c.pulledDigest(spec.Image, runEnv)
 		// A Terraform or OpenTofu dry run uses plan -detailed-exitcode: exit 2 is a clean plan with
 		// pending changes, which is drift, not a failure.
 		if spec.DryRun && code == 2 && isTerraformTool(spec.Tool) {
-			return Result{ExitCode: 0, Drift: true}, nil
+			return Result{ExitCode: 0, Drift: true, ImageDigest: digest}, nil
 		}
-		return Result{ExitCode: code}, nil
+		return Result{ExitCode: code, ImageDigest: digest}, nil
 	}
 	return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, runErr)
+}
+
+// inspectTimeout bounds the runtime's answer about which image a run used.
+const inspectTimeout = 10 * time.Second
+
+// pulledDigest returns the digest of the image a container run executed in. A reference pinned by
+// digest is that digest: the runtime pulls content by its digest and refuses anything else. A tag is
+// asked of the runtime, which names the digest of the image it holds for the tag, the one the run
+// just pulled and ran. It returns the empty string when the runtime cannot say, which the outcome
+// records as no digest rather than a guess.
+func (c *containerRunner) pulledDigest(image string, env []string) string {
+	if _, digest, ok := strings.Cut(image, "@"); ok && strings.HasPrefix(digest, "sha256:") {
+		return digest
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), inspectTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, c.runtime, "image", "inspect", "--format", "{{json .RepoDigests}}",
+		image)
+	cmd.Env = env
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	var repoDigests []string
+	if err := json.Unmarshal(out, &repoDigests); err != nil {
+		return ""
+	}
+	name := image
+	if r, perr := imageref.Parse(image); perr == nil {
+		name = r.Name
+	}
+	pick := ""
+	for _, rd := range repoDigests {
+		repo, digest, ok := strings.Cut(rd, "@")
+		if !ok || !strings.HasPrefix(digest, "sha256:") {
+			continue
+		}
+		if repo == name {
+			return digest
+		}
+		if pick == "" {
+			pick = digest
+		}
+	}
+	return pick
 }
 
 // containerHome is the home directory a containerized tool is given. It is inside the container's
@@ -242,6 +373,7 @@ func (c *containerRunner) runArgs(spec Spec, plan containerPlan, name, envFile s
 	}
 
 	mounts := newMountSet()
+	mounts.private = spec.RunFilesRoot
 	var addErr error
 	addMount := func(path string, ro bool) {
 		if addErr == nil {
@@ -271,6 +403,19 @@ func (c *containerRunner) runArgs(spec Spec, plan containerPlan, name, envFile s
 	}
 	if addErr != nil {
 		return nil, addErr
+	}
+	// The run's private directory is an in-memory filesystem inside the container, mounted at the
+	// path it has on the host. The files staged for the run are bind mounted into it read-only, one
+	// by one, and everything a tool writes there, the cloud tool state pointed into it above all,
+	// stays in the container's memory: it never reaches the host's disk, including the container's
+	// own writable layer, which a crashed daemon can leave behind. The host side of the directory is
+	// removed by the executor as for any run, so nothing here waits on the container dying.
+	if spec.RunDir != "" {
+		tmpfs, err := c.secretsMount(spec.RunDir)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, "--tmpfs", tmpfs)
 	}
 	args = append(args, mounts.args()...)
 
@@ -304,6 +449,7 @@ func (c *containerRunner) writeEnvFile(spec Spec, extraEnv []string) (string, fu
 		}
 		env = append(env, callbackEnv(dir, spec.EventsPath)...)
 	}
+	env = append(env, factCacheEnv(spec.FactCacheDir)...)
 	// No environment means no file and no shell wrapper: a run that injects nothing runs the tool
 	// directly, so a container image without a shell is only a constraint for a run that has env to
 	// source, which in practice is every run that carries a credential.
@@ -317,7 +463,7 @@ func (c *containerRunner) writeEnvFile(spec Spec, extraEnv []string) (string, fu
 		return "", func() {}, nil
 	}
 
-	f, err := os.CreateTemp("", "switchtender-env-*")
+	f, err := os.CreateTemp(spec.RunDir, "switchtender-env-*")
 	if err != nil {
 		return "", func() {}, err
 	}
@@ -390,11 +536,20 @@ func (c *containerRunner) login(ctx context.Context, spec Spec, env []string, ou
 	return cmd.Run()
 }
 
-// newRuntimeConfigDir makes a private config directory for one run's registry login and returns it
-// with a cleanup that removes it. Both the Docker and Podman variable names point at it, so the
-// login lands there whichever runtime is configured.
+// newRuntimeConfigDir makes a private config directory for one run's registry login in the
+// temporary directory and returns it with a cleanup that removes it.
 func newRuntimeConfigDir() (string, func(), error) {
-	dir, err := os.MkdirTemp("", "switchtender-registry-*")
+	return newRuntimeConfigDirIn("")
+}
+
+// newRuntimeConfigDirIn makes a private config directory for one run's registry login inside
+// parent, the temporary directory when parent is empty, and returns it with a cleanup that removes
+// it. Both the Docker and Podman variable names point at it, so the login lands there whichever
+// runtime is configured. The runtime writes the registry password into it, so the run's private
+// directory is the parent, where a crash leaves it to the sweep rather than to the temporary
+// directory's cleaner.
+func newRuntimeConfigDirIn(parent string) (string, func(), error) {
+	dir, err := os.MkdirTemp(parent, "switchtender-registry-*")
 	if err != nil {
 		return "", func() {}, fmt.Errorf("create registry config dir: %w", err)
 	}
@@ -411,6 +566,8 @@ type mountSet struct {
 	seen map[string]bool
 	// specs holds the ordered docker -v arguments.
 	specs []string
+	// private is the run-files root, inside which a path is mountable wherever the root sits.
+	private string
 }
 
 // newMountSet returns an empty mount set.
@@ -425,7 +582,7 @@ func (m *mountSet) add(path string, ro bool) error {
 	if path == "" || m.seen[path] {
 		return nil
 	}
-	if err := checkMountPath(path); err != nil {
+	if err := checkMountPath(path); err != nil && !insidePrivateRoot(m.private, path) {
 		return err
 	}
 	m.seen[path] = true

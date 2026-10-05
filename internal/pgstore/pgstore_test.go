@@ -16,12 +16,18 @@ import (
 	"github.com/kordloom/switchtender/internal/authtest"
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/credtest"
+	"github.com/kordloom/switchtender/internal/factcache"
+	"github.com/kordloom/switchtender/internal/factcachetest"
+	"github.com/kordloom/switchtender/internal/federation"
+	"github.com/kordloom/switchtender/internal/federationtest"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/granttest"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/inventorytest"
 	"github.com/kordloom/switchtender/internal/invsource"
 	"github.com/kordloom/switchtender/internal/invsourcetest"
+	"github.com/kordloom/switchtender/internal/notification"
+	"github.com/kordloom/switchtender/internal/notificationtest"
 	"github.com/kordloom/switchtender/internal/org"
 	"github.com/kordloom/switchtender/internal/orgtest"
 	"github.com/kordloom/switchtender/internal/pgstore"
@@ -181,6 +187,20 @@ func TestCredentialStoreContract(t *testing.T) {
 	})
 }
 
+// TestFederationKeyStoreContract runs the signing key contract against PostgreSQL.
+func TestFederationKeyStoreContract(t *testing.T) {
+	dsn := testDSN(t)
+	db, err := pgstore.Open(dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	federationtest.KeyContract(t, func() federation.KeyStore {
+		truncateTable(t, dsn, "federation_keys")
+		return db.FederationKeys()
+	})
+}
+
 // truncateCredentials clears the credentials table between contract subtests.
 func truncateCredentials(t *testing.T, dsn string) {
 	truncateTable(t, dsn, "credentials")
@@ -280,6 +300,33 @@ func truncatePolicies(t *testing.T, dsn string) {
 	}
 }
 
+func TestFactCacheStoreContract(t *testing.T) {
+	dsn := testDSN(t)
+	db, err := pgstore.Open(dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	factcachetest.Contract(t, func() (factcache.Store, inventory.Store) {
+		truncateTable(t, dsn, "host_fact_cache")
+		truncateInventories(t, dsn)
+		return db.FactCache(), db.Inventories()
+	})
+}
+
+func TestInventoryDeleteClearsCachedFacts(t *testing.T) {
+	dsn := testDSN(t)
+	db, err := pgstore.Open(dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	truncateTable(t, dsn, "host_fact_cache")
+	truncateInventories(t, dsn)
+	factcachetest.InventoryCascade(t, db.Inventories(), db.FactCache())
+}
+
 func TestTemplateStoreContract(t *testing.T) {
 	dsn := testDSN(t)
 	db, err := pgstore.Open(dsn)
@@ -302,7 +349,7 @@ func truncateTemplates(t *testing.T, dsn string) {
 		t.Fatalf("open postgres: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	if _, err := db.Exec("TRUNCATE templates"); err != nil {
+	if _, err := db.Exec("TRUNCATE templates, awx_callback_bindings"); err != nil {
 		t.Fatalf("truncate templates: %v", err)
 	}
 }
@@ -386,6 +433,28 @@ func truncateSources(t *testing.T, dsn string) {
 	if _, err := db.Exec("TRUNCATE inventory_sources"); err != nil {
 		t.Fatalf("truncate inventory_sources: %v", err)
 	}
+}
+
+func TestNotificationStoreContract(t *testing.T) {
+	dsn := testDSN(t)
+	db, err := pgstore.Open(dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	notificationtest.Contract(t, func() notification.Store {
+		raw, err := sql.Open("pgx", dsn)
+		if err != nil {
+			t.Fatalf("open postgres: %v", err)
+		}
+		defer func() { _ = raw.Close() }()
+		if _, err := raw.Exec("TRUNCATE notification_targets, notification_attachments, " +
+			"notification_events, notification_deliveries"); err != nil {
+			t.Fatalf("truncate notification tables: %v", err)
+		}
+		return db.Notifications()
+	})
 }
 
 func TestTriggerStoreContract(t *testing.T) {

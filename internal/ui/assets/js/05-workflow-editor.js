@@ -31,6 +31,8 @@ function mountWorkflow() {
 	const wfSave = document.getElementById("wf-save-template");
 	if (wfSave) wfSave.addEventListener("click", saveWorkflowTemplate);
 	document.getElementById("wf-step-tool").addEventListener("change", syncStepFields);
+	const kindSelect = document.getElementById("wf-step-kind");
+	if (kindSelect) kindSelect.addEventListener("change", syncStepFields);
 	document.getElementById("wf-step-form").addEventListener("submit", saveStep);
 	document.getElementById("wf-step-delete").addEventListener("click", deleteStepFromModal);
 	document.getElementById("wf-step-draft-go").addEventListener("click", draftStep);
@@ -366,6 +368,19 @@ const WF_PATTERNS = [
 		links: [[0, 1], [0, 2], [1, 3], [2, 3]],
 	},
 	{
+		id: "approve",
+		title: "Build, approve, then ship",
+		summary: "The first step runs, the workflow waits for a person, and only then does it ship.",
+		detail: "An approval step pauses the workflow partway. Denying it stops the ship.",
+		diagram: [[1], [1], [1]],
+		steps: [
+			["build", null, 0, 0],
+			["approve", "approval", 1, 0],
+			["ship", null, 2, 0],
+		],
+		links: [[0, 1], [1, 2]],
+	},
+	{
 		id: "canary",
 		title: "Canary, then the fleet",
 		summary: "Ship to one host, verify it, then roll to the rest.",
@@ -401,6 +416,13 @@ function wfApplyPattern(id, tool) {
 	const target = (t) => (t === "ansible" ? "site.yml" : "");
 	wfState.nodes = pattern.steps.map(([name, stepTool, col, row], i) => {
 		const chosen = stepTool || tool;
+		if (chosen === "approval") {
+			return {
+				id: "n" + (wfState.seq + i), name, kind: "approval", tool: "approval",
+				x: 60 + col * WF_PATTERN_COL, y: 60 + row * WF_PATTERN_ROW,
+				description: "Approve the " + name + " before the workflow continues?", timeout: 0,
+			};
+		}
 		return {
 			id: "n" + (wfState.seq + i),
 			name,
@@ -608,9 +630,21 @@ function wfPoint(e) {
 	};
 }
 
+// isApprovalNode reports whether a canvas node is a step that waits for a person.
+function isApprovalNode(node) {
+	return !!node && node.kind === "approval";
+}
+
 // syncStepFields shows the playbook field for Ansible and the command field for the other tools.
-// The AI draft row appears only for the inline script tools, where a draft can fill the command.
+// The AI draft row appears only for the inline script tools, where a draft can fill the command. An
+// approval step runs no tool, so it shows what the approver decides and how long it waits instead.
 function syncStepFields() {
+	const kind = document.getElementById("wf-step-kind");
+	const approval = !!kind && kind.value === "approval";
+	const toolFields = document.getElementById("wf-step-tool-fields");
+	const approvalFields = document.getElementById("wf-step-approval-fields");
+	if (toolFields) toolFields.hidden = approval;
+	if (approvalFields) approvalFields.hidden = !approval;
 	const tool = document.getElementById("wf-step-tool").value;
 	const ansible = tool === "ansible";
 	document.getElementById("wf-step-playbook-field").hidden = !ansible;
@@ -664,7 +698,13 @@ function openStepModal(node) {
 	wfState.editing = node ? node.id : null;
 	document.getElementById("wf-step-status").textContent = "";
 	document.getElementById("wf-step-name").value = node ? node.name : "";
-	document.getElementById("wf-step-tool").value = node ? node.tool : "ansible";
+	const kind = document.getElementById("wf-step-kind");
+	if (kind) kind.value = isApprovalNode(node) ? "approval" : "";
+	const description = document.getElementById("wf-step-description");
+	if (description) description.value = isApprovalNode(node) ? (node.description || "") : "";
+	const timeout = document.getElementById("wf-step-timeout");
+	if (timeout) timeout.value = isApprovalNode(node) ? (node.timeout || 0) : 0;
+	document.getElementById("wf-step-tool").value = node && !isApprovalNode(node) ? node.tool : "ansible";
 	document.getElementById("wf-step-playbook").value = node ? node.playbook : "";
 	document.getElementById("wf-step-command").value = node ? node.command : "";
 	document.getElementById("wf-step-inventory").value = node ? node.inventory : "";
@@ -696,6 +736,11 @@ function saveStep(e) {
 	if (!name) { status.textContent = "Name is required."; return; }
 	const clash = wfState.nodes.some((n) => n.name === name && n.id !== wfState.editing);
 	if (clash) { status.textContent = "A step named " + name + " already exists."; return; }
+	const kindEl = document.getElementById("wf-step-kind");
+	if (kindEl && kindEl.value === "approval") {
+		saveApprovalStep(name);
+		return;
+	}
 	const fields = {
 		name, tool,
 		playbook: document.getElementById("wf-step-playbook").value.trim(),
@@ -713,10 +758,38 @@ function saveStep(e) {
 		status.textContent = "A " + tool + " step needs a command.";
 		return;
 	}
+	// A step that stops waiting for approval keeps no deny path: only an approval step has one.
+	commitStep(Object.assign({ kind: undefined, description: undefined, timeout: undefined }, fields));
+}
+
+// saveApprovalStep creates or updates a step that waits for a person. It runs no tool, so it carries
+// only what the approver is asked and how long it waits before taking its deny path.
+function saveApprovalStep(name) {
+	const status = document.getElementById("wf-step-status");
+	const timeout = parseInt(document.getElementById("wf-step-timeout").value, 10) || 0;
+	if (timeout < 0) {
+		status.textContent = "The timeout cannot be negative.";
+		return;
+	}
+	commitStep({
+		name, kind: "approval", tool: "approval",
+		description: document.getElementById("wf-step-description").value.trim(),
+		timeout,
+		playbook: "", command: "", inventory: "", dryRun: false, continueOnFailure: false, retries: 0,
+	});
+}
+
+// commitStep writes a saved step into the graph as one undo point, creating it or editing it in
+// place. A step that is no longer an approval step loses any deny path leaving it, since only an
+// approval step can be denied.
+function commitStep(fields) {
 	wfSnapshot();
 	if (wfState.editing) {
 		const node = wfState.nodes.find((n) => n.id === wfState.editing);
 		Object.assign(node, fields);
+		if (!isApprovalNode(node)) {
+			wfState.edges = wfState.edges.filter((e) => !(e.deny && e.from === node.id));
+		}
 	} else {
 		wfState.nodes.push(Object.assign({ id: "n" + (wfState.seq++) }, spawnPosition(), fields));
 	}
@@ -812,16 +885,21 @@ function renderNodes() {
 		el.dataset.id = node.id;
 		el.tabIndex = 0;
 		el.setAttribute("role", "group");
-		el.setAttribute("aria-label", node.name + ", " + node.tool +
-			" step. Enter edits, arrow keys move, L starts a link, Delete removes.");
-		const target = node.tool === "ansible" ? node.playbook : node.command;
+		const approval = isApprovalNode(node);
+		el.setAttribute("aria-label", approval
+			? node.name + ", approval step. Enter edits, arrow keys move, L links the approve path, " +
+				"D links the deny path, Delete removes."
+			: node.name + ", " + node.tool +
+				" step. Enter edits, arrow keys move, L starts a link, Delete removes.");
+		const target = approval ? node.description : (node.tool === "ansible" ? node.playbook : node.command);
 		el.innerHTML =
 			'<div class="wf-node-head"><span class="wf-node-name"></span>' +
 			'<button type="button" class="wf-node-del" aria-label="Delete step">&times;</button></div>' +
 			'<div class="wf-node-meta"><span class="wf-tool"></span><span class="wf-node-target mono"></span></div>' +
 			'<div class="wf-node-flags"></div>' +
 			'<span class="wf-handle wf-in" aria-hidden="true"></span>' +
-			'<span class="wf-handle wf-out" data-tip="Drag onto another step to make it wait for this one"></span>';
+			'<span class="wf-handle wf-out" data-tip="Drag onto another step to make it wait for this one"></span>' +
+			(approval ? '<span class="wf-handle wf-out-deny" data-tip="Drag onto a step to run it when this approval is denied or times out"></span>' : "");
 		el.querySelector(".wf-node-name").textContent = node.name;
 		el.querySelector(".wf-tool").textContent = node.tool;
 		el.querySelector(".wf-node-target").textContent = target || "";
@@ -839,6 +917,13 @@ function renderNodes() {
 		if (node.continueOnFailure) {
 			flag("continues", "warn", "A failure here does not stop the steps after it");
 		}
+		if (approval) {
+			flag("approval", "warn", "The workflow waits here until an admin approves or denies");
+			if (node.timeout > 0) {
+				flag("times out " + node.timeout + "s", "retry",
+					"Takes the deny path if nobody decides within " + node.timeout + " seconds");
+			}
+		}
 		if (node.retries > 0) {
 			flag("retry " + node.retries, "retry",
 				"Retried up to " + node.retries + " more " + (node.retries === 1 ? "time" : "times") +
@@ -847,6 +932,8 @@ function renderNodes() {
 		flags.hidden = !flags.children.length;
 		el.querySelector(".wf-node-del").addEventListener("click", (ev) => { ev.stopPropagation(); removeNode(node.id); });
 		el.querySelector(".wf-out").addEventListener("pointerdown", (ev) => startLink(ev, node.id));
+		const denyHandle = el.querySelector(".wf-out-deny");
+		if (denyHandle) denyHandle.addEventListener("pointerdown", (ev) => startLink(ev, node.id, true));
 		el.addEventListener("pointerdown", (ev) => startDrag(ev, node.id));
 		el.addEventListener("keydown", (ev) => nodeKey(ev, node.id));
 		layer.appendChild(el);
@@ -884,8 +971,9 @@ function nodeKey(e, id) {
 	if (e.key === "Enter" || e.key === " ") {
 		e.preventDefault();
 		if (wfState.linkFrom && wfState.linkFrom !== id) {
-			linkTo(wfState.linkFrom, id);
+			linkTo(wfState.linkFrom, id, wfState.linkDeny);
 			wfState.linkFrom = null;
+			wfState.linkDeny = false;
 			renderEdges();
 		} else {
 			openStepModal(node);
@@ -896,8 +984,15 @@ function nodeKey(e, id) {
 	} else if (e.key.toLowerCase() === "l") {
 		e.preventDefault();
 		wfState.linkFrom = id;
+		wfState.linkDeny = false;
 		wfSetStatus("Linking from " + node.name +
 			". Focus another step and press Enter to add the dependency. Escape cancels.", "");
+	} else if (e.key.toLowerCase() === "d" && isApprovalNode(node)) {
+		e.preventDefault();
+		wfState.linkFrom = id;
+		wfState.linkDeny = true;
+		wfSetStatus("Linking the deny path from " + node.name +
+			". Focus the step to run on a denial and press Enter. Escape cancels.", "");
 	} else if (e.key.startsWith("Arrow")) {
 		e.preventDefault();
 		wfSnapshot("move-" + id);
@@ -946,11 +1041,13 @@ function renderEdges() {
 		const d = edgeD(a.x + WF_CARD_W, a.y + WF_HANDLE_Y, b.x, b.y + WF_HANDLE_Y);
 		// A link takes the color of the step it leaves, so a fan-out is traceable back to its source
 		// at a glance instead of resolving into one flat tangle.
-		paths += '<path class="wf-edge' + (sel ? " wf-edge-selected" : "") + '" data-tool="' +
-			esc(a.tool) + '" d="' + d + '"/>';
-		paths += '<path class="wf-edge-hit" d="' + d + '" tabindex="0" role="button" ' +
+		const fromY = e.deny ? a.y + WF_DENY_Y : a.y + WF_HANDLE_Y;
+		const dd = e.deny ? edgeD(a.x + WF_CARD_W, fromY, b.x, b.y + WF_HANDLE_Y) : d;
+		paths += '<path class="wf-edge' + (e.deny ? " wf-edge-deny" : "") + (sel ? " wf-edge-selected" : "") +
+			'" data-tool="' + esc(a.tool) + '" d="' + dd + '"/>';
+		paths += '<path class="wf-edge-hit" d="' + dd + '" tabindex="0" role="button" ' +
 			'data-from="' + esc(e.from) + '" data-to="' + esc(e.to) + '" ' +
-			'aria-label="Dependency link, ' + esc(a.name) + ' into ' + esc(b.name) +
+			'aria-label="' + (e.deny ? "Deny path link, " : "Dependency link, ") + esc(a.name) + ' into ' + esc(b.name) +
 			'. Press Delete to remove it."/>';
 	}
 	if (wfState.link && wfState.link.cursor) {
@@ -962,6 +1059,10 @@ function renderEdges() {
 	}
 	svg.innerHTML = paths;
 }
+
+// WF_DENY_Y is where the deny handle of an approval step sits on its card, the anchor its deny path
+// edges leave from, so a deny path reads as its own line below the approve path.
+const WF_DENY_Y = 48;
 
 // esc escapes a value for interpolation into an attribute of markup built as a string, so a step name
 // carrying a quote or an angle bracket cannot break out of the attribute it sits in.
@@ -1026,11 +1127,12 @@ function startDrag(e, id) {
 	wfState.canvas.setPointerCapture(e.pointerId);
 }
 
-// startLink begins drawing a dependency edge out of a node's output handle.
-function startLink(e, id) {
+// startLink begins drawing a dependency edge out of a node's output handle, or a deny path edge out of
+// an approval step's deny handle.
+function startLink(e, id, deny) {
 	if (e.button !== 0 || !e.isPrimary) return;
 	e.stopPropagation();
-	wfState.link = { from: id, cursor: wfPoint(e) };
+	wfState.link = { from: id, cursor: wfPoint(e), deny: !!deny };
 	wfState.canvas.setPointerCapture(e.pointerId);
 }
 

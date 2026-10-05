@@ -29,7 +29,7 @@ func (p *pythonRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Resul
 	if spec.Command == "" {
 		return Result{ExitCode: -1}, ErrNoCommand
 	}
-	path, cleanup, err := writeScriptFile("switchtender-py-*.py", spec.Command)
+	path, cleanup, err := writeScriptFileIn(spec.RunDir, "switchtender-py-*.py", spec.Command)
 	if err != nil {
 		return Result{ExitCode: -1}, err
 	}

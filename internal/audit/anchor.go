@@ -3,6 +3,7 @@ package audit
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/kordloom/switchtender/internal/idgen"
@@ -41,6 +42,11 @@ var ErrAnchorShape = errors.New("unknown anchor shape")
 
 // ErrAnchorNotFound is returned when a named anchor does not exist.
 var ErrAnchorNotFound = errors.New("anchor not found")
+
+// ErrAnchorBeforeEntry is returned when a timestamp authority's token is dated before the entry it
+// covers by more than AnchorClockSkew. A verifier refuses such an anchor, and a refused anchor
+// fails every bundle and receipt drawn from the chain afterward, so it is never saved.
+var ErrAnchorBeforeEntry = errors.New("the timestamp authority's time precedes the entry it covers")
 
 // Anchor fixes one chain link in time somewhere outside this install.
 //
@@ -105,4 +111,30 @@ func ValidAnchorType(t string) bool {
 // ValidAnchorShape reports whether s is an anchor shape the format defines.
 func ValidAnchorShape(s string) bool {
 	return s == AnchorShapeLinear || s == AnchorShapeTree
+}
+
+// CheckAnchorTime refuses an anchor a verifier would refuse for its time: a timestamp token whose
+// authority time precedes entryAt, the recorded time of the entry the anchor covers, by more than
+// AnchorClockSkew. An anchor that carries no token is checked by fetching its reference and is
+// passed.
+//
+// The check runs before an anchor is saved. Every bundle carries every anchor at or below the range
+// it covers, so a saved anchor the verifier refuses turns every bundle and receipt drawn from the
+// chain afterward into a failure, over evidence nobody altered. The usual cause is a chain head
+// dated ahead of the authority's clock, which the operator can only learn from this refusal.
+func CheckAnchorTime(a *Anchor, entryAt time.Time) error {
+	if a == nil || a.Type != AnchorRFC3161 || a.Proof == "" || entryAt.IsZero() {
+		return nil
+	}
+	genTime, err := VerifyTimestampProofTime(a.Link, a.Proof)
+	if err != nil {
+		return fmt.Errorf("check anchor at %d: %w", a.Seq, err)
+	}
+	if genTime.IsZero() || !genTime.Before(entryAt.Add(-AnchorClockSkew)) {
+		return nil
+	}
+	return fmt.Errorf("%w: the authority dated its token %s and entry %d is recorded at %s, more "+
+		"than %s later, so a verifier would refuse this anchor and every bundle it reached",
+		ErrAnchorBeforeEntry, genTime.UTC().Format(time.RFC3339), a.Seq,
+		entryAt.UTC().Format(time.RFC3339), AnchorClockSkew)
 }

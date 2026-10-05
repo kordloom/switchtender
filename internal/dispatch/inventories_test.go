@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -98,7 +99,7 @@ func TestInventoryFileCommandSource(t *testing.T) {
 	}
 
 	d := &Dispatcher{inventories: store, sealer: sealer}
-	path, cleanup, _, err := d.inventoryFile(context.Background(), "inv_1")
+	path, cleanup, _, _, err := d.inventoryFile(context.Background(), "inv_1", nil)
 	defer cleanup()
 	if err != nil {
 		t.Fatalf("inventoryFile() error = %v", err)
@@ -259,5 +260,46 @@ func TestInventoryQueuePinning(t *testing.T) {
 				t.Errorf("Queue = %q, want %q", created.Queue, test.WantQueue)
 			}
 		})
+	}
+}
+
+// TestInventoryFileIsPrivate pins that a run's inventory is written into a directory of its own.
+// Ansible reads group_vars and host_vars directories beside an inventory file, so a file written
+// straight into the shared temporary directory took the variables any account had left there. The
+// directory is a run directory, so beside the inventory it holds only the run directory's own lock
+// and heartbeat counter, which no Ansible inventory plugin reads.
+func TestInventoryFileIsPrivate(t *testing.T) {
+	t.Parallel()
+	store := inventory.NewMemStore()
+	if err := store.Save(context.Background(), &inventory.Inventory{
+		ID: "inv_1", Name: "prod", Content: "[web]\nhost1\n",
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	d := &Dispatcher{inventories: store}
+	path, cleanup, _, _, err := d.inventoryFile(context.Background(), "inv_1", nil)
+	if err != nil {
+		t.Fatalf("inventoryFile() error = %v", err)
+	}
+	dir := filepath.Dir(path)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir() error = %v", err)
+	}
+	var others []string
+	for _, e := range entries {
+		if e.Name() != filepath.Base(path) && e.Name() != ".lock" && e.Name() != ".beat" {
+			others = append(others, e.Name())
+		}
+	}
+	if len(others) > 0 || dir == filepath.Clean(os.TempDir()) {
+		t.Errorf("the inventory shares %s with %v", dir, others)
+	}
+	if st, err := os.Stat(dir); err != nil || st.Mode().Perm() != 0o700 {
+		t.Errorf("the inventory's directory is not private: %v %v", st.Mode(), err)
+	}
+	cleanup()
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("cleanup left the directory behind: %v", err)
 	}
 }

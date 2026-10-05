@@ -66,6 +66,8 @@ func TestEveryLaterColumnIsHealable(t *testing.T) {
 		"audit_entries.at (TEXT NOT NULL)",
 		"audit_entries.method (TEXT NOT NULL)",
 		"audit_entries.path (TEXT NOT NULL)",
+		"awx_callback_bindings.created_at (TEXT NOT NULL)",
+		"awx_callback_bindings.updated_at (TEXT NOT NULL)",
 		"credential_types.name (TEXT NOT NULL)",
 		"credentials.created_at (TEXT NOT NULL)",
 		"credentials.kind (TEXT NOT NULL)",
@@ -85,10 +87,38 @@ func TestEveryLaterColumnIsHealable(t *testing.T) {
 		"host_facts_history.facts (TEXT NOT NULL)",
 		"host_facts_history.gathered_at (TEXT NOT NULL)",
 		"host_facts_history.run_id (TEXT NOT NULL)",
+		// host_fact_cache arrived whole on 2026-10-01 as a new table, so CREATE TABLE IF NOT EXISTS
+		// builds it complete on an upgraded database and the healer never has an ALTER to perform.
+		"host_fact_cache.facts (TEXT NOT NULL)",
+		"host_fact_cache.host (TEXT NOT NULL)",
+		"host_fact_cache.modified_at (TEXT NOT NULL)",
 		"inventories.content (TEXT NOT NULL)",
 		"inventories.created_at (TEXT NOT NULL)",
 		"inventory_sources.created_at (TEXT NOT NULL)",
 		"inventory_sources.source (TEXT NOT NULL)",
+		// The two notification tables arrived whole on 2026-10-01 as new tables, so CREATE TABLE IF
+		// NOT EXISTS builds them complete on an upgraded database and the healer never has an ALTER
+		// to perform. Original-era by construction, like host_facts_history above.
+		"notification_attachments.created_at (TEXT NOT NULL)",
+		"notification_attachments.event (TEXT NOT NULL)",
+		"notification_attachments.notification_id (TEXT NOT NULL)",
+		"notification_attachments.object_id (TEXT NOT NULL)",
+		"notification_attachments.object_kind (TEXT NOT NULL)",
+		// The notification event and delivery tables arrived whole on 2026-10-01 as new tables, so
+		// CREATE TABLE IF NOT EXISTS builds them complete on an upgraded database and the healer
+		// never has an ALTER to perform. Original-era by construction, like the two above.
+		"notification_deliveries.created_ms (INTEGER NOT NULL)",
+		"notification_deliveries.event (TEXT NOT NULL)",
+		"notification_deliveries.run_id (TEXT NOT NULL)",
+		"notification_deliveries.seq (INTEGER NOT NULL)",
+		"notification_deliveries.status (TEXT NOT NULL)",
+		"notification_events.created_ms (INTEGER NOT NULL)",
+		"notification_events.dedupe_key (TEXT NOT NULL)",
+		"notification_events.event (TEXT NOT NULL)",
+		"notification_events.seq (INTEGER NOT NULL)",
+		"notification_events.snapshot (TEXT NOT NULL)",
+		"notification_targets.created_at (TEXT NOT NULL)",
+		"notification_targets.kind (TEXT NOT NULL)",
 		"org_members.user_id (TEXT NOT NULL)",
 		"orgs.created_at (TEXT NOT NULL)",
 		"policies.created_at (TEXT NOT NULL)",

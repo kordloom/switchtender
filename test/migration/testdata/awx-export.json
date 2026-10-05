@@ -1,0 +1,215 @@
+{
+  "organizations": [{"name": "Platform"}],
+  "credential_types": [
+    {
+      "name": "Service Token File",
+      "description": "A service token the client library reads from a file",
+      "kind": "cloud",
+      "managed": false,
+      "inputs": {
+        "fields": [
+          {"id": "endpoint", "type": "string", "label": "Endpoint"},
+          {"id": "token", "type": "string", "label": "Token", "secret": true}
+        ],
+        "required": ["endpoint", "token"]
+      },
+      "injectors": {
+        "file": {"template": "endpoint={{ endpoint }}\ntoken={{ token }}"},
+        "env": {"SERVICE_TOKEN_FILE": "{{ tower.filename }}"}
+      },
+      "natural_key": {"name": "Service Token File", "kind": "cloud", "type": "credential_type"}
+    },
+    {
+      "name": "Cluster Kubeconfig",
+      "description": "A kubeconfig the kubernetes.core collection reads from a file",
+      "kind": "cloud",
+      "managed": false,
+      "inputs": {
+        "fields": [
+          {"id": "kube_config", "type": "string", "label": "Kubeconfig", "secret": true,
+           "multiline": true}
+        ],
+        "required": ["kube_config"]
+      },
+      "injectors": {
+        "file": {"template": "{{ kube_config }}"},
+        "env": {"K8S_AUTH_KUBECONFIG": "{{ tower.filename }}"}
+      }
+    },
+    {
+      "name": "Legacy Bundle",
+      "description": "A bundle written to a file whose path no injector hands over",
+      "kind": "cloud",
+      "managed": false,
+      "inputs": {
+        "fields": [
+          {"id": "host", "type": "string", "label": "Host"},
+          {"id": "bundle", "type": "string", "label": "Bundle", "secret": true, "multiline": true}
+        ]
+      },
+      "injectors": {
+        "file": {"template": "{{ bundle }}"},
+        "env": {"BUNDLE_HOST": "{{ host }}"}
+      }
+    }
+  ],
+  "credentials": [
+    {"name": "svc-token", "organization": {"name": "Platform"},
+     "credential_type": {"name": "Service Token File", "kind": "cloud"},
+     "inputs": {"endpoint": "https://svc.example.invalid", "token": "$encrypted$"}},
+    {"name": "cluster-kube", "organization": {"name": "Platform"},
+     "credential_type": {"name": "Cluster Kubeconfig", "kind": "cloud"},
+     "inputs": {"kube_config": "$encrypted$"}},
+    {"name": "edge-bundle", "organization": {"name": "Platform"},
+     "credential_type": {"name": "Legacy Bundle", "kind": "cloud"},
+     "inputs": {"host": "edge.example.invalid", "bundle": "$encrypted$"}}
+  ],
+  "projects": [
+    {"name": "infra", "organization": {"name": "Platform"}, "scm_type": "git",
+     "scm_url": "__REPO_URL__", "scm_branch": "main"}
+  ],
+  "notification_templates": [
+    {"name": "ops webhook", "organization": {"name": "Platform"},
+     "notification_type": "webhook", "description": "tells ops about rotations",
+     "notification_configuration": {"url": "__NOTIFY_URL__", "headers": {},
+       "http_method": "POST", "username": "", "password": "", "disable_ssl_verification": false}}
+  ],
+  "inventory": [
+    {"name": "fleet", "organization": {"name": "Platform"},
+     "variables": {"ansible_connection": "local",
+                   "ansible_python_interpreter": "{{ ansible_playbook_python }}"},
+     "related": {
+       "hosts": [
+         {"name": "web1", "variables": {"ansible_host": "10.20.0.11"}},
+         {"name": "web2", "variables": {"ansible_host": "10.20.0.12"}},
+         {"name": "db1", "variables": {"ansible_host": "10.20.0.21", "state": "shutdown"}}
+       ],
+       "groups": [
+         {"name": "web", "related": {"hosts": [{"name": "web1"}, {"name": "web2"}]}},
+         {"name": "db", "related": {"hosts": [{"name": "db1"}]}}
+       ]
+     }},
+    {"name": "edge", "organization": {"name": "Platform"},
+     "variables": {"ansible_connection": "local",
+                   "ansible_python_interpreter": "{{ ansible_playbook_python }}"},
+     "related": {
+       "hosts": [
+         {"name": "edge1", "variables": {"ansible_host": "10.30.0.11"}},
+         {"name": "edge-canary", "variables": {"ansible_host": "10.30.0.12", "state": "shutdown"}}
+       ],
+       "groups": [
+         {"name": "web", "related": {"hosts": [{"name": "edge1"}, {"name": "edge-canary"}]}}
+       ]
+     }},
+    {"name": "web everywhere", "kind": "smart", "organization": {"name": "Platform"},
+     "host_filter": "groups__name=web and not name__icontains=canary"},
+    {"name": "shut down", "kind": "constructed", "organization": {"name": "Platform"},
+     "related": {
+       "input_inventories": [{"name": "fleet"}, {"name": "edge"}],
+       "inventory_sources": [{"name": "shut down", "source": "constructed",
+         "source_vars": "strict: false\ngroups:\n  off: state | default('running') == 'shutdown'\n",
+         "limit": "off"}]
+     }}
+  ],
+  "job_templates": [
+    {"name": "rotate db password", "organization": {"name": "Platform"},
+     "project": {"name": "infra"}, "playbook": "survey.yml", "inventory": {"name": "fleet"},
+     "limit": "web1", "extra_vars": "marker_dir: __MARKER_DIR__\n", "survey_enabled": true,
+     "related": {
+       "survey_spec": {"spec": [
+         {"question_name": "New database password", "variable": "db_password",
+          "type": "password", "required": true}
+       ]},
+       "notification_templates_success": [{"name": "ops webhook", "type": "notification_template"}],
+       "notification_templates_error": [{"name": "ops webhook", "type": "notification_template"}]
+     }},
+    {"name": "use service token", "organization": {"name": "Platform"},
+     "project": {"name": "infra"}, "playbook": "token.yml", "inventory": {"name": "fleet"},
+     "limit": "web1", "extra_vars": "marker_dir: __MARKER_DIR__\n",
+     "related": {"credentials": [{"name": "svc-token", "organization": {"name": "Platform"}}]}},
+    {"name": "show kubeconfig", "organization": {"name": "Platform"},
+     "project": {"name": "infra"}, "playbook": "kube.yml", "inventory": {"name": "fleet"},
+     "limit": "web1", "extra_vars": "marker_dir: __MARKER_DIR__\n",
+     "related": {"credentials": [{"name": "cluster-kube", "organization": {"name": "Platform"}}]}},
+    {"name": "use bundle", "organization": {"name": "Platform"},
+     "project": {"name": "infra"}, "playbook": "mark.yml", "inventory": {"name": "fleet"},
+     "limit": "web1", "extra_vars": "marker_dir: __MARKER_DIR__\nmarker_name: bundle\n",
+     "related": {"credentials": [{"name": "edge-bundle", "organization": {"name": "Platform"}}]}},
+    {"name": "smart mark", "organization": {"name": "Platform"},
+     "project": {"name": "infra"}, "playbook": "mark.yml", "inventory": {"name": "web everywhere"},
+     "extra_vars": "marker_dir: __MARKER_DIR__\nmarker_name: smart\n"},
+    {"name": "constructed mark", "organization": {"name": "Platform"},
+     "project": {"name": "infra"}, "playbook": "mark.yml", "inventory": {"name": "shut down"},
+     "extra_vars": "marker_dir: __MARKER_DIR__\nmarker_name: constructed\n"},
+    {"name": "build", "organization": {"name": "Platform"},
+     "project": {"name": "infra"}, "playbook": "build.yml", "inventory": {"name": "fleet"},
+     "limit": "web1", "extra_vars": "marker_dir: __MARKER_DIR__\n"},
+    {"name": "ship", "organization": {"name": "Platform"},
+     "project": {"name": "infra"}, "playbook": "ship.yml", "inventory": {"name": "fleet"},
+     "limit": "web1", "extra_vars": "marker_dir: __MARKER_DIR__\n"},
+    {"name": "page", "organization": {"name": "Platform"},
+     "project": {"name": "infra"}, "playbook": "page.yml", "inventory": {"name": "fleet"},
+     "limit": "web1", "extra_vars": "marker_dir: __MARKER_DIR__\n"},
+    {"name": "monthly report", "organization": {"name": "Platform"},
+     "project": {"name": "infra"}, "playbook": "mark.yml", "inventory": {"name": "fleet"},
+     "limit": "web1", "extra_vars": "marker_dir: __MARKER_DIR__\nmarker_name: monthly\n",
+     "related": {"schedules": [
+       {"name": "last friday close",
+        "rrule": "DTSTART;TZID=Europe/London:20260130T170000 RRULE:FREQ=MONTHLY;BYDAY=-1FR",
+        "enabled": true}
+     ]}},
+    {"name": "heartbeat", "organization": {"name": "Platform"},
+     "project": {"name": "infra"}, "playbook": "mark.yml", "inventory": {"name": "fleet"},
+     "limit": "web1", "extra_vars": "marker_dir: __MARKER_DIR__\nmarker_name: heartbeat\n",
+     "related": {"schedules": [
+       {"name": "half past every minute",
+        "rrule": "DTSTART:20260101T000030Z RRULE:FREQ=MINUTELY;INTERVAL=1;BYSECOND=30",
+        "enabled": false}
+     ]}},
+    {"name": "provision", "organization": {"name": "Platform"},
+     "project": {"name": "infra"}, "playbook": "mark.yml", "inventory": {"name": "fleet"},
+     "extra_vars": "marker_dir: __MARKER_DIR__\nmarker_name: provision\n",
+     "allow_callbacks": true, "host_config_key": "__HOST_CONFIG_KEY__"},
+    {"name": "gather facts", "organization": {"name": "Platform"},
+     "project": {"name": "infra"}, "playbook": "facts.yml", "inventory": {"name": "fleet"},
+     "limit": "web1", "extra_vars": "marker_dir: __MARKER_DIR__\n", "use_fact_cache": true},
+    {"name": "preview forced", "organization": {"name": "Platform"},
+     "project": {"name": "infra"}, "playbook": "forcing.yml", "inventory": {"name": "fleet"},
+     "limit": "web1", "job_type": "check", "extra_vars": "marker_dir: __MARKER_DIR__\n"},
+    {"name": "preview clean", "organization": {"name": "Platform"},
+     "project": {"name": "infra"}, "playbook": "mark.yml", "inventory": {"name": "fleet"},
+     "limit": "web1", "job_type": "check",
+     "extra_vars": "marker_dir: __MARKER_DIR__\nmarker_name: clean\n"},
+    {"name": "cloud deploy", "organization": {"name": "Platform"},
+     "project": {"name": "infra"}, "playbook": "cloud.yml", "inventory": {"name": "fleet"},
+     "limit": "web1", "extra_vars": "marker_dir: __MARKER_DIR__\n"},
+    {"name": "cleanup probe", "organization": {"name": "Platform"},
+     "project": {"name": "infra"}, "playbook": "cleanup.yml", "inventory": {"name": "fleet"},
+     "limit": "web1", "extra_vars": "marker_dir: __MARKER_DIR__\n", "use_fact_cache": true,
+     "related": {"credentials": [{"name": "svc-token", "organization": {"name": "Platform"}}]}}
+  ],
+  "workflow_job_templates": [
+    {"name": "release", "organization": {"name": "Platform"},
+     "workflow_nodes": [
+       {"identifier": "build", "unified_job_template": {"name": "build"},
+        "related": {"success_nodes": [{"identifier": "approve"}]}},
+       {"identifier": "approve",
+        "related": {"success_nodes": [{"identifier": "ship"}], "failure_nodes": [{"identifier": "page"}],
+          "create_approval_template": {"name": "Approve the release",
+            "description": "Check the build before it ships", "timeout": 0}}},
+       {"identifier": "ship", "unified_job_template": {"name": "ship"}},
+       {"identifier": "page", "unified_job_template": {"name": "page"}}
+     ]},
+    {"name": "release with deadline", "organization": {"name": "Platform"},
+     "workflow_nodes": [
+       {"identifier": "build", "unified_job_template": {"name": "build"},
+        "related": {"success_nodes": [{"identifier": "approve"}]}},
+       {"identifier": "approve",
+        "related": {"success_nodes": [{"identifier": "ship"}], "failure_nodes": [{"identifier": "page"}],
+          "create_approval_template": {"name": "Approve before the deadline",
+            "description": "Unanswered approvals page the on-call", "timeout": 2}}},
+       {"identifier": "ship", "unified_job_template": {"name": "ship"}},
+       {"identifier": "page", "unified_job_template": {"name": "page"}}
+     ]}
+  ]
+}

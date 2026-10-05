@@ -111,8 +111,11 @@ func TestTypedCredentialWithoutTypesConfiguredFails(t *testing.T) {
 	}
 	// Credentials configured, but no type store.
 	d := &Dispatcher{credentials: creds, sealer: sealer}
-	_, _, err = d.materializeCredentials(ctx,
+	cleanup, _, err := d.materializeCredentials(ctx,
 		&run.Run{ID: "run_1", CredentialIDs: []string{"cred_x"}}, &roundhouse.Spec{})
+	// The run's private directory exists before any credential is opened, so even a refusal hands
+	// back a cleanup that has something to remove.
+	defer cleanup()
 	if err == nil {
 		t.Error("a credential naming an unresolvable type materialized with no error, so it would " +
 			"run authenticating with nothing")

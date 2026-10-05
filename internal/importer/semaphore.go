@@ -461,17 +461,6 @@ func (p *Plan) semaphoreTemplate(tmpl semaphoreTemplate, repoIDs, inventoryIDs m
 		}
 	}
 	for _, v := range tmpl.SurveyVars {
-		// Semaphore prompts for a secret variable and stores it obscured. A survey field here is plain
-		// text whose answer is kept on the run and injected as an extra var, so importing one would
-		// turn a secret prompt into a value stored in the clear on every run of this template, in its
-		// record, its exports, and the evidence drawn from it. The AWX importer refuses its equivalent
-		// for the same reason; this one silently did the downgrade.
-		if strings.EqualFold(v.Type, "secret") {
-			p.warn("survey variable %q of template %q prompts for a secret and was NOT imported. "+
-				"Store its value as a credential instead: importing it as a survey field would keep "+
-				"the answer in plain text on every run.", v.Name, tmpl.Name)
-			continue
-		}
 		obj.Survey = append(obj.Survey, template.SurveyField{
 			Var: v.Name, Label: v.Title, Type: mapSemaphoreVarType(v.Type),
 			Required: v.Required, Choices: enumChoices(v.Values),
@@ -686,7 +675,10 @@ func (p *Plan) addSemaphoreKeys(proj semaphoreProject, now time.Time) map[string
 
 // mapSemaphoreVarType converts a Semaphore survey variable type to a SwitchTender field type.
 func mapSemaphoreVarType(varType string) template.FieldType {
-	switch varType {
+	switch strings.ToLower(varType) {
+	case "secret":
+		// Semaphore stores a secret variable's answer obscured, and a secret field seals it.
+		return template.FieldSecret
 	case "int":
 		return template.FieldInt
 	case "enum":

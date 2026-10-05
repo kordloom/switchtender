@@ -1,0 +1,12 @@
+# Host keys with ports and ranges, a host in two groups, and variables set twice.
+web:
+  hosts:
+    web[01:03]:
+      tier: web
+    lb.example.com:8443:
+    "[2001:db8::2]:443":
+db:
+  hosts:
+    web01:
+      tier: db
+    db[a:b]:

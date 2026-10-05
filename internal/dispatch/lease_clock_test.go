@@ -43,14 +43,14 @@ func (s *skewedClockStore) Claim(ctx context.Context, owner string, queues []str
 	return r, nil
 }
 
-// TransitionStatusAndClaim stamps the lease from the store's clock, the way the real stores do
-// inside the fenced start. Modeling it matters because the fence made this a lease-stamping path:
-// without the override the embedded memstore stamps claimed_at from this process's clock, which is
-// the very skew the surrounding test exists to catch, so the fake would manufacture the defect the
+// StartClaimed stamps the lease from the store's clock, the way the real stores do inside the
+// fenced start. Modeling it matters because the fence made this a lease-stamping path: without the
+// override the embedded memstore stamps claimed_at from this process's clock, which is the very
+// skew the surrounding test exists to catch, so the fake would manufacture the defect the
 // production stores do not have.
-func (s *skewedClockStore) TransitionStatusAndClaim(ctx context.Context, id string,
-	from, to run.Status, owner string, startedAt time.Time) (bool, error) {
-	moved, err := s.Store.TransitionStatusAndClaim(ctx, id, from, to, owner, startedAt)
+func (s *skewedClockStore) StartClaimed(ctx context.Context, id, owner, secret string,
+	startedAt time.Time) (bool, error) {
+	moved, err := s.Store.StartClaimed(ctx, id, owner, secret, startedAt)
 	if err != nil || !moved {
 		return moved, err
 	}

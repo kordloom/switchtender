@@ -63,6 +63,16 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
 		{{end}}
 	</dl>
 
+	{{if .Resolution}}
+	<h2>Hosts the inventory resolved to at launch</h2>
+	<p class="sub">This run targeted a {{.Resolution.Kind}} inventory, which is evaluated when a run launches rather than stored. These are the hosts it resolved to for the person who launched it{{if .Resolution.Inputs}}, drawn from <span class="mono">{{.Resolution.Inputs}}</span>{{end}}. The run was held to this set, and the set is part of the spec the chain commits.</p>
+	<div class="scroll"><table>
+		<tr><th>Host</th></tr>
+		{{range .Resolution.Hosts}}<tr><td class="mono">{{.}}</td></tr>
+		{{end}}
+	</table></div>
+	{{end}}
+
 	{{if .NoReceipt}}
 	<p class="sub">No recorded request created this run, so there is no launch entry to redeem. A run
 	the scheduler started on its own, or one created before receipts were kept, reads this way. A run
@@ -74,6 +84,37 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
 	<div class="scroll"><table>
 		<tr><th>Decision</th><th>Actor</th><th>When</th><th>Chain entry</th></tr>
 		{{range .Decisions}}<tr><td>{{.Role}}</td><td>{{if .Actor}}{{.Actor}}{{else}}none recorded{{end}}{{if .OnBehalfOf}} on behalf of {{.OnBehalfOf}}{{end}}</td><td>{{.At}}</td><td class="mono">{{.Seq}}</td></tr>
+		{{end}}
+	</table></div>
+	{{end}}
+
+	{{if .Tokens}}
+	<h2>Identity tokens issued</h2>
+	<p class="sub">Each federated credential handed this run a short-lived identity token. The key id is the signing key's public thumbprint, the kid a cloud verified the token against, and the chain entry records it before the token left the server. Neither the token nor any key material is recorded.</p>
+	<div class="scroll"><table>
+		<tr><th>Run</th><th>Credential</th><th>Signing key</th><th>Token id</th><th>Valid until</th><th>Chain entry</th></tr>
+		{{range .Tokens}}<tr><td class="mono">{{.Run}}</td><td class="mono">{{.Credential}}</td><td class="mono">{{.KeyID}}</td><td class="mono">{{.TokenID}}</td><td>{{.Expires}}</td><td class="mono">{{.Seq}}</td></tr>
+		{{end}}
+	</table></div>
+	{{end}}
+
+	{{if .Identity}}
+	<h2>Agent identity</h2>
+	<p class="sub">An AI agent asked for this run. Agents can propose changes. Only authorized humans can approve them. Separation of duties can require an independent human when policy demands it.</p>
+	<dl class="meta">
+		<dt>Initiated by</dt><dd>{{.Identity.InitiatedBy}} (agent)</dd>
+		<dt>Bound to</dt><dd>{{.Identity.BoundTo}}</dd>
+		<dt>Provisioned by</dt><dd>{{.Identity.ProvisionedBy}}</dd>
+		<dt>Approved by</dt><dd>{{.Identity.ApprovedBy}}</dd>
+	</dl>
+	{{end}}
+
+	{{if .Reasons}}
+	<h2>Decisions and the reasons given</h2>
+	<p class="sub">A reason is audit evidence. The chain holds a commitment to it, SHA-256 over the RFC 8785 canonical object of the event id, the random value, and the reason, so anyone holding these three values checks it against the chain with no secret. A reason is never edited: a correction follows the decision it corrects. A redacted reason's commitment stays on the chain and can no longer be opened.</p>
+	<div class="scroll"><table>
+		<tr><th>Decision</th><th>By</th><th>When</th><th>Reason</th><th>Commitment inputs</th></tr>
+		{{range .Reasons}}<tr><td>{{if .Correction}}&#8627; {{end}}{{.Kind}}{{if .Step}} (step <span class="mono">{{.Step}}</span>){{end}}</td><td>{{.Actor}}</td><td>{{.At}}</td><td>{{if .Redacted}}<em>{{.Redacted}}</em>{{else if .Reason}}{{.Reason}}{{if .Masked}} <em>(masked for known secrets before storage)</em>{{end}}{{else}}<span class="sub">no reason given</span>{{end}}{{if .SoD}}<br><span class="sub">{{.SoD}}</span>{{end}}</td><td class="mono">{{if .Commitment}}event {{.Event}}<br>{{if .Random}}random {{.Random}}<br>{{end}}commitment {{.Commitment}}{{end}}</td></tr>
 		{{end}}
 	</table></div>
 	{{end}}

@@ -78,13 +78,26 @@ type ReversibilityEvidence struct {
 //
 // The order matters and runs from strongest evidence to weakest. What actually happened beats what
 // a file says will happen, which beats what a command line looks like.
+//
+// A dry run is reversible only when it changes nothing. One the gate did not find change free, such
+// as one whose playbook forces tasks to run for real under check mode or whose configuration runs a
+// program while it plans, is graded as the real run it may be, and the grade says why.
 func AssessReversibilityFrom(r *Run, ev ReversibilityEvidence) Reversibility {
 	if r == nil {
 		return Reversibility{Class: Reversible}
 	}
-	if r.DryRun {
+	if r.ChangeFree() {
 		return Reversibility{Class: Reversible, Reasons: []string{"dry run, changes nothing to undo"}}
 	}
+	out := assessChange(r, ev)
+	if why := r.NotChangeFreeSummary(); why != "" {
+		out.Reasons = append([]string{why}, out.Reasons...)
+	}
+	return out
+}
+
+// assessChange grades a run that may change something, from the strongest evidence available.
+func assessChange(r *Run, ev ReversibilityEvidence) Reversibility {
 	// A plan read before the apply says what it removes, which no command line naming a directory
 	// can. A destroyed resource comes back only as a new one, empty of whatever the old one held.
 	if reason := plannedDestroys(r); reason != "" {

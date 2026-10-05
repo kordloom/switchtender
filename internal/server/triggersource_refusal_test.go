@@ -34,6 +34,11 @@ func (s *stubTriggers) Save(context.Context, *trigger.Trigger) error { return s.
 // save error, since a stamp is a write.
 func (s *stubTriggers) TouchFired(context.Context, string, time.Time) error { return s.saveErr }
 
+// RecordRefusal reports the configured save error, since recording a refusal is a write too.
+func (s *stubTriggers) RecordRefusal(context.Context, string, time.Time, string) error {
+	return s.saveErr
+}
+
 // Get answers with the fixed trigger, its configured error, or trigger.ErrNotFound.
 func (s *stubTriggers) Get(context.Context, string) (*trigger.Trigger, error) {
 	if s.getErr != nil {

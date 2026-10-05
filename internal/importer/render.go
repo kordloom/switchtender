@@ -54,13 +54,16 @@ func Render(out io.Writer, format, source string, a Assessment) {
 	g := a.Governance
 	fmt.Fprintf(out, "What changes about how it is governed\n")
 	renderGates(out, g.ApprovalGates)
+	renderCarriedGates(out, g.CarriedGates)
 	switch {
 	case g.Templates == 0 && len(g.ApprovalGates) > 0:
 		// The gates above are something to govern, so the export is not one with nothing to gate.
+		renderComposed(out, g.Composed)
 		fmt.Fprintf(out, "  This export holds no templates to grade, so the approval gates above are\n"+
 			"  the whole of what changes about how it is governed.\n\n")
 		return
 	case g.Templates == 0:
+		renderComposed(out, g.Composed)
 		fmt.Fprintf(out, "  This export holds no templates, so there is nothing here to gate. What\n"+
 			"  it brings is the estate itself, which is what later runs are governed against.\n\n")
 		return
@@ -88,6 +91,7 @@ func Render(out io.Writer, format, source string, a Assessment) {
 	for _, n := range capList(g.NoInventory, 6) {
 		fmt.Fprintf(out, "      - %s\n", n)
 	}
+	renderComposed(out, g.Composed)
 	fmt.Fprintln(out)
 
 	if g.Unread > 0 {
@@ -145,8 +149,30 @@ func renderGates(out io.Writer, gates []string) {
 		waits, does = "workflows wait", "Those gates do"
 	}
 	fmt.Fprintf(out, "  %d %s for a person at an approval node today. %s not\n"+
-		"  come across: approval here is a policy that holds a run before it starts, so write\n"+
-		"  one before the workflow is rebuilt, or it runs with no gate.\n", len(gates), waits, does)
+		"  come across: the node runs other work whatever the approver decides, which an\n"+
+		"  approval step cannot express, so rebuild the gate on the Workflows page as an\n"+
+		"  approval step before the workflow runs, or it runs with no gate.\n",
+		len(gates), waits, does)
+	for _, n := range capList(gates, 6) {
+		fmt.Fprintf(out, "      - %s\n", n)
+	}
+	fmt.Fprintln(out)
+}
+
+// renderCarriedGates names the approvals the estate has today that the import keeps, so a reader
+// who knows the estate is gated is told the gate survives rather than left to assume it does not.
+func renderCarriedGates(out io.Writer, gates []string) {
+	if len(gates) == 0 {
+		return
+	}
+	waits, comes := "workflow waits", "That gate comes"
+	if len(gates) > 1 {
+		waits, comes = "workflows wait", "Those gates come"
+	}
+	fmt.Fprintf(out, "  %d %s for a person at an approval node today. %s\n"+
+		"  across as an approval step: the workflow still stops there until an approver\n"+
+		"  decides, a denial or a timeout takes its failure path, and every request and\n"+
+		"  decision is recorded in the audit chain.\n", len(gates), waits, comes)
 	for _, n := range capList(gates, 6) {
 		fmt.Fprintf(out, "      - %s\n", n)
 	}
@@ -188,10 +214,10 @@ func HeadlineOf(a Assessment) Headline {
 				Text: "This export holds no templates, so there is nothing here to gate."}
 		case 1:
 			return Headline{Kind: "gap", Text: gateSentence(gates) +
-				" Write an approval policy before it is rebuilt, or it runs with no gate."}
+				" Rebuild it with an approval step before it runs, or it runs with no gate."}
 		default:
 			return Headline{Kind: "gap", Text: gateSentence(gates) +
-				" Write an approval policy before they are rebuilt, or they run with no gate."}
+				" Rebuild them with approval steps before they run, or they run with no gate."}
 		}
 	}
 
@@ -221,7 +247,22 @@ func HeadlineOf(a Assessment) Headline {
 		h.Kind = "gap"
 		h.Text += " " + gateSentence(gates)
 	}
+	if carried := len(g.CarriedGates); carried > 0 {
+		h.Text += " " + carriedSentence(carried)
+	}
 	return h
+}
+
+// carriedSentence says how many workflows wait on an approval node that the move keeps as an
+// approval step. It is said beside the templates, never instead of them, and it changes no verdict:
+// a gate kept is the governance the estate already had, not a gap and not a new control.
+func carriedSentence(n int) string {
+	if n == 1 {
+		return "1 workflow waits for a person at an approval node, and that gate comes across as " +
+			"an approval step."
+	}
+	return fmt.Sprintf("%d workflows wait for a person at an approval node, and those gates come "+
+		"across as approval steps.", n)
 }
 
 // gateSentence says how many workflows wait on an approval node that the move does not carry.
@@ -232,4 +273,17 @@ func gateSentence(n int) string {
 	}
 	return fmt.Sprintf("%d workflows wait for a person at an approval node today, and those gates "+
 		"do not come across.", n)
+}
+
+// renderComposed names the smart and constructed inventories that come across, and what a run
+// against one records that the same job in AWX did not. It prints nothing when there are none.
+func renderComposed(out io.Writer, composed []string) {
+	if len(composed) == 0 {
+		return
+	}
+	fmt.Fprintf(out, "  %-22s %6d   resolved at each launch; every run records the hosts it reached\n",
+		"composed inventories", len(composed))
+	for _, n := range capList(composed, 6) {
+		fmt.Fprintf(out, "      - %s\n", n)
+	}
 }

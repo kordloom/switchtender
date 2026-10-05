@@ -274,11 +274,20 @@ function clipLabel(text) {
 	return one.length > 48 ? one.slice(0, 47) + "…" : one;
 }
 
+// notChangeFree reports whether the gate's scan of a run found something that runs work for real,
+// or could not read all of what the run executes: an Ansible task that sets check_mode to false, a
+// Terraform external data source, or a module or role it could not read.
+function notChangeFree(run) {
+	const scans = Array.isArray(run.dry_run_scans) ? run.dry_run_scans : [];
+	return scans.some((s) => (s.findings && s.findings.length) || (s.unread && s.unread.length));
+}
+
 // KIND_TIPS explains each run kind and tool chip on hover.
 const KIND_TIPS = {
 	pipeline: "A multi-step pipeline. Each step runs after the one before it and can pass outputs on",
 	split: "Split into shards across the inventory, balanced by each host's measured duration",
 	dry: "A dry run. Reports what would change without applying anything",
+	noted: "A policy recorded a warning on this run without holding it",
 	ansible: "Runs an Ansible playbook",
 	bash: "Runs a Bash script",
 	terraform: "Runs Terraform",
@@ -291,7 +300,7 @@ const KIND_TIPS = {
 // SOURCE_LABELS names each provenance source in the interface.
 const SOURCE_LABELS = {
 	api: "API", manual: "Manual", template: "Template", schedule: "Schedule",
-	rerun: "Rerun", reconcile: "Drift fix", propose: "Proposed",
+	rerun: "Rerun", reconcile: "Drift fix", propose: "Proposed", review: "PR plan",
 };
 
 // originCellEl renders what fired a run: a chip naming the source, linked to the object behind
@@ -355,6 +364,7 @@ function originTip(r) {
 	case "reconcile": return "Proposed to fix drift found by a check. Open the check";
 	case "propose": return "Proposed from a description, held for approval";
 	case "api": return "Submitted directly through the API";
+	case "review": return "Planned from a pull request by a review trigger. Nothing was applied";
 	default: return "How this run was started";
 	}
 }
@@ -428,12 +438,24 @@ function typeCellEl(r) {
 		if (KIND_TIPS[tool]) chip.dataset.tip = KIND_TIPS[tool];
 		cell.appendChild(chip);
 	}
-	for (const kind of [r.kind === "split" ? "split" : "", (r.kind === "pipeline" || stepped) ? "pipeline" : "", r.dry_run ? "dry" : ""]) {
+	// A run a policy noted went ahead past a warning, so it is marked where runs are scanned rather
+	// than only on its own page, and the mark names the first warning.
+	const notes = Array.isArray(r.policy_notes) ? r.policy_notes : [];
+	for (const kind of [r.kind === "split" ? "split" : "", (r.kind === "pipeline" || stepped) ? "pipeline" : "", r.dry_run ? "dry" : "", notes.length ? "noted" : ""]) {
 		if (!kind) continue;
 		const tag = document.createElement("span");
 		tag.className = "run-kind " + kind;
 		tag.textContent = kind;
 		tag.dataset.tip = KIND_TIPS[kind];
+		// A dry run the gate did not find change free is not the preview the tip promises, so it
+		// says what it is instead.
+		if (kind === "dry" && notChangeFree(r)) {
+			tag.dataset.tip = "A dry run the gate did not find change free: it may run some work for real";
+		}
+		if (kind === "noted") {
+			tag.dataset.tip = KIND_TIPS.noted + ": " + notes[0] +
+				(notes.length > 1 ? ", and " + (notes.length - 1) + " more" : "");
+		}
 		cell.appendChild(document.createTextNode(" "));
 		cell.appendChild(tag);
 	}

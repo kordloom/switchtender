@@ -189,7 +189,9 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 		dispatch.WithAudits(bundle.Audits()),
 		dispatch.WithClock(seedClock.Now),
 		dispatch.WithNoJanitor(),
-		dispatch.WithPolicies(bundle.Policies()))
+		dispatch.WithPolicies(bundle.Policies()),
+		dispatch.WithDecisions(bundle.Decisions()),
+		dispatch.WithPresence(bundle.Attention()))
 	defer disp.Close()
 
 	if demoNoSeed && demoSeedOnly {
@@ -284,7 +286,11 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 			server.WithInventories(bundle.Inventories()),
 			server.WithCredentials(bundle.Credentials(), sealer),
 			server.WithInventorySources(bundle.InventorySources(), disp),
+			server.WithInventoryPreviewer(disp),
 			server.WithTriggers(bundle.Triggers(), sealer),
+			server.WithNotificationTargets(bundle.Notifications()),
+			server.WithFactCache(bundle.FactCache()),
+			server.WithAttention(attentionSource(bundle, nil)),
 			server.WithTeams(bundle.Teams()),
 			// The users page asks for organizations, so without this the demo answered 404 on a
 			// page a visitor is invited to open, and showed no organizations at all. Serve wires
@@ -297,6 +303,7 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 			server.WithPolicies(bundle.Policies()),
 			server.WithUsers(bundle.Users()),
 			server.WithApprover(disp),
+			server.WithDecisions(bundle.Decisions()),
 			server.WithDocs(docsFS),
 			server.WithReadOnly(true), server.WithDemo(true)).Handler(),
 		// The same timeouts serve sets. The demo is the one process actually exposed to the public

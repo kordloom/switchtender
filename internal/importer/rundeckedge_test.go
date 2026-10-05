@@ -4,6 +4,11 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
+
+	"github.com/kordloom/switchtender/internal/template"
 )
 
 // rundeckPlan runs one Rundeck YAML document through the importer and fails the test if it does not
@@ -375,6 +380,7 @@ func TestRundeckStructuredScheduleFields(t *testing.T) {
 		Name         string
 		Schedule     string
 		WantCron     string
+		WantRRule    string
 		WantWarning  string
 		WantImported bool
 	}{
@@ -404,10 +410,11 @@ func TestRundeckStructuredScheduleFields(t *testing.T) {
 			Schedule: "    time:\n      hour: '2'\n      minute: '0'\n" +
 				"    weekday:\n      day: '2'\n",
 			WantCron: "0 2 * * 1", WantImported: true}, // Test 7: Quartz Monday is two.
-		{Name: "last weekday refused",
+		{Name: "last weekday comes across as a recurrence",
 			Schedule: "    time:\n      hour: '2'\n      minute: '0'\n" +
 				"    weekday:\n      day: '6L'\n",
-			WantWarning: "has no cron equivalent"}, // Test 8.
+			WantImported: true,
+			WantRRule:    "RRULE:FREQ=MONTHLY;BYDAY=-1FR;BYHOUR=2;BYMINUTE=0;BYSECOND=0"}, // Test 8.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -422,6 +429,10 @@ func TestRundeckStructuredScheduleFields(t *testing.T) {
 				}
 				if got := plan.Schedules[0].Cron; got != test.WantCron {
 					t.Errorf("cron = %q, want %q", got, test.WantCron)
+				}
+				if got := plan.Schedules[0].RRule; !strings.HasSuffix(got, test.WantRRule) ||
+					(test.WantRRule == "") != (got == "") {
+					t.Errorf("rrule = %q, want it to end %q", got, test.WantRRule)
 				}
 			} else if len(plan.Schedules) != 0 {
 				t.Errorf("schedules = %d, want 0", len(plan.Schedules))
@@ -577,9 +588,9 @@ func TestRundeckSurveyOptionShapes(t *testing.T) {
 	}
 }
 
-// TestRundeckSecureOptionIsNeverDowngradedToPlainText pins the refusal. Rundeck stores a secure
-// option obscured while a survey answer is kept in the clear on every run, in its record and in the
-// evidence drawn from it, so importing one is a downgrade the operator never asked for.
+// TestRundeckSecureOptionIsNeverDowngradedToPlainText pins the mapping. Rundeck stores a secure
+// option obscured, so it imports as a secret field, never as text. Its default comes from Rundeck's
+// key storage, which an export does not carry, so it is left behind, named, and never repeated.
 func TestRundeckSecureOptionIsNeverDowngradedToPlainText(t *testing.T) {
 	t.Parallel()
 	const doc = `- name: j
@@ -593,12 +604,15 @@ func TestRundeckSecureOptionIsNeverDowngradedToPlainText(t *testing.T) {
       - exec: /bin/x
 `
 	plan := rundeckPlan(t, "prod", doc)
-	survey := plan.Templates[0].Survey
-	if len(survey) != 1 || survey[0].Var != "env" {
-		t.Fatalf("survey = %+v, want only the non-secret option", survey)
+	want := []template.SurveyField{
+		{Var: "token", Label: "token", Type: template.FieldSecret},
+		{Var: "env", Label: "env", Type: template.FieldText},
 	}
-	if _, ok := warningContaining(t, plan.Warnings, `option "token"`, "NOT imported"); !ok {
-		t.Errorf("the secure option was not named.\nwarnings: %v", plan.Warnings)
+	if diff := cmp.Diff(want, plan.Templates[0].Survey, cmpopts.EquateEmpty()); diff != "" {
+		t.Fatalf("survey mismatch (-want +got):\n%s", diff)
+	}
+	if _, ok := warningContaining(t, plan.Warnings, `secret field "token" arrives without its default`); !ok {
+		t.Errorf("the default left behind was not named.\nwarnings: %v", plan.Warnings)
 	}
 	for _, w := range plan.Warnings {
 		if strings.Contains(w, "s3cret-default") {

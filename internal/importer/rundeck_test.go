@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kordloom/switchtender/internal/template"
 )
 
 // testNow is the fixed time imported objects are stamped with.
@@ -88,12 +90,12 @@ func TestFromRundeckJob(t *testing.T) {
 	}
 }
 
-// TestFromRundeckSecureOptionRefused proves a secure option is never imported as a survey field.
+// TestFromRundeckSecureOptionImportsAsSecret proves a secure option imports as a secret field.
 //
-// Rundeck keeps a secure option's value obscured. A survey field here is plain text whose answer is
-// stored on the run and injected as an extra var, so importing one would quietly turn a password
-// prompt into a stored plaintext value. The importer must drop it and say so.
-func TestFromRundeckSecureOptionRefused(t *testing.T) {
+// Rundeck keeps a secure option's value obscured. A secret field seals its answer with the
+// credential key and never keeps it on the run in plain text, so the option comes across with its
+// protection rather than being dropped or downgraded to text.
+func TestFromRundeckSecureOptionImportsAsSecret(t *testing.T) {
 	t.Parallel()
 	export := `
 - name: Rotate
@@ -113,22 +115,15 @@ func TestFromRundeckSecureOptionRefused(t *testing.T) {
 	if len(plan.Templates) != 1 {
 		t.Fatalf("templates = %d, want 1", len(plan.Templates))
 	}
-	for _, f := range plan.Templates[0].Survey {
-		if f.Var == "db_password" {
-			t.Fatal("a secure option was imported as a survey field, which stores the secret in plain text")
-		}
+	survey := plan.Templates[0].Survey
+	if len(survey) != 2 || survey[0].Var != "db_password" || survey[0].Type != template.FieldSecret ||
+		!survey[0].Required {
+		t.Fatalf("survey = %+v, want db_password as a required secret field beside region", survey)
 	}
-	if len(plan.Templates[0].Survey) != 1 {
-		t.Errorf("survey fields = %d, want only the non-secure one", len(plan.Templates[0].Survey))
-	}
-	var told bool
 	for _, w := range plan.Warnings {
-		if strings.Contains(w, "db_password") && strings.Contains(w, "secure") {
-			told = true
+		if strings.Contains(w, "db_password") {
+			t.Errorf("the secure option is still reported as left out: %s", w)
 		}
-	}
-	if !told {
-		t.Errorf("dropping the secure option was not reported; warnings = %v", plan.Warnings)
 	}
 }
 

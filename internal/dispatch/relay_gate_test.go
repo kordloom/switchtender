@@ -90,7 +90,8 @@ func TestProposeApplyForFacesTheSameRulesAsASubmit(t *testing.T) {
 				policies = append(policies, test.Policy)
 			}
 
-			got, _, err := ProposeApplyFor(ctx, store, policies, plan, test.Destroys, test.Read)
+			got, _, err := ProposeApplyFor(ctx, store, policies, plan, test.Destroys, test.Read,
+				"sealed-plan-file")
 			if !errors.Is(err, test.Want) {
 				t.Fatalf("ProposeApplyFor() error = %v, want %v", err, test.Want)
 			}
@@ -164,14 +165,14 @@ func TestProposeApplyForMakesOnlyOneApplyPerPlan(t *testing.T) {
 		t.Fatalf("Save(plan) error = %v", err)
 	}
 
-	first, created, err := ProposeApplyFor(ctx, store, nil, plan, 2, true)
+	first, created, err := ProposeApplyFor(ctx, store, nil, plan, 2, true, "sealed-plan-file")
 	if err != nil {
 		t.Fatalf("ProposeApplyFor(first) error = %v", err)
 	}
 	if !created {
 		t.Error("the first proposal reports it was not created, so it would never be announced")
 	}
-	second, created, err := ProposeApplyFor(ctx, store, nil, plan, 2, true)
+	second, created, err := ProposeApplyFor(ctx, store, nil, plan, 2, true, "sealed-plan-file")
 	if err != nil {
 		t.Fatalf("ProposeApplyFor(second) error = %v", err)
 	}
@@ -201,7 +202,8 @@ func TestProposeApplyForMakesOnlyOneApplyPerPlan(t *testing.T) {
 // defaults would apply an empty spec.
 func TestProposeApplyForRefusesWithoutAPlan(t *testing.T) {
 	t.Parallel()
-	got, _, err := ProposeApplyFor(context.Background(), run.NewMemStore(), nil, nil, 0, true)
+	got, _, err := ProposeApplyFor(context.Background(), run.NewMemStore(), nil, nil, 0, true,
+		"sealed-plan-file")
 	if err == nil {
 		t.Fatal("ProposeApplyFor reported success with no plan run")
 	}

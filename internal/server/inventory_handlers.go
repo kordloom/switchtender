@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/user"
@@ -38,6 +39,58 @@ type createInventoryRequest struct {
 	// an update rather than un-owning the record, and leaves a create unowned. A present empty
 	// string is the explicit "move this out of its organization".
 	OrgID *string `json:"org_id,omitempty"`
+	// Kind is empty for an inventory with hosts of its own, smart for a host filter over other
+	// inventories, or constructed for the constructed plugin over input inventories.
+	Kind string `json:"kind,omitempty"`
+	// HostFilter is a smart inventory's filter, in AWX host_filter syntax.
+	HostFilter string `json:"host_filter,omitempty"`
+	// InputIDs are a constructed inventory's input inventories, in order.
+	InputIDs []string `json:"input_inventory_ids,omitempty"`
+	// SourceVars are a constructed inventory's plugin options as YAML.
+	SourceVars string `json:"source_vars,omitempty"`
+	// Limit narrows a constructed inventory to the hosts an Ansible pattern matches.
+	Limit string `json:"limit,omitempty"`
+}
+
+// composed reports whether the request defines a smart or constructed inventory.
+func (req createInventoryRequest) composed() bool {
+	return req.Kind == inventory.KindSmart || req.Kind == inventory.KindConstructed
+}
+
+// applyComposition copies the request's composition onto i and validates the result, returning a
+// message and status to answer with, or empty when the inventory is consistent. A constructed
+// inventory's inputs must exist and hold hosts of their own.
+func applyComposition(ctx context.Context, store inventory.Store, req createInventoryRequest,
+	i *inventory.Inventory) (string, int) {
+	i.Kind, i.HostFilter, i.SourceVars, i.Limit = req.Kind, strings.TrimSpace(req.HostFilter),
+		req.SourceVars, strings.TrimSpace(req.Limit)
+	i.InputIDs = append([]string(nil), req.InputIDs...)
+	if err := inventory.Validate(i); err != nil {
+		return err.Error(), http.StatusBadRequest
+	}
+	for _, id := range i.InputIDs {
+		in, err := store.Get(ctx, id)
+		if errors.Is(err, inventory.ErrNotFound) {
+			return "input inventory " + id + " not found", http.StatusBadRequest
+		}
+		if err != nil {
+			return "could not read input inventory", http.StatusInternalServerError
+		}
+		if in.Composed() {
+			return "input inventory " + in.Name + " is itself a " + in.Kind +
+					" inventory; a constructed inventory reads inventories that hold hosts of their own",
+				http.StatusBadRequest
+		}
+	}
+	return "", 0
+}
+
+// denyInputs refuses a constructed inventory naming an input the caller may not use, reporting
+// whether it answered the request. Naming an inventory as an input reaches its hosts at every
+// launch, the same reach a run naming it directly has, so it asks the same question.
+func denyInputs(w http.ResponseWriter, r *http.Request, authz *authorizer, log *zap.Logger,
+	i *inventory.Inventory) bool {
+	return denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, i.InputIDs...))
 }
 
 // inventorySource validates a request's content source and returns the normalized source and the
@@ -115,7 +168,10 @@ func createInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 			respondError(w, log, http.StatusBadRequest, "name is required")
 			return
 		}
-		source, sealed, msg, status := inventorySource(req, "", sealer)
+		source, sealed, msg, status := credential.SourceLocal, "", "", 0
+		if !req.composed() {
+			source, sealed, msg, status = inventorySource(req, "", sealer)
+		}
 		if msg != "" {
 			respondError(w, log, status, msg)
 			return
@@ -147,6 +203,13 @@ func createInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 		}
 		if source != credential.SourceLocal {
 			i.ContentSource, i.ContentConfig = source, sealed
+		}
+		if msg, status := applyComposition(r.Context(), store, req, i); msg != "" {
+			respondError(w, log, status, msg)
+			return
+		}
+		if denyInputs(w, r, authz, log, i) {
+			return
 		}
 		if err := store.Save(r.Context(), i); err != nil {
 			log.Error("server: save inventory: " + err.Error())
@@ -184,7 +247,10 @@ func updateInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 			respondError(w, log, http.StatusInternalServerError, "could not read inventory")
 			return
 		}
-		source, sealed, msg, status := inventorySource(req, existing.ContentConfig, sealer)
+		source, sealed, msg, status := credential.SourceLocal, "", "", 0
+		if !req.composed() {
+			source, sealed, msg, status = inventorySource(req, existing.ContentConfig, sealer)
+		}
 		if msg != "" {
 			respondError(w, log, status, msg)
 			return
@@ -219,7 +285,7 @@ func updateInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 			}
 		}
 		content := req.Content
-		if source == credential.SourceLocal {
+		if source == credential.SourceLocal && !req.composed() {
 			restored, refuse := restoreRedactedInventoryContent(req.Content, existing.Content)
 			if refuse != "" {
 				respondError(w, log, http.StatusBadRequest, refuse)
@@ -233,6 +299,13 @@ func updateInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 		}
 		if source != credential.SourceLocal {
 			inv.ContentSource, inv.ContentConfig = source, sealed
+		}
+		if msg, status := applyComposition(r.Context(), store, req, inv); msg != "" {
+			respondError(w, log, status, msg)
+			return
+		}
+		if denyInputs(w, r, authz, log, inv) {
+			return
 		}
 		err = store.Update(r.Context(), inv)
 		if errors.Is(err, inventory.ErrNotFound) {
@@ -368,4 +441,135 @@ func deleteInventoryHandler(store inventory.Store, refs *refChecker, log *zap.Lo
 		}
 		respondJSON(w, log, http.StatusOK, map[string]string{"deleted": r.PathValue("id")}, wantsPretty(r))
 	}
+}
+
+// errNotComposed answers a preview of an inventory that holds hosts of its own.
+const errNotComposed = "only a smart or constructed inventory has hosts to preview"
+
+// InventoryPreviewer resolves a smart or constructed inventory for the actor on the context, the
+// way a launch by that actor would.
+type InventoryPreviewer interface {
+	// PreviewInventory resolves inv, saved or not, drawing only on inputs the actor may use.
+	PreviewInventory(ctx context.Context, inv *inventory.Inventory) (*dispatch.Composition, error)
+}
+
+// previewInput names one input inventory a preview drew hosts from.
+type previewInput struct {
+	// ID is the input inventory's id.
+	ID string `json:"id"`
+	// Name is the input inventory's name.
+	Name string `json:"name"`
+}
+
+// inventoryPreviewResponse is what a composed inventory resolves to right now. It names hosts and
+// inputs and never carries the hosts' variables, which can hold secrets.
+type inventoryPreviewResponse struct {
+	// Kind is smart or constructed.
+	Kind string `json:"kind"`
+	// Hosts are the hosts it resolves to, sorted.
+	Hosts []string `json:"hosts"`
+	// Count is how many hosts it resolves to.
+	Count int `json:"count"`
+	// Inputs are the inventories it drew hosts from.
+	Inputs []previewInput `json:"inputs"`
+	// Engine is what resolved it: native, or ansible when Ansible read any of it.
+	Engine string `json:"engine,omitempty"`
+	// AnsibleCore is the ansible-core version that resolved it, when Ansible did.
+	AnsibleCore string `json:"ansible_core,omitempty"`
+}
+
+// previewInventoryHandler resolves a composed inventory definition that has not been saved, so the
+// form that builds one can show which hosts it would reach before anyone saves it. The caller's
+// access bounds the answer exactly as it bounds a launch.
+func previewInventoryHandler(store inventory.Store, previewer InventoryPreviewer, authz *authorizer,
+	log *zap.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if store == nil || previewer == nil {
+			respondError(w, log, http.StatusNotFound, "inventory previews not enabled")
+			return
+		}
+		var req createInventoryRequest
+		if !decodeStrict(w, log, r.Body, &req) {
+			return
+		}
+		if !req.composed() {
+			respondError(w, log, http.StatusBadRequest, errNotComposed)
+			return
+		}
+		inv := &inventory.Inventory{Name: req.Name}
+		if req.OrgID != nil {
+			inv.OrgID = *req.OrgID
+		}
+		if msg, status := applyComposition(r.Context(), store, req, inv); msg != "" {
+			respondError(w, log, status, msg)
+			return
+		}
+		if denyInputs(w, r, authz, log, inv) {
+			return
+		}
+		respondPreview(w, r, store, previewer, inv, log)
+	}
+}
+
+// previewSavedInventoryHandler resolves a stored composed inventory as a launch by the caller
+// would, so a person can see which hosts a run against it would reach right now.
+func previewSavedInventoryHandler(store inventory.Store, previewer InventoryPreviewer, authz *authorizer,
+	log *zap.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if store == nil || previewer == nil {
+			respondError(w, log, http.StatusNotFound, "inventory previews not enabled")
+			return
+		}
+		id := r.PathValue("id")
+		if denyOnAuthzError(w, log, authz.authorize(r.Context(), id, grant.AccessUse)) {
+			return
+		}
+		inv, err := store.Get(r.Context(), id)
+		if errors.Is(err, inventory.ErrNotFound) {
+			respondError(w, log, http.StatusNotFound, "inventory not found")
+			return
+		}
+		if err != nil {
+			log.Error("server: read inventory: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read inventory")
+			return
+		}
+		if !inv.Composed() {
+			respondError(w, log, http.StatusBadRequest, errNotComposed)
+			return
+		}
+		respondPreview(w, r, store, previewer, inv, log)
+	}
+}
+
+// respondPreview resolves inv and answers with its hosts and the inputs it drew them from.
+func respondPreview(w http.ResponseWriter, r *http.Request, store inventory.Store, previewer InventoryPreviewer,
+	inv *inventory.Inventory, log *zap.Logger) {
+	c, err := previewer.PreviewInventory(r.Context(), inv)
+	switch {
+	case errors.Is(err, inventory.ErrHostFilter), errors.Is(err, inventory.ErrSourceVars),
+		errors.Is(err, inventory.ErrComposition), errors.Is(err, inventory.ErrResolve),
+		errors.Is(err, inventory.ErrNeedsAnsible), errors.Is(err, inventory.ErrInvalidInventory):
+		respondError(w, log, http.StatusUnprocessableEntity, err.Error())
+		return
+	case err != nil:
+		log.Error("server: preview inventory: " + err.Error())
+		respondError(w, log, http.StatusInternalServerError, "could not resolve inventory")
+		return
+	}
+	out := inventoryPreviewResponse{
+		Kind: c.Resolution.Kind, Hosts: c.Resolution.Hosts, Count: len(c.Resolution.Hosts),
+		Inputs: []previewInput{}, Engine: c.Resolution.Engine, AnsibleCore: c.Resolution.AnsibleCore,
+	}
+	if out.Hosts == nil {
+		out.Hosts = []string{}
+	}
+	for _, id := range c.Resolution.Inputs {
+		name := id
+		if in, err := store.Get(r.Context(), id); err == nil {
+			name = in.Name
+		}
+		out.Inputs = append(out.Inputs, previewInput{ID: id, Name: name})
+	}
+	respondJSON(w, log, http.StatusOK, out, wantsPretty(r))
 }

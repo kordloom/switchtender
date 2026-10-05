@@ -2,10 +2,12 @@ package sqlutil_test
 
 import (
 	"database/sql"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 
 	"github.com/kordloom/switchtender/internal/sqlutil"
 )
@@ -112,5 +114,44 @@ func TestQueuePlaceholders(t *testing.T) {
 			t.Errorf("test %d (%s): QueuePlaceholders() = %q with %d args, want %q with %d",
 				i, test.Name, list, len(args), test.WantList, test.WantCount)
 		}
+	}
+}
+
+// TestStringsRoundTrip covers storing free text that may hold commas, which an id list would split.
+func TestStringsRoundTrip(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		In         []string
+		WantStored string
+	}{{ // Test 0: An empty list stores as empty.
+		In: nil, WantStored: "",
+	}, { // Test 1: Text holding commas and quotes survives whole.
+		In:         []string{`site.yml: task "a, b" sets check_mode to false`, "two"},
+		WantStored: `["site.yml: task \"a, b\" sets check_mode to false","two"]`,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			stored := sqlutil.JSONStrings(test.In)
+			if diff := cmp.Diff(test.WantStored, stored); diff != "" {
+				t.Errorf("JSONStrings() mismatch (-want +got):\n%s", diff)
+			}
+			got, err := sqlutil.ParseStrings(stored)
+			if err != nil {
+				t.Fatalf("ParseStrings() error = %v", err)
+			}
+			if diff := cmp.Diff(test.In, got, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("ParseStrings() round trip mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// TestParseStringsRefusesNonJSON covers a corrupted column, which is reported rather than read as
+// an empty list.
+func TestParseStringsRefusesNonJSON(t *testing.T) {
+	t.Parallel()
+	if _, err := sqlutil.ParseStrings("not json"); err == nil {
+		t.Error("ParseStrings() accepted a column that is not JSON")
 	}
 }

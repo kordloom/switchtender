@@ -136,13 +136,14 @@ func (m *memStore) LastEventSeq(_ context.Context, id string) (int64, error) {
 
 // PurgeEventsBefore drops the events and logs of terminal runs created before cutoff, keeping the
 // run records and their summaries. It returns how many runs were trimmed, counting only runs that
-// actually held events or logs to remove.
+// actually held events or logs to remove. A run an owed outcome is built from keeps them. See
+// heldForOutcome.
 func (m *memStore) PurgeEventsBefore(_ context.Context, cutoff time.Time) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	trimmed := 0
 	for id, r := range m.runs {
-		if !r.Status.Terminal() || !r.CreatedAt.Before(cutoff) {
+		if !r.Status.Terminal() || !r.CreatedAt.Before(cutoff) || m.heldForOutcome(r) {
 			continue
 		}
 		if len(m.events[id]) == 0 && len(m.logs[id]) == 0 {
@@ -156,13 +157,14 @@ func (m *memStore) PurgeEventsBefore(_ context.Context, cutoff time.Time) (int, 
 }
 
 // PurgeRunsBefore deletes terminal runs created before cutoff along with their events and logs,
-// keeping the per host and per task summaries. It returns how many runs were deleted.
+// keeping the per host and per task summaries. It returns how many runs were deleted. A run an owed
+// outcome is built from stays, with everything it holds. See heldForOutcome.
 func (m *memStore) PurgeRunsBefore(_ context.Context, cutoff time.Time) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	deleted := 0
 	for id, r := range m.runs {
-		if !r.Status.Terminal() || !r.CreatedAt.Before(cutoff) {
+		if !r.Status.Terminal() || !r.CreatedAt.Before(cutoff) || m.heldForOutcome(r) {
 			continue
 		}
 		if r.IdempotencyKey != "" && m.byKey[r.IdempotencyKey] == id {
@@ -178,6 +180,8 @@ func (m *memStore) PurgeRunsBefore(_ context.Context, cutoff time.Time) (int, er
 		delete(m.runs, id)
 		delete(m.events, id)
 		delete(m.logs, id)
+		delete(m.queued, id)
+		m.outcomes.forget(id)
 		deleted++
 	}
 	return deleted, nil

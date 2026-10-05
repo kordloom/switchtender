@@ -242,3 +242,74 @@ async function loadHostFacts(host) {
 	}
 }
 
+
+// RRULE_UNITS names the period each recurrence frequency counts in.
+const RRULE_UNITS = {
+	MINUTELY: "minute", HOURLY: "hour", DAILY: "day", WEEKLY: "week", MONTHLY: "month", YEARLY: "year",
+};
+
+// RRULE_DAYS names the iCalendar weekday codes.
+const RRULE_DAYS = {
+	MO: "Monday", TU: "Tuesday", WE: "Wednesday", TH: "Thursday", FR: "Friday", SA: "Saturday", SU: "Sunday",
+};
+
+// RRULE_MONTHS names the months a BYMONTH list holds, January first.
+const RRULE_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August",
+	"September", "October", "November", "December"];
+
+// rruleLines returns a recurrence's rule lines, everything but its DTSTART, for a table cell.
+function rruleLines(text) {
+	return String(text || "").trim().split(/\s+/)
+		.filter((line) => line && !/^DTSTART/i.test(line)).join(" ");
+}
+
+// ordinal renders a BYDAY or BYSETPOS position in words: 1 is first, -1 is last.
+function ordinal(n) {
+	const words = { 1: "first", 2: "second", 3: "third", 4: "fourth", 5: "fifth", "-1": "last",
+		"-2": "second to last" };
+	return words[n] || (n > 0 ? n + "th" : -n + "th from the end");
+}
+
+// describeRRule renders the first rule of an RFC 5545 recurrence in words, so a schedule imported
+// from AWX reads as a cadence in the list. A rule it does not recognize is reported as a custom
+// recurrence rather than guessed at, and extra rule lines are counted rather than ignored.
+function describeRRule(text) {
+	const lines = String(text || "").trim().split(/\s+/);
+	const first = lines.find((line) => /^(RRULE:)?FREQ=/i.test(line));
+	if (!first) return "Custom recurrence";
+	const parts = {};
+	for (const pair of first.replace(/^RRULE:/i, "").split(";")) {
+		const [key, value] = pair.split("=");
+		if (key && value) parts[key.toUpperCase()] = value.toUpperCase();
+	}
+	const unit = RRULE_UNITS[parts.FREQ];
+	if (!unit) return "Custom recurrence";
+	const n = parseInt(parts.INTERVAL || "1", 10);
+	let out = n > 1 ? "Every " + n + " " + unit + "s" : "Every " + unit;
+	const days = (parts.BYDAY || "").split(",").filter(Boolean);
+	const weekdays = ["MO", "TU", "WE", "TH", "FR"];
+	if (days.length === 5 && weekdays.every((d) => days.includes(d)) && parts.BYSETPOS) {
+		out += " on the " + ordinal(parseInt(parts.BYSETPOS, 10)) + " weekday";
+	} else if (days.length) {
+		const named = days.map((code) => {
+			const m = /^([+-]?\d+)?([A-Z]{2})$/.exec(code);
+			if (!m || !RRULE_DAYS[m[2]]) return code;
+			return m[1] ? "the " + ordinal(parseInt(m[1], 10)) + " " + RRULE_DAYS[m[2]] : RRULE_DAYS[m[2]];
+		});
+		out += " on " + named.join(", ");
+	}
+	if (parts.BYMONTHDAY) {
+		const named = parts.BYMONTHDAY.split(",").map((d) => (parseInt(d, 10) < 0
+			? "the " + ordinal(parseInt(d, 10)) + " day" : "day " + d));
+		out += " on " + named.join(", ");
+	}
+	if (parts.BYMONTH) {
+		const named = parts.BYMONTH.split(",").map((m) => RRULE_MONTHS[parseInt(m, 10) - 1] || m);
+		out += " in " + named.join(", ");
+	}
+	if (parts.COUNT) out += ", " + parts.COUNT + " " + plural(parseInt(parts.COUNT, 10), "time", "times");
+	if (parts.UNTIL) out += ", until " + parts.UNTIL.slice(0, 4) + "-" + parts.UNTIL.slice(4, 6) + "-" + parts.UNTIL.slice(6, 8);
+	const more = lines.filter((line) => /^(RRULE|EXRULE|RDATE|EXDATE)/i.test(line) || /^FREQ=/i.test(line)).length - 1;
+	if (more > 0) out += ", with " + more + " more " + plural(more, "line", "lines");
+	return out;
+}

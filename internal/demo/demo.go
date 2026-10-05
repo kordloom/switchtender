@@ -70,6 +70,7 @@ import (
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/template"
 	"github.com/kordloom/switchtender/internal/user"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // assets holds the playbook, inventory, and Terraform configuration the seeder runs.
@@ -416,6 +417,11 @@ func seedAnchors(ctx context.Context, d Deps, log *zap.Logger) {
 		defer cancel()
 		a, err := audit.NewAnchor(actx, client, audit.AnchorRFC3161, d.AnchorTSA, shape,
 			d.InstallID, seq, link, time.Now())
+		if err == nil {
+			// Both shapes cover the newest entry, and an anchor a verifier would refuse fails every
+			// bundle the demo serves.
+			err = audit.CheckAnchorTime(a, newest.At)
+		}
 		if err != nil {
 			log.Warn("demo: " + shape + " anchor skipped, seeding continues unanchored: " +
 				err.Error())
@@ -619,26 +625,11 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, ids
 			it, them = "them", "them"
 		}
 		log.Warn("demo: seeded without "+strings.Join(missing, " and ")+
-			", so a visitor sees no run for "+englishList(missing)+
+			", so a visitor sees no run for "+util.JoinWords(missing, "or")+
 			" even though this product advertises "+it+": install "+them+" on this host and reseed",
 			zap.Strings("missing", missing))
 	}
 	return nil
-}
-
-// englishList joins names the way a sentence does, so a warning reads as prose rather than as a
-// slice printed into the middle of one.
-func englishList(names []string) string {
-	switch len(names) {
-	case 0:
-		return ""
-	case 1:
-		return names[0]
-	case 2:
-		return names[0] + " or " + names[1]
-	default:
-		return strings.Join(names[:len(names)-1], ", ") + ", or " + names[len(names)-1]
-	}
 }
 
 // infraStep returns the mixed pipeline's first step, choosing the best available infrastructure tool.

@@ -17,11 +17,20 @@ import (
 type createScheduleRequest struct {
 	// Name identifies the schedule. Optional.
 	Name string `json:"name"`
-	// Cron is the cron expression that sets the cadence. Required.
+	// Cron is the cron expression that sets the cadence. Required unless RRule is set.
 	Cron string `json:"cron"`
+	// RRule is an RFC 5545 recurrence that sets the cadence instead of Cron, such as
+	// "DTSTART;TZID=America/New_York:20260102T170000 RRULE:FREQ=MONTHLY;BYMONTH=3,6,9,12;BYDAY=-1FR".
+	RRule string `json:"rrule,omitempty"`
 	// Timezone is the IANA name the cron expression is read in, such as America/New_York. Empty
-	// leaves it in the server's local time.
+	// leaves it in the server's local time, or for a recurrence, in the zone its DTSTART names.
 	Timezone string `json:"timezone,omitempty"`
+	// SpringForward says what happens to a time the clocks skip on the night they go forward: jump,
+	// later, or skip, or empty for the default of the cadence. A pointer on the same rule as
+	// Enabled: an update that omits it keeps the stored setting, so an edit dialog that does not
+	// know the field cannot reset it, while an explicit empty string returns the schedule to its
+	// default.
+	SpringForward *string `json:"spring_forward,omitempty"`
 	// Playbook is the playbook to run for a single or split schedule.
 	Playbook string `json:"playbook"`
 	// TemplateID fires a stored job template instead of the inline fields.
@@ -49,6 +58,15 @@ type createScheduleRequest struct {
 // scheduleEnabled resolves the fire flag for a write: what the request says, or what is stored when the
 // request says nothing.
 func scheduleEnabled(requested *bool, stored bool) bool {
+	if requested == nil {
+		return stored
+	}
+	return *requested
+}
+
+// scheduleSpringForward resolves the spring-forward setting for a write: what the request says, or
+// what is stored when the request says nothing.
+func scheduleSpringForward(requested *string, stored string) string {
 	if requested == nil {
 		return stored
 	}
@@ -109,8 +127,15 @@ func createScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 		// without an owner it belongs to everybody. The org is the one the request already carries,
 		// resolved once beside the actor, so a schedule and a run submitted by the same caller are
 		// stamped with the same tenant.
+		// A recurrence whose DTSTART names its zone carries that zone onto the schedule, so every
+		// view of it says which zone it fires in rather than showing it as server time.
+		zone := req.Timezone
+		if zone == "" {
+			zone = schedule.RecurrenceZone(req.RRule)
+		}
 		sc := &schedule.Schedule{
-			ID: schedule.NewID(), Name: req.Name, Cron: req.Cron, Timezone: req.Timezone, Playbook: req.Playbook,
+			ID: schedule.NewID(), Name: req.Name, Cron: req.Cron, RRule: req.RRule, Timezone: zone,
+			Playbook:  req.Playbook,
 			Inventory: req.Inventory, Shards: scheduleShards(req.Shards, 0),
 			Steps:      scheduleSteps(req.Steps, nil),
 			TemplateID: req.TemplateID, OrgID: run.SubmitterOrgFrom(r.Context()),
@@ -120,18 +145,15 @@ func createScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 			// the automation, because halting production work the moment somebody leaves is its own
 			// outage. What was missing was the record needed to make that call.
 			CreatedBy: actorName(r),
+			// Empty is the cadence's default: jump for a cron expression, later for a rule.
+			SpringForward: scheduleSpringForward(req.SpringForward, ""),
 		}
+		// A schedule that names no zone is read in this server's zone, and that zone is written onto
+		// it by name. Left unnamed, each server of a highly available pair read it in its own zone,
+		// so a pair whose servers disagreed fired one daily schedule twice in a day.
+		sc.PinZone(schedule.ServerZone())
 		if err := sc.Validate(); err != nil {
-			msg := "invalid schedule"
-			switch {
-			case errors.Is(err, schedule.ErrBadTimezone):
-				msg = err.Error()
-			case errors.Is(err, schedule.ErrBadCron):
-				msg = "invalid cron expression"
-			case errors.Is(err, schedule.ErrNoTarget):
-				msg = "a playbook, steps, or a template_id is required"
-			}
-			respondError(w, log, http.StatusBadRequest, msg)
+			respondError(w, log, http.StatusBadRequest, scheduleInvalid(err))
 			return
 		}
 		next, err := sc.NextFire(time.Now())
@@ -201,7 +223,13 @@ func updateScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 		// an imported schedule pinned to America/New_York began firing in the server's local time,
 		// hours off, with nothing on screen to show it. An empty zone from an editor means "leave it
 		// as it is"; a caller that wants server-local time can send it explicitly as UTC.
+		//
+		// A recurrence whose DTSTART names a zone is read in that zone, so an edit that sends one
+		// takes the zone from it rather than from what the schedule held before.
 		zone := req.Timezone
+		if zone == "" {
+			zone = schedule.RecurrenceZone(req.RRule)
+		}
 		if zone == "" {
 			zone = existing.Timezone
 		}
@@ -215,27 +243,28 @@ func updateScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 			return
 		}
 		sc := &schedule.Schedule{
-			ID: id, Name: req.Name, Cron: req.Cron, Timezone: zone, Playbook: req.Playbook,
+			ID: id, Name: req.Name, Cron: req.Cron, RRule: req.RRule, Timezone: zone,
+			Playbook:  req.Playbook,
 			Inventory: req.Inventory, Shards: scheduleShards(req.Shards, existing.Shards),
 			Steps:      restoredSteps,
 			TemplateID: req.TemplateID, OrgID: existing.OrgID,
 			Enabled: scheduleEnabled(req.Enabled, existing.Enabled), CreatedAt: existing.CreatedAt,
 			LastRunAt: existing.LastRunAt, LastRunID: existing.LastRunID,
+			// The skips are fires that already happened, which an edit does not undo. The editor
+			// previews the inventory, so whoever edits sees whether the next fire will reach hosts.
+			LastSkip: existing.LastSkip, SkippedFires: existing.SkippedFires,
 			// Carried through an edit: the field records who set the schedule up, not who last
 			// touched it, and rewriting it on every edit would erase exactly what it is for.
 			CreatedBy: existing.CreatedBy,
+			// Kept through an edit that does not name it, like the enabled flag.
+			SpringForward: scheduleSpringForward(req.SpringForward, existing.SpringForward),
 		}
+		// A stored schedule that names no zone, which only an earlier release writes, is read in
+		// schedule.UnnamedZone, so an edit that names none either writes that zone onto it rather
+		// than moving when it fires.
+		sc.PinZone(schedule.UnnamedZone)
 		if err := sc.Validate(); err != nil {
-			msg := "invalid schedule"
-			switch {
-			case errors.Is(err, schedule.ErrBadTimezone):
-				msg = err.Error()
-			case errors.Is(err, schedule.ErrBadCron):
-				msg = "invalid cron expression"
-			case errors.Is(err, schedule.ErrNoTarget):
-				msg = "a playbook, steps, or a template_id is required"
-			}
-			respondError(w, log, http.StatusBadRequest, msg)
+			respondError(w, log, http.StatusBadRequest, scheduleInvalid(err))
 			return
 		}
 		next, err := sc.NextFire(time.Now())
@@ -351,9 +380,12 @@ func deleteScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 		if denyOnAuthzError(w, log, authz.authorizeSchedule(r.Context(), grant.AccessUse, existing)) {
 			return
 		}
-		err := store.Delete(r.Context(), id)
+		err := deleteAttachableObject(r.Context(), store, id)
 		if errors.Is(err, schedule.ErrNotFound) {
 			respondError(w, log, http.StatusNotFound, "schedule not found")
+			return
+		}
+		if respondCleanupChanged(w, log, err) {
 			return
 		}
 		if err != nil {
@@ -365,24 +397,52 @@ func deleteScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 	}
 }
 
-// previewScheduleHandler returns the next five firings for a cron spec, so a form can show what a
-// schedule will do before saving it.
+// previewScheduleHandler returns the next five firings for a cron spec or an RFC 5545 recurrence,
+// so a form can show what a schedule will do before saving it.
 //
 // The preview reads the same optional timezone a schedule carries. Without it the preview computed
 // firings in the server's local zone while the saved schedule fired in its own, so a form promised
 // times hours away from when the job actually ran.
+//
+// A recurrence bounded by COUNT or UNTIL may have fewer than five fires left. The ones it has are
+// returned with finished set, so a form can say the rule stops rather than implying it repeats.
+//
+// The preview reads the spring-forward setting too, so the times it shows are the times the
+// schedule fires. Five fires rarely reach the one night a year the setting matters, so when the
+// schedule names a time the clocks skip within about thirteen months, spring_gap says which night,
+// which readings the jump erases, and where the schedule fires that night under its setting.
 func previewScheduleHandler(log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		spec := r.URL.Query().Get("cron")
-		if spec == "" {
-			respondError(w, log, http.StatusBadRequest, "cron is required")
+		q := r.URL.Query()
+		spec, rule := q.Get("cron"), q.Get("rrule")
+		if spec == "" && rule == "" {
+			respondError(w, log, http.StatusBadRequest, "cron or rrule is required")
 			return
 		}
-		preview := &schedule.Schedule{Cron: spec, Timezone: r.URL.Query().Get("timezone")}
+		zone := q.Get("timezone")
+		if zone == "" {
+			zone = schedule.RecurrenceZone(rule)
+		}
+		preview := &schedule.Schedule{Cron: spec, RRule: rule, Timezone: zone,
+			SpringForward: q.Get("spring_forward")}
+		// The preview reads a cadence that names no zone in the zone a create would pin to it, so the
+		// times it shows are the times the saved schedule fires, and it answers that zone by name.
+		preview.PinZone(schedule.ServerZone())
+		zone = preview.Timezone
+		if spec != "" && rule != "" {
+			respondError(w, log, http.StatusBadRequest,
+				"a schedule takes a cron expression or a recurrence rule, not both")
+			return
+		}
 		next := make([]time.Time, 0, 5)
 		after := time.Now()
+		finished := false
 		for range 5 {
 			fire, err := preview.NextFire(after)
+			if errors.Is(err, schedule.ErrExhausted) && len(next) > 0 {
+				finished = true
+				break
+			}
 			if err != nil {
 				respondError(w, log, http.StatusBadRequest, scheduleTimeError(err))
 				return
@@ -390,16 +450,43 @@ func previewScheduleHandler(log *zap.Logger) http.HandlerFunc {
 			next = append(next, fire)
 			after = fire
 		}
-		respondJSON(w, log, http.StatusOK, map[string]any{"next": next}, wantsPretty(r))
+		body := map[string]any{"next": next}
+		if finished {
+			body["finished"] = true
+		}
+		if zone != "" {
+			body["timezone"] = zone
+		}
+		// The night is a courtesy beside the fires, which are the answer, so a schedule whose next
+		// such night cannot be worked out still previews.
+		if gap, gerr := preview.NextSpringGap(time.Now()); gerr == nil && gap != nil {
+			body["spring_gap"] = gap
+		}
+		respondJSON(w, log, http.StatusOK, body, wantsPretty(r))
 	}
 }
 
 // scheduleTimeError picks the message for a failure to compute a schedule's next firing. A bad
 // timezone and a bad expression are different mistakes made in different fields, and reporting the
 // first as the second sent an operator to check the one thing that was correct.
+//
+// A recurrence's own message names the part of the rule at fault, which is the only way to find it
+// in a rule of several lines, so it is passed through as written.
 func scheduleTimeError(err error) string {
-	if errors.Is(err, schedule.ErrBadTimezone) {
+	switch {
+	case errors.Is(err, schedule.ErrBadTimezone), errors.Is(err, schedule.ErrBadRecurrence),
+		errors.Is(err, schedule.ErrBadSpringForward):
 		return err.Error()
+	case errors.Is(err, schedule.ErrExhausted):
+		return "the recurrence has no fire after now, so the schedule would never run"
 	}
 	return "invalid cron expression"
+}
+
+// scheduleInvalid picks the message for a schedule that does not validate.
+func scheduleInvalid(err error) string {
+	if errors.Is(err, schedule.ErrNoTarget) {
+		return "a playbook, steps, or a template_id is required"
+	}
+	return scheduleTimeError(err)
 }

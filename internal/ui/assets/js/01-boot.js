@@ -79,6 +79,7 @@ const NAV_GROUPS = [
 		{ key: "templates", href: "/ui/templates", label: "Templates", desc: "Saved launch presets" },
 		{ key: "workflows", href: "/ui/workflows", label: "Workflow", desc: "Visual pipeline builder" },
 		{ key: "schedules", href: "/ui/schedules", label: "Schedules", desc: "Cron-driven runs", operator: true },
+		{ key: "notifications", href: "/ui/notifications", label: "Notifications", desc: "Where run events are sent", operator: true },
 		{ key: "migrate", href: "/ui/migrate", label: "Migrate", desc: "Import from AWX, Semaphore, Chef, Puppet, Rundeck, or Jenkins", admin: true },
 	] },
 	{ label: "Access", items: [

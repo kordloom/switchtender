@@ -1,0 +1,10 @@
+# A repeated key keeps its first place and its last value.
+all:
+  hosts:
+    h1:
+      x: 1
+      y: 2
+      x: 3
+  vars:
+    z: first
+    z: second

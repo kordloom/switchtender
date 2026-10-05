@@ -30,7 +30,7 @@ func (g *goRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Result, e
 	if spec.Command == "" {
 		return Result{ExitCode: -1}, ErrNoCommand
 	}
-	path, cleanup, err := writeScriptFile("switchtender-go-*.go", spec.Command)
+	path, cleanup, err := writeScriptFileIn(spec.RunDir, "switchtender-go-*.go", spec.Command)
 	if err != nil {
 		return Result{ExitCode: -1}, err
 	}

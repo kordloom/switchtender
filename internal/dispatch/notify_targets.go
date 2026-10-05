@@ -14,7 +14,14 @@ import (
 // run and for a held one. Delivery reuses the built-in channel formatters and their bounded,
 // best-effort sending.
 func (d *Dispatcher) notifyRunTargets(r *run.Run) {
-	if len(r.Notifications) == 0 {
+	d.deliverTargets(r, r.Notifications)
+}
+
+// deliverTargets delivers a run to a list of notification targets through the built-in channel
+// formatters, the list a run carries and the named targets attached to what it came from alike, so
+// the two paths cannot disagree about what a channel is sent.
+func (d *Dispatcher) deliverTargets(r *run.Run, targets []run.NotifyTarget) {
+	if len(targets) == 0 {
 		return
 	}
 	byKind := map[string][]string{}
@@ -22,7 +29,6 @@ func (d *Dispatcher) notifyRunTargets(r *run.Run) {
 	// The list is bounded where it is written, and bounded again here so a run stored before that limit
 	// existed cannot still fan out into a goroutine and a socket per target. What is dropped is named,
 	// because silently delivering to some of a list reads as delivering to all of it.
-	targets := r.Notifications
 	if len(targets) > run.MaxNotifyTargets {
 		d.log.Warn("dispatch: notification targets truncated to the limit",
 			zap.String("run_id", r.ID), zap.Int("carried", len(targets)),
@@ -33,8 +39,10 @@ func (d *Dispatcher) notifyRunTargets(r *run.Run) {
 		if !run.ValidNotifyKind(t.Kind) {
 			continue
 		}
-		// A target that asked for failures only hears neither a success nor a hold.
-		if t.OnFailure && (r.Status == run.StatusSucceeded || r.Status == run.StatusPendingApproval) {
+		// A target that asked for failures only hears neither a success nor a hold. It does hear an
+		// attention alert, which reports trouble the way a failure does.
+		if t.OnFailure && r.Attention == nil &&
+			(r.Status == run.StatusSucceeded || r.Status == run.StatusPendingApproval) {
 			continue
 		}
 		// A URL-configured channel groups by URL; a richer channel carries its own key or recipient

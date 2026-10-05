@@ -67,7 +67,7 @@ func TestScheduleAndTriggerRecordWhoCreatedThem(t *testing.T) {
 			&template.Template{ID: "tpl_1", Name: "deploy", Playbook: "site.yml"}); err != nil {
 			t.Fatalf("Save template: %v", err)
 		}
-		handler := createTriggerHandler(triggers, templates, nil, nil, zap.NewNop())
+		handler := createTriggerHandler(triggers, templates, nil, nil, nil, zap.NewNop())
 
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest("POST", "/v1/triggers",

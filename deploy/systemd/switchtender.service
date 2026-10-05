@@ -1,0 +1,47 @@
+# SwitchTender server, as a systemd service.
+#
+# Install it once:
+#
+#   useradd --system --home-dir /var/lib/switchtender --shell /usr/sbin/nologin switchtender
+#   install -d -m 0750 -o root -g switchtender /etc/switchtender
+#   install -m 0640 -o root -g switchtender /dev/null /etc/switchtender/switchtender.env
+#   install -m 0644 switchtender.service /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now switchtender
+#
+# switchtender.env holds the server's settings, one KEY=value per line: at least
+# SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT, and SWITCHTENDER_DB for PostgreSQL.
+#
+# Run files, the keys, tokens, and secret answers each run stages on disk, go to the runtime
+# directory below: memory-backed under /run, private to this account, and removed by systemd when the
+# service stops for any reason, a crash included. SwitchTender finds it through RUNTIME_DIRECTORY,
+# which systemd sets from version 240. On an older systemd add
+# --runfiles-dir /run/switchtender/runfiles to ExecStart.
+
+[Unit]
+Description=SwitchTender server
+Documentation=https://switchtender.com/docs/run-files
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=switchtender
+Group=switchtender
+EnvironmentFile=/etc/switchtender/switchtender.env
+ExecStart=/usr/local/bin/switchtender serve --db /var/lib/switchtender/switchtender.db
+WorkingDirectory=/var/lib/switchtender
+StateDirectory=switchtender
+StateDirectoryMode=0700
+RuntimeDirectory=switchtender
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=no
+PrivateTmp=true
+NoNewPrivileges=true
+LimitCORE=0
+KillMode=mixed
+TimeoutStopSec=90
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

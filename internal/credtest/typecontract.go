@@ -27,6 +27,58 @@ func TypeContract(t *testing.T, newStore func() credential.TypeStore) {
 	t.Run("list is oldest first on every backend", func(t *testing.T) {
 		testTypeListOrder(t, newStore())
 	})
+	t.Run("an imported type keeps its origin", func(t *testing.T) {
+		testTypeOrigin(t, newStore())
+	})
+}
+
+// testTypeOrigin pins that a type's origin survives storage, on save and on overwrite, because it
+// is what lets an AWX type keep a file no injector references. A backend that dropped it would turn
+// every stored imported type with such a file into one that no longer validates, and a run of it
+// would stop warning about the file.
+func testTypeOrigin(t *testing.T, store credential.TypeStore) {
+	ctx := context.Background()
+	imported := sampleType("ctype_awx", "Legacy cert")
+	imported.Origin = credential.OriginAWX
+	// The single file is written and nothing hands its path over, which an imported type may do.
+	imported.FileInjectors = map[string]string{"template": "{{ ca }}"}
+	imported.EnvInjectors = map[string]string{"API_HOST": "{{host}}"}
+	if err := store.Save(ctx, imported); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	got, err := store.Get(ctx, "ctype_awx")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if diff := cmp.Diff(imported, got); diff != "" {
+		t.Errorf("round trip changed the imported type (-want +got):\n%s", diff)
+	}
+	if err := got.Validate(); err != nil {
+		t.Errorf("a stored imported type no longer validates: %v", err)
+	}
+	if diff := cmp.Diff([]string{credential.SingleFile}, got.UnreferencedFiles()); diff != "" {
+		t.Errorf("unreferenced files of the stored type (-want +got):\n%s", diff)
+	}
+	listed, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	var origins []string
+	for _, l := range listed {
+		origins = append(origins, l.Origin)
+	}
+	if diff := cmp.Diff([]string{credential.OriginAWX}, origins); diff != "" {
+		t.Errorf("origins List() returned (-want +got):\n%s", diff)
+	}
+	// An overwrite carries the origin it is given, so a save that clears it clears it.
+	cleared := *got
+	cleared.Origin = ""
+	if err := store.Save(ctx, &cleared); err != nil {
+		t.Fatalf("Save() overwrite error = %v", err)
+	}
+	if again, err := store.Get(ctx, "ctype_awx"); err != nil || again.Origin != "" {
+		t.Errorf("Get() after an overwrite clearing the origin = %+v, %v, want no origin", again, err)
+	}
 }
 
 // testTypeListOrder pins that List returns types oldest first identically on every backend.
@@ -74,17 +126,22 @@ func testTypeListOrder(t *testing.T, store credential.TypeStore) {
 	}
 }
 
-// sampleType is a representative custom type: two fields, one secret, both an env and an extra-var
-// injector, including a template that splices a field into literal text.
+// sampleType is a representative custom type: three fields, one secret and one multiline, an env,
+// an extra-var, and a file injector, including a template that splices a field into literal text and
+// one that hands the written file's path over.
 func sampleType(id, name string) *credential.CredentialType {
 	return &credential.CredentialType{
 		ID: id, Name: name, CreatedAt: time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC),
 		Fields: []credential.Field{
 			{Name: "host", Label: "API host"},
 			{Name: "token", Label: "API token", Secret: true},
+			{Name: "ca", Label: "CA bundle", Multiline: true},
 		},
-		EnvInjectors:      map[string]string{"API_HOST": "{{host}}", "API_AUTH": "Bearer {{token}}"},
+		EnvInjectors: map[string]string{
+			"API_HOST": "{{host}}", "API_AUTH": "Bearer {{token}}", "API_CA": "{{tower.filename.ca}}",
+		},
 		ExtraVarInjectors: map[string]string{"api_host": "{{host}}"},
+		FileInjectors:     map[string]string{"template.ca": "# bundle\n{{ ca }}\n"},
 	}
 }
 

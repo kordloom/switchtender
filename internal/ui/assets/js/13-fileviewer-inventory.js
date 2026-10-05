@@ -150,7 +150,7 @@ async function openPromptLaunch(t) {
 		const created = await postAction("/templates/" + t.id + "/launch", payload);
 		location.href = "/ui/runs/" + created.id;
 	}, (err) => {
-		status.textContent = "Launch failed: " + err.message;
+		showLaunchFailure(status, err);
 	});
 	go.onclick = () => {
 		const payload = { answers: collectSurveyAnswers(document.getElementById("prompt-survey")) };
@@ -223,6 +223,18 @@ function openInventoryEdit(inv) {
 	sourceSel.dispatchEvent(new Event("change"));
 	const ids = inv.credential_ids || [];
 	for (const o of document.getElementById("inv-credentials").options) o.selected = ids.includes(o.value);
+	document.getElementById("inv-host-filter").value = inv.host_filter || "";
+	document.getElementById("inv-source-vars").value = inv.source_vars || "";
+	document.getElementById("inv-limit").value = inv.limit || "";
+	const inputs = inv.input_inventory_ids || [];
+	for (const o of document.getElementById("inv-inputs").options) {
+		o.selected = inputs.includes(o.value);
+		// An inventory cannot be its own input, so editing one hides it from its own list.
+		o.hidden = o.value === inv.id;
+	}
+	const kindSel = document.getElementById("inv-kind");
+	kindSel.value = inv.kind || "";
+	kindSel.dispatchEvent(new Event("change"));
 	document.getElementById("inv-status").textContent = "";
 	setModalTitle("inventory", "Edit inventory");
 	document.getElementById("inventory-modal").hidden = false;
@@ -306,6 +318,63 @@ function applyInventorySource(payload, src, editId) {
 	}
 }
 
+// composedPayload reads the smart or constructed fields of the inventory dialog into the payload the
+// API takes, and throws with a message when a required one is missing. A smart inventory is its
+// host filter; a constructed one is its inputs, in the order the list shows them, with its plugin
+// options and limit when given.
+function composedPayload(kind) {
+	const payload = { kind };
+	if (kind === "smart") {
+		const filter = document.getElementById("inv-host-filter").value.trim();
+		if (!filter) throw new Error("Write the host filter that picks this inventory's hosts.");
+		payload.host_filter = filter;
+		return payload;
+	}
+	const inputs = Array.from(document.getElementById("inv-inputs").selectedOptions).map((o) => o.value);
+	if (!inputs.length) throw new Error("Pick at least one input inventory.");
+	payload.input_inventory_ids = inputs;
+	const vars = document.getElementById("inv-source-vars").value;
+	if (vars.trim()) payload.source_vars = vars;
+	const limit = document.getElementById("inv-limit").value.trim();
+	if (limit) payload.limit = limit;
+	return payload;
+}
+
+// renderInventoryPreview lists the hosts a preview resolved to, and says where they came from, so
+// the person writing a filter sees what it reaches before saving it.
+function renderInventoryPreview(result, list, status) {
+	list.innerHTML = "";
+	const hosts = result.hosts || [];
+	for (const h of hosts) {
+		const li = document.createElement("li");
+		li.textContent = h;
+		list.appendChild(li);
+	}
+	const from = (result.inputs || []).map((i) => i.name);
+	const noun = hosts.length === 1 ? "host" : "hosts";
+	status.textContent = hosts.length
+		? hosts.length + " " + noun + " right now, from " + from.join(", ") + "."
+		: "No host matches right now among the inventories you may use.";
+	// A smart inventory keeps the hosts and leaves their groups behind, as AWX does, so a play
+	// written for a group reaches none of what the preview lists. Said beside the list, where the
+	// person writing the filter is looking.
+	if (hosts.length && result.kind === "smart") {
+		status.textContent += " They arrive without their groups, so a play for hosts: all reaches " +
+			"them and a play for a group does not. A constructed inventory keeps or builds groups.";
+	}
+	status.textContent += inventoryEngineText(result);
+}
+
+// inventoryEngineText says which engine resolved a preview, the way the run's evidence will: the
+// native engine needs no Ansible, and an Ansible resolution names its ansible-core.
+function inventoryEngineText(result) {
+	if (result.engine === "native") return " Resolved by the native engine, without Ansible.";
+	if (result.engine === "ansible") {
+		return " Resolved by Ansible" + (result.ansible_core ? ", ansible-core " + result.ansible_core : "") + ".";
+	}
+	return "";
+}
+
 // wireInventoryForm hooks the inventory dialog up to POST /inventories for a new record and PUT
 // /inventories/{id} when editing. The content source select swaps the stored-content box for the
 // fields of a command, Vault, or Google Secret Manager source. The New button resets the dialog to
@@ -333,12 +402,75 @@ function wireInventoryForm() {
 	};
 	sourceSel.addEventListener("change", syncSource);
 
+	// The kind decides which half of the dialog applies: content of its own, a host filter, or
+	// inputs and plugin options. Only a composed kind has hosts to preview.
+	const kindSel = document.getElementById("inv-kind");
+	const inputsSel = document.getElementById("inv-inputs");
+	const previewBox = document.getElementById("inv-preview-box");
+	const previewList = document.getElementById("inv-preview-hosts");
+	const previewStatus = document.getElementById("inv-preview-status");
+	const clearPreview = () => {
+		previewList.innerHTML = "";
+		previewStatus.textContent = "";
+	};
+	const syncKind = () => {
+		const kind = kindSel.value;
+		for (const g of form.querySelectorAll("[data-kind-group]")) {
+			g.hidden = g.id !== "inv-kind-" + (kind || "static");
+		}
+		previewBox.hidden = !kind;
+		clearPreview();
+	};
+	kindSel.addEventListener("change", syncKind);
+	// Only an inventory with hosts of its own can be an input; a composed one is refused by the API.
+	(async () => {
+		try {
+			const data = await getJSON("/inventories");
+			for (const inv of data.inventories || []) {
+				if (inv.kind) continue;
+				const opt = document.createElement("option");
+				opt.value = inv.id;
+				opt.textContent = inv.name;
+				inputsSel.appendChild(opt);
+			}
+		} catch { /* inventories unavailable; the list stays empty */ }
+	})();
+	const previewBtn = document.getElementById("inv-preview");
+	previewBtn.addEventListener("click", async (e) => {
+		e.preventDefault();
+		clearPreview();
+		let payload;
+		try {
+			payload = Object.assign({ name: document.getElementById("inv-name").value.trim() },
+				composedPayload(kindSel.value));
+		} catch (err) {
+			previewStatus.textContent = err.message;
+			return;
+		}
+		previewStatus.textContent = "Resolving.";
+		try {
+			renderInventoryPreview(await postAction("/inventories/preview", payload), previewList,
+				previewStatus);
+		} catch (err) {
+			previewStatus.textContent = "Preview failed: " + err.message;
+		}
+	});
+
 	const resetToCreate = () => {
 		delete form.dataset.editId;
 		document.getElementById("inv-name").value = "";
 		document.getElementById("inv-queue").value = "";
 		for (const el of sourceFieldEls()) el.value = "";
 		for (const o of creds.options) o.selected = false;
+		for (const o of inputsSel.options) {
+			o.selected = false;
+			o.hidden = false;
+		}
+		for (const id of ["inv-host-filter", "inv-source-vars", "inv-limit"]) {
+			document.getElementById(id).value = "";
+		}
+		kindSel.value = "";
+		syncKind();
 		sourceSel.value = "local";
 		syncSource();
 		document.getElementById("inv-status").textContent = "";
@@ -357,12 +489,15 @@ function wireInventoryForm() {
 		if (inFlight) return;
 		const status = document.getElementById("inv-status");
 		const editId = form.dataset.editId;
-		const payload = {
-			name: document.getElementById("inv-name").value.trim(),
-			content_source: sourceSel.value,
-		};
+		const kind = kindSel.value;
+		const payload = { name: document.getElementById("inv-name").value.trim() };
 		try {
-			applyInventorySource(payload, sourceSel.value, editId);
+			if (kind) {
+				Object.assign(payload, composedPayload(kind));
+			} else {
+				payload.content_source = sourceSel.value;
+				applyInventorySource(payload, sourceSel.value, editId);
+			}
 		} catch (err) {
 			status.textContent = err.message;
 			return;

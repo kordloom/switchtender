@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/license"
+	"github.com/kordloom/switchtender/internal/project"
+	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -25,7 +27,28 @@ func (d *Dispatcher) validateRun(ctx context.Context, r *run.Run) error {
 	if err := d.validateCredentials(ctx, r.Tool, d.inventoryCredentialIDs(ctx, r), false); err != nil {
 		return err
 	}
+	if err := validateGitRef(r); err != nil {
+		return err
+	}
 	return d.validateProject(ctx, r.ProjectID)
+}
+
+// validateGitRef refuses a run naming a git ref it cannot honor. A ref is only meaningful inside a
+// project, it must be a full reference the syncer will fetch, and it must travel with a pin: a ref
+// is a moving pointer, so without the commit it was expected to hold the run would execute whatever
+// the ref names at claim time, which nobody judged.
+func validateGitRef(r *run.Run) error {
+	if r.GitRef == "" {
+		return nil
+	}
+	if r.ProjectID == "" || r.PinnedCommit == "" {
+		return fmt.Errorf("%w: a git ref needs a project and the commit it is expected to hold",
+			ErrBadGitRef)
+	}
+	if err := project.ValidateFetchRef(r.GitRef); err != nil {
+		return fmt.Errorf("%w: %w", ErrBadGitRef, err)
+	}
+	return nil
 }
 
 // resolveQueue fills a run's queue from its stored inventory when neither the request nor its
@@ -147,6 +170,7 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 	run.ApplyOptions(r, opts)
 	stampReceipt(ctx, r)
 	stampOrg(ctx, r)
+	stampInitiator(ctx, r)
 	if err := requireToolInput(r); err != nil {
 		return nil, err
 	}
@@ -156,6 +180,15 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 		return existing, nil
 	}
 	if err := d.validateRun(ctx, r); err != nil {
+		return nil, err
+	}
+	if err := d.resolveComposed(ctx, r); err != nil {
+		return nil, err
+	}
+	if err := d.snapshotInventory(ctx, r); err != nil {
+		return nil, err
+	}
+	if err := d.pinImage(ctx, r); err != nil {
 		return nil, err
 	}
 	d.resolveQueue(ctx, r)
@@ -225,10 +258,20 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		return nil, ErrNoHostLister
 	}
 
+	// A composed inventory is resolved once, here, for the actor asking, and the parent and every
+	// shard carry that one resolution. Resolving again for the parent could draw a different set
+	// from the one the shards were cut from.
+	if err := d.resolveComposed(ctx, probe); err != nil {
+		return nil, err
+	}
+	// So is a plain stored inventory's snapshot: the shards are cut from the content they execute.
+	if err := d.snapshotInventory(ctx, probe); err != nil {
+		return nil, err
+	}
 	// A stored inventory must exist as a file before its hosts can be enumerated for sharding.
 	listPath := inventory
 	if probe.InventoryID != "" {
-		path, cleanup, _, err := d.inventoryFile(ctx, probe.InventoryID)
+		path, cleanup, err := d.splitInventoryFile(ctx, probe)
 		if err != nil {
 			return nil, err
 		}
@@ -261,7 +304,14 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 	run.ApplyOptions(parent, opts)
 	stampReceipt(ctx, parent)
 	stampOrg(ctx, parent)
+	stampInitiator(ctx, parent)
 	if err := d.validateRun(ctx, parent); err != nil {
+		return nil, err
+	}
+	parent.InventoryResolution = probe.InventoryResolution.Clone()
+	parent.InventorySnapshot = probe.InventorySnapshot.Clone()
+	parent.InventorySealed = probe.InventorySealed
+	if err := d.pinImage(ctx, parent); err != nil {
 		return nil, err
 	}
 	d.resolveQueue(ctx, parent)
@@ -319,6 +369,15 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		// A held child was held by whatever held its parent, so it says the same thing rather than
 		// reading as a change nothing stopped.
 		child.HeldByPolicy = parent.HeldByPolicy
+		// A shard executes the inventory snapshot its parent was submitted with.
+		child.InventorySnapshot = parent.InventorySnapshot.Clone()
+		child.InventorySealed = parent.InventorySealed
+		// A shard runs the parent's playbook, so the gate's scan of it is the shard's too, and so is
+		// any note on why the hold the shard inherits happened.
+		child.DryRunScans = parent.DryRunScans
+		child.HoldNote = parent.HoldNote
+		// And it is the run a policy noted, so it says what the parent's record says.
+		child.PolicyNotes = parent.PolicyNotes
 		// A child belongs to its parent's authorization, whether it is built inside the request or
 		// after it returned. Inheriting is the one rule; re-deriving from context would make an
 		// in-request shard and a later step disagree about which receipt is truthful.
@@ -398,6 +457,20 @@ func stampOrg(ctx context.Context, r *run.Run) {
 	}
 }
 
+// stampInitiator records the identity evidence of the agent that asked for the run, taken from the
+// agent identity the request in flight carries. It is recorded only on a run whose actor is that
+// agent, so work a person sets in motion during the same process, or a run that names its actor
+// explicitly as somebody else, never borrows an agent's identity. An explicit WithInitiator, as a
+// proposed apply inheriting its plan's, wins over the ambient context.
+func stampInitiator(ctx context.Context, r *run.Run) {
+	if r.Initiator != nil || r.ActorType != agentActorType {
+		return
+	}
+	if i := run.InitiatorFrom(ctx); i != nil && i.InitiatedBy == r.Actor {
+		r.Initiator = i
+	}
+}
+
 // inheritExecution copies onto child every field that decides how a run executes, so a shard of a
 // split, or a retry of one, runs exactly the way its parent would have.
 //
@@ -410,6 +483,10 @@ func inheritExecution(child, parent *run.Run) {
 	for _, opt := range parent.ExecutionOptions() {
 		opt(child)
 	}
+	// The resolved target set too. A shard, a step, or a retry of failed shards is the same launch
+	// over part of its hosts, so it is held to the set the parent resolved and recorded. It is not
+	// an execution option, because a rerun or a relaunch is a new launch and resolves afresh.
+	child.InventoryResolution = parent.InventoryResolution.Clone()
 	// Labels as well, which ExecutionOptions leaves out on purpose: it carries how a run executes,
 	// and a label is what the run is. A derived run is still the same work, so it belongs to the
 	// same change, the same ticket, and the same environment as the one it came from.
@@ -518,6 +595,15 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string, opt
 	}
 	// A retry is authorized by the retry request, not by whatever authorized the parent weeks ago.
 	stampReceipt(ctx, retry)
+	stampInitiator(ctx, retry)
+	// It is a submission of its own, so it executes the inventory as the store holds it now, read
+	// once here, rather than the snapshot its parent ran, which was wiped when the parent ended.
+	if err := d.snapshotInventory(ctx, retry); err != nil {
+		return nil, err
+	}
+	if err := d.pinImage(ctx, retry); err != nil {
+		return nil, err
+	}
 	// A retry is a fourth way to submit a run, and it inherits the parent's entire execution spec,
 	// so it has to face the same gate as the other three. Submit, SubmitSplit, and SubmitPipeline
 	// each consult the policy; this path did not, which made retrying a way to run a spec an
@@ -570,6 +656,11 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string, opt
 		// here stored every shard of a held retry at pending_approval naming no rule, so the
 		// register showed them held by nothing.
 		child.HeldByPolicy = retry.HeldByPolicy
+		child.InventorySnapshot = retry.InventorySnapshot.Clone()
+		child.InventorySealed = retry.InventorySealed
+		child.DryRunScans = retry.DryRunScans
+		child.HoldNote = retry.HoldNote
+		child.PolicyNotes = retry.PolicyNotes
 		child.AuditReceipt = retry.AuditReceipt
 		child.OrgID = retry.OrgID
 		if err := d.store.Save(ctx, child); err != nil {
@@ -658,4 +749,26 @@ func (d *Dispatcher) RelaunchFailedHosts(ctx context.Context, runID string, opts
 	// operator started missed the runs they started this way.
 	launch = append(launch, opts...)
 	return d.Submit(ctx, src.Playbook, src.Inventory, launch...)
+}
+
+// splitInventoryFile writes the stored inventory a split targets to a private file for listing its
+// hosts and returns its path and cleanup: the snapshot the split was submitted with for a plain
+// inventory, so the shards are cut from the content they execute, and the composed rendering held to
+// its resolution otherwise.
+func (d *Dispatcher) splitInventoryFile(ctx context.Context, probe *run.Run) (string, func(), error) {
+	if probe.InventorySnapshot == nil {
+		path, cleanup, _, _, err := d.inventoryFile(ctx, probe.InventoryID, probe.InventoryResolution)
+		return path, cleanup, err
+	}
+	content, err := d.openSnapshot(probe)
+	if err != nil {
+		return "", func() {}, err
+	}
+	var spec roundhouse.Spec
+	named := &run.Run{ID: "split-" + run.NewID()}
+	cleanup, _, err := d.materializeSnapshot(named, content, &spec)
+	if err != nil {
+		return "", func() {}, err
+	}
+	return spec.Inventory, cleanup, nil
 }

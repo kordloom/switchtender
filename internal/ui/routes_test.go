@@ -97,7 +97,7 @@ func TestEveryNavLinkResolves(t *testing.T) {
 		"/ui/", "/ui/runs", "/ui/activity", "/ui/fleet", "/ui/drift", "/ui/tasks",
 		"/ui/workers", "/ui/projects", "/ui/inventories", "/ui/sources", "/ui/templates",
 		"/ui/workflows", "/ui/schedules", "/ui/migrate", "/ui/credentials", "/ui/users",
-		"/ui/audit", "/ui/policies", "/ui/doctor", "/ui/login",
+		"/ui/audit", "/ui/policies", "/ui/doctor", "/ui/login", "/ui/notifications",
 	}
 
 	seen := map[string]bool{}

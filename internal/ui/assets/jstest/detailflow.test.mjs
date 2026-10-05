@@ -199,6 +199,7 @@ test("a run against a stored inventory draws its header and offers its decision"
 		[/^\/v1\/runs\/run_inv\/events\?/, reply({ events: [] })],
 		[/^\/v1\/runs\/run_inv\/logs(\?|$)/, textReply("")],
 		[/^\/v1\/inventories$/, reply({ inventories: [{ id: "inv_1", name: "prod-hosts" }] })],
+		[/^\/v1\/runs\/run_inv\/decisions$/, reply({ decisions: [], count: 0 })],
 		[/^\/v1\/runs\/run_inv$/, reply(held)],
 	]);
 

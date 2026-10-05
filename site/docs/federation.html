@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Federated cloud credentials | SwitchTender docs</title>
+	<meta name="description" content="A federated credential stores no secret. Each run that carries one receives a short-lived identity token that SwitchTender signs, with claims naming the run precisely: its organization, project">
+	<link rel="canonical" href="https://switchtender.com/docs/federation">
+	<meta property="og:title" content="Federated cloud credentials | SwitchTender docs">
+	<meta property="og:description" content="A federated credential stores no secret. Each run that carries one receives a short-lived identity token that SwitchTender signs, with claims naming the run precisely: its organization, project">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="https://switchtender.com/docs/federation">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
+	<meta name="twitter:card" content="summary_large_image">
+	<meta name="twitter:title" content="Federated cloud credentials | SwitchTender docs">
+	<meta name="twitter:description" content="A federated credential stores no secret. Each run that carries one receives a short-lived identity token that SwitchTender signs, with claims naming the run precisely: its organization, project">
+	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
+	<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "TechArticle",
+ "about": {
+  "@type": "SoftwareApplication",
+  "name": "SwitchTender",
+  "url": "https://switchtender.com/"
+ },
+ "description": "A federated credential stores no secret. Each run that carries one receives a short-lived identity token that SwitchTender signs, with claims naming the run precisely: its organization, project",
+ "headline": "Federated cloud credentials",
+ "isPartOf": {
+  "@type": "WebSite",
+  "name": "SwitchTender docs",
+  "url": "https://switchtender.com/docs/"
+ },
+ "publisher": {
+  "@type": "Organization",
+  "name": "KordLoom LLC",
+  "url": "https://kordloom.com"
+ },
+ "url": "https://switchtender.com/docs/federation"
+}
+</script>
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=2">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/kordloom/switchtender">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation" class="active">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="federated-cloud-credentials">Federated cloud credentials</h1>
+<p>A federated credential stores no secret. Each run that carries one receives a short-lived identity
+token that SwitchTender signs, with claims naming the run precisely: its organization, project,
+template, environment, who launched it, and whether an approver released it. AWS, Google Cloud, and
+Microsoft Entra verify the token against keys SwitchTender publishes and exchange it for credentials
+that expire on their own. Nothing durable is stored, so there is nothing to rotate, leak, or re-enter.</p>
+<p>This is the same workload identity federation GitHub Actions, Terraform Cloud, Spacelift, and env0
+use. It is part of Community and needs no license.</p>
+<h2 id="how-it-works">How it works</h2>
+<ol>
+<li>SwitchTender is an OpenID Connect issuer at the URL you give it. It serves a discovery document at
+<code>/.well-known/openid-configuration</code> and its public keys at <code>/.well-known/jwks.json</code>.</li>
+<li>You register that issuer with the cloud once, and write a trust policy that names which runs may
+assume which role, keyed on the token's claims.</li>
+<li>When a run starts, SwitchTender mints a token for it, valid for minutes, and hands it to the tool.</li>
+<li>The tool, or SwitchTender when you choose the exchange delivery, trades the token for cloud
+credentials. The cloud fetches the public keys to verify the signature.</li>
+</ol>
+<p>SwitchTender makes no outbound call for any of this to work. The cloud fetches the keys, and with the
+default file delivery the tool performs the exchange.</p>
+<h2 id="turning-it-on">Turning it on</h2>
+<p>Set the issuer URL on <code>serve</code> and on every <code>worker</code> that shares its database:</p>
+<pre><code>switchtender serve --federation-issuer https://switchtender.example.com
+</code></pre>
+<p>or <code>SWITCHTENDER_FEDERATION_ISSUER=https://switchtender.example.com</code> in the environment file every
+process reads. The URL must be https, reachable by the cloud, and served with a certificate the cloud
+trusts. It may carry a path when a proxy serves SwitchTender under one. The token's <code>iss</code> claim is
+this URL exactly, with no trailing slash.</p>
+<p>Federation needs <code>SWITCHTENDER_ENCRYPTION_KEY</code> and <code>SWITCHTENDER_ENCRYPTION_SALT</code>, because the signing
+key is sealed under them. They live outside the database, in the environment of each process, so the
+database alone cannot open the signing key. A server given an issuer URL and no encryption key refuses
+to start rather than run with federation it cannot sign for.</p>
+<p>On start, <code>serve</code> generates the first signing key if there is none, so a cloud you configure before
+the first run already finds a key to read.</p>
+<p>A relay worker started with <code>--server</code> holds no signing key and mints nothing. When its pool has
+registered a delivery key, the control node mints the run's token at claim, for the mode the worker
+will execute, and seals it to the pool's key with the run's other secrets. The worker writes the
+token file or runs the exchange exactly as above, and refuses a token minted for the other mode, so a
+token whose claims say plan never authorizes an apply. A relay worker whose pool registered no key
+fails a federated run with the reason. See
+<a href="/docs/configuration#delivering-secrets-to-relay-workers">Delivering secrets to relay workers</a>.</p>
+<h2 id="credential-kinds">Credential kinds</h2>
+<p>A federated credential has settings and no secret. Create one on the Credentials page or with:</p>
+<pre><code>POST /v1/credentials
+{
+  &quot;name&quot;: &quot;aws-prod-deploy&quot;,
+  &quot;kind&quot;: &quot;aws_oidc&quot;,
+  &quot;settings&quot;: {
+    &quot;role_arn&quot;: &quot;arn:aws:iam::123456789012:role/switchtender-deploy&quot;,
+    &quot;region&quot;: &quot;us-east-1&quot;,
+    &quot;environment&quot;: &quot;prod&quot;
+  }
+}
+</code></pre>
+<p>A secret, a passphrase, or an external source sent with a federated kind is refused, and so is a
+settings key the kind does not read, so a misspelling fails when the credential is saved.</p>
+<table>
+<thead>
+<tr>
+<th>Kind</th>
+<th>Required settings</th>
+<th>Optional settings</th>
+<th>What the run receives</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>aws_oidc</code></td>
+<td><code>role_arn</code></td>
+<td><code>region</code>, <code>delivery</code>, <code>audience</code>, <code>session_name</code>, <code>session_duration</code>, <code>sts_endpoint</code>, <code>token_ttl</code>, <code>environment</code></td>
+<td>With the file delivery, <code>AWS_ROLE_ARN</code>, <code>AWS_WEB_IDENTITY_TOKEN_FILE</code>, and <code>AWS_ROLE_SESSION_NAME</code>. With the exchange delivery, <code>AWS_ACCESS_KEY_ID</code>, <code>AWS_SECRET_ACCESS_KEY</code>, and <code>AWS_SESSION_TOKEN</code>. <code>AWS_REGION</code> and <code>AWS_DEFAULT_REGION</code> when a region is set.</td>
+</tr>
+<tr>
+<td><code>gcp_oidc</code></td>
+<td><code>provider</code></td>
+<td><code>service_account</code>, <code>delivery</code>, <code>audience</code>, <code>sts_endpoint</code>, <code>iam_endpoint</code>, <code>token_ttl</code>, <code>environment</code></td>
+<td>With the file delivery, an <code>external_account</code> credentials file in <code>GOOGLE_APPLICATION_CREDENTIALS</code> and <code>CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE</code>, and <code>GCP_AUTH_KIND=application</code>. With the exchange delivery, the access token in <code>GOOGLE_OAUTH_ACCESS_TOKEN</code> and <code>GCP_ACCESS_TOKEN</code>, and <code>GCP_AUTH_KIND=accesstoken</code>. The Ansible <code>google.cloud</code> collection reads the last two.</td>
+</tr>
+<tr>
+<td><code>azure_oidc</code></td>
+<td><code>client_id</code>, <code>tenant_id</code></td>
+<td><code>subscription_id</code>, <code>audience</code>, <code>authority_host</code>, <code>token_ttl</code>, <code>environment</code></td>
+<td><code>AZURE_CLIENT_ID</code>, <code>AZURE_TENANT_ID</code>, and <code>AZURE_FEDERATED_TOKEN_FILE</code>, the workload identity convention, and <code>ARM_CLIENT_ID</code>, <code>ARM_TENANT_ID</code>, <code>ARM_USE_OIDC=true</code>, and <code>ARM_OIDC_TOKEN_FILE_PATH</code> for Terraform's azurerm provider. The subscription as <code>AZURE_SUBSCRIPTION_ID</code> and <code>ARM_SUBSCRIPTION_ID</code> when set.</td>
+</tr>
+<tr>
+<td><code>oidc_token</code></td>
+<td><code>audience</code></td>
+<td><code>token_ttl</code>, <code>environment</code></td>
+<td>The path of a file holding the token in <code>SWITCHTENDER_OIDC_TOKEN_FILE</code>, for any other relying party, such as HashiCorp Vault's JWT auth method. The token itself is never put in a variable, which every process the run starts would inherit.</td>
+</tr>
+</tbody>
+</table>
+<p>The settings shared by every kind:</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>audience</code></td>
+<td><code>sts.amazonaws.com</code> for AWS, <code>https://iam.googleapis.com/</code> followed by the provider for Google Cloud, <code>api://AzureADTokenExchange</code> for Azure</td>
+<td>The token's <code>aud</code> claim. It must match what the cloud expects.</td>
+</tr>
+<tr>
+<td><code>token_ttl</code></td>
+<td><code>15m</code></td>
+<td>How long the token is valid, from <code>1m</code> to <code>1h</code>.</td>
+</tr>
+<tr>
+<td><code>environment</code></td>
+<td>none</td>
+<td>The <code>environment</code> claim and the <code>env</code> segment of the subject. Letters, digits, dots, hyphens, and underscores.</td>
+</tr>
+<tr>
+<td><code>delivery</code></td>
+<td><code>file</code></td>
+<td><code>file</code> or <code>exchange</code>, for <code>aws_oidc</code> and <code>gcp_oidc</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>The AWS settings: <code>role_arn</code> is the role to assume in any partition. <code>session_name</code> names the session in
+CloudTrail and defaults to <code>switchtender-</code> followed by the run id, <code>switchtender-gate-</code> followed by
+the run id for the approval gate's module download, and <code>switchtender-review-</code> followed by the pull
+request number for a review's pre-check, which no run exists for. <code>session_duration</code> is the session
+length in seconds from 900 to 43200 and applies to the exchange delivery. <code>sts_endpoint</code> overrides the
+STS endpoint, for a FIPS, GovCloud, China, or VPC endpoint. With the exchange delivery SwitchTender sends
+the token there itself. With the file delivery the tool makes the exchange, and the setting reaches it
+as <code>AWS_ENDPOINT_URL_STS</code>. boto3, which the Ansible <code>amazon.aws</code> collection uses, the AWS SDK for Go
+v2, and the Terraform and OpenTofu S3 state backends send the exchange to that endpoint (checked with
+botocore 1.43, the Go SDK's config module 1.32, Terraform 1.9.8, and OpenTofu 1.12.6). For any other
+tool, the Terraform AWS provider included, confirm that it reads the variable or set the endpoint in the
+tool's own configuration, or choose the exchange delivery.</p>
+<p>The Google Cloud settings: <code>provider</code> is the workload identity pool provider, as
+<code>projects/NUMBER/locations/global/workloadIdentityPools/POOL/providers/PROVIDER</code> with or without the
+<code>//iam.googleapis.com/</code> prefix. <code>service_account</code> is a service account to impersonate with the
+federated token, which the file delivery writes into the credentials file and the exchange delivery
+performs itself. <code>sts_endpoint</code> and <code>iam_endpoint</code> override the token service URL and the IAM
+credentials service base URL, for Private Service Connect.</p>
+<p>The Azure settings: <code>client_id</code> and <code>tenant_id</code> name the Entra application and its tenant.
+<code>authority_host</code> sets <code>AZURE_AUTHORITY_HOST</code> for a sovereign cloud.</p>
+<p>A run may carry one federated credential of each kind. Two of the same kind would set the same
+variables, one silently replacing the other, so the second is refused when the run is submitted.</p>
+<h2 id="choosing-a-delivery">Choosing a delivery</h2>
+<p>The default is <code>file</code>. The token is written to a file only the run's user can read, and the tool's
+own SDK exchanges it. SwitchTender makes no call to the cloud. This is the delivery that works for
+Ansible, Terraform, OpenTofu, and scripts alike, because every one of them reaches the cloud through an
+SDK that reads these variables:</p>
+<ul>
+<li>
+<p>AWS: boto3, which the Ansible <code>amazon.aws</code> collection and the AWS CLI use, the AWS SDK for Go that
+the Terraform and OpenTofu AWS provider and S3 backend use, and the other AWS SDKs all assume a
+role from <code>AWS_ROLE_ARN</code> and <code>AWS_WEB_IDENTITY_TOKEN_FILE</code>.</p>
+</li>
+<li>
+<p>Google Cloud: the Google client libraries, gcloud, the Terraform google provider, and the Ansible
+<code>google.cloud</code> collection with <code>auth_kind: application</code> all read an <code>external_account</code> file. With the
+exchange delivery the collection's modules, its <code>gcp_compute</code> inventory plugin, and its lookups take
+<code>GCP_AUTH_KIND=accesstoken</code> and the token in <code>GCP_ACCESS_TOKEN</code> as their defaults (checked in
+<code>google.cloud</code> 1.14.0).</p>
+</li>
+<li>
+<p>Azure: the Azure Identity libraries and Terraform's azurerm provider read the variables above. The
+Azure CLI does not, so a script that uses it signs in first:</p>
+<pre><code>az login --service-principal -u &quot;$AZURE_CLIENT_ID&quot; -t &quot;$AZURE_TENANT_ID&quot; \
+  --federated-token &quot;$(cat &quot;$AZURE_FEDERATED_TOKEN_FILE&quot;)&quot;
+</code></pre>
+</li>
+</ul>
+<p>Choose <code>exchange</code> for a tool that cannot read a token file, such as a script that calls a cloud API
+directly. SwitchTender then calls AWS STS <code>AssumeRoleWithWebIdentity</code>, or Google's security token
+service and, with a service account, the IAM credentials service, as the run starts, and injects the
+credentials those return. The call needs no AWS or Google key: the token is the authentication. This
+is the only case in which SwitchTender itself contacts a cloud, and it happens on the process that
+executes the run.</p>
+<p>The token is minted once, when the run starts, and is not refreshed. A tool that first reaches the
+cloud late in a long run must do so within <code>token_ttl</code>, so raise it to cover that, up to an hour. Once
+exchanged, the cloud credentials last for the role's session length. A run that outlives that session
+needs a longer session on the role, not a longer token.</p>
+<h2 id="the-token">The token</h2>
+<p>Every token is a JWT signed with RS256. Every claim below is present on every token, empty when it does
+not apply, so a policy condition never meets a missing claim.</p>
+<table>
+<thead>
+<tr>
+<th>Claim</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>iss</code></td>
+<td>The issuer URL.</td>
+</tr>
+<tr>
+<td><code>sub</code></td>
+<td>The subject, described below.</td>
+</tr>
+<tr>
+<td><code>aud</code></td>
+<td>The audience the credential sets.</td>
+</tr>
+<tr>
+<td><code>exp</code>, <code>iat</code>, <code>nbf</code></td>
+<td>Expiry, issue time, and not-before time, in seconds since the epoch.</td>
+</tr>
+<tr>
+<td><code>jti</code></td>
+<td>A unique token id.</td>
+</tr>
+<tr>
+<td><code>run_id</code></td>
+<td>The run the token was minted for, empty for a review's pre-check, which no run exists for.</td>
+</tr>
+<tr>
+<td><code>purpose</code></td>
+<td>Why the token was minted: <code>run</code> for a run executing, <code>gate_download</code> for the module download the approval gate runs with the run's credentials before it records the run, or <code>review_precheck</code> for the module download a pull request review runs before it plans.</td>
+</tr>
+<tr>
+<td><code>pull_request</code></td>
+<td>The pull or merge request number a review's plan or pre-check is for, empty otherwise.</td>
+</tr>
+<tr>
+<td><code>parent_run_id</code></td>
+<td>The pipeline or split run this run is a step or shard of, empty for a top-level run.</td>
+</tr>
+<tr>
+<td><code>org_id</code></td>
+<td>The organization that owns the run.</td>
+</tr>
+<tr>
+<td><code>project_id</code></td>
+<td>The git project the run reads from.</td>
+</tr>
+<tr>
+<td><code>template_id</code></td>
+<td>The job template the run executes. It is stamped when a template is launched directly, by a schedule, or by a trigger, and carried to every run derived from it.</td>
+</tr>
+<tr>
+<td><code>environment</code></td>
+<td>The environment the credential names.</td>
+</tr>
+<tr>
+<td><code>credential_id</code></td>
+<td>The federated credential the token was minted for.</td>
+</tr>
+<tr>
+<td><code>tool</code></td>
+<td><code>ansible</code>, <code>terraform</code>, <code>opentofu</code>, <code>bash</code>, <code>powershell</code>, <code>python</code>, or <code>go</code>.</td>
+</tr>
+<tr>
+<td><code>run_type</code></td>
+<td><code>apply</code>, or <code>dry_run</code> for a run in its tool's no-change mode, including the plan a plan-content policy runs before a gated apply.</td>
+</tr>
+<tr>
+<td><code>source</code></td>
+<td>What fired the run: <code>api</code>, <code>template</code>, <code>schedule</code>, <code>trigger</code>, <code>rerun</code>, <code>reconcile</code>, or <code>propose</code>.</td>
+</tr>
+<tr>
+<td><code>commit_sha</code></td>
+<td>The project commit the run executes.</td>
+</tr>
+<tr>
+<td><code>launcher_type</code></td>
+<td><code>person</code>, <code>agent</code>, <code>schedule</code>, <code>trigger</code>, <code>pipeline</code>, or <code>system</code>.</td>
+</tr>
+<tr>
+<td><code>actor</code>, <code>actor_type</code>, <code>actor_user_id</code></td>
+<td>The launching credential's name, how it authenticated, and the account behind it.</td>
+</tr>
+<tr>
+<td><code>approved</code></td>
+<td><code>true</code> when an approval decision released the run.</td>
+</tr>
+<tr>
+<td><code>approved_by</code>, <code>approved_by_type</code></td>
+<td>The approver the audit chain recorded, and how they authenticated.</td>
+</tr>
+<tr>
+<td><code>approval_policy</code></td>
+<td>The approval rule that held the run.</td>
+</tr>
+</tbody>
+</table>
+<p>A token can be minted before a run exists. The approval gate downloads the modules a Terraform or
+OpenTofu plan calls with the run's own credentials before it records the run, and a pull request
+review does the same before it plans, to learn whether the plan is safe to run at all. The gate's
+token carries <code>purpose</code> <code>gate_download</code> and the id the run will be recorded under, so a run id with
+no run behind it, because the gate refused the run, says why. A review's pre-check carries <code>purpose</code>
+<code>review_precheck</code>, names no run, and names the pull request in <code>pull_request</code> and the commit it read
+in <code>commit_sha</code>. Both carry the subject the run itself would, so a trust policy grants the download
+exactly the access the run would have.</p>
+<p>A shard or a pipeline step reads <code>launcher_type</code>, the actor, and the approval from the run that was
+launched, since that run's requester and that run's approval are what released it. <code>approved</code> is true
+only when the decision was recorded in the audit chain and bound to the run's spec, and execution has
+already refused a run whose spec moved since.</p>
+<h3 id="the-subject">The subject</h3>
+<p>The subject joins six pairs with colons, broadest first:</p>
+<pre><code>org:&lt;org_id&gt;:project:&lt;project_id&gt;:template:&lt;template_id&gt;:env:&lt;environment&gt;:run_type:&lt;apply|dry_run&gt;:approved:&lt;true|false&gt;
+</code></pre>
+<p>For example:</p>
+<pre><code>org:org_acme:project:proj_web:template:tpl_deploy:env:prod:run_type:apply:approved:true
+</code></pre>
+<p>An empty part reads <code>none</code>. The parts are ids rather than names, because a name can be taken by
+renaming another object and an id cannot. Find each id on its page in the interface or in the API. A
+value that holds a colon or a wildcard character is refused, so no part can shift another.</p>
+<p>The <code>environment</code> comes from the credential, set by whoever manages credentials, and never from the
+run's labels, which whoever launches a run chooses.</p>
+<h2 id="trust-policy-examples">Trust policy examples</h2>
+<p>The examples use the issuer <code>https://switchtender.example.com</code>.</p>
+<h3 id="aws">AWS</h3>
+<p>Register the issuer once:</p>
+<pre><code>aws iam create-open-id-connect-provider \
+  --url https://switchtender.example.com \
+  --client-id-list sts.amazonaws.com
+</code></pre>
+<p>Then give the role a trust policy. This one lets only approved apply runs of one template in the
+production environment assume it:</p>
+<pre><code>{
+  &quot;Version&quot;: &quot;2012-10-17&quot;,
+  &quot;Statement&quot;: [{
+    &quot;Effect&quot;: &quot;Allow&quot;,
+    &quot;Principal&quot;: {
+      &quot;Federated&quot;: &quot;arn:aws:iam::123456789012:oidc-provider/switchtender.example.com&quot;
+    },
+    &quot;Action&quot;: &quot;sts:AssumeRoleWithWebIdentity&quot;,
+    &quot;Condition&quot;: {
+      &quot;StringEquals&quot;: {
+        &quot;switchtender.example.com:aud&quot;: &quot;sts.amazonaws.com&quot;,
+        &quot;switchtender.example.com:sub&quot;:
+          &quot;org:org_acme:project:proj_web:template:tpl_deploy:env:prod:run_type:apply:approved:true&quot;
+      }
+    }
+  }]
+}
+</code></pre>
+<p>A read-only role for plans of any template in the project uses a pattern:</p>
+<pre><code>&quot;StringLike&quot;: {
+  &quot;switchtender.example.com:sub&quot;: &quot;org:org_acme:project:proj_web:template:*:env:prod:run_type:dry_run:*&quot;
+}
+</code></pre>
+<p>AWS evaluates conditions on <code>aud</code> and <code>sub</code> for an external issuer, which is why the subject carries
+the approval and the run type.</p>
+<h3 id="google-cloud">Google Cloud</h3>
+<p>Create a pool and a provider that maps the claims, and refuses tokens from any other organization:</p>
+<pre><code>gcloud iam workload-identity-pools create switchtender --location=global
+
+gcloud iam workload-identity-pools providers create-oidc switchtender \
+  --location=global --workload-identity-pool=switchtender \
+  --issuer-uri=https://switchtender.example.com \
+  --attribute-mapping=&quot;google.subject=assertion.sub,attribute.template_id=assertion.template_id,attribute.environment=assertion.environment,attribute.approved=string(assertion.approved)&quot; \
+  --attribute-condition=&quot;assertion.org_id == 'org_acme'&quot;
+</code></pre>
+<p>Then let approved production runs of one template impersonate a service account:</p>
+<pre><code>gcloud iam service-accounts add-iam-policy-binding deployer@my-project.iam.gserviceaccount.com \
+  --role=roles/iam.workloadIdentityUser \
+  --member=&quot;principal://iam.googleapis.com/projects/123456789/locations/global/workloadIdentityPools/switchtender/subject/org:org_acme:project:proj_web:template:tpl_deploy:env:prod:run_type:apply:approved:true&quot;
+</code></pre>
+<p>The credential's settings are then
+<code>provider=projects/123456789/locations/global/workloadIdentityPools/switchtender/providers/switchtender</code>
+and <code>service_account=deployer@my-project.iam.gserviceaccount.com</code>. Google Cloud can also be given the
+key set directly when it cannot reach the issuer: save the output of
+<code>curl https://switchtender.example.com/.well-known/jwks.json</code> and pass it to the provider with
+<code>--jwk-json-path</code>, and upload it again after each rotation.</p>
+<h3 id="azure">Azure</h3>
+<p>Add a federated identity credential to the Entra application. Entra matches the subject exactly, so
+add one per subject a role should accept:</p>
+<pre><code>az ad app federated-credential create --id &lt;application-id&gt; --parameters '{
+  &quot;name&quot;: &quot;switchtender-prod-deploy&quot;,
+  &quot;issuer&quot;: &quot;https://switchtender.example.com&quot;,
+  &quot;subject&quot;: &quot;org:org_acme:project:proj_web:template:tpl_deploy:env:prod:run_type:apply:approved:true&quot;,
+  &quot;audiences&quot;: [&quot;api://AzureADTokenExchange&quot;]
+}'
+</code></pre>
+<p>Grant the application its role assignment as usual. The credential's settings are <code>client_id</code>, the
+application id, and <code>tenant_id</code>.</p>
+<h2 id="signing-keys">Signing keys</h2>
+<p>The signing key is a 2048 bit RSA key of its own, not the audit chain's key and not the license key, so
+a key that signs run identity can be rotated on its own schedule and its loss forges no evidence. The
+key id is the RFC 7638 thumbprint of the public key.</p>
+<h3 id="where-the-key-lives">Where the key lives</h3>
+<p>Each key's private half is sealed with the server's encryption key, <code>SWITCHTENDER_ENCRYPTION_KEY</code> with
+<code>SWITCHTENDER_ENCRYPTION_SALT</code>, and stored in the database beside its public half. The server and every
+worker on that database sign with the same key, and the server publishes it. The encryption key itself
+lives outside the database, in the environment of each process, so a copy of the database cannot open
+a signing key. Keep the encryption key with your other root secrets and apart from database backups.</p>
+<p>The private half never appears in an API response, a log line, a backup, or an evidence entry. The key
+listing and the published key set carry public halves and times only, backups leave the keys out, and
+the audit chain names a key by its id alone.</p>
+<h3 id="the-four-times">The four times</h3>
+<p>Every key records four times:</p>
+<table>
+<thead>
+<tr>
+<th>Time</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Created</td>
+<td>The key was generated and published.</td>
+</tr>
+<tr>
+<td>Activated</td>
+<td>The key starts signing.</td>
+</tr>
+<tr>
+<td>Retired</td>
+<td>The key stops signing and stays published.</td>
+</tr>
+<tr>
+<td>Removed</td>
+<td>The key leaves the published set, and its private half is erased.</td>
+</tr>
+</tbody>
+</table>
+<p>A key is pending from its creation until it activates, signing until it retires, retired until it is
+removed, and removed after that. A removed key stays listed with its public half and its times, as the
+record of when it was trusted. <code>GET /v1/federation/keys</code> lists every key with its state and its four
+times, and the Credentials page shows the same table under Federation signing keys, with both
+rotations beside it for an admin.</p>
+<h3 id="normal-rotation">Normal rotation</h3>
+<pre><code>POST /v1/federation/keys/rotate
+</code></pre>
+<p>A normal rotation is for routine hygiene. It has two phases, on fixed times rather than settings:</p>
+<ol>
+<li>At once, the new key is published and does not sign. The current key keeps signing.</li>
+<li>24 hours later, the new key starts signing and the old key retires. The old key stays published for
+another 24 hours and is then removed.</li>
+</ol>
+<p>A cloud has a day to fetch the new key before any token needs it, and every token the old key signed
+expires, an hour at most after it was signed, while that key is still published. The whole schedule is
+written when the rotation is asked for, so the server and every worker read it from the database and
+switch at the same moment with nothing left to trigger. A normal rotation asked for while another is
+under way is refused with <code>409</code>, naming the pending key and the time it starts signing.</p>
+<p>A rotation is one decision for every server and worker on the database. It is written in a single
+transaction under a lock all of them take, so two rotations asked for at once on two servers start
+one and the second is refused with <code>409</code>, and a rotation cut off partway, by a crash or a lost
+connection, leaves the keys as they were for the retry. Every process reads the schedule against the
+database clock rather than its own, so a host whose clock is wrong neither switches keys early nor
+erases a key before its time.</p>
+<p>Where a cloud is given the key set directly instead of fetching it, as Google Cloud can be with
+<code>--jwk-json-path</code>, upload the set again within the day after a rotation, so the new key is in place
+before it signs.</p>
+<h3 id="emergency-rotation">Emergency rotation</h3>
+<pre><code>POST /v1/federation/keys/rotate/emergency
+</code></pre>
+<p>An emergency rotation is for a key that may be compromised. A new key signs at once, and every other
+key leaves the published set at the same moment with its private half erased, not only the key that
+was signing. That means the key that was signing, a key a normal rotation had published and not yet
+started signing with, and any retired key still published. They were all stored the same way, so a
+suspected compromise of one is treated as a compromise of all.</p>
+<p>A removed key stays removed. No server or worker signs with it again, even one that read the keys
+just before the rotation, none publishes it again whatever its own clock says, and the database
+refuses any write that would give back its private half or postpone its removal. A normal rotation
+that was under way when the emergency rotation ran is removed with the rest.</p>
+<p>The cost is availability. Nothing a removed key signed verifies again, which is the point, and for a
+while some runs fail:</p>
+<ul>
+<li>A run already holding a token from a removed key fails once the cloud reads the new key set.</li>
+<li>A run that starts before a cloud has read the new key set fails until it has. When that happens is
+up to the cloud, so retry the runs that failed.</li>
+</ul>
+<p>Use it when a forged token would cost more than failed runs, and a normal rotation for everything else.
+After an emergency rotation, upload the key set again anywhere a cloud was given it directly. Both
+rotations are admin only and recorded in the audit chain, each under its own path, so the chain tells
+an emergency rotation from a routine one.</p>
+<h3 id="evidence-for-every-token">Evidence for every token</h3>
+<p>Each token is recorded in the audit chain before it leaves the server, in an entry whose method is
+<code>TOKEN</code> and whose path is</p>
+<pre><code>/runs/&lt;run&gt;/federation/&lt;credential&gt;/kid/&lt;key id&gt;/jti/&lt;token id&gt;/exp/&lt;expiry&gt;
+</code></pre>
+<p>with <code>/parent/&lt;run&gt;</code> added for a pipeline step or a shard. The entry names the key that signed the
+token by its id and the token by its <code>jti</code>, and holds neither the token nor any key material. When the
+entry cannot be written the token is withheld and the run fails, so no token reaches a tool or a cloud
+without its signing key on record. A token sent to a cloud by the exchange delivery is recorded the
+same way, even when the cloud refuses it.</p>
+<p>A run's receipt and its evidence dossier carry these entries, and the dossier lists them under Identity
+tokens issued. The audit trail shows each one as the run, the credential, and the signing key, so the
+tokens a key signed, for example before an emergency rotation, can be picked out of the trail or its
+export by the key's id.</p>
+<h3 id="backups-and-restores">Backups and restores</h3>
+<p>Backups leave the keys out. A restored install generates its own key when it starts, and that key
+signs at once, the way an emergency rotation's key does, so a cloud verifies the restored install's
+tokens once it has read the new key set.</p>
+<h2 id="security-model">Security model</h2>
+<ul>
+<li>Nothing that authenticates to a cloud is stored. A federated credential holds settings, which are
+not secret and return from the API. The signing key is the one secret, sealed at rest with the
+encryption key, which lives outside the database.</li>
+<li>A token lives for <code>token_ttl</code>, fifteen minutes unless the credential says otherwise and never more
+than an hour, and names one run. A token copied out of a run is worth that run's narrow scope for
+minutes.</li>
+<li>Token files live in the run's one private credential directory, the same one every other
+materialized credential uses, created mode 0700 with each file mode 0600. The directory is removed
+when the run ends, whether it succeeds, fails, is canceled, or times out, and when the run fails
+before the tool starts. A process killed mid-run leaves it locked by nobody, and a sweep by any
+server or worker on the host removes it, as <a href="/docs/run-files">Run files</a> describes for every
+credential file.</li>
+<li>The token and every credential an exchange returns are masked out of the run's log, live stream,
+and events. Neither is written to the run record, the audit chain, a receipt, a dossier, an API
+response, or MCP output. The chain records each token's <code>jti</code> and the id of the key that signed it,
+never the token. An exchange refusal is reported with the cloud's reason and with the token cut out
+of it.</li>
+<li>Whoever can launch a run with the credential can obtain a token for it, so the trust policy is where
+scope is decided: key it on the template, the environment, and, for production, <code>approved:true</code>.
+The subject uses ids, the environment comes from the credential, and approval comes from the audit
+chain, so none of them is chosen by whoever launches the run.</li>
+<li>The discovery document and key set are public and unauthenticated, as a cloud needs them to be. They
+hold public keys only.</li>
+<li>The exchange delivery sends the token only to the token service the credential names, over https,
+refuses redirects, and refuses the cloud metadata addresses. With <code>SWITCHTENDER_EGRESS_PROXY</code> set,
+the exchange leaves through that proxy, and only after the token service's address passes the same
+check, so a proxy never stands in for the check.</li>
+</ul>
+
+		</main>
+	</div>
+	<div class="foot-legal" style="text-align:center;margin:26px auto 34px;font-size:12px;opacity:.75">SwitchTender&trade; is a trademark of KordLoom LLC. Copyright 2026 KordLoom LLC.</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

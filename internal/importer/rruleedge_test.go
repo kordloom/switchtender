@@ -2,7 +2,6 @@ package importer
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 )
 
@@ -106,38 +105,6 @@ func TestRRULEToCronCoversEveryFrequencyAndItsRefusals(t *testing.T) {
 			}
 			if !ok && got != "" {
 				t.Errorf("RRULEToCron(%q) refused but returned %q, want empty", test.RRule, got)
-			}
-		})
-	}
-}
-
-// TestRRULEProblemNamesTheRightRemedy pins that a skipped schedule tells the operator what to do.
-// A rule that bounds itself needs a different fix from a cadence cron cannot express, and a cron
-// entry created from a bounded rule would fire forever.
-func TestRRULEProblemNamesTheRightRemedy(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		Name         string
-		RRule        string
-		WantFragment string
-	}{
-		{Name: "count", RRule: "RRULE:FREQ=MINUTELY;COUNT=1",
-			WantFragment: "runs a fixed number of times"}, // Test 0.
-		{Name: "until", RRule: "RRULE:FREQ=DAILY;UNTIL=20270101T000000Z",
-			WantFragment: "stops on a date"}, // Test 1.
-		{Name: "count wins over until", RRule: "RRULE:FREQ=DAILY;COUNT=3;UNTIL=20270101T000000Z",
-			WantFragment: "runs a fixed number of times"}, // Test 2.
-		{Name: "neither", RRule: "RRULE:FREQ=YEARLY",
-			WantFragment: "cadence cannot be expressed as cron"}, // Test 3.
-		{Name: "empty", RRule: "",
-			WantFragment: "cadence cannot be expressed as cron"}, // Test 4.
-	}
-	for testNum, test := range tests {
-		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
-			t.Parallel()
-			if got := rruleProblem(test.RRule); !strings.Contains(got, test.WantFragment) {
-				t.Errorf("rruleProblem(%q) = %q, want it to mention %q",
-					test.RRule, got, test.WantFragment)
 			}
 		})
 	}

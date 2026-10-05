@@ -60,6 +60,8 @@
 					<dd>Focus a step and press Enter to edit, L to start a link, Delete to remove. Cmd or Ctrl Z undoes.</dd>
 					<dt>Failure</dt>
 					<dd>A failed step stops everything downstream of it. Mark a step Continue on failure to let the rest proceed, or give it retries.</dd>
+					<dt>Approval</dt>
+					<dd>A step that waits for approval pauses the workflow there until an admin approves or denies it. Steps linked from its right dot run on approval. Drag from its lower red dot, or press D, to link the steps that run when it is denied or times out.</dd>
 					<dt>Colors</dt>
 					<dd>Each step is tinted by the tool it runs, and a link takes the color of the step it leaves, so the shape of a pipeline reads before the labels do.</dd>
 				</dl>
@@ -101,6 +103,22 @@
 					<label class="field-label">Name
 						<input id="wf-step-name" class="input" placeholder="build" required>
 					</label>
+					<label class="field-label">Kind
+						<select id="wf-step-kind" class="input">
+							<option value="">Runs a tool</option>
+							<option value="approval">Waits for approval</option>
+						</select>
+					</label>
+					<div id="wf-step-approval-fields" class="stack" hidden>
+						<label class="field-label">What the approver decides
+							<textarea id="wf-step-description" class="input" rows="3" maxlength="2000" placeholder="Check the canary dashboard, then approve the production deploy"></textarea>
+						</label>
+						<label class="field-label">Timeout in seconds
+							<input id="wf-step-timeout" class="input" type="number" min="0" value="0">
+							<span class="field-hint">Zero waits until somebody decides. When it passes, the step takes its deny path.</span>
+						</label>
+					</div>
+					<div id="wf-step-tool-fields" class="stack">
 					<label class="field-label">Tool
 						<select id="wf-step-tool" class="input">
 							<option value="ansible">Ansible</option>
@@ -132,6 +150,7 @@
 						<label class="field-label wf-step-retries">Retries
 							<input id="wf-step-retries" class="input" type="number" min="0" value="0">
 						</label>
+					</div>
 					</div>
 					<div class="launch-actions">
 						<button type="submit" class="button primary" data-demo-safe="true">Save step</button>

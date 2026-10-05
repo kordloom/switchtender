@@ -34,6 +34,22 @@ const auditCLI = {
 	"import/apply": "Applied an import",
 };
 
+// auditSurveyReason reads the tail a refusal for an unanswered survey carries, the word survey and
+// then the questions, comma separated, from index i of parts, and says it as a clause. It is empty
+// for any other tail, so a refusal recorded for another reason reads as the refusal alone.
+function auditSurveyReason(parts, i) {
+	if (parts[i] !== "survey") {
+		return "";
+	}
+	const names = parts.slice(i + 1).join("/").split(",").filter(Boolean);
+	if (names.length === 0) {
+		return "";
+	}
+	return names.length === 1
+		? ": the required survey question " + names[0] + " had no answer"
+		: ": the required survey questions " + names.join(", ") + " had no answer";
+}
+
 // auditChange turns a recorded method and path into a sentence.
 //
 // The chain hashes the actor, the method, and the path, because those are what the server knows for
@@ -54,6 +70,19 @@ function auditChange(method, path) {
 		return auditCLI[rest] || "Ran " + rest.replace(/[/-]/g, " ") + " from the command line";
 	}
 	if (parts[0] === "hooks") {
+		// A review trigger records what it did with one pull request: planned it, refused it, or
+		// reported back to it. Read as a fire, a refused fork looked like a change that ran.
+		if (parts[2] === "review" && parts[3]) {
+			const pr = "pull request " + parts[3];
+			if (parts[4] === "planned") return "Planned " + pr + " from a review trigger";
+			if (parts[4] === "refused") return "Refused to plan " + pr + auditSurveyReason(parts, 5);
+			if (parts[4] === "report") return "Reported the plan to " + pr;
+		}
+		// A delivery refused before anything fired, such as for a survey nobody was there to
+		// answer, is not a fire and must not read as one.
+		if (parts[2] === "refused") {
+			return "Refused to fire webhook trigger " + parts[1] + auditSurveyReason(parts, 3);
+		}
 		return "Fired a webhook trigger";
 	}
 	// The chain's own entry kinds read as sentences, not as lowercase path fragments: a decision
@@ -67,7 +96,32 @@ function auditChange(method, path) {
 		return "Decided run " + runID;
 	}
 	if (method === "SCHEDULE") {
+		if (parts[2] === "refused") {
+			return "Schedule " + (parts[1] || "") + " refused to fire" + auditSurveyReason(parts, 3);
+		}
 		return "Schedule " + (parts[1] || "") + " fired";
+	}
+	// A token issuance names the run, the credential, and the key that signed the token, which is
+	// the fact an auditor reads it for.
+	if (method === "TOKEN") {
+		return "Issued an identity token for run " + (parts[1] || "") + " under credential " +
+			(parts[3] || "") + ", signed by key " + (parts[5] || "");
+	}
+	if (parts[0] === "federation" && parts[1] === "keys" && parts[2] === "rotate") {
+		return parts[3] === "emergency"
+			? "Emergency rotation, every other federation signing key removed"
+			: "Rotated the federation signing key, the new key signing in 24 hours";
+	}
+	// What happened to a decision's reason after the decision: a correction appended to it, or a
+	// redaction that removed its text, which names why and never what it held.
+	if (method === "REASON") {
+		const runID = parts[1] || "";
+		const at = parts.indexOf("reason_redacted");
+		if (at >= 0) {
+			return "Redacted a reason on run " + runID + " (" +
+				String(parts[at + 1] || "").replace(/_/g, " ") + ")";
+		}
+		return "Added a correction to a decision on run " + runID;
 	}
 	// A span beat is the chain attesting that it was alive and unbroken across an interval, which
 	// is why the newest rows on a quiet install are all beats. The generic fallthrough rendered

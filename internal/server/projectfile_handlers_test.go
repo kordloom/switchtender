@@ -76,18 +76,13 @@ func TestProjectTreeHandler(t *testing.T) {
 // TestProjectFileHandlerRefusals verifies the file endpoint reads a tracked file and refuses every
 // path that would escape the checkout, expose git, or name something absent. Refusals share one
 // status so a caller cannot map the host filesystem by probing.
+//
+// Each case builds its own checkout once it is running, rather than sharing one made before the
+// cases waited their turn: on a busy machine a parallel case can wait minutes for a slot, and a
+// checkout that sat in the temporary directory that long was the one thing the case depended on
+// that it did not hold.
 func TestProjectFileHandlerRefusals(t *testing.T) {
 	t.Parallel()
-	handler, cache := newFileServer(t, map[string]string{
-		"site.yml":    "- hosts: all\n",
-		".git/config": "[remote]\n",
-	})
-	// A symlink inside the checkout pointing at the secret beside it.
-	link := filepath.Join(cache, "proj_1", "escape.txt")
-	if err := os.Symlink(filepath.Join(cache, "secret.txt"), link); err != nil {
-		t.Fatalf("Symlink() error = %v", err)
-	}
-
 	tests := []struct {
 		Path       string
 		WantStatus int
@@ -106,6 +101,15 @@ func TestProjectFileHandlerRefusals(t *testing.T) {
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
+			handler, cache := newFileServer(t, map[string]string{
+				"site.yml":    "- hosts: all\n",
+				".git/config": "[remote]\n",
+			})
+			// A symlink inside the checkout pointing at the secret beside it.
+			link := filepath.Join(cache, "proj_1", "escape.txt")
+			if err := os.Symlink(filepath.Join(cache, "secret.txt"), link); err != nil {
+				t.Fatalf("Symlink() error = %v", err)
+			}
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
 				"/v1/projects/proj_1/file?path="+test.Path, nil))

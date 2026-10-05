@@ -19,7 +19,8 @@ import (
 // outlives a run".
 var runAuthReferents = []string{
 	"runs", "run_host_summary", "run_task_summary", "host_facts", "host_facts_history",
-	"run_events", "run_logs", "stream_tickets",
+	"host_fact_cache", "run_events", "run_logs", "stream_tickets", "review_reports", "run_decisions",
+	"notification_events", "notification_deliveries", "run_ends_owed",
 }
 
 //go:embed runauth_purge.go

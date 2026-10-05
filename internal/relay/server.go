@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -42,6 +43,8 @@ type claimRequest struct {
 	Owner string `json:"owner"`
 	// Queues names the queues the worker serves; empty carries the default pool.
 	Queues []string `json:"queues"`
+	// Slots is how many runs the worker executes at once, zero from a worker that does not say.
+	Slots int `json:"slots,omitempty"`
 }
 
 // heartbeatRequest is the body of a relay heartbeat: the run and the owner renewing its lease.
@@ -82,6 +85,17 @@ type relayServer struct {
 	// announcer tells the notification channels about the runs workers finish and the applies their
 	// plans leave held, nil when the control node announces nothing.
 	announcer Announcer
+	// opener opens a claimed run's secrets for sealed delivery to the claiming pool, nil when this
+	// control node delivers none.
+	opener SecretOpener
+	// planSealer seals the plan file a worker's plan saved onto the apply it proposes, nil when this
+	// control node accepts none.
+	planSealer PlanSealer
+	// held keeps what opening a delivered run's secrets minted until the claim it went to ends.
+	held heldReleases
+	// presence records the workers that reach the control node across the relay, nil when nothing
+	// records them.
+	presence *presenceNotes
 }
 
 // Announcer tells the notification channels about a run: that it finished, or that it is held for a
@@ -135,6 +149,7 @@ func NewHandler(store run.Store, pools *Pools, log *zap.Logger,
 	}
 	s := &relayServer{store: store, appender: appender, pools: pools, log: log,
 		policies: policies, audits: audits}
+	s.held.store = store
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -269,6 +284,7 @@ func (s *relayServer) claim(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	owner := normalizeOwner(body.Owner)
+	s.presence.note(r.Context(), owner, body.Queues, body.Slots)
 	leased, err := s.store.Claim(r.Context(), owner, body.Queues)
 	switch {
 	case errors.Is(err, run.ErrNonePending):
@@ -287,7 +303,11 @@ func (s *relayServer) claim(w http.ResponseWriter, r *http.Request) {
 		if leased.ApprovedSpecBinding != "" {
 			w.Header().Set(bindingHeader, leased.ApprovedSpecBinding)
 		}
-		s.writeJSON(w, leased)
+		// A run that needs secrets carries them sealed to the claiming pool's key, bound to this
+		// claim's lease, or carries why they were not sent. A run that needs none carries nothing,
+		// and its answer is the run alone, as it always was.
+		s.writeJSON(w, claimResponse{Run: leased,
+			Delivery: s.deliver(r.Context(), poolFrom(r.Context()), owner, leased)})
 	}
 }
 
@@ -333,6 +353,7 @@ func (s *relayServer) heartbeat(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		s.internal(w, "heartbeat", err)
 	default:
+		s.presence.touch(r.Context(), normalizeOwner(body.Owner))
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -357,7 +378,14 @@ func (s *relayServer) start(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "run not found")
 		return
 	}
-	if !leaseHeld(stored, r) {
+	// The start hands a run to a tool and opens its delivery, so it demands the capability the
+	// claim minted, as proposing an apply does, never the fallback the report paths keep for a run
+	// claimed before the capability existed. A run with no capability on its row is one nobody
+	// holds: never claimed, or claimed and taken back by the janitor, which clears it. Accepting a
+	// start for one let any worker of the pool start a run it never claimed, and let a worker that
+	// stalled past its lease start the run the janitor had requeued and open the secrets sealed to
+	// the claim that ended.
+	if stored.ClaimSecret == "" || !leaseHeld(stored, r) {
 		writeErr(w, http.StatusNotFound, "run not found")
 		return
 	}
@@ -386,8 +414,11 @@ func (s *relayServer) start(w http.ResponseWriter, r *http.Request) {
 			startedAt = bounded
 		}
 	}
-	moved, err := s.store.TransitionStatusAndClaim(r.Context(), id, run.StatusPending,
-		run.StatusRunning, normalizeOwner(body.Owner), startedAt)
+	// The fence is the claim as well as the status. The check above read the row before this write,
+	// and a janitor that requeues the run between the two clears the claim, so a status-only swap
+	// still let the stale start through.
+	moved, err := s.store.StartClaimed(r.Context(), id, normalizeOwner(body.Owner),
+		r.Header.Get(leaseHeader), startedAt)
 	switch {
 	case errors.Is(err, run.ErrNotFound):
 		writeErr(w, http.StatusNotFound, "run not found")
@@ -396,6 +427,13 @@ func (s *relayServer) start(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_ = json.NewEncoder(w).Encode(startResponse{Moved: moved})
+		// A run a worker begins is announced as started, once: only the request that moved it does,
+		// so a worker retrying a start whose answer it never received announces nothing again.
+		if moved {
+			started := *stored
+			started.Status, started.StartedAt = run.StatusRunning, &startedAt
+			s.announce(&started)
+		}
 	}
 }
 
@@ -467,6 +505,21 @@ func (s *relayServer) save(w http.ResponseWriter, r *http.Request) {
 	if stored == nil {
 		return
 	}
+	// A finished run's capability is cleared with its claim, so its own worker's retried terminal
+	// report, the one whose answer was lost, no longer matches it. It is answered as the finished run
+	// it is rather than as a lease that does not match. That first request may have ended before the
+	// run's outcome reached the chain, so the outcome is committed first if it is still owed. The
+	// commit reads only what the store holds and does nothing for a run that owes nothing, so it
+	// needs no lease: it is what the janitor would do, done sooner.
+	if stored.Status.Terminal() {
+		if stored.ParentID == nil {
+			s.commitOwedOutcome(context.WithoutCancel(r.Context()), stored.ID)
+		}
+		if err := checkWorkerReport(stored, &body, false); err != nil {
+			writeErr(w, http.StatusConflict, err.Error())
+			return
+		}
+	}
 	// The capability minted at claim is the proof this report comes from the run's holder. Every
 	// worker presents the same shared token, so the lease name a report carries is asserted, not
 	// proven, and a worker that reads another run's id could otherwise forge a terminal report for
@@ -494,7 +547,8 @@ func (s *relayServer) save(w http.ResponseWriter, r *http.Request) {
 			Status: stored.Status, ExitCode: stored.ExitCode, Error: stored.Error,
 			Warning: stored.Warning, CommitSHA: stored.CommitSHA,
 			Image: stored.Image, PullCredentialID: stored.PullCredentialID,
-			Outputs: stored.Outputs, EndedAt: ended,
+			Outputs: stored.Outputs, InventoryCheck: stored.InventoryCheck, EndedAt: ended,
+			ImageDigest: stored.ImageDigest, ResolvedHosts: stored.ResolvedHosts,
 		}
 		moved, err := s.store.FinalizeRunning(r.Context(), id, fin)
 		if err != nil {
@@ -506,7 +560,7 @@ func (s *relayServer) save(w http.ResponseWriter, r *http.Request) {
 			// report terminal before ever sending one, so the run is stepped to running first, by
 			// compare-and-swap like everything else here, and finalized again. A run a sweep settled
 			// fails both swaps and the report is refused, which is the point of the fence.
-			if ok, terr := s.store.TransitionStatus(r.Context(), id, run.StatusPending, run.StatusRunning); terr == nil && ok {
+			if ok, terr := s.startForReport(r, stored); terr == nil && ok {
 				moved, err = s.store.FinalizeRunning(r.Context(), id, fin)
 				if err != nil {
 					s.internal(w, "save", err)
@@ -519,9 +573,16 @@ func (s *relayServer) save(w http.ResponseWriter, r *http.Request) {
 				"the run settled elsewhere while this report was in flight, so it was not applied")
 			return
 		}
+		// The run is finished in the store from here on, so nothing after this may depend on the
+		// worker's connection. The outcome used to be committed on the request's context, and a
+		// worker restarted by its supervisor, a load balancer's idle timeout, or a network blip
+		// canceled it mid-commit, after which the worker's retry was refused as a report on a
+		// finished run and nothing committed the outcome at all.
+		own, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), outcomeCommitTimeout)
+		defer cancel()
 		// The outcome digests what the store now holds, so the finalized row is read back rather
 		// than trusting this handler's in-memory copy of it.
-		final, gerr := s.store.Get(r.Context(), id)
+		final, gerr := s.store.Get(own, id)
 		if gerr != nil {
 			final = stored
 			final.EndedAt = &ended
@@ -532,12 +593,17 @@ func (s *relayServer) save(w http.ResponseWriter, r *http.Request) {
 		// split or pipeline is skipped, its outcome rolled into the parent the coordinator commits, and
 		// the commit is not fail-closed since the run has already happened.
 		if s.audits != nil && final.ParentID == nil {
-			if err := outcome.Commit(r.Context(), s.audits, s.store, final, "system:relay", time.Now); err != nil {
-				s.log.Error("relay: commit run outcome: "+err.Error(), zap.String("run_id", final.ID))
+			if err := outcome.CommitOwed(own, s.audits, s.store, final, "system:relay",
+				time.Now); err != nil {
+				s.log.Error("relay: commit run outcome, the janitor commits it once the chain "+
+					"takes it: "+err.Error(), zap.String("run_id", final.ID))
 			}
 		}
-		s.record(r.Context(), poolFrom(r.Context()), final.ClaimedBy,
+		s.record(own, poolFrom(r.Context()), final.ClaimedBy,
 			"/relay/finished/"+final.ID+"/"+string(final.Status))
+		// The claim the run's secrets were delivered for is over, so whatever opening them minted is
+		// handed back now rather than left to expire.
+		s.held.releaseRun(final.ID)
 		// Announced once, by the node whose compare-and-swap moved the run, and after its outcome is
 		// on the chain, the order the in-process executor keeps. A child is rolled into its parent,
 		// which the coordinator announces.
@@ -559,13 +625,16 @@ func (s *relayServer) save(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, "save", err)
 		return
 	}
-	if fresh.Status.Terminal() {
+	// The re-read row must still be the claim this report proved it holds. A janitor that requeued
+	// the run after the first read, and a worker that claimed it again, left a row the report's
+	// lease no longer matches, and the progress below was then written onto the new claim's run.
+	if fresh.Status.Terminal() || !leaseHeld(fresh, r) {
 		writeErr(w, http.StatusConflict,
 			"the run settled elsewhere while this report was in flight, so it was not applied")
 		return
 	}
 	if fresh.Status == run.StatusPending {
-		if moved, terr := s.store.TransitionStatus(r.Context(), id, run.StatusPending, run.StatusRunning); terr != nil {
+		if moved, terr := s.startForReport(r, fresh); terr != nil {
 			s.internal(w, "save", terr)
 			return
 		} else if !moved {
@@ -597,6 +666,34 @@ func (s *relayServer) save(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// outcomeCommitTimeout bounds how long the control node spends committing a finished run's outcome
+// once the worker's request no longer holds it open.
+const outcomeCommitTimeout = 30 * time.Second
+
+// commitOwedOutcome commits the outcome of the finished run id when the store says it is still
+// owed, and does nothing otherwise. A failure is logged, and the janitor commits the outcome later.
+func (s *relayServer) commitOwedOutcome(ctx context.Context, id string) {
+	if s.audits == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, outcomeCommitTimeout)
+	defer cancel()
+	owed, err := s.store.OutcomeOwed(ctx, id)
+	if err != nil || !owed {
+		if err != nil {
+			s.log.Error("relay: read whether an outcome is owed: "+err.Error(), zap.String("run_id", id))
+		}
+		return
+	}
+	final, err := s.store.Get(ctx, id)
+	if err == nil {
+		err = outcome.CommitOwed(ctx, s.audits, s.store, final, "system:relay", time.Now)
+	}
+	if err != nil {
+		s.log.Error("relay: commit owed outcome: "+err.Error(), zap.String("run_id", id))
+	}
+}
+
 // workerStatuses are the states a worker may report. A worker claims a run, executes it, and says
 // how it ended; it never puts a run back in the queue and never reopens one that finished.
 var workerStatuses = map[run.Status]bool{
@@ -613,21 +710,35 @@ var workerStatuses = map[run.Status]bool{
 // one shared worker token, so the question is not only what may be reported but which runs may be
 // reported on at all. Without that, a token holder could mark a queued run succeeded so its
 // playbook never ran, cancel a run another worker was executing, or report on a run nobody had
-// claimed and take it out of band, bypassing the queue that decides order.
-// leaseHeld reports whether the request carries the capability minted for this run's current claim.
-// A run claimed before the capability existed carries no stored secret, so it is accepted here and
-// the caller falls back to the older lease-name check; this is what keeps runs already in flight at
-// upgrade time from stranding. A run that has a secret must present the matching one, compared in
-// constant time so a wrong guess reveals nothing through how long the comparison took.
+// claimed and take it out of band, bypassing the queue that decides order. leaseHeld reports
+// whether the request carries the capability minted for this run's current claim. A run claimed
+// before the capability existed carries no stored secret, and a request that presents none is
+// accepted here so the caller falls back to the older lease-name check; this is what keeps runs
+// already in flight at upgrade time from stranding. A request that presents a lease for a run with
+// no secret is refused: the sweeps that requeue or settle a run clear its secret, so that lease
+// belonged to a claim the control node has taken back. A run that has a secret must present the
+// matching one, compared in constant time so a wrong guess reveals nothing through how long the
+// comparison took.
 func leaseHeld(stored *run.Run, r *http.Request) bool {
-	if stored.ClaimSecret == "" {
-		return true
-	}
 	presented := r.Header.Get(leaseHeader)
+	if stored.ClaimSecret == "" {
+		return presented == ""
+	}
 	if presented == "" {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(presented), []byte(stored.ClaimSecret)) == 1
+}
+
+// startForReport moves a claimed run that is still pending to running for a report from its
+// holder, through the same fenced start a worker's own start takes. The fence is the claim the
+// report proved it holds: the holder on the row the report was checked against and the capability
+// the request presents. A status-only step let a report checked against one claim land on the
+// next, when the janitor requeued the run and another worker claimed it between the read and the
+// write.
+func (s *relayServer) startForReport(r *http.Request, stored *run.Run) (bool, error) {
+	return s.store.StartClaimed(r.Context(), stored.ID, stored.ClaimedBy, r.Header.Get(leaseHeader),
+		time.Time{})
 }
 
 // checkWorkerReport rejects a report a worker has no business making. leaseVerified is true when the
@@ -697,6 +808,14 @@ func applyWorkerReport(stored, reported *run.Run) {
 	// settles, so one request turned into a remote kill switch on any long-running split or
 	// pipeline. The control node already knows who holds a run, because it granted the claim.
 	stored.CommitSHA = reported.CommitSHA
+	// The inventory cross-check is made by the executor just before its play, like the commit it
+	// checked out, so it is the executor's to report.
+	stored.InventoryCheck = reported.InventoryCheck.Clone()
+	// So are the digest of the image the runtime pulled and the hosts a dynamic inventory source
+	// resolved to. Neither is part of what an approval bound: the image reference and the source's
+	// definition were bound when the run was submitted, and a worker cannot change either.
+	stored.ImageDigest = reported.ImageDigest
+	stored.ResolvedHosts = slices.Clone(reported.ResolvedHosts)
 	if len(reported.Outputs) > 0 {
 		stored.Outputs = reported.Outputs
 	}
@@ -805,20 +924,22 @@ func (s *relayServer) heldForReport(w http.ResponseWriter, r *http.Request) bool
 	if stored == nil {
 		return false
 	}
+	// A finished run is not an error, it is a no-op. The store already drops these writes silently,
+	// so answering with a conflict changed nothing about what is recorded and started a retry storm
+	// instead: the transport retries the post, re-posts the whole batch on a timer, and keeps at it
+	// for the abandon window while logging an error nobody can act on. It is answered before the
+	// lease is weighed, because a finished run's capability is cleared with its claim, so the tail
+	// its own worker delivers late no longer matches anything, and nothing is written either way.
+	if stored.Status.Terminal() {
+		w.WriteHeader(http.StatusNoContent)
+		return false
+	}
 	// The same capability that gates a status report gates the writes that build the record. A
 	// worker's captured log and events are what an approver reads while deciding, so they are exactly
 	// the thing worth forging, and one shared token is not proof of who is writing. A run claimed
 	// before the capability existed carries no secret and is left to the holder checks below.
 	if !leaseHeld(stored, r) {
 		writeErr(w, http.StatusForbidden, "the run's lease was not presented or did not match")
-		return false
-	}
-	// A finished run is not an error, it is a no-op. The store already drops these writes silently,
-	// so answering with a conflict changed nothing about what is recorded and started a retry storm
-	// instead: the transport retries the post, re-posts the whole batch on a timer, and keeps at it
-	// for the abandon window while logging an error nobody can act on.
-	if stored.Status.Terminal() {
-		w.WriteHeader(http.StatusNoContent)
 		return false
 	}
 	if stored.Status == run.StatusPendingApproval || stored.Status == run.StatusRejected {
@@ -1124,11 +1245,28 @@ func (s *relayServer) proposeApply(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		// Destroys is how many resources the plan said it would destroy.
 		Destroys int `json:"destroys"`
-		// Read reports whether that count came from a summary the parser found.
+		// Read reports whether that count came from a rendering the worker read.
 		Read bool `json:"read"`
+		// PlanFile is the plan file the plan saved, which the apply carries out.
+		PlanFile []byte `json:"plan_file"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		// A request cut off at the upload limit carries a plan file past MaxPlanFileBytes, so the
+		// refusal states the limit rather than calling the body invalid.
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeErr(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("%s: a relay worker can hand the "+
+				"control node a plan file of at most %s", ErrPlanFileTooLarge, mebibytes(MaxPlanFileBytes)))
+			return
+		}
 		writeErr(w, http.StatusBadRequest, "invalid propose body")
+		return
+	}
+	// The plan file holds the plan's values in the clear, so this copy is dropped when the request
+	// ends: the sealed one on the apply is the only one kept.
+	defer clear(body.PlanFile)
+	if len(body.PlanFile) > MaxPlanFileBytes {
+		writeErr(w, http.StatusRequestEntityTooLarge, planFileTooLarge(len(body.PlanFile)).Error())
 		return
 	}
 	plan := s.servesRun(w, r)
@@ -1179,8 +1317,25 @@ func (s *relayServer) proposeApply(w http.ResponseWriter, r *http.Request) {
 	default:
 		policies = list
 	}
+	// An apply carries out the plan file its plan saved or nothing, so a proposal without one, or one
+	// this control node cannot seal, is refused rather than built to plan again when it runs.
+	if len(body.PlanFile) == 0 {
+		writeErr(w, http.StatusConflict, "the plan saved no plan file, so there is no plan for an "+
+			"apply to carry out")
+		return
+	}
+	if s.planSealer == nil {
+		writeErr(w, http.StatusConflict, "this control node cannot seal a plan file, so a plan-gated "+
+			"apply cannot complete on a relay worker")
+		return
+	}
+	sealed, err := s.planSealer.SealPlanFile(body.PlanFile)
+	if err != nil {
+		s.internal(w, "seal plan file", err)
+		return
+	}
 	proposal, created, err := dispatch.ProposeApplyFor(r.Context(), s.store, policies, plan,
-		body.Destroys, read)
+		body.Destroys, read, sealed)
 	if errors.Is(err, dispatch.ErrPolicyDenied) {
 		// A rule refused the apply. That is an answer, not a fault, and the worker records it on the
 		// plan run, so the reason travels rather than becoming "propose apply failed".

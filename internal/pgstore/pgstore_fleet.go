@@ -231,7 +231,9 @@ SELECT host, changed, run_id, ran_at FROM checks WHERE rn = 1 ORDER BY changed D
 
 // HostHistory returns a host's most recent per run summaries, newest first, with run ids.
 // SaveHostFacts records each host's gathered facts, replacing what was held before since the
-// newest gather is the truth about a host.
+// newest gather is the truth about a host. Newest is by when the facts were gathered rather than
+// when the run that gathered them saved them, so a run that gathered first and finished last does
+// not write an older reading over a newer one, here or in the history bucket the two share.
 func (s *store) SaveHostFacts(ctx context.Context, runID string, facts []run.HostFacts) error {
 	// Cleaned here so both backends store the same bytes: a host or task name carries whatever an
 	// inventory or playbook called it, and PostgreSQL refuses a byte SQLite accepts.
@@ -243,7 +245,8 @@ func (s *store) SaveHostFacts(ctx context.Context, runID string, facts []run.Hos
 INSERT INTO host_facts (host, run_id, facts, gathered_at)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT(host) DO UPDATE SET
-	run_id=excluded.run_id, facts=excluded.facts, gathered_at=excluded.gathered_at`
+	run_id=excluded.run_id, facts=excluded.facts, gathered_at=excluded.gathered_at
+WHERE rtrim(host_facts.gathered_at, 'Z') <= rtrim(excluded.gathered_at, 'Z')`
 	// The same reading, kept rather than replaced. The statement above answers what a host is now
 	// and overwrites to do it, so before this table existed a gather destroyed the only copy of the
 	// previous one and no estate history accumulated anywhere.
@@ -251,7 +254,8 @@ ON CONFLICT(host) DO UPDATE SET
 INSERT INTO host_facts_history (host, bucket, run_id, facts, gathered_at)
 VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT(host, bucket) DO UPDATE SET
-	run_id=excluded.run_id, facts=excluded.facts, gathered_at=excluded.gathered_at`
+	run_id=excluded.run_id, facts=excluded.facts, gathered_at=excluded.gathered_at
+WHERE rtrim(host_facts_history.gathered_at, 'Z') <= rtrim(excluded.gathered_at, 'Z')`
 	// Bounded here, at the moment of growth, rather than by the retention sweeper. The sweeper only
 	// trims summaries when --retain-history is set, and it defaults to unset, so a sweeper-based cap
 	// would leave this table unbounded on most installs. A fact set is hundreds of kilobytes.

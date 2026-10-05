@@ -30,6 +30,7 @@ import (
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
 	"github.com/kordloom/switchtender/internal/outcome"
+	"github.com/kordloom/switchtender/internal/plantest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -1176,8 +1177,10 @@ func TestSeedHeldDestroyHoldsTheApplyItsPlanProposed(t *testing.T) {
 	runner := roundhouse.RunnerFunc(func(_ context.Context, spec roundhouse.Spec,
 		out io.Writer) (roundhouse.Result, error) {
 		if spec.DryRun {
+			// The plan returns what terraform returns, the saved plan file and its JSON rendering,
+			// since the gate weighs the saved plan rather than the text the tool printed.
 			_, _ = io.WriteString(out, legacyNetworkPlan)
-			return roundhouse.Result{ExitCode: 0, Drift: true}, nil
+			return plantest.Result(legacyNetworkPlan), nil
 		}
 		applies.Add(1)
 		return roundhouse.Result{ExitCode: 0}, nil

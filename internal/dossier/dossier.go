@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/decision"
+	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/scrub"
 	"github.com/kordloom/switchtender/internal/util"
@@ -67,6 +69,10 @@ type Input struct {
 	RecordedBy int64 `json:"recorded_by,omitempty"`
 	// GeneratedAt is when the dossier was collected.
 	GeneratedAt time.Time `json:"generated_at"`
+	// Decisions are the run's decision records, attached by AttachDecisions: each approval and denial
+	// a person made, the reason given with it, the random value that opens the reason's commitment,
+	// corrections, redactions, and for an agent's run the separation-of-duties evaluation.
+	Decisions []*decision.Record `json:"decisions,omitempty"`
 }
 
 // Collect gathers a run's evidence from the stores in one streaming pass over the chain. It
@@ -377,6 +383,54 @@ type metaRow struct {
 	V string
 }
 
+// tokenRow is one federated identity token issuance as rendered: which key signed which run's
+// token.
+type tokenRow struct {
+	// Run is the run the token was minted for, this run or one of its steps or shards.
+	Run string
+	// Credential is the federated credential it was minted under.
+	Credential string
+	// KeyID is the id of the key that signed it.
+	KeyID string
+	// TokenID is the token's jti.
+	TokenID string
+	// Expires is when the token stopped being valid, formatted.
+	Expires string
+	// Seq is the chain position of the entry that recorded it.
+	Seq int64
+}
+
+// tokenRows reads the token issuances among a run's chain entries, oldest first. An entry whose
+// path does not read as an issuance is left to the entry list, where every entry appears as
+// recorded.
+func tokenRows(entries []*audit.Entry) []tokenRow {
+	var out []tokenRow
+	for _, e := range entries {
+		if e.Method != audit.MethodToken {
+			continue
+		}
+		ti, ok := outcome.ParseTokenPath(e.Path)
+		if !ok {
+			continue
+		}
+		out = append(out, tokenRow{
+			Run: ti.RunID, Credential: ti.CredentialID, KeyID: ti.KeyID, TokenID: ti.TokenID,
+			Expires: ti.ExpiresAt.UTC().Format(time.RFC3339), Seq: e.Seq,
+		})
+	}
+	return out
+}
+
+// resolutionView is a composed inventory's resolved target set as the dossier shows it.
+type resolutionView struct {
+	// Kind is smart or constructed.
+	Kind string
+	// Inputs are the input inventory ids the hosts were drawn from, joined for display.
+	Inputs string
+	// Hosts are the hosts it resolved to.
+	Hosts []string
+}
+
 // view is the data rendered into the dossier.
 type view struct {
 	// Status is the machine verdict class: verified, unanchored, or broken.
@@ -395,6 +449,15 @@ type view struct {
 	Entries []entryRow
 	// Hosts are the per-host outcomes.
 	Hosts []hostRow
+	// Reasons are the decisions people made, with their reasons and corrections, as a thread.
+	Reasons []reasonRow
+	// Identity is an agent-initiated run's identity evidence, nil for any other run.
+	Identity *identityView
+	// Resolution is the host set a smart or constructed inventory resolved to at launch, nil for a
+	// run against any other inventory.
+	Resolution *resolutionView
+	// Tokens are the federated identity tokens minted for the run, each with the key that signed it.
+	Tokens []tokenRow
 	// Anchors are the covering anchors.
 	Anchors []anchorRow
 	// AnchorProblems describes each anchor the chain no longer satisfies.
@@ -438,6 +501,7 @@ func Render(in *Input) ([]byte, error) {
 		v.Decisions = append(v.Decisions, launchRow)
 		v.Entries = append(v.Entries, launchRow)
 	}
+	v.Meta = withAWXArrival(v.Meta, in.Launch)
 	v.ReceiptMissing = in.ReceiptMissing
 	// Silence reads as an omission in an evidence document, so the two reasons a launch row is
 	// absent are distinguished: no request authorized this run, or the entry that did is gone.
@@ -455,6 +519,14 @@ func Render(in *Input) ([]byte, error) {
 		v.Entries = append(v.Entries, row)
 		if row.Role != "" {
 			v.Decisions = append(v.Decisions, row)
+		}
+	}
+	v.Tokens = tokenRows(in.Entries)
+	v.Reasons = reasonRows(in.Decisions)
+	v.Identity = agentIdentity(in.Run, in.Decisions)
+	if res := in.Run.InventoryResolution; res != nil {
+		v.Resolution = &resolutionView{
+			Kind: res.Kind, Inputs: strings.Join(res.Inputs, ", "), Hosts: res.Hosts,
 		}
 	}
 	for _, h := range in.Hosts {
@@ -557,6 +629,13 @@ func onBehalfOf(e *audit.Entry) string {
 // it by id. Who asked for the run is carried by the run actor and source instead, and RecordedBy
 // is the position an anchor has to reach to cover the creation.
 func entryRole(e *audit.Entry) string {
+	// A workflow approval step's entries name the step as well as the workflow, so they read as what
+	// happened at the step: asked, approved, denied, or given up on, rather than as a decision on the
+	// whole run.
+	if _, _, verdict, ok := outcome.ParseStepDecisionPath(e.Path); ok &&
+		e.Method == audit.MethodDecision {
+		return stepRole(verdict)
+	}
 	switch {
 	case e.Method == audit.MethodDecision && strings.Contains(e.Path, "/decision/"):
 		// The committed decision, not the HTTP attempt: an attempt is recorded whether or not the
@@ -584,6 +663,21 @@ func entryRole(e *audit.Entry) string {
 	return ""
 }
 
+// stepRole names a workflow approval step entry by its verdict.
+func stepRole(verdict string) string {
+	switch verdict {
+	case outcome.StepRequested:
+		return "Step approval requested"
+	case outcome.StepApproved:
+		return "Step approved"
+	case outcome.StepRejected:
+		return "Step denied"
+	case outcome.StepTimedOut:
+		return "Step timed out"
+	}
+	return ""
+}
+
 // runMeta flattens the run's attributes into labeled rows, skipping empty ones.
 func runMeta(r *run.Run) []metaRow {
 	rows := []metaRow{}
@@ -604,17 +698,84 @@ func runMeta(r *run.Run) []metaRow {
 	add("Command", redactedCommand)
 	add("Inventory", r.Inventory)
 	add("Inventory id", r.InventoryID)
+	if res := r.InventoryResolution; res != nil {
+		noun := "hosts"
+		if len(res.Hosts) == 1 {
+			noun = "host"
+		}
+		add("Inventory resolved", fmt.Sprintf("%s inventory, %d %s at launch", res.Kind,
+			len(res.Hosts), noun))
+		switch {
+		case res.AnsibleCore != "":
+			add("Resolved by", "Ansible, ansible-core "+res.AnsibleCore)
+		case res.Engine != "":
+			add("Resolved by", "the native engine")
+		}
+		add("Inventory input digest", res.InputDigest)
+		add("Inventory resolved digest", res.ResolvedDigest)
+	}
+	if c := r.InventoryCheck; c != nil {
+		if len(c.Differences) == 0 {
+			add("Inventory cross-check", "ansible-core "+c.AnsibleCore+" read the same hosts, "+
+				"groups, and variables before the play ran")
+		} else {
+			add("Inventory cross-check", fmt.Sprintf("refused: ansible-core %s read it "+
+				"differently in %d places", c.AnsibleCore, len(c.Differences)))
+		}
+		for _, diff := range c.Differences {
+			add("Inventory difference", diff)
+		}
+	}
 	add("Project", r.ProjectID)
 	add("Commit", r.CommitSHA)
-	if r.DryRun {
+	// A dry run the gate did not find change free is not a preview, and the document handed to an
+	// auditor must not certify that nothing changed. It says what the gate's scan read and with
+	// which scanner, and names each thing it found or could not read, so the hold the run waited on
+	// is explained by the evidence rather than by a reader's guess.
+	switch {
+	case r.DryRun && !r.ChangeFree():
+		add("Dry run", "yes, but the gate did not find it change free")
+	case r.DryRun:
 		add("Dry run", "yes, no changes were made")
+	}
+	for _, s := range r.DryRunScans {
+		add("Dry-run scan", scanSummary(s))
+		add("Scan read", strings.Join(s.Inputs, ", "))
+	}
+	for _, why := range r.DryRunFindings() {
+		add("Not change free", why)
+	}
+	// Cached facts stand in for facts the play would have gathered, so the evidence states the
+	// setting the approval bound to: that the run used them, and how old they were allowed to be.
+	if r.UseFactCache {
+		add("Fact cache", factCacheText(r.FactCacheTimeout))
 	}
 	if r.ShardCount != nil && *r.ShardCount > 1 {
 		add("Shards", fmt.Sprintf("%d", *r.ShardCount))
 	}
 	add("Queue", r.Queue)
-	add("Image", r.Image)
+	add("Image", imageText(r.Image))
+	add("Pulled image digest", r.ImageDigest)
+	// What the approval bound about where the run reached: the inventory as it was submitted, or a
+	// dynamic source that resolves at execution, and then what it resolved to.
+	if snap := r.InventorySnapshot; snap != nil {
+		add("Inventory snapshot", snapshotText(snap))
+	}
+	if len(r.ResolvedHosts) > 0 {
+		add("Resolved at execution", strings.Join(r.ResolvedHosts, ", "))
+	}
+	// A gated apply carries out the saved plan its approval bound, never a plan made again.
+	if r.PlanSHA256 != "" {
+		add("Plan file", "applies the saved plan sha256:"+r.PlanSHA256[:min(12, len(r.PlanSHA256))]+
+			", sealed until the apply ended")
+	}
 	add("Held by", r.HeldByPolicy)
+	add("Why it was held", r.HoldNote)
+	// A note is a warning a policy recorded instead of holding the run, so the document handed to an
+	// auditor says what was flagged on a change that went ahead.
+	for _, note := range r.PolicyNotes {
+		add("Policy note", note)
+	}
 	// Separation of duties is the control a change-management review asks about first, so the evidence
 	// says whether it applied to this run rather than leaving the reader to infer it from the names.
 	if r.RequireDistinctApprover {
@@ -673,4 +834,45 @@ func runMeta(r *run.Run) []metaRow {
 	add("Error", r.Error)
 	add("Warning", r.Warning)
 	return rows
+}
+
+// scanSummary describes one of the gate's dry-run scans in a line: what read it, what it concluded,
+// how much it read, which version of the files that was, and how the module download the gate ran
+// first went, when it ran one.
+func scanSummary(s run.DryRunScan) string {
+	out := fmt.Sprintf("%s version %d, %s, %d files read", s.Scanner, s.Version, s.Classification,
+		len(s.Inputs))
+	if s.Step != "" {
+		out = fmt.Sprintf("step %q: %s", s.Step, out)
+	}
+	if s.Source != "" {
+		out += ", " + s.Source
+	}
+	if s.Fetch != nil {
+		out += ", " + s.Fetch.Summary()
+	}
+	return out
+}
+
+// imageText states a run's image the way an approver reads it: pinned by digest, or held to a tag the
+// registry did not resolve when the run was submitted. It returns the empty string for a host run.
+func imageText(image string) string {
+	switch {
+	case image == "":
+		return ""
+	case strings.Contains(image, "@sha256:"):
+		return image + " (pinned to a digest)"
+	default:
+		return image + " (tag not pinned to a digest)"
+	}
+}
+
+// snapshotText states an inventory snapshot: the hosts it names, or that it is a dynamic source
+// whose hosts resolve at execution.
+func snapshotText(snap *run.InventorySnapshot) string {
+	if snap.Dynamic {
+		return "a dynamic source: its hosts resolve at execution, so the definition is bound and the " +
+			"hosts it reached are recorded below"
+	}
+	return fmt.Sprintf("%d host(s) as submitted: %s", len(snap.Hosts), strings.Join(snap.Hosts, ", "))
 }

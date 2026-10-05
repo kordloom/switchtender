@@ -104,6 +104,10 @@ func TestSubcommandGroupsKeepTheirMembers(t *testing.T) {
 		WantNames: []string{"awx", "chef", "cron", "jenkins", "puppet", "rundeck", "semaphore"},
 	}, { // Test 6: The witness tools.
 		Name: "witness", Parent: witnessCmd, WantNames: []string{"serve", "verify-attestation"},
+	}, { // Test 7: The worker's one group, its delivery keys.
+		Name: "worker", Parent: workerCmd, WantNames: []string{"key"},
+	}, { // Test 8: The delivery key tools a relay worker pool registers and rotates with.
+		Name: "worker key", Parent: workerKeyCmd, WantNames: []string{"new", "public"},
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

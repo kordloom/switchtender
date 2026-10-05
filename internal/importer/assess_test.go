@@ -172,28 +172,29 @@ const ungatedExport = `{
 // TestAnAssessmentNamesTheApprovalGatesAMoveDrops holds the document to the approvals an estate
 // already has.
 //
-// An AWX approval node is the governance an estate carries today, and it was read as a node running
-// a template with an empty name and as a field the importer does not read. The document said the
-// workflow did not come across for no reason a reader could act on, then said every template runs
-// when somebody presses the button, which is the opposite of what that workflow does.
+// An AWX approval node is the governance an estate carries today. It comes across as an approval
+// step, and the document has to say the gate survives, or a reader who knows the estate is gated
+// assumes the move drops it.
 func TestAnAssessmentNamesTheApprovalGatesAMoveDrops(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		Name         string
-		Export       string
-		WantGates    []string
+		Name      string
+		Export    string
+		WantGates []string
+		// WantCarried are the workflows whose gates must be named as coming across.
+		WantCarried  []string
 		WantInDoc    []string
 		WantNotInDoc []string
-	}{{ // Test 0: The gate is named first in the governance section and read rather than unread.
-		Name:      "workflow with an approval node",
-		Export:    approvalExport,
-		WantGates: []string{"Release"},
+	}{{ // Test 0: The gate comes across as an approval step and the document says so.
+		Name:        "workflow with an approval node",
+		Export:      approvalExport,
+		WantCarried: []string{"Release"},
 		WantInDoc: []string{
-			`node approve is an approval gate, "Approve production"`,
-			"1 workflow waits for a person at an approval node today",
+			`workflow "Release" keeps its approval node, approve, as approval step`,
+			"1 workflow waits for a person at an approval node today. That gate comes",
 			"      - Release\n",
 		},
-		WantNotInDoc: []string{"create_approval_template", `runs ""`},
+		WantNotInDoc: []string{"create_approval_template", `runs ""`, "does not\n  come across"},
 	}, { // Test 1: An estate with no approval node says nothing about one.
 		Name:         "workflow without one",
 		Export:       ungatedExport,
@@ -210,6 +211,10 @@ func TestAnAssessmentNamesTheApprovalGatesAMoveDrops(t *testing.T) {
 			if diff := cmp.Diff(test.WantGates, a.Governance.ApprovalGates,
 				cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("ApprovalGates mismatch (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff(test.WantCarried, a.Governance.CarriedGates,
+				cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("CarriedGates mismatch (-want +got):\n%s", diff)
 			}
 			var doc strings.Builder
 			Render(&doc, "awx", "export.json", a)
@@ -317,6 +322,39 @@ func TestTheAssessmentListsEverythingThatDoesNotComeAcross(t *testing.T) {
 	for _, gone := range []string{"What is in there", "comes across   "} {
 		if strings.Contains(out, gone) {
 			t.Errorf("the assessment still says %q:\n%s", gone, out)
+		}
+	}
+}
+
+// TestAssessmentNoLongerLeavesRecurrencesOut pins the assessment's half of the recurrence change. A
+// schedule cron cannot express used to be counted among what does not come across, which is the
+// list a reader decides on; it now comes across and the assessment says so by counting it created
+// and naming it nowhere among the losses.
+func TestAssessmentNoLongerLeavesRecurrencesOut(t *testing.T) {
+	t.Parallel()
+	const export = `{"job_templates": [{"name": "close", "playbook": "close.yml",
+	  "related": {"schedules": [
+	    {"name": "quarter close", "rrule": "DTSTART;TZID=America/New_York:20260102T170000 ` +
+		`RRULE:FREQ=MONTHLY;BYMONTH=3,6,9,12;BYDAY=-1FR"},
+	    {"name": "fortnightly", "rrule": "DTSTART:20260106T020000Z RRULE:FREQ=WEEKLY;INTERVAL=2"},
+	    {"name": "but not at christmas", "rrule": "DTSTART:20260101T020000Z RRULE:FREQ=DAILY ` +
+		`EXDATE:20261225T020000Z"}]}}]}`
+	plan, err := FromAWX([]byte(export), importNow)
+	if err != nil {
+		t.Fatalf("FromAWX: %v", err)
+	}
+	report := plan.Assess().Report
+	created := map[string]int{}
+	for _, c := range report.Created {
+		created[c.Kind] = c.N
+	}
+	if created["schedules"] != 3 {
+		t.Errorf("schedules created = %d, want 3.\nleft out: %v", created["schedules"],
+			report.LeftOut)
+	}
+	for _, line := range append(slices.Clone(report.LeftOut), report.NeedsReview...) {
+		if strings.Contains(line, "schedule") {
+			t.Errorf("a schedule is still listed: %s", line)
 		}
 	}
 }

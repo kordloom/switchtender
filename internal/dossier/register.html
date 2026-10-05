@@ -201,7 +201,7 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13.5px; }
 					{{range .Rows}}<tr>
 						<td>{{.When}}</td>
 						<td class="mono">{{.Run}}</td>
-						<td class="mono">{{.Change}}{{if .DryRun}} <span class="pill warn">dry run</span>{{end}}</td>
+						<td class="mono">{{.Change}}{{if .DryRun}} <span class="pill warn">dry run</span>{{end}}{{if .NotChangeFree}} <span class="pill warn">not change free</span>{{end}}</td>
 						<td>{{if .Actor}}{{.Actor}}{{else}}none recorded{{end}}</td>
 						<td>{{.Source}}</td>
 						<td>{{.Risk}}</td>

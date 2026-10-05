@@ -5,11 +5,15 @@ import (
 	"io"
 	"os"
 	"slices"
+	"sort"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/spf13/cobra"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -125,10 +129,47 @@ func runVerify(cmd *cobra.Command, args []string) error {
 			mark(rep.DecisionsOK), rep.DecisionsPresent, matchWord(rep.DecisionsOK))
 		for _, d := range rep.Decisions {
 			fmt.Fprintf(out, "  %s %s, binding spec %s\n", d.Verdict, decidedBy(d), d.SpecDigest)
+			if line := reasonLine(d.ReasonState, d.Reason, d.RedactedCategory); line != "" {
+				fmt.Fprintf(out, "    reason   %s\n", line)
+			}
+			if d.SeparationOfDuties != nil {
+				fmt.Fprintf(out, "    separation of duties %s\n", sodLine(d.SeparationOfDuties))
+			}
+		}
+	}
+	if rep.CorrectionsPresent > 0 {
+		fmt.Fprintf(out, "corrections  %s (%d, each %s what the chain committed)\n",
+			mark(!rep.CorrectionsFailed), rep.CorrectionsPresent, matchWord(!rep.CorrectionsFailed))
+		for _, c := range rep.Corrections {
+			fmt.Fprintf(out, "  by %s to decision %s: %s\n", c.Actor, c.DecisionID,
+				reasonLine(c.ReasonState, c.Reason, c.RedactedCategory))
 		}
 	}
 	if rep.SpecPresent || rep.DecisionsPresent > 0 {
 		fmt.Fprintf(out, "spec         %s (%s)\n", mark(rep.SpecConsistent), specVerdict(rep))
+	}
+	// Every member the chain link does not commit, in one of three states. What was checked is
+	// counted by member and a redacted one is named. The unchecked ones follow the verdict, which
+	// counts them, so a verdict never stands for more than was checked.
+	if len(rep.Disclosed) > 0 {
+		checked, unchecked, redacted := disclosedCounts(rep.Disclosed)
+		fmt.Fprintf(out, "disclosed    %d checked, %d unchecked, %d redacted\n", checked, unchecked,
+			redacted)
+		if line := checkedMembers(rep.Disclosed); line != "" {
+			fmt.Fprintf(out, "  checked    %s\n", line)
+		}
+		for _, m := range rep.Disclosed {
+			if m.State == audit.MemberRedacted && m.With == "" {
+				fmt.Fprintf(out, "  redacted   claim %d %s: %s\n", m.Claim, printable(m.Member),
+					printable(m.Detail))
+			}
+		}
+	}
+	// A record under the unkeyed form verifies, and a reader should still know its digest confirms
+	// a guess for anyone holding the document.
+	for _, l := range rep.LegacyRecords {
+		fmt.Fprintf(out, "legacy       %s is committed under the unkeyed digest form from before "+
+			"nonces, which anyone who can guess it can confirm\n", l)
 	}
 
 	if !rep.OK() {
@@ -138,13 +179,96 @@ func runVerify(cmd *cobra.Command, args []string) error {
 	// Without a pin a forged receipt earned the same VERIFIED as a genuine one, because any key signs
 	// its own bundle. The unpinned result is its own verdict, the one the browser verifier gives.
 	if !pinned {
-		fmt.Fprintf(out, "\nINTACT, BUT UNIDENTIFIED: nothing has been altered since this %s was "+
-			"signed. Who signed it is unchecked, because no key was pinned. Pass --pubkey with the "+
-			"fingerprint the producing install publishes at /.well-known/loomseal.json.\n", noun)
+		fmt.Fprintf(out, "\nINTACT, BUT UNIDENTIFIED%s: nothing %shas been altered since this %s "+
+			"was signed. Who signed it is unchecked, because no key was pinned. Pass --pubkey with "+
+			"the fingerprint the producing install publishes at /.well-known/loomseal.json.\n",
+			uncheckedQualifier(rep), checkedScope(rep), noun)
+		printUnchecked(out, rep)
 		return nil
 	}
-	fmt.Fprintf(out, "\nVERIFIED: nothing has been altered since this %s was signed\n", noun)
+	fmt.Fprintf(out, "\nVERIFIED%s: nothing %shas been altered since this %s was signed\n",
+		uncheckedQualifier(rep), checkedScope(rep), noun)
+	printUnchecked(out, rep)
 	return nil
+}
+
+// uncheckedQualifier is what follows the verdict word when the document discloses members nothing
+// checked: their count, so the word never stands alone over something it did not cover.
+func uncheckedQualifier(rep *audit.BundleReport) string {
+	if rep.DisclosedUnchecked == 0 {
+		return ""
+	}
+	return fmt.Sprintf(", %d disclosed record(s) unchecked", rep.DisclosedUnchecked)
+}
+
+// checkedScope narrows what the verdict says was not altered to what was checked, when anything was
+// left unchecked.
+func checkedScope(rep *audit.BundleReport) string {
+	if rep.DisclosedUnchecked == 0 {
+		return ""
+	}
+	return "it checked "
+}
+
+// printUnchecked names each unchecked disclosed record after the verdict that counts them.
+func printUnchecked(out io.Writer, rep *audit.BundleReport) {
+	for _, m := range rep.Disclosed {
+		if m.State == audit.MemberUnchecked && m.With == "" {
+			fmt.Fprintf(out, "  unchecked  claim %d %s: %s\n", m.Claim, printable(m.Member),
+				printable(m.Detail))
+		}
+	}
+}
+
+// printable returns s as it can be written to a terminal: unchanged when every character prints,
+// and quoted otherwise. A member name or a claim type is written by whoever produced the document,
+// and one carrying control characters must not act on the terminal reading it.
+func printable(s string) string {
+	for _, c := range s {
+		if !unicode.IsPrint(c) {
+			return strconv.Quote(s)
+		}
+	}
+	return s
+}
+
+// disclosedCounts counts disclosed records by state, a member and the one it travels with counted
+// once.
+func disclosedCounts(members []audit.DisclosedMember) (checked, unchecked, redacted int) {
+	for _, m := range members {
+		if m.With != "" {
+			continue
+		}
+		switch m.State {
+		case audit.MemberChecked:
+			checked++
+		case audit.MemberUnchecked:
+			unchecked++
+		case audit.MemberRedacted:
+			redacted++
+		}
+	}
+	return checked, unchecked, redacted
+}
+
+// checkedMembers names the checked records by member, with how many of each, in name order.
+func checkedMembers(members []audit.DisclosedMember) string {
+	counts := map[string]int{}
+	for _, m := range members {
+		if m.State == audit.MemberChecked && m.With == "" {
+			counts[m.Member]++
+		}
+	}
+	names := make([]string, 0, len(counts))
+	for name := range counts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		parts = append(parts, fmt.Sprintf("%s %d", printable(name), counts[name]))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // documentNoun names the file being verified by what its claims are about. A receipt is about one
@@ -229,6 +353,22 @@ func failedChecks(rep *audit.BundleReport) string {
 	if !rep.DecisionsOK {
 		failed = append(failed, "a disclosed decision is not what the chain committed")
 	}
+	if rep.CorrectionsFailed {
+		failed = append(failed, "a disclosed correction is not what the chain committed")
+	}
+	if rep.SpansUnbound {
+		failed = append(failed, "a span beat's members disagree with the path its link committed")
+	}
+	if len(rep.CaseVariants) > 0 {
+		failed = append(failed, "a member's name differs only in case from one a check reads ("+
+			printable(strings.Join(rep.CaseVariants, ", "))+"), so a reader folding case would "+
+			"take one for the other")
+	}
+	if len(rep.LegacyAfterKeyed) > 0 {
+		failed = append(failed, "a disclosed record sits on an unkeyed digest after the keyed form "+
+			"began ("+strings.Join(rep.LegacyAfterKeyed, ", ")+"), so it is not an entry from "+
+			"before nonces")
+	}
 	if !rep.SpecConsistent {
 		if approvedAndExecuted(rep) {
 			failed = append(failed, "the approved and the executed change are not the same")
@@ -240,6 +380,48 @@ func failedChecks(rep *audit.BundleReport) string {
 		return "a check did not pass"
 	}
 	return strings.Join(failed, "; ")
+}
+
+// reasonLine says what a receipt shows of a reason: the verified text, quoted so nothing in it can
+// act on the terminal printing it, that it was redacted and why, or that the chain commits one the
+// document does not disclose. It is empty for a decision given no reason.
+func reasonLine(state, text, category string) string {
+	switch state {
+	case audit.ReasonVerified:
+		return fmt.Sprintf("%q (opens the commitment the chain holds)", text)
+	case audit.ReasonRedacted:
+		return "redacted (" + category + "), its commitment stays on the chain and cannot be opened"
+	case audit.ReasonWithheld:
+		return "committed by the chain and not disclosed in this document"
+	}
+	return ""
+}
+
+// sodLine says how separation of duties applied to a decision on an agent's run: whether a rule
+// required an independent approver, whose account counted as the requester, who decided, and the
+// result.
+func sodLine(s *decision.SeparationOfDuties) string {
+	result := "not required"
+	switch s.Result {
+	case decision.SoDSatisfied:
+		result = "required and satisfied"
+	case decision.SoDNotApplicable:
+		result = "not applicable, a denial is never restricted"
+	}
+	independent := "the same account"
+	if s.Independent {
+		independent = "an independent account"
+	}
+	return fmt.Sprintf("%s: requester %s (the agent's bound account), decided by %s, %s", result,
+		s.Requester, s.Decider, independent)
+}
+
+// valueOr returns v, or fallback when v is empty.
+func valueOr(v, fallback string) string {
+	if v == "" {
+		return fallback
+	}
+	return v
 }
 
 // decidedBy says who made a decision, as far as the chain recorded it. A decision an install
@@ -347,11 +529,45 @@ func printOutcome(out io.Writer, body []byte) {
 		exit = fmt.Sprintf("%d", *rec.ExitCode)
 	}
 	fmt.Fprintf(out, "  what happened  run %s %s (exit %s)\n", rec.RunID, rec.Status, exit)
+	// A record too large to disclose whole was committed and disclosed as its summary, which still
+	// names the run, its status, and its spec. Saying so keeps a reader from taking the missing
+	// hosts and tasks for a run that had none.
+	if o := rec.Oversize; o != nil {
+		fmt.Fprintf(out, "  summarized     the record is %d bytes, over the %d disclosed whole, and "+
+			"the chain commits its SHA-256 %s\n", o.Size, o.Limit, o.SHA256)
+	}
+	// An agent's run names the agent, the account it acted under, and who provisioned it, which the
+	// record committed with the outcome. Who approved it is on the decisions line.
+	if i := rec.Initiator; i != nil {
+		fmt.Fprintf(out, "  initiated by   %s (agent)\n", i.InitiatedBy)
+		fmt.Fprintf(out, "  bound to       %s\n", valueOr(i.BoundTo, "no account recorded"))
+		provisioned := valueOr(i.ProvisionedBy, "not recorded, the token predates issuer records")
+		if i.ProvisionedByType != "" {
+			provisioned += " (" + i.ProvisionedByType + ")"
+		}
+		fmt.Fprintf(out, "  provisioned by %s\n", provisioned)
+	}
 	// A no-change preview and the change itself are the two things a reader must never confuse, and
 	// the record distinguishes them. Leaving the mode out made a receipt for a dry run read exactly
 	// like a receipt for the real thing. The commit is the content that actually ran.
-	if rec.DryRun {
+	// A dry run the gate did not find change free is not a preview, and the receipt must not read
+	// like one. What the gate's scan read is part of the record, so the receipt says so too.
+	switch {
+	case rec.DryRun && !run.ScansChangeFree(rec.DryRunScans):
+		fmt.Fprintln(out, "  mode           dry run, but the gate did not find it change free")
+	case rec.DryRun:
 		fmt.Fprintln(out, "  mode           check mode, so nothing was changed")
+	}
+	for _, s := range rec.DryRunScans {
+		fetch := ""
+		if s.Fetch != nil {
+			fetch = ", " + s.Fetch.Summary()
+		}
+		fmt.Fprintf(out, "  dry-run scan   %s version %d, %s, %d files read%s\n", s.Scanner, s.Version,
+			s.Classification, len(s.Inputs), fetch)
+	}
+	for _, why := range run.ScanEntries(rec.DryRunScans) {
+		fmt.Fprintf(out, "  not change free %s\n", why)
 	}
 	if rec.CommitSHA != "" {
 		fmt.Fprintf(out, "  commit         %s\n", rec.CommitSHA)
@@ -370,6 +586,11 @@ func printOutcome(out io.Writer, body []byte) {
 				fmt.Fprintf(out, "    - %s\n", rule)
 			}
 		}
+	}
+	// What a policy warned about and recorded instead of holding the run. The run went ahead past
+	// it, so the receipt says what the warning was rather than leaving it to a server to recall.
+	for _, note := range rec.PolicyNotes {
+		fmt.Fprintf(out, "  policy note    %s\n", note)
 	}
 	if rec.Image != "" {
 		fmt.Fprintf(out, "  image          %s\n", rec.Image)

@@ -32,10 +32,11 @@ type Options struct {
 
 // Tools returns the tool set an agent may call, in listing order.
 //
-// The set is proposing runs and reading what happened. There is no approve or reject tool, so an
-// agent cannot release its own work no matter how it is prompted, and no credential, account, token,
-// grant, or policy tool, so it cannot widen its own reach. Everything here is an authenticated call
-// the server authorizes and records like any other.
+// The set is proposing runs and reading what happened, including what is waiting for a person.
+// There is no approve or reject tool, for a run or for a workflow approval step, so an agent cannot
+// release its own work no matter how it is prompted, and no credential, account, token, grant, or
+// policy tool, so it cannot widen its own reach. Everything here is an authenticated call the
+// server authorizes and records like any other.
 func Tools(c *Client, opts Options) []Tool {
 	tools := []Tool{
 		{
@@ -183,6 +184,22 @@ func Tools(c *Client, opts Options) []Tool {
 				// read the evidence for a run it asked for, which is exactly this tool's case.
 				path := "/v1/runs/" + escapeID(id) + "/evidence?format=json"
 				if err := c.do(ctx, "GET", path, nil, &out); err != nil {
+					return "", err
+				}
+				return render(out)
+			},
+		},
+		{
+			Name: "list_pending_approvals",
+			Description: "List the workflow approval steps waiting for a person: the workflow, the " +
+				"step and what it asks, the steps that already ran, what an approval runs next, " +
+				"what a denial runs, and when the step times out. Use it to learn that work you " +
+				"proposed is waiting rather than failed. You cannot approve or deny a step; a " +
+				"person decides it.",
+			InputSchema: object(nil, nil),
+			Run: func(ctx context.Context, _ json.RawMessage) (string, error) {
+				var out any
+				if err := c.do(ctx, "GET", "/v1/approvals", nil, &out); err != nil {
 					return "", err
 				}
 				return render(out)

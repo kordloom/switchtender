@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -26,6 +27,12 @@ type SpecRecord struct {
 	Inventory string `json:"inventory,omitempty"`
 	// InventoryID names the stored inventory the run targets.
 	InventoryID string `json:"inventory_id,omitempty"`
+	// InventoryResolution is the host set a smart or constructed inventory resolved to at launch,
+	// and the inputs it drew them from. The run is held to these hosts, so they are part of what an
+	// approver decides on and what the outcome commits: a composed inventory is evaluated rather
+	// than stored, and without this the evidence names a filter but never the machines it reached.
+	// Absent for every run that targets no composed inventory, which keeps their digests unchanged.
+	InventoryResolution *run.InventoryResolution `json:"inventory_resolution,omitempty"`
 	// ProjectID names the git project the run reads from.
 	ProjectID string `json:"project_id,omitempty"`
 	// Limit narrows the run to matching hosts.
@@ -35,14 +42,33 @@ type SpecRecord struct {
 	SkipTags []string `json:"skip_tags,omitempty"`
 	// ExtraVars are the run's injected variables, redacted before the record is digested.
 	ExtraVars map[string]any `json:"extra_vars,omitempty"`
+	// SealedNames names the variables supplied as secret survey answers. The record says that an
+	// answer was supplied and never what it was: the answers are sealed on the run and bound here by
+	// name, the way credentials are bound by reference.
+	SealedNames []string `json:"sealed_vars,omitempty"`
+	// SealedDigests binds each of those answers by a digest of its ciphertext, so an approval covers
+	// which sealed answer will be opened and not only that one was given: a sealed answer swapped
+	// for another under the same name moves the binding. A digest of ciphertext says nothing about
+	// the answer. Absent for every run without sealed answers, and for one created before digests
+	// existed, which keeps their digests unchanged.
+	SealedDigests []run.SealedDigest `json:"sealed_var_digests,omitempty"`
 	// CredentialIDs names the stored credentials the run executes with, by reference.
 	CredentialIDs []string `json:"credential_ids,omitempty"`
-	// PullCredentialID names the registry credential for a private image. The image reference
-	// itself is deliberately absent: the dispatcher resolves it onto the run when the run
-	// finalizes, so including it would make the executed digest differ from the approved one on
-	// every run that used a project or server default. The resolved image is committed by the
-	// outcome record instead.
+	// Image is the container image the run executes in, resolved and pinned when the run was
+	// submitted, by digest when the registry answered then. The image is where the tool, its
+	// credentials, and its output live, so it decides what a run does as surely as the command does,
+	// and an approval covers it. Absent for a run on the host, which keeps its digest unchanged.
+	Image string `json:"image,omitempty"`
+	// PullCredentialID names the registry credential for a private image.
 	PullCredentialID string `json:"pull_credential_id,omitempty"`
+	// InventorySnapshot binds the stored inventory the run executes against, materialized when the
+	// run was submitted: the digest of its sealed content, a digest of its content with secrets
+	// masked, and its hosts. Absent for every run that targets no stored inventory, and for one
+	// targeting a composed inventory, which InventoryResolution binds instead.
+	InventorySnapshot *InventorySnapshotSpec `json:"inventory_snapshot,omitempty"`
+	// PlanSHA256 binds the sealed plan file a gated terraform or opentofu apply carries out, so an
+	// approval releases that plan and nothing planned afterward. Absent for every other run.
+	PlanSHA256 string `json:"plan_sha256,omitempty"`
 	// DryRun runs the tool in its no-change mode.
 	DryRun bool `json:"dry_run,omitempty"`
 	// Verbosity, Forks, and DiffMode are the Ansible execution controls.
@@ -55,6 +81,42 @@ type SpecRecord struct {
 	ShardCount int `json:"shard_count,omitempty"`
 	// Steps are a pipeline's declared steps, the graph an approver decided on.
 	Steps []run.PipelineStep `json:"steps,omitempty"`
+	// FactCache records that the run serves cached facts and how old they may be, absent while the
+	// cache is off so a run that does not use it keeps its digest. See FactCacheSpec.
+	FactCache *FactCacheSpec `json:"fact_cache,omitempty"`
+	// ModulesDigests are the digests of the Terraform or OpenTofu module trees the gate downloaded
+	// and read before it judged the run. Execution refuses a run whose modules differ, so an
+	// approval covers the exact module code that will run, not whatever a version constraint
+	// resolves to by the time it does. Absent for every run the gate downloaded no modules for,
+	// which keeps their digests unchanged.
+	ModulesDigests []string `json:"modules_digests,omitempty"`
+}
+
+// InventorySnapshotSpec is the part of a run's inventory snapshot an approval binds. Every field is
+// safe to disclose: the content is bound by the digest of its ciphertext and by a digest taken with
+// its secret values masked, never by a digest of a secret a reader could guess against.
+type InventorySnapshotSpec struct {
+	// SealedSHA256 is the hex SHA-256 of the sealed content as stored on the run.
+	SealedSHA256 string `json:"sealed_sha256"`
+	// ContentSHA256 is the hex SHA-256 of the content with its secret values masked.
+	ContentSHA256 string `json:"content_sha256"`
+	// Hosts are the hosts the content names when it resolves without Ansible.
+	Hosts []string `json:"hosts,omitempty"`
+	// Dynamic reports that the content is a definition Ansible resolves at execution, so its hosts
+	// are recorded with the outcome rather than bound here.
+	Dynamic bool `json:"dynamic,omitempty"`
+	// CredentialIDs are the credentials the inventory attached when the run was submitted.
+	CredentialIDs []string `json:"credential_ids,omitempty"`
+}
+
+// inventorySnapshotSpecOf returns the binding part of r's inventory snapshot, nil for none.
+func inventorySnapshotSpecOf(r *run.Run) *InventorySnapshotSpec {
+	s := r.InventorySnapshot
+	if s == nil {
+		return nil
+	}
+	return &InventorySnapshotSpec{SealedSHA256: s.SealedSHA256, ContentSHA256: s.ContentSHA256,
+		Hosts: s.Hosts, Dynamic: s.Dynamic, CredentialIDs: s.CredentialIDs}
 }
 
 // Spec assembles the canonical redacted spec bytes for r. Redaction happens here, before the bytes
@@ -76,15 +138,19 @@ func Spec(r *run.Run) ([]byte, error) {
 func specRecordOf(r *run.Run) SpecRecord {
 	rec := SpecRecord{
 		Tool: r.Tool, Playbook: r.Playbook, Command: r.Command,
-		Inventory: r.Inventory, InventoryID: r.InventoryID, ProjectID: r.ProjectID,
+		Inventory: r.Inventory, InventoryID: r.InventoryID,
+		InventoryResolution: r.InventoryResolution, ProjectID: r.ProjectID,
 		Limit: r.Limit, Tags: r.Tags, SkipTags: r.SkipTags, ExtraVars: r.ExtraVars,
-		CredentialIDs: r.CredentialIDs, PullCredentialID: r.PullCredentialID,
+		SealedNames: r.SealedNames, CredentialIDs: r.CredentialIDs, PullCredentialID: r.PullCredentialID,
 		DryRun: r.DryRun, Verbosity: r.Verbosity, Forks: r.Forks, DiffMode: r.DiffMode,
-		Timeout: r.Timeout, Steps: r.Steps,
+		Timeout: r.Timeout, Steps: r.Steps, ModulesDigests: r.ModulesDigests(), Image: r.Image,
+		InventorySnapshot: inventorySnapshotSpecOf(r), PlanSHA256: r.PlanSHA256,
 	}
+	rec.SealedDigests = r.SealedDigests
 	if r.ShardCount != nil {
 		rec.ShardCount = *r.ShardCount
 	}
+	rec.FactCache = factCacheSpecOf(r)
 	return rec
 }
 
@@ -140,20 +206,85 @@ type DecisionRecord struct {
 	Verdict string `json:"verdict"`
 	// SpecDigest is the digest of the run's spec at the moment of the decision.
 	SpecDigest string `json:"spec_digest"`
+	// DecisionID is the id of the decision record kept beside the chain, which is also the id of the
+	// chain entry committing this body. It is what a correction and a redaction name, and it is the
+	// event id the reason commitment is bound to. Omitted on a decision recorded before decision
+	// records existed, which reduces to the bytes it always did.
+	DecisionID string `json:"decision_id,omitempty"`
+	// ReasonCommitment is the hiding commitment to the approver's masked reason, omitted when none
+	// was given. The reason itself is never in the body.
+	ReasonCommitment string `json:"reason_commitment,omitempty"`
+	// SeparationOfDuties is how separation of duties was evaluated for a decision on a run an agent
+	// asked for, omitted for every other run.
+	SeparationOfDuties *decision.SeparationOfDuties `json:"separation_of_duties,omitempty"`
 }
 
 // DecisionBody assembles the canonical decision record for r and returns its JSON with the spec
 // digest it embeds. It is exported so a receipt can rebuild the same bytes for disclosure.
 func DecisionBody(r *run.Run, verdict string) (body []byte, specDigest string, err error) {
+	return DecisionBodyWith(r, verdict, DecisionExtras{})
+}
+
+// DecisionBodyWith is DecisionBody for a decision recorded with a decision record, committing the
+// record's id, the reason commitment, and the separation-of-duties evaluation beside the verdict.
+func DecisionBodyWith(r *run.Run, verdict string, extras DecisionExtras) (body []byte,
+	specDigest string, err error) {
 	specDigest, err = SpecDigest(r)
 	if err != nil {
 		return nil, "", err
 	}
-	body, err = json.Marshal(DecisionRecord{RunID: r.ID, Verdict: verdict, SpecDigest: specDigest})
+	body, err = json.Marshal(DecisionRecord{RunID: r.ID, Verdict: verdict, SpecDigest: specDigest,
+		DecisionID: extras.ID, ReasonCommitment: extras.ReasonCommitment,
+		SeparationOfDuties: extras.SeparationOfDuties})
 	if err != nil {
 		return nil, "", err
 	}
 	return body, specDigest, nil
+}
+
+// VerdictRefused is the decision a deny policy makes about a submission it refuses.
+const VerdictRefused = "refused"
+
+// policyDecider is who the chain names for a refusal: the policy engine, acting on behalf of
+// whoever asked for the run, since no person made the decision.
+const policyDecider = "system:policy"
+
+// RefusalPath is the chain path of a refusal: the run that was refused, for a Rego policy the full
+// digest of the bundle that decided, and the rule that refused it. The refused run is never
+// created, so nothing could be looked up by its id afterward, and the path is the one part of the
+// entry an exported chain discloses as written. The rule's name comes last and runs to the end of
+// the path, so a name holding a slash cannot pose as a bundle digest.
+func RefusalPath(runID, rule, bundle string) string {
+	path := "/runs/" + runID + "/decision/" + VerdictRefused
+	if bundle != "" {
+		path += "/rego/sha256:" + bundle
+	}
+	return path + "/policy/" + rule
+}
+
+// CommitRefusal records that a deny policy refused r's submission, naming the rule and, for a Rego
+// policy, the bundle digest, and committing the decision body over the spec that was refused.
+//
+// A refusal used to leave only the attempt the request middleware records, which says that a
+// launch was asked for and nothing about what refused it. The policy in force could change a minute
+// later, so the chain could not show which rule, or which exact Rego bundle, turned a submission
+// away.
+func CommitRefusal(ctx context.Context, audits audit.Store, r *run.Run, rule, bundle string,
+	now func() time.Time) error {
+	body, _, err := DecisionBody(r, VerdictRefused)
+	if err != nil {
+		return err
+	}
+	digest, nonce, err := audit.ContentDigestOf(body)
+	if err != nil {
+		return err
+	}
+	return audits.Append(ctx, &audit.Entry{
+		ID: audit.NewID(), At: now(),
+		Actor: policyDecider, ActorType: "system", OnBehalfOf: r.Actor,
+		Method: audit.MethodDecision, Path: RefusalPath(r.ID, rule, bundle),
+		ContentDigest: digest, Nonce: nonce,
+	})
 }
 
 // Decider is who made an approval decision, in the audit chain's vocabulary. The three fields
@@ -169,6 +300,11 @@ type Decider struct {
 	Type string
 	// OnBehalfOf is the account whose authority the decider used, empty when it acted as itself.
 	OnBehalfOf string
+	// AccountID is the id of the account the decider authenticated as, empty when the caller names
+	// no account. It is never written to the chain, which names accounts by OnBehalfOf. It is what
+	// separation of duties compares, because a person's token and their browser session carry
+	// different names for one account, and an agent's runs count its bound account as the requester.
+	AccountID string
 }
 
 // CommitDecision records an approval decision as a tamper-evident chain entry naming the decider
@@ -177,22 +313,44 @@ type Decider struct {
 // system acts on.
 func CommitDecision(ctx context.Context, audits audit.Store, r *run.Run, verdict string, by Decider,
 	now func() time.Time) (string, error) {
-	body, specDigest, err := DecisionBody(r, verdict)
+	return CommitDecisionWith(ctx, audits, r, verdict, by, now, DecisionExtras{})
+}
+
+// CommitDecisionWith is CommitDecision for a decision recorded with a decision record. The entry
+// takes the record's id, so the record and the entry that committed it name each other.
+func CommitDecisionWith(ctx context.Context, audits audit.Store, r *run.Run, verdict string,
+	by Decider, now func() time.Time, extras DecisionExtras) (string, error) {
+	entry, specDigest, err := DecisionEntry(r, verdict, by, now, extras)
 	if err != nil {
 		return "", err
-	}
-	digest, nonce, err := audit.ContentDigestOf(body)
-	if err != nil {
-		return "", err
-	}
-	entry := &audit.Entry{
-		ID: audit.NewID(), At: now(),
-		Actor: by.Name, ActorType: by.Type, OnBehalfOf: by.OnBehalfOf,
-		Method: audit.MethodDecision, Path: "/runs/" + r.ID + "/decision/" + verdict,
-		ContentDigest: digest, Nonce: nonce,
 	}
 	if err := audits.Append(ctx, entry); err != nil {
 		return "", err
 	}
 	return specDigest, nil
+}
+
+// DecisionEntry builds the chain entry CommitDecisionWith appends, without appending it, and
+// returns it with the spec digest its body commits. A decision is claimed before it is recorded,
+// and the claim carries this entry, so whichever process finishes the decision appends exactly
+// these bytes under exactly this id.
+func DecisionEntry(r *run.Run, verdict string, by Decider, now func() time.Time,
+	extras DecisionExtras) (*audit.Entry, string, error) {
+	body, specDigest, err := DecisionBodyWith(r, verdict, extras)
+	if err != nil {
+		return nil, "", err
+	}
+	digest, nonce, err := audit.ContentDigestOf(body)
+	if err != nil {
+		return nil, "", err
+	}
+	if now == nil {
+		now = time.Now
+	}
+	return &audit.Entry{
+		ID: entryID(extras.ID), At: now(),
+		Actor: by.Name, ActorType: by.Type, OnBehalfOf: by.OnBehalfOf,
+		Method: audit.MethodDecision, Path: "/runs/" + r.ID + "/decision/" + verdict,
+		ContentDigest: digest, Nonce: nonce,
+	}, specDigest, nil
 }

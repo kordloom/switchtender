@@ -60,7 +60,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts" class="active">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts" class="active">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -97,6 +97,10 @@ nothing but the stored path would decide what code runs as the executor.</p>
 <p>A stored inventory can also draw its content from an external store, a command, Vault, or Google
 Secret Manager, resolved at launch, so the host list lives outside SwitchTender and is fetched fresh
 for each run.</p>
+<p>A smart inventory is a host filter over the other inventories, and a constructed inventory runs the
+constructed plugin over a list of input inventories. Both are resolved at every launch for the
+person launching, never reach an input that person may not use, and record on the run the hosts
+they resolved to. The <a href="/docs/inventories">inventories guide</a> covers both.</p>
 <h2 id="triggers">Triggers</h2>
 <p>A webhook trigger is a URL that launches a template on an inbound git push. The project syncs
 fresh first, so the run deploys the commit that was just pushed.</p>
@@ -105,12 +109,23 @@ separate from the URL token so a leaked URL cannot forge signed pushes. Set that
 webhook secret on the git host and turn on enforcement, and every inbound push must carry a valid
 <code>X-Hub-Signature-256</code> HMAC over its body or it is rejected. Rotate the secret at any time. A bad or
 missing signature never launches a run.</p>
+<p>A git host stops waiting for a webhook's answer after about ten seconds, and a launch can take
+longer when the template is a Terraform or OpenTofu plan whose modules the approval gate downloads
+first. The fire is recorded on the audit chain before anything launches, and the sender is answered
+within five seconds either way: with the run when the launch finished, or with <code>accepted</code> when it
+is still going, in which case the run launches once the gate has read the configuration. A
+redelivery that arrives while the launch is still going joins it, and one that arrives later is
+answered with the run the first delivery made, so a delivery never launches twice. A launch that
+fails after its sender was answered is recorded on the chain at <code>/hooks/&lt;trigger&gt;/failed</code> and in the
+server log, since the answer that would have carried the failure reached nobody.</p>
 <h2 id="credentials">Credentials</h2>
 <p>A credential is a secret sealed with AES-256-GCM, decrypted only at execution into the run's
-environment or a temporary file created mode 0600 and deleted when the run ends. Fourteen kinds cover SSH keys and SSH passwords, vault passwords, become
+environment or a temporary file created mode 0600 and deleted when the run ends. Fifteen kinds cover SSH keys and SSH passwords, vault passwords, become
 passwords and full become settings, network device logins, environment bundles for cloud SDKs, API
-tokens, container registry logins, and typed AWS, Azure, GCP, VMware, and OpenStack cloud credentials. The
-<a href="/docs/secrets">secrets guide</a> describes each. Secrets never appear in API responses.</p>
+tokens, container registry logins, Kubernetes kubeconfigs, and typed AWS, Azure, GCP, VMware, and OpenStack cloud credentials. The
+<a href="/docs/secrets">secrets guide</a> describes each. Secrets never appear in API responses. Four federated
+kinds store no secret at all: each run that carries one receives a short-lived identity token
+SwitchTender signs, as <a href="/docs/federation">workload identity federation</a> describes.</p>
 <h2 id="teams-and-grants">Teams and grants</h2>
 <p>The global roles, admin, operator, and viewer, decide the broad strokes. On top of them, a grant
 gives a user or a team access to a specific project, template, inventory, or credential. A read grant
@@ -161,9 +176,12 @@ produced it.</p>
 a digest of the request payload, so a recorded change cannot be re-cast as a different one while the
 chain still verifies. The digest is taken over the payload with its secret fields redacted first, so
 it proves the shape and non-secret content of a change without becoming a way to brute-force a
-secret the request carried. Each entry also records how the caller authenticated and, for a token
-bound to an account, the account it acted on behalf of, so a change an AI agent made under an
-operator's authority is attributable to both and cannot later be presented as a person's.</p>
+secret the request carried. A secret field is one named like a secret, such as a password or a
+token, and also one whose name says nothing: the answer to a secret survey question and a secret
+question's default, a notification target's address and key, and an approver's reason, which the
+decision's own entry commits instead. Each entry also records how the caller authenticated and, for
+a token bound to an account, the account it acted on behalf of, so a change an AI agent made under
+an operator's authority is attributable to both and cannot later be presented as a person's.</p>
 <p><strong>A receipt names the install that wrote it.</strong> The install's identity takes part in every chain
 link, and a verifier checks each claim against the identity the bundle advertises. Without this a
 published receipt could be lifted whole: keep the claims and the genuine third-party anchor, rewrite
@@ -176,6 +194,20 @@ that chain has to sign as the same install, so none of them will mint a key on i
 one is supplied the server runs with the chain unattributed and unbound. It still records and still
 verifies, but its receipts name no install and can be lifted. Set <code>SWITCHTENDER_AUDIT_KEY</code> to one
 seed on every process, or place the same <code>producer-key.json</code> in each host's identity directory.</p>
+<p><strong>A receipt discloses exactly what its entries committed.</strong> A run's receipt carries the run's
+outcome record, its spec, and each approval decision and correction beside the digests the chain
+committed. Each is redacted before its bytes are fixed and disclosed as those same bytes, so a
+LoomSeal verifier from 1.7.0 on checks every one of them as carried, with none of this product's
+redaction rules. An outcome is committed under the exact digest form, <code>sha256e:</code>. A record whose
+redacted form is over 1 MiB is committed and disclosed as its summary: the run, its status, exit
+code, and spec digest, and the full record's size and SHA-256. An outcome recorded before the exact
+form keeps verifying with <code>switchtender verify</code>, and an open verifier reports it as carried and
+unchecked. A decision or correction an install recorded before nonces existed carries an unkeyed
+digest, which still verifies and is named as legacy, because anyone holding the receipt can confirm
+a guess of its body against it. Every entry after the first keyed one is keyed, so an unkeyed
+digest after that point fails. Records are read only on the entries the chain says they are, and a
+member whose name differs from a record member only in case fails the receipt, so a reader that
+folds case cannot be shown a value no verifier checked.</p>
 <p>A chain proves that what it holds was not altered. On its own it cannot prove that nothing is
 missing, because the same server decides both what happens and what gets written down, and because a
 prefix of a valid chain is itself a valid chain. Three things close that gap.</p>
@@ -292,6 +324,124 @@ says so. Editing the file takes effect without a restart, so merging is what dep
 <p>Omitting <code>max_destroy</code> makes a blanket policy that holds every matching run. Setting it makes a
 plan-content policy that holds only when a Terraform or OpenTofu plan would destroy more than that
 many resources.</p>
+<p>The same file can load Rego policies written for Open Policy Agent, so an existing OPA or Conftest
+rule ports as it is. <a href="/docs/policy">Approval policies</a> covers both kinds, the input a Rego policy
+reads, and how its decisions map onto the YAML ones. A Rego <code>warn</code> holds the run by default, and a
+policy can set <code>warn: note</code> to record its warnings on the run and in the evidence without holding
+it, so one set of checks can hold production runs and only note staging ones.</p>
+<h3 id="dry-runs-and-exclude-dry-run">Dry runs and <code>exclude_dry_run</code></h3>
+<p>Setting <code>exclude_dry_run</code> leaves a dry run unmatched, so a preview that changes nothing does not
+wait for a person. A <a href="/docs/pull-request-review#plans-and-your-approval-rules">pull request review</a>
+plan is a dry run, so this one line is what lets plans of pull requests run without waiting while
+the apply after merge is still held. A tool's dry-run mode is a promise about the tool, not about
+what it is given, so the gate reads what a dry run executes before it exempts it, and exempts only
+a dry run it can classify as change free. A dry run it cannot classify is matched as the real run
+it may be, and graded that way for <code>min_risk</code> and <code>reversibility</code> too. A Rego policy is evaluated on
+such a dry run both as it is and as the real run, and the stricter answer stands, so a module that
+exempts <code>input.run.dry_run</code> holds it where the YAML rule does. <a href="/docs/policy#dry-runs-that-are-not-change-free">Approval
+policies</a> has the details.</p>
+<p>An Ansible dry run is <code>ansible-playbook --check</code>, and check mode is not a promise about the
+playbook: a play, block, task, role, or include that sets <code>check_mode: false</code> (or <code>no</code>, or a
+templated value) runs that work for real even under <code>--check</code>. The gate reads the playbook and
+everything it pulls in, and a dry run whose playbook forces real tasks with <code>check_mode</code> is not
+exempt.</p>
+<p>A Terraform or OpenTofu dry run is <code>plan</code>, and a plan runs the program every <code>external</code> data source
+names, with the run's credentials and environment. The gate reads the configuration in the run's
+working directory, and every module it calls, with the HCL parser Terraform is built on, and a plan
+that declares an external data source anywhere is not exempt. The hold names each one by the
+address a plan gives it, such as <code>module.network.data.external.lookup</code>, with its file and line. A
+data source scoped to a <code>check</code> block counts, since a plan reads it too. The scan does not evaluate
+<code>count</code> or <code>for_each</code>, so a data source that a count of zero switches off is still reported.</p>
+<p>A plan also runs provider code, with the same credentials. Providers are code the team chose and
+installed, and the scan does not judge them: it looks for explicit program execution and for
+configuration it could not read, nothing else. A finding means the plan cannot be classified as
+change free, not that it has side effects.</p>
+<p>Both scans fail closed. What a scan cannot read could run work for real too, so a dry run with any
+of it is not exempt either:</p>
+<ul>
+<li>For Ansible: a role that is not in the project, an include named at run time, or a playbook past
+the limits one read covers.</li>
+<li>For Terraform and OpenTofu: a registry or remote module the gate could not download, a module
+source or version only known when the run plans (OpenTofu evaluates variables in <code>source</code>), a
+file that does not parse, a local module outside the project, or a configuration past the limits
+one read covers.</li>
+</ul>
+<p>A commit does not hold <code>.terraform</code>, so before it reads a plan whose configuration calls registry
+or remote modules, the gate downloads them. It runs the tool's own <code>terraform get</code> or <code>tofu get</code> in
+a private copy of the configuration, which is removed afterward. A get downloads modules and
+nothing else. It installs no provider and runs no program a configuration names. It runs with the
+run's own credentials, opened the way execution opens them, with the binary or image the plan would
+use, and only where the plan itself may run. A plan routed to a named queue runs on a worker whose
+network the server does not share, so its modules are not downloaded for it. The download is
+bounded at two minutes and at 512 MiB or 50,000 files. One that fails, runs too long, writes too
+much, or cannot run leaves the modules unread, with the reason, so the plan is not exempt.</p>
+<p>The gate then reads each module where the get installed it, which <code>.terraform/modules/modules.json</code>
+names, and only when that copy is the one the run's own <code>init</code> keeps: the same source, and for a
+registry module a version its constraint allows. A <code>.terraform</code> the gate did not install itself is
+never read, whether a commit carries it or a working directory on the server holds it, since its
+manifest could point a module at a harmless copy while <code>init</code> installs the real one. The gate copies
+the configuration without it and downloads the modules afresh, and no setting makes it trust a copy
+it did not install. A module vendored into the repository and called by a local path is read like
+any other file.</p>
+<p>The run executes exactly the modules the gate read. A plan held for approval can wait days, and a
+version constraint that allows more than one release could resolve to a newer one by then, so the
+gate records a digest of the module tree it read, the path and content of every file under
+<code>.terraform/modules</code>, and keeps a copy of the tree. The digest is part of the scan's evidence and of
+the spec an approval binds, so an approver releases those modules and no others. When the run
+starts, the kept copy goes into its working directory and <code>init</code> is told to install no module, so it
+resolves no version again. When the copy is not on the machine the run executes on, because it was
+kept longer than <code>--module-keep-for</code> ago, seven days by default, or the run went to another worker,
+the run downloads its modules again and goes ahead only if they have the same digest. Otherwise it
+is refused before anything runs, with both digests named, and the plan has to be submitted again so
+the gate reads the current modules. The kept copies live under the run-files directory, at most
+<code>--module-keep-max-mib</code> of them, 2 GiB by default, the oldest dropped first.</p>
+<p>Only a dry run whose input was read in full and runs nothing keeps the exemption, and that is true
+whichever way it arrives: from a person, a schedule, a webhook, a template, a pull request, or an
+agent through MCP.</p>
+<p>The run records each scan as <code>dry_run_scans</code>: the scanner and its version, the files it read, what
+it found, what it could not read, and the classification, <code>change_free</code>, <code>not_change_free</code>, or
+<code>incomplete</code>. A scan the gate downloaded modules for carries <code>fetch</code>: the command, its exit status,
+why it failed when it did, and when it completed, <code>modules_digest</code>, the digest the run is held to.
+The approver sees the findings on the held run, in the held notification, in the run's dossier and
+register, and in the signed outcome record, so the evidence says why a dry run waited for approval.
+What executes does not change: an Ansible dry run still passes <code>--check</code>, and a plan is still a
+plan.</p>
+<p>The plan a plan-content rule runs ahead of an apply is not held for what the scan finds. The apply
+was asked for as a real run, and an apply within the rule's limit runs the same programs without
+waiting, so holding its plan would stop nothing the apply does not do anyway.</p>
+<h3 id="when-a-dry-run-you-expected-to-pass-is-held">When a dry run you expected to pass is held</h3>
+<p>The hold says what the scan found, or what it could not read, and names the two clean fixes: rework
+what was found so the dry run is safe, or drop <code>exclude_dry_run</code> from the rule that held it. A Rego
+rule has no <code>exclude_dry_run</code>, so its second fix is to stop exempting dry runs in its module. There
+is no per-task or per-resource override. A mark saying &quot;this one is safe&quot; is a claim the gate cannot
+check, written by whoever wants the run to go through, which is the bypass the scan exists to close.</p>
+<p>The trade-off is between the exemption and the playbook or configuration as written. The cases
+that come up most:</p>
+<ul>
+<li>A read-only command forced to run. A playbook often reads something with <code>command: git rev-parse HEAD</code> or <code>command: cat /etc/app/version</code>, with <code>check_mode: false</code> and <code>changed_when: false</code>, so
+later tasks can use the answer during <code>--check</code>. The command changes nothing, but the playbook
+does not say so in a form the gate can check, and the same keyword on a restart looks identical.
+To keep the exemption, read with a module that reads under check mode on its own, such as
+<code>ansible.builtin.stat</code>, <code>ansible.builtin.slurp</code>, or a <code>*_info</code> module, or skip the task under
+check mode with <code>when: not ansible_check_mode</code> when the dry run does not need its answer. If the
+dry run truly needs the command, drop <code>exclude_dry_run</code> from the rule, and every dry run it
+matches waits for approval, which is what that playbook's dry runs are.</li>
+<li>A role that is not in the project. A playbook that names a role installed only on the server, or
+one from Galaxy that the project does not list, cannot be read, so the dry run is incomplete. To
+keep the exemption, list the role in the project's <code>requirements.yml</code> with <code>install_deps</code> on, so
+the sync installs it where the gate reads it, or commit the role to the repository. Otherwise
+drop <code>exclude_dry_run</code>.</li>
+<li>An external data source. To keep the exemption, replace it with a provider data source that
+reads the same thing, or pass the value in as a variable, which a survey answer or template
+variable delivers as <code>TF_VAR_</code>. If the program has to run, drop <code>exclude_dry_run</code>.</li>
+<li>A registry or remote module. The gate downloads it before it reads the plan, so a hold here
+means the download did not complete, and the hold says why. To keep the exemption, make the
+module reachable with the run's own credentials from where the plan runs, such as an <code>env</code>
+credential carrying <code>TF_TOKEN_&lt;host&gt;</code> or <code>TF_CLI_CONFIG_FILE</code> for a private registry, keep it
+within the download's bounds, or vendor it into the repository and call it by a local path. A
+plan routed to a named queue is not downloaded for, so its modules have to be vendored. Otherwise
+drop <code>exclude_dry_run</code>.</li>
+</ul>
 <p>The apply that a plan proposes is pinned to the commit the plan was read from, and it inherits the
 plan's requester. So an approval releases the code the approver actually saw: if the project's branch
 has moved by the time the apply runs, the run refuses and names both commits rather than applying
@@ -316,6 +466,70 @@ slipped past an approver by wrapping it in a workflow. The whole workflow is hel
 matching step, because a change applied halfway is worse than one that never started. Approving
 releases the workflow and it runs from the top; the step graph is stored with it, so an approval that
 arrives after a restart still runs the workflow that was approved.</p>
+<h2 id="approval-steps-in-a-workflow">Approval steps in a workflow</h2>
+<p>A workflow can also stop partway and wait for a person, at an approval step. The steps the approval
+step depends on run first. When nothing else in the workflow can move, it pauses at the step until
+an admin approves or denies it, and then it continues.</p>
+<p>A step is an approval step when it carries <code>&quot;type&quot;: &quot;approval&quot;</code>. It runs no tool, so it takes no
+playbook, command, inventory, dry run, or retries, and it must have a name, since the approver is
+shown it. <code>description</code> is what the approver is asked to decide, and <code>approval_timeout</code> is how many
+seconds it waits, where zero waits until somebody decides.</p>
+<pre><code class="language-json">{&quot;name&quot;: &quot;release&quot;, &quot;steps&quot;: [
+  {&quot;name&quot;: &quot;build&quot;, &quot;tool&quot;: &quot;bash&quot;, &quot;command&quot;: &quot;make release&quot;},
+  {&quot;name&quot;: &quot;gate&quot;, &quot;type&quot;: &quot;approval&quot;, &quot;description&quot;: &quot;Check the canary, then ship&quot;,
+   &quot;approval_timeout&quot;: 3600, &quot;depends_on&quot;: [&quot;build&quot;]},
+  {&quot;name&quot;: &quot;ship&quot;, &quot;playbook&quot;: &quot;deploy.yml&quot;, &quot;depends_on&quot;: [&quot;gate&quot;]},
+  {&quot;name&quot;: &quot;notify&quot;, &quot;tool&quot;: &quot;bash&quot;, &quot;command&quot;: &quot;./page-oncall.sh&quot;, &quot;if_denied&quot;: [&quot;gate&quot;]}
+]}
+</code></pre>
+<p>The answer decides which path runs, matching AWX's approval node:</p>
+<ul>
+<li>Approved, the steps that depend on the approval step run. That is its approve path.</li>
+<li>Denied, or not decided before the timeout passes, the steps that name it in <code>if_denied</code> run
+instead. That is its deny path, the equivalent of an AWX failure path. A timeout is recorded as the
+system ending the wait, not as anybody's decision.</li>
+<li>A denial or a timeout with no deny path fails the workflow, as an AWX approval node with no
+failure path fails its workflow job. With a deny path, the workflow's result is the result of that
+path.</li>
+<li>An approval step cannot be marked continue on failure, since that would run its approve path
+after a denial. A step cannot both depend on an approval step and handle its denial.</li>
+<li>A plain sequence of steps with an approval step in it waits at the step and continues in order.</li>
+</ul>
+<p><strong>Who is told.</strong> A workflow reaching an approval step notifies with its own event,
+<code>workflow.step_awaiting_approval</code>, distinct from a whole run held for approval. It reaches the same
+chat channels, email, webhooks, and named targets attached for <code>approval</code> that a hold reaches, and
+it names the workflow, the step, what the step asks, and what approving and denying each run next.</p>
+<p><strong>Who may decide.</strong> The same rules as a held run. Deciding is an admin route, so an agent's token,
+which is capped at operator, can never approve a step, and the dispatcher refuses an agent's approval
+a second time. When any approval policy in force at submission that covers the workflow or one of its
+steps sets <code>require_distinct_approver</code>, the person who launched the workflow cannot approve its
+approval steps, matched by account so a token and a browser session are one person. As with a held
+run, the launcher can always deny, which withdraws their own request.</p>
+<p><strong>What an approval binds to.</strong> An approver approves the state they were shown: the workflow's spec,
+every step the approval waited behind with how it ended and what it published, and the steps each
+answer runs. <code>GET /v1/approvals</code> returns that state's <code>state_digest</code>, and sending it back with the
+decision refuses the decision if the workflow no longer matches. The decision is committed to the
+audit chain with that digest before it takes effect, and the workflow is held to it when it resumes:
+a workflow whose finished steps or published values changed after the approval is refused rather
+than continued.</p>
+<p><strong>Where to decide.</strong> The approvals panel on the Runs page lists every waiting step with what already
+ran and what each answer runs next, and the run page of a waiting workflow shows its own. A step is
+decided by <code>POST /v1/runs/{id}/approve</code> or <code>/reject</code> with the step's id, or with the workflow's id
+when exactly one step is waiting. Deciding the workflow as a whole run is refused once it has started,
+since that would run it from the top.</p>
+<p><strong>Notifications and evidence.</strong> Reaching an approval step notifies the same channels a held run does,
+naming the step, including every named notification target attached for the <code>approval</code> event to
+the workflow's template, schedule, project, or organization. A named target hears the step after the
+workflow's start and the steps it comes after, and two steps that run beside each other are not put
+in an order between themselves. The request, the approval or denial, and a timeout are each a <code>DECISION</code> entry on
+the audit chain, at <code>/runs/{workflow}/steps/{step}/decision/{verdict}</code>, and the workflow's dossier
+and receipt disclose them beside the digests the chain committed.</p>
+<p><strong>Durability.</strong> A paused workflow is held by nothing in memory. When it parks it releases its lease,
+so a restart loses nothing, and whichever replica records the decision resumes it from the step
+records in the store, without running finished steps again. Resuming is a compare-and-set on the
+workflow, so of every replica that sees the decision exactly one continues it, and every replica's
+janitor times out expired steps and resumes a decided workflow whose resume was lost to a crash.
+Canceling a paused workflow withdraws its waiting step.</p>
 
 		</main>
 	</div>

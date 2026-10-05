@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/sqlutil"
 )
 
@@ -36,7 +38,9 @@ type auditStore struct {
 
 // Append records one entry, linking it to the current chain head inside a transaction so the head
 // read and the insert are atomic. The unique seq index rejects a fork from a second process. A
-// span marker entry is refused: only AppendSpanBeat mints beats.
+// span marker entry is refused: only AppendSpanBeat mints beats. A run's second outcome entry is
+// refused with audit.ErrOutcomeRecorded, checked inside the same transaction, which holds the write
+// lock against every other process on the file.
 func (s *auditStore) Append(ctx context.Context, e *audit.Entry) error {
 	if audit.IsSpanMarker(e) {
 		return fmt.Errorf("append audit entry: %w", audit.ErrReservedSpan)
@@ -49,6 +53,15 @@ func (s *auditStore) Append(ctx context.Context, e *audit.Entry) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if runID, ok := audit.OutcomeRunID(e); ok {
+		held, herr := outcomeHeld(ctx, tx, runID)
+		if herr != nil {
+			return fmt.Errorf("append audit entry: %w", herr)
+		}
+		if held {
+			return fmt.Errorf("append audit entry: run %s: %w", runID, audit.ErrOutcomeRecorded)
+		}
+	}
 	prev, err := s.head(ctx, tx)
 	if err != nil {
 		return err
@@ -56,7 +69,7 @@ func (s *auditStore) Append(ctx context.Context, e *audit.Entry) error {
 	cp := *e
 	audit.BindEntryInstall(&cp, s.installID)
 	// The time is stamped here, under the same lock that assigns the sequence, so the two can never
-	// disagree. A caller that set its own time keeps it.
+	// disagree. A caller that set its own time keeps it, unless it is later than this clock.
 	audit.StampAppendTime(prev, &cp, time.Now())
 	audit.Link(prev, &cp)
 	const q = `INSERT INTO audit_entries (id, at, actor, actor_type, on_behalf_of, method, path, content_digest, seq, prev_hash, hash, nonce, install_id)
@@ -64,6 +77,9 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	if _, err := tx.ExecContext(ctx, q,
 		cp.ID, sqlutil.FormatTime(cp.At), cp.Actor, cp.ActorType, cp.OnBehalfOf, cp.Method,
 		cp.Path, cp.ContentDigest, cp.Seq, cp.PrevHash, cp.Hash, cp.Nonce, cp.InstallID); err != nil {
+		if isPrimaryKeyConflict(err) {
+			return fmt.Errorf("append audit entry %s: %w", cp.ID, audit.ErrDuplicateID)
+		}
 		return fmt.Errorf("append audit entry: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -75,10 +91,12 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 // AppendSpanBeat mints and appends the next span beat under the append mutex and inside a
 // transaction, so the beat read, the count, and the insert are one atomic step and concurrent
-// callers cannot mint the same beat. A time that does not advance past the newest beat is refused
-// with audit.ErrClockBehind and nothing is written: a beat's time is a signed claim, so writing a
-// time the clock did not read would be a false statement in an attestation. The skipped beat
-// surfaces as a reported gap, and its number waits for the next beat the chain accepts.
+// callers cannot mint the same beat. A time that does not advance past the newest beat, or that
+// falls behind the newest entry, is refused with audit.ErrClockBehind and nothing is written: a
+// beat's time is a signed claim, so writing a time the clock did not read would be a false
+// statement in an attestation. The skipped beat surfaces as a reported gap, and its number waits
+// for the next beat the chain accepts. A zero time is read from the clock once the transaction
+// holds the write lock.
 func (s *auditStore) AppendSpanBeat(ctx context.Context, at time.Time, cadenceS int) (*audit.Entry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -87,6 +105,9 @@ func (s *auditStore) AppendSpanBeat(ctx context.Context, at time.Time, cadenceS 
 		return nil, fmt.Errorf("append span beat: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if at.IsZero() {
+		at = time.Now()
+	}
 
 	prev, err := s.head(ctx, tx)
 	if err != nil {
@@ -106,6 +127,11 @@ func (s *auditStore) AppendSpanBeat(ctx context.Context, at time.Time, cadenceS 
 	// bundle covering the pair. See audit.CheckBeatAdvance.
 	if err := audit.CheckBeatAdvance(at, lastSpanAt, beat); err != nil {
 		return nil, fmt.Errorf("append span beat: %w", err)
+	}
+	if prev != nil {
+		if err := audit.CheckBeatAfterHead(at, prev.At, beat); err != nil {
+			return nil, fmt.Errorf("append span beat: %w", err)
+		}
 	}
 	e := audit.NewSpanEntry(at, beat, count, cadenceS)
 	audit.BindEntryInstall(e, s.installID)
@@ -159,6 +185,33 @@ ORDER BY seq DESC`
 		return 0, 0, time.Time{}, fmt.Errorf("last span: %w", err)
 	}
 	return 0, 0, time.Time{}, nil
+}
+
+// outcomeHeld reports whether the chain already holds an outcome entry for runID. The paths are
+// matched exactly, one for each terminal status, so the lookup rides idx_audit_outcome, which holds
+// only outcome entries. The method is written into the query rather than bound, since SQLite uses a
+// partial index only for a query whose own condition proves the index's.
+func outcomeHeld(ctx context.Context, q rowQuerier, runID string) (bool, error) {
+	paths := outcomePaths(runID)
+	query := "SELECT EXISTS (SELECT 1 FROM audit_entries WHERE method = '" + audit.MethodRun +
+		"' AND path IN (?" + strings.Repeat(", ?", len(paths)-1) + "))"
+	var held bool
+	if err := q.QueryRowContext(ctx, query, paths...).Scan(&held); err != nil {
+		return false, fmt.Errorf("find run %s outcome: %w", runID, err)
+	}
+	return held, nil
+}
+
+// outcomePaths returns every path an outcome entry for runID can carry, one for each terminal
+// status, as query arguments.
+func outcomePaths(runID string) []any {
+	var paths []any
+	for _, st := range run.AllStatuses() {
+		if st.Terminal() {
+			paths = append(paths, audit.OutcomePath(runID, string(st)))
+		}
+	}
+	return paths
 }
 
 // head returns the current chain head, the entry with the highest sequence, or nil when empty. It

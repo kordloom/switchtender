@@ -63,6 +63,14 @@ func TestUIRoutes(t *testing.T) {
 			Name: "migrate", Path: "/ui/migrate", WantStatus: http.StatusOK,
 			WantContains: `data-page="migrate"`,
 		},
+		{ // Test 8: Notification targets page renders.
+			Name: "notifications", Path: "/ui/notifications", WantStatus: http.StatusOK,
+			WantContains: `data-page="notifications"`,
+		},
+		{ // Test 9: The run page carries the section its notification record is drawn into.
+			Name: "run notifications", Path: "/ui/runs/run_1", WantStatus: http.StatusOK,
+			WantContains: `id="run-notifications"`,
+		},
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

@@ -21,6 +21,7 @@ import (
 	gitssh "github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	"gopkg.in/yaml.v3"
 
+	"github.com/kordloom/switchtender/internal/runfiles"
 	"github.com/kordloom/switchtender/internal/util"
 )
 
@@ -55,18 +56,31 @@ func WithGalaxy(server, token string) SyncerOption {
 // galaxyDir is the directory inside a checkout that a sync installs its Ansible dependencies to.
 const galaxyDir = ".galaxy"
 
-// runsSubdir holds the per-run isolated worktrees, one directory per Sync call, kept apart from the
-// canonical per-project checkouts that live directly under the cache directory.
-const runsSubdir = ".runs"
+const (
+	// runsSubdir holds the per-run isolated worktrees, one run directory per Sync call, kept apart
+	// from the canonical per-project checkouts that live directly under the cache directory. The
+	// process that made each one holds its lock for as long as the run lasts.
+	runsSubdir = ".runs"
+	// checkoutSubdir is the directory inside a worktree's run directory that holds its files, so the
+	// lock and heartbeat files beside it are never part of what a run executes.
+	checkoutSubdir = "checkout"
+	// locksSubdir holds one lock file per project, which serializes work on the project's canonical
+	// checkout across every process that shares the cache.
+	locksSubdir = ".locks"
+)
 
 // NewSyncer returns a Syncer that caches checkouts under dir, creating it if needed.
 func NewSyncer(dir string, opts ...SyncerOption) (*Syncer, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create project cache: %w", err)
 	}
-	// A worktree is removed when its run ends, but a crash leaves it behind. Clearing the run
-	// directory on startup keeps a restarted server from accumulating dead checkouts.
-	_ = os.RemoveAll(filepath.Join(dir, runsSubdir))
+	// A worktree is removed when its run ends, and a process that dies leaves its worktrees behind.
+	// Only those whose process is gone are removed here. Every serve and worker on a host shares one
+	// cache, so clearing the whole directory deleted the checkouts other live processes were
+	// executing from, playbooks, roles, and includes, in the middle of their runs.
+	_, _ = runfiles.RemoveDead(filepath.Join(dir, runsSubdir))
+	// Without the directory every project lock falls back to this process's own mutex.
+	_ = os.MkdirAll(filepath.Join(dir, locksSubdir), 0o700)
 	s := &Syncer{cacheDir: dir, locks: make(map[string]*sync.Mutex)}
 	for _, opt := range opts {
 		opt(s)
@@ -92,6 +106,36 @@ type Worktree struct {
 	cleanup func()
 }
 
+// projectLock serializes work on one project's canonical checkout: a mutex for the goroutines of
+// this process, then a lock file for every other process sharing the cache. A mutex alone let two
+// processes clone and reset one checkout at the same time, and one of them failed its run at sync.
+type projectLock struct {
+	// mu serializes this process's goroutines.
+	mu *sync.Mutex
+	// path is the lock file every process sharing the cache takes.
+	path string
+	// release drops the file lock, nil while none is held. It is guarded by mu.
+	release func()
+}
+
+// Lock takes the project's mutex and then its lock file. A lock file that cannot be taken leaves
+// the mutex in force alone, which serializes this process as before.
+func (l *projectLock) Lock() {
+	l.mu.Lock()
+	if release, err := runfiles.LockPath(l.path); err == nil {
+		l.release = release
+	}
+}
+
+// Unlock releases the lock file and then the mutex.
+func (l *projectLock) Unlock() {
+	if l.release != nil {
+		l.release()
+		l.release = nil
+	}
+	l.mu.Unlock()
+}
+
 // Cleanup removes the worktree. It is safe to call on a nil worktree and safe to call more than once.
 func (w *Worktree) Cleanup() {
 	if w != nil && w.cleanup != nil {
@@ -99,8 +143,8 @@ func (w *Worktree) Cleanup() {
 	}
 }
 
-// lock returns the mutex for a project id, creating it on first use.
-func (s *Syncer) lock(id string) *sync.Mutex {
+// lock returns the lock for a project id, creating its mutex on first use.
+func (s *Syncer) lock(id string) sync.Locker {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	l, ok := s.locks[id]
@@ -108,7 +152,7 @@ func (s *Syncer) lock(id string) *sync.Mutex {
 		l = &sync.Mutex{}
 		s.locks[id] = l
 	}
-	return l
+	return &projectLock{mu: l, path: filepath.Join(s.cacheDir, locksSubdir, id)}
 }
 
 // Sync brings the project's canonical checkout up to date with its remote, then returns a private
@@ -136,7 +180,7 @@ func (s *Syncer) Sync(p *Project, sshKey string) (*Worktree, error) {
 	// which resets the canonical checkout, cannot reach it. The galaxy dependencies were installed
 	// into the canonical checkout and are copied with it, so the copy is self-contained and no
 	// dependency install runs per run.
-	runDir, err := s.isolate(p.ID, canonical)
+	runDir, cleanup, err := s.isolate(p.ID, canonical)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +188,7 @@ func (s *Syncer) Sync(p *Project, sshKey string) (*Worktree, error) {
 		Dir:       runDir,
 		SHA:       sha,
 		GalaxyEnv: galaxyEnvIn(runDir, wantRoles, wantCollections),
-		cleanup:   func() { _ = os.RemoveAll(runDir) },
+		cleanup:   cleanup,
 	}, nil
 }
 
@@ -224,25 +268,40 @@ func (s *Syncer) update(p *Project, sshKey string) (canonical, sha string, wantR
 	return canonical, sha, wantRoles, wantCollections, nil
 }
 
-// isolate copies a project's canonical checkout to a fresh per-run directory and returns its path.
-// The .git directory is left behind: a run executes source, not history, and the repository metadata
-// is the largest part of a checkout and the part a run never reads.
-func (s *Syncer) isolate(projectID, canonical string) (string, error) {
-	base := filepath.Join(s.cacheDir, runsSubdir)
-	if err := os.MkdirAll(base, 0o700); err != nil {
-		return "", fmt.Errorf("create run checkout base: %w", err)
-	}
-	runDir, err := os.MkdirTemp(base, projectID+"-")
+// isolate copies a project's canonical checkout to a fresh per-run directory and returns its path
+// and the cleanup that removes it. The .git directory is left behind: a run executes source, not
+// history, and the repository metadata is the largest part of a checkout and the part a run never
+// reads.
+func (s *Syncer) isolate(projectID, canonical string) (string, func(), error) {
+	runDir, cleanup, err := s.newRunCheckout(projectID)
 	if err != nil {
-		return "", fmt.Errorf("create run checkout: %w", err)
+		return "", nil, err
 	}
 	if err := copyTree(canonical, runDir, func(rel string) bool {
 		return rel == ".git" || strings.HasPrefix(rel, ".git"+string(os.PathSeparator))
 	}); err != nil {
-		_ = os.RemoveAll(runDir)
-		return "", fmt.Errorf("isolate checkout: %w", err)
+		cleanup()
+		return "", nil, fmt.Errorf("isolate checkout: %w", err)
 	}
-	return runDir, nil
+	return runDir, cleanup, nil
+}
+
+// newRunCheckout creates an empty directory for one run's checkout and returns its path and the
+// cleanup that removes it. It sits inside a run directory this process holds the lock of until the
+// cleanup runs, which is how a process starting on the same cache tells a live run's checkout from
+// one a dead process left behind.
+func (s *Syncer) newRunCheckout(projectID string) (string, func(), error) {
+	dir, err := runfiles.Create(filepath.Join(s.cacheDir, runsSubdir), projectID)
+	if err != nil {
+		return "", nil, fmt.Errorf("create run checkout: %w", err)
+	}
+	cleanup := func() { _ = dir.Remove() }
+	runDir := filepath.Join(dir.Path(), checkoutSubdir)
+	if err := os.Mkdir(runDir, 0o700); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("create run checkout: %w", err)
+	}
+	return runDir, cleanup, nil
 }
 
 // requirementFiles names the checkout-relative paths where Ansible dependency requirements live.

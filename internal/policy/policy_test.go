@@ -86,6 +86,48 @@ func TestPolicyMatches(t *testing.T) {
 	}, { // Test 21: A dry run grades low and stays under a high floor.
 		Name: "min risk unmet", Policy: policy.Policy{MinRisk: run.RiskHigh},
 		Run: run.Run{Tool: "bash", Command: "echo ok", DryRun: true}, Want: false,
+	}, { // Test 22: A dry run whose playbook forces real tasks is not excluded.
+		Name: "forcing dry run not excluded", Policy: policy.Policy{Tool: "ansible", ExcludeDryRun: true},
+		Run: run.Run{Playbook: "site.yml", DryRun: true, DryRunScans: []run.DryRunScan{{
+			Tool: "ansible", Findings: []string{`site.yml: task "Restart web" sets check_mode to false`},
+		}}},
+		Want: true,
+	}, { // Test 23: A clean Ansible dry run is still excluded.
+		Name:   "clean ansible dry run excluded",
+		Policy: policy.Policy{Tool: "ansible", ExcludeDryRun: true},
+		Run:    run.Run{Playbook: "site.yml", DryRun: true}, Want: false,
+	}, { // Test 24: A forcing dry run is graded as the change it is, so it can meet a risk floor.
+		Name: "forcing dry run meets a risk floor", Policy: policy.Policy{MinRisk: run.RiskMedium},
+		Run: run.Run{Playbook: "site.yml", DryRun: true, DryRunScans: []run.DryRunScan{{
+			Tool: "ansible", Findings: []string{`site.yml: task "Restart web" sets check_mode to false`},
+		}}},
+		Want: true,
+	}, { // Test 25: A plan whose configuration runs a program is not excluded.
+		Name:   "plan running a program not excluded",
+		Policy: policy.Policy{Tool: "terraform", ExcludeDryRun: true},
+		Run: run.Run{Tool: "terraform", Command: "infra", DryRun: true,
+			DryRunScans: []run.DryRunScan{{Tool: "terraform",
+				Findings: []string{"data.external.x runs a program during plan (main.tf line 1)"}}}},
+		Want: true,
+	}, { // Test 26: A plan whose configuration could not be read in full is not excluded either.
+		Name:   "plan read incompletely not excluded",
+		Policy: policy.Policy{Tool: "opentofu", ExcludeDryRun: true},
+		Run: run.Run{Tool: "opentofu", Command: "infra", DryRun: true,
+			DryRunScans: []run.DryRunScan{{Tool: "opentofu",
+				Unread: []string{`module.vpc from "acme/vpc/aws" (not downloaded here)`}}}},
+		Want: true,
+	}, { // Test 27: A plan whose configuration was read in full and runs nothing is excluded.
+		Name:   "change-free plan excluded",
+		Policy: policy.Policy{Tool: "terraform", ExcludeDryRun: true},
+		Run: run.Run{Tool: "terraform", Command: "infra", DryRun: true,
+			DryRunScans: []run.DryRunScan{{Tool: "terraform", Inputs: []string{"infra/main.tf"}}}},
+		Want: false,
+	}, { // Test 28: A plan that runs a program meets a risk floor, graded as the apply it may be.
+		Name: "plan running a program meets a risk floor", Policy: policy.Policy{MinRisk: run.RiskMedium},
+		Run: run.Run{Tool: "terraform", Command: "infra", DryRun: true,
+			DryRunScans: []run.DryRunScan{{Tool: "terraform",
+				Findings: []string{"data.external.x runs a program during plan (main.tf line 1)"}}}},
+		Want: true,
 	}}
 	for _, test := range tests {
 		t.Run(test.Name, func(t *testing.T) {

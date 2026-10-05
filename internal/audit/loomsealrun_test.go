@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kordloom/switchtender/internal/loomsealtest"
 )
 
 // runLoomSealVerify runs the loomseal verifier over a bundle and returns its JSON report.
@@ -33,6 +35,9 @@ func runLoomSealVerify(t *testing.T, signed []byte) []byte {
 			t.Fatalf("run loomseal verify: %v\n%s", err, stderr)
 		}
 	}
+	// The format has two independent implementations, and this product's output has to satisfy the
+	// format, not one implementation of it, so the reference verifier reads the same bytes.
+	loomsealtest.RequireReferenceAgreement(t, repo, path, out)
 	return out
 }
 

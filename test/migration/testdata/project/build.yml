@@ -1,0 +1,8 @@
+---
+- name: The build step of the release
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Append a line to the build marker, one per execution
+      ansible.builtin.shell: echo "{{ inventory_hostname }}" >> "{{ marker_dir }}/build-{{ inventory_hostname }}"
+      changed_when: true

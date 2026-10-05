@@ -10,6 +10,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
+	"github.com/kordloom/switchtender/internal/plantest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -139,12 +140,16 @@ type proposingStore struct {
 	read     bool
 	// calls counts how many times it was asked.
 	calls int
+	// plan is the plan file it was handed.
+	plan []byte
 }
 
 // ProposeApply records the request and stores a held apply, standing in for the control node.
-func (p *proposingStore) ProposeApply(ctx context.Context, planID string, destroys int, read bool) (*run.Run, error) {
+func (p *proposingStore) ProposeApply(ctx context.Context, planID string, destroys int, read bool,
+	plan []byte) (*run.Run, error) {
 	p.calls++
 	p.planID, p.destroys, p.read = planID, destroys, read
+	p.plan = append([]byte(nil), plan...)
 	proposal := &run.Run{
 		ID: run.NewID(), Status: run.StatusPendingApproval, ProposedFrom: planID,
 		Tool: run.ToolTerraform, Command: "infra/prod", CreatedAt: time.Now(),
@@ -189,6 +194,9 @@ func TestThePlanGateAsksAStoreThatCannotCreateRuns(t *testing.T) {
 	}
 	if store.destroys != 3 || !store.read {
 		t.Errorf("reported destroys=%d read=%v, want 3 and true", store.destroys, store.read)
+	}
+	if string(store.plan) != string(plantest.File) {
+		t.Errorf("the control node was handed plan file %q, want the one the plan saved", store.plan)
 	}
 }
 

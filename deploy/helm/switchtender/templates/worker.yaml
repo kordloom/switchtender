@@ -41,6 +41,11 @@ spec:
             - {{ . | quote }}
             {{- end }}
           env:
+            # Run files, the keys, tokens, and secret answers a run stages, go to the memory-backed
+            # volume below rather than the container's writable layer on the node's disk. It is a
+            # variable rather than a flag so an older image, which has no such setting, ignores it.
+            - name: SWITCHTENDER_RUNFILES_DIR
+              value: /run/switchtender/runfiles
             - name: POD_NAME
               valueFrom:
                 fieldRef:
@@ -90,8 +95,9 @@ spec:
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          {{- if or .Values.license .Values.existingSecret .Values.extraVolumeMounts }}
           volumeMounts:
+            - name: runfiles
+              mountPath: /run/switchtender
             {{- if or .Values.license .Values.existingSecret }}
             - name: license
               mountPath: /etc/switchtender/license
@@ -100,9 +106,13 @@ spec:
             {{- with .Values.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- end }}
-      {{- if or .Values.license .Values.existingSecret .Values.extraVolumes }}
       volumes:
+        # Memory-backed, sized, and gone with the pod. A worker that stops for good takes its run
+        # files with it rather than leaving them on the node.
+        - name: runfiles
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ .Values.runFiles.sizeLimit }}
         {{- if or .Values.license .Values.existingSecret }}
         - name: license
           secret:
@@ -115,5 +125,4 @@ spec:
         {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-      {{- end }}
 {{- end }}

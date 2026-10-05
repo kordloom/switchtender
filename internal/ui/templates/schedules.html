@@ -16,7 +16,7 @@
 		<div class="page-head">
 			<div class="page-head-text">
 				<h1>Schedules</h1>
-				<p class="muted">Fire a saved template on a cron cadence.</p>
+				<p class="muted">Fire a saved template on a cron cadence or a recurrence rule.</p>
 			</div>
 			<button id="schedule-open" class="button primary">
 				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -34,19 +34,41 @@
 				<label class="field-label">Name
 					<input id="schedule-name" class="input" placeholder="nightly deploy" required>
 				</label>
-				<label class="field-label">Cron
+				<label class="field-label">Cadence
+					<select id="schedule-kind" class="input">
+						<option value="cron">Cron expression</option>
+						<option value="rrule">Recurrence rule (RFC 5545)</option>
+					</select>
+					<span class="field-hint">A recurrence rule says what cron cannot, such as the last Friday of each quarter, every other Tuesday, or a nightly run that skips a holiday.</span>
+				</label>
+				<label class="field-label" id="schedule-cron-field">Cron
 					<input id="schedule-cron" class="input mono" placeholder="0 2 * * *" data-cron-input required>
 					<span class="field-hint">Five fields: minute, hour, day of month, month, day of week. Hover the box to read it back.</span>
-					<span id="cron-preview" class="field-hint"></span>
 				</label>
+				<label class="field-label" id="schedule-rrule-field" hidden>Recurrence rule
+					<textarea id="schedule-rrule" class="input mono" rows="3" placeholder="DTSTART;TZID=America/New_York:20260102T170000&#10;RRULE:FREQ=MONTHLY;BYMONTH=3,6,9,12;BYDAY=-1FR"></textarea>
+					<span class="field-hint">A DTSTART line, which sets the first day and the time of day, and one or more RRULE lines. EXRULE, RDATE, and EXDATE lines add or remove dates. A TZID on the DTSTART sets the zone.</span>
+				</label>
+				<span id="cron-preview" class="field-hint"></span>
+				<span id="cron-preview-gap" class="field-hint" hidden></span>
 				<label class="field-label">Timezone
 					<input id="schedule-timezone" class="input" placeholder="server local time" list="tz-list">
 					<datalist id="tz-list"></datalist>
-					<span class="field-hint">The IANA zone the cron is read in, such as America/New_York. Empty means the server's local time.</span>
+					<span class="field-hint">The IANA zone the cadence is read in, such as America/New_York. Empty means the server's local time, or for a recurrence rule, the zone its DTSTART names.</span>
+				</label>
+				<label class="field-label">If the time doesn't exist
+					<select id="schedule-spring-forward" class="input">
+						<option value="">Default for this cadence</option>
+						<option value="jump">Run when the clock jumps</option>
+						<option value="later">Run after the clock change</option>
+						<option value="skip">Skip that day</option>
+					</select>
+					<span class="field-hint">On the night the clocks go forward, a time such as 02:30 does not exist. A time that happens twice, when they go back, runs once, at the first.</span>
 				</label>
 				<label class="field-label">Template
 					<select id="schedule-template" class="input"><option value="">Select a template</option></select>
 				</label>
+				<div id="schedule-inventory-preview" class="field-hint" hidden></div>
 				<details id="schedule-inline" class="alt-auth">
 					<summary class="muted">Or run something directly, with no template</summary>
 					<label class="field-label">Playbook or command
@@ -72,7 +94,7 @@
 			<thead>
 				<tr>
 					<th>Name</th>
-					<th>Cron</th>
+					<th>Expression</th>
 					<th>Cadence</th>
 					<th>Target</th>
 					<th>Enabled</th>

@@ -135,7 +135,7 @@ func TestLoopbackRefusesWhatItCannotServe(t *testing.T) {
 	if got != nil {
 		t.Errorf("Policies() returned %v alongside its refusal", got)
 	}
-	proposal, err := tr.ProposeApply(context.Background(), "run_plan", 3, true)
+	proposal, err := tr.ProposeApply(context.Background(), "run_plan", 3, true, nil)
 	if !errors.Is(err, relay.ErrUnsupported) {
 		t.Errorf("ProposeApply() error = %v, want ErrUnsupported", err)
 	}

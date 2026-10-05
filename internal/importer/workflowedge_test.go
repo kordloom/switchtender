@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+
+	"github.com/kordloom/switchtender/internal/template"
 )
 
 // workflowDoc builds an export whose single workflow carries the nodes given, alongside two job
@@ -99,59 +101,63 @@ func TestWorkflowIsImportedWholeOrNotAtAll(t *testing.T) {
 		{Name: "self edge refused",
 			Nodes:       `{"id": 1, "unified_job_template": "a", "success_nodes": [1]}`,
 			WantWarning: "was not imported"}, // Test 10.
-		{Name: "approval node refused as a gate",
+		{Name: "approval node imports as an approval step",
 			Nodes: `{"identifier": "build", "unified_job_template": "a",
 				"related": {"success_nodes": ["approve"]}},
 				{"identifier": "approve", "related": {"success_nodes": ["ship"],
 				"create_approval_template": {"name": "Approve prod", "description": "", "timeout": 0}}},
 				{"identifier": "ship", "unified_job_template": "b"}`,
-			WantWarning: `node approve is an approval gate, "Approve prod"`,
-			WantGate:    true}, // Test 11: awxkit writes the approval to create in the node's place.
-		{Name: "approval gate named ahead of its failure edge",
+			WantImported: true,
+			WantWarning:  "keeps its approval node, approve, as approval step"}, // Test 11.
+		{Name: "approval failure edge imports as the deny path",
 			Nodes: `{"identifier": "approve", "related": {"failure_nodes": ["page"],
 				"create_approval_template": {"name": "Approve prod"}}},
 				{"identifier": "page", "unified_job_template": "b"}`,
-			WantWarning: "is an approval gate",
-			WantGate:    true}, // Test 12: A denial takes the failure edge.
+			WantImported: true}, // Test 12: A denial takes the failure edge.
 		{Name: "REST approval node wired by id",
 			Nodes: `{"id": 1, "unified_job_template": "a", "success_nodes": [2]},
 				{"id": 2, "unified_job_template": 7, "success_nodes": [3],
 				"summary_fields": {"unified_job_template": {"id": 7, "name": "Approve prod",
 				"unified_job_type": "workflow_approval"}}},
 				{"id": 3, "unified_job_template": "b"}`,
-			WantWarning: `node node-2 is an approval gate, "Approve prod"`,
-			WantGate:    true}, // Test 13: The REST API names an approval only in the summary.
-		{Name: "approval template named by natural key",
+			WantImported: true,
+			WantWarning:  "keeps its approval node, node-2"}, // Test 13: Named only in the summary.
+		{Name: "approval node alone has nothing to release",
 			Nodes: `{"identifier": "approve",
 				"unified_job_template": {"name": "Approve prod", "type": "workflow_approval_template"}}`,
-			WantWarning: `node approve is an approval gate, "Approve prod"`,
-			WantGate:    true}, // Test 14: A natural key can name the approval template itself.
+			WantWarning: "carries only approval nodes"}, // Test 14: A natural key names the approval.
+		{Name: "approval always edge refused as a lost gate",
+			Nodes: `{"identifier": "approve", "related": {"always_nodes": ["ship"],
+				"create_approval_template": {"name": "Approve prod"}}},
+				{"identifier": "ship", "unified_job_template": "b"}`,
+			WantWarning: `approval node approve, "Approve prod", runs other nodes whatever`,
+			WantGate:    true}, // Test 15: An always edge would run work nobody approved.
 		{Name: "nested workflow sharing a job template's name",
 			Nodes: `{"identifier": "build", "unified_job_template": "b",
 				"related": {"success_nodes": ["child"]}},
 				{"identifier": "child",
 				"unified_job_template": {"name": "a", "type": "workflow_job_template"}}`,
-			WantWarning: `node child runs a nested workflow, "a"`}, // Test 15: Not job template a.
+			WantWarning: `node child runs a nested workflow, "a"`}, // Test 16: Not job template a.
 		{Name: "REST nested workflow",
 			Nodes: `{"id": 1, "unified_job_template": 9,
 				"summary_fields": {"unified_job_template": {"id": 9, "name": "child",
 				"unified_job_type": "workflow_job"}}}`,
-			WantWarning: `node node-1 runs a nested workflow, "child"`}, // Test 16: Named in the summary.
+			WantWarning: `node node-1 runs a nested workflow, "child"`}, // Test 17: Named in the summary.
 		{Name: "project sync sharing a job template's name",
 			Nodes:       `{"identifier": "sync", "unified_job_template": {"name": "a", "type": "project"}}`,
-			WantWarning: `node sync runs a project sync, "a"`}, // Test 17: Not job template a either.
+			WantWarning: `node sync runs a project sync, "a"`}, // Test 18: Not job template a either.
 		{Name: "inventory sync sharing a job template's name",
 			Nodes: `{"identifier": "sync",
 				"unified_job_template": {"name": "a", "type": "inventory_source"}}`,
-			WantWarning: `node sync runs an inventory sync, "a"`}, // Test 18: Nor this one.
+			WantWarning: `node sync runs an inventory sync, "a"`}, // Test 19: Nor this one.
 		{Name: "job template named by a typed natural key",
 			Nodes: `{"identifier": "one", "unified_job_template": {"name": "a", "type": "job_template",
 				"organization": {"name": "Default", "type": "organization"}}}`,
-			WantImported: true}, // Test 19: The ordinary awxkit shape still imports.
+			WantImported: true}, // Test 20: The ordinary awxkit shape still imports.
 		{Name: "REST job node",
 			Nodes: `{"id": 1, "unified_job_template": "a",
 				"summary_fields": {"unified_job_template": {"name": "a", "unified_job_type": "job"}}}`,
-			WantImported: true}, // Test 20: A REST job node still imports.
+			WantImported: true}, // Test 21: A REST job node still imports.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -474,10 +480,10 @@ func TestWorkflowUnknownCredentialIsReportedWithoutRefusingTheWorkflow(t *testin
 	}
 }
 
-// TestWorkflowSurveyRefusesAPasswordFieldToo pins that a workflow's survey goes through the same
-// refusal a job template's does. A password prompt imported as a survey field would keep the answer
-// in plain text on every run, whichever kind of template carried it.
-func TestWorkflowSurveyRefusesAPasswordFieldToo(t *testing.T) {
+// TestWorkflowSurveyImportsAPasswordFieldAsSecretToo pins that a workflow's survey goes through the
+// same mapping a job template's does: a password prompt becomes a secret field, whichever kind of
+// template carried it.
+func TestWorkflowSurveyImportsAPasswordFieldAsSecretToo(t *testing.T) {
 	t.Parallel()
 	const doc = `{
       "projects": [{"name": "infra", "scm_type": "git", "scm_url": "https://e.com/i.git"}],
@@ -490,12 +496,12 @@ func TestWorkflowSurveyRefusesAPasswordFieldToo(t *testing.T) {
     }`
 	plan := workflowPlanFor(t, doc)
 	tpl := workflowTemplate(t, plan)
-	if len(tpl.Survey) != 1 || tpl.Survey[0].Var != "env" {
-		t.Fatalf("survey = %+v, want only the non-secret field", tpl.Survey)
+	if len(tpl.Survey) != 2 || tpl.Survey[0].Type != template.FieldSecret ||
+		tpl.Survey[1].Var != "env" {
+		t.Fatalf("survey = %+v, want the password field as secret and the text field kept", tpl.Survey)
 	}
-	if _, ok := warningContaining(t, plan.Warnings, `survey field "secret"`,
-		"NOT imported"); !ok {
-		t.Errorf("the password field was not named.\nwarnings: %v", plan.Warnings)
+	if w, ok := warningContaining(t, plan.Warnings, `"secret"`, "NOT imported"); ok {
+		t.Errorf("the password field is still refused: %s", w)
 	}
 }
 

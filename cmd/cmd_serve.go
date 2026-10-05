@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"net"
 	"net/http"
 	"net/smtp"
@@ -25,27 +26,35 @@ import (
 
 	"github.com/kordloom/switchtender/identity"
 	"github.com/kordloom/switchtender/internal/ai"
+	"github.com/kordloom/switchtender/internal/attention"
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/evidence"
 	"github.com/kordloom/switchtender/internal/extplugin"
+	"github.com/kordloom/switchtender/internal/factcache"
+	"github.com/kordloom/switchtender/internal/federation"
 	"github.com/kordloom/switchtender/internal/forward"
 	"github.com/kordloom/switchtender/internal/grant"
+	"github.com/kordloom/switchtender/internal/imageref"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
 	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/live"
 	"github.com/kordloom/switchtender/internal/logutil"
+	"github.com/kordloom/switchtender/internal/notification"
 	"github.com/kordloom/switchtender/internal/org"
 	"github.com/kordloom/switchtender/internal/pgstore"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/relay"
 	"github.com/kordloom/switchtender/internal/retention"
+	"github.com/kordloom/switchtender/internal/review"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/safedial"
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/server"
 	"github.com/kordloom/switchtender/internal/sqlitestore"
@@ -160,6 +169,10 @@ var serveDefaultImage string
 // serveRequireImageDigest holds the value of the --require-image-digest flag.
 var serveRequireImageDigest bool
 
+// serveImageDigestLookup holds the value of the --image-digest-lookup flag: whether a submitted run's
+// image tag is resolved to the digest its registry serves, so the run executes by that digest.
+var serveImageDigestLookup bool
+
 // serveWorkers holds the value of the serve --workers flag.
 var serveWorkers int
 
@@ -209,6 +222,10 @@ var (
 	serveLDAPDefaultRole string
 	serveLDAPRoleMap     []string
 )
+
+// servePublicURL is the externally reachable address of this server, used to link a pull request
+// review comment and commit status to the run they describe. Empty posts run ids without links.
+var servePublicURL string
 
 // serveSAML* hold the SAML single sign-on flags. SwitchTender is the service provider and the
 // certificate and key files are its PEM keypair.
@@ -303,6 +320,11 @@ var smtpTo []string
 // SWITCHTENDER_SMTP_PASSWORD environment variable.
 var smtpUsername string
 
+// notifyWhen is when every chat and webhook channel flag is told about a run, the same moments the
+// configuration reference lists for each.
+const notifyWhen = "a run finishes, is held for approval, waits at a workflow approval step, or " +
+	"needs attention past its alert threshold"
+
 // notifyOn holds the value of the --notify-on flag: failure or finish.
 var notifyOn string
 
@@ -340,6 +362,9 @@ func registerContainerFlags(cmd *cobra.Command) {
 		"Container CLI for containerized runs: docker or podman.")
 	cmd.Flags().StringVar(&containerPullPolicy, "container-pull-policy", "missing",
 		"Image pull policy for containerized runs, as docker --pull: always, missing, or never.")
+	cmd.Flags().StringVar(&containerRunFilesSize, "container-runfiles-size", d.RunFilesSize,
+		"Size of the in-memory filesystem a containerized run's private directory is mounted as, "+
+			"for example 64m. It counts against --container-memory as it fills.")
 }
 
 // containerLimitsFromFlags builds the ContainerLimits from the shared container flag values.
@@ -347,6 +372,7 @@ func containerLimitsFromFlags() roundhouse.ContainerLimits {
 	return roundhouse.ContainerLimits{
 		Memory: containerMemory, CPUs: containerCPUs,
 		PidsLimit: containerPidsLimit, Network: containerNetwork,
+		RunFilesSize: containerRunFilesSize,
 	}
 }
 
@@ -360,10 +386,103 @@ func checkChoice(flag, value string, allowed ...string) error {
 	return fmt.Errorf("%w: --%s %q is not one of %s", ErrUsage, flag, value, strings.Join(allowed, ", "))
 }
 
+// moduleFetchTimeout holds the value of the --module-fetch-timeout flag, which serve and worker
+// share.
+var moduleFetchTimeout time.Duration
+
+// moduleFetchMaxMiB holds the value of the --module-fetch-max-mib flag, which serve and worker
+// share.
+var moduleFetchMaxMiB int
+
+// moduleKeepFor holds the value of the --module-keep-for flag, which serve and worker share.
+var moduleKeepFor time.Duration
+
+// moduleKeepMaxMiB holds the value of the --module-keep-max-mib flag, which serve and worker share.
+var moduleKeepMaxMiB int
+
+// Bounds the module download flags accept. The download runs while a submission waits for its
+// answer, so its time is held to minutes, and its size to what a module tree can plausibly be.
+const (
+	// minModuleFetchTimeout is the shortest download time the flag accepts.
+	minModuleFetchTimeout = time.Second
+	// maxModuleFetchTimeout is the longest download time the flag accepts.
+	maxModuleFetchTimeout = time.Hour
+	// maxModuleFetchMiB is the largest download size, in MiB, the flag accepts.
+	maxModuleFetchMiB = 64 << 10
+	// minModuleKeepFor is the shortest time the flag keeps a module tree for its run. Shorter has
+	// every run that waits at all download its modules again.
+	minModuleKeepFor = time.Hour
+	// maxModuleKeepFor is the longest time the flag keeps a module tree for its run.
+	maxModuleKeepFor = 90 * 24 * time.Hour
+	// maxModuleKeepMiB is the most space, in MiB, the flag lets the kept module trees occupy.
+	maxModuleKeepMiB = 1 << 20
+)
+
+// registerModuleFetchFlags registers the bounds on the module download the approval gate runs
+// before it reads a Terraform or OpenTofu plan, which a run repeats when the gate's copy of the
+// modules is not kept where it executes. serve and worker share them.
+func registerModuleFetchFlags(cmd *cobra.Command) {
+	cmd.Flags().DurationVar(&moduleFetchTimeout, "module-fetch-timeout",
+		dispatch.DefaultModuleFetchTimeout,
+		"How long one module download may run, for example 2m, from 1s to 1h. Past it the "+
+			"download stops and the plan stays unclassified, so it is held or refused.")
+	cmd.Flags().IntVar(&moduleFetchMaxMiB, "module-fetch-max-mib",
+		dispatch.DefaultModuleFetchMaxBytes>>20,
+		"How many MiB one module download may write, from 1 to 65536. The download also stops past "+
+			"50000 files. Past either the plan stays unclassified, so it is held or refused.")
+	cmd.Flags().DurationVar(&moduleKeepFor, "module-keep-for", dispatch.DefaultModuleKeepFor,
+		"How long the module trees the gate downloads are kept for the run it judged, for example "+
+			"168h, from 1h to 2160h. A run whose tree is no longer kept downloads its modules again "+
+			"and is refused unless they match what the gate read.")
+	cmd.Flags().IntVar(&moduleKeepMaxMiB, "module-keep-max-mib",
+		dispatch.DefaultModuleKeepMaxBytes>>20,
+		"How many MiB the kept module trees may occupy together, from 1 to 1048576, the oldest "+
+			"dropped first.")
+}
+
+// checkModuleFetchLimits refuses module download bounds outside what the flags accept.
+func checkModuleFetchLimits(timeout time.Duration, maxMiB int) error {
+	if timeout < minModuleFetchTimeout || timeout > maxModuleFetchTimeout {
+		return fmt.Errorf("%w: --module-fetch-timeout %s is outside %s to %s", ErrUsage, timeout,
+			minModuleFetchTimeout, maxModuleFetchTimeout)
+	}
+	if maxMiB < 1 || maxMiB > maxModuleFetchMiB {
+		return fmt.Errorf("%w: --module-fetch-max-mib %d is outside 1 to %d", ErrUsage, maxMiB,
+			maxModuleFetchMiB)
+	}
+	return nil
+}
+
+// checkModuleKeep refuses module keep bounds outside what the flags accept.
+func checkModuleKeep(keepFor time.Duration, maxMiB int) error {
+	if keepFor < minModuleKeepFor || keepFor > maxModuleKeepFor {
+		return fmt.Errorf("%w: --module-keep-for %s is outside %s to %s", ErrUsage, keepFor,
+			minModuleKeepFor, maxModuleKeepFor)
+	}
+	if maxMiB < 1 || maxMiB > maxModuleKeepMiB {
+		return fmt.Errorf("%w: --module-keep-max-mib %d is outside 1 to %d", ErrUsage, maxMiB,
+			maxModuleKeepMiB)
+	}
+	return nil
+}
+
+// moduleFetchOption is the dispatcher option the module download flags select.
+func moduleFetchOption() dispatch.Option {
+	return dispatch.WithModuleFetchLimits(moduleFetchTimeout, int64(moduleFetchMaxMiB)<<20)
+}
+
+// moduleKeepOption is the dispatcher option the module keep flags select.
+func moduleKeepOption() dispatch.Option {
+	return dispatch.WithModuleKeep(moduleKeepFor, int64(moduleKeepMaxMiB)<<20)
+}
+
 // checkContainerChoices refuses a container runtime or pull policy the runner does not know, for
 // serve and worker alike.
 func checkContainerChoices() error {
 	if err := checkChoice("container-runtime", containerRuntime, "docker", "podman"); err != nil {
+		return err
+	}
+	if err := checkContainerRunFilesSize(); err != nil {
 		return err
 	}
 	return checkChoice("container-pull-policy", containerPullPolicy, "always", "missing", "never")
@@ -372,6 +491,15 @@ func checkContainerChoices() error {
 // checkServeChoices refuses any serve choice flag holding a value it does not know.
 func checkServeChoices() error {
 	if err := checkContainerChoices(); err != nil {
+		return err
+	}
+	if err := checkCallbackFlags(); err != nil {
+		return err
+	}
+	if err := checkModuleFetchLimits(moduleFetchTimeout, moduleFetchMaxMiB); err != nil {
+		return err
+	}
+	if err := checkModuleKeep(moduleKeepFor, moduleKeepMaxMiB); err != nil {
 		return err
 	}
 	return checkChoice("notify-on", notifyOn, "failure", "finish")
@@ -489,26 +617,23 @@ func init() {
 	serveCmd.Flags().DurationVar(&scheduleInterval, "schedule-interval", schedule.DefaultInterval,
 		"How often the scheduler checks for due schedules.")
 	serveCmd.Flags().StringArrayVar(&notifyWebhooks, "notify-webhook", nil,
-		"URL that receives a JSON notification when a run finishes or is held for approval. "+
-			"Repeatable.")
+		"URL that receives a JSON notification when "+notifyWhen+". Repeatable.")
 	serveCmd.Flags().StringArrayVar(&notifySlack, "notify-slack", nil,
-		"Slack incoming webhook URL that receives a message when a run finishes or is held "+
-			"for approval. Repeatable.")
+		"Slack incoming webhook URL that receives a message when "+notifyWhen+". Repeatable.")
 	serveCmd.Flags().StringArrayVar(&notifyMattermost, "notify-mattermost", nil,
-		"Mattermost incoming webhook URL that receives a message when a run finishes or is "+
-			"held for approval. Repeatable.")
+		"Mattermost incoming webhook URL that receives a message when "+notifyWhen+
+			". Repeatable.")
 	serveCmd.Flags().StringArrayVar(&notifyRocketChat, "notify-rocketchat", nil,
-		"Rocket.Chat incoming webhook URL that receives a message when a run finishes or is "+
-			"held for approval. Repeatable.")
+		"Rocket.Chat incoming webhook URL that receives a message when "+notifyWhen+
+			". Repeatable.")
 	serveCmd.Flags().StringArrayVar(&notifyDiscord, "notify-discord", nil,
-		"Discord incoming webhook URL that receives a message when a run finishes or is held "+
-			"for approval. Repeatable.")
+		"Discord incoming webhook URL that receives a message when "+notifyWhen+". Repeatable.")
 	serveCmd.Flags().StringArrayVar(&notifyTeams, "notify-teams", nil,
-		"Microsoft Teams incoming webhook URL that receives an Adaptive Card when a run "+
-			"finishes or is held for approval. Repeatable.")
+		"Microsoft Teams incoming webhook URL that receives an Adaptive Card when "+notifyWhen+
+			". Repeatable.")
 	serveCmd.Flags().StringArrayVar(&notifyNtfy, "notify-ntfy", nil,
-		"ntfy topic URL that receives a notification when a run finishes or is held for "+
-			"approval, such as https://ntfy.sh/my-topic. Repeatable.")
+		"ntfy topic URL that receives a notification when "+notifyWhen+
+			", such as https://ntfy.sh/my-topic. Repeatable.")
 	serveCmd.Flags().StringVar(&notifyNtfyToken, "notify-ntfy-token", "",
 		"Optional bearer token for a protected ntfy topic, applied to every --notify-ntfy URL. Prefer SWITCHTENDER_NOTIFY_NTFY_TOKEN, which a run cannot read, since a flag is visible in the process list.")
 	serveCmd.Flags().StringArrayVar(&notifyPagerDuty, "notify-pagerduty", nil,
@@ -532,8 +657,15 @@ func init() {
 			"Empty leaves an unpinned run on the host.")
 	serveCmd.Flags().BoolVar(&serveRequireImageDigest, "require-image-digest", false,
 		"Reject a container run whose image is not pinned to an @sha256: digest.")
+	serveCmd.Flags().BoolVar(&serveImageDigestLookup, "image-digest-lookup", true,
+		"Resolve a submitted run's image tag to the digest its registry serves, so the run executes "+
+			"by that digest. Turn off where no registry is reachable from this server.")
 	registerContainerFlags(serveCmd)
+	registerRunFilesFlag(serveCmd)
+	registerModuleFetchFlags(serveCmd)
 	registerGalaxyFlag(serveCmd)
+	registerFederationFlag(serveCmd)
+	registerCallbackFlags(serveCmd)
 	serveCmd.Flags().StringSliceVar(&serveTrustedProxy, "trusted-proxy", nil,
 		"CIDR of a reverse proxy whose client IP header to believe, repeatable. Required behind a "+
 			"proxy: without it every client shares one rate-limit key.")
@@ -581,6 +713,9 @@ func init() {
 	serveCmd.Flags().StringArrayVar(&serveLDAPRoleMap, "ldap-role-map", nil,
 		"Map a directory group to a role as groupDN=role, for example cn=admins,dc=x=admin. "+
 			"A matched group sets the user's role on every sign-in. Repeatable.")
+	serveCmd.Flags().StringVar(&servePublicURL, "public-url", os.Getenv("SWITCHTENDER_PUBLIC_URL"),
+		"Public base URL of this server, such as https://switchtender.example.com, used to link a pull "+
+			"request review back to its run. Also SWITCHTENDER_PUBLIC_URL.")
 	serveCmd.Flags().StringVar(&serveSAMLIDPMetadataURL, "saml-idp-metadata-url", "",
 		"SAML IdP metadata URL to enable SAML sign-in. Empty leaves SAML off.")
 	serveCmd.Flags().StringVar(&serveSAMLBaseURL, "saml-base-url", "",
@@ -667,8 +802,9 @@ func init() {
 	serveCmd.Flags().StringVar(&smtpUsername, "smtp-username", "",
 		"SMTP username. The password comes from SWITCHTENDER_SMTP_PASSWORD.")
 	serveCmd.Flags().StringVar(&notifyOn, "notify-on", "failure",
-		"When to email: failure for failed runs only, "+
-			"or finish for every finished run and every run held for approval.")
+		"When to email: failure for failed runs only, or finish for every finished run, every "+
+			"run held for approval, and every workflow waiting at an approval step. An attention "+
+			"alert is emailed under either setting.")
 }
 
 // buildEmailer constructs the SMTP notifier from the flags, or returns nil when email is not
@@ -717,6 +853,8 @@ type storeBundle interface {
 	Credentials() credential.Store
 	// CredentialTypes returns the operator-defined credential type store.
 	CredentialTypes() credential.TypeStore
+	// FederationKeys returns the workload identity federation signing key store.
+	FederationKeys() federation.KeyStore
 	// Projects returns the git project store.
 	Projects() project.Store
 	// Templates returns the job template store.
@@ -733,14 +871,63 @@ type storeBundle interface {
 	InventorySources() invsource.Store
 	// Triggers returns the webhook trigger store.
 	Triggers() trigger.Store
+	// Notifications returns the named notification target store.
+	Notifications() notification.Store
 	// Teams returns the team store.
 	Teams() team.Store
 	// Orgs returns the organization store.
 	Orgs() org.Store
 	// Grants returns the per-object access grant store.
 	Grants() grant.Store
+	// FactCache returns the per-host Ansible fact cache store.
+	FactCache() factcache.Store
+	// ReviewReports returns the pull request review report store.
+	ReviewReports() review.Store
+	// Decisions returns the approval decision record store: approver reasons, their corrections and
+	// redactions, and the separation-of-duties evaluations of agent-initiated runs.
+	Decisions() decision.Store
+	// Attention returns the store of worker reports and raised attention alerts.
+	Attention() attention.Store
 	// Close closes the underlying database.
 	Close() error
+}
+
+// notificationRouter builds the router that finds the named notification targets attached to what a
+// run came from, reading a run's template through the schedule, trigger, or run that fired it, and
+// an organization's targets through the organization that owns that template. The sealer opens each
+// target's secrets at delivery; without a key a target that carries one fails to deliver, recorded.
+func notificationRouter(bundle storeBundle, sealer *credential.Sealer,
+	log *zap.Logger) *notification.Router {
+	templates := bundle.Templates()
+	return notification.NewRouter(bundle.Notifications(), notificationSealerOf(sealer),
+		notification.SourceLineage(bundle.Schedules(), bundle.Triggers(), bundle.Runs()), log,
+		notification.WithTemplateOrgs(func(ctx context.Context, id string) string {
+			t, err := templates.Get(ctx, id)
+			if err != nil {
+				return ""
+			}
+			return t.OrgID
+		}))
+}
+
+// notificationOutbox builds the outbox every process that runs work records its runs' events in and
+// delivers them from: in each run's order, per target, retried, and kept as failed when the
+// attempts run out. Claims and retries are measured by the database's clock, so the processes
+// sharing it agree on when a claim lapses.
+func notificationOutbox(bundle storeBundle, sealer *credential.Sealer,
+	log *zap.Logger) *notification.Outbox {
+	runs := bundle.Runs()
+	return notification.NewOutbox(bundle.Notifications(), notificationRouter(bundle, sealer, log),
+		notificationSealerOf(sealer), log, notification.WithClock(runs.Now))
+}
+
+// notificationSealerOf returns the credential sealer as a notification.Sealer, keeping a nil one
+// nil rather than a typed nil the notification package would call through.
+func notificationSealerOf(sealer *credential.Sealer) notification.Sealer {
+	if sealer == nil {
+		return nil
+	}
+	return sealer
 }
 
 // openBundle opens the stores for the --db value: a postgres:// or postgresql:// DSN selects the
@@ -1043,6 +1230,9 @@ func bootstrapAdminToken(ctx context.Context, bundle storeBundle, addr, db strin
 	if err != nil {
 		return fmt.Errorf("mint the initial admin token: %w", err)
 	}
+	// Nobody minted it but the server's own first start, and the issuer says so rather than naming
+	// whoever happens to own the process.
+	tok.CreatedBy, tok.CreatedByType = "system:first-start", "system"
 	if err := bundle.Tokens().Save(ctx, tok); err != nil {
 		return fmt.Errorf("save the initial admin token: %w", err)
 	}
@@ -1158,6 +1348,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("init logger: %w", err)
 	}
 	defer func() { _ = log.Sync() }()
+	protectProcess(log)
+	if err := applyEgressProxy(log); err != nil {
+		return err
+	}
 	if err := refusePublishedKey(); err != nil {
 		return err
 	}
@@ -1165,6 +1359,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if err := checkServeChoices(); err != nil {
+		return err
+	}
+	runFiles, runFilesReport, err := prepareRunFiles(log)
+	if err != nil {
 		return err
 	}
 
@@ -1284,6 +1482,21 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 
 	sealer := newSealerFromEnv(log)
+	// The issuer is built before anything serves, and its first key generated, so a cloud
+	// configured ahead of the first run finds a key set to read, and a URL or a missing encryption
+	// key that would leave federation unable to sign stops the start rather than the first run that
+	// needs it.
+	issuer, err := newFederationIssuer(federationIssuer, bundle.FederationKeys(), sealer,
+		bundle.Audits())
+	if err != nil {
+		return err
+	}
+	if issuer != nil {
+		if err := issuer.Ensure(cmd.Context()); err != nil {
+			return fmt.Errorf("federation signing key: %w", err)
+		}
+		log.Info("serve: workload identity federation on", zap.String("issuer", issuer.URL()))
+	}
 	closePlugins, err := extplugin.Load(pluginsDir(servePluginsDir), log)
 	if err != nil {
 		return fmt.Errorf("load plugins: %w", err)
@@ -1364,14 +1577,19 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 
 	disp := dispatch.New(store, runner, log, dispatch.WithPublisher(hub),
+		dispatch.WithRunFilesRoot(runFilesReport.Root),
 		dispatch.WithAudits(bundle.Audits()),
 		dispatch.WithWorkers(serveWorkers),
 		dispatch.WithMaxShards(serveMaxShards),
 		dispatch.WithRunTimeout(serveRunTimeout),
+		moduleFetchOption(),
+		moduleKeepOption(),
 		dispatch.WithCredentials(bundle.Credentials(), sealer),
 		dispatch.WithCredentialTypes(bundle.CredentialTypes()),
+		dispatch.WithFederation(issuer),
 		dispatch.WithProjects(bundle.Projects(), syncer),
 		dispatch.WithDefaultImage(serveDefaultImage),
+		imageResolverOption(),
 		dispatch.WithWebhooks(notifyWebhooks),
 		dispatch.WithSlack(notifySlack),
 		dispatch.WithMattermost(notifyMattermost),
@@ -1386,15 +1604,34 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			notifySecret(notifyTwilioToken, "SWITCHTENDER_NOTIFY_TWILIO_TOKEN"),
 			notifyTwilioFrom, notifyTwilioTo),
 		dispatch.WithEmail(emailer, onFailureOnly),
+		dispatch.WithNotificationOutbox(notificationOutbox(bundle, sealer, log)),
 		dispatch.WithInventories(bundle.Inventories()),
 		dispatch.WithInventorySources(bundle.InventorySources()),
+		dispatch.WithFactCache(bundle.FactCache()),
 		dispatch.WithSourceSync(),
-		dispatch.WithPolicies(policies))
+		dispatch.WithPolicies(policies),
+		dispatch.WithDecisions(bundle.Decisions()),
+		dispatch.WithPresence(bundle.Attention()))
 	defer disp.Close()
+
+	// The Needs attention view, the doctor, and the alert monitor read the same source, so the three
+	// cannot disagree about what is stuck. A thresholds file that does not parse stops the server,
+	// the same choice the policy file makes.
+	attentionCfg, err := loadAttentionConfig(log)
+	if err != nil {
+		return err
+	}
+	attentionSrc := attentionSource(bundle, attentionCfg)
+	attentionMonitor := attention.NewMonitor(attentionSrc, bundle.Attention(), disp, log, 0)
+	attentionMonitor.Start()
+	defer attentionMonitor.Close()
 
 	scheduler := schedule.NewScheduler(schedules, disp, log,
 		schedule.WithInterval(scheduleInterval), schedule.WithTemplates(bundle.Templates()),
 		schedule.WithAudits(bundle.Audits()),
+		// A fire whose inventory matched no hosts is skipped, and the targets attached to the
+		// schedule hear about it through the same named-target path its runs take.
+		schedule.WithSkipNotifier(disp),
 		// A schedule waits for its own previous run rather than stacking a second copy of the same
 		// work on the same hosts.
 		schedule.WithRunActive(schedule.ActiveIn(store)))
@@ -1434,6 +1671,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 					a, err := audit.NewAnchor(ctx, client, audit.AnchorRFC3161, serveAnchorTSAURL,
 						audit.AnchorShapeLinear, producerInstallID(producer), b.Seq, b.Hash, time.Now())
 					if err != nil {
+						return err
+					}
+					if err := audit.CheckAnchorTime(a, b.At); err != nil {
 						return err
 					}
 					return anchors.SaveAnchor(ctx, a)
@@ -1627,6 +1867,13 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	case workerPools != nil:
 		log.Info("mesh relay worker endpoints enabled, each token confined to its own queues",
 			zap.String("pools", serveWorkerPools))
+		// A pool that opted in to sealed secret delivery is named with the key its runs are sealed
+		// to, so a key rotation can be confirmed from the log.
+		keyIDs := workerPools.DeliveryKeyIDs()
+		for _, name := range slices.Sorted(maps.Keys(keyIDs)) {
+			log.Info("relay secret delivery enabled for a worker pool", zap.String("pool", name),
+				zap.String("delivery_key", keyIDs[name]))
+		}
 	case workerToken() != "":
 		log.Info("mesh relay worker endpoints enabled; every worker token may lease from every " +
 			"queue, so set --worker-pools to confine them")
@@ -1639,12 +1886,21 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	srv := server.New(store, disp, log, server.WithStreamer(hub),
 		server.WithShutdown(ctx),
+		server.WithRunFiles(runFiles.Source, runFilesReport),
 		server.WithCanceler(disp), server.WithRetrier(disp), server.WithApprover(disp),
+		server.WithDecisions(bundle.Decisions()),
 		// Relay workers hold no notification channels, so the control node announces for them.
 		server.WithAnnouncer(disp),
+		// Relay workers hold no credential store either, so the control node opens a claimed run's
+		// secrets and seals them to the claiming pool's delivery key, when the pool registered one.
+		server.WithSecretOpener(disp),
+		// A worker's plan hands its saved plan file to the control node, which seals it onto the
+		// apply it proposes, so the apply carries out exactly that plan.
+		server.WithPlanSealer(disp),
 		server.WithSchedules(schedules), server.WithTokens(bundle.Tokens()),
 		server.WithCredentials(bundle.Credentials(), sealer),
 		server.WithCredentialTypes(bundle.CredentialTypes()),
+		server.WithFederation(issuer),
 		server.WithProjects(bundle.Projects()),
 		server.WithProjectFiles(syncer),
 		server.WithTemplates(bundle.Templates()),
@@ -1655,7 +1911,14 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		server.WithProducerIdentity(producer, resolveVersion()),
 		server.WithProducerUnavailable(producerProblem),
 		server.WithInventorySources(bundle.InventorySources(), disp),
+		server.WithInventoryPreviewer(disp),
 		server.WithTriggers(bundle.Triggers(), sealer),
+		server.WithNotificationTargets(bundle.Notifications()),
+		server.WithFactCache(bundle.FactCache()),
+		callbackServeOption(disp),
+		server.WithAttention(attentionSrc),
+		server.WithReviewReporting(servePublicURL, nil, 0),
+		server.WithReviewStore(bundle.ReviewReports()),
 		server.WithTeams(bundle.Teams()),
 		server.WithOrgs(bundle.Orgs()),
 		server.WithGrants(bundle.Grants(), serveStrictGrants),
@@ -1673,6 +1936,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		// token and account tables are empty until somebody signs in, and deriving enforcement
 		// from them served the whole API to anonymous callers as admin in the meantime.
 		enforcedAuthOption(externalAuthConfigured()))
+	// A review plan still in flight when the server last stopped is reported on again, so its pull
+	// request is not left showing a plan that never finishes.
+	srv.ResumeReviews(ctx)
 	httpServer := &http.Server{
 		Addr:              serveAddr,
 		Handler:           srv.Handler(),
@@ -1719,6 +1985,13 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		defer cancel()
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
 			return fmt.Errorf("shutdown: %w", err)
+		}
+		// A webhook answered before its launch finished is carried through rather than cut off. Its
+		// delivery is on the chain either way, so one still running when the drain gives up shows a
+		// fire with no run after it, and a redelivery launches it.
+		if !srv.WaitForHooks(shutdownCtx) {
+			log.Warn("shutdown: webhook launches still running were cut off; their deliveries are " +
+				"recorded and a redelivery launches them")
 		}
 		return <-errCh
 	}
@@ -1802,4 +2075,16 @@ func dbFromEnv(cmd *cobra.Command, flagValue string) string {
 		return v
 	}
 	return flagValue
+}
+
+// imageResolverOption returns the dispatch option that resolves each submitted run's image tag to
+// the digest its registry serves, through a client that refuses the addresses a server-side request
+// forgery aims at. With --image-digest-lookup off it sets none, and every image stays bound to its
+// tag.
+func imageResolverOption() dispatch.Option {
+	if !serveImageDigestLookup {
+		return dispatch.WithImageResolver(nil)
+	}
+	client := &http.Client{Transport: safedial.Transport(), Timeout: imageref.DefaultTimeout}
+	return dispatch.WithImageResolver(imageref.NewResolver(client, imageref.DefaultTimeout))
 }

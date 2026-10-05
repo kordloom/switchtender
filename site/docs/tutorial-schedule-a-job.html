@@ -4,16 +4,16 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Schedule a job | SwitchTender docs</title>
-	<meta name="description" content="A schedule uses a cron expression, and it can fire a stored template, a single run, a split, or a whole pipeline.">
+	<meta name="description" content="A schedule uses a cron expression or an RFC 5545 recurrence rule, and it can fire a stored template, a single run, a split, or a whole pipeline.">
 	<link rel="canonical" href="https://switchtender.com/docs/tutorial-schedule-a-job">
 	<meta property="og:title" content="Schedule a job | SwitchTender docs">
-	<meta property="og:description" content="A schedule uses a cron expression, and it can fire a stored template, a single run, a split, or a whole pipeline.">
+	<meta property="og:description" content="A schedule uses a cron expression or an RFC 5545 recurrence rule, and it can fire a stored template, a single run, a split, or a whole pipeline.">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/tutorial-schedule-a-job">
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
 	<meta name="twitter:card" content="summary_large_image">
 	<meta name="twitter:title" content="Schedule a job | SwitchTender docs">
-	<meta name="twitter:description" content="A schedule uses a cron expression, and it can fire a stored template, a single run, a split, or a whole pipeline.">
+	<meta name="twitter:description" content="A schedule uses a cron expression or an RFC 5545 recurrence rule, and it can fire a stored template, a single run, a split, or a whole pipeline.">
 	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
 	<script type="application/ld+json">
 {
@@ -24,7 +24,7 @@
   "name": "SwitchTender",
   "url": "https://switchtender.com/"
  },
- "description": "A schedule uses a cron expression, and it can fire a stored template, a single run, a split, or a whole pipeline.",
+ "description": "A schedule uses a cron expression or an RFC 5545 recurrence rule, and it can fire a stored template, a single run, a split, or a whole pipeline.",
  "headline": "Schedule a job",
  "isPartOf": {
   "@type": "WebSite",
@@ -60,13 +60,13 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job" class="active">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job" class="active">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
 			<h1 id="schedule-a-job">Schedule a job</h1>
-<p>A schedule uses a cron expression, and it can fire a stored template, a single run, a split, or a
-whole pipeline.</p>
+<p>A schedule uses a cron expression or an RFC 5545 recurrence rule, and it can fire a stored template,
+a single run, a split, or a whole pipeline.</p>
 <h2 id="schedule-a-template">Schedule a template</h2>
 <ol>
 <li>Save the work first as a <a href="/docs/tutorial-save-a-template">template</a>, so the schedule stays a one-line
@@ -89,14 +89,170 @@ and the schedules list call it.</p>
 <p>To schedule without a template, send <code>playbook</code> and <code>inventory</code> inline, add <code>shards</code> for a split, or
 <code>steps</code> for a pipeline. A worker or the server must be running for a schedule to fire. On a Team
 license, add capacity with <code>switchtender worker</code>.</p>
-<p>By default the cron expression reads in the server's local time. Add a <code>timezone</code>, an IANA name such
-as <code>America/New_York</code>, to pin it to a zone and let it follow that zone's daylight-saving shifts, so a
-nightly window stays put across the year.</p>
+<p>A schedule over a smart or constructed inventory can match no hosts at a fire. That fire is
+skipped, not failed, as <a href="#when-a-fire-matches-no-hosts">when a fire matches no hosts</a> explains.</p>
+<p>By default the cron expression reads in the server's local time, and the server writes its zone's
+name onto the schedule when it is created or imported, such as <code>America/Chicago</code>, so every server of
+a highly available group reads it the same way. The published container image runs in UTC, so a
+schedule created there without a zone is pinned to <code>UTC</code>. Add a <code>timezone</code>, an IANA name such as
+<code>America/New_York</code>, to pin it to a zone of your choosing and let it follow that zone's
+daylight-saving shifts, so a nightly window stays put across the year.</p>
+<p>A schedule an earlier release stored without a zone is read in UTC, and the first server of this
+release to open the database writes <code>UTC</code> onto it, so no server reads it in a zone of its own. That
+is the zone the published image already ran those schedules in. On a host install whose clock is
+not on UTC, those schedules now fire by UTC, so set each one's <code>timezone</code> to the zone it should fire
+in.</p>
 <pre><code>curl -s -X POST localhost:8080/v1/schedules \
   -H &quot;Authorization: Bearer $ST_TOKEN&quot; \
   -H 'content-type: application/json' \
   -d '{&quot;cron&quot;:&quot;0 2 * * *&quot;,&quot;timezone&quot;:&quot;America/New_York&quot;,&quot;template_id&quot;:&quot;tpl_abc123&quot;}'
 </code></pre>
+<h2 id="schedule-a-template-with-a-survey">Schedule a template with a survey</h2>
+<p>Nobody is there to answer a survey when a schedule fires, so every question takes its default: a
+plain question's default becomes an extra var, and a secret question's sealed default rides onto the
+run still sealed, opened only inside the execution, the same as when a person leaves the field
+blank. A required question takes its default too, held to the question's own rules.</p>
+<p>A required question with no default has no answer, so the schedule refuses to fire rather than run
+without it. No run is created. The schedules list shows &quot;did not run&quot; with the reason, which names
+the question, the audit trail records the refusal as its own entry naming the question, and the
+Doctor page reports the schedule as broken before its first fire comes due. Give the question a
+default in the template editor and the next fire runs. A webhook trigger and a pull request plan
+fire templates the same way and refuse the same way.</p>
+<h2 id="when-a-fire-matches-no-hosts">When a fire matches no hosts</h2>
+<p>A template whose inventory is smart or constructed is resolved each time a fire comes due. When the
+inventory matches no host at that moment, the fire is skipped, not failed: no run starts, and the
+schedule fires again on its cadence. A skip is recorded where it is hard to miss:</p>
+<ul>
+<li>The schedule dialog previews the chosen template's inventory and warns when it matches nothing
+right now.</li>
+<li>The schedules list shows the last fire as <code>skipped: no hosts matched</code>, apart from a failure, and a
+schedule whose last three fires in a row were skipped carries the badge <code>matched no hosts for the last N fires</code>.</li>
+<li>The Doctor page, at <code>/ui/doctor</code>, and <code>GET /v1/doctor</code> warn about the same schedules and link to
+the inventory's host preview.</li>
+<li>Every notification target attached to the schedule for <code>skipped</code> or for <code>failure</code> is told, once,
+through chat, webhook, ntfy, and email targets. A skip is not an incident, so like a hold it never
+pages, texts, or annotates a dashboard.</li>
+<li>Each skip is its own entry on the audit chain, <code>SCHEDULE /schedules/&lt;id&gt;/skipped</code>, after the entry
+for the fire.</li>
+</ul>
+<p>A schedule's <code>last_skip</code> holds the reason the last fire was skipped and <code>skipped_fires</code> how many
+fires in a row were. A fire that starts a run, or fails, clears both.</p>
+<h2 id="schedule-what-cron-cannot-say">Schedule what cron cannot say</h2>
+<p>A cron expression has no way to say the last Friday of each quarter, every other Tuesday, every
+third day, run six times and stop, or run nightly except on a holiday. A recurrence rule says all of
+them. It is the same RFC 5545 form AWX stores its schedules in, so a rule copied out of AWX works as
+written.</p>
+<p>In the schedule dialog, set Cadence to Recurrence rule and write the rule. Send it as <code>rrule</code>
+instead of <code>cron</code> from the API. A schedule carries one of the two, never both.</p>
+<pre><code>curl -s -X POST localhost:8080/v1/schedules \
+  -H &quot;Authorization: Bearer $ST_TOKEN&quot; \
+  -H 'content-type: application/json' \
+  -d '{&quot;rrule&quot;:&quot;DTSTART;TZID=America/New_York:20260102T170000\nRRULE:FREQ=MONTHLY;BYMONTH=3,6,9,12;BYDAY=-1FR&quot;,&quot;template_id&quot;:&quot;tpl_abc123&quot;}'
+</code></pre>
+<p>A rule is a <code>DTSTART</code> line and one or more <code>RRULE</code> lines, separated by line breaks or spaces:</p>
+<ul>
+<li><code>DTSTART</code> sets the first day and the time of day. A <code>TZID</code> on it, as in
+<code>DTSTART;TZID=America/New_York:20260102T170000</code>, sets the zone the rule is read in, and the
+schedule takes that zone. A trailing <code>Z</code> means UTC. With neither, the rule reads in the schedule's
+<code>timezone</code>, which a schedule created without one takes from the server's local zone. A <code>TZID</code>
+that disagrees with the schedule's <code>timezone</code> is refused rather than resolved in favor of either.</li>
+<li><code>RRULE</code> takes every RFC 5545 part: <code>FREQ</code> from <code>MINUTELY</code> to <code>YEARLY</code>, <code>INTERVAL</code>, <code>COUNT</code>,
+<code>UNTIL</code>, <code>WKST</code>, <code>BYSETPOS</code>, <code>BYMONTH</code>, <code>BYMONTHDAY</code>, <code>BYYEARDAY</code>, <code>BYWEEKNO</code>, <code>BYDAY</code> with an
+ordinal such as <code>-1FR</code> for the last Friday, <code>BYHOUR</code>, <code>BYMINUTE</code>, and <code>BYSECOND</code>. <code>FREQ=SECONDLY</code>
+is refused, since the scheduler checks for due work every 15 seconds.</li>
+<li><code>EXRULE</code> takes the dates one rule generates back out of the others, <code>EXDATE</code> takes out single
+dates, and <code>RDATE</code> adds single dates.</li>
+</ul>
+<p>Some rules worth having:</p>
+<table>
+<thead>
+<tr>
+<th>Cadence</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Last Friday of each quarter at 17:00</td>
+<td><code>RRULE:FREQ=MONTHLY;BYMONTH=3,6,9,12;BYDAY=-1FR</code></td>
+</tr>
+<tr>
+<td>Last weekday of each quarter</td>
+<td><code>RRULE:FREQ=MONTHLY;BYMONTH=3,6,9,12;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1</code></td>
+</tr>
+<tr>
+<td>Every other Tuesday</td>
+<td><code>RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=TU</code></td>
+</tr>
+<tr>
+<td>Every third day</td>
+<td><code>RRULE:FREQ=DAILY;INTERVAL=3</code></td>
+</tr>
+<tr>
+<td>Weekdays, except the first Monday of the month</td>
+<td><code>RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR</code> and <code>EXRULE:FREQ=MONTHLY;BYDAY=1MO</code></td>
+</tr>
+<tr>
+<td>Nightly, but not on 25 December</td>
+<td><code>RRULE:FREQ=DAILY</code> and <code>EXDATE;TZID=America/New_York:20261225T020000</code></td>
+</tr>
+<tr>
+<td>Six runs, then stop</td>
+<td><code>RRULE:FREQ=DAILY;COUNT=6</code></td>
+</tr>
+</tbody>
+</table>
+<p>The time of day comes from the <code>DTSTART</code> unless <code>BYHOUR</code> and <code>BYMINUTE</code> say otherwise. The <code>DTSTART</code>
+itself fires only when it matches the rule, which is how AWX evaluates its schedules, so a rule for
+the last Friday of the quarter with a <code>DTSTART</code> on a Monday starts at the first last Friday after
+it.</p>
+<p>The dialog previews the next five fires as the rule is typed, on the rule's own clock, and the
+preview endpoint answers the same question from the API:</p>
+<pre><code>curl -s -G localhost:8080/v1/schedules/preview \
+  -H &quot;Authorization: Bearer $ST_TOKEN&quot; \
+  --data-urlencode 'rrule=DTSTART;TZID=America/New_York:20260102T170000 RRULE:FREQ=MONTHLY;BYMONTH=3,6,9,12;BYDAY=-1FR'
+</code></pre>
+<h3 id="daylight-saving">Daylight saving</h3>
+<p>A rule is expanded on the wall clock of its zone, which keeps a 09:00 rule at 09:00 local through
+every change of the clocks. The two nights a year the clocks move are handled the way RFC 5545
+defines them:</p>
+<ul>
+<li>When the clocks go back, a wall time that happens twice fires once, at the first of the two. A
+nightly 01:30 job fires once that night, and an hourly rule fires each named hour once rather than
+running the repeated hour twice.</li>
+<li>When the clocks go forward, a wall time that does not exist is read with the offset in force
+before the gap, so a 02:30 rule fires at 03:30 that night rather than being dropped. A schedule's
+<code>spring_forward</code>, the dialog's &quot;If the time doesn't exist&quot;, can instead run it when the clock
+jumps, as a cron schedule does by default, or skip that day.</li>
+</ul>
+<h3 id="when-a-rule-ends">When a rule ends</h3>
+<p>A rule with a <code>COUNT</code> or an <code>UNTIL</code> fires its last occurrence and then stops: the schedule stays,
+with no next run, and the Doctor page lists it as finished. Saving a rule that has already fired its
+last time is refused, since the schedule would never run.</p>
+<h3 id="running-more-than-one-server">Running more than one server</h3>
+<p>Every server in a highly available group runs the scheduler, and a due recurrence is claimed the
+same way a due cron schedule is: by a compare-and-set on its next run time in the shared database,
+so exactly one server fires it. The last occurrence of a bounded rule is claimed by clearing that
+time under the same compare-and-set, so it fires once too.</p>
+<p>A server that stops while it is firing an occurrence, before the run exists, hands the occurrence
+back: its next run time is set back to that occurrence, and the schedule's last error says the fire
+was interrupted. The next scheduler to check fires it, this server after a restart or another server
+of the group. Each scheduled run carries a key naming its schedule and occurrence, so a fire that
+takes up a handed back occurrence finds the run the interrupted fire made, if it made one, rather
+than starting a second.</p>
+<p>A tick that runs late on the night the clocks go back, after a restart, a database failover, or with
+a <code>--schedule-interval</code> longer than a minute, still fires a time that happens twice only once.</p>
+<h3 id="imported-schedules">Imported schedules</h3>
+<p>An AWX import carries each schedule's rule across. A rule a cron expression says exactly, checked
+against the rule's own next fires, becomes cron, which is easier to read and edit. Every other rule
+comes across as the recurrence it is, where it used to be skipped. A Rundeck job on a Quartz form
+cron cannot read, such as the third Friday (<code>6#3</code>) or the last day of the month (<code>L</code>), comes across
+as a recurrence too.</p>
+<p>An AWX schedule that answers its template's survey fires a copy of the template whose questions
+default to those answers, so it fires with the same answers it did in AWX. A secret answer cannot
+come across, because an export never carries one readably, so a schedule that gave one arrives
+switched off and the import report names the question. Give that question a default on the copy,
+then switch the schedule on.</p>
 <p>Next: give the job its secrets with <a href="/docs/tutorial-set-a-secret">set a secret</a>.</p>
 
 		</main>

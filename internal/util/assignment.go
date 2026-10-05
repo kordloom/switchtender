@@ -2,29 +2,40 @@ package util
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 )
 
-// iniAssignment matches one name=value assignment in free text. The name is captured so a single
-// classifier decides whether it is secret, and the value is either a quoted run (spaces allowed, up to
-// the closing quote) or an unquoted run up to the next whitespace, which is exactly what the INI form
-// permits: several host variables share one line, so an unquoted value cannot contain a space.
-//
-// A backslash escapes the next character inside a quoted run, so a quote escaped inside a value does
-// not end it. Ending there left the rest of a password holding a quote out of the masker's list, and
-// the password printed in the run log.
-var iniAssignment = regexp.MustCompile(
-	`(?i)([a-z0-9_][a-z0-9_.\-]*)\s*=\s*("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|[^\s]+)`)
+// iniAssignment finds one name=value assignment in free text: the name, a quote closing the name
+// when it is written as a string, as in HCL's "password" = "x", and the first byte of the value. How
+// far the value runs is the shell's question and not a pattern's, so the pattern stops there and
+// shellWord answers it.
+var iniAssignment = regexp.MustCompile(`(?i)([a-z0-9_][a-z0-9_.\-]*)(["']?)\s*=\s*(\S)`)
 
-// yamlAssignment matches one name: value line in text that did not parse as a document. The value runs
-// to the end of the line rather than to the next space, because a YAML scalar needs no quotes to
-// contain spaces and stopping at the first space left the rest of a passphrase in the clear.
-var yamlAssignment = regexp.MustCompile(
-	`(?i)([a-z0-9_][a-z0-9_.\-]*)\s*:[ \t]*("[^"\n]*"|'[^'\n]*'|[^\r\n]+)`)
+// yamlAssignment finds one name: value line in text that did not parse as a document, with the same
+// three groups. A quote may close the name because a JSON body is written this way: curl -d
+// '{"password":"x"}' carried a password no pattern saw, since the quote sat between the name and the
+// colon, so the body went into every disclosure path in the clear and the masker never learned it.
+var yamlAssignment = regexp.MustCompile(`(?i)([a-z0-9_][a-z0-9_.\-]*)(["']?)\s*:[ \t]*(\S)`)
 
-// assignmentPatterns are the textual forms, applied in order to text no parser accepted and to the
+// assignmentForm is one textual form an assignment takes.
+type assignmentForm struct {
+	// pattern finds a name, an optional quote closing it, and the first byte of the value.
+	pattern *regexp.Regexp
+	// read returns how many bytes of rest, the text from where the value starts, the value takes, and
+	// whether its quotes stay around the mask. line is the text before the value on its own line, and
+	// closer the quote that line leaves open, if any.
+	read func(rest, line string, closer byte) (int, bool)
+	// decode returns what a program receives from raw, the value as written.
+	decode func(raw string, closer byte) string
+}
+
+// assignmentForms are the textual forms, applied in order to text no parser accepted and to the
 // string leaves of text one did.
-var assignmentPatterns = []*regexp.Regexp{iniAssignment, yamlAssignment}
+var assignmentForms = []assignmentForm{
+	{pattern: iniAssignment, read: shellWordLen, decode: shellValue},
+	{pattern: yamlAssignment, read: yamlValue, decode: yamlValueDecode},
+}
 
 // maxNestedAssignmentDepth bounds how deep a secret may be nested inside another assignment's value
 // with no separating space, such as cmd=psql;password=x. Each level is a value that itself parses as
@@ -46,7 +57,8 @@ const maxNestedAssignmentDepth = 8
 type Assignment struct {
 	// Name is the variable the value was assigned to.
 	Name string
-	// Value is what it was assigned, without surrounding quotes.
+	// Value is what a program receives from the assignment: the value with the quoting and escapes
+	// of its form removed.
 	Value string
 	// Raw is the value as written, quotes and escapes included, for a reader that decodes it the way
 	// the consuming program does.
@@ -67,8 +79,8 @@ type Assignment struct {
 // still found. The scan never rewinds, so it stays linear in the length of the text.
 func RedactAssignments(text, mask string) (string, []Assignment) {
 	var found []Assignment
-	for _, pattern := range assignmentPatterns {
-		text = redactPattern(pattern, text, mask, &found)
+	for _, form := range assignmentForms {
+		text = redactPatternDepth(form, text, mask, &found, maxNestedAssignmentDepth)
 	}
 	// A credential can also ride inside a URL, as scheme://user:password@host, where no name=value
 	// pattern sees it: pg_dump postgres://backup:pass@db and git clone https://x:token@host both
@@ -94,41 +106,77 @@ func RedactAssignments(text, mask string) (string, []Assignment) {
 // masker needs is the password after the colon, which the caller extracts from the match.
 var urlUserinfo = regexp.MustCompile(`(?i)([a-z][a-z0-9+.\-]*://)[^/@\s]+@`)
 
-// redactPattern applies one assignment pattern across text, replacing the values whose names the
-// classifier calls secret and recording each one.
-func redactPattern(pattern *regexp.Regexp, text, mask string, found *[]Assignment) string {
-	return redactPatternDepth(pattern, text, mask, found, maxNestedAssignmentDepth)
+// Readings returns every string the assigned value can reach a program as, Value first, leaving out
+// empty ones. A run's output is masked by matching these literally, and a program prints a value the
+// way it read it: a shell strips the quotes and escapes, Ansible reads an INI value as a Python
+// literal, and a tool that echoes its own command line or configuration prints it as written.
+// Ansible splits a host line as a shell would before it reads the literal, but reads a group's vars
+// line as written, so 'multi\nline' under [db:vars] is a password holding a newline. Both literals
+// are readings, since the text alone does not say which kind of line held the value.
+func (a Assignment) Readings() []string {
+	var out []string
+	add := func(s string) {
+		if s != "" && !slices.Contains(out, s) {
+			out = append(out, s)
+		}
+	}
+	add(a.Value)
+	add(Unquote(a.Raw))
+	if v, ok := PyUnquote(a.Value); ok {
+		add(v)
+	}
+	if v, ok := PyUnquote(a.Raw); ok {
+		add(v)
+	}
+	return out
 }
 
-// redactPatternDepth is redactPattern with the remaining nesting budget carried explicitly. It makes a
-// single forward pass, and for a non-secret assignment whose value may itself hold a joined assignment
-// it scans that value once rather than rewinding the outer scan into it. The budget stops a value that
-// is really a long chain of joined assignments from being descended into without end.
-func redactPatternDepth(pattern *regexp.Regexp, text, mask string, found *[]Assignment, depth int) string {
+// redactPatternDepth applies one assignment form across text, replacing the values whose names the
+// classifier calls secret and recording each one, with the remaining nesting budget carried
+// explicitly. It makes a single forward pass, and for a non-secret assignment whose value may itself
+// hold a joined assignment it scans that value once rather than rewinding the outer scan into it. The
+// budget stops a value that is really a long chain of joined assignments from being descended into
+// without end.
+//
+// Redacting the result again changes nothing. A value ends where its syntax ends, at a space, a
+// separator, the quote holding the text, or the end of a line, and a mask written in its place ends
+// at that same boundary, so a second pass reads the mask as the whole value and writes it back. The
+// redacted text is what gets stored, signed, and disclosed, and a record whose digest covers it has
+// to come out the same on every path that redacts it.
+func redactPatternDepth(form assignmentForm, text, mask string, found *[]Assignment, depth int) string {
 	var out strings.Builder
 	pos := 0
 	for pos < len(text) {
-		loc := pattern.FindStringSubmatchIndex(text[pos:])
+		loc := form.pattern.FindStringSubmatchIndex(text[pos:])
 		if loc == nil {
 			break
 		}
 		name := text[pos+loc[2] : pos+loc[3]]
-		valueStart, valueEnd := pos+loc[4], pos+loc[5]
-		value := text[valueStart:valueEnd]
-		// The pattern took the value without knowing what encloses it, so it is cut back to what the
-		// surrounding syntax actually assigns. Whatever the cut leaves behind is not skipped: the
-		// scan resumes at the new end and walks it like any other text.
-		if stop := valueStop(lineBefore(text, valueStart), value); stop < len(value) {
-			value, valueEnd = value[:stop], valueStart+stop
+		valueStart := pos + loc[6]
+		line := lineBefore(text, valueStart)
+		closer := openQuote(line)
+		// A value that opens with the quote the line left open is either the end of that quoted
+		// string, so nothing was assigned, or a quote of its own the line's count got wrong, as an
+		// apostrophe earlier in a sentence does. A quote that closes again is the second, and reading
+		// it as the first left the password inside it in the clear.
+		if closer != 0 && text[valueStart] == closer && quotedEnd(text, valueStart, 0, closer == '"') > 0 {
+			closer = 0
 		}
+		n, keepQuotes := form.read(text[valueStart:], line, closer)
+		valueEnd := valueStart + n
+		value := text[valueStart:valueEnd]
 		out.WriteString(text[pos:valueStart])
 		switch {
 		case value == "":
-			// The value was cut back to nothing, so the name assigns nothing here and there is
-			// neither anything to mask nor anything to report.
+			// The value ends before it starts, so the name assigns nothing here and there is neither
+			// anything to mask nor anything to report.
 		case SecretKey(name):
-			out.WriteString(mask)
-			*found = append(*found, Assignment{Name: name, Value: Unquote(value), Raw: value})
+			if keepQuotes {
+				out.WriteString(value[:1] + mask + value[len(value)-1:])
+			} else {
+				out.WriteString(mask)
+			}
+			*found = append(*found, Assignment{Name: name, Value: form.decode(value, closer), Raw: value})
 		case depth > 0 && (strings.IndexByte(value, '=') >= 0 || strings.IndexByte(value, ':') >= 0):
 			// The value may be a secret joined onto this one, like a=psql;password=x or a yaml line
 			// note: ... ansible_ssh_pass: x, so it can hold either separator. Scan it once, spending a
@@ -144,7 +192,7 @@ func redactPatternDepth(pattern *regexp.Regexp, text, mask string, found *[]Assi
 			// events, and the live stream while the receipt showed it redacted.
 			open, inner, close := splitQuoted(value)
 			out.WriteString(open)
-			out.WriteString(redactPatternDepth(pattern, inner, mask, found, depth-1))
+			out.WriteString(redactPatternDepth(form, inner, mask, found, depth-1))
 			out.WriteString(close)
 		default:
 			out.WriteString(value)
@@ -156,50 +204,11 @@ func redactPatternDepth(pattern *regexp.Regexp, text, mask string, found *[]Assi
 }
 
 // shellSeparators end an unquoted value on a command line. A value that is not held open by a quote
-// cannot contain one of these, because the shell would have ended the word there too.
+// cannot contain one of these, because the shell would have ended the word there too. Reported with
+// the separator, a value is longer than the secret, and since callers match it literally against a
+// run's output, a tool that echoed the secret put it in the stored log while the receipt showed it
+// redacted.
 const shellSeparators = ";&|"
-
-// valueStop returns how much of value the assignment actually gives it, which is all of it unless
-// the syntax around the value ends it sooner.
-//
-// The patterns read a name and then take a value, and neither knows what encloses the text. Two
-// things end a value that they run straight past. A quote opened before the name closes it where it
-// matches: in curl -H "X-Api-Key: <secret>" https://host the YAML form ran to the end of the line
-// and swallowed the URL. And a shell separator ends an unquoted one: in
-// export API_TOKEN=<secret>; deploy the INI form took the semicolon with it.
-//
-// Both cost the same two things, and the first is a leak. The value handed back is longer than the
-// secret, and callers match that value literally against a run's output to mask it, so a tool that
-// echoed the secret put it in the stored log and the live stream while the receipt showed it
-// redacted. The second is the evidence: the mask replaced text that was not secret, so the command
-// in the signed record is not the command that ran.
-//
-// prefix is the text before the value on its own line, which is what says whether a quote is open.
-func valueStop(prefix, value string) int {
-	if value == "" {
-		return 0
-	}
-	if value[0] == '"' || value[0] == '\'' {
-		// The pattern delimited this one itself, and a separator inside it is ordinary text.
-		return len(value)
-	}
-	stop := -1
-	for _, q := range []byte{'"', '\''} {
-		if strings.Count(prefix, string(q))%2 == 0 {
-			continue
-		}
-		if i := strings.IndexByte(value, q); i >= 0 && (stop < 0 || i < stop) {
-			stop = i
-		}
-	}
-	if stop >= 0 {
-		return stop
-	}
-	if i := strings.IndexAny(value, shellSeparators); i >= 0 {
-		return i
-	}
-	return len(value)
-}
 
 // lineBefore returns what precedes valueStart on its own line, which is what says whether a quote is
 // open around the value. An earlier line cannot leave one open for this one: a shell word and a YAML

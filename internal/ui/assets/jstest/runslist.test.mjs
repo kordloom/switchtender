@@ -149,6 +149,19 @@ test("originHref navigates only when the source has a page", () => {
 	}
 });
 
+test("a review plan's origin names the pull request plan", () => {
+	const tests = [
+		// Test 0: A review plan is labeled as a pull request plan.
+		{ In: "review", WantLabel: "PR plan", WantTip: "Planned from a pull request by a review trigger. Nothing was applied" },
+		// Test 1: An API submission keeps its own wording.
+		{ In: "api", WantLabel: "API", WantTip: "Submitted directly through the API" },
+	];
+	for (const [i, tc] of tests.entries()) {
+		assert.equal(app.SOURCE_LABELS[tc.In], tc.WantLabel, "test " + i + " label");
+		assert.equal(app.originTip({ source: tc.In }), tc.WantTip, "test " + i + " tip");
+	}
+});
+
 test("Load more requests the same filtered set as the first page", async () => {
 	const handle = mountRunsPage({
 		"runs-status": "failed", "runs-tool": "ansible", "runs-order": "duration",

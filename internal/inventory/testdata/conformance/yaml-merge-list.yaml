@@ -1,0 +1,14 @@
+defaults: &defaults
+  a: 1
+  b: 1
+overrides: &overrides
+  b: 2
+  c: 2
+all:
+  hosts:
+    h1:
+      <<: [*overrides, *defaults]
+      d: 4
+    h2:
+      <<: *defaults
+      a: 10

@@ -16,6 +16,16 @@ type auditBeatStore struct {
 	store audit.Store
 }
 
+// AppendSpanBeatNow writes one beat at the chain's own clock, read under its append lock, which is
+// what the emitter uses: no request appended beside the beat loop can then put the beat behind the
+// chain's newest entry. On PostgreSQL that clock is the database's, the one every entry is stamped
+// with.
+func (a auditBeatStore) AppendSpanBeatNow(
+	ctx context.Context, cadenceSeconds int,
+) (spanbeat.AppendedBeat, error) {
+	return a.AppendSpanBeat(ctx, time.Time{}, cadenceSeconds)
+}
+
 // AppendSpanBeat writes one beat to the chain and reports the time, seq, hash, and number the emitter
 // logs and anchors.
 func (a auditBeatStore) AppendSpanBeat(

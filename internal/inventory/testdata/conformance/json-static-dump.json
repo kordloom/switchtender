@@ -1,0 +1,10 @@
+{
+  "aws_ec2": {
+    "hosts": {
+      "ec2-1": {"ansible_host": "198.51.100.4", "placement": {"region": "us-east-1"}, "cpu": 2},
+      "ec2-2": {"ansible_host": "198.51.100.5", "placement": {"region": "us-west-2"}, "cpu": 4.0}
+    },
+    "children": {"tag_env_prod": null}
+  },
+  "tag_env_prod": {"hosts": {"ec2-1": {"ansible_host": "198.51.100.4"}}}
+}

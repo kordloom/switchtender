@@ -18,8 +18,8 @@ import (
 )
 
 // TestNewSyncerRefusesAnUnusableCacheAndClearsDeadWorktrees covers the constructor's two jobs: it
-// must fail rather than hand back a Syncer that cannot write, and it must clear the per-run
-// directory so a crashed server does not accumulate dead checkouts on every restart.
+// must fail rather than hand back a Syncer that cannot write, and it must clear the worktrees a
+// dead process left so a crashed server does not accumulate dead checkouts on every restart.
 func TestNewSyncerRefusesAnUnusableCacheAndClearsDeadWorktrees(t *testing.T) {
 	t.Parallel()
 
@@ -37,17 +37,21 @@ func TestNewSyncerRefusesAnUnusableCacheAndClearsDeadWorktrees(t *testing.T) {
 		t.Error("NewSyncer(\"\") = nil error, want a refusal")
 	}
 
-	// Test 2: a worktree left behind by a crash is cleared on the next start.
+	// Test 2: a worktree left behind by a crash is cleared on the next start. A process that dies
+	// leaves its worktree's lock file behind with nobody holding the lock.
 	cache := t.TempDir()
-	dead := filepath.Join(cache, runsSubdir, "proj_dead-123")
-	if err := os.MkdirAll(dead, 0o700); err != nil {
+	dead := filepath.Join(cache, runsSubdir, "run-proj_dead-123")
+	if err := os.MkdirAll(filepath.Join(dead, checkoutSubdir), 0o700); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dead, ".lock"), nil, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
 	}
 	if _, err := NewSyncer(cache); err != nil {
 		t.Fatalf("NewSyncer() error = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(cache, runsSubdir)); !os.IsNotExist(err) {
-		t.Errorf("the run directory survived the restart, err = %v", err)
+	if _, err := os.Stat(dead); !os.IsNotExist(err) {
+		t.Errorf("the dead worktree survived the restart, err = %v", err)
 	}
 
 	// Test 3: a cache directory that does not exist yet is created.

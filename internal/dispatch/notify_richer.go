@@ -21,8 +21,11 @@ import (
 func (d *Dispatcher) notifyRicherTargets(r *run.Run, targets []run.NotifyTarget) {
 	for _, t := range targets {
 		// A hold asks for a decision rather than reporting an incident, so it reaches an email
-		// recipient and never pages, texts, or annotates a dashboard.
-		if r.Status == run.StatusPendingApproval && t.Kind != run.NotifyEmail {
+		// recipient and never pages, texts, or annotates a dashboard. A skipped schedule fire is
+		// not an incident either, so it follows the same rule. An attention alert does report a
+		// problem, and only a target attached for it reaches here with a pager or text kind.
+		if ((r.Status == run.StatusPendingApproval && r.Attention == nil) || isSkip(r)) &&
+			t.Kind != run.NotifyEmail {
 			continue
 		}
 		switch t.Kind {
@@ -38,19 +41,39 @@ func (d *Dispatcher) notifyRicherTargets(r *run.Run, targets []run.NotifyTarget)
 	}
 }
 
-// deliverPagerDutyTo triggers an incident on one routing key for a failed or interrupted run.
+// pagerDutyEventFor builds the event a run triggers on one routing key: an incident for a failed or
+// interrupted run, or a warning for an attention alert. It reports false for a run that pages for
+// nothing. The per-target path and the named targets' ordered delivery both build it here, so a
+// pager hears the same thing whichever path reaches it.
+func pagerDutyEventFor(r *run.Run, routingKey string) (pagerDutyEvent, bool) {
+	event := pagerDutyEvent{RoutingKey: routingKey, EventAction: "trigger", DedupKey: r.ID,
+		Payload: pagerDutyPayload{Source: "switchtender", Severity: "error"}}
+	switch {
+	case r.Attention != nil:
+		// The alert's own id collapses repeats of one condition into one incident, and a new
+		// condition on the same run opens its own.
+		event.DedupKey = r.Attention.ID
+		event.Payload.Summary = r.Attention.Summary
+		event.Payload.Severity = "warning"
+	case r.Status != run.StatusFailed && r.Status != run.StatusInterrupted:
+		return pagerDutyEvent{}, false
+	default:
+		event.Payload.Summary = "SwitchTender run " + runLabel(r) + " " + string(r.Status)
+		if r.Error != "" {
+			event.Payload.Summary += ": " + truncateError(r.Error)
+		}
+	}
+	return event, true
+}
+
+// deliverPagerDutyTo triggers an incident on one routing key for a failed or interrupted run, or a
+// warning for an attention alert.
 func (d *Dispatcher) deliverPagerDutyTo(r *run.Run, routingKey string) {
-	if r.Status != run.StatusFailed && r.Status != run.StatusInterrupted {
+	event, ok := pagerDutyEventFor(r, routingKey)
+	if !ok {
 		return
 	}
-	summary := "SwitchTender run " + runLabel(r) + " " + string(r.Status)
-	if r.Error != "" {
-		summary += ": " + truncateError(r.Error)
-	}
-	body, err := json.Marshal(pagerDutyEvent{
-		RoutingKey: routingKey, EventAction: "trigger", DedupKey: r.ID,
-		Payload: pagerDutyPayload{Summary: summary, Source: "switchtender", Severity: "error"},
-	})
+	body, err := json.Marshal(event)
 	if err != nil {
 		d.log.Error("dispatch: encode pagerduty target: "+err.Error(), zap.String("run_id", r.ID))
 		return
@@ -64,11 +87,7 @@ func (d *Dispatcher) deliverPagerDutyTo(r *run.Run, routingKey string) {
 
 // deliverGrafanaTo posts one annotation to a Grafana instance with the target's own token.
 func (d *Dispatcher) deliverGrafanaTo(r *run.Run, base, token string) {
-	ann := grafanaAnnotation{Text: grafanaText(r), Tags: []string{"switchtender", string(r.Status)}}
-	if r.EndedAt != nil {
-		ann.Time = r.EndedAt.UnixMilli()
-	}
-	body, err := json.Marshal(ann)
+	body, err := json.Marshal(grafanaAnnotationFor(r))
 	if err != nil {
 		d.log.Error("dispatch: encode grafana target: "+err.Error(), zap.String("run_id", r.ID))
 		return

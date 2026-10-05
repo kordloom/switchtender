@@ -1,0 +1,20 @@
+# Depth decides before priority: a child group wins over a parent with a far higher priority.
+all:
+  children:
+    top:
+      vars:
+        ansible_group_priority: 100
+        tier: top
+      children:
+        mid:
+          vars:
+            tier: mid
+          hosts:
+            h1:
+    side:
+      vars:
+        ansible_group_priority: 5
+        tier: side
+      hosts:
+        h1:
+        h2:

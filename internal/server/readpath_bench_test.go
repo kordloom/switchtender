@@ -191,7 +191,7 @@ func BenchmarkGetRun(b *testing.B) {
 	for _, n := range benchRowCounts {
 		b.Run(fmt.Sprintf("rows=%d", n), func(b *testing.B) {
 			store := benchRunStore(b, n)
-			handler := getRunHandler(store, nil, benchOpenAuthz(), benchLogger())
+			handler := getRunHandler(store, nil, benchOpenAuthz(), benchLogger(), nil)
 			req := httptest.NewRequest(http.MethodGet, "/v1/runs/x", nil)
 			req.SetPathValue("id", fmt.Sprintf("run_%06d", n/2))
 			serveBench(b, handler, req)
@@ -205,7 +205,7 @@ func BenchmarkGetRunStrict(b *testing.B) {
 	for _, n := range benchRowCounts {
 		b.Run(fmt.Sprintf("rows=%d", n), func(b *testing.B) {
 			store := benchRunStore(b, n)
-			handler := getRunHandler(store, nil, benchStrictAuthz(b, 100), benchLogger())
+			handler := getRunHandler(store, nil, benchStrictAuthz(b, 100), benchLogger(), nil)
 			req := benchActorRequest("/v1/runs/x")
 			req.SetPathValue("id", fmt.Sprintf("run_%06d", n/2))
 			serveBench(b, handler, req)

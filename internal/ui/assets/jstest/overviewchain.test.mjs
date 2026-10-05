@@ -14,6 +14,7 @@ async function overviewAs(role) {
 		routes: {
 			"/v1/runs": reply({ runs: [] }),
 			"/v1/fleet": reply({ hosts: [] }),
+			"/v1/attention": reply({ counts: {}, items: [] }),
 			"/v1/audit/verify": reply({ ok: true, count: 3, anchored: 1 }),
 		},
 	});
@@ -47,6 +48,7 @@ async function chainTileLabel(count) {
 		routes: {
 			"/v1/runs": reply({ runs: [] }),
 			"/v1/fleet": reply({ hosts: [] }),
+			"/v1/attention": reply({ counts: {}, items: [] }),
 			"/v1/audit/verify": reply({ ok: true, count, anchored: 0 }),
 		},
 	});

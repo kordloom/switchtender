@@ -17,9 +17,154 @@ async function heldRuns() {
 function heldByRule(held, p) {
 	let n = 0;
 	for (const r of held) {
-		if (r.held_by_policy && (r.held_by_policy === p.name || r.held_by_policy === p.id)) n++;
+		if (!r.held_by_policy) continue;
+		// A Rego policy records its reasons and bundle after its name, so its holds are counted
+		// by that prefix rather than by an exact name.
+		if (r.held_by_policy === p.name || r.held_by_policy === p.id ||
+			(p.rego && r.held_by_policy.startsWith(p.name + " ("))) n++;
 	}
 	return n;
+}
+
+// CRITERIA_COLUMNS is how many criteria columns follow the effect in the policies table: who, risk,
+// tool, command, inventory, queue, destroy threshold, dry runs, and separation of duties.
+const CRITERIA_COLUMNS = 9;
+
+// appendRegoCells fills the criteria columns for a Rego policy. Its package decides everything, so
+// each column says so rather than reading "any", which would describe a rule matching every run.
+function appendRegoCells(tr, p) {
+	const rego = p.rego || {};
+	const digest = (rego.sha256 || "").slice(0, 12);
+	for (let i = 0; i < CRITERIA_COLUMNS; i++) {
+		const cell = document.createElement("td");
+		const span = document.createElement("span");
+		span.className = i === 0 ? "mono" : "muted";
+		span.textContent = i === 0 ? (rego.package || "rego") : "in rego";
+		span.dataset.tip = "Decided by Rego package " + (rego.package || "") +
+			", bundle sha256:" + digest;
+		cell.appendChild(span);
+		tr.appendChild(cell);
+	}
+}
+
+// regoEffectTip says what a Rego policy does to a run: what its warn rule does, which the policy file
+// sets, and how long one evaluation may run before the submission is refused.
+function regoEffectTip(rego) {
+	const warn = rego.warn === "note"
+		? "Its warnings are recorded on the run without holding it."
+		: "Its warnings hold the run for approval.";
+	const limit = rego.timeout ? " Each evaluation may run for " + rego.timeout + "." : "";
+	return "Denies or holds a run as its Rego package decides. " + warn + limit;
+}
+
+// appendCriteriaCells fills the criteria columns for a YAML or API policy, one per criterion.
+function appendCriteriaCells(tr, p, invByID) {
+	const whoCell = document.createElement("td");
+	if (p.actor) {
+		const span = document.createElement("span");
+		span.className = "mono";
+		span.textContent = p.actor;
+		span.dataset.tip = "Only this named actor's runs match";
+		whoCell.appendChild(span);
+	} else if (p.actor_kind === "agent" || p.actor_kind === "human") {
+		const span = document.createElement("span");
+		span.textContent = p.actor_kind === "agent" ? "agents" : "people";
+		span.dataset.tip = p.actor_kind === "agent"
+			? "Only runs an AI agent submitted match"
+			: "Only runs a person submitted match";
+		whoCell.appendChild(span);
+	} else {
+		const span = document.createElement("span");
+		span.className = "muted";
+		span.textContent = "any";
+		whoCell.appendChild(span);
+	}
+	tr.appendChild(whoCell);
+	const riskCell = document.createElement("td");
+	if (p.min_risk) {
+		const badge = document.createElement("span");
+		badge.className = "risk risk-" + p.min_risk;
+		badge.textContent = p.min_risk + "+";
+		badge.dataset.tip = "Only runs graded at least this risky match";
+		riskCell.appendChild(badge);
+	} else {
+		const span = document.createElement("span");
+		span.className = "muted";
+		span.textContent = "any";
+		riskCell.appendChild(span);
+	}
+	tr.appendChild(riskCell);
+	const toolCell = document.createElement("td");
+	if (p.tool) {
+		const badge = document.createElement("span");
+		badge.className = "tool-badge " + p.tool;
+		badge.dataset.tool = p.tool;
+		badge.textContent = p.tool;
+		toolCell.appendChild(badge);
+	} else {
+		const span = document.createElement("span");
+		span.className = "muted";
+		span.textContent = "any";
+		toolCell.appendChild(span);
+	}
+	tr.appendChild(toolCell);
+	tr.appendChild(p.command_contains ? td(p.command_contains, "mono") : anyCell());
+	tr.appendChild(p.inventory_id ? td(invByID[p.inventory_id] || p.inventory_id) : anyCell());
+	tr.appendChild(p.queue ? td(p.queue, "mono") : anyCell());
+	const destroyCell = document.createElement("td");
+	if (p.max_destroy !== undefined && p.max_destroy !== null && p.max_destroy >= 0) {
+		const span = document.createElement("span");
+		span.className = "mono";
+		span.textContent = "> " + p.max_destroy;
+		span.dataset.tip = "A matching apply is held when its plan destroys more than this many resources";
+		destroyCell.appendChild(span);
+	} else {
+		const span = document.createElement("span");
+		span.className = "muted";
+		span.textContent = "off";
+		destroyCell.appendChild(span);
+	}
+	tr.appendChild(destroyCell);
+	const dry = document.createElement("td");
+	if (p.exclude_dry_run) {
+		const chip = document.createElement("span");
+		chip.className = "chip ok";
+		chip.textContent = "yes";
+		dry.appendChild(chip);
+	} else {
+		const span = document.createElement("span");
+		span.className = "muted";
+		span.textContent = "no";
+		dry.appendChild(span);
+	}
+	tr.appendChild(dry);
+	// Separation of duties reads at a glance, beside the other thing a rule does to a match.
+	const distinct = document.createElement("td");
+	if (p.require_distinct_approver) {
+		const chip = document.createElement("span");
+		chip.className = "chip ok";
+		chip.textContent = "required";
+		chip.dataset.tip = "The person who asks for a matching run cannot approve it";
+		distinct.appendChild(chip);
+	} else {
+		const span = document.createElement("span");
+		span.className = "muted";
+		span.textContent = "any approver";
+		distinct.appendChild(span);
+	}
+	// A rule that asks for the approver's reason says so in the same cell, since it is the other
+	// thing a rule asks of whoever decides.
+	if (p.require_reason) {
+		const reason = document.createElement("span");
+		reason.className = "chip ok";
+		reason.textContent = p.require_reason === "always" ? "reason required" : "reason to deny";
+		reason.dataset.tip = p.require_reason === "always"
+			? "An approval and a denial must each carry the approver's reason"
+			: "A denial must carry the approver's reason";
+		distinct.appendChild(document.createTextNode(" "));
+		distinct.appendChild(reason);
+	}
+	tr.appendChild(distinct);
 }
 
 async function loadPolicies() {
@@ -37,7 +182,13 @@ async function loadPolicies() {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(p.name));
 			const effectCell = document.createElement("td");
-			if (p.effect === "deny") {
+			if (p.rego) {
+				const chip = document.createElement("span");
+				chip.className = "chip";
+				chip.textContent = "rego";
+				chip.dataset.tip = regoEffectTip(p.rego);
+				effectCell.appendChild(chip);
+			} else if (p.effect === "deny") {
 				const chip = document.createElement("span");
 				chip.className = "chip failed";
 				chip.textContent = "deny";
@@ -50,100 +201,11 @@ async function loadPolicies() {
 				effectCell.appendChild(span);
 			}
 			tr.appendChild(effectCell);
-			const whoCell = document.createElement("td");
-			if (p.actor) {
-				const span = document.createElement("span");
-				span.className = "mono";
-				span.textContent = p.actor;
-				span.dataset.tip = "Only this named actor's runs match";
-				whoCell.appendChild(span);
-			} else if (p.actor_kind === "agent" || p.actor_kind === "human") {
-				const span = document.createElement("span");
-				span.textContent = p.actor_kind === "agent" ? "agents" : "people";
-				span.dataset.tip = p.actor_kind === "agent"
-					? "Only runs an AI agent submitted match"
-					: "Only runs a person submitted match";
-				whoCell.appendChild(span);
+			if (p.rego) {
+				appendRegoCells(tr, p);
 			} else {
-				const span = document.createElement("span");
-				span.className = "muted";
-				span.textContent = "any";
-				whoCell.appendChild(span);
+				appendCriteriaCells(tr, p, invByID);
 			}
-			tr.appendChild(whoCell);
-			const riskCell = document.createElement("td");
-			if (p.min_risk) {
-				const badge = document.createElement("span");
-				badge.className = "risk risk-" + p.min_risk;
-				badge.textContent = p.min_risk + "+";
-				badge.dataset.tip = "Only runs graded at least this risky match";
-				riskCell.appendChild(badge);
-			} else {
-				const span = document.createElement("span");
-				span.className = "muted";
-				span.textContent = "any";
-				riskCell.appendChild(span);
-			}
-			tr.appendChild(riskCell);
-			const toolCell = document.createElement("td");
-			if (p.tool) {
-				const badge = document.createElement("span");
-				badge.className = "tool-badge " + p.tool;
-				badge.dataset.tool = p.tool;
-				badge.textContent = p.tool;
-				toolCell.appendChild(badge);
-			} else {
-				const span = document.createElement("span");
-				span.className = "muted";
-				span.textContent = "any";
-				toolCell.appendChild(span);
-			}
-			tr.appendChild(toolCell);
-			tr.appendChild(p.command_contains ? td(p.command_contains, "mono") : anyCell());
-			tr.appendChild(p.inventory_id ? td(invByID[p.inventory_id] || p.inventory_id) : anyCell());
-			tr.appendChild(p.queue ? td(p.queue, "mono") : anyCell());
-			const destroyCell = document.createElement("td");
-			if (p.max_destroy !== undefined && p.max_destroy !== null && p.max_destroy >= 0) {
-				const span = document.createElement("span");
-				span.className = "mono";
-				span.textContent = "> " + p.max_destroy;
-				span.dataset.tip = "A matching apply is held when its plan destroys more than this many resources";
-				destroyCell.appendChild(span);
-			} else {
-				const span = document.createElement("span");
-				span.className = "muted";
-				span.textContent = "off";
-				destroyCell.appendChild(span);
-			}
-			tr.appendChild(destroyCell);
-			const dry = document.createElement("td");
-			if (p.exclude_dry_run) {
-				const chip = document.createElement("span");
-				chip.className = "chip ok";
-				chip.textContent = "yes";
-				dry.appendChild(chip);
-			} else {
-				const span = document.createElement("span");
-				span.className = "muted";
-				span.textContent = "no";
-				dry.appendChild(span);
-			}
-			tr.appendChild(dry);
-			// Separation of duties reads at a glance, beside the other thing a rule does to a match.
-			const distinct = document.createElement("td");
-			if (p.require_distinct_approver) {
-				const chip = document.createElement("span");
-				chip.className = "chip ok";
-				chip.textContent = "required";
-				chip.dataset.tip = "The person who asks for a matching run cannot approve it";
-				distinct.appendChild(chip);
-			} else {
-				const span = document.createElement("span");
-				span.className = "muted";
-				span.textContent = "any approver";
-				distinct.appendChild(span);
-			}
-			tr.appendChild(distinct);
 			const holding = document.createElement("td");
 			const ruleHeld = heldByRule(held, p);
 			if (ruleHeld > 0) {
@@ -469,6 +531,9 @@ async function loadDetail(runId) {
 		}
 		offerRerun(run);
 		offerOwnEvidence(run);
+		// The decisions and the reasons approvers gave, drawn beside the run without holding up the
+		// rest of the page.
+		if (decisionsMatter(run)) loadDecisions(runId);
 		// A split or pipeline parent has no output of its own; each shard or step carries its log
 		// and events. Hiding the links beats serving blanks.
 		const isParent = !run.parent_id && (run.kind === "pipeline" || run.kind === "split" || run.shard_count);
@@ -606,7 +671,11 @@ async function postAction(path, payload, method) {
 	}
 	const body = await res.json().catch(() => ({}));
 	if (!res.ok) {
-		throw new Error(body.error || ("HTTP " + res.status));
+		const err = new Error(body.error || ("HTTP " + res.status));
+		// A launch refused because its inventory matched no hosts names the page that previews the
+		// inventory, so the caller can link to it.
+		if (typeof body.preview_url === "string") err.previewURL = body.preview_url;
+		throw err;
 	}
 	return body;
 }

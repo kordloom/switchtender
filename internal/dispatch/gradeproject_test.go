@@ -259,28 +259,40 @@ func TestAProjectRunIsNeverGradedFromTheServersDirectory(t *testing.T) {
 	}
 }
 
-// TestOnlyAReversibilityRuleFetches holds the cost of the gate's fetch to the installs that use
-// it. Nothing but a reversibility floor reads what a playbook does, so an install without one must
-// not pay a fetch on every submission.
-func TestOnlyAReversibilityRuleFetches(t *testing.T) {
+// TestOnlyARuleThatReadsThePlaybookFetches holds the cost of the gate's fetch to the installs that
+// use it. A reversibility floor reads what any playbook does, and for a dry run a dry-run exclusion
+// and a risk floor read it too, since the playbook decides whether the dry run forces real work.
+// Nothing else does, so an install without such a rule must not pay a fetch on every submission.
+func TestOnlyARuleThatReadsThePlaybookFetches(t *testing.T) {
 	t.Parallel()
+	apply, dry := &run.Run{Playbook: "site.yml"}, &run.Run{Playbook: "site.yml", DryRun: true}
 	tests := []struct {
 		Rules []*policy.Policy
+		Run   *run.Run
 		Want  bool
 	}{{ // Test 0: No rules at all.
-		Rules: nil, Want: false,
-	}, { // Test 1: A risk floor, which reads no playbook.
-		Rules: []*policy.Policy{{Name: "prod", MinRisk: "high"}}, Want: false,
+		Rules: nil, Run: apply, Want: false,
+	}, { // Test 1: A risk floor, which reads no playbook for a real run.
+		Rules: []*policy.Policy{{Name: "prod", MinRisk: "high"}}, Run: apply, Want: false,
 	}, { // Test 2: A reversibility floor.
-		Rules: []*policy.Policy{{Name: "perm", Reversibility: run.Irreversible}}, Want: true,
+		Rules: []*policy.Policy{{Name: "perm", Reversibility: run.Irreversible}}, Run: apply, Want: true,
 	}, { // Test 3: A reversibility floor beside a nil entry.
-		Rules: []*policy.Policy{nil, {Name: "perm", Reversibility: run.ReversibleCostly}}, Want: true,
+		Rules: []*policy.Policy{nil, {Name: "perm", Reversibility: run.ReversibleCostly}}, Run: apply,
+		Want: true,
+	}, { // Test 4: A dry-run exclusion reads the playbook of a dry run.
+		Rules: []*policy.Policy{{Name: "prod", ExcludeDryRun: true}}, Run: dry, Want: true,
+	}, { // Test 5: And not of a real run, which it never exempts.
+		Rules: []*policy.Policy{{Name: "prod", ExcludeDryRun: true}}, Run: apply, Want: false,
+	}, { // Test 6: A risk floor reads a dry run's playbook, since it grades low only if clean.
+		Rules: []*policy.Policy{{Name: "prod", MinRisk: "medium"}}, Run: dry, Want: true,
+	}, { // Test 7: A plain rule reads nothing, dry run or not.
+		Rules: []*policy.Policy{{Name: "prod", Tool: "ansible"}}, Run: dry, Want: false,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			if got := gradesPlaybooks(test.Rules); got != test.Want {
-				t.Errorf("gradesPlaybooks() = %v, want %v", got, test.Want)
+			if got := readsPlaybook(test.Rules, test.Run); got != test.Want {
+				t.Errorf("readsPlaybook() = %v, want %v", got, test.Want)
 			}
 		})
 	}

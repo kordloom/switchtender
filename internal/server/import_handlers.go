@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/importer"
+	"github.com/kordloom/switchtender/internal/org"
 )
 
 // maxImportBody caps an uploaded export document, generous enough for a large AWX export.
@@ -31,6 +32,8 @@ type importResponse struct {
 	Sources []string `json:"sources"`
 	// Credentials names the credential shells the import creates; their secrets must be set after.
 	Credentials []string `json:"credentials"`
+	// CredentialTypes names the custom credential types the import creates.
+	CredentialTypes []string `json:"credential_types,omitempty"`
 	// Templates names the job templates the import creates.
 	Templates []string `json:"templates"`
 	// Report summarizes what comes across, what needs a secret, and what does not transfer. The
@@ -38,6 +41,12 @@ type importResponse struct {
 	Report *importer.Report `json:"report,omitempty"`
 	// Schedules names the schedules the import creates.
 	Schedules []string `json:"schedules"`
+	// Notifications names the notification targets the import creates. Their addresses and keys
+	// are never in the response.
+	Notifications []string `json:"notifications"`
+	// Attachments counts the attachments the import creates between those targets and the
+	// templates, workflows, and organizations that name them.
+	Attachments int `json:"attachments"`
 	// InventoryContent maps an inventory's name to the content the import would write.
 	//
 	// A preview that lists only names cannot be reviewed. An inventory is the list of machines a
@@ -45,6 +54,17 @@ type importResponse struct {
 	// export: the dry run has to show what apply will actually store, or the review step is a
 	// formality performed on a name.
 	InventoryContent map[string]string `json:"inventory_content,omitempty"`
+	// Organizations names the organizations the import creates for what came from an AWX
+	// organization: its smart inventories with the inventories they filter, and its own
+	// notification attachments with the templates they cover. Each is created when the import is
+	// applied unless exactly one of that name already exists.
+	Organizations []string `json:"organizations,omitempty"`
+	// InventoryOrganizations maps the name of each inventory placed in an organization to that
+	// organization's name, so a smart inventory's reach can be reviewed before and after apply.
+	InventoryOrganizations map[string]string `json:"inventory_organizations,omitempty"`
+	// TemplateOrganizations maps the name of each template placed in an organization to that
+	// organization's name, since placing a template changes who may see it under --strict-grants.
+	TemplateOrganizations map[string]string `json:"template_organizations,omitempty"`
 	// Warnings names what could not be mapped cleanly or needs follow up.
 	Warnings []string `json:"warnings"`
 	// SuppressedWarnings counts warnings past the reporting cap, zero when none were dropped.
@@ -53,6 +73,20 @@ type importResponse struct {
 	Applied bool `json:"applied"`
 	// Created is how many objects were written when applied.
 	Created int `json:"created"`
+}
+
+// logUnreferencedFiles warns, once per file, about each file an imported credential type writes
+// that no injector references. The import carries such a type as it was, and the report says so to
+// whoever read it. The log says so to whoever runs the server, who is the one a later run's warning
+// about the same file will reach. Only the type and the file are named, never a template.
+func logUnreferencedFiles(log *zap.Logger, plan *importer.Plan) {
+	for _, ct := range plan.CredentialTypes {
+		for _, file := range ct.UnreferencedFiles() {
+			log.Warn("server: imported credential type writes a file no injector references",
+				zap.String("credential_type", ct.Name), zap.String("credential_type_id", ct.ID),
+				zap.String("file", file))
+		}
+	}
 }
 
 // importStoresFunc returns the stores an import writes to, and whether all are enabled.
@@ -157,12 +191,28 @@ func importHandler(stores importStoresFunc, log *zap.Logger) http.HandlerFunc {
 		for _, c := range plan.Credentials {
 			resp.Credentials = append(resp.Credentials, c.Name)
 		}
+		for _, ct := range plan.CredentialTypes {
+			resp.CredentialTypes = append(resp.CredentialTypes, ct.Name)
+		}
 		for _, t := range plan.Templates {
 			resp.Templates = append(resp.Templates, t.Name)
 		}
 		for _, s := range plan.Schedules {
 			resp.Schedules = append(resp.Schedules, s.Name)
 		}
+		for _, n := range plan.Notifications {
+			resp.Notifications = append(resp.Notifications, n.Name)
+		}
+		resp.Attachments = len(plan.Attachments)
+		// Where each organization lands, and what is placed in it. Apply settles each organization
+		// against what is stored, using the one of the same name in place of a new one and leaving
+		// what an ambiguous name would hold unplaced, so this is read again once it has run.
+		placement := func() {
+			resp.Organizations = orgNames(plan.Orgs)
+			resp.InventoryOrganizations = plan.InventoryOrganizations()
+			resp.TemplateOrganizations = plan.TemplateOrganizations()
+		}
+		placement()
 
 		if applyRequested(r) {
 			applyStores, ok := stores()
@@ -183,6 +233,7 @@ func importHandler(stores importStoresFunc, log *zap.Logger) http.HandlerFunc {
 			}
 			resp.Applied = true
 			resp.Created = created
+			logUnreferencedFiles(log, plan)
 			// Apply resolves template inventory names against what is stored and warns about the ones
 			// it could not find, which it does after this response was assembled. Snapshotting the
 			// warnings before the write meant the "no stored inventory is named X, so it is used as a
@@ -190,7 +241,23 @@ func importHandler(stores importStoresFunc, log *zap.Logger) http.HandlerFunc {
 			// import and found out only when a run failed on a path that does not exist.
 			resp.Warnings = plan.Warnings
 			resp.SuppressedWarnings = plan.Suppressed()
+			// The apply settles where an organization's notification attachments went and where
+			// each placed object landed, so the report and the names are taken again after it
+			// rather than kept from the preview.
+			applied := plan.Report()
+			resp.Report = &applied
+			resp.Attachments = len(plan.Attachments)
+			placement()
 		}
 		respondJSON(w, log, http.StatusOK, resp, wantsPretty(r))
 	}
+}
+
+// orgNames names the organizations an import creates.
+func orgNames(orgs []*org.Org) []string {
+	var out []string
+	for _, o := range orgs {
+		out = append(out, o.Name)
+	}
+	return out
 }

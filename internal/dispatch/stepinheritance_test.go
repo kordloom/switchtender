@@ -52,6 +52,10 @@ var stepFields = map[string]stepFieldRule{
 	"StepIndex": fresh,
 	"Attempt":   fresh,
 	"ExtraVars": fresh,
+	// What the gate's scan of the step's own dry run read, its share of the pipeline's record.
+	"DryRunScans": fresh,
+	// What a policy noted about the step, its share of the pipeline's record the same way.
+	"PolicyNotes": fresh,
 
 	// How the run executes, which the pipeline decides for all of it.
 	"DryRun":           carries,
@@ -61,6 +65,8 @@ var stepFields = map[string]stepFieldRule{
 	"Verbosity":        carries,
 	"Forks":            carries,
 	"DiffMode":         carries,
+	"UseFactCache":     carries,
+	"FactCacheTimeout": carries,
 	"Timeout":          carries,
 	"Queue":            carries,
 	"Image":            carries,
@@ -68,7 +74,17 @@ var stepFields = map[string]stepFieldRule{
 	"CredentialIDs":    carries,
 	"ProjectID":        carries,
 	"InventoryID":      carries,
-	"PinnedCommit":     carries,
+	// The hosts a composed inventory resolved to at launch, which every step is held to.
+	"InventoryResolution": carries,
+	// The plain stored inventory the pipeline was submitted with, which every step executes.
+	"InventorySnapshot": carries,
+	"InventorySealed":   carries,
+	"PinnedCommit":      carries,
+	"GitRef":            carries,
+	"TemplateID":        carries,
+	"SealedNames":       carries,
+	"SealedVars":        carries,
+	"SealedDigests":     carries,
 
 	// Who asked, which tenant it belongs to, and what the record and the rules say about it.
 	"OrgID":        carries,
@@ -91,32 +107,53 @@ var stepFields = map[string]stepFieldRule{
 	"ClaimSecret":     notOnAStep,
 	"CancelRequested": notOnAStep,
 	"CommitSHA":       notOnAStep,
+	// The cross-check each step's own execution makes before its play.
+	"InventoryCheck": notOnAStep,
+	// What each step's own execution learns: the image digest it pulled and the hosts a dynamic
+	// source resolved to.
+	"ImageDigest":   notOnAStep,
+	"ResolvedHosts": notOnAStep,
 
 	// Shape and provenance that belong to the pipeline run, not to a step under it.
-	"Kind":           notOnAStep,
-	"Steps":          notOnAStep,
-	"ShardIndex":     notOnAStep,
-	"ShardCount":     notOnAStep,
-	"RetryOf":        notOnAStep,
-	"RerunOf":        notOnAStep,
-	"ProposedFrom":   notOnAStep,
-	"PlanDestroys":   notOnAStep,
+	"Kind":         notOnAStep,
+	"Steps":        notOnAStep,
+	"ShardIndex":   notOnAStep,
+	"ShardCount":   notOnAStep,
+	"RetryOf":      notOnAStep,
+	"RerunOf":      notOnAStep,
+	"ProposedFrom": notOnAStep,
+	"PlanDestroys": notOnAStep,
+	// A plan file belongs to the apply a plan gate proposes, never to a step of a pipeline.
+	"PlanSHA256":     notOnAStep,
+	"PlanSealed":     notOnAStep,
 	"Intent":         notOnAStep,
 	"Source":         notOnAStep,
 	"SourceID":       notOnAStep,
 	"IdempotencyKey": notOnAStep,
 	"Notifications":  notOnAStep,
+	// The agent identity is the pipeline's provenance, recorded once on the run its outcome commits.
+	"Initiator": notOnAStep,
 
 	// Decisions, which are made about the pipeline. A child is not approvable on its own, and these
 	// stamps cover the spec that was decided on rather than any step's.
 	"HeldByPolicy":            notOnAStep,
+	"HoldNote":                notOnAStep,
 	"RequireDistinctApprover": notOnAStep,
+	"RequireReason":           notOnAStep,
 	"ApprovedSpecDigest":      notOnAStep,
 	"ApprovedSpecBinding":     notOnAStep,
+	// The decision that won the pipeline, and one still claiming it, are the pipeline's. A step is
+	// decided on its own, when it is an approval step, by a decision that claims that step.
+	"DecisionID":    notOnAStep,
+	"DecisionClaim": notOnAStep,
 
 	// Grades a handler computes when something reads the run.
 	"Risk":          notOnAStep,
 	"Reversibility": notOnAStep,
+
+	// Notices a notification carries on its own copy of the run, never stored.
+	"AwaitingStep": notOnAStep,
+	"Attention":    notOnAStep,
 }
 
 // TestEveryRunFieldSaysWhatAPipelineStepDoesWithIt fails the build for an unclassified field.

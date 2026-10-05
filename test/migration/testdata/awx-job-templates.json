@@ -1,0 +1,6 @@
+{"count": 2, "next": null, "previous": null, "results": [
+  {"id": 7, "type": "job_template", "name": "provision", "organization": 1,
+   "summary_fields": {"organization": {"id": 1, "name": "Platform"}}},
+  {"id": 8, "type": "job_template", "name": "gather facts", "organization": 1,
+   "summary_fields": {"organization": {"id": 1, "name": "Platform"}}}
+]}

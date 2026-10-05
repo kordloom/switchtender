@@ -11,10 +11,12 @@ import (
 
 // memStore is an in-memory template Store guarded by a mutex.
 type memStore struct {
-	// mu guards templates.
+	// mu guards templates and awx.
 	mu sync.RWMutex
 	// templates maps template id to the stored template.
 	templates map[string]*Template
+	// awx maps an AWX job template id to its binding, created on the first bind.
+	awx map[int64]AWXBinding
 }
 
 // NewMemStore returns an empty in-memory template Store.
@@ -60,7 +62,20 @@ func (m *memStore) Update(_ context.Context, t *Template) error {
 	}
 	cp := clone(t)
 	cp.CreatedAt = existing.CreatedAt
+	cp.HostConfigKey = existing.HostConfigKey
 	m.templates[t.ID] = cp
+	return nil
+}
+
+// SetHostConfigKey replaces the template's sealed callback key, or returns ErrNotFound.
+func (m *memStore) SetHostConfigKey(_ context.Context, id, sealed string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t, ok := m.templates[id]
+	if !ok {
+		return ErrNotFound
+	}
+	t.HostConfigKey = sealed
 	return nil
 }
 

@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -34,5 +35,23 @@ func TestStaticFromDump(t *testing.T) {
 	}
 	if _, ok := out["_meta"]; ok {
 		t.Error("static output should not carry _meta")
+	}
+}
+
+// TestStaticFromDumpKeepsNumbersExact pins that a refreshed source keeps the numbers its plugin
+// produced: a float stays a float when Ansible reads the stored document back, and a large int
+// keeps every digit.
+func TestStaticFromDumpKeepsNumbersExact(t *testing.T) {
+	t.Parallel()
+	dump := []byte(`{"dyn": {"hosts": ["a"]}, "_meta": {"hostvars": {"a": ` +
+		`{"cpu": 4.0, "id": 12345678901234567890, "ratio": 1e-05}}}}`)
+	got, err := staticFromDump(dump)
+	if err != nil {
+		t.Fatalf("staticFromDump() error = %v", err)
+	}
+	for _, want := range []string{`"cpu": 4.0`, `"id": 12345678901234567890`, `"ratio": 1e-05`} {
+		if !strings.Contains(string(got), want) {
+			t.Errorf("the stored document lacks %s:\n%s", want, got)
+		}
 	}
 }

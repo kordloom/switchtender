@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kordloom/switchtender/internal/schedule"
 )
 
 // TestFromCron pins the crontab parser: which lines become schedules, which are skipped with a
@@ -106,7 +108,7 @@ func TestCronTZSetsTheZoneTheSchedulesBelowItAreReadIn(t *testing.T) {
 	}{{
 		Name:      "no CRON_TZ means the server's local time, as the crontab meant",
 		Crontab:   "0 2 * * * /usr/bin/backup\n",
-		WantZones: []string{""},
+		WantZones: []string{schedule.ServerZone()},
 	}, {
 		Name:      "CRON_TZ applies to the lines below it",
 		Crontab:   "CRON_TZ=America/Chicago\n0 2 * * * /usr/bin/backup\n",
@@ -123,12 +125,12 @@ func TestCronTZSetsTheZoneTheSchedulesBelowItAreReadIn(t *testing.T) {
 	}, {
 		Name:        "a zone this system does not know is named as the loss it is",
 		Crontab:     "CRON_TZ=Mars/Olympus\n0 2 * * * /usr/bin/backup\n",
-		WantZones:   []string{""},
+		WantZones:   []string{schedule.ServerZone()},
 		WantWarning: "not a zone this system knows",
 	}, {
 		Name:        "an ordinary variable still reports as one",
 		Crontab:     "MAILTO=ops@example.com\n0 2 * * * /usr/bin/backup\n",
-		WantZones:   []string{""},
+		WantZones:   []string{schedule.ServerZone()},
 		WantWarning: "sets an environment variable",
 	}}
 	for _, test := range tests {

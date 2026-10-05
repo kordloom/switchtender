@@ -652,6 +652,7 @@ const ROUTE_WORDS = [
 	[/^\/ui\/templates$/, "Click to open templates"],
 	[/^\/ui\/workflows$/, "Click to open the workflow editor"],
 	[/^\/ui\/schedules$/, "Click to open schedules"],
+	[/^\/ui\/notifications$/, "Click to open notification targets"],
 	[/^\/ui\/migrate$/, "Click to open the migration importer"],
 	[/^\/ui\/credentials$/, "Click to open credentials"],
 	[/^\/ui\/users$/, "Click to open users"],

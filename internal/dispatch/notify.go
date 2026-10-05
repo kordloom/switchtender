@@ -11,6 +11,7 @@ import (
 
 	"go.uber.org/zap"
 
+	named "github.com/kordloom/switchtender/internal/notification"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/safedial"
 	"github.com/kordloom/switchtender/internal/util"
@@ -33,18 +34,31 @@ func WithWebhooks(urls []string) Option {
 
 // notification is the JSON body delivered to webhooks.
 type notification struct {
-	// Event names what happened: run.finished for a run that reached a terminal state, or run.held
-	// for one a rule is holding for a person to decide on.
+	// Event names what happened: run.finished for a run that reached a terminal state, run.held for
+	// one a rule is holding for a person to decide on, workflow.step_awaiting_approval for a workflow
+	// waiting at one of its approval steps, or run.needs_attention for an attention alert.
 	Event string `json:"event"`
 	// Run is the run the event is about.
 	Run *run.Run `json:"run"`
 }
 
 // webhookEvent names the event a webhook payload reports for r, so the server-wide and per-run
-// webhook paths cannot disagree about it.
+// webhook paths cannot disagree about it. A running run reaches a webhook only through a named
+// target attached for the started event.
 func webhookEvent(r *run.Run) string {
-	if r.Status == run.StatusPendingApproval {
+	switch {
+	case isSkip(r):
+		return skipWebhookEvent
+	case r.Attention != nil:
+		return eventNeedsAttention
+	case r.Status == run.StatusPendingApproval && r.AwaitingStep != nil:
+		return eventStepAwaiting
+	}
+	switch r.Status {
+	case run.StatusPendingApproval:
 		return "run.held"
+	case run.StatusRunning:
+		return "run.started"
 	}
 	return "run.finished"
 }
@@ -61,12 +75,22 @@ func heldSentences(r *run.Run) string {
 }
 
 // heldDetail is what a held notification says beyond the fact of the hold, as whole sentences: the
-// rule holding it when one is named, and who asked for it when that is known. It is empty when
-// neither is recorded.
+// rule holding it when one is named, why the gate held a dry run it did not find change free and
+// what would change that, and who asked for it when that is known. It is empty when none is
+// recorded.
 func heldDetail(r *run.Run) string {
 	var detail []string
 	if r.HeldByPolicy != "" {
 		detail = append(detail, "Held by \""+r.HeldByPolicy+"\".")
+	}
+	// The person deciding reads this before opening the run, and "dry run" alone would tell them
+	// there is nothing to decide. The hold note says it in full when the scan is why the rule held
+	// the run, and names the fixes; otherwise the scan's summary says what the run may do.
+	switch why := r.NotChangeFreeSummary(); {
+	case r.HoldNote != "":
+		detail = append(detail, r.HoldNote)
+	case why != "":
+		detail = append(detail, "Not a preview: "+why+".")
 	}
 	if r.Actor != "" {
 		detail = append(detail, "Requested by "+r.Actor+".")
@@ -84,6 +108,13 @@ func heldDetail(r *run.Run) string {
 // email, and webhooks, and never to a pager, a text message, or a dashboard annotation. Plugin
 // notifiers keep receiving finished runs only, which is the contract they were written against.
 func (d *Dispatcher) notifyHeld(r *run.Run) {
+	d.notifyHeldOn(r, named.Branch{})
+}
+
+// notifyHeldOn is notifyHeld for a hold that comes from a workflow step, placed within the workflow
+// by branch, which is how the named targets' delivery orders it against the workflow's other steps.
+// The zero Branch is the run's own hold.
+func (d *Dispatcher) notifyHeldOn(r *run.Run, branch named.Branch) {
 	if r.ParentID != nil || r.Status != run.StatusPendingApproval {
 		return
 	}
@@ -96,17 +127,21 @@ func (d *Dispatcher) notifyHeld(r *run.Run) {
 	d.notifyNtfy(r)
 	d.notifyEmail(r)
 	d.notifyRunTargets(r)
+	d.notifyNamedOn(r, branch)
 }
 
 // Announce tells the channels about a run this process did not execute: one a relay worker
-// finished, or an apply held on a worker's plan. It satisfies relay.Announcer, so the control node
-// announces what the relay records the way it announces what it executes itself.
+// started or finished, or an apply held on a worker's plan. It satisfies relay.Announcer, so the
+// control node announces what the relay records the way it announces what it executes itself.
 func (d *Dispatcher) Announce(r *run.Run) {
-	if r.Status == run.StatusPendingApproval {
+	switch r.Status {
+	case run.StatusPendingApproval:
 		d.notifyHeld(r)
-		return
+	case run.StatusRunning:
+		d.notifyStarted(r)
+	default:
+		d.notify(r)
 	}
-	d.notify(r)
 }
 
 // notify delivers a terminal top-level run to every configured channel without blocking the
@@ -128,6 +163,7 @@ func (d *Dispatcher) notify(r *run.Run) {
 	d.notifyEmail(r)
 	d.notifyExtra(r)
 	d.notifyRunTargets(r)
+	d.announceEnd(r)
 }
 
 // redactForExternal returns a copy of r safe to send off the host to an external channel, a plugin

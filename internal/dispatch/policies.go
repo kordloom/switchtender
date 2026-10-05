@@ -4,8 +4,13 @@ import (
 	"context"
 	"fmt"
 
+	"go.uber.org/zap"
+
+	"github.com/kordloom/switchtender/internal/decision"
+	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // WithPolicies enforces approval policies on submitted runs: a run matching any stored policy is
@@ -44,14 +49,53 @@ func (d *Dispatcher) requiresApproval(ctx context.Context, r *run.Run) (bool, er
 	// when the evidence is read would answer with today's policies rather than the one that
 	// actually stopped the change, and would answer with nothing at all once it is deleted.
 	gr := d.graded(r)
+	// What the gate's scan read is recorded on the run itself, held or not, so the evidence says
+	// what a dry run was found to run, and why it waited or went through.
+	r.DryRunScans = gr.DryRunScans
+	// So is what a policy noted rather than held on, for the same reason: a run nothing holds is
+	// the run whose record has to say what it was warned about.
+	r.PolicyNotes = policyNotes(policies, gr)
 	if p := policy.Requiring(policies, gr); p != nil {
-		r.HeldByPolicy = p.Label()
+		r.HeldByPolicy = maskPolicyText(gr, p.Label())
+		r.HoldNote = exemptionHoldNote(policies, gr, p)
 		// The label names the first rule for the evidence; the flag is the OR of every matching
 		// rule, and an explicitly requested distinct approver is never lowered by a policy.
 		r.RequireDistinctApprover = r.RequireDistinctApprover || policy.RequireDistinct(policies, gr)
+		// The reason requirement composes the same way: the strictest of every rule covering the
+		// run, copied now so a rule edited while the run waits cannot loosen it.
+		r.RequireReason = decision.Stricter(r.RequireReason, policy.ReasonRequirement(policies, gr))
 		return true, nil
 	}
 	return false, nil
+}
+
+// policyNotes returns what the Rego policies set to warn: note recorded about the graded run g,
+// with g's own secrets masked.
+func policyNotes(policies []*policy.Policy, g *run.Run) []string {
+	notes := policy.Noting(policies, g)
+	for i, note := range notes {
+		notes[i] = maskPolicyText(g, note)
+	}
+	return notes
+}
+
+// maskPolicyText hides r's own secrets in text a policy wrote about r: the values its variables and
+// script carry, and any secret-looking assignment in the text itself.
+//
+// A Rego module builds its messages from the input document, and the document carries a script's
+// text, so a message can quote a token written inline in a command. The text it builds is written
+// onto the run as a hold or a note, the dossier handed to an auditor shows both, and a note is
+// committed with the run's outcome and disclosed by every receipt. This is the reading
+// RedactRunText gives text leaving the server, short of the stored credentials, which a policy
+// never sees.
+func maskPolicyText(r *run.Run, text string) string {
+	if r == nil || text == "" {
+		return text
+	}
+	m := &masker{}
+	m.set(runOwnSecrets(r.ExtraVars, r.Command))
+	masked, _ := util.RedactAssignments(m.redactString(text), maskToken)
+	return masked
 }
 
 // recordHold makes sure a held run says what held it.
@@ -88,10 +132,39 @@ func (d *Dispatcher) denied(ctx context.Context, r *run.Run) error {
 	// The first rule check of every submission path, so the fetch happens once, here, and the hold
 	// check that follows reads the same commit.
 	d.refreshForGate(policies, r)
-	if p := policy.Denying(policies, d.graded(r)); p != nil {
-		return fmt.Errorf("%w: policy %q refuses this submission", ErrPolicyDenied, p.Label())
+	gr := d.graded(r)
+	if p := policy.Denying(policies, gr); p != nil {
+		d.recordRefusal(ctx, r, policies, p)
+		// A Rego verdict is labeled with the messages its module built, which can quote the run's
+		// command, so the refusal the caller reads is masked like every other text a policy writes.
+		return fmt.Errorf("%w: policy %q refuses this submission", ErrPolicyDenied,
+			maskPolicyText(gr, p.Label()))
 	}
 	return nil
+}
+
+// recordRefusal commits a deny policy's refusal of r to the chain, naming the rule and the bundle
+// that decided. The submission is refused whether or not the entry lands, since refusing is the
+// direction a gate fails in, and a chain that cannot record it is logged.
+func (d *Dispatcher) recordRefusal(ctx context.Context, r *run.Run, policies []*policy.Policy,
+	decided *policy.Policy) {
+	if d.audits == nil {
+		return
+	}
+	rule, bundle := decided.Label(), ""
+	if decided.Rego != nil {
+		bundle = decided.Rego.Digest()
+		// A Rego verdict is a copy labeled with its reasons, so the rule is named by the policy the
+		// verdict came from.
+		for _, p := range policies {
+			if p.Rego == decided.Rego {
+				rule = p.Label()
+			}
+		}
+	}
+	if err := outcome.CommitRefusal(ctx, d.audits, r, rule, bundle, d.now); err != nil {
+		d.log.Error("dispatch: record a policy refusal: "+err.Error(), zap.String("run_id", r.ID))
+	}
 }
 
 // stampPolicySet records the rule set in force on the run.
@@ -113,23 +186,42 @@ func (d *Dispatcher) pipelineDenied(ctx context.Context, parent *run.Run, steps 
 		return fmt.Errorf("%w: approval policies could not be read, so the pipeline is refused "+
 			"rather than run past a gate that could not be checked: %w", ErrPolicyUnavailable, err)
 	}
-	units := make([]*run.Run, len(steps))
-	for i, step := range steps {
-		units[i] = stepRun(parent, step, i, 0, baseStepVars(parent))
-	}
+	units, names := policyUnits(parent, steps)
 	// The pipeline's first rule check, as denied is a single run's, so the steps are graded on the
 	// commit fetched here.
 	d.refreshForGate(policies, append([]*run.Run{parent}, units...)...)
-	if p := policy.Denying(policies, d.graded(parent)); p != nil {
-		return fmt.Errorf("%w: policy %q refuses this submission", ErrPolicyDenied, p.Label())
+	gp := d.graded(parent)
+	if p := policy.Denying(policies, gp); p != nil {
+		d.recordRefusal(ctx, parent, policies, p)
+		return fmt.Errorf("%w: policy %q refuses this submission", ErrPolicyDenied,
+			maskPolicyText(gp, p.Label()))
 	}
 	for i, unit := range units {
 		gs := d.graded(unit)
 		if p := policy.Denying(policies, gs); p != nil {
-			return fmt.Errorf("%w: policy %q refuses step %q", ErrPolicyDenied, p.Label(), steps[i].Name)
+			d.recordRefusal(ctx, parent, policies, p)
+			return fmt.Errorf("%w: policy %q refuses step %q", ErrPolicyDenied,
+				maskPolicyText(gs, p.Label()), names[i])
 		}
 	}
 	return nil
+}
+
+// policyUnits builds the run each executable step of a pipeline would execute as, with its name,
+// for the rules to grade. An approval step executes nothing, so it is not a unit: graded as a run
+// it reads as an Ansible run of no playbook, which a blanket rule on Ansible would hold or refuse,
+// and a workflow would be stopped by the very step that exists to stop it.
+func policyUnits(parent *run.Run, steps []run.PipelineStep) ([]*run.Run, []string) {
+	units := make([]*run.Run, 0, len(steps))
+	names := make([]string, 0, len(steps))
+	for i, step := range steps {
+		if step.IsApproval() {
+			continue
+		}
+		units = append(units, stepRun(parent, step, i, 0, baseStepVars(parent)))
+		names = append(names, step.Name)
+	}
+	return units, names
 }
 
 // pipelineRequiresApproval reports whether a pipeline must be held, which it must when the parent
@@ -154,18 +246,32 @@ func (d *Dispatcher) pipelineRequiresApproval(ctx context.Context, parent *run.R
 	units := make([]*run.Run, 0, len(steps)+1)
 	units = append(units, gp)
 	held := false
+	parent.DryRunScans = gp.DryRunScans
+	parent.PolicyNotes = policyNotes(policies, gp)
 	if p := policy.Requiring(policies, gp); p != nil {
-		parent.HeldByPolicy = p.Label()
+		parent.HeldByPolicy = maskPolicyText(gp, p.Label())
+		parent.HoldNote = exemptionHoldNote(policies, gp, p)
 		held = true
 	}
-	for i, step := range steps {
+	stepUnits, unitNames := policyUnits(parent, steps)
+	for i, unit := range stepUnits {
 		// A pipeline held because one of its steps matches records that rule too: the whole graph
 		// is held, so the evidence has to say which step's rule stopped it.
-		gs := d.graded(stepRun(parent, step, i, 0, baseStepVars(parent)))
+		gs := d.graded(unit)
 		units = append(units, gs)
+		// What the gate's scan of each step read is recorded on the pipeline, which is what an
+		// approver decides on, named by the step it belongs to.
+		named := stepNamed(gs, unitNames[i])
+		parent.DryRunScans = append(parent.DryRunScans, named.DryRunScans...)
+		// So is what a policy noted about a step, under the step's prefix, so each step run takes
+		// back its own share.
+		for _, note := range policyNotes(policies, gs) {
+			parent.PolicyNotes = append(parent.PolicyNotes, run.StepPrefix(unitNames[i])+note)
+		}
 		if !held {
 			if p := policy.Requiring(policies, gs); p != nil {
-				parent.HeldByPolicy = p.Label()
+				parent.HeldByPolicy = maskPolicyText(gs, p.Label())
+				parent.HoldNote = exemptionHoldNote(policies, named, p)
 				held = true
 			}
 		}
@@ -185,5 +291,65 @@ func (d *Dispatcher) pipelineRequiresApproval(ctx context.Context, parent *run.R
 			break
 		}
 	}
+	for _, gu := range units {
+		parent.RequireReason = decision.Stricter(parent.RequireReason,
+			policy.ReasonRequirement(policies, gu))
+	}
 	return true, nil
+}
+
+// approvalStepsRequireDistinct records whether the workflow's approval steps must be decided by
+// somebody other than whoever launched it. It is the same answer a hold of the whole workflow
+// computes, the strictest across the parent and every step, taken from the rules in force at
+// submission whether or not they hold the workflow. A rule that demands a second person for a
+// step's change demands it for the approval that releases that step, and a workflow nothing held
+// would otherwise reach its approval step with no separation at all.
+func (d *Dispatcher) approvalStepsRequireDistinct(ctx context.Context, parent *run.Run,
+	steps []run.PipelineStep) error {
+	if d.policies == nil || parent.RequireDistinctApprover || !run.HasApproval(steps) {
+		return nil
+	}
+	policies, err := d.policies.List(ctx)
+	if err != nil {
+		return fmt.Errorf("%w: approval policies could not be read, so the pipeline is refused "+
+			"rather than run past a gate that could not be checked: %w", ErrPolicyUnavailable, err)
+	}
+	units, _ := policyUnits(parent, steps)
+	for _, unit := range append([]*run.Run{parent}, units...) {
+		if policy.RequireDistinct(policies, d.graded(unit)) {
+			parent.RequireDistinctApprover = true
+			return nil
+		}
+	}
+	return nil
+}
+
+// stepNamed returns a copy of the graded step gs whose scans name the step, the way the pipeline
+// records them, so a hold note about the step says which step it is.
+func stepNamed(gs *run.Run, name string) *run.Run {
+	named := *gs
+	named.DryRunScans = run.ScansForStep(name, gs.DryRunScans)
+	return &named
+}
+
+// approvalStepsRequireReason records whether a decision on the workflow's approval steps must carry
+// the decider's reason, the strictest requirement across the parent and every step, from the rules
+// in force at submission whether or not they hold the workflow. It is the reason requirement's half
+// of approvalStepsRequireDistinct, for the same reason.
+func (d *Dispatcher) approvalStepsRequireReason(ctx context.Context, parent *run.Run,
+	steps []run.PipelineStep) error {
+	if d.policies == nil || !run.HasApproval(steps) {
+		return nil
+	}
+	policies, err := d.policies.List(ctx)
+	if err != nil {
+		return fmt.Errorf("%w: approval policies could not be read, so the pipeline is refused "+
+			"rather than run past a gate that could not be checked: %w", ErrPolicyUnavailable, err)
+	}
+	units, _ := policyUnits(parent, steps)
+	for _, unit := range append([]*run.Run{parent}, units...) {
+		parent.RequireReason = decision.Stricter(parent.RequireReason,
+			policy.ReasonRequirement(policies, d.graded(unit)))
+	}
+	return nil
 }

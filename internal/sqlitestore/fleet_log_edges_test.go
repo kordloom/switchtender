@@ -587,6 +587,12 @@ func TestPurgeKeepsRunsNobodyHasDecidedOn(t *testing.T) {
 		saveRuns(t, store, &run.Run{ID: id, Status: s, CreatedAt: old})
 		if !s.Terminal() {
 			wantKept = append(wantKept, id)
+			continue
+		}
+		// A finished run's outcome is on the chain, as the process that finished it puts it, so
+		// only the status decides here.
+		if err := store.SettleOutcome(ctx, id); err != nil {
+			t.Fatalf("SettleOutcome(%s) error = %v", id, err)
 		}
 	}
 
@@ -681,6 +687,9 @@ func TestPurgeSurvivesMoreChildRowsThanOneBatchHolds(t *testing.T) {
 		}
 	}
 	saveRuns(t, store, &run.Run{ID: "run_1", Status: run.StatusSucceeded, CreatedAt: old})
+	if err := store.SettleOutcome(ctx, "run_1"); err != nil {
+		t.Fatalf("SettleOutcome() error = %v", err)
+	}
 
 	trimmed, err := store.PurgeEventsBefore(ctx, baseTime)
 	if err != nil {

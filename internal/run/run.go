@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"time"
 
@@ -37,11 +38,42 @@ const (
 	StatusRejected Status = "rejected"
 )
 
+// Stored statuses are how a database keeps two states that read as pending_approval. A release
+// that predates them reads each as a status it does not know, so it neither approves nor sweeps
+// the run, and the state waits for a release that understands it.
+const (
+	// StoredParked is a workflow parked at an approval step: started, holding no lease, waiting
+	// for a person. A release from before approval steps reads pending_approval on a workflow as
+	// one held before it started, and approving it there would start it again from its first step.
+	StoredParked = "parked"
+	// StoredDeciding is a held run or an approval step that a decision has claimed and not yet
+	// settled. An earlier release would decide it again, or cancel it under the decision.
+	StoredDeciding = "deciding"
+)
+
+// StatusFromStored returns the status a stored value reads as: pending_approval for a parked
+// workflow and for a claimed decision, and the value itself for everything else.
+func StatusFromStored(stored string) Status {
+	switch stored {
+	case StoredParked, StoredDeciding:
+		return StatusPendingApproval
+	}
+	return Status(stored)
+}
+
 const (
 	// KindSplit marks a parent run whose children are inventory shards.
 	KindSplit = "split"
 	// KindPipeline marks a parent run whose children are pipeline steps.
 	KindPipeline = "pipeline"
+	// KindApproval marks the child of a pipeline that records one approval step: the request, then
+	// the decision. It executes nothing, so no claim ever takes it, and it waits in pending_approval
+	// until an approver decides it or its timeout passes.
+	KindApproval = "approval"
+	// KindSkippedFire marks the run-shaped notice of a schedule fire that started nothing because its
+	// inventory matched no hosts. It exists only to be announced to notification targets and is never
+	// stored, so no run in a store carries it.
+	KindSkippedFire = "skipped_fire"
 )
 
 const (
@@ -166,6 +198,17 @@ type Run struct {
 	// DryRun runs the tool in its no-change mode: ansible --check, terraform plan, a syntax check for
 	// bash and python.
 	DryRun bool `json:"dry_run,omitempty"`
+	// DryRunScans records each read the gate made of what this run's dry run executes: an Ansible
+	// playbook read for what sets check_mode to anything but true, or a Terraform or OpenTofu
+	// configuration read for external data sources, with what the read examined, found, and could
+	// not read. A dry run any scan found something in, or could not read in full, is not change
+	// free: it is matched, graded, and shown as the real change it may be. A pipeline records its
+	// steps' scans, each named by its step. Empty for a run the gate never scanned.
+	DryRunScans []DryRunScan `json:"dry_run_scans,omitempty"`
+	// HoldNote says why the gate held a dry run that the rule holding it would otherwise have let
+	// through, and what would change that: the scan did not show it to be change free, and the rule
+	// exempts only a dry run that is. Empty for every other run.
+	HoldNote string `json:"hold_note,omitempty"`
 	// Status is the current lifecycle state.
 	Status Status `json:"status"`
 	// ExitCode is the process exit code, set once the run reaches a terminal state.
@@ -200,6 +243,13 @@ type Run struct {
 	Forks int `json:"forks,omitempty"`
 	// DiffMode shows the before-and-after of every Ansible file and template change.
 	DiffMode bool `json:"diff_mode,omitempty"`
+	// UseFactCache serves the facts earlier runs gathered for these hosts to this Ansible run through
+	// Ansible's jsonfile fact cache, and keeps what this run gathers for the runs after it. Cached
+	// facts are kept per stored inventory host, so it does nothing for a run with no InventoryID.
+	UseFactCache bool `json:"use_fact_cache,omitempty"`
+	// FactCacheTimeout is how many seconds a host's cached facts stay fresh enough to serve. Zero
+	// serves them however old they are.
+	FactCacheTimeout int `json:"fact_cache_timeout,omitempty"`
 	// Kind distinguishes a plain run from a split or pipeline parent. Empty means a plain run.
 	Kind string `json:"kind,omitempty"`
 	// RetryOf links a split created by a failed shard retry back to the run it retries.
@@ -217,6 +267,22 @@ type Run struct {
 	// ExtraVars are the variables injected into the run, for a pipeline step the merged outputs
 	// of the steps it depends on.
 	ExtraVars map[string]any `json:"extra_vars,omitempty"`
+	// SealedNames names the variables whose values were supplied as secret survey answers, sorted. It
+	// records that an answer was supplied, never the answer, so it is safe in every read, receipt,
+	// and export.
+	SealedNames []string `json:"sealed_vars,omitempty"`
+	// SealedVars maps each name in SealedNames to its answer sealed with the credential key. It is
+	// opened only by the executor, inside the execution that uses it, and merged over ExtraVars there.
+	// The json:"-" tag keeps the ciphertext out of every API response, bundle, SIEM forward, relay
+	// read, and evidence document. A store writes it once and keeps it until the run is purged.
+	SealedVars map[string]string `json:"-"`
+	// SealedDigests binds each sealed answer by a digest of its ciphertext, sorted by variable. It is
+	// fixed when the run is created and a store keeps it as written, so the run's spec, and with it
+	// an approval, covers exactly which sealed answer will be opened, and the executor refuses one
+	// whose ciphertext no longer matches. A digest of ciphertext says nothing about the answer, so it
+	// is safe in every read. A run created before digests existed carries none, which leaves its
+	// spec, and every receipt already issued for it, as it was.
+	SealedDigests []SealedDigest `json:"sealed_var_digests,omitempty"`
 	// Outputs are the values the playbook published with set_stats for downstream steps.
 	Outputs map[string]any `json:"outputs,omitempty"`
 	// ClaimedBy names the process that leased this run for execution, empty while queued.
@@ -251,8 +317,41 @@ type Run struct {
 	// nothing in the record shows. The executor compares it against what the project sync produced and
 	// refuses a mismatch. Empty on an ordinary run, which runs whatever the branch holds.
 	PinnedCommit string `json:"pinned_commit,omitempty"`
+	// GitRef is the git reference the project sync fetches this run's commit from instead of the
+	// project's branch, such as refs/pull/12/head for a GitHub pull request or
+	// refs/merge-requests/12/head for a GitLab merge request. It is how a review plan runs the
+	// commit a pull request proposes, which is on no branch the project tracks. It is always paired
+	// with PinnedCommit, so a ref that moved after the webhook named its head refuses to execute
+	// rather than planning code nobody asked about. Empty on every ordinary run.
+	GitRef string `json:"git_ref,omitempty"`
 	// InventoryID names a stored inventory materialized for this run instead of a file path.
 	InventoryID string `json:"inventory_id,omitempty"`
+	// InventoryResolution records the hosts a smart or constructed inventory resolved to when this
+	// run was launched, and the input inventories they came from. A composed inventory is evaluated
+	// at launch rather than stored, so without this the evidence could name the inventory but never
+	// the machines it stood for at that moment. Execution is held to this set, so a host added to an
+	// input afterward is not reached by a run approved before it existed. Nil for every other run.
+	InventoryResolution *InventoryResolution `json:"inventory_resolution,omitempty"`
+	// InventoryCheck records the cross-check an Ansible run against a natively resolved inventory
+	// made just before it executed: the ansible-core that read the inventory, the digests both
+	// engines agreed on, or the differences that refused the run. It is stamped at execution and is
+	// not part of the spec an approver decides on. Nil for every other run.
+	InventoryCheck *InventoryCheck `json:"inventory_check,omitempty"`
+	// InventorySnapshot records the stored inventory this run executes against, materialized when the
+	// run was submitted: the digest of the sealed content, a digest of the content with its secrets
+	// masked, and the hosts it names. It is part of the spec an approver decides on, and the run
+	// executes that snapshot rather than whatever the store holds when it is claimed. Nil for a run
+	// that targets no stored inventory, and for one that targets a composed inventory, which
+	// InventoryResolution holds to its hosts instead.
+	InventorySnapshot *InventorySnapshot `json:"inventory_snapshot,omitempty"`
+	// InventorySealed is the materialized inventory content, sealed with the server's key, while the
+	// run waits. It is never serialized, written once when the run is created, and wiped when the run
+	// ends.
+	InventorySealed string `json:"-"`
+	// ResolvedHosts are the hosts a dynamic inventory source resolved to when this run executed. A
+	// dynamic source resolves against live systems by nature, so its hosts are recorded with the
+	// outcome rather than bound at approval. Empty for every other run.
+	ResolvedHosts []string `json:"resolved_hosts,omitempty"`
 	// OrgID is the owning organization stamped from the submitting actor at creation. It is what
 	// scopes a run that references no stored object: an inline script, a proposed run, or a
 	// terraform working directory names no project, inventory, or credential, so there is nothing
@@ -263,11 +362,17 @@ type Run struct {
 	OrgID string `json:"org_id,omitempty"`
 	// Queue restricts execution to workers serving this queue. Empty runs on the default pool.
 	Queue string `json:"queue,omitempty"`
-	// Image names a container image the run executes inside, its execution environment. It outranks
-	// the project's image. Every built-in tool runs in a container; the runner builds a per-tool plan.
+	// Image names a container image the run executes inside, its execution environment. The image in
+	// force, the run's own, then its template's, then its project's, then the server default, is
+	// resolved and pinned here when the run is submitted, so an approval covers the container the run
+	// will execute in. When the registry answered at submission the reference carries the digest the
+	// tag resolved to, and the run executes by that digest.
 	Image string `json:"image,omitempty"`
 	// PullCredentialID names a registry credential for pulling a private Image. Empty for public.
 	PullCredentialID string `json:"pull_credential_id,omitempty"`
+	// ImageDigest is the digest of the image the container runtime actually pulled and ran, recorded
+	// when the run executes. Empty for a run on the host.
+	ImageDigest string `json:"image_digest,omitempty"`
 	// ProposedFrom names the run this one was proposed from: the drift check a reconcile answers, or
 	// the plan a gated terraform or opentofu apply carries out. A run carrying it was built by the
 	// product rather than asked for directly, and it never passes through the plan gate again.
@@ -277,6 +382,15 @@ type Run struct {
 	// terraform or opentofu change says what it removes, so the apply is graded from it rather than
 	// from a command line that names only a directory.
 	PlanDestroys *int `json:"plan_destroys,omitempty"`
+	// PlanSHA256 is the hex SHA-256 of the sealed plan file a gated terraform or opentofu apply
+	// carries out, as stored. It is part of the spec an approver decides on, so an approval releases
+	// that exact plan, and the apply runs the plan file rather than planning again. Empty for every
+	// other run.
+	PlanSHA256 string `json:"plan_sha256,omitempty"`
+	// PlanSealed is the plan file the apply carries out, sealed with the server's key while the apply
+	// waits. A plan file holds the values the configuration was planned with, sensitive ones
+	// included, so it is never serialized, written once, and wiped when the run ends.
+	PlanSealed string `json:"-"`
 	// HeldByPolicy names the approval rule that held this run, as that rule was named when the hold
 	// happened. It is recorded at the hold rather than looked up later, because a policy can be
 	// renamed or deleted long before anyone reads the evidence, and "which rule stopped this
@@ -287,6 +401,13 @@ type Run struct {
 	// rule when the decision is made: an admin who edits or deletes the rule afterward must not be
 	// able to weaken a decision already pending, and an admin is who this control constrains.
 	RequireDistinctApprover bool `json:"require_distinct_approver,omitempty"`
+	// PolicyNotes are the warnings a Rego policy set to warn: note recorded on this run instead of
+	// holding it, one entry per policy, each naming the policy, its messages, and its bundle the way
+	// HeldByPolicy names a hold. They are recorded at submission whether or not anything holds the
+	// run, and carried into its outcome record, so the evidence says what was flagged and that the
+	// run went ahead. A pipeline records its steps' notes, each named by its step. Empty when no
+	// policy noted anything.
+	PolicyNotes []string `json:"policy_notes,omitempty"`
 	// AuditReceipt is the seq:link of the chain entry that recorded the request which created this
 	// run. The entry is written before the handler runs, at a path naming the template or the
 	// collection rather than the run it goes on to create, so this is the only thing that ties a
@@ -323,6 +444,13 @@ type Run struct {
 	// SourceID is the object behind Source: the template or schedule id, or the origin run for a
 	// rerun.
 	SourceID string `json:"source_id,omitempty"`
+	// TemplateID is the job template this run executes, stamped by the server when a template is
+	// launched directly, by a schedule, or by a trigger, and carried to every run derived from it:
+	// shards, retries, reruns, pipeline steps, and a proposed apply. It is recorded at submit
+	// rather than looked up from the schedule or trigger later, because a run identity token names
+	// it and an edit to the schedule while the run waited would otherwise change which template the
+	// token says ran. Empty for a run no template launched.
+	TemplateID string `json:"template_id,omitempty"`
 	// Actor is the authenticated user who fired the run, when the server knows one.
 	Actor string `json:"actor,omitempty"`
 	// ActorUserID is the account behind the credential that fired the run, empty for an unscoped
@@ -359,6 +487,32 @@ type Run struct {
 	// Notifications are per-run notification targets, copied from the launching template, that
 	// receive this run's terminal state in addition to the server-wide channels.
 	Notifications []NotifyTarget `json:"notifications,omitempty"`
+	// Initiator is the identity evidence of an agent-initiated run: which agent asked, the account it
+	// is bound to, and who provisioned its token. It is recorded from the agent's token when the run
+	// is submitted and committed with the run's outcome. Nil for every run an agent did not ask for.
+	Initiator *Initiator `json:"initiator,omitempty"`
+	// RequireReason says a decision on this run must carry the approver's reason: "denials" for a
+	// denial, "always" for an approval and a denial alike. It is copied from the rules that held the
+	// run, at the hold, for the reason RequireDistinctApprover is: a rule edited while the run waits
+	// must not loosen a decision already pending. Empty when no rule asks for one.
+	RequireReason string `json:"require_reason,omitempty"`
+	// DecisionID is the decision that won this held run, or this workflow approval step: the id of
+	// its decision record and of the chain entry that records it. The compare-and-set that claims
+	// the decision sets it, and nothing changes it afterward, so a reader credits this decision and
+	// no other. Empty for a run nobody decided, and for one decided before decisions were claimed.
+	DecisionID string `json:"decision_id,omitempty"`
+	// DecisionClaim is the decision that claimed this run and has not settled it yet, as JSON: the
+	// chain entry that records it and how it settles the run. Whoever finishes the decision, the
+	// process that made it or a janitor after that process died, appends exactly that entry and
+	// settles exactly that way. Empty once the decision settles, and for a run nothing claimed.
+	DecisionClaim string `json:"-"`
+	// AwaitingStep names the approval step a workflow is waiting at, on the copy of the workflow a
+	// notification carries, so every channel says which step waits and what each answer runs next.
+	// It is never stored, so it is nil on every run read back from a store.
+	AwaitingStep *AwaitingStep `json:"awaiting_step,omitempty"`
+	// Attention says why the run has needed attention past its threshold, on the copy an attention
+	// alert carries. It is never stored, so it is nil on every run read back from a store.
+	Attention *AttentionNote `json:"attention,omitempty"`
 }
 
 // NotifyTarget routes one run's terminal notification to a specific channel, so a template can page
@@ -522,6 +676,9 @@ func (r *Run) Clone() *Run {
 		out.RetryOf = &id
 	}
 	out.ExtraVars = maps.Clone(r.ExtraVars)
+	out.SealedNames = append([]string(nil), r.SealedNames...)
+	out.SealedVars = maps.Clone(r.SealedVars)
+	out.SealedDigests = slices.Clone(r.SealedDigests)
 	out.Outputs = maps.Clone(r.Outputs)
 	if r.ClaimedAt != nil {
 		t := *r.ClaimedAt
@@ -532,6 +689,13 @@ func (r *Run) Clone() *Run {
 	out.Labels = maps.Clone(r.Labels)
 	out.Tags = append([]string(nil), r.Tags...)
 	out.SkipTags = append([]string(nil), r.SkipTags...)
+	out.InventoryResolution = r.InventoryResolution.Clone()
+	out.DryRunScans = cloneScans(r.DryRunScans)
+	out.PolicyNotes = append([]string(nil), r.PolicyNotes...)
+	out.InventoryCheck = r.InventoryCheck.Clone()
+	out.InventorySnapshot = r.InventorySnapshot.Clone()
+	out.ResolvedHosts = slices.Clone(r.ResolvedHosts)
+	out.Initiator = r.Initiator.Clone()
 	if r.PolicySet != nil {
 		set := *r.PolicySet
 		set.Rules = append([]string(nil), r.PolicySet.Rules...)
@@ -546,9 +710,12 @@ func (r *Run) Clone() *Run {
 		out.Steps = make([]PipelineStep, len(r.Steps))
 		for i, s := range r.Steps {
 			s.DependsOn = append([]string(nil), s.DependsOn...)
+			s.IfDenied = append([]string(nil), s.IfDenied...)
 			out.Steps[i] = s
 		}
 	}
+	out.AwaitingStep = r.AwaitingStep.Clone()
+	out.Attention = r.Attention.Clone()
 	return &out
 }
 
@@ -592,6 +759,15 @@ func WithProject(id string) SubmitOption {
 	return func(r *Run) { r.ProjectID = id }
 }
 
+// WithTemplate records the job template the run executes. Empty is a no-op.
+func WithTemplate(id string) SubmitOption {
+	return func(r *Run) {
+		if id != "" {
+			r.TemplateID = id
+		}
+	}
+}
+
 // WithInventory targets a stored inventory instead of a file path.
 func WithInventory(id string) SubmitOption {
 	return func(r *Run) { r.InventoryID = id }
@@ -628,6 +804,44 @@ func WithExtraVars(vars map[string]any) SubmitOption {
 			return
 		}
 		r.ExtraVars = maps.Clone(vars)
+	}
+}
+
+// WithExactExtraVars sets the run's extra vars to exactly vars, replacing what an earlier option set,
+// with nothing when vars is empty. WithExtraVars keeps an earlier value when handed an empty map,
+// which suits a caller adding variables and not one that has already decided the whole set. A
+// template launch is the second kind: it drops the template's own value for a variable a secret
+// answer stands in for, and when that was the only variable, the empty set left the template's plain
+// value on the run beside the sealed answer it was meant to give way to.
+func WithExactExtraVars(vars map[string]any) SubmitOption {
+	return func(r *Run) {
+		r.ExtraVars = nil
+		if len(vars) > 0 {
+			r.ExtraVars = maps.Clone(vars)
+		}
+	}
+}
+
+// SealedVarNames returns the variable names of a sealed answer map, sorted.
+func SealedVarNames(sealed map[string]string) []string {
+	if len(sealed) == 0 {
+		return nil
+	}
+	return slices.Sorted(maps.Keys(sealed))
+}
+
+// WithSealedVars attaches secret survey answers, each already sealed with the credential key, keyed
+// by variable name. SealedNames is set from the keys so a reader can see which answers were
+// supplied, and SealedDigests from the ciphertexts so the run's spec binds each one. Empty is a
+// no-op.
+func WithSealedVars(sealed map[string]string) SubmitOption {
+	return func(r *Run) {
+		if len(sealed) == 0 {
+			return
+		}
+		r.SealedVars = maps.Clone(sealed)
+		r.SealedNames = SealedVarNames(sealed)
+		r.SealedDigests = SealedDigestsOf(sealed)
 	}
 }
 
@@ -687,9 +901,19 @@ func WithPolicySet(digest string, count int, rules []string) SubmitOption {
 	return func(r *Run) { r.PolicySet = &PolicySet{Digest: digest, Count: count, Rules: rules} }
 }
 
+// LabelPullRequest is the run label holding the pull or merge request number a pull request review
+// plans, which the review sets and the dispatcher names in a federated token.
+const LabelPullRequest = "pull_request"
+
 // WithPinnedCommit binds the run to one commit, refusing to execute any other. See Run.PinnedCommit.
 func WithPinnedCommit(sha string) SubmitOption {
 	return func(r *Run) { r.PinnedCommit = sha }
+}
+
+// WithGitRef has the project sync fetch the run's commit from ref rather than the project's branch.
+// See Run.GitRef.
+func WithGitRef(ref string) SubmitOption {
+	return func(r *Run) { r.GitRef = ref }
 }
 
 // WithActorAccount records the account behind the credential that fired the run. See Run.ActorUserID.
@@ -763,6 +987,18 @@ func WithDiffMode(diff bool) SubmitOption {
 	return func(r *Run) { r.DiffMode = diff }
 }
 
+// WithFactCache turns the Ansible fact cache on or off for the run, with how many seconds cached
+// facts stay fresh enough to serve. A timeout below zero is read as zero, which never expires them.
+func WithFactCache(use bool, timeoutSeconds int) SubmitOption {
+	return func(r *Run) {
+		r.UseFactCache = use
+		if timeoutSeconds < 0 || !use {
+			timeoutSeconds = 0
+		}
+		r.FactCacheTimeout = timeoutSeconds
+	}
+}
+
 // cloneNonEmpty returns a copy of in with blank entries dropped, or nil when nothing remains, so a
 // stored tag list never carries an empty tag that would widen or narrow a run in a surprising way.
 func cloneNonEmpty(in []string) []string {
@@ -813,8 +1049,8 @@ func WithRetryOf(sourceID string) SubmitOption {
 }
 
 // ExecutionOptions returns the options that carry how r executes onto another run: the tool and its
-// command, the dry-run flag, the variables, the credentials, the project, the inventory, the queue,
-// the timeout, and the execution image with its pull credential.
+// command, the dry-run flag, the variables and the sealed secret answers, the credentials, the
+// project, the inventory, the queue, the timeout, and the execution image with its pull credential.
 //
 // It is the one description of a run's execution spec. Every path that derives a run from another
 // run used to write its own list, and every one of those lists lost a field over time: a shard
@@ -831,12 +1067,15 @@ func (r *Run) ExecutionOptions() []SubmitOption {
 		WithCommand(r.Command),
 		WithDryRun(r.DryRun),
 		WithExtraVars(r.ExtraVars),
+		WithSealedVars(r.SealedVars),
+		withSealedDigests(r.SealedDigests),
 		WithCredentialIDs(r.CredentialIDs),
 		WithTags(r.Tags...),
 		WithSkipTags(r.SkipTags...),
 		WithVerbosity(r.Verbosity),
 		WithForks(r.Forks),
 		WithDiffMode(r.DiffMode),
+		WithFactCache(r.UseFactCache, r.FactCacheTimeout),
 	}
 	if r.ProjectID != "" {
 		opts = append(opts, WithProject(r.ProjectID))
@@ -853,11 +1092,22 @@ func (r *Run) ExecutionOptions() []SubmitOption {
 	if r.Image != "" {
 		opts = append(opts, WithImage(r.Image, r.PullCredentialID))
 	}
+	if r.TemplateID != "" {
+		// A derived run executes the same template's spec, so it carries the same template
+		// identity: a shard, a retry, a rerun, or a proposed apply of a template run is still that
+		// template.
+		opts = append(opts, WithTemplate(r.TemplateID))
+	}
 	if r.PinnedCommit != "" {
 		// The pin decides what a run is allowed to execute, so a shard or retry of a pinned run
 		// carries it: without this the parent was pinned to the judged commit while its children
 		// executed whatever the branch had become.
 		opts = append(opts, WithPinnedCommit(r.PinnedCommit))
+	}
+	if r.GitRef != "" {
+		// The ref travels with the pin it serves. A rerun of a review plan carrying only the pin
+		// synced the branch, which does not hold the pull request's commit, and failed as moved.
+		opts = append(opts, WithGitRef(r.GitRef))
 	}
 	return opts
 }

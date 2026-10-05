@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -117,6 +118,66 @@ func (c *commitFS) Open(name string) (fs.File, error) {
 	return &commitFile{body: body, info: fileInfo{name: path.Base(name), size: blob.Size,
 		mode: 0o444}}, nil
 }
+
+// ReadDir lists the directory at name, following symbolic links to it, sorted by name. Each entry
+// is described as the commit stores it: a symbolic link is listed as one, and is followed, inside
+// the commit only, when it is opened. A submodule is left out, since its files are another
+// repository's and this commit does not hold them.
+func (c *commitFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	entry, err := c.resolve("readdir", name)
+	if err != nil {
+		return nil, err
+	}
+	if !entry.dir {
+		return nil, &fs.PathError{Op: "readdir", Path: name, Err: fs.ErrInvalid}
+	}
+	tree, err := c.repo.TreeObject(entry.hash)
+	if err != nil {
+		return nil, &fs.PathError{Op: "readdir", Path: name, Err: err}
+	}
+	out := make([]fs.DirEntry, 0, len(tree.Entries))
+	for _, e := range tree.Entries {
+		var mode fs.FileMode
+		switch e.Mode {
+		case filemode.Dir:
+			mode = fs.ModeDir | 0o555
+		case filemode.Symlink:
+			mode = fs.ModeSymlink | 0o777
+		case filemode.Regular, filemode.Executable, filemode.Deprecated:
+			mode = 0o444
+		default:
+			continue
+		}
+		out = append(out, commitDirEntry{fsys: c, path: path.Join(name, e.Name), name: e.Name,
+			mode: mode})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name() < out[j].Name() })
+	return out, nil
+}
+
+// commitDirEntry is one entry of a directory listed from a commit.
+type commitDirEntry struct {
+	// fsys is the commit the entry belongs to, which Info reads.
+	fsys *commitFS
+	// path is the entry's full path in the commit.
+	path string
+	// name is the entry's base name.
+	name string
+	// mode is the entry's type as the commit stores it, with read permissions.
+	mode fs.FileMode
+}
+
+// Name returns the entry's base name.
+func (e commitDirEntry) Name() string { return e.name }
+
+// IsDir reports whether the entry is a directory.
+func (e commitDirEntry) IsDir() bool { return e.mode.IsDir() }
+
+// Type returns the entry's type bits.
+func (e commitDirEntry) Type() fs.FileMode { return e.mode.Type() }
+
+// Info describes the entry, following a symbolic link to what it points at.
+func (e commitDirEntry) Info() (fs.FileInfo, error) { return e.fsys.Stat(e.path) }
 
 // Stat describes the file or directory at name, following symbolic links.
 func (c *commitFS) Stat(name string) (fs.FileInfo, error) {
@@ -253,6 +314,12 @@ func (o overlayFS) Open(name string) (fs.File, error) {
 func (o overlayFS) Stat(name string) (fs.FileInfo, error) {
 	fsys, rel := o.route(name)
 	return fs.Stat(fsys, rel)
+}
+
+// ReadDir lists name from whichever filesystem serves it.
+func (o overlayFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	fsys, rel := o.route(name)
+	return fs.ReadDir(fsys, rel)
 }
 
 // commitFile is an open file from a commit.

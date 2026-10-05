@@ -1,0 +1,24 @@
+# String sections, empty groups, unknown keys, a non-mapping group, and hosts under all.
+all:
+  hosts:
+    loose1:
+    loose2: {}
+  vars:
+    from_all: 1
+  children:
+    strings:
+      hosts: s1
+      vars: novalue
+      children: kid
+    weird:
+      hosts:
+        x1:
+      unexpected: ignored
+      list_key: [1, 2]
+    kid:
+      hosts:
+        k1:
+          port_set_here: 1
+ignored_group: just a string
+also_ignored: [a, b]
+nullgroup:

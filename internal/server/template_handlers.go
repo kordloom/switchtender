@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"fmt"
 	"maps"
 	"net/http"
 	"slices"
@@ -85,6 +86,93 @@ type createTemplateRequest struct {
 	// an update rather than un-owning the record, and leaves a create unowned. A present empty
 	// string is the explicit "move this out of its organization".
 	OrgID *string `json:"org_id,omitempty"`
+	// UseFactCache keeps the facts each launch gathers per stored inventory host and serves them to
+	// the next launch. A pointer so an update that omits it leaves the setting as it was.
+	UseFactCache *bool `json:"use_fact_cache,omitempty"`
+	// FactCacheTimeout is how many seconds cached facts stay fresh enough to serve, zero for no
+	// limit. A pointer for the same reason.
+	FactCacheTimeout *int `json:"fact_cache_timeout,omitempty"`
+	// AllowCallbacks lets a host in the stored inventory launch the template against itself with
+	// the template's callback key. A pointer for the same reason, and the reason matters more here:
+	// turning callbacks off revokes the key, so an edit that merely forgot the field must not.
+	AllowCallbacks *bool `json:"allow_callbacks,omitempty"`
+	// CallbackLimit is intersect, the default, to keep a callback inside the template's limit, or
+	// replace to launch for any matched host as AWX does. A pointer for the same reason.
+	CallbackLimit *string `json:"callback_limit,omitempty"`
+	// AWXCallback answers callbacks on the AWX-compatible address of the AWX job template an
+	// import bound to this template. A pointer for the same reason.
+	AWXCallback *bool `json:"awx_callback,omitempty"`
+}
+
+// cacheSettings are a template's fact cache and provisioning callback settings as a request
+// resolves them.
+type cacheSettings struct {
+	// useFactCache turns the fact cache on.
+	useFactCache bool
+	// factCacheTimeout is the cache's freshness bound in seconds.
+	factCacheTimeout int
+	// allowCallbacks turns provisioning callbacks on.
+	allowCallbacks bool
+	// callbackLimit is what a callback does with the template's limit.
+	callbackLimit string
+	// awxCallback answers callbacks on the AWX-compatible address too.
+	awxCallback bool
+}
+
+// resolveCacheSettings returns the settings a request asks for, taking each one it omits from the
+// stored template, or leaving it off on a create where there is none.
+func resolveCacheSettings(req createTemplateRequest, existing *template.Template) cacheSettings {
+	var out cacheSettings
+	if existing != nil {
+		out = cacheSettings{useFactCache: existing.UseFactCache,
+			factCacheTimeout: existing.FactCacheTimeout, allowCallbacks: existing.AllowCallbacks,
+			callbackLimit: existing.CallbackLimit, awxCallback: existing.AWXCallback}
+	}
+	if req.UseFactCache != nil {
+		out.useFactCache = *req.UseFactCache
+	}
+	if req.FactCacheTimeout != nil {
+		out.factCacheTimeout = *req.FactCacheTimeout
+	}
+	if req.AllowCallbacks != nil {
+		out.allowCallbacks = *req.AllowCallbacks
+	}
+	if req.CallbackLimit != nil {
+		out.callbackLimit = *req.CallbackLimit
+	}
+	if req.AWXCallback != nil {
+		out.awxCallback = *req.AWXCallback
+	}
+	return out
+}
+
+// cacheSettingsError returns why the fact cache or callback settings cannot apply to the template a
+// request describes, or empty when they can. Both work per host of a stored inventory, so both need
+// one, and both are Ansible job features, so neither applies to another tool or to a workflow.
+func cacheSettingsError(req createTemplateRequest, cs cacheSettings) string {
+	if cs.factCacheTimeout < 0 {
+		return "fact_cache_timeout cannot be negative; zero serves cached facts however old they are"
+	}
+	if !template.ValidCallbackLimit(cs.callbackLimit) {
+		return "callback_limit must be intersect, to keep a callback inside the template's limit, " +
+			"or replace, to launch for any matched host as AWX does"
+	}
+	for _, f := range []struct {
+		on   bool
+		name string
+	}{{cs.useFactCache, "use_fact_cache"}, {cs.allowCallbacks, "allow_callbacks"}} {
+		switch {
+		case !f.on:
+		case len(req.Steps) > 0:
+			return f.name + " applies to a single Ansible job, and this template is a workflow; " +
+				"set it on the template a step runs"
+		case run.NormalizeTool(req.Tool) != run.ToolAnsible:
+			return f.name + " is an Ansible feature, and this template runs " + run.NormalizeTool(req.Tool)
+		case req.InventoryID == "":
+			return f.name + " needs inventory_id: it works per host of a stored inventory"
+		}
+	}
+	return ""
 }
 
 // listTemplatesResponse wraps the template list.
@@ -150,8 +238,18 @@ func workflowTemplateError(req createTemplateRequest) string {
 	return ""
 }
 
+// sealFunc returns the function that seals a secret survey default with the credential key, or nil
+// when no key is configured, so a secret default is refused rather than stored as text.
+func sealFunc(sealer *credential.Sealer) func(string) (string, error) {
+	if sealer == nil || !sealer.Enabled() {
+		return nil
+	}
+	return sealer.Seal
+}
+
 // createTemplateHandler stores a new template.
-func createTemplateHandler(store template.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+func createTemplateHandler(store template.Store, sealer *credential.Sealer, authz *authorizer,
+	log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "templates not enabled")
@@ -180,11 +278,24 @@ func createTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 			respondError(w, log, http.StatusBadRequest, msg)
 			return
 		}
+		// A secret field's default is sealed before anything else reads the survey, so it is never
+		// held as text past this point.
+		survey, serr := template.SealDefaults(req.Survey, nil, sealFunc(sealer))
+		if serr != nil {
+			respondError(w, log, http.StatusBadRequest, serr.Error())
+			return
+		}
+		req.Survey = survey
 		// Check the survey's own definitions here rather than at launch. A malformed pattern
 		// compiles nowhere until somebody launches, so saving one produced a template that failed
 		// every single launch instead of being refused at the point it was written.
 		if err := template.ValidateSurvey(req.Survey); err != nil {
 			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		}
+		cs := resolveCacheSettings(req, nil)
+		if msg := cacheSettingsError(req, cs); msg != "" {
+			respondError(w, log, http.StatusBadRequest, msg)
 			return
 		}
 		// A template that targets a queue launches runs only a worker serving it can claim, and every
@@ -204,9 +315,17 @@ func createTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 			ConfirmOnLaunch: req.ConfirmOnLaunch,
 			Notifications:   req.Notifications,
 			Queue:           req.Queue, Image: req.Image, PullCredentialID: req.PullCredentialID,
-			Timeout:   req.Timeout,
-			OrgID:     orgForCreate(req.OrgID),
-			CreatedAt: time.Now(),
+			Timeout:      req.Timeout,
+			OrgID:        orgForCreate(req.OrgID),
+			CreatedAt:    time.Now(),
+			UseFactCache: cs.useFactCache, FactCacheTimeout: cs.factCacheTimeout,
+			AllowCallbacks: cs.allowCallbacks, CallbackLimit: cs.callbackLimit,
+		}
+		// A new template has no AWX job template id: only an import binds one, and an id is never
+		// handed to a template created afterward.
+		if cs.awxCallback {
+			respondError(w, log, http.StatusBadRequest, awxCallbackUnbound)
+			return
 		}
 		if err := store.Save(r.Context(), t); err != nil {
 			log.Error("server: save template: " + err.Error())
@@ -218,7 +337,8 @@ func createTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 }
 
 // updateTemplateHandler changes an existing template's fields, keeping its id and creation time.
-func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+func updateTemplateHandler(store template.Store, sealer *credential.Sealer, authz *authorizer,
+	log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "templates not enabled")
@@ -245,13 +365,6 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 
 		if msg := templateToolError(req); msg != "" {
 			respondError(w, log, http.StatusBadRequest, msg)
-			return
-		}
-		// Check the survey's own definitions here rather than at launch. A malformed pattern
-		// compiles nowhere until somebody launches, so saving one produced a template that failed
-		// every single launch instead of being refused at the point it was written.
-		if err := template.ValidateSurvey(req.Survey); err != nil {
-			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
 		}
 		id := r.PathValue("id")
@@ -319,6 +432,30 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 				return
 			}
 		}
+		// A secret field's default reads back masked, so an edit that leaves it alone sends the mask
+		// and keeps the sealed default stored for that field. A new default is sealed here.
+		var storedSurvey []template.SurveyField
+		if existing != nil {
+			storedSurvey = existing.Survey
+		}
+		survey, serr := template.SealDefaults(req.Survey, storedSurvey, sealFunc(sealer))
+		if serr != nil {
+			respondError(w, log, http.StatusBadRequest, serr.Error())
+			return
+		}
+		req.Survey = survey
+		// Check the survey's own definitions here rather than at launch. A malformed pattern
+		// compiles nowhere until somebody launches, so saving one produced a template that failed
+		// every single launch instead of being refused at the point it was written.
+		if err := template.ValidateSurvey(req.Survey); err != nil {
+			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		}
+		cs := resolveCacheSettings(req, existing)
+		if msg := cacheSettingsError(req, cs); msg != "" {
+			respondError(w, log, http.StatusBadRequest, msg)
+			return
+		}
 		// Same gate on update, or the queue a create refuses can be added afterward.
 		if qerr := allowQueue(req.Queue); qerr != nil {
 			respondError(w, log, http.StatusForbidden, qerr.Error())
@@ -335,8 +472,16 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 			ConfirmOnLaunch: req.ConfirmOnLaunch,
 			Notifications:   notifications,
 			Queue:           req.Queue, Image: req.Image, PullCredentialID: req.PullCredentialID,
-			Timeout: req.Timeout,
-			OrgID:   orgID,
+			Timeout:      req.Timeout,
+			OrgID:        orgID,
+			UseFactCache: cs.useFactCache, FactCacheTimeout: cs.factCacheTimeout,
+			AllowCallbacks: cs.allowCallbacks, CallbackLimit: cs.callbackLimit,
+			AWXCallback: cs.awxCallback,
+		}
+		if msg, status := awxCallbackRefusal(r.Context(), store, id, existing, cs.awxCallback,
+			log); msg != "" {
+			respondError(w, log, status, msg)
+			return
 		}
 		err := store.Update(r.Context(), t)
 		if errors.Is(err, template.ErrNotFound) {
@@ -348,12 +493,23 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 			respondError(w, log, http.StatusInternalServerError, "could not update template")
 			return
 		}
+		// Turning callbacks off revokes the key. Left in place it would quietly work again the
+		// moment somebody turned callbacks back on, for every host that ever held it.
+		if existing != nil && existing.AllowCallbacks && !cs.allowCallbacks {
+			if err := store.SetHostConfigKey(r.Context(), id, ""); err != nil {
+				log.Error("server: revoke callback key: " + err.Error())
+				respondError(w, log, http.StatusInternalServerError,
+					"callbacks were turned off, and the old callback key could not be revoked")
+				return
+			}
+		}
 		updated, err := store.Get(r.Context(), id)
 		if err != nil {
 			log.Error("server: read updated template: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not read template")
 			return
 		}
+		withAWXBindings(r.Context(), store, []*template.Template{updated}, log)
 		respondTemplate(w, r, log, http.StatusOK, updated)
 	}
 }
@@ -380,7 +536,8 @@ func listTemplatesHandler(store template.Store, authz *authorizer, log *zap.Logg
 			respondError(w, log, http.StatusInternalServerError, "could not list templates")
 			return
 		}
-		capped, total := cappedList(scrubbedTemplates(r.Context(), maskTemplates(visible)))
+		served := withAWXBindings(r.Context(), store, maskTemplates(visible), log)
+		capped, total := cappedList(scrubbedTemplates(r.Context(), served))
 		respondJSON(w, log, http.StatusOK,
 			listTemplatesResponse{Templates: capped, Count: len(capped), Total: total}, wantsPretty(r))
 	}
@@ -405,9 +562,12 @@ func deleteTemplateHandler(store template.Store, refs *refChecker, log *zap.Logg
 				return
 			}
 		}
-		err := store.Delete(r.Context(), r.PathValue("id"))
+		err := deleteAttachableObject(r.Context(), store, r.PathValue("id"))
 		if errors.Is(err, template.ErrNotFound) {
 			respondError(w, log, http.StatusNotFound, "template not found")
+			return
+		}
+		if respondCleanupChanged(w, log, err) {
 			return
 		}
 		if err != nil {
@@ -438,6 +598,31 @@ type launchTemplateRequest struct {
 	DryRun *bool `json:"dry_run,omitempty"`
 	// Labels are launch-time key values attached to the created run.
 	Labels map[string]string `json:"labels,omitempty"`
+}
+
+// sealSecretAnswers seals each secret survey answer a launch supplied and adds the sealed defaults
+// that stood in for unanswered fields, returning the sealed values keyed by variable name. The
+// plain answers are dropped as soon as they are sealed. A launch with a secret answer and no key to
+// seal it is refused, because the only other place the answer could go is the run in plain text.
+func sealSecretAnswers(secrets template.SecretAnswers, sealer *credential.Sealer) (map[string]string, error) {
+	if secrets.Empty() {
+		return nil, nil
+	}
+	if len(secrets.Plain) > 0 && (sealer == nil || !sealer.Enabled()) {
+		return nil, fmt.Errorf("this template asks a secret survey question, and its answer is "+
+			"sealed with the credential key before it is stored: %w", credential.ErrNoKey)
+	}
+	out := make(map[string]string, len(secrets.Plain)+len(secrets.Sealed))
+	maps.Copy(out, secrets.Sealed)
+	for name, plain := range secrets.Plain {
+		sealed, err := sealer.Seal(plain)
+		if err != nil {
+			return nil, fmt.Errorf("seal the answer to %q: %w", name, err)
+		}
+		out[name] = sealed
+		delete(secrets.Plain, name)
+	}
+	return out, nil
 }
 
 // mergeCredentialIDs returns base followed by any extra ids not already present, dropping blanks, so
@@ -490,7 +675,8 @@ func agentLaunchRefusal(r *http.Request, t *template.Template, req launchTemplat
 }
 
 // launchTemplateHandler submits a run from a saved template in one action.
-func launchTemplateHandler(store template.Store, submitter Submitter, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+func launchTemplateHandler(store template.Store, submitter Submitter, sealer *credential.Sealer, authz *authorizer,
+	log *zap.Logger) http.HandlerFunc {
 	if submitter == nil {
 		panic("server: launchTemplateHandler: Submitter required")
 	}
@@ -571,6 +757,8 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 
 		vars := map[string]any{}
 		maps.Copy(vars, t.ExtraVars)
+		// sealedVars holds the template's secret survey answers, sealed before they go anywhere.
+		var sealedVars map[string]string
 		// Answers to a template that asks nothing are refused rather than dropped.
 		//
 		// The branch below only runs for a template carrying a survey, so answers sent to one
@@ -599,12 +787,22 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 					return
 				}
 			}
-			resolved, err := template.ResolveSurvey(t.Survey, launchReq.Answers)
+			resolved, secrets, err := template.ResolveSurveyAnswers(t.Survey, launchReq.Answers)
 			if err != nil {
 				respondError(w, log, http.StatusBadRequest, err.Error())
 				return
 			}
 			maps.Copy(vars, resolved)
+			sealedVars, err = sealSecretAnswers(secrets, sealer)
+			if err != nil {
+				respondError(w, log, http.StatusBadRequest, err.Error())
+				return
+			}
+			// A secret answer is the only value its variable carries. A template extra var of the
+			// same name would otherwise sit on the run in plain text beside the sealed answer.
+			for name := range sealedVars {
+				delete(vars, name)
+			}
 		}
 		maps.Copy(vars, launchReq.ExtraVars)
 		dryRun := t.DryRun
@@ -617,7 +815,8 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 		// schedule, and a webhook from applying different subsets of the same preset.
 		opts := append(t.LaunchOptions(),
 			run.WithCredentialIDs(credIDs),
-			run.WithExtraVars(vars),
+			run.WithExactExtraVars(vars),
+			run.WithSealedVars(sealedVars),
 			run.WithDryRun(dryRun),
 			run.WithSource("template", t.ID), run.WithActor(actorName(r)),
 			run.WithActorAccount(actorAccount(r)),
@@ -643,8 +842,15 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 			created, err = submitter.Submit(r.Context(), t.Playbook, t.Inventory, opts...)
 		}
 		switch {
+		case errors.Is(err, inventory.ErrNoHosts):
+			respondNoHosts(w, log, inventoryID, err)
+			return
 		case errors.Is(err, credential.ErrNotFound), errors.Is(err, credential.ErrNoKey),
 			errors.Is(err, project.ErrNotFound), errors.Is(err, inventory.ErrNotFound),
+			errors.Is(err, inventory.ErrResolve), errors.Is(err, dispatch.ErrInventorySnapshot),
+			errors.Is(err, inventory.ErrNeedsAnsible), errors.Is(err, inventory.ErrInvalidInventory),
+			errors.Is(err, inventory.ErrComposition), errors.Is(err, inventory.ErrHostFilter),
+			errors.Is(err, inventory.ErrSourceVars),
 			errors.Is(err, dispatch.ErrNoPlaybook), errors.Is(err, dispatch.ErrNoCommand),
 			errors.Is(err, dispatch.ErrUnknownTool), errors.Is(err, dispatch.ErrStepInput),
 			errors.Is(err, dispatch.ErrNoSteps), errors.Is(err, dispatch.ErrTooManySteps),

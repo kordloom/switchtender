@@ -1,10 +1,14 @@
 package pgstore
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,7 +24,7 @@ import (
 // first sign is an upgraded binary reading a column that was never added.
 //
 // So every condition the check asks about is broken here in turn, and Open has to notice and repair
-// each one. A check stuck on yes fails all four.
+// each one. A check stuck on yes fails every one.
 //
 // It runs against a database of its own, created and dropped here, because it damages the schema and
 // the rest of the suite shares one.
@@ -75,6 +79,14 @@ func TestOpenStillRepairsWhatItSkips(t *testing.T) {
 			return has(raw, `SELECT EXISTS (SELECT 1 FROM pg_indexes
 				WHERE schemaname = current_schema() AND indexname = $1)`, indexes.Created[0])
 		},
+	}, {
+		What:  "the trigger that owes a finished run's outcome to the chain",
+		SQL:   "DROP TRIGGER runs_outcome_owed ON runs",
+		Check: func(raw *sql.DB) (bool, error) { return hasRunTrigger(raw, "runs_outcome_owed") },
+	}, {
+		What:  "the trigger that owes a finished run's end to its notification targets",
+		SQL:   "DROP TRIGGER runs_owe_end ON runs",
+		Check: func(raw *sql.DB) (bool, error) { return hasRunTrigger(raw, "runs_owe_end") },
 	}}
 
 	for _, d := range damage {
@@ -167,6 +179,11 @@ func anAddableColumn(t *testing.T) (string, string) {
 // DATABASE works from any database, and swaps the name with url.Parse, so a DSN naming any database
 // works. Deriving an admin DSN by replacing "/switchtender?" skipped silently whenever the database
 // had another name, including under the ratchet that exists to refuse exactly that.
+//
+// The name carries random bytes as well as the time. Parallel callers named by the clock alone
+// collided, and the loser skipped, so a test that proved nothing reported as one that could not run.
+// A database that cannot be created fails the test for the same reason: a caller reaches here only
+// with a DSN set, so the database it asked for is the test, not an optional extra.
 func freshDatabase(t *testing.T, dsn string) string {
 	t.Helper()
 	u, err := url.Parse(dsn)
@@ -178,9 +195,9 @@ func freshDatabase(t *testing.T, dsn string) string {
 		t.Fatalf("connect to postgres: %v", err)
 	}
 	defer func() { _ = conn.Close() }()
-	name := fmt.Sprintf("st_skipcheck_%d", time.Now().UnixNano())
+	name := freshDatabaseName(t)
 	if _, err := conn.Exec("CREATE DATABASE " + name); err != nil {
-		skipOrFail(t, "cannot create a database of this test's own: %v", err)
+		t.Fatalf("cannot create a database of this test's own, %s: %v", name, err)
 	}
 	t.Cleanup(func() {
 		c, cerr := sql.Open("pgx", dsn)
@@ -192,6 +209,17 @@ func freshDatabase(t *testing.T, dsn string) string {
 	})
 	u.Path = "/" + name
 	return u.String()
+}
+
+// freshDatabaseName returns a database name no other caller can be handed: the time and eight random
+// bytes, in the lowercase letters, digits, and underscores an unquoted identifier allows.
+func freshDatabaseName(t *testing.T) string {
+	t.Helper()
+	var suffix [8]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		t.Fatalf("read random bytes for a database name: %v", err)
+	}
+	return fmt.Sprintf("st_fresh_%d_%s", time.Now().UnixNano(), hex.EncodeToString(suffix[:]))
 }
 
 // skipOrFail skips the test, unless SWITCHTENDER_REQUIRE_FULL_SUITE demands the full suite, in
@@ -224,4 +252,40 @@ func has(raw *sql.DB, q string, args ...any) (bool, error) {
 		return false, err
 	}
 	return out, nil
+}
+
+// hasRunTrigger reports whether the runs table carries the trigger called name.
+func hasRunTrigger(raw *sql.DB, name string) (bool, error) {
+	return has(raw, `SELECT EXISTS (SELECT 1 FROM pg_trigger
+		WHERE tgname = $1 AND tgrelid = to_regclass('runs'))`, name)
+}
+
+// TestFreshDatabaseNamesNeverCollide pins the helper's names: many taken at once, as parallel tests
+// take them, are all different and all valid unquoted identifiers. Named by the clock alone, two
+// callers in the same instant got one name, and the second's CREATE DATABASE failed.
+func TestFreshDatabaseNamesNeverCollide(t *testing.T) {
+	t.Parallel()
+	valid := regexp.MustCompile(`^[a-z_][a-z0-9_]{0,62}$`)
+	const callers = 64
+	names := make(chan string, callers)
+	var wg sync.WaitGroup
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			names <- freshDatabaseName(t)
+		}()
+	}
+	wg.Wait()
+	close(names)
+	seen := map[string]bool{}
+	for name := range names {
+		if seen[name] {
+			t.Errorf("two callers were handed %s", name)
+		}
+		seen[name] = true
+		if !valid.MatchString(name) {
+			t.Errorf("%s is not a valid unquoted Postgres identifier of at most 63 bytes", name)
+		}
+	}
 }

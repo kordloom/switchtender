@@ -1,0 +1,54 @@
+# YAML 1.1 as PyYAML reads it.
+all:
+  hosts:
+    h1:
+      yes_word: yes
+      no_word: no
+      on_word: on
+      off_word: Off
+      y_letter: y
+      octal: 010
+      not_octal: 08
+      sexagesimal: 1:20
+      time_like: 12:30:45
+      exp_no_dot: 1e3
+      exp_signed: 1.0e+3
+      exp_unsigned: 1.0e3
+      hex: 0x1F
+      hex_upper_x: 0X1F
+      binary: 0b101
+      underscores: 1_000
+      tilde: ~
+      null_word: Null
+      empty:
+      dot_five: .5
+      neg_dot_five: -.5
+      plus: +5
+      quoted_int: "5"
+      single_quoted: 'yes'
+      date: 2024-01-15
+      stamp: 2001-12-14t21:59:43.10-05:00
+      stamp_z: 2001-12-14 21:59:43Z
+      stamp_frac: 2001-12-14T21:59:43.123456789Z
+      float_text: 3.14
+      neg_float: -2.5
+      ip: 10.0.0.1
+      version: 1.2.3
+      literal: |
+        line one
+        line two
+      folded: >
+        folded
+        text
+      multiline_plain: first
+        second
+      list: [1, two, 3.0, yes]
+      nested:
+        a: 1
+        b: [x, {c: d}]
+      int_keys:
+        80: http
+        443: https
+      tagged_str: !!str 123
+      tagged_int: !!int "42"
+      tagged_float: !!float "1"

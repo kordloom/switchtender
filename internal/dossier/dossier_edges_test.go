@@ -822,6 +822,79 @@ func TestRunMetaRecordsTheControlsAChangeReviewAsksAbout(t *testing.T) {
 	}
 }
 
+// TestRunMetaSaysWhatADryRunForced pins the evidence for a held dry run. A dry run the gate did not
+// find change free is held for that reason, and a dossier certifying that no changes were made
+// would contradict the hold it records. It names each finding, what read it, the files read, and
+// why it was held.
+func TestRunMetaSaysWhatADryRunForced(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Scan         run.DryRunScan
+		WantFindings []string
+		WantScan     string
+	}{{ // Test 0: An Ansible dry run whose playbook forces real work.
+		Scan: run.DryRunScan{Tool: run.ToolAnsible, Scanner: "ansible-check-mode", Version: 1,
+			Inputs: []string{"roles/db/tasks/main.yml", "site.yml"},
+			Findings: []string{
+				`site.yml: task "Restart web" sets check_mode to false`,
+				`roles/db/tasks/main.yml: block "Migrate" sets check_mode to "no"`,
+			}}.Classified(),
+		WantFindings: []string{
+			`site.yml: task "Restart web" sets check_mode to false`,
+			`roles/db/tasks/main.yml: block "Migrate" sets check_mode to "no"`,
+		},
+		WantScan: "ansible-check-mode version 1, not_change_free, 2 files read",
+	}, { // Test 1: A Terraform plan whose configuration could not be read in full, since the
+		// module download the gate ran first failed.
+		Scan: run.DryRunScan{Tool: run.ToolTerraform, Scanner: "terraform-external", Version: 1,
+			Source: "read at commit 0123456789ab, the project's last synced commit",
+			Inputs: []string{"infra/main.tf"},
+			Unread: []string{`module.vpc from "acme/vpc/aws" (not downloaded, since the gate's ` +
+				`terraform get failed with exit status 1)`},
+			Fetch: &run.ModuleFetch{Command: "terraform get", ExitStatus: 1,
+				Error: "the gate's terraform get failed with exit status 1"}}.Classified(),
+		WantFindings: []string{`could not read module.vpc from "acme/vpc/aws" (not downloaded, ` +
+			`since the gate's terraform get failed with exit status 1), so it may run a program ` +
+			`during plan`},
+		WantScan: "terraform-external version 1, incomplete, 1 files read, read at commit " +
+			"0123456789ab, the project's last synced commit, the gate's terraform get did not " +
+			"download its modules (exit status 1)",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			rows := runMeta(&run.Run{ID: "run_forced", Playbook: "site.yml", DryRun: true,
+				DryRunScans: []run.DryRunScan{test.Scan}, HeldByPolicy: "prod",
+				HoldNote: "This dry run was not shown to change nothing.", CreatedAt: evidenceTime})
+			var gotFindings []string
+			got := map[string]string{}
+			for _, row := range rows {
+				if row.K == "Not change free" {
+					gotFindings = append(gotFindings, row.V)
+					continue
+				}
+				got[row.K] = row.V
+			}
+			if diff := cmp.Diff(test.WantFindings, gotFindings); diff != "" {
+				t.Errorf("finding rows mismatch (-want +got):\n%s", diff)
+			}
+			if dry := got["Dry run"]; dry == "yes, no changes were made" ||
+				!strings.Contains(dry, "not find it change free") {
+				t.Errorf("Dry run = %q, want it to say the gate did not find it change free", dry)
+			}
+			if got["Dry-run scan"] != test.WantScan {
+				t.Errorf("Dry-run scan = %q, want %q", got["Dry-run scan"], test.WantScan)
+			}
+			if got["Scan read"] != strings.Join(test.Scan.Inputs, ", ") {
+				t.Errorf("Scan read = %q, want the files the scan read", got["Scan read"])
+			}
+			if got["Why it was held"] == "" {
+				t.Error("the dossier leaves out why the dry run was held")
+			}
+		})
+	}
+}
+
 // TestRunMetaLeavesOutWhatWasNeverRecorded pins that an unset attribute is absent rather than
 // rendered blank. A row reading "Pinned to commit:" with nothing after it says a control was
 // considered and left empty, which is a different claim from the control not applying.

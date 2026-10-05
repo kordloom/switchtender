@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,6 +33,43 @@ func filePolicyID(name string) string {
 type fileDoc struct {
 	// Policies are the approval policies this file declares.
 	Policies []filePolicy `yaml:"policies" json:"policies"`
+	// Rego are the Rego policies this file loads, each compiled from modules beside it.
+	Rego []fileRego `yaml:"rego,omitempty" json:"rego,omitempty"`
+}
+
+// fileRego is one Rego policy as an operator declares it: a name, the modules that make it up, and
+// optionally the package that decides, the syntax the modules are written in, what a warning does,
+// and how long one evaluation may run.
+//
+// The modules are read from paths relative to the policy file, so the YAML and the Rego it loads
+// live in one repository, change in one reviewed diff, and are deployed together by one merge.
+type fileRego struct {
+	// Name identifies the policy, as a YAML policy's name does.
+	Name string `yaml:"name" json:"name"`
+	// Files are the Rego modules, relative to the policy file's directory.
+	Files []string `yaml:"files" json:"files"`
+	// Package is the package whose rules decide. Omit it to use the first module's package.
+	Package string `yaml:"package,omitempty" json:"package,omitempty"`
+	// Syntax is v1, the default, or v0 for a module written before OPA 1.0.
+	Syntax string `yaml:"syntax,omitempty" json:"syntax,omitempty"`
+	// Warn is what the package's warn rule does: hold, the default, holds the run for approval, and
+	// note records the warning on the run and lets it go ahead.
+	Warn string `yaml:"warn,omitempty" json:"warn,omitempty"`
+	// Timeout bounds one evaluation, written as a duration with a unit such as 750ms or 2s. Omit it
+	// for 500ms. It may be at most 10s.
+	Timeout string `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	// RequireReason asks for the approver's reason on a decision about a run this policy holds:
+	// denials or always. Omit for none.
+	RequireReason string `yaml:"require_reason,omitempty" json:"require_reason,omitempty"`
+}
+
+// fileStamp is what a file looked like when it was last parsed.
+type fileStamp struct {
+	// modTime is the file's modification time.
+	modTime time.Time
+	// size is the file's size, since a modification time alone can repeat within a filesystem's
+	// timestamp granularity.
+	size int64
 }
 
 // filePolicy is one policy as an operator writes it.
@@ -68,6 +107,8 @@ type filePolicy struct {
 	Reversibility string `yaml:"reversibility,omitempty" json:"reversibility,omitempty"`
 	// Effect is what a match does: require_approval, the default, or deny.
 	Effect string `yaml:"effect,omitempty" json:"effect,omitempty"`
+	// RequireReason asks for the approver's reason on a decision: denials or always. Omit for none.
+	RequireReason string `yaml:"require_reason,omitempty" json:"require_reason,omitempty"`
 }
 
 // FileStore serves approval policies from a file on disk rather than from the database.
@@ -93,6 +134,9 @@ type FileStore struct {
 	// size is the file's size when cached was parsed, since a modification time alone can repeat
 	// within a filesystem's timestamp granularity.
 	size int64
+	// regoStamps are the Rego modules the cached parse read, so editing one reloads the set just
+	// as editing the policy file does.
+	regoStamps map[string]fileStamp
 }
 
 // compile-time proof that FileStore is a Store.
@@ -123,7 +167,8 @@ func (s *FileStore) load() ([]*Policy, error) {
 		return nil, fmt.Errorf("policy file: %w", err)
 	}
 	s.mu.RLock()
-	fresh := s.cached != nil && info.ModTime().Equal(s.modTime) && info.Size() == s.size
+	fresh := s.cached != nil && info.ModTime().Equal(s.modTime) && info.Size() == s.size &&
+		stampsCurrent(s.regoStamps)
 	cached := s.cached
 	s.mu.RUnlock()
 	if fresh {
@@ -175,6 +220,7 @@ func (s *FileStore) load() ([]*Policy, error) {
 			MinRisk:                 fp.MinRisk,
 			Reversibility:           fp.Reversibility,
 			Effect:                  fp.Effect,
+			RequireReason:           fp.RequireReason,
 			CreatedAt:               info.ModTime().UTC(),
 		}
 		if err := p.Validate(); err != nil {
@@ -182,13 +228,130 @@ func (s *FileStore) load() ([]*Policy, error) {
 		}
 		parsed = append(parsed, p)
 	}
+	regoPolicies, stamps, err := s.loadRego(doc, info.ModTime().UTC())
+	if err != nil {
+		return nil, err
+	}
+	parsed = append(parsed, regoPolicies...)
 
 	s.mu.Lock()
 	s.cached = parsed
 	s.modTime = info.ModTime()
 	s.size = info.Size()
+	s.regoStamps = stamps
 	s.mu.Unlock()
 	return parsed, nil
+}
+
+// regoModulePath resolves a rego policy's files entry against the policy file's directory and refuses
+// one that escapes it. A files entry is a path relative to the policy file, so an absolute path or one
+// that climbs out with .. would read a module from anywhere on disk, which the policy file's own
+// directory is meant to bound. The check is lexical, which is enough here: the policy file is reviewed
+// deployment configuration, so this stops a stray path, not a planted symbolic link.
+func regoModulePath(dir, rel string) (string, error) {
+	if rel == "" {
+		return "", fmt.Errorf("%w: a module file has no name", ErrRego)
+	}
+	if filepath.IsAbs(rel) || filepath.VolumeName(rel) != "" {
+		return "", fmt.Errorf("%w: module file %q is an absolute path, but a files entry is read "+
+			"relative to the policy file", ErrRego, rel)
+	}
+	full := filepath.Join(dir, rel)
+	within, err := filepath.Rel(dir, full)
+	if err != nil || within == ".." || strings.HasPrefix(within, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("%w: module file %q is outside the policy directory, which it may not "+
+			"leave", ErrRego, rel)
+	}
+	return full, nil
+}
+
+// loadRego compiles the Rego policies the file declares and records what each module looked like,
+// so a later edit to a module is noticed. Any error refuses the whole file, exactly as a malformed
+// YAML rule does: a Rego policy that cannot compile must not degrade to no policy.
+func (s *FileStore) loadRego(doc fileDoc, created time.Time) ([]*Policy, map[string]fileStamp, error) {
+	stamps := map[string]fileStamp{}
+	if len(doc.Rego) == 0 {
+		return nil, stamps, nil
+	}
+	names := make(map[string]bool, len(doc.Policies)+len(doc.Rego))
+	for _, fp := range doc.Policies {
+		names[fp.Name] = true
+	}
+	dir := filepath.Dir(s.path)
+	out := make([]*Policy, 0, len(doc.Rego))
+	for i, fr := range doc.Rego {
+		if fr.Name == "" {
+			return nil, nil, fmt.Errorf("policy file %s: rego policy %d has no name", s.path, i)
+		}
+		// The id is derived from the name, so two rules sharing one would share an id and a
+		// recorded hold could not say which of them it meant.
+		if names[fr.Name] {
+			return nil, nil, fmt.Errorf("policy file %s: rego policy %q shares its name with "+
+				"another policy in the file", s.path, fr.Name)
+		}
+		names[fr.Name] = true
+		if len(fr.Files) == 0 {
+			return nil, nil, fmt.Errorf("policy file %s: rego policy %q names no files",
+				s.path, fr.Name)
+		}
+		modules := make([]RegoModule, 0, len(fr.Files))
+		for _, rel := range fr.Files {
+			full, err := regoModulePath(dir, rel)
+			if err != nil {
+				return nil, nil, fmt.Errorf("policy file %s: rego policy %q: %w", s.path, fr.Name, err)
+			}
+			info, err := os.Stat(full)
+			if err != nil {
+				return nil, nil, fmt.Errorf("policy file %s: rego policy %q: %w", s.path, fr.Name, err)
+			}
+			src, err := os.ReadFile(full)
+			if err != nil {
+				return nil, nil, fmt.Errorf("policy file %s: rego policy %q: %w", s.path, fr.Name, err)
+			}
+			stamps[full] = fileStamp{modTime: info.ModTime(), size: info.Size()}
+			modules = append(modules, RegoModule{File: rel, Source: string(src)})
+		}
+		opts := []RegoOption{WithRegoWarn(fr.Warn)}
+		if fr.Timeout != "" {
+			// A bare number is refused rather than read in some unit, since 500 means half a second
+			// to one reader and more than eight minutes to another.
+			limit, err := time.ParseDuration(fr.Timeout)
+			if err != nil {
+				return nil, nil, fmt.Errorf("policy file %s: rego policy %q: timeout %q is not a "+
+					"duration: write it with a unit, such as 500ms or 2s", s.path, fr.Name, fr.Timeout)
+			}
+			opts = append(opts, WithRegoTimeout(limit))
+		}
+		prog, err := CompileRego(fr.Package, fr.Syntax, modules, opts...)
+		if err != nil {
+			return nil, nil, fmt.Errorf("policy file %s: rego policy %q: %w", s.path, fr.Name, err)
+		}
+		p := &Policy{
+			ID:            filePolicyID(fr.Name),
+			Name:          fr.Name,
+			MaxDestroy:    DisabledMaxDestroy,
+			Rego:          prog,
+			RequireReason: fr.RequireReason,
+			CreatedAt:     created,
+		}
+		if err := p.Validate(); err != nil {
+			return nil, nil, fmt.Errorf("policy file %s: rego policy %q: %w", s.path, fr.Name, err)
+		}
+		out = append(out, p)
+	}
+	return out, stamps, nil
+}
+
+// stampsCurrent reports whether every recorded file still looks as it did when it was parsed. A file
+// that can no longer be read is not current, so the reload that follows reports why.
+func stampsCurrent(stamps map[string]fileStamp) bool {
+	for path, was := range stamps {
+		info, err := os.Stat(path)
+		if err != nil || !info.ModTime().Equal(was.modTime) || info.Size() != was.size {
+			return false
+		}
+	}
+	return true
 }
 
 // List returns every policy the file declares, in the order it declares them.
@@ -254,6 +417,10 @@ func (s *FileStore) allowed(set []*Policy) error {
 				if errors.Is(err, license.ErrLapsed) {
 					break
 				}
+				if rego := firstRego(set); rego != nil {
+					return fmt.Errorf("the policy file needs a license it does not have: Rego "+
+						"policy %q is part of the full policy engine: %w", rego.Name, err)
+				}
 				return fmt.Errorf("the policy file needs a license it does not have: %w", err)
 			}
 			break
@@ -261,6 +428,17 @@ func (s *FileStore) allowed(set []*Policy) error {
 	}
 	if err := license.AllowPolicies(len(set)); err != nil && !errors.Is(err, license.ErrLapsed) {
 		return fmt.Errorf("the policy file needs a license it does not have: %w", err)
+	}
+	return nil
+}
+
+// firstRego returns the first Rego policy in set, or nil, so a refusal names the Rego policy rather
+// than leaving an operator to guess which line of the file the license does not cover.
+func firstRego(set []*Policy) *Policy {
+	for _, p := range set {
+		if p.Rego != nil {
+			return p
+		}
 	}
 	return nil
 }

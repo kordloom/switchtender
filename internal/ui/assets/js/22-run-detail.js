@@ -22,34 +22,32 @@ function wireActions(runId) {
 			retry.disabled = false;
 		}
 	});
+	// Approve and Reject ask for the approver's reason, which the server masks, records as audit
+	// evidence, and commits to the chain, and which the rule that held the run may require.
+	const decide = (btn, approve) => async () => {
+		const requirement = decisionRun ? decisionRun.require_reason : "";
+		btn.disabled = true;
+		try {
+			const done = await decideWithReason("/runs/" + runId + (approve ? "/approve" : "/reject"), {}, {
+				title: approve ? "Approve this run" : "Reject this run",
+				action: approve ? "Approve" : "Reject",
+				required: reasonRequired(requirement, approve),
+				requiredBy: decisionRun && decisionRun.held_by_policy
+					? "the rule that held it (" + decisionRun.held_by_policy + ")" : "",
+			});
+			if (done !== null) {
+				location.reload();
+				return;
+			}
+		} catch (e) {
+			setStatus((approve ? "Approve" : "Reject") + " failed: " + e.message);
+		}
+		btn.disabled = false;
+	};
 	const approve = document.getElementById("approve-run");
-	if (approve) {
-		approve.addEventListener("click", async () => {
-			approve.disabled = true;
-			try {
-				await postAction("/runs/" + runId + "/approve");
-				location.reload();
-			} catch (e) {
-				setStatus("Approve failed: " + e.message);
-				approve.disabled = false;
-			}
-		});
-	}
+	if (approve) approve.addEventListener("click", decide(approve, true));
 	const reject = document.getElementById("reject-run");
-	if (reject) {
-		reject.addEventListener("click", async () => {
-			const reason = window.prompt("Reason for rejecting (optional):");
-			if (reason === null) return;
-			reject.disabled = true;
-			try {
-				await postAction("/runs/" + runId + "/reject", { reason });
-				location.reload();
-			} catch (e) {
-				setStatus("Reject failed: " + e.message);
-				reject.disabled = false;
-			}
-		});
-	}
+	if (reject) reject.addEventListener("click", decide(reject, false));
 	const explainClose = document.getElementById("explain-close");
 	if (explainClose) {
 		explainClose.addEventListener("click", () => {
@@ -94,6 +92,7 @@ function wireActions(runId) {
 // updateActions shows cancel while the run is active and retry on a finished split that did not
 // fully succeed.
 function updateActions(run) {
+	rememberDecisionRun(run);
 	const cancel = document.getElementById("cancel-run");
 	const retry = document.getElementById("retry-run");
 	if (!cancel || !retry) return;
@@ -206,7 +205,91 @@ function renderRiskCallout(run) {
 		why.appendChild(li);
 	}
 	if (why.children.length) host.appendChild(why);
+	const scanned = scanNote(run);
+	if (scanned) host.appendChild(scanned);
+	const facts = factCacheNote(run);
+	if (facts) host.appendChild(facts);
+	const pins = executionPinsNote(run);
+	if (pins) host.appendChild(pins);
 	host.hidden = false;
+}
+
+// scanNote names what a held run may run for real, or returns null when the gate found it change
+// free. A dry run reads as harmless, so an approver shown only the mode would release a change
+// believing it was a preview. The gate's scan records what runs for real, worded for the tool: each
+// play, block, task, role, or include that sets check_mode to something other than true, or each
+// external data source by the address a plan gives it, and anything it could not read. This lists
+// them where the decision is made, with the note on why the rule held the run and how to change
+// that, and says what the scan read so the approver can see the classification's basis.
+function scanNote(run) {
+	const scans = Array.isArray(run.dry_run_scans) ? run.dry_run_scans : [];
+	const held = scans.find((s) => (s.findings && s.findings.length) || (s.unread && s.unread.length));
+	if (!held) return null;
+	const box = document.createElement("div");
+	box.className = "risk-forced";
+	const lead = document.createElement("p");
+	lead.textContent = scanLead(held);
+	box.appendChild(lead);
+	const list = document.createElement("ul");
+	list.className = "risk-reasons";
+	for (const s of scans) {
+		const prefix = s.step ? "step \"" + s.step + "\": " : "";
+		const entries = (s.findings || []).concat((s.unread || []).map((u) => "could not read " + u));
+		for (const entry of entries) {
+			const li = document.createElement("li");
+			li.textContent = prefix + entry;
+			list.appendChild(li);
+		}
+	}
+	box.appendChild(list);
+	if (run.hold_note) {
+		const note = document.createElement("p");
+		note.className = "risk-hold-note";
+		note.textContent = run.hold_note;
+		box.appendChild(note);
+	}
+	const read = document.createElement("p");
+	read.className = "risk-scan-read";
+	read.textContent = scans.map(scanRead).join(" ");
+	box.appendChild(read);
+	return box;
+}
+
+// SCAN_CLASSES words a scan's classification as the approver reads it.
+const SCAN_CLASSES = {
+	change_free: "change free",
+	not_change_free: "not change free",
+	incomplete: "incomplete, since something could not be read",
+};
+
+// scanLead opens the note for the scan that held the run, worded for its tool and for whether it
+// found something or only could not read everything.
+function scanLead(held) {
+	const found = held.findings && held.findings.length;
+	if (held.tool === "terraform" || held.tool === "opentofu") {
+		return found
+			? "This plan is not a preview. Planning it runs these programs:"
+			: "This plan was not shown to be a preview. The gate could not read all of its configuration:";
+	}
+	return found
+		? "This dry run is not a preview. Its playbook runs this work for real even under check mode:"
+		: "This dry run was not shown to be a preview. The gate could not read all of its playbook:";
+}
+
+// scanRead says what one scan read and what it concluded, so the classification can be traced. A
+// plan's scan also says whether the module download the gate ran before reading it completed.
+function scanRead(s) {
+	const inputs = Array.isArray(s.inputs) ? s.inputs.length : 0;
+	let text = (s.step ? "Step \"" + s.step + "\": read by " : "Read by ") + s.scanner + " version " +
+		s.version + ", " + inputs + (inputs === 1 ? " file" : " files");
+	if (s.source) text += ", " + s.source;
+	if (s.fetch) {
+		text += s.fetch.exit_status === 0 && !s.fetch.error
+			? ", modules downloaded first by the gate's " + s.fetch.command + " (exit status 0)"
+			: ", the gate's " + s.fetch.command + " did not download its modules (exit status " +
+				s.fetch.exit_status + ")";
+	}
+	return text + ": " + (SCAN_CLASSES[s.classification] || s.classification) + ".";
 }
 
 // loadPipeline renders a pipeline run as an ordered list of step runs, refreshed live over the
@@ -342,7 +425,9 @@ function renderSteps(steps) {
 		const label = document.createElement("span");
 		label.className = "shard-label";
 		let text = idx + ". " + (s.step_name || "step");
-		const detail = toolLabel(s);
+		// An approval step ran nothing, so it is named for what it is rather than given a playbook
+		// label it does not have.
+		const detail = s.kind === "approval" ? approvalStepLabel(s) : toolLabel(s);
 		if (detail) {
 			text += "  ·  " + detail;
 		}
@@ -354,6 +439,19 @@ function renderSteps(steps) {
 		list.appendChild(row);
 	}
 	panel.hidden = false;
+}
+
+// approvalStepLabel says where a workflow approval step stands: waiting, approved, denied, timed out,
+// or withdrawn with the workflow.
+function approvalStepLabel(s) {
+	switch (s.status) {
+	case "pending_approval": return "approval, waiting for a decision";
+	case "succeeded": return "approval, approved";
+	case "rejected": return "approval, denied";
+	case "failed": return "approval, " + (s.error && s.error.startsWith("timed out") ? "timed out" : "failed");
+	case "canceled": return "approval, withdrawn";
+	}
+	return "approval";
 }
 
 // loadSingle renders a normal run and streams it live while it is active.
@@ -790,6 +888,45 @@ function renderWarningCallout(run) {
 	host.hidden = false;
 }
 
+// renderPolicyNotes lists the warnings a policy recorded on the run instead of holding it. A policy
+// set to note its warnings lets the run go ahead, so this page is where a person reading the run
+// learns what it was warned about. It shows whatever the run's status, held by another rule or not,
+// because the note is part of the record either way.
+function renderPolicyNotes(run) {
+	const host = document.getElementById("run-policy-notes");
+	if (!host) return;
+	host.textContent = "";
+	const notes = run.policy_notes;
+	if (!Array.isArray(notes) || !notes.length) {
+		host.hidden = true;
+		return;
+	}
+	const head = document.createElement("div");
+	head.className = "risk-callout-head";
+	const label = document.createElement("strong");
+	label.textContent = notes.length === 1 ? "Policy note" : "Policy notes";
+	head.appendChild(label);
+	host.appendChild(head);
+	const lead = document.createElement("div");
+	lead.className = "muted";
+	lead.textContent = "A policy recorded this warning without holding the run. It is part of " +
+		"the run's evidence.";
+	if (notes.length > 1) {
+		lead.textContent = "Policies recorded these warnings without holding the run. They are " +
+			"part of the run's evidence.";
+	}
+	host.appendChild(lead);
+	const list = document.createElement("ul");
+	list.className = "risk-reasons";
+	for (const note of notes) {
+		const li = document.createElement("li");
+		li.textContent = note;
+		list.appendChild(li);
+	}
+	host.appendChild(list);
+	host.hidden = false;
+}
+
 // renderFailureCallout says why a run failed, when the server is holding the only copy of the
 // reason.
 //
@@ -830,6 +967,65 @@ function renderFailureCallout(run) {
 		note.textContent = "Nothing executed, so there is no log or event stream for this run.";
 		host.appendChild(note);
 	}
+	host.hidden = false;
+}
+
+// REPORT_PHASES names what a pull request review plan's pull request was last told.
+const REPORT_PHASES = {
+	running: "plan running", held: "waiting for approval", succeeded: "plan succeeded",
+	failed: "plan failed", canceled: "plan canceled",
+};
+
+// reportField renders the pull request a review plan reports to and what it was last told, or
+// null for any other run.
+function reportField(run) {
+	const report = run.pull_request_report;
+	if (!report) return null;
+	const told = report.phase ? "last told: " + (REPORT_PHASES[report.phase] || report.phase)
+		: "nothing reported yet";
+	const f = field("Pull request", "#" + report.pull_request + " \u00b7 " + told);
+	if (report.reported_at) {
+		f.querySelector(".value").dataset.tip = "Reported " + exactTime(report.reported_at);
+	}
+	return f;
+}
+
+// renderReportCallout says when reporting a pull request review plan to its pull request is
+// failing. The server retries a forge that refuses or cannot be reached, and the pull request keeps
+// showing the last report that landed meanwhile, so without this the run looked fine while its
+// pull request showed a stale result.
+function renderReportCallout(run) {
+	const host = document.getElementById("run-report");
+	if (!host) return;
+	host.textContent = "";
+	const report = run.pull_request_report;
+	if (!report || !report.last_error) {
+		host.hidden = true;
+		return;
+	}
+	const head = document.createElement("div");
+	head.className = "risk-callout-head";
+	const label = document.createElement("strong");
+	label.textContent = "Reporting to pull request #" + report.pull_request +
+		(report.done ? " stopped" : " is failing");
+	head.appendChild(label);
+	host.appendChild(head);
+	const why = document.createElement("pre");
+	why.className = "drill-pre";
+	why.textContent = report.last_error;
+	host.appendChild(why);
+	const note = document.createElement("div");
+	note.className = "muted";
+	if (report.done) {
+		note.textContent = "No more attempts will be made. The pull request shows the last " +
+			"report that landed.";
+	} else {
+		const attempts = report.attempts || 0;
+		note.textContent = attempts + (attempts === 1 ? " attempt has" : " attempts have") +
+			" failed. The next is " + (report.retry_at ? relTime(report.retry_at) : "soon") +
+			", and the pull request shows the last report that landed until one does.";
+	}
+	host.appendChild(note);
 	host.hidden = false;
 }
 
@@ -916,12 +1112,43 @@ function renderHeader(run) {
 		el.appendChild(field("Queue", run.queue));
 	}
 	if (run.image) {
-		const image = field("Image", run.image, null, run.image);
+		const image = field("Image", run.image + " (" + imagePinLabel(run) + ")", null, run.image);
+		image.querySelector(".value").dataset.tip = imagePinned(run.image)
+			? "The image was resolved to this digest when the run was submitted, and the run executes " +
+				"by it. An approval binds it."
+			: "The registry did not answer when the run was submitted, so the run is bound to this tag. " +
+				"The outcome records the digest that was pulled.";
 		image.querySelector(".value").appendChild(copyButton(run.image, "Copy the image reference"));
 		el.appendChild(image);
 	}
+	if (run.image_digest) {
+		const pulled = field("Pulled", shortId(run.image_digest), null, run.image_digest);
+		pulled.querySelector(".value").appendChild(copyButton(run.image_digest, "Copy the pulled digest"));
+		el.appendChild(pulled);
+	}
+	if (run.inventory_snapshot) {
+		const snap = field("Inventory snapshot", inventorySnapshotLabel(run));
+		snap.querySelector(".value").dataset.tip = run.inventory_snapshot.dynamic
+			? "A dynamic source resolves at execution. The approval binds its definition, and the " +
+				"outcome records the hosts it resolved to."
+			: "The inventory as it was when the run was submitted. The run executes this snapshot, and " +
+				"an approval binds it.";
+		el.appendChild(snap);
+	}
+	if (run.plan_sha256) {
+		const plan = field("Plan file", shortId("sha256:" + run.plan_sha256), null, run.plan_sha256);
+		plan.querySelector(".value").dataset.tip = "The saved plan this apply carries out. An approval " +
+			"binds it, and the apply runs it rather than planning again.";
+		el.appendChild(plan);
+	}
 	if (run.dry_run) {
-		el.appendChild(field("Mode", "dry run"));
+		el.appendChild(field("Mode", notChangeFree(run) ? "dry run, not change free" : "dry run"));
+	}
+	if (run.use_fact_cache) {
+		const facts = field("Fact cache", factCacheLabel(run));
+		facts.querySelector(".value").dataset.tip = "The play reads facts earlier runs gathered " +
+			"instead of gathering them. An approval binds this setting.";
+		el.appendChild(facts);
 	}
 	if (run.risk) {
 		el.appendChild(field("Risk", null, riskBadge(run.risk)));
@@ -931,7 +1158,9 @@ function renderHeader(run) {
 	}
 	renderRiskCallout(run);
 	renderWarningCallout(run);
+	renderPolicyNotes(run);
 	renderFailureCallout(run);
+	renderReportCallout(run);
 	if (run.actor) {
 		const who = field("Requested by",
 			run.actor + (run.actor_type === "agent" ? " (agent)" : ""), null, run.actor);
@@ -956,6 +1185,10 @@ function renderHeader(run) {
 		const origin = originCellEl(run);
 		origin.className = "";
 		el.appendChild(field("Origin", null, origin));
+	}
+	const reported = reportField(run);
+	if (reported) {
+		el.appendChild(reported);
 	}
 	if (run.rerun_of) {
 		const link = document.createElement("a");

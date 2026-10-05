@@ -128,7 +128,7 @@ func TestNoExecutionPathGoesAroundTheBoundary(t *testing.T) {
 		if err != nil {
 			t.Fatalf("list policies: %v", err)
 		}
-		_, _, err = ProposeApplyFor(ctx, store, rules, plan, 3, false)
+		_, _, err = ProposeApplyFor(ctx, store, rules, plan, 3, false, "sealed-plan-file")
 		if !errors.Is(err, ErrPolicyDenied) {
 			t.Errorf("an apply proposed from a plan failed with %v, want ErrPolicyDenied", err)
 		}

@@ -2,10 +2,14 @@ package run
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // DedupeWindow is how long a repeat of the same one-click action collapses onto the run it already
@@ -24,15 +28,65 @@ const internalKeyPrefix = "st:"
 // ErrReservedKey is returned when a caller supplies an idempotency key in the server's namespace.
 var ErrReservedKey = errors.New("reserved idempotency key")
 
+// clientDigestPrefix opens the stored form of a caller's idempotency key that is kept as a digest:
+// every key scoped to an organization, and a key that is not text. It sits in the reserved
+// namespace, so no caller can send it, and no derived action is named client.
+const clientDigestPrefix = internalKeyPrefix + "client:"
+
+// digestMark opens a part of a derived key that is kept as a digest of the id it stands for.
+const digestMark = "#"
+
 // DedupeKey returns the idempotency key that action on the run named by id saves under during the
 // window containing at. Two requests inside one window derive the same key, so the store's unique
 // index on it rejects the second run rather than letting a double click fire twice.
+//
+// The key is text every backend stores. An id that is not, such as a tuple joined with a NUL byte
+// or a name that is not valid UTF-8, stands in the key as its digest. PostgreSQL refuses both in a
+// text value with SQLSTATE 22021, and a provisioning callback's id joins its template and its host
+// with a NUL byte, so before this every callback failed its replay lookup on PostgreSQL.
 func DedupeKey(action, id string, at time.Time) string {
-	return fmt.Sprintf("%s%s:%s:%d", internalKeyPrefix, action, id, at.UnixNano()/int64(DedupeWindow))
+	return dedupeKeyIn(action, id, at.UnixNano()/int64(DedupeWindow))
 }
 
-// orgKeySeparator joins an organization to a caller's idempotency key. It is a byte a key cannot
-// contain, so one organization cannot spell another's stored key.
+// dedupeKeyIn returns the key action on id saves under in the window numbered bucket.
+func dedupeKeyIn(action, id string, bucket int64) string {
+	return fmt.Sprintf("%s%s:%s:%d", internalKeyPrefix, action, keyPart(id), bucket)
+}
+
+// keyPart returns s as it stands inside a derived key: s itself when every backend stores it as
+// text, and otherwise digestMark followed by its digest. A part that already begins with digestMark
+// is digested too, so the two forms can never spell each other.
+func keyPart(s string) string {
+	if storableText(s) && !strings.HasPrefix(s, digestMark) {
+		return s
+	}
+	return digestMark + digestHex(s)
+}
+
+// storableText reports whether every backend stores s as text unchanged: it is valid UTF-8 and holds
+// no NUL byte, the two things PostgreSQL refuses in a text value with SQLSTATE 22021.
+func storableText(s string) bool {
+	return utf8.ValidString(s) && !strings.ContainsRune(s, 0)
+}
+
+// digestHex returns the hex SHA-256 of s.
+func digestHex(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
+// ScheduleKey returns the idempotency key the run a schedule fires for one occurrence saves under.
+// Every fire of the same occurrence derives the same key, so a fire that takes up an occurrence an
+// interrupted fire handed back finds the run that one made, if it made one, instead of starting a
+// second. The key sits in the server's reserved namespace, so no caller can plant a run under it
+// and make the schedule's fire resolve to that run.
+func ScheduleKey(scheduleID string, occurrence time.Time) string {
+	return fmt.Sprintf("%sschedule:%s:%d", internalKeyPrefix, scheduleID, occurrence.UnixNano())
+}
+
+// orgKeySeparator joins an organization to a caller's idempotency key in the text a scoped key's
+// digest is taken over. It is a byte a key cannot contain, so one organization cannot spell
+// another's key.
 const orgKeySeparator = "\x00"
 
 // ClientKey returns the key a caller-supplied Idempotency-Key header is stored under, or an error when
@@ -44,8 +98,15 @@ const orgKeySeparator = "\x00"
 // returned it, handing over that run's id, command, actor, and status, while the change they asked for
 // never ran. Neither side saw an error, which is what made it a leak rather than a bug report.
 //
-// An install with no organizations stores the key exactly as sent, so a single-tenant deployment's keys
-// keep the shape they always had.
+// A scoped key is stored as the digest of the organization and the key joined by a NUL byte, under
+// the reserved namespace. The joined text itself used to be stored, and PostgreSQL refuses a NUL in
+// a text value, so on the backend high availability runs on every retried submission from an
+// organization failed instead of finding its run. The digest is text on every backend, has one
+// length whatever was sent, and cannot be sent by a caller. A key that is not valid UTF-8, which a
+// header can carry, is stored as its digest for the same reason.
+//
+// An install with no organizations stores any other key exactly as sent, so a single-tenant
+// deployment's keys keep the shape they always had.
 func ClientKey(supplied, orgID string) (string, error) {
 	if strings.HasPrefix(supplied, internalKeyPrefix) {
 		return "", fmt.Errorf("%w: an idempotency key may not begin with %q", ErrReservedKey,
@@ -54,10 +115,43 @@ func ClientKey(supplied, orgID string) (string, error) {
 	if strings.Contains(supplied, orgKeySeparator) {
 		return "", fmt.Errorf("%w: an idempotency key may not contain a null byte", ErrReservedKey)
 	}
-	if orgID == "" {
-		return supplied, nil
+	if orgID != "" {
+		supplied = orgID + orgKeySeparator + supplied
 	}
-	return orgID + orgKeySeparator + supplied, nil
+	return clientStoredKey(supplied), nil
+}
+
+// clientStoredKey returns how a caller's key is stored, given the text earlier releases stored for
+// it: that text when every backend stores it, and its digest under clientDigestPrefix otherwise.
+func clientStoredKey(joined string) string {
+	if storableText(joined) {
+		return joined
+	}
+	return clientDigestPrefix + digestHex(joined)
+}
+
+// CurrentKey returns the idempotency key this release stores in place of one an earlier release
+// stored, and whether the two differ.
+//
+// Earlier releases stored a key scoped to an organization and a provisioning callback's replay key
+// with a NUL byte inside them, and a caller's key that was not valid UTF-8 exactly as it arrived.
+// SQLite keeps all three. A store rewrites them with this when it opens, so a retried submission or
+// a repeated callback still finds the run an earlier release recorded, and every key it holds is one
+// PostgreSQL can hold too.
+func CurrentKey(stored string) (string, bool) {
+	if storableText(stored) {
+		return stored, false
+	}
+	if rest, ok := strings.CutPrefix(stored, internalKeyPrefix); ok {
+		action, tail, found := strings.Cut(rest, ":")
+		at := strings.LastIndexByte(tail, ':')
+		if found && at >= 0 && storableText(action) {
+			if bucket, err := strconv.ParseInt(tail[at+1:], 10, 64); err == nil {
+				return dedupeKeyIn(action, tail[:at], bucket), true
+			}
+		}
+	}
+	return clientDigestPrefix + digestHex(stored), true
 }
 
 // ResolveDedupe returns the run that a repeat of action on id already created inside the dedupe

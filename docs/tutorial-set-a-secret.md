@@ -33,6 +33,7 @@ live stream, and events, so the output shows `***` instead of the secret.
    | `gcp` | a Google Cloud service account JSON, written to a private file bound to `GOOGLE_APPLICATION_CREDENTIALS`. |
    | `vmware` | a vCenter login, injected as the `VMWARE_*` environment variables the community.vmware modules read. |
    | `openstack` | an OpenStack login, injected as the `OS_*` environment variables openstacksdk and the openstack.cloud collection read. |
+   | `kubeconfig` | a Kubernetes kubeconfig, written to a private file bound to `KUBECONFIG`, `K8S_AUTH_KUBECONFIG`, and `KUBE_CONFIG_PATH`. |
 
 3. Paste the secret and save. Attach it to a project, a template, or a run.
 

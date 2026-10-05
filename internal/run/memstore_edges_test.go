@@ -832,6 +832,13 @@ func TestPurgeKeepsNonTerminalAndRecentRuns(t *testing.T) {
 		saveRun(t, store, &Run{
 			ID: s.ID, Playbook: "site.yml", Status: s.Status, CreatedAt: s.CreatedAt,
 		})
+		// A finished run's outcome is on the chain, as the process that finished it puts it, so
+		// only status and age decide here.
+		if s.Status.Terminal() {
+			if err := store.SettleOutcome(ctx, s.ID); err != nil {
+				t.Fatalf("SettleOutcome(%s) error = %v", s.ID, err)
+			}
+		}
 	}
 	trimmed, err := store.PurgeEventsBefore(ctx, cutoff)
 	if err != nil {

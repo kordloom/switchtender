@@ -577,6 +577,21 @@ func TestRegisterRowCarriesTheControlsAReviewerNeeds(t *testing.T) {
 	if !strings.Contains(string(doc), "dry run") {
 		t.Error("a no-change run is shown as an ordinary change")
 	}
+	if strings.Contains(string(doc), "not change free") {
+		t.Error("a clean dry run is marked as not change free")
+	}
+
+	// A dry run the gate did not find change free is not the rehearsal the mark alone claims, so
+	// the row says so beside it.
+	in.Runs[0].DryRunScans = []run.DryRunScan{{Tool: run.ToolAnsible,
+		Findings: []string{`site.yml: task "Restart web" sets check_mode to false`}}}
+	doc, err = RenderRegister(in)
+	if err != nil {
+		t.Fatalf("RenderRegister() error = %v", err)
+	}
+	if !strings.Contains(string(doc), "not change free") {
+		t.Error("a dry run that forced real work is shown as a no-change rehearsal")
+	}
 }
 
 // TestRegisterAnchorsAreFoldedTheSameWayADossierFoldsThem pins that a disowned anchor is reported in

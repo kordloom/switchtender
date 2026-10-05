@@ -23,9 +23,17 @@ func NewMemStore() Store {
 // clone deep copies a trigger so callers cannot mutate stored state.
 func clone(t *Trigger) *Trigger {
 	cp := *t
+	if t.Review != nil {
+		rv := *t.Review
+		cp.Review = &rv
+	}
 	if t.LastFiredAt != nil {
 		v := *t.LastFiredAt
 		cp.LastFiredAt = &v
+	}
+	if t.LastErrorAt != nil {
+		v := *t.LastErrorAt
+		cp.LastErrorAt = &v
 	}
 	return &cp
 }
@@ -46,6 +54,19 @@ func (m *memStore) TouchFired(_ context.Context, id string, at time.Time) error 
 	if t, ok := m.triggers[id]; ok {
 		v := at
 		t.LastFiredAt = &v
+		t.LastError, t.LastErrorAt = "", nil
+	}
+	return nil
+}
+
+// RecordRefusal stamps why a delivery started no run on a trigger that still exists, and quietly
+// does nothing for one that does not.
+func (m *memStore) RecordRefusal(_ context.Context, id string, at time.Time, reason string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if t, ok := m.triggers[id]; ok {
+		v := at
+		t.LastError, t.LastErrorAt = reason, &v
 	}
 	return nil
 }

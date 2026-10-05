@@ -56,11 +56,11 @@ func TestFinalizeCommitsRunOutcomeToChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("outcomeBody() error = %v", err)
 	}
-	if !audit.VerifyContentDigest(outcomeEntry.ContentDigest, outcomeEntry.Nonce, body) {
+	if !outcome.VerifyBody(outcomeEntry.ContentDigest, outcomeEntry.Nonce, body) {
 		t.Error("committed outcome digest does not verify against the run's actual outcome")
 	}
 	// A tampered body must not verify, or the commitment proves nothing.
-	if audit.VerifyContentDigest(outcomeEntry.ContentDigest, outcomeEntry.Nonce, append(body, '!')) {
+	if outcome.VerifyBody(outcomeEntry.ContentDigest, outcomeEntry.Nonce, append(body, '!')) {
 		t.Error("a tampered outcome body verified against the committed digest")
 	}
 }

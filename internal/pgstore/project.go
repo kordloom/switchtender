@@ -96,20 +96,10 @@ func (s *projectStore) List(ctx context.Context) ([]*project.Project, error) {
 	return out, nil
 }
 
-// Delete removes the project with the given id, or returns project.ErrNotFound.
+// Delete removes the project with the given id and its notification attachments in one
+// transaction, or returns project.ErrNotFound.
 func (s *projectStore) Delete(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, "DELETE FROM projects WHERE id=$1", id)
-	if err != nil {
-		return fmt.Errorf("delete project: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("delete project: %w", err)
-	}
-	if n == 0 {
-		return project.ErrNotFound
-	}
-	return nil
+	return deleteAttachable(ctx, s.db, attachableProject, id, nil)
 }
 
 // scanProject reads one project row from a scanner.

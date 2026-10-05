@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net/http"
@@ -11,12 +12,17 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/decision"
+	"github.com/kordloom/switchtender/internal/factcache"
+	"github.com/kordloom/switchtender/internal/federation"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
+	named "github.com/kordloom/switchtender/internal/notification"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/runfiles"
 )
 
 // Option configures a Dispatcher.
@@ -27,6 +33,9 @@ type config struct {
 	// notifyClient dials notification targets. Nil uses the guarded default, which refuses this
 	// server itself; a test serving on loopback sets its own.
 	notifyClient *http.Client
+	// outbox records and delivers the events named notification targets hear, nil to deliver them
+	// directly through the router.
+	outbox *named.Outbox
 	// audits commits each run's outcome to the audit chain, nil when no trail is kept.
 	audits audit.Store
 	// workers is the worker pool size.
@@ -45,8 +54,15 @@ type config struct {
 	credentials credential.Store
 	// credentialTypes resolves operator-defined credential types, nil when none are configured.
 	credentialTypes credential.TypeStore
+	// federation mints run identity tokens for federated credentials, nil when no issuer is set.
+	federation *federation.Issuer
+	// runFilesRoot is the directory each run's private credential directory is created under. Empty
+	// uses runfiles.DefaultRoot.
+	runFilesRoot string
 	// sealer decrypts credential secrets.
 	sealer *credential.Sealer
+	// delivery hands a relay worker the secrets the control node sealed for each run at claim.
+	delivery SecretDelivery
 	// projects resolves git projects, nil when the feature is off.
 	projects project.Store
 	// syncer maintains project checkouts.
@@ -83,22 +99,44 @@ type config struct {
 	emailer Emailer
 	// emailOnFailureOnly limits email notifications to failed runs.
 	emailOnFailureOnly bool
+	// router finds the named notification targets attached to what a run came from, nil when none
+	// are configured.
+	router NotificationRouter
 	// inventories resolves stored inventories, nil when the feature is off.
 	inventories inventory.Store
 	// invSources resolves dynamic inventory sources, nil when the feature is off.
 	invSources invsource.Store
+	// factCache holds the facts a template's fact cache serves, nil when no executor here can.
+	factCache factcache.Store
 	// syncSources enables the background scheduled-sync loop for dynamic inventory sources.
 	syncSources bool
 	// policies gate submitted runs by holding matches for approval, nil when enforcement is off.
 	policies policy.Store
+	// decisions keeps decision records. Nil uses an in-memory store, which a process that never
+	// decides anything, a relay worker, needs no more than.
+	decisions decision.Store
 	// defaultImage is the fallback execution image used when a run, its template, and its project pin
 	// none. Empty leaves an unpinned run on the host.
 	defaultImage string
+	// imageResolver resolves a run's image tag to the digest its registry serves when the run is
+	// submitted. Nil leaves every image bound to its tag.
+	imageResolver ImageResolver
+	// moduleFetchTimeout bounds how long the gate's module download may run. Zero keeps the default.
+	moduleFetchTimeout time.Duration
+	// moduleFetchMaxBytes bounds what the gate's module download may write. Zero keeps the default.
+	moduleFetchMaxBytes int64
+	// moduleKeepFor is how long a module tree the gate downloaded is kept for its run. Zero keeps
+	// the default.
+	moduleKeepFor time.Duration
+	// moduleKeepMaxBytes bounds what the kept module trees occupy. Zero keeps the default.
+	moduleKeepMaxBytes int64
 	// runTimeout bounds how long a single run may execute. Zero disables the cap.
 	runTimeout time.Duration
 	// noJanitor disables the stale-lease janitor. A relay worker sets it because the store it runs
 	// against cannot reclaim leases; that stays the control node's job.
 	noJanitor bool
+	// presence records that this process is polling for work, nil when nothing records it.
+	presence PresenceRecorder
 	// claimGate refuses new claims while it returns an error, for a process whose claiming is a
 	// licensed feature. Nil on a single node install, where claiming is not.
 	claimGate func() error
@@ -107,6 +145,13 @@ type config struct {
 	// past instant, with its record, chain entry, and receipt all agreeing on that time. It never
 	// governs lease or dedupe timing, which must read the real clock the store ages leases against.
 	now func() time.Time
+}
+
+// WithDecisions keeps the record of each decision a person makes, its reason, its corrections, and
+// its separation-of-duties evaluation, in store. A server passes its database's store so the
+// records outlive the process; without one they live in memory.
+func WithDecisions(store decision.Store) Option {
+	return func(c *config) { c.decisions = store }
 }
 
 // WithWorkers sets the worker pool size. Values below one fall back to DefaultWorkers.
@@ -165,6 +210,12 @@ func WithClaimInterval(d time.Duration) Option {
 // targeted at them; the default when unset is the empty default pool.
 func WithQueues(queues []string) Option {
 	return func(c *config) { c.queues = queues }
+}
+
+// WithRunFilesRoot sets the directory each run's private credential directory is created under,
+// instead of the per-account directory in the system temporary directory.
+func WithRunFilesRoot(dir string) Option {
+	return func(c *config) { c.runFilesRoot = dir }
 }
 
 // WithNoJanitor disables the stale-lease janitor. A relay worker runs against a store that cannot
@@ -239,61 +290,96 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 	if cfg.now == nil {
 		cfg.now = time.Now
 	}
+	if cfg.decisions == nil {
+		cfg.decisions = decision.NewMemStore()
+	}
 
 	lister, _ := runner.(roundhouse.HostLister)
 	dumper, _ := runner.(roundhouse.InventoryDumper)
+	invLister, _ := runner.(roundhouse.InventoryLister)
+	invReader, _ := runner.(roundhouse.InventoryReader)
+	coreReporter, _ := runner.(roundhouse.AnsibleCoreReporter)
 	ctx, cancel := context.WithCancelCause(context.Background())
 	d := &Dispatcher{
-		store:              store,
-		audits:             cfg.audits,
-		notifyHTTP:         cfg.notifyClient,
-		runner:             runner,
-		log:                log,
-		sem:                make(chan struct{}, cfg.workers),
-		ctx:                ctx,
-		cancel:             cancel,
-		publisher:          cfg.publisher,
-		hostLister:         lister,
-		dumper:             dumper,
-		cancels:            make(map[string]context.CancelCauseFunc),
-		owner:              cfg.owner,
-		claimInterval:      cfg.claimInterval,
-		wakeCh:             make(chan struct{}, 1),
-		runTimeout:         cfg.runTimeout,
-		now:                cfg.now,
-		maxShards:          cfg.maxShards,
-		queues:             cfg.queues,
-		credentials:        cfg.credentials,
-		credentialTypes:    cfg.credentialTypes,
-		sealer:             cfg.sealer,
-		projects:           cfg.projects,
-		syncer:             cfg.syncer,
-		webhooks:           cfg.webhooks,
-		slackWebhooks:      cfg.slackWebhooks,
-		mattermostWebhooks: cfg.mattermostWebhooks,
-		rocketChatWebhooks: cfg.rocketChatWebhooks,
-		discordWebhooks:    cfg.discordWebhooks,
-		teamsWebhooks:      cfg.teamsWebhooks,
-		ntfyURLs:           cfg.ntfyURLs,
-		ntfyToken:          cfg.ntfyToken,
-		pagerdutyKeys:      cfg.pagerdutyKeys,
-		grafanaURLs:        cfg.grafanaURLs,
-		grafanaToken:       cfg.grafanaToken,
-		twilioSID:          cfg.twilioSID,
-		twilioToken:        cfg.twilioToken,
-		twilioFrom:         cfg.twilioFrom,
-		twilioTo:           cfg.twilioTo,
-		pagerDutyEndpoint:  defaultPagerDutyEndpoint,
-		twilioBaseURL:      defaultTwilioBaseURL,
-		emailer:            cfg.emailer,
-		emailOnFailureOnly: cfg.emailOnFailureOnly,
-		inventories:        cfg.inventories,
-		invSources:         cfg.invSources,
-		syncSources:        cfg.syncSources,
-		policies:           cfg.policies,
-		defaultImage:       cfg.defaultImage,
-		claimGate:          cfg.claimGate,
+		store:               store,
+		audits:              cfg.audits,
+		notifyHTTP:          cfg.notifyClient,
+		runner:              runner,
+		log:                 log,
+		sem:                 make(chan struct{}, cfg.workers),
+		ctx:                 ctx,
+		cancel:              cancel,
+		publisher:           cfg.publisher,
+		hostLister:          lister,
+		invLister:           invLister,
+		invReader:           invReader,
+		ansibleCoreReporter: coreReporter,
+		dumper:              dumper,
+		cancels:             make(map[string]context.CancelCauseFunc),
+		coordinators:        make(map[string]chan struct{}),
+		owner:               cfg.owner,
+		claimInterval:       cfg.claimInterval,
+		wakeCh:              make(chan struct{}, 1),
+		runTimeout:          cfg.runTimeout,
+		now:                 cfg.now,
+		maxShards:           cfg.maxShards,
+		queues:              cfg.queues,
+		credentials:         cfg.credentials,
+		credentialTypes:     cfg.credentialTypes,
+		federation:          cfg.federation,
+		runFilesRoot:        cfg.runFilesRoot,
+		sealer:              cfg.sealer,
+		delivery:            cfg.delivery,
+		projects:            cfg.projects,
+		syncer:              cfg.syncer,
+		webhooks:            cfg.webhooks,
+		slackWebhooks:       cfg.slackWebhooks,
+		mattermostWebhooks:  cfg.mattermostWebhooks,
+		rocketChatWebhooks:  cfg.rocketChatWebhooks,
+		discordWebhooks:     cfg.discordWebhooks,
+		teamsWebhooks:       cfg.teamsWebhooks,
+		ntfyURLs:            cfg.ntfyURLs,
+		ntfyToken:           cfg.ntfyToken,
+		pagerdutyKeys:       cfg.pagerdutyKeys,
+		grafanaURLs:         cfg.grafanaURLs,
+		grafanaToken:        cfg.grafanaToken,
+		twilioSID:           cfg.twilioSID,
+		twilioToken:         cfg.twilioToken,
+		twilioFrom:          cfg.twilioFrom,
+		twilioTo:            cfg.twilioTo,
+		pagerDutyEndpoint:   defaultPagerDutyEndpoint,
+		twilioBaseURL:       defaultTwilioBaseURL,
+		emailer:             cfg.emailer,
+		emailOnFailureOnly:  cfg.emailOnFailureOnly,
+		router:              cfg.router,
+		outbox:              cfg.outbox,
+		inventories:         cfg.inventories,
+		invSources:          cfg.invSources,
+		factCache:           cfg.factCache,
+		syncSources:         cfg.syncSources,
+		policies:            cfg.policies,
+		decisions:           cfg.decisions,
+		defaultImage:        cfg.defaultImage,
+		imageResolver:       cfg.imageResolver,
+		claimGate:           cfg.claimGate,
+		presence:            cfg.presence,
+		planScans:           newPlanScanCache(),
 	}
+	d.modules = newModuleStore(d.runFiles(), cmp.Or(cfg.moduleKeepFor, DefaultModuleKeepFor),
+		cmp.Or(cfg.moduleKeepMaxBytes, DefaultModuleKeepMaxBytes))
+	d.moduleFetchTimeout, d.moduleFetchMaxBytes = DefaultModuleFetchTimeout, DefaultModuleFetchMaxBytes
+	if cfg.moduleFetchTimeout > 0 {
+		d.moduleFetchTimeout = cfg.moduleFetchTimeout
+	}
+	if cfg.moduleFetchMaxBytes > 0 {
+		d.moduleFetchMaxBytes = cfg.moduleFetchMaxBytes
+	}
+	// Every executor sweeps, whether or not it holds credentials, because the fact cache, the
+	// secrets a relay worker is delivered, and the runner's own files live in run directories too.
+	// The root is read here, once, so the sweep and the runs agree on it.
+	d.wg.Add(1)
+	go d.sweepRunFiles(runfiles.NewSweeper(d.runFiles()))
+	d.startOutbox()
 	d.wg.Add(1)
 	go d.claimLoop()
 	if !cfg.noJanitor {
@@ -303,6 +389,13 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 	if d.syncSources && d.invSources != nil {
 		d.wg.Add(1)
 		go d.sourceSyncLoop()
+	}
+	if d.presence != nil {
+		d.wg.Add(1)
+		go d.presenceLoop()
+	}
+	if slots, ok := store.(slotReporter); ok {
+		slots.SetClaimSlots(cfg.workers)
 	}
 	return d
 }

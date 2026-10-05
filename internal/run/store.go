@@ -75,6 +75,28 @@ type Progress struct {
 	Outputs map[string]any
 }
 
+// DecisionSettle is how a claimed decision moves the run it decided out of pending_approval.
+type DecisionSettle struct {
+	// Status is where the run goes: pending for an approved run the claim loop executes, running
+	// for an approved split or workflow whose coordinator takes it, or a terminal status.
+	Status Status
+	// Owner takes the run's lease when Status is running, and is empty otherwise. A run settled into
+	// running is stamped with the lease and, unless it has one, its start time in the same write.
+	Owner string
+	// Error is the failure text a terminal status records.
+	Error string
+	// EndedAt is when a terminal status ended the run. Zero moves only the status and leaves the
+	// failure text and the end time for the finalize that follows, which is how a rejected run is
+	// settled: finalize completes the record and commits its outcome exactly once.
+	EndedAt time.Time
+}
+
+// InFlight reports whether a decision has claimed r and not yet settled it. Such a run reads as
+// pending_approval, and nothing but the claiming decision may move it out of that status.
+func (r *Run) InFlight() bool {
+	return r.DecisionClaim != "" && r.Status == StatusPendingApproval
+}
+
 // Finalization holds the facts that explain how a run ended.
 type Finalization struct {
 	// Status is the terminal status the run reached.
@@ -117,6 +139,16 @@ type Finalization struct {
 	// Warning is the note a run carries about itself, such as having recorded no per-host result.
 	// It is written while the run finishes, for the same reason.
 	Warning string
+	// InventoryCheck is the cross-check an Ansible run against a natively resolved inventory made
+	// before it executed. It is made while the run is under way, after the last whole-run save, and
+	// the outcome digest commits to it, so it lands with the terminal status or not at all.
+	InventoryCheck *InventoryCheck
+	// ImageDigest is the digest of the image the container runtime pulled and ran, learned while the
+	// run executed. The outcome commits to it, so it lands with the terminal status or not at all.
+	ImageDigest string
+	// ResolvedHosts are the hosts a dynamic inventory source resolved to while the run executed. The
+	// outcome commits to them, so they land with the terminal status or not at all.
+	ResolvedHosts []string
 	// EndedAt is when the run reached its terminal state.
 	EndedAt time.Time
 }
@@ -185,6 +217,19 @@ type Store interface {
 	// same clock that stamped the lease: a caller computing the cutoff from its own clock would
 	// interrupt healthy runs whenever the two clocks disagreed by more than ttl.
 	ReclaimStale(ctx context.Context, ttl time.Duration) (int, error)
+	// OwedOutcomes returns the ids of finished top-level runs whose outcome is not yet recorded as
+	// being on the audit chain and has been owed for at least age by the store's clock, longest owed
+	// first, at most limit. A run comes to owe its outcome in the write that makes it terminal,
+	// whichever write that is, so neither an append the chain refused nor a process that died
+	// between the terminal write and the append can leave a finished run with no outcome for good.
+	// A run stored already finished, which no process saw finish, owes nothing.
+	OwedOutcomes(ctx context.Context, age time.Duration, limit int) ([]string, error)
+	// OutcomeOwed reports whether the run with the given id owes its outcome to the chain. A
+	// missing run owes nothing.
+	OutcomeOwed(ctx context.Context, id string) (bool, error)
+	// SettleOutcome records that the run's outcome is on the audit chain, so it is owed no longer.
+	// Settling a run that owes nothing changes nothing.
+	SettleOutcome(ctx context.Context, id string) error
 	// RequestCancel marks the run so whichever process holds it stops it, or ErrNotFound.
 	RequestCancel(ctx context.Context, id string) error
 	// CancelPending atomically cancels a run that is waiting unclaimed in pending or
@@ -202,6 +247,18 @@ type Store interface {
 	// sweep settles, so two separate writes would let a janitor tick cancel a run an approver had
 	// just released.
 	TransitionStatusAndClaim(ctx context.Context, id string, from, to Status, owner string, startedAt time.Time) (bool, error)
+	// StartClaimed moves a pending run to running for the executor whose claim still holds it,
+	// stamping the lease from the store's own clock and startedAt as the run's start when none is
+	// recorded yet, and reports whether it changed a row. It changes nothing unless the run is
+	// pending, carries no cancel request, and is held by owner under secret, the capability its
+	// claim minted. An empty owner never matches. An empty secret matches only a claim made before
+	// the capability existed, which carries none.
+	//
+	// A fence on the status alone let a claimant that stalled past its lease start a run the
+	// janitor had already taken back. The requeue clears the claim and its capability and leaves
+	// the run pending, so the stale start matched, moved the run to running under no capability,
+	// and executed it beside whichever executor claimed it next.
+	StartClaimed(ctx context.Context, id, owner, secret string, startedAt time.Time) (bool, error)
 	// Now returns the store's own clock, the one leases are stamped and aged with. Every sweep
 	// that ages rows must measure with this clock rather than the process's: two replicas each
 	// trusting their own wall clock is how a healthy run got settled as timed out.
@@ -225,6 +282,38 @@ type Store interface {
 	// touches nothing else, so it cannot clobber a concurrent claim or cancel the way a full Save
 	// from a stale snapshot would.
 	StampApprovedSpec(ctx context.Context, id, digest, binding string) error
+	// WipeSealed removes the sealed inventory snapshot and the sealed plan file a run carries, leaving
+	// the digests that bound them. A run's sealed material is needed only while it waits and executes,
+	// so it is wiped when the run ends rather than kept at rest for the life of the record.
+	WipeSealed(ctx context.Context, id string) error
+	// SweepSealed wipes the sealed material of every run that has already ended and still carries
+	// some, and reports how many it wiped. It is the backstop for an end that did not wipe its own,
+	// such as a cancel before start or a sweep that settled the run.
+	SweepSealed(ctx context.Context) (int, error)
+	// ParkForApproval moves a running pipeline parent owned by owner to pending_approval and clears
+	// its lease in one write, reporting whether it changed a row. A workflow parks when nothing is
+	// left to do but wait for a person at an approval step, so no process holds it while it waits:
+	// a restart then has nothing to lose, and whichever replica records the decision resumes it.
+	// It changes nothing when the parent is not running, is held by a different owner, or carries a
+	// cancel request, so a parent somebody canceled is never parked out of the cancel's reach.
+	ParkForApproval(ctx context.Context, id, owner string) (bool, error)
+	// SettleHeld moves a run waiting unclaimed in pending_approval to the terminal status fin names,
+	// recording the failure text and end time in the same write, and reports whether it changed a
+	// row. It is how an approval step is decided: the decision is a compare-and-swap, so when an
+	// approver, a second approver, and the timeout sweep race on one step exactly one of them wins.
+	SettleHeld(ctx context.Context, id string, fin Finalization) (bool, error)
+	// ClaimDecision records, in one compare-and-set, that the decision decisionID is the one that
+	// will settle a run waiting in pending_approval, with claim saying how. The run must be held,
+	// unleased, not canceled, and claimed by no other decision. It reports whether this decision
+	// won. From then until SettleDecision with the same id, nothing moves the run out of
+	// pending_approval: a cancel, SettleHeld, and a transition from pending_approval all refuse it,
+	// so a decision that lost can never be the one that took effect, and the chain records only the
+	// winner.
+	ClaimDecision(ctx context.Context, id, decisionID, claim string) (bool, error)
+	// SettleDecision moves a run the decision decisionID claimed out of pending_approval as s says,
+	// clearing the claim in the same write. It reports false when that decision does not hold the
+	// run, which is how a second finisher of one decision learns the first one already settled it.
+	SettleDecision(ctx context.Context, id, decisionID string, s DecisionSettle) (bool, error)
 	// FinalizeRunning atomically moves a running run to its terminal status and records the fields
 	// that explain how it ended in the same write, reporting whether it changed a row. It changes
 	// nothing and returns false when the run is missing or is no longer running, so an executor
@@ -265,7 +354,9 @@ type Store interface {
 	HostHistory(ctx context.Context, host string, limit int) ([]HostSummary, error)
 	// RunHostSummaries returns one run's stored per host summaries, ordered by host.
 	RunHostSummaries(ctx context.Context, runID string) ([]HostSummary, error)
-	// SaveHostFacts records the system facts a run gathered, replacing what is held for each host.
+	// SaveHostFacts records the system facts a run gathered, replacing what is held for each host
+	// unless that was gathered later, so a run that gathered first and finished last cannot write
+	// an older reading over a newer one.
 	SaveHostFacts(ctx context.Context, runID string, facts []HostFacts) error
 	// HostFactsFor returns a host's most recently gathered facts, or ErrNotFound when a host has
 	// never been gathered.
@@ -340,11 +431,14 @@ type Store interface {
 	// the run records and their summaries. It returns how many runs were trimmed, counting only
 	// runs that actually held events or logs to remove. A terminal run older than cutoff that had
 	// nothing to trim is not counted, so the number reports runs whose data was removed, not every
-	// eligible run.
+	// eligible run. A run that owes its outcome to the audit chain, and each child of one, keeps its
+	// events and logs until that outcome is committed, since the outcome is built from them.
 	PurgeEventsBefore(ctx context.Context, cutoff time.Time) (int, error)
 	// PurgeRunsBefore deletes terminal runs created before cutoff along with their events and logs,
 	// keeping the per host and per task summaries that power the cross-run views. It returns how
-	// many runs were deleted. Non-terminal runs are never purged.
+	// many runs were deleted. Non-terminal runs are never purged, and neither is a run that owes its
+	// outcome to the audit chain or a child of one: they stay, with everything they hold, until that
+	// outcome is committed.
 	PurgeRunsBefore(ctx context.Context, cutoff time.Time) (int, error)
 	// TrimSummaries keeps the newest keep per host summaries for each host and the newest keep per
 	// task summaries for each task, deleting the rest, and returns how many rows it deleted. Nothing
@@ -352,7 +446,8 @@ type Store interface {
 	// outcome history survives run retention. That makes this the only bound on those two tables,
 	// which otherwise grow by one row per host per run forever. A keep below one is treated as one,
 	// so no caller can empty the tables. Holding keep at or above MinRetainSummaries is the
-	// configuration's job, not the store's.
+	// configuration's job, not the store's. A summary of a run that owes its outcome to the audit
+	// chain, or of a child of one, is kept beyond keep until that outcome is committed.
 	TrimSummaries(ctx context.Context, keep int) (int, error)
 }
 

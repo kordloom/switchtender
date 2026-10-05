@@ -497,6 +497,16 @@ func TestAFinishedRunsTailIsDroppedOnceItLands(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	tr, flaky, backing := newFlakyTransport(t, "run_tail_lands")
+	// The control node holds the capability its claim minted, which is the one markDone gives the
+	// worker. A lease presented for a run that holds none belongs to a claim that was taken back.
+	stored, err := backing.Get(ctx, "run_tail_lands")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	stored.ClaimSecret = "the-capability-minted-at-claim"
+	if err := backing.Save(ctx, stored); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
 
 	flaky.down.Store(true)
 	if err := tr.AppendLog(ctx, "run_tail_lands", []byte("last line\n")); err != nil {

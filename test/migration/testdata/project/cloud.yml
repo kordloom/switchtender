@@ -1,0 +1,18 @@
+---
+- name: Reach the cloud with the federated identity token
+  hosts: all
+  gather_facts: false
+  vars:
+    token_path: "{{ lookup('ansible.builtin.env', 'AWS_WEB_IDENTITY_TOKEN_FILE') }}"
+  tasks:
+    - name: Record the token file, the role, and the token the run received
+      ansible.builtin.copy:
+        content: |
+          {{ token_path }}
+          {{ lookup('ansible.builtin.env', 'AWS_ROLE_ARN') }}
+          {{ lookup('ansible.builtin.file', token_path) }}
+        dest: "{{ marker_dir }}/{{ marker_name | default('cloud') }}-{{ inventory_hostname }}"
+        mode: "0600"
+    - name: Print the token, which the log has to mask
+      ansible.builtin.debug:
+        msg: "{{ lookup('ansible.builtin.file', token_path) }}"

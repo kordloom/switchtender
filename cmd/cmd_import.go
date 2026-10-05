@@ -9,8 +9,11 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/importer"
+	"github.com/kordloom/switchtender/internal/inventory"
+	"github.com/kordloom/switchtender/internal/org"
 	"github.com/kordloom/switchtender/internal/template"
 )
 
@@ -37,7 +40,11 @@ var importAWXCmd = &cobra.Command{
 	Short: "Import an awx export into SwitchTender.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runImport(cmd, args[0], importer.FromAWX)
+		mapper, err := awxMapper()
+		if err != nil {
+			return err
+		}
+		return runImport(cmd, args[0], mapper)
 	},
 }
 
@@ -143,9 +150,9 @@ location for you to attach an inventory of your own. An archive brings one proje
 configuration names a repository this can reach; a file:// URL names a path on the Rundeck server,
 so it is reported rather than cloned.
 
-A secure option is never imported as a survey field, because that would turn a password prompt into
-a value stored in plain text on every run. Store those as credentials instead; the report names each
-one. Job references, plugin steps, and remote script URLs are reported rather than guessed at.
+A secure option becomes a secret survey field, whose answer is sealed with the credential key and
+never kept on a run in plain text. Its default lives in Rundeck's key storage and does not come
+across. Job references, plugin steps, and remote script URLs are reported rather than guessed at.
 
 Without --apply the import only reports what it would create.`,
 	Args: cobra.ExactArgs(1),
@@ -170,9 +177,10 @@ translation into a template, so it is named and skipped rather than half-importe
 also skipped: it builds only when the repository changed, so importing it as a schedule would run
 the job every interval whether anything changed or not.
 
-Password parameters and remote trigger tokens are never imported, because both would turn a secret
-into a stored plaintext value. Jenkins picks an agent by label rather than naming hosts, so pass
---inventory to say which machines these jobs run against.
+A password parameter becomes a secret survey field, whose answer is sealed rather than stored as
+text. Its encrypted default does not come across. A remote trigger token is never imported, because
+it would turn a secret into a stored plaintext value. Jenkins picks an agent by label rather than
+naming hosts, so pass --inventory to say which machines these jobs run against.
 
 Without --apply the import only reports what it would create.`,
 	Args: cobra.ExactArgs(1),
@@ -260,6 +268,62 @@ func runImportData(cmd *cobra.Command, data []byte, mapper mapFunc) error {
 	return nil
 }
 
+// reportComposed writes a smart or constructed inventory's definition: its filter, or its inputs by
+// name, its limit, and its plugin options.
+func reportComposed(out io.Writer, plan *importer.Plan, inv *inventory.Inventory) {
+	if inv.Kind == inventory.KindSmart {
+		fmt.Fprintf(out, "        smart, resolved at each launch: %s\n", inv.HostFilter)
+		return
+	}
+	names := make([]string, 0, len(inv.InputIDs))
+	for _, id := range inv.InputIDs {
+		name := id
+		for _, other := range plan.Inventories {
+			if other.ID == id {
+				name = other.Name
+				break
+			}
+		}
+		names = append(names, name)
+	}
+	fmt.Fprintf(out, "        constructed, resolved at each launch from: %s\n",
+		strings.Join(names, ", "))
+	if inv.Limit != "" {
+		fmt.Fprintf(out, "        limit: %s\n", inv.Limit)
+	}
+	for _, line := range strings.Split(strings.TrimRight(inv.SourceVars, "\n"), "\n") {
+		if line != "" {
+			fmt.Fprintf(out, "        %s\n", line)
+		}
+	}
+}
+
+// reportOrganizations writes the organizations an import places smart inventories in. Each is
+// created when the import is applied unless exactly one of that name already exists, which is used
+// instead, and the apply step says which happened.
+func reportOrganizations(out io.Writer, orgs []*org.Org) {
+	if len(orgs) == 0 {
+		return
+	}
+	fmt.Fprintf(out, "  Organizations: %d (created unless one of the name already exists)\n",
+		len(orgs))
+	for _, o := range orgs {
+		fmt.Fprintf(out, "    - %s\n", o.Name)
+	}
+	fmt.Fprintln(out, "    Templates and inventories placed in one are visible under --strict-grants only")
+	fmt.Fprintln(out, "    to its members, and AWX memberships are not imported: grant access to whoever")
+	fmt.Fprintln(out, "    needs them.")
+}
+
+// inOrganization renders the organization an inventory or a template is placed in after its name, or
+// nothing for one placed in none.
+func inOrganization(name string) string {
+	if name == "" {
+		return ""
+	}
+	return " (organization " + name + ")"
+}
+
 // reportPlan writes a human-readable summary of what an import will create to out.
 func reportPlan(out io.Writer, plan *importer.Plan) {
 	reportSummary(out, plan)
@@ -268,9 +332,17 @@ func reportPlan(out io.Writer, plan *importer.Plan) {
 	for _, p := range plan.Projects {
 		fmt.Fprintf(out, "    - %s (%s @ %s)\n", p.Name, p.RepoURL, branchOrDefault(p.Branch))
 	}
+	reportOrganizations(out, plan.Orgs)
+	placedIn := plan.InventoryOrganizations()
 	fmt.Fprintf(out, "  Inventories: %d\n", len(plan.Inventories))
 	for _, inv := range plan.Inventories {
-		fmt.Fprintf(out, "    - %s\n", inv.Name)
+		fmt.Fprintf(out, "    - %s%s\n", inv.Name, inOrganization(placedIn[inv.Name]))
+		// A composed inventory has no content: what is reviewed is the definition that decides which
+		// machines it reaches at each launch.
+		if inv.Composed() {
+			reportComposed(out, plan, inv)
+			continue
+		}
 		// The content is shown, not just the name. An inventory is the list of machines a play
 		// reaches and the variables it reaches them with, assembled from somebody else's export, so
 		// a review that sees only a name is a review of nothing.
@@ -289,12 +361,27 @@ func reportPlan(out io.Writer, plan *importer.Plan) {
 		secrets = " (secrets must be re-entered)"
 	}
 	fmt.Fprintf(out, "  Credentials: %d%s\n", len(plan.Credentials), secrets)
-	for _, c := range plan.Credentials {
-		fmt.Fprintf(out, "    - %s (%s)\n", c.Name, c.Kind)
+	typeNames := make(map[string]string, len(plan.CredentialTypes))
+	for _, ct := range plan.CredentialTypes {
+		typeNames[ct.ID] = ct.Name
 	}
+	for _, c := range plan.Credentials {
+		kind := string(c.Kind)
+		if c.TypeID != "" {
+			kind = "custom type " + typeNames[c.TypeID]
+		}
+		fmt.Fprintf(out, "    - %s (%s)\n", c.Name, kind)
+	}
+	if len(plan.CredentialTypes) > 0 {
+		fmt.Fprintf(out, "  Credential types: %d\n", len(plan.CredentialTypes))
+		for _, ct := range plan.CredentialTypes {
+			fmt.Fprintf(out, "    - %s\n", ct.Name)
+		}
+	}
+	templatesIn := plan.TemplateOrganizations()
 	fmt.Fprintf(out, "  Templates:   %d\n", len(plan.Templates))
 	for _, t := range plan.Templates {
-		fmt.Fprintf(out, "    - %s%s\n", t.Name, templateScope(t))
+		fmt.Fprintf(out, "    - %s%s%s\n", t.Name, templateScope(t), inOrganization(templatesIn[t.Name]))
 	}
 	fmt.Fprintf(out, "  Schedules:   %d\n", len(plan.Schedules))
 	for _, s := range plan.Schedules {
@@ -302,7 +389,32 @@ func reportPlan(out io.Writer, plan *importer.Plan) {
 		if !s.Enabled {
 			state = ", arrives switched off"
 		}
-		fmt.Fprintf(out, "    - %s (%s%s)\n", s.Name, s.Cron, state)
+		cadence := s.Cron
+		if s.RRule != "" {
+			// A recurrence spans several properties, so it is shown on one line with its parts
+			// joined the way AWX writes them.
+			cadence = strings.Join(strings.Fields(s.RRule), " ")
+		}
+		fmt.Fprintf(out, "    - %s (%s%s)\n", s.Name, cadence, state)
+	}
+	fmt.Fprintf(out, "  Notification targets: %d\n", len(plan.Notifications))
+	attached := map[string]int{}
+	for _, a := range plan.Attachments {
+		attached[a.NotificationID]++
+	}
+	for _, n := range plan.Notifications {
+		state := ""
+		if n.NeedsSecret {
+			state = ", needs its secret entered"
+		}
+		fmt.Fprintf(out, "    - %s (%s, %d %s%s)\n", n.Name, n.Kind, attached[n.ID],
+			plural(attached[n.ID], "attachment", "attachments"), state)
+	}
+	if len(plan.Orgs) > 0 {
+		fmt.Fprintf(out, "  Organizations: %d\n", len(plan.Orgs))
+		for _, o := range plan.Orgs {
+			fmt.Fprintf(out, "    - %s (holds its AWX notification attachments)\n", o.Name)
+		}
 	}
 	if len(plan.Warnings) > 0 {
 		fmt.Fprintf(out, "  Warnings (%d):\n", len(plan.Warnings))
@@ -339,6 +451,15 @@ func templateScope(t *template.Template) string {
 	}
 	if t.Verbosity > 0 {
 		parts = append(parts, fmt.Sprintf("verbosity %d", t.Verbosity))
+	}
+	if t.UseFactCache {
+		parts = append(parts, "fact cache")
+	}
+	if t.AllowCallbacks {
+		parts = append(parts, "provisioning callbacks")
+	}
+	if t.AWXCallback {
+		parts = append(parts, "AWX callback address")
 	}
 	if n := len(t.ExtraVars); n > 0 {
 		noun := "extra vars"
@@ -388,12 +509,23 @@ func applyPlan(ctx context.Context, plan *importer.Plan) (int, error) {
 	if err := recordCLI(ctx, bundle.Audits(), importDB, "/cli/import/apply"); err != nil {
 		return 0, err
 	}
-	return plan.Apply(ctx, importer.ApplyStores{
+	stores := importer.ApplyStores{
 		Projects: bundle.Projects(), Inventories: bundle.Inventories(),
 		Sources:     bundle.InventorySources(),
-		Credentials: bundle.Credentials(), Templates: bundle.Templates(),
-		Schedules: bundle.Schedules(),
-	})
+		Credentials: bundle.Credentials(), CredentialTypes: bundle.CredentialTypes(),
+		Templates: bundle.Templates(), Schedules: bundle.Schedules(),
+		Notifications: bundle.Notifications(), Orgs: bundle.Orgs(),
+	}
+	// A notification target's address and a template's provisioning callback key are sealed with
+	// the install's key, the same one the server opens them with, as they are stored, and the
+	// notification store takes the plan's Attachments beside the targets. The key is derived only
+	// when there is something to seal, since the derivation is deliberately expensive.
+	if plan.NeedsSealer() {
+		if sealer := newSealerFromEnv(zap.NewNop()); sealer.Enabled() {
+			stores.Sealer = sealer
+		}
+	}
+	return plan.Apply(ctx, stores)
 }
 
 // branchOrDefault names a branch for display, calling out the remote default when unset.

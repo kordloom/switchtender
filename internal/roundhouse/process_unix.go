@@ -39,3 +39,21 @@ func configureProcessGroup(cmd *exec.Cmd) {
 	}
 	cmd.WaitDelay = processWaitDelay + processKillGrace
 }
+
+// configureContainerClient puts a container client in its own process group and, on context cancel,
+// kills the group outright. That is what a cancel did to the client before it ran under the shim:
+// the client is only a window onto the container, and the runner stops and removes the container
+// itself. Killing the group rather than the client alone reaches the client through the shim it
+// runs under.
+func configureContainerClient(cmd *exec.Cmd) {
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.Setpgid = true
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+}

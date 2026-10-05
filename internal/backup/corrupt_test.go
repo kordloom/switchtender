@@ -137,8 +137,8 @@ func TestReadRefusesACorruptArchive(t *testing.T) {
 		Name: "version 1", Body: []byte(`{"format":"switchtender-backup","version":1,"sealed":"x"}`),
 		Want: ErrFormat, WantMessage: "unsupported version 1",
 	}, { // Test 7: A version this build has never seen.
-		Name: "future version", Body: []byte(`{"format":"switchtender-backup","version":3,"sealed":"x"}`),
-		Want: ErrFormat, WantMessage: "unsupported version 3",
+		Name: "future version", Body: []byte(`{"format":"switchtender-backup","version":4,"sealed":"x"}`),
+		Want: ErrFormat, WantMessage: "unsupported version 4",
 	}, { // Test 8: A missing version field reads as zero and is refused.
 		Name: "no version", Body: []byte(`{"format":"switchtender-backup"}`),
 		Want: ErrFormat, WantMessage: "unsupported version 0",

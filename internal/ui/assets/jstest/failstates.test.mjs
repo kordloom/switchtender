@@ -119,6 +119,7 @@ const GOOD = (() => {
 		runs: one, hosts: one, entries: one, policies: one, users: one, templates: one,
 		projects: one, inventories: one, sources: one, workers: one, credentials: one,
 		schedules: one, tasks: one, findings: one, tokens: one, events: [], shards: [], steps: [],
+		notifications: one,
 		count: 1, has_more: false, next_after: 0, summary: { total: 1, succeeded: 1, failed: 0 },
 		checked_templates: 1, checked_schedules: 1, checked_credentials: 1,
 		// The comparison page reads its own document rather than a list.

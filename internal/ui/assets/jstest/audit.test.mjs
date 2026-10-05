@@ -66,6 +66,34 @@ test("auditChange turns a method and path into a sentence", () => {
 		{ Method: "POST", Path: "", Want: "" },
 		// Test 21: Null inputs are an empty sentence, not a crash.
 		{ Method: null, Path: null, Want: "" },
+		// Test 22: A review trigger planning a pull request says so.
+		{
+			Method: "POST", Path: "/hooks/trg_1/review/7/planned",
+			Want: "Planned pull request 7 from a review trigger",
+		},
+		// Test 23: A refused pull request does not read as a fire.
+		{ Method: "POST", Path: "/hooks/trg_1/review/7/refused", Want: "Refused to plan pull request 7" },
+		// Test 24: A report back to the pull request.
+		{ Method: "POST", Path: "/hooks/trg_1/review/7/report", Want: "Reported the plan to pull request 7" },
+		// Test 25: A push trigger's fire still reads as a fire.
+		{ Method: "POST", Path: "/hooks/trg_1/fired", Want: "Fired a webhook trigger" },
+		// Test 26: A delivery refused for a survey nobody could answer is not a fire.
+		{
+			Method: "POST", Path: "/hooks/trg_1/refused/survey/db_password",
+			Want: "Refused to fire webhook trigger trg_1: the required survey question db_password had no answer",
+		},
+		// Test 27: A schedule refused for the same reason names every question.
+		{
+			Method: "SCHEDULE", Path: "/schedules/sch_1/refused/survey/release,db_password",
+			Want: "Schedule sch_1 refused to fire: the required survey questions release, db_password had no answer",
+		},
+		// Test 28: A pull request plan refused for its survey says why.
+		{
+			Method: "POST", Path: "/hooks/trg_1/review/7/refused/survey/region",
+			Want: "Refused to plan pull request 7: the required survey question region had no answer",
+		},
+		// Test 29: A schedule's ordinary fire still reads as a fire.
+		{ Method: "SCHEDULE", Path: "/schedules/sch_1/fired", Want: "Schedule sch_1 fired" },
 	];
 	for (const [i, tc] of tests.entries()) {
 		assert.equal(app.auditChange(tc.Method, tc.Path), tc.Want, "test " + i + ": " + tc.Path);

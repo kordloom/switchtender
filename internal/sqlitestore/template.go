@@ -15,7 +15,9 @@ import (
 const templateColumns = `id, name, project_id, playbook, inventory, inventory_id, shards,
 	credential_ids, extra_vars, survey, queue, created_at, tool, command, dry_run, image,
 	pull_credential_id, org_id, notifications, selectable_credential_ids, timeout,
-	confirm_on_launch, tags, skip_tags, verbosity, forks, diff_mode, steps, limit_pattern`
+	confirm_on_launch, tags, skip_tags, verbosity, forks, diff_mode, steps, limit_pattern,
+	use_fact_cache, fact_cache_timeout, allow_callbacks, host_config_key, callback_limit,
+	awx_callback`
 
 // templateStore is a template.Store backed by the shared SQLite database.
 type templateStore struct {
@@ -42,8 +44,11 @@ INSERT INTO templates
 	(id, name, project_id, playbook, inventory, inventory_id, shards, credential_ids, extra_vars,
 	 survey, queue, created_at, tool, command, dry_run, image, pull_credential_id, org_id,
 	 notifications, selectable_credential_ids, timeout, confirm_on_launch,
-	 tags, skip_tags, verbosity, forks, diff_mode, steps, limit_pattern)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	 tags, skip_tags, verbosity, forks, diff_mode, steps, limit_pattern,
+	 use_fact_cache, fact_cache_timeout, allow_callbacks, host_config_key, callback_limit,
+	 awx_callback)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+	?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	name=excluded.name, project_id=excluded.project_id, playbook=excluded.playbook,
 	inventory=excluded.inventory, inventory_id=excluded.inventory_id, shards=excluded.shards,
@@ -55,14 +60,19 @@ ON CONFLICT(id) DO UPDATE SET
 	selectable_credential_ids=excluded.selectable_credential_ids, timeout=excluded.timeout,
 	confirm_on_launch=excluded.confirm_on_launch, tags=excluded.tags,
 	skip_tags=excluded.skip_tags, verbosity=excluded.verbosity, forks=excluded.forks,
-	diff_mode=excluded.diff_mode, steps=excluded.steps, limit_pattern=excluded.limit_pattern`
+	diff_mode=excluded.diff_mode, steps=excluded.steps, limit_pattern=excluded.limit_pattern,
+	use_fact_cache=excluded.use_fact_cache, fact_cache_timeout=excluded.fact_cache_timeout,
+	allow_callbacks=excluded.allow_callbacks, host_config_key=excluded.host_config_key,
+	callback_limit=excluded.callback_limit, awx_callback=excluded.awx_callback`
 	_, err = s.db.ExecContext(ctx, q,
 		t.ID, t.Name, t.ProjectID, t.Playbook, t.Inventory, t.InventoryID, t.Shards,
 		sqlutil.JoinIDs(t.CredentialIDs), string(vars), string(survey), t.Queue, sqlutil.FormatTime(t.CreatedAt),
 		t.Tool, t.Command, sqlutil.BoolToInt(t.DryRun), t.Image, t.PullCredentialID, t.OrgID, string(notifs),
 		sqlutil.JoinIDs(t.SelectableCredentialIDs), t.Timeout, sqlutil.BoolToInt(t.ConfirmOnLaunch),
 		sqlutil.JoinIDs(t.Tags), sqlutil.JoinIDs(t.SkipTags), t.Verbosity, t.Forks,
-		sqlutil.BoolToInt(t.DiffMode), marshalSteps(t.Steps), t.Limit)
+		sqlutil.BoolToInt(t.DiffMode), marshalSteps(t.Steps), t.Limit,
+		sqlutil.BoolToInt(t.UseFactCache), t.FactCacheTimeout, sqlutil.BoolToInt(t.AllowCallbacks),
+		t.HostConfigKey, t.CallbackLimit, sqlutil.BoolToInt(t.AWXCallback))
 	if err != nil {
 		return fmt.Errorf("save template: %w", err)
 	}
@@ -93,7 +103,8 @@ func (s *templateStore) Update(ctx context.Context, t *template.Template) error 
 	credential_ids=?, extra_vars=?, survey=?, queue=?, tool=?, command=?, dry_run=?, image=?,
 	pull_credential_id=?, org_id=?, notifications=?, selectable_credential_ids=?, timeout=?,
 	confirm_on_launch=?, tags=?, skip_tags=?, verbosity=?, forks=?, diff_mode=?, steps=?,
-	limit_pattern=?
+	limit_pattern=?, use_fact_cache=?, fact_cache_timeout=?, allow_callbacks=?, callback_limit=?,
+	awx_callback=?
 	WHERE id=?`
 	res, err := s.db.ExecContext(ctx, q,
 		t.Name, t.ProjectID, t.Playbook, t.Inventory, t.InventoryID, t.Shards,
@@ -101,7 +112,9 @@ func (s *templateStore) Update(ctx context.Context, t *template.Template) error 
 		sqlutil.BoolToInt(t.DryRun), t.Image, t.PullCredentialID, t.OrgID, string(notifs),
 		sqlutil.JoinIDs(t.SelectableCredentialIDs), t.Timeout, sqlutil.BoolToInt(t.ConfirmOnLaunch),
 		sqlutil.JoinIDs(t.Tags), sqlutil.JoinIDs(t.SkipTags), t.Verbosity, t.Forks,
-		sqlutil.BoolToInt(t.DiffMode), marshalSteps(t.Steps), t.Limit, t.ID)
+		sqlutil.BoolToInt(t.DiffMode), marshalSteps(t.Steps), t.Limit,
+		sqlutil.BoolToInt(t.UseFactCache), t.FactCacheTimeout, sqlutil.BoolToInt(t.AllowCallbacks),
+		t.CallbackLimit, sqlutil.BoolToInt(t.AWXCallback), t.ID)
 	if err != nil {
 		return fmt.Errorf("update template: %w", err)
 	}
@@ -151,15 +164,23 @@ func (s *templateStore) List(ctx context.Context) ([]*template.Template, error) 
 	return out, nil
 }
 
-// Delete removes the template with the given id, or returns template.ErrNotFound.
+// Delete removes the template with the given id and its notification attachments in one
+// transaction, or returns template.ErrNotFound.
 func (s *templateStore) Delete(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, "DELETE FROM templates WHERE id=?", id)
+	return deleteAttachable(ctx, s.db, attachableTemplate, id, nil)
+}
+
+// SetHostConfigKey replaces the template's sealed provisioning callback key and nothing else, or
+// returns template.ErrNotFound.
+func (s *templateStore) SetHostConfigKey(ctx context.Context, id, sealed string) error {
+	const q = "UPDATE templates SET host_config_key=? WHERE id=?"
+	res, err := s.db.ExecContext(ctx, q, sealed, id)
 	if err != nil {
-		return fmt.Errorf("delete template: %w", err)
+		return fmt.Errorf("set template callback key: %w", err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("delete template: %w", err)
+		return fmt.Errorf("set template callback key: %w", err)
 	}
 	if n == 0 {
 		return template.ErrNotFound
@@ -183,16 +204,24 @@ func scanTemplate(sc scanner) (*template.Template, error) {
 		skipTags   string
 		diffMode   int
 		steps      string
+		factCache  int
+		callbacks  int
+		awxAlias   int
 	)
 	if err := sc.Scan(&t.ID, &t.Name, &t.ProjectID, &t.Playbook, &t.Inventory, &t.InventoryID,
 		&t.Shards, &creds, &vars, &survey, &t.Queue, &created, &t.Tool, &t.Command,
 		&dryRun, &t.Image, &t.PullCredentialID, &t.OrgID, &notifs, &selectable, &t.Timeout,
-		&confirm, &tags, &skipTags, &t.Verbosity, &t.Forks, &diffMode, &steps, &t.Limit); err != nil {
+		&confirm, &tags, &skipTags, &t.Verbosity, &t.Forks, &diffMode, &steps, &t.Limit,
+		&factCache, &t.FactCacheTimeout, &callbacks, &t.HostConfigKey, &t.CallbackLimit,
+		&awxAlias); err != nil {
 		return nil, err
 	}
 	t.DryRun = dryRun != 0
 	t.ConfirmOnLaunch = confirm != 0
 	t.DiffMode = diffMode != 0
+	t.UseFactCache = factCache != 0
+	t.AllowCallbacks = callbacks != 0
+	t.AWXCallback = awxAlias != 0
 	t.Tags = sqlutil.SplitIDs(tags)
 	t.SkipTags = sqlutil.SplitIDs(skipTags)
 	t.CredentialIDs = sqlutil.SplitIDs(creds)

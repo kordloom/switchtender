@@ -707,8 +707,7 @@ func TestRundeckArchiveScheduleShapes(t *testing.T) {
 
 // TestRundeckArchiveOptionShapes covers the option spellings an archive writes, whose settings are
 // attributes and whose allowed values are one delimited string rather than a list. A secure option
-// is refused here exactly as it is on the job export path, since a survey answer is stored in plain
-// text on every run and downgrading a password without saying so is worse than not importing it.
+// imports as a secret field here exactly as it does on the job export path.
 func TestRundeckArchiveOptionShapes(t *testing.T) {
 	t.Parallel()
 	entries := rundeckArchiveEntries()
@@ -727,13 +726,14 @@ func TestRundeckArchiveOptionShapes(t *testing.T) {
 		Var: "env", Label: "env", Type: template.FieldChoice, Required: true,
 		Help: "Where", Default: "staging", Choices: []string{"staging", "prod"},
 	}, {
+		Var: "token", Label: "token", Type: template.FieldSecret,
+	}, {
 		Var: "tags", Label: "tags", Type: template.FieldText,
 	}}
 	if diff := cmp.Diff(want, findTemplate(t, plan, "batch/close-books").Survey,
 		cmpopts.EquateEmpty()); diff != "" {
 		t.Errorf("survey mismatch (-want +got):\n%s", diff)
 	}
-	wantWarning(t, plan, `option "token" is a secure option and was NOT imported`)
 	wantWarning(t, plan, `option "tags" accepted several values at once`)
 }
 

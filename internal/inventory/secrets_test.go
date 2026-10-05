@@ -118,6 +118,11 @@ func TestSecretsCollectsValues(t *testing.T) {
 		Name: "no secrets",
 		In:   "all:\n  hosts:\n    web01:\n      ansible_port: 22\n",
 		Want: nil,
+	}, { // Test 5: An INI value Ansible reads as a Python literal after the shell's quoting, so the
+		// password the play uses is the text inside both, which the masker must hold as well.
+		Name: "ini value read as a literal",
+		In:   "web01 ansible_password='\"quoted secret\"'\n",
+		Want: []string{`"quoted secret"`, "quoted secret"},
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {

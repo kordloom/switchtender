@@ -402,10 +402,10 @@ func TestSemaphoreRunOnceScheduleIsNamedAsOneOff(t *testing.T) {
 	}
 }
 
-// TestSemaphoreSecretVariableIsNeverDowngradedToPlainText pins the refusal. Semaphore stores a
-// secret variable obscured, while a survey answer is kept in the clear on every run of the template,
-// in its record, its exports, and the evidence drawn from it. This importer once did the downgrade
-// silently.
+// TestSemaphoreSecretVariableIsNeverDowngradedToPlainText pins the mapping. Semaphore stores a
+// secret variable obscured. It imports as a secret field, whose answer is sealed rather than kept
+// in the clear on the run, so it is neither refused nor downgraded to text, whatever its type's
+// case.
 func TestSemaphoreSecretVariableIsNeverDowngradedToPlainText(t *testing.T) {
 	t.Parallel()
 	const doc = `{"meta": {"name": "ops"}, "templates": [{"name": "site", "playbook": "site.yml",
@@ -422,28 +422,28 @@ func TestSemaphoreSecretVariableIsNeverDowngradedToPlainText(t *testing.T) {
 		t.Fatalf("FromSemaphore() error = %v", err)
 	}
 	survey := plan.Templates[0].Survey
-	var vars []string
+	var got []string
 	for _, f := range survey {
-		vars = append(vars, f.Var)
+		got = append(got, f.Var+":"+string(f.Type))
 	}
-	if diff := cmp.Diff([]string{"env", "count", "note"}, vars, cmpopts.EquateEmpty()); diff != "" {
+	want := []string{"token:secret", "shout:secret", "env:choice", "count:int", "note:text"}
+	if diff := cmp.Diff(want, got, cmpopts.EquateEmpty()); diff != "" {
 		t.Errorf("survey variables mismatch (-want +got):\n%s", diff)
 	}
 	for _, name := range []string{"token", "shout"} {
-		if _, ok := warningContaining(t, plan.Warnings, fmt.Sprintf("variable %q", name),
-			"NOT imported"); !ok {
-			t.Errorf("the secret variable %q was not named.\nwarnings: %v", name, plan.Warnings)
+		if w, ok := warningContaining(t, plan.Warnings, fmt.Sprintf("%q", name), "NOT imported"); ok {
+			t.Errorf("the secret variable %q is still refused: %s", name, w)
 		}
 	}
-	if survey[0].Type != "choice" || survey[0].Label != "Environment" || !survey[0].Required {
-		t.Errorf("enum variable = %+v, want a required choice carrying its title", survey[0])
+	if survey[0].Label != "API token" {
+		t.Errorf("secret variable = %+v, want its title carried", survey[0])
 	}
-	if diff := cmp.Diff([]string{"prod", "stage"}, survey[0].Choices,
+	if survey[2].Label != "Environment" || !survey[2].Required {
+		t.Errorf("enum variable = %+v, want a required choice carrying its title", survey[2])
+	}
+	if diff := cmp.Diff([]string{"prod", "stage"}, survey[2].Choices,
 		cmpopts.EquateEmpty()); diff != "" {
 		t.Errorf("enum choices mismatch (-want +got):\n%s", diff)
-	}
-	if survey[1].Type != "int" || survey[2].Type != "text" {
-		t.Errorf("types = %q and %q, want int and text", survey[1].Type, survey[2].Type)
 	}
 }
 

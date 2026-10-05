@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Approval policies in YAML and Rego | SwitchTender docs</title>
+	<meta name="description" content="An approval policy decides what happens to a run before it executes: it runs, it waits for a person, or it is refused.">
+	<link rel="canonical" href="https://switchtender.com/docs/policy">
+	<meta property="og:title" content="Approval policies in YAML and Rego | SwitchTender docs">
+	<meta property="og:description" content="An approval policy decides what happens to a run before it executes: it runs, it waits for a person, or it is refused.">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="https://switchtender.com/docs/policy">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
+	<meta name="twitter:card" content="summary_large_image">
+	<meta name="twitter:title" content="Approval policies in YAML and Rego | SwitchTender docs">
+	<meta name="twitter:description" content="An approval policy decides what happens to a run before it executes: it runs, it waits for a person, or it is refused.">
+	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
+	<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "TechArticle",
+ "about": {
+  "@type": "SoftwareApplication",
+  "name": "SwitchTender",
+  "url": "https://switchtender.com/"
+ },
+ "description": "An approval policy decides what happens to a run before it executes: it runs, it waits for a person, or it is refused.",
+ "headline": "Approval policies in YAML and Rego",
+ "isPartOf": {
+  "@type": "WebSite",
+  "name": "SwitchTender docs",
+  "url": "https://switchtender.com/docs/"
+ },
+ "publisher": {
+  "@type": "Organization",
+  "name": "KordLoom LLC",
+  "url": "https://kordloom.com"
+ },
+ "url": "https://switchtender.com/docs/policy"
+}
+</script>
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=2">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/kordloom/switchtender">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy" class="active">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="approval-policies-in-yaml-and-rego">Approval policies in YAML and Rego</h1>
+<p>An approval policy decides what happens to a run before it executes: it runs, it waits for a person,
+or it is refused. Policies live in one file named by <code>--policy-file</code>, held in git, so a change to
+what needs approval is a reviewed diff. <a href="/docs/concepts#policy-as-code">Concepts</a> covers why the file is
+the source of truth and how a change deploys.</p>
+<p>The file holds two kinds of policy. YAML rules match on criteria. Rego policies are written in the
+Open Policy Agent language and decide in code, so an existing OPA or Conftest rule ports without
+being rewritten as criteria. Both are loaded from the same file, reloaded on the same edit, enforced
+at the same points, and recorded in the same evidence.</p>
+<h2 id="yaml-rules">YAML rules</h2>
+<pre><code>policies:
+  - name: prod-terraform-destroy
+    tool: terraform
+    command_contains: destroy
+  - name: large-teardown
+    tool: opentofu
+    max_destroy: 5
+  - name: agents-never-drop-databases
+    actor_kind: agent
+    command_contains: drop database
+    effect: deny
+</code></pre>
+<p>A rule matches on <code>tool</code>, <code>command_contains</code> (ignoring case), <code>inventory_id</code>, <code>queue</code>, <code>actor_kind</code>,
+<code>actor</code>, <code>min_risk</code>, <code>reversibility</code>, and <code>exclude_dry_run</code>. A match holds the run, or refuses it
+with <code>effect: deny</code>. <code>require_distinct_approver</code> makes the release need someone other than the
+requester, and <code>max_destroy</code> plans a Terraform or OpenTofu apply first and holds it only when the
+plan destroys more than that many resources.</p>
+<p>The count is read from the plan file the plan saved, and the apply that follows carries out that
+saved plan, so the plan an approver releases is the plan that runs. If the infrastructure changed
+since the plan was made, the tool refuses the stale plan rather than applying a different one. The
+<a href="/docs/tool-terraform#a-gated-apply-carries-out-the-approved-plan">Terraform page</a> has the details.</p>
+<h3 id="requiring-the-approvers-reason">Requiring the approver's reason</h3>
+<p><code>require_reason</code> makes a decision on a run the rule holds carry the approver's stated reason.
+<code>denials</code> requires one to deny, and <code>always</code> requires one to approve or to deny. Left out, a reason
+is optional.</p>
+<pre><code>policies:
+  - name: prod-terraform-destroy
+    tool: terraform
+    command_contains: destroy
+    require_reason: always
+  - name: hold-everything
+    require_reason: denials
+</code></pre>
+<p>When several rules cover one run, the strictest requirement applies. It is copied onto the run when
+the rule holds it, the way <code>require_distinct_approver</code> is, so editing the rule later cannot loosen a
+decision already waiting. A workflow's approval steps carry the requirement of the rules covering the
+workflow and its steps. A decision without a required reason is refused with the rule named, and
+nothing is recorded. The reason itself is masked, stored, and committed as described in
+<a href="/docs/api#approver-reasons">Approver reasons</a>.</p>
+<h2 id="rego-policies">Rego policies</h2>
+<p>A Rego policy is listed under <code>rego:</code> in the same file. Its modules are read from paths relative to
+the policy file, so the YAML and the Rego it loads change together in one diff.</p>
+<pre><code>policies:
+  - name: prod-terraform-destroy
+    tool: terraform
+    command_contains: destroy
+rego:
+  - name: guardrails
+    files: [rego/guardrails.rego, rego/lib.rego]
+    # package: data.switchtender   # optional, defaults to the first file's package
+    # syntax: v0                   # optional, for modules written before OPA 1.0
+    # warn: note                   # optional, record warnings instead of holding
+    # timeout: 2s                  # optional, 500ms unless set, at most 10s
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>Names the policy in holds, refusals, and the evidence. Unique across the file.</td>
+</tr>
+<tr>
+<td><code>files</code></td>
+<td>One or more modules, relative to the policy file. Helper packages may sit beside the decision package and be imported from it.</td>
+</tr>
+<tr>
+<td><code>package</code></td>
+<td>The package whose rules decide. Defaults to the package the first file declares.</td>
+</tr>
+<tr>
+<td><code>syntax</code></td>
+<td><code>v1</code>, the default, or <code>v0</code> for the <code>deny[msg] { ... }</code> syntax most Conftest policies are written in.</td>
+</tr>
+<tr>
+<td><code>warn</code></td>
+<td>What the package's <code>warn</code> rule does: <code>hold</code>, the default, holds the run for approval, and <code>note</code> records the warning on the run and lets it go ahead. See <a href="#warnings-hold-or-note">Warnings: hold or note</a>.</td>
+</tr>
+<tr>
+<td><code>timeout</code></td>
+<td>How long one evaluation may run, as a duration with a unit such as <code>750ms</code> or <code>2s</code>. <code>500ms</code> unless set, at most <code>10s</code>. See <a href="#evaluation-time-limit">Evaluation time limit</a>.</td>
+</tr>
+<tr>
+<td><code>require_reason</code></td>
+<td><code>denials</code> or <code>always</code>, the same setting a YAML rule takes. It applies to every run this policy holds.</td>
+</tr>
+</tbody>
+</table>
+<p>Editing a module takes effect without a restart, exactly as editing the YAML does.</p>
+<h3 id="what-a-policy-decides">What a policy decides</h3>
+<p>The decision package may define any of these rules. Every other rule in it is a helper.</p>
+<table>
+<thead>
+<tr>
+<th>Rule</th>
+<th>Shape</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>deny</code></td>
+<td>set of messages, or boolean</td>
+<td>Any message refuses the submission. The run is never created.</td>
+</tr>
+<tr>
+<td><code>allow</code></td>
+<td>boolean</td>
+<td>When the package defines it, anything it does not allow is refused.</td>
+</tr>
+<tr>
+<td><code>hold</code></td>
+<td>set of messages, or boolean</td>
+<td>Any message holds the run for approval.</td>
+</tr>
+<tr>
+<td><code>warn</code></td>
+<td>set of messages, or boolean</td>
+<td>Read as <code>hold</code> by default, since a warning asks a person to look and here a person looks by approving. Under <code>warn: note</code> it is recorded on the run instead, and the run goes ahead.</td>
+</tr>
+<tr>
+<td><code>require_distinct_approver</code></td>
+<td>boolean</td>
+<td>Whoever releases the run cannot be whoever asked for it.</td>
+</tr>
+<tr>
+<td><code>plan_gate</code></td>
+<td>boolean</td>
+<td>A Terraform or OpenTofu apply is planned first, and the apply the plan proposes is judged again with <code>input.plan</code> filled in.</td>
+</tr>
+</tbody>
+</table>
+<p>A message is a string, or a Conftest result object, whose <code>msg</code> field is used. A package must define
+at least one of <code>deny</code>, <code>allow</code>, <code>hold</code>, or <code>warn</code>, or it is refused at load.</p>
+<p>The decisions map onto the YAML model one for one. A <code>deny</code> behaves as a rule with <code>effect: deny</code>, a
+<code>hold</code> as a plain rule, <code>require_distinct_approver</code> as the YAML flag of the same name, and <code>plan_gate</code>
+with a hold on <code>input.plan.destroys</code> as <code>max_destroy</code>. Every deny is checked across the whole file
+before any hold, so a refusal in Rego is not satisfied by a hold in YAML, or the reverse.</p>
+<pre><code>package switchtender
+
+import data.lib
+
+deny contains &quot;agents may not touch production&quot; if {
+    input.actor.kind == &quot;agent&quot;
+    lib.prod
+}
+
+hold contains &quot;irreversible change&quot; if input.reversibility.class == &quot;irreversible&quot;
+
+require_distinct_approver if input.reversibility.class == &quot;irreversible&quot;
+
+plan_gate if input.run.tool in {&quot;terraform&quot;, &quot;opentofu&quot;}
+
+hold contains msg if {
+    input.plan.planned
+    input.plan.destroys &gt; 5
+    msg := sprintf(&quot;plan destroys %d&quot;, [input.plan.destroys])
+}
+</code></pre>
+<h3 id="warnings-hold-or-note">Warnings: hold or note</h3>
+<p>A <code>warn</code> rule asks a person to look. By default a warning holds the run for approval, the same as
+<code>hold</code>. A policy that sets <code>warn: note</code> records its warnings instead of waiting on them.</p>
+<table>
+<thead>
+<tr>
+<th><code>warn</code></th>
+<th>What a warning does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>hold</code> (default)</td>
+<td>The run waits for approval. The hold names the policy and the warning.</td>
+</tr>
+<tr>
+<td><code>note</code></td>
+<td>The run goes ahead. The warning is recorded on the run as a note: the run page lists it, the runs list marks the run as noted, the dossier includes it, and the outcome the audit chain commits carries it, so a receipt for the run shows it.</td>
+</tr>
+</tbody>
+</table>
+<p>A note names the policy, its messages, and its bundle the way a hold does, for example
+<code>staging-advice (no change ticket on the run, rego sha256:3f9c0a1b2c4d)</code>. It carries at most ten
+messages and says how many more there were. Before a note or a hold is recorded, values the run's
+variables and script hold under secret-looking names are masked in it, and so is any
+secret-looking assignment it quotes, since a module can build a message from <code>input.run.command</code>.</p>
+<p>The setting covers <code>warn</code> and nothing else.</p>
+<ul>
+<li>A <code>deny</code> rule in the same package still refuses, and a <code>hold</code> rule still holds. A run one of them
+holds still carries the notes, so the approver sees them.</li>
+<li>A policy that cannot decide, because it errors or runs past its timeout, refuses the submission
+under either setting. Deciding nothing is not a warning.</li>
+<li>Setting <code>warn: note</code> on a package with no <code>warn</code> rule is refused at load. It would read as
+softening the rules that are there while changing nothing.</li>
+</ul>
+<p>A dry run whose playbook forces real tasks is judged twice, as <a href="#dry-runs-that-are-not-change-free">described below</a>,
+and a policy that notes records what either pass warned about.</p>
+<h4 id="per-project-staging-notes-production-holds">Per project: staging notes, production holds</h4>
+<p>The setting belongs to a policy entry, so two projects get different treatment from two entries. The
+entries below share one set of checks. One decides only about the staging project and notes, the
+other decides only about production and holds:</p>
+<pre><code>rego:
+  - name: staging-advice
+    files: [rego/staging.rego, rego/checks.rego]
+    warn: note
+  - name: production-advice
+    files: [rego/production.rego, rego/checks.rego]
+</code></pre>
+<p><code>rego/checks.rego</code> writes each check once:</p>
+<pre><code>package checks
+
+findings contains &quot;no change ticket on the run&quot; if not input.run.labels.ticket
+
+findings contains &quot;an agent asked for this run&quot; if input.actor.kind == &quot;agent&quot;
+</code></pre>
+<p><code>rego/staging.rego</code> turns them into warnings for the staging project:</p>
+<pre><code>package staging
+
+import data.checks
+
+warn contains msg if {
+    input.run.project_id == &quot;proj_5d0e1a2b3c4f&quot;
+    some msg in checks.findings
+}
+</code></pre>
+<p><code>rego/production.rego</code> does the same for production, and its entry leaves <code>warn</code> at the default, so
+each warning holds the run:</p>
+<pre><code>package production
+
+import data.checks
+
+warn contains msg if {
+    input.run.project_id == &quot;proj_9a8b7c6d5e4f&quot;
+    some msg in checks.findings
+}
+</code></pre>
+<p>A staging run without a ticket label goes ahead carrying the note <code>staging-advice (no change ticket on the run, ...)</code>. The same run in production waits for approval, held by <code>production-advice</code>. A run in
+any other project is decided by neither entry. <code>GET /v1/projects</code> lists each project's id.</p>
+<p>The same shape scopes a warning to one job instead of a project. A rule reads the playbook the job
+runs, <code>input.run.playbook</code>, or <code>input.run.template_id</code>, which names the template however the run was
+fired, a schedule and a trigger included. <code>input.run.source</code> and <code>input.run.source_id</code> say what fired
+it: the template when it is launched directly and the schedule when a schedule fires it.</p>
+<h4 id="making-a-rule-blocking-or-silent">Making a rule blocking or silent</h4>
+<p>Where a finding lands depends on the rule that emits it and the entry around it:</p>
+<table>
+<thead>
+<tr>
+<th>To make a finding</th>
+<th>Emit it from</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Refuse the submission, so the run is never created</td>
+<td><code>deny</code></td>
+</tr>
+<tr>
+<td>Hold the run until someone approves it</td>
+<td><code>hold</code>, or <code>warn</code> in an entry that leaves <code>warn</code> at <code>hold</code></td>
+</tr>
+<tr>
+<td>Let the run go ahead and keep a record of it</td>
+<td><code>warn</code> in an entry that sets <code>warn: note</code></td>
+</tr>
+<tr>
+<td>Say nothing at all</td>
+<td>none of <code>deny</code>, <code>hold</code>, or <code>warn</code></td>
+</tr>
+</tbody>
+</table>
+<p>To make a finding fully blocking in production, emit it from <code>deny</code> in <code>rego/production.rego</code>. The
+submission is then refused with the finding as the reason, and no approver can release it:</p>
+<pre><code>package production
+
+import data.checks
+
+deny contains msg if {
+    input.run.project_id == &quot;proj_9a8b7c6d5e4f&quot;
+    some msg in checks.findings
+}
+</code></pre>
+<p>To silence one finding for staging, leave it out of the rule that reads the checks. The other finding
+is still noted:</p>
+<pre><code>package staging
+
+import data.checks
+
+warn contains msg if {
+    input.run.project_id == &quot;proj_5d0e1a2b3c4f&quot;
+    some msg in checks.findings
+    msg != &quot;an agent asked for this run&quot;
+}
+</code></pre>
+<p>To silence a whole entry, remove it from the policy file. Emptying its package instead does not
+work: a package that defines none of <code>deny</code>, <code>allow</code>, <code>hold</code>, or <code>warn</code> is refused at load, the same
+as any other policy that would decide nothing.</p>
+<h3 id="the-input-document">The input document</h3>
+<p>Every policy is evaluated against the same document, version 1. Every field is always present, with
+an empty value when the run has none, so a module never meets a missing field.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>version</code></td>
+<td><code>1</code>. It changes only if a field is removed or changes meaning.</td>
+</tr>
+<tr>
+<td><code>run.id</code></td>
+<td>The run's id.</td>
+</tr>
+<tr>
+<td><code>run.tool</code></td>
+<td><code>ansible</code>, <code>bash</code>, <code>terraform</code>, <code>opentofu</code>, <code>python</code>, <code>powershell</code>, or <code>go</code>. Never empty.</td>
+</tr>
+<tr>
+<td><code>run.command</code></td>
+<td>The script, or the working directory for Terraform and OpenTofu.</td>
+</tr>
+<tr>
+<td><code>run.playbook</code></td>
+<td>The Ansible playbook path.</td>
+</tr>
+<tr>
+<td><code>run.inventory.id</code></td>
+<td>The stored inventory the run targets, empty for a path.</td>
+</tr>
+<tr>
+<td><code>run.inventory.path</code></td>
+<td>The inventory path the run targets.</td>
+</tr>
+<tr>
+<td><code>run.limit</code></td>
+<td>The host pattern the run is narrowed to.</td>
+</tr>
+<tr>
+<td><code>run.queue</code></td>
+<td>The worker queue the run is routed to.</td>
+</tr>
+<tr>
+<td><code>run.project_id</code></td>
+<td>The git project the run reads from.</td>
+</tr>
+<tr>
+<td><code>run.dry_run</code></td>
+<td>Whether the run was asked for as a no-change preview: the tool's dry-run flag, <code>--check</code> for Ansible.</td>
+</tr>
+<tr>
+<td><code>run.dry_run_findings</code></td>
+<td>For a dry run, why the gate's scan did not find it change free. For Ansible, each play, block, task, role, or include that sets <code>check_mode</code> to anything but true, naming the file. For Terraform and OpenTofu, each external data source by its address, naming the file and line. For both, whatever the scan could not read. Empty for a dry run read in full that runs nothing, and for any other run.</td>
+</tr>
+<tr>
+<td><code>run.change_free</code></td>
+<td>Whether the run is a dry run that changes nothing: <code>dry_run</code> is true and <code>dry_run_findings</code> is empty.</td>
+</tr>
+<tr>
+<td><code>run.kind</code></td>
+<td>Empty for a plain run, or <code>split</code> or <code>pipeline</code> for a coordinator.</td>
+</tr>
+<tr>
+<td><code>run.step_name</code></td>
+<td>The pipeline step's name, for a step.</td>
+</tr>
+<tr>
+<td><code>run.source</code></td>
+<td>What fired the run: <code>manual</code>, <code>api</code>, <code>template</code>, <code>schedule</code>, <code>rerun</code>, <code>reconcile</code>, or <code>propose</code>.</td>
+</tr>
+<tr>
+<td><code>run.source_id</code></td>
+<td>The template or schedule behind <code>run.source</code>, or the origin run of a rerun.</td>
+</tr>
+<tr>
+<td><code>run.template_id</code></td>
+<td>The job template the run executes, however it was fired: launched directly, by a schedule, by a trigger, or by a callback, and carried to a rerun, a retry, a shard, and a pipeline step. Empty for a run no template launched.</td>
+</tr>
+<tr>
+<td><code>run.proposed_from</code></td>
+<td>The plan run an apply was proposed from, empty otherwise.</td>
+</tr>
+<tr>
+<td><code>run.intent</code></td>
+<td>The plain-language request an AI proposal was built from.</td>
+</tr>
+<tr>
+<td><code>run.image</code></td>
+<td>The container image named on the run.</td>
+</tr>
+<tr>
+<td><code>run.tags</code>, <code>run.skip_tags</code></td>
+<td>The Ansible tags selected and skipped.</td>
+</tr>
+<tr>
+<td><code>run.labels</code></td>
+<td>The run's labels, for example <code>run.labels.env</code>. This is where the environment usually lives.</td>
+</tr>
+<tr>
+<td><code>run.extra_var_names</code></td>
+<td>The names of the extra variables, sorted. Values are withheld, since they are where secrets ride.</td>
+</tr>
+<tr>
+<td><code>run.credential_ids</code></td>
+<td>The stored credentials the run executes with, by id.</td>
+</tr>
+<tr>
+<td><code>actor.name</code></td>
+<td>The token label or username that fired the run. For an agent, its token's label.</td>
+</tr>
+<tr>
+<td><code>actor.type</code></td>
+<td>How it authenticated: <code>agent</code>, <code>session</code>, <code>token</code>, <code>cli</code>, or <code>webhook</code>.</td>
+</tr>
+<tr>
+<td><code>actor.kind</code></td>
+<td><code>agent</code>, <code>human</code>, or <code>other</code> for a webhook, a schedule, or an unknown source.</td>
+</tr>
+<tr>
+<td><code>actor.account</code></td>
+<td>The account behind the credential. For an agent, the person it acts for.</td>
+</tr>
+<tr>
+<td><code>plan.planned</code></td>
+<td>Whether a plan has been read for this apply.</td>
+</tr>
+<tr>
+<td><code>plan.destroys</code></td>
+<td>How many resources the plan destroys, or null when nothing was planned.</td>
+</tr>
+<tr>
+<td><code>risk.level</code></td>
+<td><code>low</code>, <code>medium</code>, or <code>high</code>, the same grade <code>min_risk</code> reads.</td>
+</tr>
+<tr>
+<td><code>risk.reasons</code></td>
+<td>Why the run graded that way.</td>
+</tr>
+<tr>
+<td><code>reversibility.class</code></td>
+<td><code>reversible</code>, <code>costly</code>, or <code>irreversible</code>, the same grade <code>reversibility</code> reads, including what a playbook's content shows.</td>
+</tr>
+<tr>
+<td><code>reversibility.reasons</code></td>
+<td>Why the run graded that way.</td>
+</tr>
+<tr>
+<td><code>time.submitted_at</code></td>
+<td>When the run was submitted, RFC 3339 in UTC.</td>
+</tr>
+<tr>
+<td><code>time.submitted_at_ns</code></td>
+<td>The same instant in Unix nanoseconds, for <code>time.*</code> builtins.</td>
+</tr>
+</tbody>
+</table>
+<p>A reference to a field outside this document, such as <code>input.run.toool</code>, is refused at load. In
+Rego a missing field is undefined and an undefined rule never fires, so the typo would otherwise load
+cleanly and refuse nothing. The check covers references spelled from <code>input</code>. A module that copies
+<code>input</code> into a variable is checked only as far as the copy.</p>
+<p>A policy that reads <code>input.plan</code> must define <code>plan_gate</code>, or it is refused at load, since without
+it no apply is planned and the count it reads would never exist.</p>
+<h3 id="failing-closed">Failing closed</h3>
+<p>A Rego policy that cannot decide is a refusal, never a pass, the same rule the YAML engine follows
+for a policy set it cannot read.</p>
+<table>
+<thead>
+<tr>
+<th>When</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A module does not parse or compile</td>
+<td>The file does not load. A server refuses to start, and a running one refuses every submission until the file is fixed.</td>
+</tr>
+<tr>
+<td>A module calls a disabled builtin</td>
+<td>The same, since a call to an undefined function does not compile.</td>
+</tr>
+<tr>
+<td>A reference names a field the input lacks</td>
+<td>The same.</td>
+</tr>
+<tr>
+<td>Evaluation errors, including a builtin error, which evaluation surfaces rather than hides</td>
+<td>The submission is refused, naming the policy, the error, and the bundle.</td>
+</tr>
+<tr>
+<td>Evaluation runs past the policy's <code>timeout</code>, 500 milliseconds unless it sets one</td>
+<td>The same, naming the limit.</td>
+</tr>
+<tr>
+<td>A decision rule has the wrong shape, such as <code>deny := 5</code></td>
+<td>The same.</td>
+</tr>
+<tr>
+<td><code>allow</code> is defined and does not evaluate to true</td>
+<td>The submission is refused as not allowed.</td>
+</tr>
+</tbody>
+</table>
+<p>A policy that cannot decide also demands a distinct approver and plans any apply, so no question the
+dispatcher asks it is answered in the permissive direction.</p>
+<h3 id="evaluation-time-limit">Evaluation time limit</h3>
+<p>Each evaluation of a Rego policy has a time limit, 500 milliseconds unless the policy's entry sets
+<code>timeout</code>:</p>
+<pre><code>rego:
+  - name: inventory-checks
+    files: [rego/inventory.rego]
+    timeout: 2s
+</code></pre>
+<p>The value is a duration with a unit, such as <code>750ms</code>, <code>2s</code>, or <code>1.5s</code>, and may be at most <code>10s</code>. A
+value over <code>10s</code>, a value of zero or less, and a number without a unit are refused at load, the
+same as a module that does not compile. A bare <code>500</code> is refused rather than guessed at, since it
+could mean milliseconds or seconds.</p>
+<p>A policy that runs past its limit has not decided, so the submission is refused, and the refusal
+names the policy, the limit, and the bundle:</p>
+<pre><code>inventory-checks (rego policy: evaluation exceeded its 2s timeout, which the policy's timeout setting can raise to at most 10s, rego sha256:3f9c0a1b2c4d)
+</code></pre>
+<p>The limit applies to each evaluation, and one submission can evaluate a policy several times. The
+gate asks it separately whether to refuse, whether to hold, what to note, whether a second approver
+is needed, and whether to plan an apply first, and a dry run whose playbook forces real tasks is
+evaluated twice for each. A person is waiting on every one of them, so a policy that needs more than
+the default is worth making cheaper before its limit is raised.</p>
+<p>Changing <code>timeout</code> changes which evaluations refuse, so it changes the rule set digest every later
+run records, and a timeout other than the default is named in the rule's description in the
+evidence.</p>
+<h3 id="offline-and-deterministic">Offline and deterministic</h3>
+<p>Evaluation never leaves the process. Every builtin OPA marks nondeterministic is removed, and so is
+anything that reaches outside the input: <code>http.send</code>, <code>net.lookup_ip_addr</code>, <code>opa.runtime</code>,
+<code>time.now_ns</code>, <code>rand.intn</code>, <code>uuid.rfc4122</code>, <code>io.jwt.decode_verify</code>, the certificate chain
+verifiers, <code>providers.aws.sign_req</code>, and <code>trace</code>. The network allow list is empty. Pure builtins,
+including <code>net.cidr_contains</code> and the rest of the <code>net.cidr_*</code> family, stay available. A module that
+needs the time reads <code>input.time</code>, so the same run gives the same answer on every evaluation and on
+every server.</p>
+<h3 id="evidence">Evidence</h3>
+<p>Each Rego policy is identified by a bundle digest: the SHA-256 over its package, its syntax, and
+every module's path and text. The digest is in four places.</p>
+<ul>
+<li>A held run records the policy, its reasons, and the first twelve characters of the digest, for
+example <code>guardrails (irreversible change, rego sha256:3f9c0a1b2c4d)</code>.</li>
+<li>A run a policy noted records each note, named the same way, in <code>policy_notes</code>. The notes are
+part of the run's outcome entry in the audit chain, so a receipt for the run carries them and
+<code>switchtender verify</code> prints each one as a policy note.</li>
+<li>A refused submission names the same in its error, and the audit chain records the refusal as a
+decision entry by <code>system:policy</code> on behalf of whoever asked, at
+<code>/runs/&lt;id&gt;/decision/refused/rego/sha256:&lt;64 hex&gt;/policy/&lt;name&gt;</code>. The run is never created, so this
+entry is what shows afterward which bundle turned the submission away. A refusal by a YAML deny
+rule is recorded the same way, at <code>/runs/&lt;id&gt;/decision/refused/policy/&lt;name&gt;</code>.</li>
+<li>Every run records the rule set in force at submission, and a Rego policy appears in it as
+<code>guardrails: decided by Rego package data.switchtender, bundle sha256:&lt;64 hex&gt;</code>. That record is
+part of the run's outcome entry in the audit chain, so a receipt for the run proves which exact
+bundle was in force, and an auditor can check out the commit, hash the modules, and compare. A
+policy that sets <code>warn: note</code>, or a <code>timeout</code> other than the default, is described with the
+setting after the digest, for example <code>staging-advice: decided by Rego package data.staging, bundle sha256:&lt;64 hex&gt;, warnings noted without holding, timeout 2s</code>.</li>
+</ul>
+<p>Any edit to a module changes the digest, and so changes the rule set digest every later run carries.
+Changing <code>warn</code> or <code>timeout</code> leaves the bundle digest as it is, since no module changed, and changes
+the rule set digest, since the same bundle now does something different to a run. Renaming the
+policy changes neither.</p>
+<h3 id="workers">Workers</h3>
+<p>A relay worker reads the control node's policies, Rego bundles included, and compiles each one
+again on arrival, refusing one whose modules do not produce the digest they arrived under. A worker
+that cannot compile a bundle fails closed exactly as one that cannot reach the control node does.
+Each bundle arrives with its <code>warn</code> and <code>timeout</code> settings, and a setting the worker cannot honor
+fails the same way, so the worker's copy of a policy decides exactly as the control node's does.</p>
+<h3 id="license">License</h3>
+<p>A Rego policy is part of the full policy engine, which Team covers, the same tier as deny rules,
+risk floors, actor scoping, and separation of duties. A Community or Pro install whose policy file
+lists a Rego policy refuses to load it and names the policy and the tier, the same refusal it gives
+a deny rule. A lapsed Team license keeps serving the policies it was serving. Each Rego policy counts
+as one policy toward a tier's policy count.</p>
+<p>Rego policies are read only from the policy file. The API does not create them, and a backup
+carrying one is refused at restore.</p>
+<h3 id="dry-runs-that-are-not-change-free">Dry runs that are not change free</h3>
+<p>A dry run is a promise about the tool, not about what it is given. An Ansible dry run is
+<code>ansible-playbook --check</code>, and a playbook can set <code>check_mode: false</code> on a play, block, task, role,
+or include to run that work for real anyway. A Terraform or OpenTofu dry run is <code>plan</code>, and a plan
+runs the program every <code>external</code> data source names, with the run's credentials. The gate reads the
+playbook, or the configuration and every module it calls, before it judges a dry run, and records
+what it found in <code>run.dry_run_findings</code>: each forcing task by its file, each external data source by
+its address, file, and line. Anything it could not read is recorded there too, since it could run
+work for real as well: a role that is not in the project, a registry module the gate could not
+download, a module source only known at run time, or a file that does not parse.</p>
+<p>A dry run with anything in <code>run.dry_run_findings</code> is evaluated twice: once with the input as it
+is, and once as the real run it may be, with <code>run.dry_run</code> false. The stricter answer stands:
+every deny, every hold, a demand for a distinct approver, and a plan gate from either pass. A
+module that exempts previews by reading <code>run.dry_run</code>, the way a YAML rule sets <code>exclude_dry_run</code>,
+therefore holds such a dry run exactly where the YAML rule does, and lets a change-free dry run
+through exactly where the YAML rule does. A module that wants to say so directly reads
+<code>run.change_free</code>:</p>
+<pre><code>hold contains &quot;a change in production waits for a person&quot; if {
+    input.run.labels.env == &quot;prod&quot;
+    not input.run.change_free
+}
+</code></pre>
+<p>When the scan is the only reason a rule holds a dry run, the run carries a hold note naming what
+was found and the two clean fixes: rework it so the dry run is safe, or drop the exemption from the
+rule. <a href="/docs/concepts#dry-runs-and-exclude-dry-run">Dry runs and <code>exclude_dry_run</code></a> walks through the
+common cases.</p>
+<h3 id="testing-a-policy-locally">Testing a policy locally</h3>
+<p>The input is plain JSON, so OPA's own tools test a module before it is merged. Save a sample run as
+<code>input.json</code>:</p>
+<pre><code>{
+  &quot;version&quot;: 1,
+  &quot;run&quot;: {
+    &quot;id&quot;: &quot;run_sample&quot;, &quot;tool&quot;: &quot;terraform&quot;, &quot;command&quot;: &quot;infra/prod&quot;, &quot;playbook&quot;: &quot;&quot;,
+    &quot;inventory&quot;: {&quot;id&quot;: &quot;&quot;, &quot;path&quot;: &quot;&quot;}, &quot;limit&quot;: &quot;&quot;, &quot;queue&quot;: &quot;prod&quot;, &quot;project_id&quot;: &quot;&quot;,
+    &quot;dry_run&quot;: false, &quot;dry_run_findings&quot;: [], &quot;change_free&quot;: false, &quot;kind&quot;: &quot;&quot;,
+    &quot;step_name&quot;: &quot;&quot;, &quot;source&quot;: &quot;api&quot;, &quot;source_id&quot;: &quot;&quot;, &quot;template_id&quot;: &quot;&quot;,
+    &quot;proposed_from&quot;: &quot;&quot;, &quot;intent&quot;: &quot;&quot;, &quot;image&quot;: &quot;&quot;, &quot;tags&quot;: [], &quot;skip_tags&quot;: [],
+    &quot;labels&quot;: {&quot;env&quot;: &quot;prod&quot;}, &quot;extra_var_names&quot;: [], &quot;credential_ids&quot;: []
+  },
+  &quot;actor&quot;: {&quot;name&quot;: &quot;deploy-bot&quot;, &quot;type&quot;: &quot;agent&quot;, &quot;kind&quot;: &quot;agent&quot;, &quot;account&quot;: &quot;usr_1&quot;},
+  &quot;plan&quot;: {&quot;planned&quot;: false, &quot;destroys&quot;: null},
+  &quot;risk&quot;: {&quot;level&quot;: &quot;high&quot;, &quot;reasons&quot;: []},
+  &quot;reversibility&quot;: {&quot;class&quot;: &quot;costly&quot;, &quot;reasons&quot;: []},
+  &quot;time&quot;: {&quot;submitted_at&quot;: &quot;2026-10-01T12:00:00Z&quot;, &quot;submitted_at_ns&quot;: 1790856000000000000}
+}
+</code></pre>
+<p>Then evaluate the decision package:</p>
+<pre><code>opa eval --format pretty -d rego/ -i input.json data.switchtender
+</code></pre>
+<p>Conftest runs the same modules with <code>conftest test --namespace switchtender -p rego/ input.json</code>,
+reading <code>deny</code> and <code>warn</code>. The answer <code>opa eval</code> gives is the answer the server gives, with one
+difference to keep in mind: the server refuses a module that calls a disabled builtin or reads a
+field outside the document, and <code>opa eval</code> checks neither.</p>
+<h2 id="moving-from-sentinel">Moving from Sentinel</h2>
+<p>Sentinel is a proprietary language with no open implementation, so a Sentinel policy cannot be
+loaded. Its rules translate directly into Rego. A Terraform Cloud policy that refuses applies
+destroying more than five resources outside a change window:</p>
+<pre><code>import &quot;tfplan/v2&quot; as tfplan
+import &quot;time&quot;
+
+destroys = filter tfplan.resource_changes as _, rc {
+    rc.change.actions contains &quot;delete&quot;
+}
+
+in_window = time.now.weekday_name in [&quot;Saturday&quot;, &quot;Sunday&quot;]
+
+main = rule {
+    length(destroys) &lt;= 5 or in_window
+}
+</code></pre>
+<p>becomes:</p>
+<pre><code>package switchtender
+
+plan_gate if input.run.tool in {&quot;terraform&quot;, &quot;opentofu&quot;}
+
+weekend if {
+    day := time.weekday(time.parse_rfc3339_ns(input.time.submitted_at))
+    day in {&quot;Saturday&quot;, &quot;Sunday&quot;}
+}
+
+deny contains msg if {
+    input.plan.planned
+    input.plan.destroys &gt; 5
+    not weekend
+    msg := sprintf(&quot;plan destroys %d outside the weekend window&quot;, [input.plan.destroys])
+}
+</code></pre>
+<p>Two differences matter. Sentinel reads the clock, and Rego here reads the submission time from the
+input, so the answer does not change between evaluations. And Sentinel walks the full plan, while
+the input carries the plan's destroy count, which is what a destroy threshold reads. A rule that
+needs individual resource changes from the plan is a case for <code>hold</code>, so a person reads the plan,
+until the input carries more of it.</p>
+
+		</main>
+	</div>
+	<div class="foot-legal" style="text-align:center;margin:26px auto 34px;font-size:12px;opacity:.75">SwitchTender&trade; is a trademark of KordLoom LLC. Copyright 2026 KordLoom LLC.</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

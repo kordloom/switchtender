@@ -36,9 +36,21 @@ var safeClient = &http.Client{
 // server-side request forgery target that can hand back instance credentials. A workload-identity
 // fetch is the opposite: the endpoint is a fixed address SwitchTender hardcodes, never one config
 // chooses, so reaching it is the intent. Use this client only with those hardcoded endpoints.
+//
+// It never goes through a proxy. The endpoint answers on this host's own link-local network, which a
+// proxy elsewhere cannot reach, and a proxy that could answer in its place would hand back a token of
+// its choosing.
 var metadataClient = &http.Client{
 	Timeout:       30 * time.Second,
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	Transport:     unproxiedTransport(),
+}
+
+// unproxiedTransport returns the default transport with no proxy at all, ambient or configured.
+func unproxiedTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.Proxy = nil
+	return t
 }
 
 // safeClientWithTLS returns an HTTP client that keeps the SSRF dial guard and redirect refusal of the
@@ -62,11 +74,16 @@ func safeClientWithTLS(cert *tls.Certificate, roots *x509.CertPool) *http.Client
 	}
 }
 
-// safeTransport clones the default transport and installs a dialer that rejects a connection whose
-// resolved address is link-local or unspecified, so a hostname that resolves to the cloud metadata
-// service cannot slip past the name check.
+// safeTransport starts from safedial's transport and installs a dialer that rejects a connection
+// whose resolved address is link-local or unspecified, so a hostname that resolves to the cloud
+// metadata service cannot slip past the name check.
+//
+// Starting from safedial rather than the default transport is what keeps the ambient HTTP(S)_PROXY
+// out: the default transport sends every request to that proxy, so the dial check would only ever see
+// the proxy's address and a source whose name resolves to the metadata address would be fetched by
+// the proxy. The egress proxy an operator configures is used instead, after the target is checked.
 func safeTransport() *http.Transport {
-	t := http.DefaultTransport.(*http.Transport).Clone()
+	t := safedial.Transport()
 	t.DialContext = (&net.Dialer{
 		Timeout:   30 * time.Second,
 		KeepAlive: 30 * time.Second,

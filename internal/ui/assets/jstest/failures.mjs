@@ -34,6 +34,8 @@ export const PLACEHOLDER_PAGES = [
 		vars: { Host: "web01" } },
 	{ page: "inventories", text: "Loading inventories.", load: (app) => app.loadInventories() },
 	{ page: "jobtemplates", text: "Loading templates.", load: (app) => app.loadTemplates() },
+	{ page: "notifications", text: "Loading notification targets.",
+		load: (app) => app.loadNotifications() },
 	{ page: "overview", text: "Loading overview.", load: (app) => app.loadOverview() },
 	{ page: "policies", text: "Loading policies.", load: (app) => app.loadPolicies() },
 	{ page: "projects", text: "Loading projects.", load: (app) => app.loadProjects() },

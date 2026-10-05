@@ -52,9 +52,16 @@ type Governance struct {
 	// Unread is how many templates run a playbook whose text this assessment could not read,
 	// because it lives in a repository nothing has fetched yet. Their grades are a floor.
 	Unread int
-	// ApprovalGates names the workflows that wait for a person at an approval node today. None of
-	// them comes across, because approval here is a policy rather than a step.
+	// ApprovalGates names the workflows that wait for a person at an approval node today in a shape
+	// that does not come across, so the import refuses them rather than run them with no gate.
 	ApprovalGates []string
+	// CarriedGates names the workflows whose approval nodes come across as approval steps, so the
+	// workflow still stops there until a person decides.
+	CarriedGates []string
+	// Composed names the smart and constructed inventories that come across. Each is resolved at
+	// every launch and the run records the hosts it reached, which AWX does not keep: a job there
+	// names the inventory and not the machines a filter selected on the day.
+	Composed []string
 }
 
 // CredentialUse is one credential and how many templates materialize it.
@@ -70,7 +77,8 @@ type CredentialUse struct {
 // Assess grades a plan for what it holds and what governing it would change.
 func (p *Plan) Assess() Assessment {
 	a := Assessment{Report: p.Report()}
-	g := Governance{Templates: len(p.Templates), ApprovalGates: slices.Clone(p.gates)}
+	g := Governance{Templates: len(p.Templates), ApprovalGates: slices.Clone(p.gates),
+		CarriedGates: slices.Clone(p.carriedGates)}
 
 	credUse := map[string]int{}
 	for _, t := range p.Templates {
@@ -100,6 +108,12 @@ func (p *Plan) Assess() Assessment {
 		}
 	}
 
+	for _, inv := range p.Inventories {
+		if inv.Composed() {
+			g.Composed = append(g.Composed, p.composedLabel(inv))
+		}
+	}
+
 	for id, n := range credUse {
 		if n > 1 {
 			g.SharedCredentials = append(g.SharedCredentials, CredentialUse{
@@ -114,7 +128,7 @@ func (p *Plan) Assess() Assessment {
 		return g.SharedCredentials[i].ID < g.SharedCredentials[j].ID
 	})
 	for _, list := range []*[]string{&g.Irreversible, &g.Costly, &g.HighRisk, &g.NoInventory,
-		&g.ApprovalGates} {
+		&g.ApprovalGates, &g.CarriedGates, &g.Composed} {
 		sort.Strings(*list)
 	}
 	a.Governance = g

@@ -103,6 +103,14 @@ license: ""
 # With existingSecret, put the same value under a SWITCHTENDER_AUDIT_KEY key in that secret.
 auditKey: ""
 
+runFiles:
+  # sizeLimit caps the memory-backed volume each server and worker pod stages run files in: the
+  # keys, tokens, and secret answers a run writes to disk, and the facts a run's fact cache reads.
+  # Keeping them in memory keeps them off the node's disk, where the container's writable layer
+  # would otherwise put them. The volume is memory, so what it holds counts against the pod's memory
+  # limit; raise this for runs that cache facts for thousands of hosts.
+  sizeLimit: 256Mi
+
 service:
   type: ClusterIP
   port: 8080

@@ -43,11 +43,12 @@ func TestTheRelayMountAnnouncesThroughTheServer(t *testing.T) {
 		defer mu.Unlock()
 		said = append(said, r.ID)
 	})
+	sealer := planSealerFunc(func(plan []byte) (string, error) { return "sealed:" + string(plan), nil })
 	handler := New(store, &fakeSubmitter{}, zap.NewNop(), WithRelay(store, "worker-token"),
-		WithPolicies(rules), WithAnnouncer(announcer)).Handler()
+		WithPolicies(rules), WithAnnouncer(announcer), WithPlanSealer(sealer)).Handler()
 
 	req := httptest.NewRequest(http.MethodPost, "/relay/v1/runs/run_plan/propose-apply",
-		strings.NewReader(`{"destroys":3,"read":true}`))
+		strings.NewReader(`{"destroys":3,"read":true,"plan_file":"cGxhbg=="}`))
 	req.Header.Set("Authorization", "Bearer worker-token")
 	req.Header.Set("X-Switchtender-Lease", "capability-for-run_plan")
 	rec := httptest.NewRecorder()
@@ -61,3 +62,9 @@ func TestTheRelayMountAnnouncesThroughTheServer(t *testing.T) {
 		t.Fatalf("the server's relay announced %d runs, want the held apply once: %v", len(said), said)
 	}
 }
+
+// planSealerFunc adapts a function to a relay plan sealer.
+type planSealerFunc func(plan []byte) (string, error)
+
+// SealPlanFile calls f.
+func (f planSealerFunc) SealPlanFile(plan []byte) (string, error) { return f(plan) }

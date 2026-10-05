@@ -9,6 +9,8 @@ change with `go-licenses csv ./...` from the repository root.
 
 ## Apache License 2.0
 
+- github.com/agext/levenshtein (its NOTICE: "This product includes software developed at ALRUX
+  Inc. (http://www.alrux.com/).")
 - github.com/coreos/go-oidc/v3
 - github.com/kordloom/loomseal
 - github.com/go-git/go-billy/v5
@@ -18,21 +20,30 @@ change with `go-licenses csv ./...` from the repository root.
 - github.com/jonboulle/clockwork
 - github.com/mattermost/xml-roundtrip-validator
 - github.com/oklog/run
+- github.com/open-policy-agent/opa
 - github.com/pjbgf/sha1cd
 - github.com/russellhaering/goxmldsig
 - github.com/skeema/knownhosts
 - github.com/spf13/cobra
 - github.com/xanzy/ssh-agent
+- github.com/xeipuuv/gojsonpointer
+- github.com/xeipuuv/gojsonreference
+- github.com/yashtewari/glob-intersection
 - google.golang.org/genproto
 - google.golang.org/grpc
 
 ## MIT License
 
 - github.com/Azure/go-ntlmssp
+- github.com/agnivade/levenshtein
+- github.com/apparentlymart/go-textseg/v15 (its grapheme break tables are Unicode data, under the
+  Unicode data files license reproduced in its LICENSE)
+- github.com/cespare/xxhash/v2
 - github.com/dustin/go-humanize
 - github.com/fatih/color
 - github.com/go-asn1-ber/asn1-ber
 - github.com/go-ldap/ldap/v3
+- github.com/gobwas/glob
 - github.com/golang-jwt/jwt/v4
 - github.com/hashicorp/go-hclog
 - github.com/jackc/pgpassfile
@@ -42,14 +53,28 @@ change with `go-licenses csv ./...` from the repository root.
 - github.com/jbenet/go-context
 - github.com/kevinburke/ssh_config
 - github.com/klauspost/cpuid/v2
+- github.com/lestrrat-go/blackmagic
+- github.com/lestrrat-go/dsig
+- github.com/lestrrat-go/httpcc
+- github.com/lestrrat-go/httprc/v3
+- github.com/lestrrat-go/jwx/v3
+- github.com/lestrrat-go/option/v2
 - github.com/mattn/go-colorable
 - github.com/mattn/go-isatty
+- github.com/mitchellh/go-wordwrap
 - github.com/ncruces/go-strftime
 - github.com/robfig/cron/v3
 - github.com/sergi/go-diff
+- github.com/sirupsen/logrus
+- github.com/tchap/go-patricia/v2
+- github.com/teambition/rrule-go
+- github.com/valyala/fastjson
+- github.com/vektah/gqlparser/v2
 - github.com/yuin/goldmark
+- github.com/zclconf/go-cty
 - go.uber.org/multierr
 - go.uber.org/zap
+- go.yaml.in/yaml/v3 (MIT and Apache 2.0, as gopkg.in/yaml.v3)
 - gopkg.in/yaml.v3
 
 ## BSD 2-Clause License
@@ -57,6 +82,7 @@ change with `go-licenses csv ./...` from the repository root.
 - github.com/beevik/etree
 - github.com/crewjam/saml
 - github.com/emirpasic/gods
+- github.com/rcrowley/go-metrics
 - gopkg.in/warnings.v0
 
 ## BSD 3-Clause License
@@ -92,4 +118,6 @@ from the URLs in their module paths.
 
 - github.com/cyphar/filepath-securejoin
 - github.com/hashicorp/go-plugin
+- github.com/hashicorp/go-version
+- github.com/hashicorp/hcl/v2
 - github.com/hashicorp/yamux

@@ -2,6 +2,7 @@ package credential
 
 import (
 	"context"
+	"maps"
 	"sort"
 	"sync"
 
@@ -49,6 +50,9 @@ func cloneType(t *CredentialType) *CredentialType {
 		for k, v := range t.ExtraVarInjectors {
 			cp.ExtraVarInjectors[k] = v
 		}
+	}
+	if t.FileInjectors != nil {
+		cp.FileInjectors = maps.Clone(t.FileInjectors)
 	}
 	return &cp
 }

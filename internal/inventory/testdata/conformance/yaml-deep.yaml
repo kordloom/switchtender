@@ -1,0 +1,22 @@
+all:
+  vars: {level: 0, only_all: true}
+  children:
+    l1:
+      vars: {level: 1}
+      children:
+        l2:
+          vars: {level: 2, ansible_group_priority: "5"}
+          children:
+            l3:
+              vars: {level: 3}
+              children:
+                l4:
+                  vars: {level: 4}
+                  hosts:
+                    deep1:
+            other:
+              hosts:
+                deep1: {own: 1}
+    ungrouped:
+      hosts:
+        loner:

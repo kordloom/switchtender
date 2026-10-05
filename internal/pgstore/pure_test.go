@@ -106,30 +106,35 @@ func TestEverySelectListConstantIsChecked(t *testing.T) {
 	t.Parallel()
 	// The constants declared in the package, paired with the table each one reads.
 	all := map[string]string{
-		"runColumns":         "runs",
-		"hostSummaryColumns": "run_host_summary",
-		"credentialColumns":  "credentials",
-		"grantColumns":       "grants",
-		"credTypeColumns":    "credential_types",
-		"inventoryColumns":   "inventories",
-		"invSourceColumns":   "inventory_sources",
-		"projectColumns":     "projects",
-		"policyColumns":      "policies",
-		"scheduleColumns":    "schedules",
-		"templateColumns":    "templates",
-		"tokenColumns":       "tokens",
-		"triggerColumns":     "triggers",
-		"userColumns":        "users",
+		"attachmentColumns":   "notification_attachments",
+		"credTypeColumns":     "credential_types",
+		"credentialColumns":   "credentials",
+		"fedKeyColumns":       "federation_keys",
+		"grantColumns":        "grants",
+		"hostSummaryColumns":  "run_host_summary",
+		"invSourceColumns":    "inventory_sources",
+		"inventoryColumns":    "inventories",
+		"notificationColumns": "notification_targets",
+		"policyColumns":       "policies",
+		"projectColumns":      "projects",
+		"runColumns":          "runs",
+		"scheduleColumns":     "schedules",
+		"templateColumns":     "templates",
+		"tokenColumns":        "tokens",
+		"triggerColumns":      "triggers",
+		"userColumns":         "users",
 	}
 	parsed := sqlutil.ParseSchemaColumns(schema)
 	values := map[string]string{
 		"runColumns": runColumns, "hostSummaryColumns": hostSummaryColumns,
 		"credentialColumns": credentialColumns, "grantColumns": grantColumns,
 		"credTypeColumns": credTypeColumns, "inventoryColumns": inventoryColumns,
+		"fedKeyColumns":    fedKeyColumns,
 		"invSourceColumns": invSourceColumns, "projectColumns": projectColumns,
 		"policyColumns": policyColumns, "scheduleColumns": scheduleColumns,
 		"templateColumns": templateColumns, "tokenColumns": tokenColumns,
 		"triggerColumns": triggerColumns, "userColumns": userColumns,
+		"notificationColumns": notificationColumns, "attachmentColumns": attachmentColumns,
 	}
 	names := make([]string, 0, len(all))
 	for name := range all {
@@ -421,8 +426,8 @@ func TestNonNilMapNeverMarshalsNull(t *testing.T) {
 	}
 }
 
-// TestMarshalTypeEncodesEveryColumnAsJSON pins that a credential type's three JSON columns always
-// hold decodable JSON, including when every field is nil. scanCredType unmarshals all three with no
+// TestMarshalTypeEncodesEveryColumnAsJSON pins that a credential type's four JSON columns always
+// hold decodable JSON, including when every field is nil. scanCredType unmarshals all four with no
 // tolerance for an empty string, so a marshal that produced one would make the type unreadable.
 func TestMarshalTypeEncodesEveryColumnAsJSON(t *testing.T) {
 	t.Parallel()
@@ -430,18 +435,20 @@ func TestMarshalTypeEncodesEveryColumnAsJSON(t *testing.T) {
 		In        *credential.CredentialType
 		WantEnv   string
 		WantExtra string
+		WantFiles string
 	}{{ // Test 0: A wholly empty type still encodes objects, never empty strings or null.
-		In: &credential.CredentialType{}, WantEnv: "{}", WantExtra: "{}",
+		In: &credential.CredentialType{}, WantEnv: "{}", WantExtra: "{}", WantFiles: "{}",
 	}, { // Test 1: Populated injectors survive verbatim.
 		In: &credential.CredentialType{
 			EnvInjectors:      map[string]string{"A": "1"},
 			ExtraVarInjectors: map[string]string{"b": "2"},
-		}, WantEnv: `{"A":"1"}`, WantExtra: `{"b":"2"}`,
+			FileInjectors:     map[string]string{"template": "{{c}}"},
+		}, WantEnv: `{"A":"1"}`, WantExtra: `{"b":"2"}`, WantFiles: `{"template":"{{c}}"}`,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			fields, env, extra, err := marshalType(test.In)
+			fields, env, extra, files, err := marshalType(test.In)
 			if err != nil {
 				t.Fatalf("marshalType error = %v", err)
 			}
@@ -453,6 +460,9 @@ func TestMarshalTypeEncodesEveryColumnAsJSON(t *testing.T) {
 			}
 			if diff := cmp.Diff(test.WantExtra, extra); diff != "" {
 				t.Errorf("extra vars mismatch (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff(test.WantFiles, files); diff != "" {
+				t.Errorf("files mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}

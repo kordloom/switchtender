@@ -43,7 +43,8 @@ func (d *Dispatcher) notifyEmail(r *run.Run) {
 	if d.emailer == nil {
 		return
 	}
-	if d.emailOnFailureOnly && r.Status != run.StatusFailed {
+	// An attention alert reports a problem, so it is emailed under either setting.
+	if d.emailOnFailureOnly && r.Status != run.StatusFailed && r.Attention == nil {
 		return
 	}
 	subject := emailSubject(r)
@@ -62,8 +63,20 @@ func (d *Dispatcher) notifyEmail(r *run.Run) {
 // emailSubject is the subject line of a run's email, shared by the server-wide recipients and a
 // run's own email targets so the two cannot disagree.
 func emailSubject(r *run.Run) string {
+	if isSkip(r) {
+		return "SwitchTender schedule " + skipSchedule(r) + " " + skipHeadline(r)
+	}
+	if r.Attention != nil {
+		return "SwitchTender alert: run " + r.ID + " needs attention"
+	}
+	if r.Status == run.StatusPendingApproval && r.AwaitingStep != nil {
+		return "SwitchTender workflow " + r.ID + " is waiting at approval step " + r.AwaitingStep.Name
+	}
 	if r.Status == run.StatusPendingApproval {
 		return "SwitchTender run " + r.ID + " is waiting for approval"
+	}
+	if r.Status == run.StatusRunning {
+		return "SwitchTender run " + r.ID + " started"
 	}
 	return fmt.Sprintf("SwitchTender run %s %s", r.ID, r.Status)
 }
@@ -72,17 +85,41 @@ func emailSubject(r *run.Run) string {
 // for and how to decide on it.
 func emailBody(r *run.Run) string {
 	var b strings.Builder
+	if isSkip(r) {
+		return skipEmailBody(r)
+	}
+	if r.Attention != nil {
+		writeAttentionEmail(&b, r)
+		return b.String()
+	}
+	if r.Status == run.StatusPendingApproval && r.AwaitingStep != nil {
+		writeStepEmail(&b, r)
+		return b.String()
+	}
 	if r.Status == run.StatusPendingApproval {
 		fmt.Fprintf(&b, "Run %s is waiting for approval.\n\n", r.ID)
 		fmt.Fprintf(&b, "Run: %s\n", runLabel(r))
 		if r.HeldByPolicy != "" {
 			fmt.Fprintf(&b, "Held by: %s\n", r.HeldByPolicy)
 		}
+		if findings := r.DryRunFindings(); len(findings) > 0 {
+			b.WriteString("Not a preview. What the gate's scan found it may run for real:\n")
+			for _, why := range findings {
+				fmt.Fprintf(&b, "  - %s\n", why)
+			}
+		}
+		if r.HoldNote != "" {
+			fmt.Fprintf(&b, "%s\n", r.HoldNote)
+		}
 		if r.Actor != "" {
 			fmt.Fprintf(&b, "Requested by: %s\n", r.Actor)
 		}
 		fmt.Fprintf(&b, "\nDecide on it from the run's page, or with POST /v1/runs/%s/approve or "+
 			"POST /v1/runs/%s/reject under an admin token.\n", r.ID, r.ID)
+		return b.String()
+	}
+	if r.Status == run.StatusRunning {
+		fmt.Fprintf(&b, "Run %s started.\n\nRun: %s\n", r.ID, runLabel(r))
 		return b.String()
 	}
 	fmt.Fprintf(&b, "Run %s finished with status %s.\n\n", r.ID, r.Status)

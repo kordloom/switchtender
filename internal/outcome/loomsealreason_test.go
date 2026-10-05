@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/loomsealtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/receipt"
 	"github.com/kordloom/switchtender/internal/run"
@@ -123,6 +124,9 @@ func verifyWithLoomSeal(t *testing.T, repo string, signed []byte) loomsealReport
 	if err := json.Unmarshal(out, &rep); err != nil {
 		t.Fatalf("loomseal report is not JSON: %v\n%s", err, out)
 	}
+	// The format has two independent implementations, and this product's output has to satisfy the
+	// format, not one implementation of it, so the reference verifier reads the same bytes.
+	loomsealtest.RequireReferenceAgreement(t, repo, path, out)
 	return rep
 }
 

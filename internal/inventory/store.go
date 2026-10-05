@@ -19,13 +19,19 @@ func NewMemStore() Store {
 	return &memStore{inventories: make(map[string]*Inventory)}
 }
 
+// clone deep copies an inventory so callers cannot mutate stored state.
+func clone(i *Inventory) *Inventory {
+	cp := *i
+	cp.CredentialIDs = append([]string(nil), i.CredentialIDs...)
+	cp.InputIDs = append([]string(nil), i.InputIDs...)
+	return &cp
+}
+
 // Save inserts or replaces the inventory identified by i.ID.
 func (m *memStore) Save(_ context.Context, i *Inventory) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	cp := *i
-	cp.CredentialIDs = append([]string(nil), i.CredentialIDs...)
-	m.inventories[i.ID] = &cp
+	m.inventories[i.ID] = clone(i)
 	return nil
 }
 
@@ -45,6 +51,11 @@ func (m *memStore) Update(_ context.Context, i *Inventory) error {
 	existing.ContentConfig = i.ContentConfig
 	existing.Queue = i.Queue
 	existing.OrgID = i.OrgID
+	existing.Kind = i.Kind
+	existing.HostFilter = i.HostFilter
+	existing.InputIDs = append([]string(nil), i.InputIDs...)
+	existing.SourceVars = i.SourceVars
+	existing.Limit = i.Limit
 	return nil
 }
 
@@ -56,9 +67,7 @@ func (m *memStore) Get(_ context.Context, id string) (*Inventory, error) {
 	if !ok {
 		return nil, ErrNotFound
 	}
-	cp := *i
-	cp.CredentialIDs = append([]string(nil), i.CredentialIDs...)
-	return &cp, nil
+	return clone(i), nil
 }
 
 // List returns all inventories ordered by creation time, oldest first.
@@ -67,9 +76,7 @@ func (m *memStore) List(_ context.Context) ([]*Inventory, error) {
 	defer m.mu.RUnlock()
 	out := make([]*Inventory, 0, len(m.inventories))
 	for _, i := range m.inventories {
-		cp := *i
-		cp.CredentialIDs = append([]string(nil), i.CredentialIDs...)
-		out = append(out, &cp)
+		out = append(out, clone(i))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].CreatedAt.Equal(out[j].CreatedAt) {

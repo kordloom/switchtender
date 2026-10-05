@@ -1,7 +1,6 @@
 package importer
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -92,7 +91,7 @@ func TestAStepKeepsTheOffsetTheRuleStartsAt(t *testing.T) {
 // AWX puts the whole recurrence in one field, and iCalendar allows more than one RRULE in it plus EXRULE
 // and EXDATE to take dates back out. The parser folded every RRULE line into one map, so the last
 // line's keys quietly won, and exclusions were never read: a window that excludes a holiday imported
-// firing on the holiday. Both are refused with a reason, which is what the operator needs to rebuild it.
+// firing on the holiday. Both are refused as cron, which is what sends them across as a recurrence.
 func TestARuleThatIsMoreThanOneRuleIsRefused(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -100,25 +99,19 @@ func TestARuleThatIsMoreThanOneRuleIsRefused(t *testing.T) {
 		Name string
 		// RRule is the recurrence field.
 		RRule string
-		// WantWhy is a phrase the refusal must carry.
-		WantWhy string
 	}{{
 		Name: "two recurrence rules",
 		RRule: "DTSTART:20260101T020000Z RRULE:FREQ=WEEKLY;BYDAY=MO " +
 			"RRULE:FREQ=WEEKLY;BYDAY=TH",
-		WantWhy: "2 recurrence rules",
 	}, {
-		Name:    "an exclusion rule",
-		RRule:   "DTSTART:20260101T020000Z RRULE:FREQ=DAILY EXRULE:FREQ=WEEKLY;BYDAY=SA,SU",
-		WantWhy: "takes dates back out",
+		Name:  "an exclusion rule",
+		RRule: "DTSTART:20260101T020000Z RRULE:FREQ=DAILY EXRULE:FREQ=WEEKLY;BYDAY=SA,SU",
 	}, {
-		Name:    "excluded dates",
-		RRule:   "DTSTART:20260101T020000Z RRULE:FREQ=DAILY EXDATE:20261225T020000Z",
-		WantWhy: "takes dates back out",
+		Name:  "excluded dates",
+		RRule: "DTSTART:20260101T020000Z RRULE:FREQ=DAILY EXDATE:20261225T020000Z",
 	}, {
-		Name:    "excluded dates with a zone parameter",
-		RRule:   "DTSTART:20260101T020000Z RRULE:FREQ=DAILY EXDATE;TZID=America/Chicago:20261225T020000",
-		WantWhy: "takes dates back out",
+		Name:  "excluded dates with a zone parameter",
+		RRule: "DTSTART:20260101T020000Z RRULE:FREQ=DAILY EXDATE;TZID=America/Chicago:20261225T020000",
 	}}
 	for _, test := range tests {
 		t.Run(test.Name, func(t *testing.T) {
@@ -127,11 +120,6 @@ func TestARuleThatIsMoreThanOneRuleIsRefused(t *testing.T) {
 				t.Errorf("the rule converted to %q, which is one cadence standing in for a recurrence "+
 					"that is not one. A schedule firing on the dates its own rule removed is worse "+
 					"than one that did not import.", got)
-			}
-			why := rruleProblem(test.RRule)
-			if !strings.Contains(why, test.WantWhy) {
-				t.Errorf("the reason given is %q, which does not say %q, so the operator cannot tell "+
-					"what to rebuild", why, test.WantWhy)
 			}
 		})
 	}

@@ -148,8 +148,8 @@
 					<p>A poll trigger looks like a schedule and is not one: it asks the repository whether anything changed and builds only if it did, so a job polling every five minutes usually does nothing. Imported as a plain schedule it would run for real every five minutes. For a deploy job that is an incident, not a migration artifact.</p>
 				</article>
 				<article class="card reveal">
-					<h3>Password parameters and trigger tokens</h3>
-					<p>Jenkins stores a password parameter encrypted. A survey answer here is stored in plain text on the run, so importing one would quietly downgrade a secret. It is refused and named, and so is a job's remote build token, which is a shared secret that would hand a launch to anybody holding it.</p>
+					<h3>Remote build tokens</h3>
+					<p>A job's remote build token is a shared secret that would hand a launch to anybody holding it, so it is refused and named. A password parameter does come across, as a secret survey field whose answer is sealed the way Jenkins encrypted it. Its default is Jenkins ciphertext, so it stays behind and the report names it.</p>
 				</article>
 				<article class="card reveal">
 					<h3>Jenkins build variables</h3>

@@ -10,11 +10,13 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/importer"
 	"github.com/kordloom/switchtender/internal/invsource"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/template"
 )
 
@@ -149,20 +151,31 @@ func TestFromAWX(t *testing.T) {
 		t.Errorf("survey mismatch (-want +got):\n%s", diff)
 	}
 
-	// The daily schedule converts to cron; the every-three-days one is refused with a warning.
-	if len(plan.Schedules) != 1 {
-		t.Fatalf("schedules = %d, want 1 (the convertible one)", len(plan.Schedules))
+	// The daily schedule converts to cron; the every-three-days one, which cron cannot say, comes
+	// across as the recurrence it is.
+	if len(plan.Schedules) != 2 {
+		t.Fatalf("schedules = %d, want 2", len(plan.Schedules))
 	}
 	sch := plan.Schedules[0]
-	if sch.Cron != "30 2 * * *" {
-		t.Errorf("schedule cron = %q, want 30 2 * * *", sch.Cron)
+	if sch.Cron != "30 2 * * *" || sch.RRule != "" {
+		t.Errorf("schedule cron = %q rrule = %q, want 30 2 * * * and no rule", sch.Cron, sch.RRule)
 	}
 	if sch.TemplateID != tpl.ID {
 		t.Errorf("schedule template id = %q, want %q", sch.TemplateID, tpl.ID)
 	}
+	every3 := plan.Schedules[1]
+	if every3.Cron != "" || every3.RRule != "DTSTART:20260101T090000Z\nRRULE:FREQ=DAILY;INTERVAL=3" {
+		t.Errorf("schedule cron = %q rrule = %q, want the rule carried whole", every3.Cron,
+			every3.RRule)
+	}
 
-	assertWarns(t, plan.Warnings, "Manual", "needs its secret re-entered", "cannot be expressed as cron",
+	assertWarns(t, plan.Warnings, "Manual", "needs its secret re-entered",
 		"point it at a plugin config file")
+	for _, w := range plan.Warnings {
+		if strings.Contains(w, "cannot be expressed as cron") {
+			t.Errorf("a schedule is still reported as one cron cannot express: %s", w)
+		}
+	}
 }
 
 // backingInventoryExists reports whether the plan holds a backing inventory with the given id and
@@ -311,14 +324,14 @@ func TestFromAWXCarriesVaultID(t *testing.T) {
 	}
 }
 
-// TestAWXPasswordSurveyRefused proves an AWX password survey field is not imported as a plaintext
-// survey field.
+// TestAWXPasswordSurveyImportsAsSecret proves an AWX password survey field imports as a secret
+// field rather than being refused or downgraded to text.
 //
-// AWX prompts for such a value and stores it obscured. A survey field here is plain text whose
-// answer is kept on the run and injected as an extra var, and AWX exports the field's default
-// alongside it, so importing one would quietly downgrade a password prompt into a stored plaintext
-// value. The Rundeck importer refuses the equivalent secure option, and this must agree with it.
-func TestAWXPasswordSurveyRefused(t *testing.T) {
+// AWX prompts for such a value and stores it encrypted. A secret field seals its answer the same
+// way, so the prompt comes across whole. The exported default is the one thing that cannot: AWX
+// writes it as $encrypted$, so the field arrives without it, the report says so for review, and the
+// value is never carried into the plan.
+func TestAWXPasswordSurveyImportsAsSecret(t *testing.T) {
 	t.Parallel()
 	export := `{"job_templates":[{
 		"name":"Rotate keys","playbook":"rotate.yml",
@@ -335,28 +348,27 @@ func TestAWXPasswordSurveyRefused(t *testing.T) {
 	if len(plan.Templates) != 1 {
 		t.Fatalf("templates = %d, want 1 (warnings %v)", len(plan.Templates), plan.Warnings)
 	}
-	for _, f := range plan.Templates[0].Survey {
-		if f.Var == "vault_pass" {
-			t.Fatal("a password survey field was imported, which stores the secret in plain text")
-		}
+	want := []template.SurveyField{
+		{Var: "vault_pass", Label: "Vault password", Type: template.FieldSecret, Required: true},
+		{Var: "region", Label: "Region", Type: template.FieldText},
 	}
-	if len(plan.Templates[0].Survey) != 1 {
-		t.Errorf("survey fields = %d, want only the non-secret one", len(plan.Templates[0].Survey))
-	}
-	// The exported default must not ride along in the plan either.
-	for _, f := range plan.Templates[0].Survey {
-		if fmt.Sprint(f.Default) == "hunter2" {
-			t.Error("the password field's default was imported")
-		}
+	if diff := cmp.Diff(want, plan.Templates[0].Survey, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("survey mismatch (-want +got):\n%s", diff)
 	}
 	var told bool
 	for _, w := range plan.Warnings {
-		if strings.Contains(w, "vault_pass") && strings.Contains(w, "password") {
+		if strings.Contains(w, "hunter2") {
+			t.Errorf("the password field's default leaked into the report: %s", w)
+		}
+		if strings.Contains(w, "vault_pass") && strings.Contains(w, "without its default") {
 			told = true
+		}
+		if strings.Contains(w, "vault_pass") && strings.Contains(w, "NOT imported") {
+			t.Errorf("the password field is still reported as refused: %s", w)
 		}
 	}
 	if !told {
-		t.Errorf("refusing the password field was not reported; warnings = %v", plan.Warnings)
+		t.Errorf("the default left behind was not reported; warnings = %v", plan.Warnings)
 	}
 }
 
@@ -396,9 +408,10 @@ func TestAWXScheduleKeepsItsTimezone(t *testing.T) {
 		t.Errorf("a Zulu DTSTART got timezone %q, want UTC; the window would fire at the server's "+
 			"local hour instead of the UTC one it was written in", got)
 	}
-	// A floating local time names no zone, which is what it means.
-	if got := byName["floating window"]; got != "" {
-		t.Errorf("a floating DTSTART got timezone %q, want none", got)
+	// A floating local time names no zone, which means the server's own, and that zone is written
+	// onto the schedule by name.
+	if got, want := byName["floating window"], schedule.ServerZone(); got != want {
+		t.Errorf("a floating DTSTART got timezone %q, want %q, the server's own", got, want)
 	}
 }
 
@@ -416,10 +429,11 @@ func TestAWXReportsUnmappedObjects(t *testing.T) {
 		t.Fatalf("FromAWX() error = %v", err)
 	}
 	joined := strings.Join(plan.Warnings, "\n")
-	// Workflows are imported now rather than reported as unmapped, so only the object kinds this
-	// importer still does not create are named here.
+	// Workflows and notification templates are imported now rather than reported as unmapped, so
+	// only the object kinds this importer still does not create are counted here. A notification
+	// template with no type cannot become a target and is named on its own.
 	for _, want := range []string{
-		"1 organization", "1 team", "1 notification template",
+		"1 organization", "1 team", `notification template "slack" has the type ""`,
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("the report does not mention %q:\n%s", want, joined)

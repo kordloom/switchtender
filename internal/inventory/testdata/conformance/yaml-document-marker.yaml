@@ -1,0 +1,7 @@
+---
+# A document start marker and comments.
+ungrouped:
+  hosts:
+    solo:
+      answer: 42
+...

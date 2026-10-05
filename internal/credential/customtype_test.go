@@ -100,7 +100,7 @@ func TestInjectSubstitutesAndMasks(t *testing.T) {
 	}
 	inj, err := typ.Inject(map[string]string{
 		"host": "registry.example.com", "user": "deploy", "token": "s3cr3t-value",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("Inject() error = %v", err)
 	}
@@ -137,7 +137,7 @@ func TestInjectDoesNotReinterpretFieldValues(t *testing.T) {
 		t.Fatalf("Validate() error = %v", err)
 	}
 	// Field a's value references b. A single literal pass must leave it as text, not expand it.
-	inj, err := typ.Inject(map[string]string{"a": "{{b}}", "b": "the-secret"})
+	inj, err := typ.Inject(map[string]string{"a": "{{b}}", "b": "the-secret"}, nil)
 	if err != nil {
 		t.Fatalf("Inject() error = %v", err)
 	}
@@ -158,7 +158,7 @@ func TestInjectRefusesAMultilineValue(t *testing.T) {
 		Name: "T", Fields: []Field{{Name: "v", Secret: true}},
 		EnvInjectors: map[string]string{"V": "{{v}}"},
 	}
-	if _, err := typ.Inject(map[string]string{"v": "abc\nLD_PRELOAD=/tmp/evil.so"}); err == nil {
+	if _, err := typ.Inject(map[string]string{"v": "abc\nLD_PRELOAD=/tmp/evil.so"}, nil); err == nil {
 		t.Error("a value spanning two lines was injected, so it becomes a second variable")
 	}
 }
@@ -179,7 +179,7 @@ func FuzzInject(f *testing.F) {
 	f.Add("{{b}}", "{{a}}", "{{c}}")
 	f.Add("", "", "")
 	f.Fuzz(func(t *testing.T, a, b, c string) {
-		inj, err := typ.Inject(map[string]string{"a": a, "b": b, "c": c})
+		inj, err := typ.Inject(map[string]string{"a": a, "b": b, "c": c}, nil)
 		if err != nil {
 			return // A multiline value is a legitimate refusal.
 		}

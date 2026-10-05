@@ -18,6 +18,9 @@ func Contract(t *testing.T, newStore func() policy.Store) {
 	t.Helper()
 	t.Run("save list delete", func(t *testing.T) { testSaveListDelete(t, newStore()) })
 	everyFieldSurvivesARoundTrip(t, newStore)
+	t.Run("a rego policy is refused rather than stored without its modules", func(t *testing.T) {
+		testRegoRefused(t, newStore())
+	})
 	t.Run("get", func(t *testing.T) { testGet(t, newStore()) })
 	t.Run("empty list is non-nil", func(t *testing.T) {
 		got, err := newStore().List(context.Background())
@@ -43,7 +46,7 @@ func testGet(t *testing.T, store policy.Store) {
 		ID: policy.NewID(), Name: "prod-destroy", Tool: "terraform", CommandContains: "destroy",
 		InventoryID: "inv_prod", Queue: "dmz", ExcludeDryRun: true, MaxDestroy: 3,
 		ActorKind: policy.ActorKindAgent, Actor: "deploy-bot", MinRisk: "high",
-		Effect: policy.EffectDeny, RequireDistinctApprover: true,
+		Effect: policy.EffectDeny, RequireDistinctApprover: true, RequireReason: "always",
 		CreatedAt: time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC),
 	}
 	if err := store.Save(ctx, p); err != nil {
@@ -64,6 +67,10 @@ func testGet(t *testing.T, store policy.Store) {
 	if !got.RequireDistinctApprover {
 		t.Error("Get() lost require_distinct_approver, so the rule loads back allowing the requester " +
 			"to approve their own run")
+	}
+	if got.RequireReason != "always" {
+		t.Errorf("Get() require_reason = %q, want always: a rule that loads back without it lets a "+
+			"decision through with no reason", got.RequireReason)
 	}
 	if _, err := store.Get(ctx, "pol_missing"); !errors.Is(err, policy.ErrNotFound) {
 		t.Errorf("Get(missing) = %v, want ErrNotFound", err)
@@ -130,8 +137,9 @@ func everyFieldSurvivesARoundTrip(t *testing.T, newStore func() policy.Store) {
 		store := newStore()
 		ctx := context.Background()
 
-		// Fields the store assigns or that carry their own meaning, filled deliberately below.
-		fixed := map[string]bool{"id": true, "name": true, "created_at": true}
+		// Fields the store assigns or that carry their own meaning, filled deliberately below. The
+		// Rego bundle is never stored at all, which testRegoRefused holds every store to instead.
+		fixed := map[string]bool{"id": true, "name": true, "created_at": true, "rego": true}
 
 		want := &policy.Policy{
 			ID:        "pol_roundtrip",
@@ -238,5 +246,34 @@ func policyProbeString(field string) string {
 		return "agent"
 	default:
 		return "probe-" + field
+	}
+}
+
+// testRegoRefused holds a store to refusing a Rego policy. A database store has no columns for the
+// modules, so accepting one would keep the name and drop the bundle, and a policy with no criteria
+// left behind holds every run while the record says a Rego policy decided.
+func testRegoRefused(t *testing.T, store policy.Store) {
+	t.Helper()
+	ctx := context.Background()
+	prog, err := policy.CompileRego("", "", []policy.RegoModule{{
+		File:   "gate.rego",
+		Source: "package switchtender\n\nhold contains \"every run\" if true\n",
+	}})
+	if err != nil {
+		t.Fatalf("CompileRego() error = %v", err)
+	}
+	p := &policy.Policy{
+		ID: policy.NewID(), Name: "rego gate", MaxDestroy: policy.DisabledMaxDestroy, Rego: prog,
+		CreatedAt: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC),
+	}
+	if err := store.Save(ctx, p); !errors.Is(err, policy.ErrRegoNotStored) {
+		t.Fatalf("Save(rego policy) error = %v, want ErrRegoNotStored", err)
+	}
+	all, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(all) != 0 {
+		t.Errorf("List() after a refused save = %d policies, want none", len(all))
 	}
 }

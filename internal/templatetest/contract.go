@@ -21,6 +21,60 @@ func Contract(t *testing.T, newStore func() template.Store) {
 	t.Run("lifecycle", func(t *testing.T) { testLifecycle(t, newStore()) })
 	t.Run("list ordered", func(t *testing.T) { testList(t, newStore()) })
 	t.Run("update", func(t *testing.T) { testUpdate(t, newStore()) })
+	t.Run("callback key", func(t *testing.T) { testHostConfigKey(t, newStore()) })
+	t.Run("callback settings", func(t *testing.T) { testCallbackSettings(t, newStore()) })
+	t.Run("awx bindings", func(t *testing.T) { testAWXBindings(t, newStore()) })
+	t.Run("awx unbind gives back only its own claim", func(t *testing.T) {
+		testAWXUnbind(t, newStore())
+	})
+}
+
+// testHostConfigKey verifies the sealed callback key round trips through Save, is replaced only by
+// SetHostConfigKey, and survives an Update that carries no key, so an edit made from a snapshot
+// read before a rotation cannot undo the rotation.
+func testHostConfigKey(t *testing.T, store template.Store) {
+	ctx := context.Background()
+	created := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	if err := store.Save(ctx, &template.Template{
+		ID: "tpl_cb", Name: "boot", Playbook: "boot.yml", InventoryID: "inv_1",
+		AllowCallbacks: true, HostConfigKey: "sealed:first", CreatedAt: created,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	read := func() *template.Template {
+		t.Helper()
+		got, err := store.Get(ctx, "tpl_cb")
+		if err != nil {
+			t.Fatalf("Get() error = %v", err)
+		}
+		return got
+	}
+	if got := read(); got.HostConfigKey != "sealed:first" || !got.AllowCallbacks {
+		t.Fatalf("Get() key = %q callbacks = %v, want the saved key and callbacks on",
+			got.HostConfigKey, got.AllowCallbacks)
+	}
+	if err := store.SetHostConfigKey(ctx, "tpl_cb", "sealed:second"); err != nil {
+		t.Fatalf("SetHostConfigKey() error = %v", err)
+	}
+	if err := store.Update(ctx, &template.Template{
+		ID: "tpl_cb", Name: "renamed", Playbook: "boot.yml", InventoryID: "inv_1",
+		AllowCallbacks: true, HostConfigKey: "sealed:stale",
+	}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if got := read(); got.HostConfigKey != "sealed:second" || got.Name != "renamed" {
+		t.Errorf("after Update key = %q name = %q, want the rotated key kept and the rename applied",
+			got.HostConfigKey, got.Name)
+	}
+	if err := store.SetHostConfigKey(ctx, "tpl_cb", ""); err != nil {
+		t.Fatalf("SetHostConfigKey(clear) error = %v", err)
+	}
+	if got := read(); got.HostConfigKey != "" {
+		t.Errorf("after clearing key = %q, want none", got.HostConfigKey)
+	}
+	if err := store.SetHostConfigKey(ctx, "ghost", "x"); !errors.Is(err, template.ErrNotFound) {
+		t.Errorf("SetHostConfigKey(ghost) error = %v, want ErrNotFound", err)
+	}
 }
 
 // testUpdate verifies an update rewrites every field, preserves the creation time, and reports
@@ -43,7 +97,15 @@ func testUpdate(t *testing.T, store template.Store) {
 		CredentialIDs:           []string{"cred_2", "cred_3"},
 		SelectableCredentialIDs: []string{"cred_sel"},
 		ExtraVars:               map[string]any{"env": "stg"},
-		Survey:                  []template.SurveyField{{Var: "tier", Label: "Tier", Type: template.FieldText}},
+		// A secret field keeps its sealed default through the store, or every launch that relied
+		// on it would run with the answer missing.
+		Survey: []template.SurveyField{
+			{Var: "tier", Label: "Tier", Type: template.FieldText},
+			{
+				Var: "db_password", Label: "DB password", Type: template.FieldSecret,
+				SealedDefault: "sealed-default",
+			},
+		},
 		Steps: []run.PipelineStep{
 			{Name: "build", Tool: "bash", Command: "make"},
 			{Name: "deploy", Playbook: "deploy.yml", DependsOn: []string{"build"}},
@@ -51,9 +113,11 @@ func testUpdate(t *testing.T, store template.Store) {
 		Tool: "python", Command: "print('hi')", DryRun: true,
 		Tags: []string{"deploy", "web"}, SkipTags: []string{"slow"},
 		Verbosity: 3, Forks: 20, DiffMode: true,
+		Limit:           "canary",
 		ConfirmOnLaunch: true,
-		OrgID:           "org_new",
-		CreatedAt:       created,
+		UseFactCache:    true, FactCacheTimeout: 7200, AllowCallbacks: true,
+		OrgID:     "org_new",
+		CreatedAt: created,
 	}
 	if err := store.Update(ctx, want); err != nil {
 		t.Fatalf("Update() error = %v", err)
@@ -85,8 +149,10 @@ func testLifecycle(t *testing.T, store template.Store) {
 		Survey:                  []template.SurveyField{{Var: "region", Label: "Region", Type: template.FieldChoice, Required: true, Choices: []string{"us", "eu"}}},
 		Tool:                    "bash", Command: "echo hi", DryRun: true,
 		ConfirmOnLaunch: true,
-		OrgID:           "org_owner",
-		CreatedAt:       time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+		UseFactCache:    true, FactCacheTimeout: 600, AllowCallbacks: true,
+		HostConfigKey: "sealed:key",
+		OrgID:         "org_owner",
+		CreatedAt:     time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
 	}
 	if err := store.Save(ctx, want); err != nil {
 		t.Fatalf("Save() error = %v", err)

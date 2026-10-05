@@ -118,7 +118,8 @@ type settledReporter interface {
 	ReclaimStaleSettled(ctx context.Context, ttl time.Duration) (int, []string, error)
 }
 
-// commitSettled records the outcome of every run the sweep drove to a terminal state.
+// commitSettled records the outcome of every run the sweep drove to a terminal state, then
+// announces it the way every other end of a run is announced.
 //
 // The sweep is a bulk update in the store rather than a pass through finalize, so these runs used to
 // end with no chain entry at all: not receiptable, and absent from their own dossiers. A run whose
@@ -126,10 +127,12 @@ type settledReporter interface {
 // run that should have no record. The commit is best effort, as it is on the relay's terminal save
 // and for the same reason: the run has already happened, and refusing to record it would not unhappen
 // it. A failure is logged where an operator can find it.
+//
+// The same runs were never announced either, so a target attached for failure that heard the run
+// start never heard that it stopped, and a pager was not paged for the change that died mid-flight.
+// The announcement comes after the chain entry, the order finalize keeps. A run this cannot read is
+// left owed in the store's ledger, and the sweep of owed ends tells its named targets.
 func (d *Dispatcher) commitSettled(ids []string) {
-	if d.audits == nil || len(ids) == 0 {
-		return
-	}
 	for _, id := range ids {
 		r, err := d.store.Get(d.ctx, id)
 		if err != nil {
@@ -138,11 +141,29 @@ func (d *Dispatcher) commitSettled(ids []string) {
 			}
 			continue
 		}
-		if err := outcome.Commit(d.ctx, d.audits, d.store, r, "system:janitor", d.now); err != nil {
-			if d.ctx.Err() == nil {
-				d.log.Error("dispatch: commit settled outcome: "+err.Error(), zap.String("run_id", id))
+		if d.audits != nil {
+			if err := outcome.CommitOwed(d.ctx, d.audits, d.store, r, "system:janitor", d.now); err != nil {
+				if d.ctx.Err() == nil {
+					d.log.Error("dispatch: commit settled outcome: "+err.Error(),
+						zap.String("run_id", id))
+				}
 			}
 		}
+		d.notify(r)
+	}
+}
+
+// finishSettledWorkflows finishes the claimed approval step decisions of every workflow the sweep
+// just interrupted, before commitSettled records how those workflows ended. The sweep leaves a
+// step a decision claimed to that decision, and finishing it here is what puts the decision on
+// the chain ahead of the outcome of the workflow it was part of.
+func (d *Dispatcher) finishSettledWorkflows(ids []string) {
+	for _, id := range ids {
+		r, err := d.store.Get(d.ctx, id)
+		if err != nil || r.Kind != run.KindPipeline {
+			continue
+		}
+		d.finishClaimedSteps(d.ctx, id)
 	}
 }
 
@@ -221,6 +242,22 @@ func (d *Dispatcher) settleOverrunning() {
 	}
 }
 
+// sweepSealed wipes the sealed inventory snapshot and plan file of every run that has ended and
+// still carries them. Most ends wipe their own, and this catches the rest: a cancel before start, a
+// sweep that settled a run, or a wipe that failed.
+func (d *Dispatcher) sweepSealed() {
+	n, err := d.store.SweepSealed(d.ctx)
+	if err != nil {
+		if d.ctx.Err() == nil {
+			d.log.Error("dispatch: sweep sealed run material: " + err.Error())
+		}
+		return
+	}
+	if n > 0 {
+		d.log.Info("dispatch: wiped sealed material of ended runs", zap.Int("count", n))
+	}
+}
+
 // janitor sweeps stale leases so runs owned by dead processes requeue or resolve. It runs once
 // immediately, covering restarts, then on an interval.
 func (d *Dispatcher) janitor() {
@@ -243,8 +280,13 @@ func (d *Dispatcher) janitor() {
 		if n > 0 {
 			d.log.Info("dispatch: reclaimed stale runs", zap.Int("count", n))
 		}
+		d.finishSettledWorkflows(settled)
 		d.commitSettled(settled)
 		d.settleOverrunning()
+		d.sweepApprovalSteps()
+		d.sweepSealed()
+		d.finishPendingRedactions()
+		d.commitOwed()
 	}
 	sweep()
 	ticker := time.NewTicker(janitorInterval)

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/kordloom/switchtender/internal/decision"
 )
 
 // maxNamedRules bounds how many rule labels a description carries. An install with hundreds of rules
@@ -85,12 +87,31 @@ func canonicalRule(p *Policy) string {
 		ExcludeDryRun   bool   `json:"exclude_dry_run,omitempty"`
 		MaxDestroy      int    `json:"max_destroy"`
 		DistinctApprove bool   `json:"require_distinct_approver,omitempty"`
+		RegoSHA256      string `json:"rego_sha256,omitempty"`
+		RegoWarn        string `json:"rego_warn,omitempty"`
+		RegoTimeout     string `json:"rego_timeout,omitempty"`
+		RequireReason   string `json:"require_reason,omitempty"`
 	}{
 		Tool: p.Tool, CommandContains: p.CommandContains, InventoryID: p.InventoryID,
 		Queue: p.Queue, ActorKind: p.ActorKind, Actor: p.Actor, MinRisk: p.MinRisk,
 		Reversibility: p.Reversibility, Effect: p.Effect,
 		ExcludeDryRun: p.ExcludeDryRun, MaxDestroy: p.MaxDestroy,
-		DistinctApprove: p.RequireDistinctApprover,
+		DistinctApprove: p.RequireDistinctApprover, RequireReason: p.RequireReason,
+	}
+	// A Rego policy is covered by its bundle digest, which spans the package, the syntax, and every
+	// module's path and text, so any edit to what the policy decides moves the set's digest.
+	if p.Rego != nil {
+		shape.RegoSHA256 = p.Rego.Digest()
+		// The settings beside the bundle change what it does to a run without changing a byte of
+		// it: a warning noted rather than held lets through a run the same bundle would hold, and a
+		// different timeout changes which evaluations refuse. Each is covered when it differs from
+		// the default, so a policy that sets neither keeps the digest it had before they existed.
+		if p.Rego.Warn() != RegoWarnHold {
+			shape.RegoWarn = p.Rego.Warn()
+		}
+		if p.Rego.Timeout() != DefaultRegoTimeout {
+			shape.RegoTimeout = p.Rego.Timeout().String()
+		}
 	}
 	raw, err := json.Marshal(shape)
 	if err != nil {
@@ -101,7 +122,25 @@ func canonicalRule(p *Policy) string {
 }
 
 // describeRule renders one rule the way a person reads it: what it is called and what it does.
+//
+// A Rego policy is described by the package that decides and the full digest of its bundle. This
+// line is what the outcome record carries into the chain, so it is the evidence of which exact
+// policy was in force when a run was decided, and a reader can hash the modules at that commit and
+// compare. A setting that differs from its default is named after the digest, since it changes what
+// the same bundle does: an auditor reading that a warned run went ahead needs to read here that the
+// policy's warnings were notes.
 func describeRule(p *Policy) string {
+	if p.Rego != nil {
+		line := fmt.Sprintf("%s: decided by Rego package %s, bundle sha256:%s",
+			p.Label(), p.Rego.Package(), p.Rego.Digest())
+		if p.Rego.Warn() == RegoWarnNote {
+			line += ", warnings noted without holding"
+		}
+		if p.Rego.Timeout() != DefaultRegoTimeout {
+			line += ", timeout " + p.Rego.Timeout().String()
+		}
+		return line + reasonClause(p.RequireReason)
+	}
 	effect := "requires approval"
 	switch {
 	case p.Denies():
@@ -112,5 +151,17 @@ func describeRule(p *Policy) string {
 	if p.RequireDistinctApprover {
 		effect += ", by someone other than the requester"
 	}
-	return p.Label() + ": " + effect
+	return p.Label() + ": " + effect + reasonClause(p.RequireReason)
+}
+
+// reasonClause describes a rule's reason requirement as the end of its description, empty for none,
+// so a rule that asks for no reason reads exactly as it always did.
+func reasonClause(requirement string) string {
+	switch requirement {
+	case decision.RequireAlways:
+		return ", with a stated reason"
+	case decision.RequireDenials:
+		return ", with a stated reason to deny"
+	}
+	return ""
 }

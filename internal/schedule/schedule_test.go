@@ -132,3 +132,30 @@ func TestABadTimezoneIsReportedAsATimezone(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateAtJudgesExhaustionAtTheTimeGiven pins that whether a recurrence has fired its last
+// time is judged at the time the caller passes, not the wall clock, so an import converting an
+// export gives the same answer whenever it runs.
+func TestValidateAtJudgesExhaustionAtTheTimeGiven(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// At is the time the schedule is judged at.
+		At time.Time
+		// Want is the error ValidateAt returns.
+		Want error
+	}{{ // Test 0: Before its first fire, a three-fire rule is valid.
+		At: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC), Want: nil,
+	}, { // Test 1: After its last fire, the same rule is exhausted.
+		At: time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC), Want: schedule.ErrExhausted,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			s := &schedule.Schedule{ID: "sch_count", Name: "three nights", TemplateID: "tpl_1",
+				RRule: "DTSTART:20261001T020000Z RRULE:FREQ=DAILY;COUNT=3"}
+			if err := s.ValidateAt(test.At); !errors.Is(err, test.Want) {
+				t.Errorf("ValidateAt(%s) error = %v, want %v", test.At, err, test.Want)
+			}
+		})
+	}
+}

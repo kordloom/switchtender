@@ -202,9 +202,12 @@ jobs:
     env:
       SWITCHTENDER_TEST_POSTGRES_DSN: postgres://switchtender:switchtender@localhost:5432/switchtender?sslmode=disable
     steps:
+      # Full depth with tags: the downgrade tests build the previous release from its tag, and
+      # under the full-suite switch a missing tag fails them rather than skipping them.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
@@ -220,7 +223,13 @@ jobs:
           git -C "$RUNNER_TEMP/loomseal" checkout --quiet "$ref"
           echo "SWITCHTENDER_LOOMSEAL_REPO=$RUNNER_TEMP/loomseal" >> "$GITHUB_ENV"
       - name: Install ansible for the drift contract
-        run: pipx install ansible-core==2.18.1
+        # The runner ships its own ansible-core under a root-owned pipx home, so a pipx install of
+        # another version either keeps the runner's or cannot replace it. A venv first on the PATH
+        # is the version this job names, whatever the image carries.
+        run: |
+          python3 -m venv "$RUNNER_TEMP/ansible"
+          "$RUNNER_TEMP/ansible/bin/pip" install --quiet "ansible-core==2.18.1"
+          echo "$RUNNER_TEMP/ansible/bin" >> "$GITHUB_PATH"
       - name: Install the engines this runner does not ship
         env:
           TOFU_VERSION: "1.8.7"
@@ -271,6 +280,42 @@ jobs:
           read -ra packages <<<"$SHARD_PACKAGES"
           go test -race "${packages[@]}"
 
+  # The native inventory engine reads static INI and YAML inventories the way Ansible's own plugins
+  # do, and this job is what holds it to them: the conformance corpus in internal/inventory runs
+  # through the native engine and through one supported ansible-core release per job, and any
+  # disagreement in hosts, groups, or variables fails the build. The releases are pinned exactly,
+  # like every other tool this workflow installs, and are inventory.TestedAnsibleCoreReleases, whose
+  # minors are inventory.TestedAnsibleCore, the range doctor reports as tested. A test fails when this
+  # matrix and those lists drift apart, so moving to a newer patch is a reviewed change.
+  inventory-conformance:
+    name: inventory conformance (ansible-core ${{ matrix.ansible-core }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        ansible-core: ["2.16.19", "2.17.14", "2.18.19", "2.19.13", "2.20.9", "2.21.4"]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - name: Install ansible-core ${{ matrix.ansible-core }}
+        # The runner ships its own ansible-core under a root-owned pipx home, so a pipx install of
+        # another version either keeps the runner's or cannot replace it. A venv first on the PATH
+        # is the version this job names, whatever the image carries.
+        run: |
+          python3 -m venv "$RUNNER_TEMP/ansible"
+          "$RUNNER_TEMP/ansible/bin/pip" install --quiet "ansible-core==${{ matrix.ansible-core }}"
+          echo "$RUNNER_TEMP/ansible/bin" >> "$GITHUB_PATH"
+      # The test checks that the ansible-core it found is the one this job installed, and the full
+      # suite switch turns a missing ansible-inventory into a failure rather than a skip.
+      - name: Run the conformance corpus
+        env:
+          SWITCHTENDER_REQUIRE_FULL_SUITE: "1"
+          SWITCHTENDER_ANSIBLE_CORE: ${{ matrix.ansible-core }}
+        run: go test -count=1 -run 'TestConformance' ./internal/inventory/
+
   crossverify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -293,6 +338,19 @@ jobs:
           ref="$version"
           git -C ../loomseal rev-parse --verify --quiet "refs/tags/$ref" >/dev/null || ref="snapshot/$version"
           git -C ../loomseal checkout --quiet "$ref"
+      # LoomSeal has two independent verifiers, and this product's receipts have to satisfy the
+      # format rather than one implementation of it. Every receipt the cross-verification below
+      # hands the Go verifier is also handed to the Python reference from the same checkout, and the
+      # two must agree on the verdict and on every disclosed member. Python is pinned the way the
+      # other tools here are, by exact version, so a runner image that moves it fails this step
+      # rather than changing the check underneath it.
+      - name: Set up the reference verifier
+        run: |
+          set -euo pipefail
+          python3 -c 'import sys; v = sys.version_info[:2]; assert v == (3, 12), f"python {v}, want 3.12"'
+          python3 -m venv "$RUNNER_TEMP/loomverify"
+          "$RUNNER_TEMP/loomverify/bin/pip" install --quiet cryptography==44.0.0
+          echo "SWITCHTENDER_LOOMVERIFY_PYTHON=$RUNNER_TEMP/loomverify/bin/python" >> "$GITHUB_ENV"
       # The ratchet turns a silent skip into a failure: if the checkout detection ever breaks,
       # this job must go red, not green over a suite that quietly did not run. The outcome
       # package's receipt-reason cross-check runs here too, because it needs the same checkout and
@@ -380,7 +438,13 @@ jobs:
       # Pinned for the same reason every tool here is: a gate whose toolchain floats changes
       # behavior without a commit.
       - name: Install ansible
-        run: pipx install ansible-core==2.18.1
+        # The runner ships its own ansible-core under a root-owned pipx home, so a pipx install of
+        # another version either keeps the runner's or cannot replace it. A venv first on the PATH
+        # is the version this job names, whatever the image carries.
+        run: |
+          python3 -m venv "$RUNNER_TEMP/ansible"
+          "$RUNNER_TEMP/ansible/bin/pip" install --quiet "ansible-core==2.18.1"
+          echo "$RUNNER_TEMP/ansible/bin" >> "$GITHUB_PATH"
       # The engine contract holds the real tools to what the runners believe about them, and the
       # contract turns an absent tool into a failure rather than a skip, because a skip reports as a
       # pass. That makes installing them part of the gate rather than a convenience: v1.96.0 was

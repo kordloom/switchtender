@@ -220,13 +220,15 @@ func TestJenkinsParameterKindsMapOrAreRefused(t *testing.T) {
 			</com.example.WeirdParameterDefinition>`,
 			WantType: "text", WantImported: true,
 			WantWarning: "imports as free text"}, // Test 7.
-		{Name: "password refused", Param: `<hudson.model.PasswordParameterDefinition>
-			<name>token</name></hudson.model.PasswordParameterDefinition>`,
-			WantWarning: "is a password parameter and was NOT imported"}, // Test 8.
-		{Name: "masked password refused", Param: `<com.michelin.cio.hudson.plugins.maskedpassword.` +
-			`MaskedPasswordParameterDefinition><name>token</name>
+		{Name: "password becomes secret", Param: `<hudson.model.PasswordParameterDefinition>
+			<name>token</name><defaultValue>{AQAAABAAAAAQ}</defaultValue>
+			</hudson.model.PasswordParameterDefinition>`,
+			WantType: "secret", WantImported: true,
+			WantWarning: `secret field "token" arrives without its default`}, // Test 8: the default stays behind.
+		{Name: "masked password becomes secret", Param: `<com.michelin.cio.hudson.plugins.` +
+			`maskedpassword.MaskedPasswordParameterDefinition><name>token</name>
 			</com.michelin.cio.hudson.plugins.maskedpassword.MaskedPasswordParameterDefinition>`,
-			WantWarning: "is a password parameter and was NOT imported"}, // Test 9.
+			WantType: "secret", WantImported: true}, // Test 9.
 		{Name: "file refused", Param: `<hudson.model.FileParameterDefinition><name>blob</name>
 			</hudson.model.FileParameterDefinition>`,
 			WantWarning: "uploads a file at launch"}, // Test 10.

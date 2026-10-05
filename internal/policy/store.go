@@ -19,8 +19,11 @@ func NewMemStore() Store {
 	return &memStore{policies: make(map[string]*Policy)}
 }
 
-// Save stores a policy, inserting or replacing by id.
+// Save stores a policy, inserting or replacing by id, refusing a Rego policy.
 func (m *memStore) Save(_ context.Context, p *Policy) error {
+	if p.Rego != nil {
+		return ErrRegoNotStored
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	cp := *p

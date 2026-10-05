@@ -8,6 +8,7 @@ import (
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/inventory"
+	"github.com/kordloom/switchtender/internal/notification"
 	"github.com/kordloom/switchtender/internal/trigger"
 	"github.com/kordloom/switchtender/internal/user"
 )
@@ -40,6 +41,8 @@ func TestEveryHiddenFieldIsCarriedByItsDTO(t *testing.T) {
 		{"user", user.User{}, userDTO{}},
 		// Test 4: The API token hash, without which every token is dead after a restore.
 		{"token", auth.Token{}, tokenDTO{}},
+		// Test 5: A notification target's sealed address and key.
+		{"notification", notification.Notification{}, notificationDTO{}},
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {

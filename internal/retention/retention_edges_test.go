@@ -416,6 +416,9 @@ func TestSweepDeletesOnlyOutsideTheWindow(t *testing.T) {
 			}); err != nil {
 				t.Fatalf("Save(%s) terminal: %v", id, err)
 			}
+			if err := store.SettleOutcome(ctx, id); err != nil {
+				t.Fatalf("SettleOutcome(%s): %v", id, err)
+			}
 		}
 	}
 	seed("just-outside", window+time.Nanosecond, run.StatusSucceeded)

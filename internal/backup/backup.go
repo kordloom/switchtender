@@ -1,8 +1,8 @@
 // Package backup writes and reads a portable snapshot of a SwitchTender control plane: its
-// credentials, projects, templates, inventories, inventory sources, schedules, triggers, API tokens,
-// and the identity and access objects. The snapshot is a logical export, so it restores into either the
-// SQLite or the PostgreSQL backend, which makes it a migration tool as well as a disaster-recovery
-// one.
+// credentials, projects, templates, inventories, inventory sources, schedules, triggers,
+// notification targets, API tokens, and the identity and access objects. The snapshot is a logical
+// export, so it restores into either the SQLite or the PostgreSQL backend, which makes it a
+// migration tool as well as a disaster-recovery one.
 //
 // The whole payload is sealed with the deployment's AES-256-GCM key before it touches disk, so the
 // file is confidential and tamper-evident: it never exposes configuration, password hashes, or
@@ -27,6 +27,7 @@ import (
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
+	"github.com/kordloom/switchtender/internal/notification"
 	"github.com/kordloom/switchtender/internal/org"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
@@ -40,11 +41,21 @@ import (
 const (
 	// Format identifies a SwitchTender backup file and guards against reading an unrelated file.
 	Format = "switchtender-backup"
-	// Version is the payload schema version. A file at a different version is refused rather than
-	// misread.
+	// Version is the payload schema version this build writes. A file at a version this build does
+	// not read is refused rather than misread.
+	//
 	// Version 2 moved the snapshot time inside the seal. A version 1 file is refused rather than
 	// read, because its header was unauthenticated.
-	Version = 2
+	//
+	// Version 3 carries what a release reading version 2 does not know exists: notification targets
+	// and their attachments, a template's sealed provisioning callback key, and a secret survey
+	// question's sealed default. Such a release decoded a file stamped 2 that carried them, dropped
+	// every one, and reported a complete restore. A new kind of object in the payload takes a new
+	// version, so the release before it refuses the file instead of restoring part of it.
+	Version = 3
+	// oldestReadable is the oldest payload version this build reads. A version 2 file carries none
+	// of what version 3 added, so it restores whole.
+	oldestReadable = 2
 	// maxPayloadBytes bounds how much a backup may expand to. A sealed file is compressed, so a
 	// small one can decompress to an unbounded amount of memory.
 	maxPayloadBytes = 1 << 30
@@ -99,6 +110,9 @@ type Stores struct {
 	Schedules schedule.Store
 	// Triggers holds webhook triggers.
 	Triggers trigger.Store
+	// Notifications holds named notification targets and their attachments. Nil leaves them out,
+	// for a caller that has none.
+	Notifications notification.Store
 	// Users holds accounts.
 	Users user.Store
 	// Tokens holds API bearer tokens, restored by their hash.
@@ -142,6 +156,10 @@ type Summary struct {
 	Schedules int `json:"schedules"`
 	// Triggers is the trigger count.
 	Triggers int `json:"triggers"`
+	// Notifications is the notification target count.
+	Notifications int `json:"notifications"`
+	// NotificationAttachments is the number of attachments the targets carry.
+	NotificationAttachments int `json:"notification_attachments"`
 	// Users is the account count.
 	Users int `json:"users"`
 	// Tokens is the API token count.
@@ -154,6 +172,9 @@ type Summary struct {
 	Policies int `json:"policies"`
 	// CredentialTypes is the custom credential type count.
 	CredentialTypes int `json:"credential_types"`
+	// AWXBindings is how many AWX callback bindings the templates carry, those of deleted
+	// templates included.
+	AWXBindings int `json:"awx_bindings"`
 	// Memberships is the number of team and organization memberships.
 	Memberships int `json:"memberships"`
 	// Grants is the access grant count.
@@ -188,16 +209,19 @@ type payload struct {
 	CreatedAt        time.Time            `json:"created_at"`
 	Credentials      []credentialDTO      `json:"credentials,omitempty"`
 	Projects         []*project.Project   `json:"projects,omitempty"`
-	Templates        []*template.Template `json:"templates,omitempty"`
+	Templates        []templateDTO        `json:"templates,omitempty"`
 	Inventories      []inventoryDTO       `json:"inventories,omitempty"`
 	InventorySources []*invsource.Source  `json:"inventory_sources,omitempty"`
 	Schedules        []*schedule.Schedule `json:"schedules,omitempty"`
 	Triggers         []triggerDTO         `json:"triggers,omitempty"`
-	Users            []userDTO            `json:"users,omitempty"`
-	Tokens           []tokenDTO           `json:"tokens,omitempty"`
-	Teams            []*team.Team         `json:"teams,omitempty"`
-	Orgs             []*org.Org           `json:"orgs,omitempty"`
-	Grants           []*grant.Grant       `json:"grants,omitempty"`
+	// Notifications are the named notification targets, each with its sealed secrets and the
+	// attachments that say where it reports. A target restored without them reports nowhere.
+	Notifications []notificationDTO `json:"notifications,omitempty"`
+	Users         []userDTO         `json:"users,omitempty"`
+	Tokens        []tokenDTO        `json:"tokens,omitempty"`
+	Teams         []*team.Team      `json:"teams,omitempty"`
+	Orgs          []*org.Org        `json:"orgs,omitempty"`
+	Grants        []*grant.Grant    `json:"grants,omitempty"`
 	// CredentialTypes are the operator-defined credential types every typed credential resolves
 	// through. Restoring the credentials without them leaves each one naming a type that is not
 	// there, so it injects nothing and every run that needs it fails.
@@ -211,6 +235,9 @@ type payload struct {
 	// narrows to whoever holds a direct grant.
 	TeamMembers []teamMemberDTO `json:"team_members,omitempty"`
 	OrgMembers  []orgMemberDTO  `json:"org_members,omitempty"`
+	// AWXBindings tie AWX job template ids to the templates imported from them, so each template's
+	// AWX-compatible callback address survives a restore, and a deleted one's stays gone.
+	AWXBindings []template.AWXBinding `json:"awx_bindings,omitempty"`
 }
 
 // teamMemberDTO is one user's membership of one team.
@@ -252,6 +279,28 @@ type triggerDTO struct {
 	TokenHash string `json:"token_hash"`
 	// SigningSecret is the sealed body-signing secret, restored onto the entity's hidden field.
 	SigningSecret string `json:"signing_secret"`
+}
+
+// notificationDTO carries a notification target with its sealed address and key, which the entity
+// hides from JSON, and its attachments.
+type notificationDTO struct {
+	notification.Notification
+	// SealedURL is the sealed address, restored onto the entity's hidden field.
+	SealedURL string `json:"sealed_url"`
+	// SealedKey is the sealed routing key or token, restored onto the entity's hidden field.
+	SealedKey string `json:"sealed_key"`
+	// Attachments are the objects the target is attached to, and for which events.
+	Attachments []*notification.Attachment `json:"attachments,omitempty"`
+}
+
+// templateDTO carries a template with its sealed provisioning callback key, which the entity hides
+// from JSON. Without it a restore brought every template back with callbacks on and no key, so
+// every host's boot script was refused until somebody minted and redistributed a new one. The field
+// is omitted when empty, so a backup of a template with no key reads exactly as it did before.
+type templateDTO struct {
+	template.Template
+	// HostConfigKey is the sealed callback key, restored onto the entity's hidden field.
+	HostConfigKey string `json:"host_config_key,omitempty"`
 }
 
 // userDTO carries a user with its password hash, which the entity hides from JSON.
@@ -338,7 +387,7 @@ func Read(ctx context.Context, s Stores, sealer Sealer, r io.Reader) (Summary, e
 	if env.Format != Format {
 		return Summary{}, fmt.Errorf("%w: wrong file format", ErrFormat)
 	}
-	if env.Version != Version {
+	if env.Version < oldestReadable || env.Version > Version {
 		return Summary{}, fmt.Errorf("%w: unsupported version %d", ErrFormat, env.Version)
 	}
 	gzStr, err := sealer.Open(env.Sealed)
@@ -370,11 +419,22 @@ func Read(ctx context.Context, s Stores, sealer Sealer, r io.Reader) (Summary, e
 	if err := check(ctx, s, &p); err != nil {
 		return Summary{}, err
 	}
+	// The check read the AWX bindings, and an import running beside the restore can bind one of
+	// those ids before the restore does, which the restore learned only at its bind, after every
+	// other object was written. Claimed here, the id refuses the restore with nothing written.
+	release, err := claimAWXBindings(ctx, s.Templates, p.AWXBindings)
+	if err != nil {
+		return Summary{}, err
+	}
 	sum, err := apply(ctx, s, &p)
 	// The counts come back even when it failed. Returning an empty summary told the operator that
 	// nothing had happened at the exact moment something had.
 	sum.CreatedAt = p.CreatedAt
 	if err != nil {
+		if sum.Templates < len(p.Templates) {
+			// Stopped before its templates were restored, so the ids it claimed reach nothing.
+			err = errors.Join(err, release(ctx))
+		}
 		return sum, err
 	}
 	return sum, nil
@@ -399,10 +459,21 @@ func gather(ctx context.Context, s Stores) (*payload, Summary, error) {
 	}
 	sum.Projects = len(p.Projects)
 
-	if p.Templates, err = s.Templates.List(ctx); err != nil {
+	tpls, err := s.Templates.List(ctx)
+	if err != nil {
 		return nil, sum, fmt.Errorf("backup: list templates: %w", err)
 	}
-	sum.Templates = len(p.Templates)
+	for _, t := range tpls {
+		dto := templateDTO{Template: *t, HostConfigKey: t.HostConfigKey}
+		// Derived on read and never stored, so a backup does not carry it.
+		dto.HostConfigKeySet = false
+		p.Templates = append(p.Templates, dto)
+	}
+	sum.Templates = len(tpls)
+	if p.AWXBindings, err = gatherAWXBindings(ctx, s.Templates); err != nil {
+		return nil, sum, err
+	}
+	sum.AWXBindings = len(p.AWXBindings)
 
 	invs, err := s.Inventories.List(ctx)
 	if err != nil {
@@ -433,6 +504,25 @@ func gather(ctx context.Context, s Stores) (*payload, Summary, error) {
 		})
 	}
 	sum.Triggers = len(trigs)
+
+	if s.Notifications != nil {
+		targets, err := s.Notifications.List(ctx)
+		if err != nil {
+			return nil, sum, fmt.Errorf("backup: list notification targets: %w", err)
+		}
+		for _, n := range targets {
+			attached, err := s.Notifications.Attachments(ctx, n.ID)
+			if err != nil {
+				return nil, sum, fmt.Errorf("backup: list notification attachments: %w", err)
+			}
+			p.Notifications = append(p.Notifications, notificationDTO{
+				Notification: *n, SealedURL: n.SealedURL, SealedKey: n.SealedKey,
+				Attachments: attached,
+			})
+			sum.NotificationAttachments += len(attached)
+		}
+		sum.Notifications = len(targets)
+	}
 
 	users, err := s.Users.List(ctx)
 	if err != nil {
@@ -573,6 +663,12 @@ func check(ctx context.Context, s Stores, p *payload) error {
 	// gate in the database, counts it in the summary as recovered, and lets every change the rule
 	// was written to hold run unapproved while the operator reads a healthy recovery.
 	for _, pol := range p.Policies {
+		// A Rego policy lives in the policy file, never in the database, so a backup carrying one
+		// was not written by this product and is refused before anything is restored.
+		if pol.Rego != nil {
+			return fmt.Errorf("%w: policy %s (%s): %v", ErrFormat, pol.ID, pol.Name,
+				policy.ErrRegoNotStored)
+		}
 		if err := pol.Validate(); err != nil {
 			return fmt.Errorf("%w: policy %s (%s): %v", ErrFormat, pol.ID, pol.Name, err)
 		}
@@ -590,7 +686,7 @@ func check(ctx context.Context, s Stores, p *payload) error {
 				g.ID, g.Access)
 		}
 	}
-	return nil
+	return checkAWXBindings(ctx, s.Templates, p.AWXBindings)
 }
 
 // apply upserts every object in the payload and reports the counts. Identity and access objects are
@@ -717,11 +813,18 @@ func apply(ctx context.Context, s Stores, p *payload) (Summary, error) {
 		sum.InventorySources++
 	}
 
-	for _, t := range p.Templates {
-		if err := s.Templates.Save(ctx, t); err != nil {
+	for _, dto := range p.Templates {
+		t := dto.Template
+		t.HostConfigKey = dto.HostConfigKey
+		if err := s.Templates.Save(ctx, &t); err != nil {
 			return sum, fmt.Errorf("restore: save template %s: %w", t.ID, err)
 		}
 		sum.Templates++
+	}
+	n, err := applyAWXBindings(ctx, s.Templates, p.AWXBindings)
+	sum.AWXBindings += n
+	if err != nil {
+		return sum, err
 	}
 
 	for _, sc := range p.Schedules {
@@ -733,6 +836,11 @@ func apply(ctx context.Context, s Stores, p *payload) (Summary, error) {
 		// bringing up. Missed occurrences are skipped the way cron skips them, so the schedule
 		// resumes on its own cadence instead of catching up.
 		restored := *sc
+		// A schedule an earlier release backed up may name no zone. This release reads one in
+		// schedule.UnnamedZone, which is also what opening the store writes onto such a row, so the
+		// restore writes it now, before the next fire is worked out, rather than leaving every
+		// server to read the restored row in a zone of its own.
+		restored.PinZone(schedule.UnnamedZone)
 		if restored.Enabled {
 			if next, err := restored.NextFire(now); err == nil {
 				restored.NextRunAt = &next
@@ -757,6 +865,29 @@ func apply(ctx context.Context, s Stores, p *payload) (Summary, error) {
 			return sum, fmt.Errorf("restore: save trigger %s: %w", trig.ID, err)
 		}
 		sum.Triggers++
+	}
+
+	// Targets come after every object they can be attached to, and each target's attachments right
+	// after it. A backup holding targets restored into stores with nowhere to put them is refused
+	// rather than reported as a clean restore that dropped them.
+	if len(p.Notifications) > 0 && s.Notifications == nil {
+		return sum, fmt.Errorf("restore: %d notification targets and nowhere to restore them",
+			len(p.Notifications))
+	}
+	for _, d := range p.Notifications {
+		n := d.Notification
+		n.SealedURL, n.SealedKey = d.SealedURL, d.SealedKey
+		if err := s.Notifications.Save(ctx, &n); err != nil {
+			return sum, fmt.Errorf("restore: save notification target %s: %w", n.ID, err)
+		}
+		sum.Notifications++
+		for _, a := range d.Attachments {
+			err := s.Notifications.Attach(ctx, a)
+			if err != nil && !errors.Is(err, notification.ErrDuplicate) {
+				return sum, fmt.Errorf("restore: save notification attachment %s: %w", a.ID, err)
+			}
+			sum.NotificationAttachments++
+		}
 	}
 
 	return sum, nil

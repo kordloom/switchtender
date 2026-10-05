@@ -398,12 +398,63 @@ function fmtSeconds(s) {
 	return fmtMs((s || 0) * 1000);
 }
 
+// SKIP_BADGE_FIRES mirrors schedule.SkipBadgeFires on the server: how many fires in a row a schedule
+// must have skipped, because its inventory matched no hosts, before its row carries a badge. A Go
+// test reads this line, so the two cannot drift apart.
+const SKIP_BADGE_FIRES = 3;
+
+// scheduleSkipBadge returns the badge a schedule carries when its recent fires were all skipped,
+// or null when they were not. One skip can be ordinary. Several in a row is a schedule that has
+// stopped reaching anything, which nobody would otherwise notice, since a skip is not a failure.
+function scheduleSkipBadge(s) {
+	const n = s.skipped_fires || 0;
+	if (n < SKIP_BADGE_FIRES) return null;
+	const badge = document.createElement("span");
+	badge.className = "chip warn schedule-skip-badge";
+	badge.textContent = "matched no hosts for the last " + n + " fires";
+	badge.dataset.tip = "Its inventory resolved to no hosts at each of these fires, so none started a run";
+	return badge;
+}
+
+// scheduleNameCell renders a schedule's name with the skip badge beside it, where a reader scanning
+// the list looks first.
+function scheduleNameCell(s) {
+	const cell = td(s.name || "(unnamed)");
+	const badge = scheduleSkipBadge(s);
+	if (badge) {
+		cell.appendChild(document.createTextNode(" "));
+		cell.appendChild(badge);
+	}
+	return cell;
+}
+
 // scheduleLastCell renders what a schedule's most recent fire did. A fire that started no run left
 // this cell reading "never", or pointing at an older run, while the reason sat in the server log, so a
 // schedule that had not run in weeks looked the same as one that ran on time. The reason is shown in
 // the cell rather than only in a tip, because it is the thing to act on.
+//
+// A skipped fire is shown apart from a failed one. Its inventory matched no hosts, so there was
+// nothing to run, and painting that red like a failure would teach a reader to ignore both.
 function scheduleLastCell(s) {
 	const last = document.createElement("td");
+	if (s.last_skip) {
+		const chip = document.createElement("span");
+		chip.className = "chip skipped";
+		chip.textContent = "skipped: " + s.last_skip;
+		const when = fmtTime(s.last_run_at);
+		chip.dataset.tip = when
+			? "The fire at " + when + " started no run because its inventory matched no hosts"
+			: "The last fire started no run because its inventory matched no hosts";
+		last.appendChild(chip);
+		if (s.last_run_id) {
+			const prev = document.createElement("a");
+			prev.className = "schedule-why";
+			prev.href = "/ui/runs/" + s.last_run_id;
+			prev.textContent = "Last run that started";
+			last.appendChild(prev);
+		}
+		return last;
+	}
 	if (s.last_error) {
 		const chip = document.createElement("span");
 		chip.className = "chip failed";
@@ -449,18 +500,21 @@ async function loadSchedules() {
 		const tbody = document.getElementById("schedules");
 		for (const s of schedules) {
 			const tr = document.createElement("tr");
-			tr.appendChild(td(s.name || "(unnamed)"));
+			tr.appendChild(scheduleNameCell(s));
 			// Hovering the expression reads it back in words, field by field, so the syntax explains
 			// itself wherever it appears rather than only in the neighboring column.
-			const cron = td(s.cron, "mono");
-			cron.dataset.cron = s.cron || "";
+			// A recurrence rule shows its rule lines, which say the cadence, and leaves out the
+			// DTSTART, which only anchors it; the dialog shows the whole of it.
+			const expression = s.rrule ? rruleLines(s.rrule) : s.cron;
+			const cron = td(expression, "mono");
+			cron.dataset.cron = s.rrule ? "" : (s.cron || "");
 			tr.appendChild(cron);
 			// The zone the cron is read in rides alongside the cadence: two identical expressions in
 			// different zones fire at different times, and without it the rows are indistinguishable.
-			const cadenceText = s.timezone ? describeCron(s.cron) + " (" + s.timezone + ")"
-				: describeCron(s.cron);
+			const described = s.rrule ? describeRRule(s.rrule) : describeCron(s.cron);
+			const cadenceText = s.timezone ? described + " (" + s.timezone + ")" : described;
 			const cadence = td(cadenceText);
-			cadence.dataset.cron = s.cron || "";
+			cadence.dataset.cron = s.rrule ? "" : (s.cron || "");
 			tr.appendChild(cadence);
 			const target = document.createElement("td");
 			if (s.template_id) {

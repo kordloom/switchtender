@@ -51,12 +51,12 @@ func TestTriggerWritesAuthorizeTheTemplateTheyFire(t *testing.T) {
 		Body    string
 	}{{ // Test 0: Wrapping somebody else's template in a new webhook.
 		Name:    "create",
-		Handler: createTriggerHandler(trs, tpls, nil, authz, zap.NewNop()),
+		Handler: createTriggerHandler(trs, tpls, nil, nil, authz, zap.NewNop()),
 		Method:  http.MethodPost, Path: "/v1/triggers",
 		Body: `{"name":"mine","template_id":"tpl_prod"}`,
 	}, { // Test 1: Turning signature enforcement off on somebody else's webhook.
 		Name:    "update",
-		Handler: updateTriggerHandler(trs, tpls, authz, zap.NewNop()),
+		Handler: updateTriggerHandler(trs, tpls, nil, authz, zap.NewNop()),
 		Method:  http.MethodPut, Path: "/v1/triggers/trg_1",
 		Body: `{"name":"theirs","require_signature":false}`,
 	}, { // Test 2: Deleting somebody else's webhook, silently stopping a deployment path.
@@ -111,7 +111,7 @@ func TestHookProbeDoesNotAppendToTheChain(t *testing.T) {
 func TestHookEndpointIsRateLimited(t *testing.T) {
 	t.Parallel()
 	handler := hookHandler(trigger.NewMemStore(), template.NewMemStore(), &fakeSubmitter{},
-		nil, nil, nil, zap.NewNop())
+		nil, nil, nil, nil, newHookFlights(), zap.NewNop())
 
 	limited := false
 	for i := 0; i < hookWindowMax+20; i++ {

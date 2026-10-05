@@ -13,12 +13,16 @@ import (
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/factcache"
+	"github.com/kordloom/switchtender/internal/federation"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
+	"github.com/kordloom/switchtender/internal/notification"
 	"github.com/kordloom/switchtender/internal/org"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
+	"github.com/kordloom/switchtender/internal/review"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/team"
@@ -98,6 +102,8 @@ type DB struct {
 	// credentials is the execution secret store.
 	credentials *credentialStore
 	credTypes   *credTypeStore
+	// fedKeys is the workload identity federation signing key store.
+	fedKeys *fedKeyStore
 	// projects is the git project store.
 	projects *projectStore
 	// templates is the job template store.
@@ -112,6 +118,8 @@ type DB struct {
 	invSources *invSourceStore
 	// triggers is the webhook trigger store.
 	triggers *triggerStore
+	// notifications is the named notification target store.
+	notifications *notificationStore
 	// teams is the team store.
 	teams *teamStore
 	// orgs is the organization store.
@@ -120,6 +128,10 @@ type DB struct {
 	grants *grantStore
 	// policies is the approval policy store.
 	policies *policyStore
+	// factCache is the per-host Ansible fact cache store.
+	factCache *factCacheStore
+	// reviews is the pull request review report store.
+	reviews *reviewStore
 }
 
 // sqliteConstraintUnique and sqliteConstraintPrimaryKey are the extended result codes for the two
@@ -144,6 +156,13 @@ func isKeyConflict(err error) bool {
 		return false
 	}
 	return serr.Code() == sqliteConstraintUnique || serr.Code() == sqliteConstraintPrimaryKey
+}
+
+// isPrimaryKeyConflict reports whether err is a write refused for reusing a primary key, as
+// opposed to some other unique index on the same table.
+func isPrimaryKeyConflict(err error) bool {
+	var serr *sqlite.Error
+	return errors.As(err, &serr) && serr.Code() == sqliteConstraintPrimaryKey
 }
 
 // Runs returns the run store.
@@ -171,6 +190,11 @@ func (d *DB) CredentialTypes() credential.TypeStore {
 	return d.credTypes
 }
 
+// FederationKeys returns the workload identity federation signing key store.
+func (d *DB) FederationKeys() federation.KeyStore {
+	return d.fedKeys
+}
+
 // Projects returns the git project store.
 func (d *DB) Projects() project.Store {
 	return d.projects
@@ -191,6 +215,16 @@ func (d *DB) Inventories() inventory.Store {
 	return d.inventories
 }
 
+// FactCache returns the per-host Ansible fact cache store.
+func (d *DB) FactCache() factcache.Store {
+	return d.factCache
+}
+
+// ReviewReports returns the pull request review report store.
+func (d *DB) ReviewReports() review.Store {
+	return d.reviews
+}
+
 // Policies returns the approval policy store.
 func (d *DB) Policies() policy.Store {
 	return d.policies
@@ -209,6 +243,11 @@ func (d *DB) InventorySources() invsource.Store {
 // Triggers returns the webhook trigger store.
 func (d *DB) Triggers() trigger.Store {
 	return d.triggers
+}
+
+// Notifications returns the named notification target store.
+func (d *DB) Notifications() notification.Store {
+	return d.notifications
 }
 
 // Teams returns the team store.

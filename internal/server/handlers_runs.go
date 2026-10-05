@@ -207,8 +207,15 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 			created, err = submitter.Submit(r.Context(), req.Playbook, req.Inventory, opts...)
 		}
 		switch {
+		case errors.Is(err, inventory.ErrNoHosts):
+			respondNoHosts(w, log, req.InventoryID, err)
+			return
 		case errors.Is(err, credential.ErrNotFound), errors.Is(err, credential.ErrNoKey),
 			errors.Is(err, project.ErrNotFound), errors.Is(err, inventory.ErrNotFound),
+			errors.Is(err, inventory.ErrResolve), errors.Is(err, dispatch.ErrInventorySnapshot),
+			errors.Is(err, inventory.ErrNeedsAnsible), errors.Is(err, inventory.ErrInvalidInventory),
+			errors.Is(err, inventory.ErrComposition), errors.Is(err, inventory.ErrHostFilter),
+			errors.Is(err, inventory.ErrSourceVars),
 			errors.Is(err, dispatch.ErrNoPlaybook), errors.Is(err, dispatch.ErrNoCommand),
 			errors.Is(err, dispatch.ErrUnknownTool), errors.Is(err, dispatch.ErrToolCredential):
 			respondError(w, log, http.StatusBadRequest, err.Error())
@@ -257,6 +264,11 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 			return
 		}
 		for _, step := range req.Steps {
+			// An approval step runs no tool. What it may carry is checked with the rest of the graph
+			// when the pipeline is validated, so it is not held to a tool step's input rule here.
+			if step.IsApproval() {
+				continue
+			}
 			if !run.ValidTool(step.Tool) {
 				respondError(w, log, http.StatusBadRequest,
 					"each step tool must be ansible, bash, terraform, opentofu, python, powershell, or go")
@@ -311,6 +323,9 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 		switch {
 		case errors.Is(err, credential.ErrNotFound), errors.Is(err, credential.ErrNoKey),
 			errors.Is(err, project.ErrNotFound):
+			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		case errors.Is(err, run.ErrApprovalStep), errors.Is(err, run.ErrDenyPath):
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
 		case errors.Is(err, dispatch.ErrUnnamedStep), errors.Is(err, dispatch.ErrDuplicateStep),
@@ -675,12 +690,22 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 		} else {
 			created, err = submitter.Submit(r.Context(), rn.Playbook, rn.Inventory, opts...)
 		}
+		// A rerun resolves its composed inventory again, and a person asked for it, so matching no
+		// hosts is answered the way a launch is: the reason and where to see what it matches now.
+		if errors.Is(err, inventory.ErrNoHosts) {
+			respondNoHosts(w, log, rn.InventoryID, err)
+			return
+		}
 		if errors.Is(err, dispatch.ErrPolicyDenied) ||
 			errors.Is(err, dispatch.ErrQueueUnlicensed) {
 			respondError(w, log, http.StatusForbidden, err.Error())
 			return
 		}
 		if errors.Is(err, credential.ErrNoSecret) || errors.Is(err, credential.ErrUnreadable) {
+			respondError(w, log, http.StatusConflict, err.Error())
+			return
+		}
+		if errors.Is(err, dispatch.ErrInventorySnapshot) || errors.Is(err, inventory.ErrInvalidInventory) {
 			respondError(w, log, http.StatusConflict, err.Error())
 			return
 		}

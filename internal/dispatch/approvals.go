@@ -15,6 +15,22 @@ import (
 // decision is committed to the chain before the run is released, binding the approver to a digest
 // of the exact spec released.
 func (d *Dispatcher) Approve(ctx context.Context, id string, by outcome.Decider) (*run.Run, error) {
+	return d.approveRun(ctx, id, RunDecision{Approve: true, By: by})
+}
+
+// approveRun is Approve with the approver's optional reason. The reason is masked, recorded with a
+// hiding commitment in the decision entry, and refused for confirmation when the masker changed it.
+func (d *Dispatcher) approveRun(ctx context.Context, id string, dec RunDecision) (*run.Run, error) {
+	by := dec.By
+	// An agent's token is capped below the role the approve route needs, so it never reaches this
+	// call through the API. This is the second, independent lock, the one a workflow approval step
+	// already had: whatever path reaches the dispatcher with an agent decider, a token that slipped
+	// past the door or a caller that never went through it, nothing is recorded and nothing is
+	// released. It is checked before the run is read, because the decider alone decides it.
+	if by.Type == agentActorType {
+		return nil, fmt.Errorf("%w a held run: an agent may propose work, and only an authorized "+
+			"person can release it", ErrAgentApproval)
+	}
 	r, err := d.store.Get(ctx, id)
 	if err != nil {
 		return nil, err
@@ -24,6 +40,9 @@ func (d *Dispatcher) Approve(ctx context.Context, id string, by outcome.Decider)
 	// to roll it up.
 	if r.ParentID != nil {
 		return nil, ErrChildNotApprovable
+	}
+	if err := d.refuseStartedWorkflow(ctx, r); err != nil {
+		return nil, err
 	}
 	// A cancel already requested outranks the approval. Releasing the run anyway moved it to
 	// pending, where the claim predicate then skipped it for carrying the flag: it never executed
@@ -37,43 +56,28 @@ func (d *Dispatcher) Approve(ctx context.Context, id string, by outcome.Decider)
 	//
 	// Only an approval is checked. Rejecting a change you asked for needs no second person, and
 	// refusing it would leave a requester unable to withdraw their own request.
-	if r.RequireDistinctApprover && by.Name != "" && by.Name == r.Actor {
+	if r.RequireDistinctApprover && sameRequester(by, r) {
 		return nil, fmt.Errorf("%w: %q asked for this run, and the rule that held it requires a "+
 			"different person to approve it", ErrSelfApproval, by.Name)
 	}
-	// A decision is only recordable while the run is actually awaiting one. The CAS below is what
-	// makes the release happen at most once, but it runs AFTER the chain entry, so a decision
-	// arriving late was refused to the caller and written to the chain anyway.
-	//
-	// That is not a cosmetic duplicate. The chain then holds an approval stamped after the run's own
-	// outcome entry, and verifyTimeOrder reads an approval that postdates the execution it authorized
-	// as the signature of a gate bypass: an honest install's whole-fleet bundle reported NOT VERIFIED
-	// after nothing worse than an approver double-clicking, or clicking Reject a moment too late.
-	// The product's sharpest claim, broken by its own record of a refused request.
+	// A decision is only recordable while the run is actually awaiting one. This is the early answer
+	// for the sequential case; the claim below is what makes it hold across replicas.
 	if r.Status != run.StatusPendingApproval {
 		return nil, fmt.Errorf("%w: this run is %s", ErrNotPendingApproval, r.Status)
 	}
-	// The decision entry is appended before the run is released, fail-closed, matching the gate's
-	// rule that a change which cannot be recorded is refused. If the release below then fails, the
-	// chain truthfully holds a decision for a run that stayed held, and a second attempt appends a
-	// second decision. The digest is also stamped on the run so the executor can refuse a spec
-	// that changed underneath the decision.
-	if d.audits != nil {
-		specDigest, derr := outcome.CommitDecision(ctx, d.audits, r, "approved", by, d.now)
-		if derr != nil {
-			return nil, fmt.Errorf("record the approval decision: %w", derr)
-		}
-		// The binding covers the spec as written and is what execution is held to; the digest is
-		// the redacted form the receipt discloses. Both are stamped in one write.
-		binding, berr := outcome.SpecBinding(r)
-		if berr != nil {
-			return nil, fmt.Errorf("bind the approved spec: %w", berr)
-		}
-		if serr := d.store.StampApprovedSpec(ctx, id, specDigest, binding); serr != nil {
-			return nil, fmt.Errorf("stamp the approved spec: %w", serr)
-		}
-		r.ApprovedSpecDigest = specDigest
-		r.ApprovedSpecBinding = binding
+	// The reason is settled before anything is recorded: a reason the rule requires and was not
+	// given, one over the cap, or one the masker changed that the approver has not confirmed leaves
+	// no decision behind.
+	reason, masked, err := d.prepareReason(ctx, r, dec.Reason, dec.ConfirmedMask)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireReason(r, reason, true); err != nil {
+		return nil, err
+	}
+	rec, err := d.newDecisionRecord(r, nil, "approved", reason, masked, by)
+	if err != nil {
+		return nil, fmt.Errorf("record the approval decision: %w", err)
 	}
 	// A parent goes straight to running, never through pending.
 	//
@@ -83,63 +87,51 @@ func (d *Dispatcher) Approve(ctx context.Context, id string, by outcome.Decider)
 	// hours past the cutoff and the very next janitor tick interrupted it and canceled every shard.
 	// The approved run then executed nothing. Skipping the pending state removes the window rather
 	// than narrowing it: the sweep never sees a state it can act on, and a coordinator that dies
-	// later is still caught, by the lease sweep that already handles exactly that.
+	// later is still caught, by the lease sweep that already handles exactly that. The status change
+	// and the lease are one write for the same reason, and a plain run is released to pending
+	// unleased, so the claim loop can take it.
 	target := run.StatusPending
 	if r.Kind == run.KindSplit || r.Kind == run.KindPipeline {
 		target = run.StatusRunning
 	}
-	// The status change and the lease are one operation.
-	//
-	// Doing them in sequence leaves a window either way. Transition first and the parent is running,
-	// unleased, and instantly eligible for the sweep that settles parents nothing will finish, since
-	// that measures age from CreatedAt and a run held for a person is old by definition. Lease first
-	// and a process that dies before the transition leaves the run held with an owner, which
-	// CancelPending refuses to touch, so it can never be canceled either. One atomic step has
-	// neither state: the parent is pending_approval, then it is running and owned.
-	// Only a parent is claimed here. A plain run is released to pending precisely so the claim loop
-	// can take it, and the loop skips anything already leased, so stamping an owner on one would
-	// leave an approved run that nothing ever executes.
-	var ok bool
-	if target == run.StatusRunning {
-		ok, err = d.store.TransitionStatusAndClaim(ctx, id, run.StatusPendingApproval, target, d.owner, time.Time{})
-	} else {
-		ok, err = d.store.TransitionStatus(ctx, id, run.StatusPendingApproval, target)
+	c := &decisionClaim{ID: rec.ID, Verdict: "approved", Status: target}
+	if d.audits != nil {
+		// The decision entry binds the approver to a digest of the exact spec released, and the
+		// binding over the spec as written is what execution is held to. Both are fixed now and
+		// stamped before the run is released, so the executor can refuse a spec that changed
+		// underneath the decision.
+		entry, specDigest, err := outcome.DecisionEntry(r, "approved", by, d.now,
+			outcome.ExtrasOf(rec))
+		if err != nil {
+			return nil, fmt.Errorf("record the approval decision: %w", err)
+		}
+		binding, err := outcome.SpecBinding(r)
+		if err != nil {
+			return nil, fmt.Errorf("bind the approved spec: %w", err)
+		}
+		c.Entry, c.Digest, c.Binding = claimEntryOf(entry), specDigest, binding
 	}
+	// The decision claims the run first and is recorded and applied only once it has won, so a
+	// decision that loses, to a second approver, a rejection, a cancel, or anything on another
+	// replica, is answered 409 having written nothing. A decision appended before the
+	// compare-and-set that decided it stayed on the chain after it lost, stamped after the outcome
+	// of a run it never released, and the bundle verifier read that as a gate bypass: an honest
+	// install reported NOT VERIFIED because an approver clicked a moment too late.
+	mine, err := d.decide(ctx, id, rec, c)
+	if err != nil {
+		return nil, decisionError("approval decision", err)
+	}
+	released, err := d.storeGetWithRetries(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
-		return nil, ErrNotPendingApproval
+	// No claim loop picks up a parent run of either kind, so an approved one starts on the process
+	// that settled the decision or never runs at all. That is this one unless a janitor finished
+	// the decision first, in which case the janitor's process started it.
+	if mine {
+		d.afterRunDecision(ctx, released, c)
 	}
-	r.Status = target
-	if target == run.StatusRunning {
-		// The store stamped the lease and the start time in the same statement, so the answer the
-		// caller gets carries them too rather than describing a run that no longer exists.
-		claimed := time.Now()
-		r.ClaimedBy = d.owner
-		r.ClaimedAt = &claimed
-		if r.StartedAt == nil {
-			r.StartedAt = &claimed
-		}
-	}
-	// No claim loop picks up a parent run of either kind, so an approved one starts here or never
-	// runs at all.
-	switch r.Kind {
-	case run.KindPipeline:
-		d.startPipeline(r)
-	case run.KindSplit:
-		// The dispatcher's own context, not the request's. The approval is committed by the time
-		// this runs, and releasing the shards is the coordinator's work, not the HTTP caller's: on
-		// the request context the shard release was canceled the instant the approve response was
-		// written, so a large split lost every shard the release had not yet reached, stranded
-		// under a parent that would never run them.
-		d.startSplit(d.ctx, r)
-	default:
-		// A plain run just became claimable, so the claim loop is nudged rather than left to
-		// finish an idle backoff while an approved run waits.
-		d.wake()
-	}
-	return r, nil
+	return released, nil
 }
 
 // startSplit begins coordinating an approved split. Its shards were stored held alongside it, so
@@ -210,7 +202,7 @@ func (d *Dispatcher) startPipeline(parent *run.Run) {
 		return
 	}
 	d.wg.Add(1)
-	go d.runPipeline(parent.Clone(), parent.Steps)
+	go d.runPipeline(parent.Clone())
 }
 
 // Reject terminally denies a run held for approval so it never executes. reason is recorded as the
@@ -218,6 +210,14 @@ func (d *Dispatcher) startPipeline(parent *run.Run) {
 // for, and the rejection is committed to the chain before the run is settled, binding the decider
 // to the spec refused.
 func (d *Dispatcher) Reject(ctx context.Context, id, reason string, by outcome.Decider) (*run.Run, error) {
+	return d.rejectRun(ctx, id, RunDecision{Reason: reason, By: by})
+}
+
+// rejectRun is Reject with the decision's reason handled the way an approval's is: masked, recorded
+// with a hiding commitment, and refused for confirmation when the masker changed it. The reason is
+// kept in the decision record, never in the run's error, so a redaction can remove it.
+func (d *Dispatcher) rejectRun(ctx context.Context, id string, dec RunDecision) (*run.Run, error) {
+	by := dec.By
 	r, err := d.store.Get(ctx, id)
 	if err != nil {
 		return nil, err
@@ -227,35 +227,55 @@ func (d *Dispatcher) Reject(ctx context.Context, id, reason string, by outcome.D
 	if r.ParentID != nil {
 		return nil, ErrChildNotApprovable
 	}
+	if err := d.refuseStartedWorkflow(ctx, r); err != nil {
+		return nil, err
+	}
 	// Same precondition as Approve, and the same reason. A reject arriving after the run had already
 	// been approved and succeeded was refused with 409 and still wrote DECISION .../rejected into the
 	// chain, so the permanent record said an approver rejected a run that ran and succeeded.
 	if r.Status != run.StatusPendingApproval {
 		return nil, fmt.Errorf("%w: this run is %s", ErrNotPendingApproval, r.Status)
 	}
-	if d.audits != nil {
-		if _, derr := outcome.CommitDecision(ctx, d.audits, r, "rejected", by, d.now); derr != nil {
-			return nil, fmt.Errorf("record the rejection decision: %w", derr)
-		}
-	}
-	ok, err := d.store.TransitionStatus(ctx, id, run.StatusPendingApproval, run.StatusRejected)
+	text, masked, err := d.prepareReason(ctx, r, dec.Reason, dec.ConfirmedMask)
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
-		return nil, ErrNotPendingApproval
+	if err := requireReason(r, text, false); err != nil {
+		return nil, err
 	}
-	if reason == "" {
-		reason = "rejected by an approver"
+	rec, err := d.newDecisionRecord(r, nil, "rejected", text, masked, by)
+	if err != nil {
+		return nil, fmt.Errorf("record the rejection decision: %w", err)
 	}
-	// A held split stores its shards held alongside it, so rejecting the parent has to settle them
-	// or they sit awaiting an approval that already happened and was a no. A pipeline creates no
-	// step runs until it starts, so it has nothing to settle here.
-	if r.Kind == run.KindSplit {
-		d.rejectShards(ctx, r, reason)
+	// The run's error says it was rejected and nothing more. The reason lives in the decision record
+	// beside the commitment the chain holds, where a redaction can remove it: written here, it would
+	// be committed with the run's outcome and disclosed by every receipt drawn from it afterward.
+	c := &decisionClaim{ID: rec.ID, Verdict: "rejected", Status: run.StatusRejected,
+		Error: "rejected by an approver", Finalize: true}
+	if d.audits != nil {
+		entry, _, err := outcome.DecisionEntry(r, "rejected", by, d.now, outcome.ExtrasOf(rec))
+		if err != nil {
+			return nil, fmt.Errorf("record the rejection decision: %w", err)
+		}
+		c.Entry = claimEntryOf(entry)
 	}
-	d.finalize(r, run.StatusRejected, nil, reason)
-	return r, nil
+	// Claimed before it is recorded, as an approval is, so a rejection that loses to an approval
+	// that already ran never writes a rejection of a run that succeeded into the permanent record.
+	mine, err := d.decide(ctx, id, rec, c)
+	if err != nil {
+		return nil, decisionError("rejection decision", err)
+	}
+	rejected, err := d.storeGetWithRetries(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	// A held split stores its shards held alongside it, so the process that settled the rejection
+	// settles them too, and commits the run's outcome. A pipeline creates no step runs until it
+	// starts, so it has nothing to settle.
+	if mine {
+		d.afterRunDecision(ctx, rejected, c)
+	}
+	return rejected, nil
 }
 
 // rejectShards cancels the held shards of a rejected split so none is left awaiting a decision that
@@ -279,4 +299,23 @@ func (d *Dispatcher) rejectShards(ctx context.Context, parent *run.Run, reason s
 			d.log.Error("dispatch: cancel shard " + s.ID + " of a rejected split: " + err.Error())
 		}
 	}
+}
+
+// refuseStartedWorkflow refuses a whole-run decision on a workflow that already started. Such a
+// workflow is held only because it parked at an approval step, and approving it as a run would
+// start its coordinator from the top: every step that already ran would run again, under a decision
+// about a different question than the one the step is asking. Rejecting it as a run would end it
+// without answering the step either. The step is decided instead.
+func (d *Dispatcher) refuseStartedWorkflow(ctx context.Context, r *run.Run) error {
+	if r.Kind != run.KindPipeline {
+		return nil
+	}
+	started, err := run.Started(ctx, d.store, r.ID)
+	if err != nil {
+		return err
+	}
+	if started {
+		return ErrStepPending
+	}
+	return nil
 }

@@ -280,6 +280,19 @@ func (c *refChecker) inventoryRefs(ctx context.Context, id string) (usedBy, erro
 			}
 		}
 	}
+	if c.inventories != nil {
+		list, err := c.inventories.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, i := range list {
+			// A constructed inventory reads its inputs at every launch, so deleting one would leave
+			// it resolving to fewer hosts, or none, with nothing to say why.
+			if slices.Contains(i.InputIDs, id) {
+				out["inventories"] = append(out["inventories"], nameOr(i.Name, i.ID))
+			}
+		}
+	}
 	if c.policies != nil {
 		list, err := c.policies.List(ctx)
 		if err != nil {

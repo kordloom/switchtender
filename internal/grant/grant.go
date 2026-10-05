@@ -47,8 +47,9 @@ const QueuePrefix = "queue:"
 // QueueObject returns the grant object naming a worker queue.
 func QueueObject(queue string) string { return QueuePrefix + queue }
 
-// objectPrefixes are the id prefixes a grant object may carry.
-var objectPrefixes = []string{"proj_", "tpl_", "inv_", "cred_", QueuePrefix}
+// objectPrefixes are the id prefixes a grant object may carry. A named notification target, ntf_,
+// is grantable like a credential: use lets a subject attach it, manage lets them edit it.
+var objectPrefixes = []string{"proj_", "tpl_", "inv_", "cred_", "ntf_", QueuePrefix}
 
 // runObjectPrefixes are the id prefixes a run can name, which is a strict subset of the objects a
 // grant may be written on. A run references a project, an inventory, and credentials; it does not
@@ -72,8 +73,8 @@ type Grant struct {
 	ID string `json:"id"`
 	// Subject is the granted identity: a user id (user_...), a team id (team_...), or an org id (org_...).
 	Subject string `json:"subject"`
-	// Object is the target: a project, template, inventory, or credential id, or a worker queue
-	// named as queue:<name>.
+	// Object is the target: a project, template, inventory, credential, or notification target id,
+	// or a worker queue named as queue:<name>.
 	Object string `json:"object"`
 	// Access is the level conferred: read, use, or manage, each implying the ones below it.
 	Access Access `json:"access"`

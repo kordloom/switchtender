@@ -231,7 +231,7 @@ func newRelayFixture(t *testing.T, store run.Store, policies policy.Store) relay
 		store = run.NewMemStore()
 	}
 	ts := httptest.NewServer(relay.NewHandler(store, relay.SinglePool(testWorkerToken), nil,
-		policies, nil))
+		policies, nil, relay.WithPlanSealer(planSealerStub{})))
 	t.Cleanup(ts.Close)
 	return relayFixture{URL: ts.URL, Store: store}
 }

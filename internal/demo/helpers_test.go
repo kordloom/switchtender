@@ -35,35 +35,6 @@ func (refusingAudit) Append(context.Context, *audit.Entry) error { return errApp
 // List returns nothing, since nothing was ever appended.
 func (refusingAudit) List(context.Context, int) ([]*audit.Entry, error) { return nil, nil }
 
-// TestEnglishListReadsAsProse pins the warning that tells a demo operator which tools their host
-// cannot show. The list is interpolated into a sentence, so a slice printed raw into the middle of
-// one is the failure this exists to avoid.
-func TestEnglishListReadsAsProse(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		// In is the list of missing tool names.
-		In []string
-		// WantResult is the phrase the warning carries.
-		WantResult string
-	}{
-		{In: nil, WantResult: ""},                                        // Test 0: Nothing missing.
-		{In: []string{}, WantResult: ""},                                 // Test 1: An empty slice.
-		{In: []string{"go"}, WantResult: "go"},                           // Test 2: One name.
-		{In: []string{"terraform", "go"}, WantResult: "terraform or go"}, // Test 3: Two names.
-		{In: []string{"a", "b", "c"}, WantResult: "a, b, or c"},          // Test 4: Three names.
-		{In: []string{"a", "b", "c", "d"}, WantResult: "a, b, c, or d"},  // Test 5: Four names.
-		{In: []string{""}, WantResult: ""},                               // Test 6: An empty name.
-	}
-	for testNum, test := range tests {
-		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
-			t.Parallel()
-			if diff := cmp.Diff(test.WantResult, englishList(test.In)); diff != "" {
-				t.Errorf("englishList(%v) mismatch (-want +got):\n%s", test.In, diff)
-			}
-		})
-	}
-}
-
 // TestFailVarsOnlyTargetsANamedHost pins the switch that makes one host in a seeded run fail. An
 // empty host must produce no options at all, because a clean run that silently carried a fail_host
 // variable would make every seeded run look broken on the demo.

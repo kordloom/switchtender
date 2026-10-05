@@ -265,6 +265,11 @@ type unitSpec struct {
 // no execution image runs as the server's own account, so every Bash, Python, and local Ansible run
 // the server executed ran as root, and the server wrote root-owned files into the directory init had
 // just set up as somebody else.
+//
+// The runtime directory is where runs stage their keys and tokens: memory-backed, private, and
+// removed by systemd when the service stops for any reason, a crash included. LimitCORE=0 keeps a
+// crash from writing process memory, credentials included, to disk, and KillMode=mixed lets the
+// server end its runs' tools itself on a stop rather than having them killed under it.
 func systemdUnit(u unitSpec) string {
 	return fmt.Sprintf(`[Unit]
 Description=SwitchTender
@@ -281,6 +286,12 @@ ExecStart=%s serve --db %s --addr %s
 Restart=on-failure
 NoNewPrivileges=true
 PrivateTmp=true
+RuntimeDirectory=switchtender
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=no
+LimitCORE=0
+KillMode=mixed
+TimeoutStopSec=90
 
 [Install]
 WantedBy=multi-user.target

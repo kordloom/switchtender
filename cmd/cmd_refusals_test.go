@@ -621,8 +621,10 @@ func TestContainerLimitsFromFlagsCarriesEveryCap(t *testing.T) {
 	setString(t, &containerCPUs, "0.5")
 	setInt(t, &containerPidsLimit, 32)
 	setString(t, &containerNetwork, "none")
+	setString(t, &containerRunFilesSize, "16m")
 
-	want := roundhouse.ContainerLimits{Memory: "256m", CPUs: "0.5", PidsLimit: 32, Network: "none"}
+	want := roundhouse.ContainerLimits{Memory: "256m", CPUs: "0.5", PidsLimit: 32, Network: "none",
+		RunFilesSize: "16m"}
 	if diff := cmp.Diff(want, containerLimitsFromFlags()); diff != "" {
 		t.Errorf("containerLimitsFromFlags() mismatch (-want +got):\n%s", diff)
 	}
@@ -1033,12 +1035,24 @@ func TestChoiceFlagsRefuseValuesTheyDoNotKnow(t *testing.T) {
 	}, { // Test 3: worker refuses an unknown runtime too.
 		Name: "worker runtime", Run: func() error { return runWorker(testCommand(), nil) },
 		Set: func(t *testing.T) { setString(t, &containerRuntime, "rkt") }, WantFlag: "--container-runtime",
+	}, { // Test 4: serve refuses a run files mount size the runtime would not take.
+		Name: "serve runfiles size", Run: func() error { return runServe(testCommand(), nil) },
+		Set:      func(t *testing.T) { setString(t, &containerRunFilesSize, "lots") },
+		WantFlag: "--container-runfiles-size",
+	}, { // Test 5: serve refuses a relative run files directory.
+		Name: "serve runfiles dir", Run: func() error { return runServe(testCommand(), nil) },
+		Set: func(t *testing.T) { setString(t, &runFilesDir, "runfiles") }, WantFlag: "--runfiles-dir",
+	}, { // Test 6: worker refuses a relative run files directory too.
+		Name: "worker runfiles dir", Run: func() error { return runWorker(testCommand(), nil) },
+		Set: func(t *testing.T) { setString(t, &runFilesDir, "runfiles") }, WantFlag: "--runfiles-dir",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			// Not parallel: the commands read package-level flag variables.
 			setString(t, &containerRuntime, "docker")
 			setString(t, &containerPullPolicy, "missing")
+			setString(t, &containerRunFilesSize, "64m")
+			setString(t, &runFilesDir, "")
 			setString(t, &notifyOn, "failure")
 			setString(t, &serveDB, tempDB(t))
 			setString(t, &workerDB, tempDB(t))

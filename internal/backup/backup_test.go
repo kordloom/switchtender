@@ -16,6 +16,7 @@ import (
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
+	"github.com/kordloom/switchtender/internal/notification"
 	"github.com/kordloom/switchtender/internal/org"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
@@ -39,6 +40,7 @@ func freshStores() Stores {
 		InventorySources: invsource.NewMemStore(),
 		Schedules:        schedule.NewMemStore(),
 		Triggers:         trigger.NewMemStore(),
+		Notifications:    notification.NewMemStore(),
 		Users:            user.NewMemStore(),
 		Tokens:           auth.NewMemStore(),
 		Teams:            team.NewMemStore(),

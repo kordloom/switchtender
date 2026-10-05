@@ -2,7 +2,9 @@ package dispatch
 
 import (
 	"errors"
+	"fmt"
 
+	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -17,6 +19,24 @@ var (
 	// under Ansible to a non-Ansible tool, so the mismatch fails at submit instead of the credential
 	// being silently ignored at execution.
 	ErrToolCredential = errors.New("credential kind does not apply to this tool")
+	// ErrSecretAnswer is returned when a run carries secret survey answers this executor cannot
+	// open: they never reached it, which is the case on a relay worker, or it holds no key.
+	ErrSecretAnswer = errors.New("secret survey answer unavailable")
+	// ErrNotDelivered is returned on a relay worker when a run needs a secret the control node did not
+	// deliver with its claim, or delivered for another execution, so the run fails rather than
+	// executing without it.
+	ErrNotDelivered = errors.New("secret not delivered to this worker")
+	// ErrInventorySnapshot is returned when a run cannot execute the inventory snapshot it was
+	// submitted with: it carries none, the stored snapshot changed since it was bound, or it does not
+	// open. The run is refused rather than executed against whatever the store holds now.
+	ErrInventorySnapshot = errors.New("inventory snapshot refused")
+	// ErrPlanFile is returned when a gated apply cannot carry out the plan file its approval bound:
+	// the file is missing, changed since it was bound, or does not open. The apply is refused rather
+	// than planned again.
+	ErrPlanFile = errors.New("plan file refused")
+	// ErrImagePin is returned when a run's container image does not match what was pinned when it was
+	// submitted, or when an image could not be pinned to the run at all.
+	ErrImagePin = errors.New("image pin refused")
 	// ErrNoHostLister is returned when a split is requested but the runner cannot list hosts.
 	ErrNoHostLister = errors.New("host listing unavailable")
 	// ErrNoSteps aliases the run-package error so callers matching dispatch.ErrNoSteps still match
@@ -69,6 +89,40 @@ var ErrCommitMoved = errors.New("the project moved to a different commit since t
 // release themselves records a signature but stops nothing.
 var ErrSelfApproval = errors.New("the requester cannot approve their own run")
 
+// ErrNotApprovalStep is returned when a step decision names a run that is not a workflow approval
+// step.
+var ErrNotApprovalStep = errors.New("not a workflow approval step")
+
+// ErrAgentApproval is returned when an AI agent tries to approve a held run or a workflow approval
+// step. An agent may propose work and see that it waits, never release it.
+var ErrAgentApproval = errors.New("an agent cannot approve")
+
+// ErrReasonRequired is returned when a decision carries no reason and the rule that held the run
+// requires one for that decision.
+var ErrReasonRequired = errors.New("a reason is required for this decision")
+
+// ErrReasonTooLong is returned when an approver's reason or correction is over the length cap.
+var ErrReasonTooLong = errors.New("the reason is too long")
+
+// ErrDecisionNotFound is returned when a correction or a redaction names a decision record the run
+// does not have.
+var ErrDecisionNotFound = errors.New("no such decision on this run")
+
+// ErrNoReasonText is returned when a correction carries no text.
+var ErrNoReasonText = errors.New("a correction needs text")
+
+// ErrRedactionCategory is returned when a redaction names no category this product recognizes.
+var ErrRedactionCategory = errors.New("unknown redaction category")
+
+// ErrStateMoved is returned when an approver decides on an approval step whose workflow no longer
+// reduces to the state they were shown, so their decision would bind to something they never saw.
+var ErrStateMoved = errors.New("the workflow changed since this approval step was shown")
+
+// ErrStepPending is returned when a whole-run decision targets a workflow that already started and
+// is paused at an approval step. Approving it as a run would walk the graph from the top and repeat
+// every step that already changed something, so the step is decided instead.
+var ErrStepPending = errors.New("this workflow is paused at an approval step: decide the step")
+
 // ErrChildNotApprovable is returned when a shard or pipeline step is approved on its own. The
 // parent carries the decision; a child released by itself would run outside it.
 var ErrChildNotApprovable = errors.New("a shard or step is approved through its parent")
@@ -87,3 +141,15 @@ var ErrQueueUnlicensed = errors.New("named queues need a license this install do
 // one. A tool registered through the SDK or a plugin executes on the host, so an image on such a run
 // would be recorded as an environment the run never entered.
 var ErrToolImage = errors.New("this tool cannot execute in an image")
+
+// errDecisionFound stops the audit chain scan once the approval decision has been read.
+var errDecisionFound = errors.New("decision found")
+
+// errFederatedCredential is openCredential's refusal of a federated credential, which has no stored
+// value to open. Run materialization recognizes it and mints the run's token instead.
+var errFederatedCredential = fmt.Errorf("%w: a federated credential has no stored secret",
+	credential.ErrBadKind)
+
+// ErrBadGitRef is returned when a run names a git ref to fetch its commit from that cannot be
+// honored: one with no project, no pinned commit, or a malformed reference name.
+var ErrBadGitRef = errors.New("invalid git ref for this run")

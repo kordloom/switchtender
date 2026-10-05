@@ -12,6 +12,8 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/schedule"
+	"github.com/kordloom/switchtender/internal/template"
 )
 
 // importNow is the fixed clock every mapping test stamps its objects with, so a plan is comparable
@@ -749,7 +751,7 @@ func TestAWXReportsUnmappedCountsWithTheRightPlural(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FromAWX() error = %v", err)
 	}
-	for _, want := range []string{"1 organization,", "2 teams,", "1 notification template,"} {
+	for _, want := range []string{"1 organization,", "2 teams,"} {
 		if _, ok := warningContaining(t, plan.Warnings, want); !ok {
 			t.Errorf("missing %q in the report.\nwarnings: %v", want, plan.Warnings)
 		}
@@ -759,27 +761,32 @@ func TestAWXReportsUnmappedCountsWithTheRightPlural(t *testing.T) {
 	}
 }
 
-// TestAWXScheduleRefusalsNameTheRemedy pins that a schedule cron cannot express is skipped with a
-// reason specific enough to act on. A rule that bounds itself needs a different fix from a cadence
-// cron cannot say, and a cron entry created from a bounded rule would fire forever.
-func TestAWXScheduleRefusalsNameTheRemedy(t *testing.T) {
+// TestAWXSchedulesCronCannotSayComeAcross pins the shapes that used to be skipped because cron
+// cannot express them. Each now comes across as the recurrence AWX evaluates, and only a rule with
+// no fire left, or no rule at all, stays behind, with a reason that says which.
+func TestAWXSchedulesCronCannotSayComeAcross(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
+		WantFragment string
 		Name         string
 		RRule        string
-		WantFragment string
+		WantRule     bool
 	}{
-		{Name: "count", RRule: "DTSTART:20260101T020000Z RRULE:FREQ=MINUTELY;COUNT=1",
-			WantFragment: "runs a fixed number of times"}, // Test 0.
+		{Name: "count spent", RRule: "DTSTART:20260101T020000Z RRULE:FREQ=MINUTELY;COUNT=1",
+			WantFragment: "already fired its last time"}, // Test 0.
 		{Name: "until", RRule: "DTSTART:20260101T020000Z RRULE:FREQ=DAILY;UNTIL=20270101T000000Z",
-			WantFragment: "stops on a date"}, // Test 1.
+			WantRule: true}, // Test 1.
 		{Name: "uneven interval", RRule: "DTSTART:20260101T020000Z RRULE:FREQ=MINUTELY;INTERVAL=45",
-			WantFragment: "cadence cannot be expressed as cron"}, // Test 2.
+			WantRule: true}, // Test 2.
 		{Name: "every three days", RRule: "DTSTART:20260101T020000Z RRULE:FREQ=DAILY;INTERVAL=3",
-			WantFragment: "cadence cannot be expressed as cron"}, // Test 3.
+			WantRule: true}, // Test 3.
 		{Name: "yearly", RRule: "DTSTART:20260101T020000Z RRULE:FREQ=YEARLY",
-			WantFragment: "cadence cannot be expressed as cron"}, // Test 4.
-		{Name: "empty", RRule: "", WantFragment: "cadence cannot be expressed as cron"}, // Test 5.
+			WantRule: true}, // Test 4.
+		{Name: "empty", RRule: "", WantFragment: "has no recurrence rule"}, // Test 5.
+		{Name: "count left", RRule: "DTSTART:20261001T020000Z RRULE:FREQ=DAILY;COUNT=3",
+			WantRule: true}, // Test 6: A run-three-times rule that has not started yet.
+		{Name: "starts later", RRule: "DTSTART:20270101T020000Z RRULE:FREQ=DAILY",
+			WantRule: true}, // Test 7: cron would fire from tonight, before the rule starts.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -790,13 +797,27 @@ func TestAWXScheduleRefusalsNameTheRemedy(t *testing.T) {
 			if err != nil {
 				t.Fatalf("FromAWX() error = %v", err)
 			}
-			if len(plan.Schedules) != 0 {
-				t.Fatalf("schedules = %d, want 0: a rule cron cannot express must not become one",
-					len(plan.Schedules))
+			if !test.WantRule {
+				if len(plan.Schedules) != 0 {
+					t.Fatalf("schedules = %d, want 0", len(plan.Schedules))
+				}
+				if _, ok := warningContaining(t, plan.Warnings, `schedule "nightly"`,
+					test.WantFragment); !ok {
+					t.Errorf("missing %q.\nwarnings: %v", test.WantFragment, plan.Warnings)
+				}
+				return
 			}
-			if _, ok := warningContaining(t, plan.Warnings, `schedule "nightly"`,
-				test.WantFragment); !ok {
-				t.Errorf("missing %q.\nwarnings: %v", test.WantFragment, plan.Warnings)
+			if len(plan.Schedules) != 1 {
+				t.Fatalf("schedules = %d, want 1.\nwarnings: %v", len(plan.Schedules),
+					plan.Warnings)
+			}
+			got := plan.Schedules[0]
+			if got.RRule != test.RRule || got.Cron != "" || got.NextRunAt == nil {
+				t.Errorf("schedule rrule = %q cron = %q next = %v, want the rule whole and a "+
+					"first fire", got.RRule, got.Cron, got.NextRunAt)
+			}
+			if w, ok := warningContaining(t, plan.Warnings, `schedule "nightly"`); ok {
+				t.Errorf("the schedule came across and is still reported: %s", w)
 			}
 		})
 	}
@@ -867,8 +888,9 @@ func TestAWXUnresolvableTimezoneStillImportsInServerTime(t *testing.T) {
 		t.Fatalf("schedules = %d, want 1: an unknown zone must not drop the schedule",
 			len(plan.Schedules))
 	}
-	if got := plan.Schedules[0].Timezone; got != "" {
-		t.Errorf("Timezone = %q, want empty so the schedule runs in server time", got)
+	if got, want := plan.Schedules[0].Timezone, schedule.ServerZone(); got != want {
+		t.Errorf("Timezone = %q, want %q, the server's own zone by name, so the schedule runs in "+
+			"server time", got, want)
 	}
 	if _, ok := warningContaining(t, plan.Warnings, "Mars/Olympus",
 		"imports in the server's local time"); !ok {
@@ -892,11 +914,12 @@ func TestDTSTARTZonePanicsOnANonASCIIField(t *testing.T) {
 	}
 }
 
-// TestAWXSurveyRefusesAPasswordFieldWhereverItIsCarried pins the refusal on both export shapes. A
-// survey field here is plain text kept on the run and injected as an extra var, so importing an AWX
-// password prompt would hand the operator a migration that looks complete and is less safe than what
-// they left.
-func TestAWXSurveyRefusesAPasswordFieldWhereverItIsCarried(t *testing.T) {
+// TestAWXSurveyImportsAPasswordFieldAsSecretWhereverItIsCarried pins the mapping on both export
+// shapes. An AWX password prompt was refused because a survey answer here was plain text kept on
+// the run. It now imports as a secret field, whose answer is sealed the way AWX encrypts it. Its
+// default cannot come across, because AWX exports it as $encrypted$, so the report names that and
+// nothing else, and never repeats the default.
+func TestAWXSurveyImportsAPasswordFieldAsSecretWhereverItIsCarried(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		Name string
@@ -918,17 +941,21 @@ func TestAWXSurveyRefusesAPasswordFieldWhereverItIsCarried(t *testing.T) {
 			if err != nil {
 				t.Fatalf("FromAWX() error = %v", err)
 			}
-			survey := plan.Templates[0].Survey
-			if len(survey) != 1 || survey[0].Var != "env" {
-				t.Fatalf("survey = %+v, want only the non-secret field", survey)
+			want := []template.SurveyField{
+				{Var: "secret", Type: template.FieldSecret},
+				{Var: "env", Type: template.FieldText},
 			}
-			if _, ok := warningContaining(t, plan.Warnings, `survey field "secret"`,
-				"NOT imported"); !ok {
-				t.Errorf("the password field was not named.\nwarnings: %v", plan.Warnings)
+			if diff := cmp.Diff(want, plan.Templates[0].Survey, cmpopts.EquateEmpty()); diff != "" {
+				t.Fatalf("survey mismatch (-want +got):\n%s", diff)
+			}
+			if _, ok := warningContaining(t, plan.Warnings, `secret field "secret"`,
+				"default"); !ok {
+				t.Errorf("the default that did not come across was not named.\nwarnings: %v",
+					plan.Warnings)
 			}
 			for _, w := range plan.Warnings {
-				if strings.Contains(w, "hunter2") {
-					t.Errorf("the refused field's default leaked into the report: %s", w)
+				if strings.Contains(w, "hunter2") || strings.Contains(w, "NOT imported") {
+					t.Errorf("the report leaks the default or still refuses the field: %s", w)
 				}
 			}
 		})

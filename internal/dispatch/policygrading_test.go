@@ -86,8 +86,15 @@ func isGradedLocal(arg string) bool { return gradedLocals[arg] }
 // plan gate's free functions may grade without a checkout, since their runs are Terraform or
 // OpenTofu applies that name no playbook: anywhere else, grading without the checkout is the
 // ungraded original under another name for every run drawn from a project.
+//
+// A graded run judged as the change-free dry run it would be, which is how the gate asks whether a
+// hold rests on what the scan found, is still a graded run, so asChangeFree of a graded local or
+// of d.graded passes and asChangeFree of anything else does not.
 func gradedExpr(file, expr string) bool {
 	expr = strings.TrimSpace(expr)
+	if inner, ok := strings.CutPrefix(expr, "asChangeFree("); ok {
+		return isGradedLocal(inner) || strings.HasPrefix(inner, "d.graded(")
+	}
 	if strings.HasPrefix(expr, "d.graded(") {
 		return true
 	}

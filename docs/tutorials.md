@@ -16,7 +16,7 @@ the pitch, and the migration path.
 |------|--------------|
 | [Run a job](tutorial-run-a-job.md) | Launch a run, with any tool.|
 | [Save a template](tutorial-save-a-template.md) | Save a launch preset.|
-| [Schedule a job](tutorial-schedule-a-job.md) | Fire a template on a cron.|
+| [Schedule a job](tutorial-schedule-a-job.md) | Fire a template on a cron or on a recurrence rule cron cannot say.|
 | [Set a secret](tutorial-set-a-secret.md) | Seal a secret, or resolve it from Vault at run time.|
 | [Migrate your setup](tutorial-migrate.md) | Import a whole export at once.|
 

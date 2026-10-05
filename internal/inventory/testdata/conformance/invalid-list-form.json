@@ -1,0 +1,5 @@
+{
+  "_meta": {"hostvars": {"h1": {"a": 1}}},
+  "all": {"children": ["ungrouped", "g"]},
+  "g": {"hosts": ["h1"]}
+}

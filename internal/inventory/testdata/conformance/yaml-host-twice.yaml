@@ -1,0 +1,8 @@
+web:
+  hosts:
+    h1: {a: 1, b: 1, shared: web}
+db:
+  hosts:
+    h1: {b: 2, c: 2, shared: db}
+  vars:
+    shared: dbgroup

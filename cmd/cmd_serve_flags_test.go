@@ -27,6 +27,7 @@ func quietServeFlags(t *testing.T) {
 	setString(t, &serveDB, filepath.Join(t.TempDir(), "switchtender.db"))
 	setString(t, &serveAddr, defaultServeAddr)
 	setString(t, &policyFile, "")
+	setString(t, &serveAttentionFile, "")
 	setString(t, &serveTLSCert, "")
 	setString(t, &serveTLSKey, "")
 	setString(t, &servePluginsDir, "")
@@ -169,6 +170,18 @@ func TestServeRefusesAMisconfigurationRatherThanRunWithoutTheFeature(t *testing.
 			setString(t, &policyFile, path)
 		},
 		WantWord: "",
+	}, { // Test 16: An attention thresholds file with a misspelled key stops the server, rather than
+		// alerting on defaults nobody chose while the operator believes their thresholds apply.
+		Name: "malformed attention file",
+		Setup: func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "attention.yml")
+			if err := os.WriteFile(path, []byte("defaults:\n  alert_no_wroker: 5m\n"),
+				0o600); err != nil {
+				t.Fatalf("write attention file: %v", err)
+			}
+			setString(t, &serveAttentionFile, path)
+		},
+		WantWord: "attention thresholds",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

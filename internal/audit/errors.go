@@ -17,6 +17,12 @@ var ErrExport = errors.New("audit export")
 // that merely arrived wearing it is a forgery attempt, not a beat.
 var ErrReservedSpan = errors.New("span marker reserved for AppendSpanBeat")
 
+// ErrDuplicateID is returned by Append when the chain already holds an entry with the id the new
+// one carries, and nothing is written. An entry's id names one event, so a second append under it
+// is that event recorded again: a decision finished by two processes, the one that made it and a
+// janitor after a crash, is appended once and the second finisher learns it is already there.
+var ErrDuplicateID = errors.New("the chain already holds an entry with this id")
+
 // ErrClockBehind is returned by AppendSpanBeat when the supplied time does not strictly advance
 // past the newest beat already in the chain, and nothing is written. A beat's time is a signed
 // claim about when the count was taken, so recording a time the clock did not read would put a
@@ -24,11 +30,20 @@ var ErrReservedSpan = errors.New("span marker reserved for AppendSpanBeat")
 // as a gap with its bounds and duration rather than failing.
 var ErrClockBehind = errors.New("clock behind the last span beat")
 
+// ErrOutcomeRecorded is returned by Append for a run's outcome entry when the chain already holds
+// an outcome for that run, and nothing is written. A run has exactly one outcome entry, so a
+// committer that retries an append whose result it never learned, or two committers that both found
+// the outcome owed, cannot put a second one on the chain. A committer reads it as success: the
+// outcome is on the chain.
+var ErrOutcomeRecorded = errors.New("the chain already holds this run's outcome")
+
 // ClockBehindError is the refusal AppendSpanBeat returns when the clock has not passed the newest
-// beat in the chain. It unwraps to ErrClockBehind and carries both times and the beat number, so a
-// caller reports how far behind the clock is without reading the chain again.
+// beat in the chain, or would put the beat behind the chain's newest entry. It unwraps to
+// ErrClockBehind and carries both times and the beat number, so a caller reports how far behind the
+// clock is without reading the chain again.
 type ClockBehindError struct {
-	// Prev is the recorded time of the newest beat in the chain.
+	// Prev is the recorded time the beat had to pass: the newest beat's, or the newest entry's when
+	// the beat would otherwise be written behind it.
 	Prev time.Time
 	// At is the time the caller supplied for the beat that was refused.
 	At time.Time
@@ -39,7 +54,7 @@ type ClockBehindError struct {
 
 // Error names the beat that was not written and both times it was decided from.
 func (e *ClockBehindError) Error() string {
-	return fmt.Sprintf("%s: beat %d was not written because the last beat is at %s and the clock "+
+	return fmt.Sprintf("%s: beat %d was not written because the chain is at %s and the clock "+
 		"reads %s", ErrClockBehind, e.Beat, e.Prev.UTC().Format(time.RFC3339Nano),
 		e.At.UTC().Format(time.RFC3339Nano))
 }

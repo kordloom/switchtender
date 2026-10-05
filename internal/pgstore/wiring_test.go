@@ -577,6 +577,11 @@ func TestPurgeEventsBeforeKeepsTheRunAndCountsOnlyTrimmedOnes(t *testing.T) {
 	}
 	withOutput.Status = run.StatusSucceeded
 	saveRun(t, ctx, s, withOutput)
+	// Its outcome is on the chain, as the process that finished it puts it, so retention may trim
+	// it.
+	if err := s.SettleOutcome(ctx, withOutput.ID); err != nil {
+		t.Fatalf("SettleOutcome() error = %v", err)
+	}
 
 	bare := newPending(fmt.Sprintf("q_pe_%d", stamp), "bare")
 	bare.Status = run.StatusSucceeded

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/idgen"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/scrub"
 )
 
 var (
@@ -26,6 +28,9 @@ var (
 	// ErrSurveyField is returned when a survey field's own definition is malformed, which is a
 	// problem with the template rather than with an answer.
 	ErrSurveyField = errors.New("survey field invalid")
+	// ErrUnanswered is returned when a launch with nobody present to answer the survey reaches a
+	// required question it has no usable answer for. An *UnansweredError carrying it names them.
+	ErrUnanswered = errors.New("survey question unanswered")
 )
 
 // FieldType names the kind of a survey field.
@@ -36,6 +41,7 @@ type FieldType string
 // unknown type, though the words mean int and bool to anyone who writes them.
 var fieldTypeSpellings = map[string]FieldType{
 	"integer": FieldInt, "boolean": FieldBool, "string": FieldText, "textarea": FieldMultiline,
+	"password": FieldSecret,
 }
 
 // UnmarshalJSON reads a field type, taking the common spellings in fieldTypeSpellings as the type
@@ -64,6 +70,10 @@ const (
 	FieldChoice FieldType = "choice"
 	// FieldMultiline is free text spanning several lines, such as a block of variables or a note.
 	FieldMultiline FieldType = "multiline"
+	// FieldSecret is a text answer that is a secret, such as a password or a token. Its answer is
+	// sealed with the credential key the moment a launch is accepted, is never stored on the run in
+	// plain text, and is opened only inside the execution that uses it. AWX calls this type password.
+	FieldSecret FieldType = "secret"
 )
 
 // SurveyField is one prompt shown at launch, whose answer becomes an extra var.
@@ -91,6 +101,16 @@ type SurveyField struct {
 	MaxLength int `json:"max_length,omitempty"`
 	// Pattern is a regular expression a text answer must match in full. Empty imposes no pattern.
 	Pattern string `json:"pattern,omitempty"`
+	// SealedDefault is a secret field's default, sealed with the credential key. A secret field never
+	// keeps a plain Default: the server seals one when the template is saved, and every read shows
+	// the default as set or not set rather than returning it. It is stored and backed up with the
+	// template, never accepted from a caller, and never written into an API response.
+	SealedDefault string `json:"sealed_default,omitempty"`
+}
+
+// Secret reports whether the field collects a secret answer.
+func (f SurveyField) Secret() bool {
+	return f.Type == FieldSecret
 }
 
 // Template is one saved launch preset.
@@ -167,33 +187,327 @@ type Template struct {
 	// When set, members of the organization gain access to the template and, under strict grants, it
 	// is hidden from non-members who lack an explicit grant.
 	OrgID string `json:"org_id,omitempty"`
+	// UseFactCache keeps the facts each launch gathers for every host of the stored inventory and
+	// serves them to the next launch through Ansible's jsonfile fact cache, the way AWX's
+	// use_fact_cache does. It needs a stored inventory, since facts are kept per inventory host.
+	UseFactCache bool `json:"use_fact_cache,omitempty"`
+	// FactCacheTimeout is how many seconds cached facts stay fresh enough to serve to a launch. Zero
+	// serves them however old they are, which is the AWX default.
+	FactCacheTimeout int `json:"fact_cache_timeout,omitempty"`
+	// AllowCallbacks lets a host in the template's stored inventory launch the template against
+	// itself by posting the host config key to the template's callback URL, the way AWX's
+	// provisioning callbacks do. A callback is refused until a key has been minted.
+	AllowCallbacks bool `json:"allow_callbacks,omitempty"`
+	// HostConfigKey is the provisioning callback key, sealed with the server key. It never
+	// serializes: the plaintext is shown once when it is minted and is never returned again.
+	HostConfigKey string `json:"-"`
+	// HostConfigKeySet reports whether a callback key has been minted. It is filled in when a
+	// template is served and is never stored, so a reader learns that a key exists and nothing else.
+	HostConfigKeySet bool `json:"host_config_key_set,omitempty"`
+	// CallbackLimit says what a provisioning callback does with Limit: CallbackLimitIntersect, the
+	// default, launches only when the calling host also falls within it, and CallbackLimitReplace
+	// launches against the calling host whatever it says, as AWX does. Empty means intersect.
+	CallbackLimit string `json:"callback_limit,omitempty"`
+	// AWXCallback answers provisioning callbacks on the AWX-compatible address as well, for a
+	// template an import bound to its AWX job template id. See AWXBinding.
+	AWXCallback bool `json:"awx_callback,omitempty"`
+	// AWXJobTemplateID is the AWX job template id bound to the template. It is filled in when a
+	// template is served or planned for import and is never stored on the template.
+	AWXJobTemplateID int64 `json:"awx_job_template_id,omitempty"`
+	// AWXCallbackCalledAt is when a host last called the template through the AWX-compatible
+	// address. It is filled in when a template is served and is never stored on the template.
+	AWXCallbackCalledAt *time.Time `json:"awx_callback_called_at,omitempty"`
 	// CreatedAt is when the template was created.
 	CreatedAt time.Time `json:"created_at"`
 }
 
 // ResolveSurvey validates launch answers against the survey and returns the values to inject as
 // extra vars: each answered field coerced to its type, plus defaults for optional unanswered
-// fields. It fails when a required field is missing or an answer does not match its type.
+// fields. It fails when a required field is missing or an answer does not match its type. A secret
+// field is validated like any other but its answer is not among the values returned, since it must
+// never become a plain extra var. ResolveSurveyAnswers returns it.
 func ResolveSurvey(fields []SurveyField, answers map[string]any) (map[string]any, error) {
+	vars, _, err := ResolveSurveyAnswers(fields, answers)
+	return vars, err
+}
+
+// SecretAnswers holds the resolved answers to a survey's secret fields, kept apart from the plain
+// extra vars so no caller can put one on a run in plain text by accident.
+type SecretAnswers struct {
+	// Plain maps a secret field's var to the answer the launcher supplied. The caller seals each one
+	// before anything is stored and drops the map.
+	Plain map[string]string `json:"-"`
+	// Sealed maps a secret field's var to its template default, which was sealed when the template
+	// was saved and is carried onto the run sealed, without being opened.
+	Sealed map[string]string `json:"-"`
+}
+
+// Empty reports whether no secret field produced a value.
+func (s SecretAnswers) Empty() bool {
+	return len(s.Plain) == 0 && len(s.Sealed) == 0
+}
+
+// ResolveSurveyAnswers validates launch answers against the survey and returns the plain values to
+// inject as extra vars and, separately, the answers to its secret fields. A secret field left
+// unanswered falls back to its sealed default when it has one.
+func ResolveSurveyAnswers(fields []SurveyField, answers map[string]any) (map[string]any, SecretAnswers, error) {
 	out := map[string]any{}
+	var secrets SecretAnswers
 	for _, f := range fields {
 		raw, given := answers[f.Var]
 		if !given || raw == nil {
 			if f.Required {
-				return nil, fmt.Errorf("%w: %q is required", ErrSurvey, f.Var)
+				return nil, SecretAnswers{}, fmt.Errorf("%w: %q is required", ErrSurvey, f.Var)
 			}
-			if f.Default != nil {
+			switch {
+			case f.Secret() && f.SealedDefault != "":
+				if secrets.Sealed == nil {
+					secrets.Sealed = map[string]string{}
+				}
+				secrets.Sealed[f.Var] = f.SealedDefault
+			case !f.Secret() && f.Default != nil:
 				out[f.Var] = f.Default
 			}
 			continue
 		}
 		val, err := coerce(f, raw)
 		if err != nil {
-			return nil, err
+			return nil, SecretAnswers{}, err
+		}
+		if f.Secret() {
+			if secrets.Plain == nil {
+				secrets.Plain = map[string]string{}
+			}
+			secrets.Plain[f.Var], _ = val.(string)
+			continue
 		}
 		out[f.Var] = val
 	}
+	return out, secrets, nil
+}
+
+// UnansweredError names the required survey questions a launch with nobody present to answer them
+// has no usable answer for: a question with no default, or with a default its own rules refuse. It
+// matches ErrUnanswered.
+type UnansweredError struct {
+	// Vars are the variables of those questions, in survey order.
+	Vars []string
+	// Reasons say why each one has no answer, in the same order.
+	Reasons []string
+}
+
+// Error names every unanswered question and why.
+func (e *UnansweredError) Error() string {
+	return ErrUnanswered.Error() + ": " + strings.Join(e.Reasons, ", ")
+}
+
+// Is reports whether target is ErrUnanswered, so a caller tells this refusal apart with errors.Is.
+func (e *UnansweredError) Is(target error) bool {
+	return target == ErrUnanswered
+}
+
+// add records one unanswered question.
+func (e *UnansweredError) add(v, reason string) {
+	e.Vars = append(e.Vars, v)
+	e.Reasons = append(e.Reasons, reason)
+}
+
+// UnansweredVars returns the questions an *UnansweredError in err's chain names, nil when it holds
+// none.
+func UnansweredVars(err error) []string {
+	var u *UnansweredError
+	if errors.As(err, &u) {
+		return u.Vars
+	}
+	return nil
+}
+
+// RefuseUnattended returns the refusal a launch with nobody present to answer t's survey records when
+// cause, from UnattendedOptions, says a required question has no usable answer. launch names that
+// launch in the reason, such as "scheduled fire". The refusal wraps cause, so it still matches
+// ErrUnanswered, and it says the two ways out, since whoever reads it is the one who has to act.
+func (t *Template) RefuseUnattended(launch string, cause error) error {
+	fix := "give the question a default"
+	if len(UnansweredVars(cause)) > 1 {
+		fix = "give each question a default"
+	}
+	return fmt.Errorf("refused: %w. A %s of template %q has nobody to answer it, so %s or launch "+
+		"the template by hand", cause, launch, t.Name, fix)
+}
+
+// ResolveSurveyDefaults resolves a survey for a launch with nobody present to answer it: a
+// schedule's fire, a webhook, a pull request plan, or a provisioning callback. It returns what such
+// a launch carries in the shape ResolveSurveyAnswers does, the plain values to inject as extra vars
+// and, apart from them, the sealed defaults of the secret questions, which ride onto the run
+// without being opened.
+//
+// Every question takes its default. An optional one takes it exactly as an interactive launch that
+// leaves it blank does, so the two never fire one template with different values. A required one
+// takes it too, since nobody is there to type the answer, and so its default is held to the rules
+// an answer is held to. A required question with no default, an empty one, or one those rules
+// refuse has no answer at all, and the launch is refused with an *UnansweredError naming every such
+// question: the only other outcome is a run missing an answer its template says it needs.
+func ResolveSurveyDefaults(fields []SurveyField) (map[string]any, SecretAnswers, error) {
+	out := map[string]any{}
+	var secrets SecretAnswers
+	var missing UnansweredError
+	for _, f := range fields {
+		if f.Secret() {
+			switch {
+			case f.SealedDefault != "":
+				if secrets.Sealed == nil {
+					secrets.Sealed = map[string]string{}
+				}
+				secrets.Sealed[f.Var] = f.SealedDefault
+			case f.Required:
+				missing.add(f.Var, fmt.Sprintf("%q is required and has no default", f.Var))
+			}
+			continue
+		}
+		if !f.Required {
+			if f.Default != nil {
+				out[f.Var] = f.Default
+			}
+			continue
+		}
+		if s, ok := f.Default.(string); f.Default == nil || (ok && s == "") {
+			missing.add(f.Var, fmt.Sprintf("%q is required and has no default", f.Var))
+			continue
+		}
+		val, err := coerce(f, f.Default)
+		if err != nil {
+			missing.add(f.Var, fmt.Sprintf("%q is required and its default is not a valid answer: %s",
+				f.Var, strings.TrimPrefix(err.Error(), ErrSurvey.Error()+": ")))
+			continue
+		}
+		out[f.Var] = val
+	}
+	if len(missing.Vars) > 0 {
+		return nil, SecretAnswers{}, &missing
+	}
+	return out, secrets, nil
+}
+
+// UnattendedVars returns the variables a launch with nobody present to answer the template's survey
+// carries: the template's own extra vars with the survey's defaults over them, and, apart from
+// them, the sealed defaults of its secret questions. A template extra var named like a secret
+// question that has a sealed default is dropped, so the sealed default is the only value that
+// variable has, the rule an interactive launch follows. It fails with an *UnansweredError when a
+// required question has no usable default.
+func (t *Template) UnattendedVars() (map[string]any, map[string]string, error) {
+	vars := maps.Clone(t.ExtraVars)
+	if len(t.Survey) == 0 {
+		return vars, nil, nil
+	}
+	resolved, secrets, err := ResolveSurveyDefaults(t.Survey)
+	if err != nil {
+		return nil, nil, err
+	}
+	if vars == nil {
+		vars = map[string]any{}
+	}
+	maps.Copy(vars, resolved)
+	for name := range secrets.Sealed {
+		delete(vars, name)
+	}
+	return vars, secrets.Sealed, nil
+}
+
+// UnattendedOptions returns the submit options that apply the template's survey to a launch with
+// nobody present to answer it, to append after LaunchOptions: the variables UnattendedVars resolves,
+// in place of the template's own, and the sealed defaults beside them.
+//
+// Schedules, webhooks, pull request plans, and provisioning callbacks all fire a template this way.
+// A schedule and a webhook used to fire with LaunchOptions alone, which left the survey out
+// entirely: an optional question's default never reached the play, a secret question's sealed
+// default never reached it either, and a template with a required question nobody answered fired
+// anyway, so the run went ahead without an answer its template says it cannot do without.
+func (t *Template) UnattendedOptions() ([]run.SubmitOption, error) {
+	vars, sealed, err := t.UnattendedVars()
+	if err != nil {
+		return nil, err
+	}
+	return []run.SubmitOption{run.WithExactExtraVars(vars), run.WithSealedVars(sealed)}, nil
+}
+
+// SealDefaults prepares a survey for storage: every secret field's default is sealed with seal and
+// its plain Default cleared, so a secret default is never kept or returned as text. A SealedDefault
+// sent by a caller is discarded rather than trusted. A default sent back as scrub.Marker, the form
+// every read shows a set default in, keeps the sealed default of the same secret field in existing,
+// so an edit that does not touch the default does not erase it. An empty default clears it.
+func SealDefaults(fields, existing []SurveyField, seal func(string) (string, error)) ([]SurveyField, error) {
+	if fields == nil {
+		return nil, nil
+	}
+	out := make([]SurveyField, len(fields))
+	for i, f := range fields {
+		f.SealedDefault = ""
+		if !f.Secret() || f.Default == nil {
+			out[i] = f
+			continue
+		}
+		plain, ok := f.Default.(string)
+		if !ok {
+			return nil, fmt.Errorf("%w: %q is a secret field, so its default must be text",
+				ErrSurveyField, f.Var)
+		}
+		f.Default = nil
+		switch plain {
+		case "":
+		case scrub.Marker:
+			kept := storedSealedDefault(existing, f.Var)
+			if kept == "" {
+				return nil, fmt.Errorf("%w: %q sends its default back masked, but no default is "+
+					"stored for it. Send the default itself, or leave it empty for none",
+					ErrSurveyField, f.Var)
+			}
+			f.SealedDefault = kept
+		default:
+			if seal == nil {
+				return nil, fmt.Errorf("%w: %q has a secret default and no encryption key is "+
+					"configured to seal it", ErrSurveyField, f.Var)
+			}
+			sealed, err := seal(plain)
+			if err != nil {
+				return nil, fmt.Errorf("%w: seal the default of %q: %w", ErrSurveyField, f.Var, err)
+			}
+			f.SealedDefault = sealed
+		}
+		out[i] = f
+	}
 	return out, nil
+}
+
+// storedSealedDefault returns the sealed default of the secret field named v in fields, or the
+// empty string when there is none.
+func storedSealedDefault(fields []SurveyField, v string) string {
+	for _, f := range fields {
+		if f.Var == v && f.Secret() {
+			return f.SealedDefault
+		}
+	}
+	return ""
+}
+
+// MaskSurvey returns a copy of fields fit for any reader: a secret field's sealed default is
+// removed and its Default reads scrub.Marker when one is set, so a reader learns that a default
+// exists and never its value or its ciphertext. Nothing else changes.
+func MaskSurvey(fields []SurveyField) []SurveyField {
+	if fields == nil {
+		return nil
+	}
+	out := make([]SurveyField, len(fields))
+	for i, f := range fields {
+		if f.Secret() {
+			f.Default = nil
+			if f.SealedDefault != "" {
+				f.Default = scrub.Marker
+			}
+		}
+		f.SealedDefault = ""
+		out[i] = f
+	}
+	return out
 }
 
 // ValidateSurvey checks a survey's field definitions on their own, with no launch answers, so a
@@ -203,7 +517,11 @@ func ResolveSurvey(fields []SurveyField, answers map[string]any) (map[string]any
 func ValidateSurvey(fields []SurveyField) error {
 	for _, f := range fields {
 		switch f.Type {
-		case FieldText, FieldMultiline, "":
+		case FieldText, FieldMultiline, FieldSecret, "":
+			if f.Secret() && f.Default != nil {
+				return fmt.Errorf("%w: %q is a secret field, so its default is sealed when the "+
+					"template is saved and never kept as text", ErrSurveyField, f.Var)
+			}
 			if f.Pattern != "" {
 				if _, err := regexp.Compile(anchorPattern(f.Pattern)); err != nil {
 					return fmt.Errorf("%w: %q has an invalid pattern: %v", ErrSurveyField, f.Var, err)
@@ -222,8 +540,8 @@ func ValidateSurvey(fields []SurveyField) error {
 				return fmt.Errorf("%w: %q is a choice field with no choices", ErrSurveyField, f.Var)
 			}
 		default:
-			return fmt.Errorf("%w: %q has the type %q, which is not one of text, multiline, int, bool, "+
-				"or choice", ErrSurveyField, f.Var, f.Type)
+			return fmt.Errorf("%w: %q has the type %q, which is not one of text, multiline, secret, "+
+				"int, bool, or choice", ErrSurveyField, f.Var, f.Type)
 		}
 	}
 	return nil
@@ -239,7 +557,7 @@ func anchorPattern(p string) string {
 // coerce converts a raw answer to the field's type or reports why it cannot.
 func coerce(f SurveyField, raw any) (any, error) {
 	switch f.Type {
-	case FieldText, FieldMultiline, "":
+	case FieldText, FieldMultiline, FieldSecret, "":
 		s, ok := raw.(string)
 		if !ok {
 			return nil, fmt.Errorf("%w: %q must be text", ErrSurvey, f.Var)
@@ -318,6 +636,27 @@ type Store interface {
 	List(ctx context.Context) ([]*Template, error)
 	// Delete removes the template with the given id, or returns ErrNotFound.
 	Delete(ctx context.Context, id string) error
+	// SetHostConfigKey replaces the template's sealed provisioning callback key and nothing else, or
+	// returns ErrNotFound. An empty key removes it. Update never writes the key, so an edit made
+	// from a snapshot read before a rotation cannot put the old key back.
+	SetHostConfigKey(ctx context.Context, id, sealed string) error
+	// BindAWX records that an AWX job template id reaches the template b names. A binding the id
+	// already has for the same AWX object, by organization and name, is pointed at b's template.
+	// One for a different AWX object is refused with ErrAWXConflict, and nothing changes.
+	BindAWX(ctx context.Context, b AWXBinding) error
+	// UnbindAWX removes the binding of b's AWX job template id while it still names b's AWX object
+	// and b's template, and changes nothing otherwise. It is how an import or a restore gives back an
+	// id it claimed before it wrote anything, when it then stops, so a binding another import has
+	// since pointed at its own template is never taken back.
+	UnbindAWX(ctx context.Context, b AWXBinding) error
+	// AWXBindingFor returns the binding of an AWX job template id, or ErrNotFound.
+	AWXBindingFor(ctx context.Context, awxID int64) (*AWXBinding, error)
+	// AWXBindings returns every binding, including those whose template was deleted, ordered by
+	// AWX id.
+	AWXBindings(ctx context.Context) ([]AWXBinding, error)
+	// MarkAWXCalled records that a host called through the AWX-compatible address of awxID at at,
+	// or returns ErrNotFound.
+	MarkAWXCalled(ctx context.Context, awxID int64, at time.Time) error
 }
 
 // NewID returns a random template identifier prefixed with "tpl_".
@@ -338,6 +677,7 @@ func NewID() string {
 // overrides such as a host limit or a substituted inventory.
 func (t *Template) LaunchOptions() []run.SubmitOption {
 	opts := []run.SubmitOption{
+		run.WithTemplate(t.ID),
 		run.WithCredentialIDs(t.CredentialIDs),
 		run.WithExtraVars(t.ExtraVars),
 		run.WithTool(t.Tool),
@@ -348,6 +688,7 @@ func (t *Template) LaunchOptions() []run.SubmitOption {
 		run.WithVerbosity(t.Verbosity),
 		run.WithForks(t.Forks),
 		run.WithDiffMode(t.DiffMode),
+		run.WithFactCache(t.UseFactCache, t.FactCacheTimeout),
 	}
 	if t.Limit != "" {
 		opts = append(opts, run.WithLimit(t.Limit))

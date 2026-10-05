@@ -18,6 +18,48 @@ func Contract(t *testing.T, newStore func() auth.Store) {
 	t.Run("list ordered", func(t *testing.T) { testList(t, newStore()) })
 	t.Run("count", func(t *testing.T) { testCount(t, newStore()) })
 	t.Run("touch never resurrects a revoked token", func(t *testing.T) { testTouch(t, newStore()) })
+	t.Run("issuer round trips", func(t *testing.T) { testIssuer(t, newStore()) })
+}
+
+// testIssuer verifies who minted a token survives the round trip, both for a token minted over the
+// API and for one minted before issuers were recorded. The issuer is what an agent-initiated run's
+// evidence names as having provisioned the agent, so a store that dropped it would let the record
+// say nobody did.
+func testIssuer(t *testing.T, store auth.Store) {
+	ctx := context.Background()
+	created := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	minted := &auth.Token{ID: "tok_issued", Name: "deploy-bot", Hash: "issued", Kind: auth.KindAgent,
+		UserID: "user_dev_lead", CreatedBy: "org-admin", CreatedByType: "session", CreatedAt: created}
+	legacy := &auth.Token{ID: "tok_legacy", Name: "ci", Hash: "legacy", CreatedAt: created}
+	for _, tok := range []*auth.Token{minted, legacy} {
+		if err := store.Save(ctx, tok); err != nil {
+			t.Fatalf("Save(%s) error = %v", tok.ID, err)
+		}
+	}
+	got, err := store.FindByHash(ctx, "issued")
+	if err != nil {
+		t.Fatalf("FindByHash() error = %v", err)
+	}
+	if got.CreatedBy != "org-admin" || got.CreatedByType != "session" {
+		t.Errorf("issuer = %q (%q), want org-admin (session) to round-trip", got.CreatedBy,
+			got.CreatedByType)
+	}
+	got, err = store.FindByHash(ctx, "legacy")
+	if err != nil {
+		t.Fatalf("FindByHash() error = %v", err)
+	}
+	if got.CreatedBy != "" || got.CreatedByType != "" {
+		t.Errorf("legacy issuer = %q (%q), want both empty", got.CreatedBy, got.CreatedByType)
+	}
+	list, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	for _, tok := range list {
+		if tok.ID == "tok_issued" && tok.CreatedBy != "org-admin" {
+			t.Errorf("List() issuer = %q, want org-admin", tok.CreatedBy)
+		}
+	}
 }
 
 // testLifecycle verifies a token round trips by hash, updates, and deletes.

@@ -140,9 +140,15 @@ func TestApproveCommitsTheDecision(t *testing.T) {
 	if decision.Actor != "approver-pat" || decision.ActorType != "session" {
 		t.Errorf("decision actor = %s (%s), want approver-pat (session)", decision.Actor, decision.ActorType)
 	}
-	body, _, err := outcome.DecisionBody(held, "approved")
+	// The decision is recorded with a decision record whose id is the entry's, and the body commits
+	// that id beside the verdict and the spec digest.
+	rec, err := d.DecisionStore().Get(ctx, decision.ID)
 	if err != nil {
-		t.Fatalf("DecisionBody() error = %v", err)
+		t.Fatalf("the decision entry %s has no decision record: %v", decision.ID, err)
+	}
+	body, _, err := outcome.DecisionBodyWith(held, "approved", outcome.ExtrasOf(rec))
+	if err != nil {
+		t.Fatalf("DecisionBodyWith() error = %v", err)
 	}
 	if !audit.VerifyContentDigest(decision.ContentDigest, decision.Nonce, body) {
 		t.Error("the decision entry's digest does not commit the rebuilt decision body")
