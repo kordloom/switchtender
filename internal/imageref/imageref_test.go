@@ -236,7 +236,9 @@ func TestADeadRegistryIsAskedAgainOnlyAfterAMinute(t *testing.T) {
 	srv, asked := hangingRegistry(t)
 	ref := strings.TrimPrefix(srv.URL, "https://") + "/team/runner:2"
 	clock := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
-	r := NewResolver(srv.Client(), 100*time.Millisecond)
+	// A second rather than less: the timeout also covers the TLS handshake with the test server, and
+	// on a loaded machine a shorter one ended the lookup before the registry ever saw it.
+	r := NewResolver(srv.Client(), time.Second)
 	r.now = func() time.Time { return clock }
 	steps := []struct {
 		// Name labels the step.
@@ -274,7 +276,9 @@ func TestALookupEndsWithTheRequest(t *testing.T) {
 	ref := strings.TrimPrefix(srv.URL, "https://") + "/team/runner:2"
 	r := NewResolver(srv.Client(), 3*time.Second)
 	for attempt := int64(1); attempt <= 2; attempt++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		// The request's second is far inside the resolver's three, and long enough for the TLS
+		// handshake to finish on a loaded machine so the registry sees the request it then drops.
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		start := time.Now()
 		_, err := r.Digest(ctx, ref, Credentials{})
 		cancel()
