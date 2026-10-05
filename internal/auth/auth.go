@@ -32,6 +32,15 @@ type Token struct {
 	// cannot manage identity, access, or secrets no matter what account it is bound to. The kind is
 	// set when the token is minted and observed, never guessed from how a request looks.
 	Kind string `json:"kind,omitempty"`
+	// CreatedBy names who minted the token, recorded when it is minted and never changed: the API
+	// caller as the audit chain names it, or the host account behind the command line. It is what
+	// tells apart the account an agent is bound to from whoever provisioned the agent, which differ
+	// when an organization admin issues agents on behalf of other people. Empty on a token minted
+	// before issuers were recorded.
+	CreatedBy string `json:"created_by,omitempty"`
+	// CreatedByType is how the minting caller authenticated, in the audit chain's vocabulary:
+	// session, token, or cli. Empty when CreatedBy is.
+	CreatedByType string `json:"created_by_type,omitempty"`
 	// Hash is the hex encoded SHA-256 of the plaintext token.
 	Hash string `json:"-"`
 	// CreatedAt is when the token was created.
