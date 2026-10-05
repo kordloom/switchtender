@@ -40,7 +40,7 @@ var linuxFilesystems = map[uint32]filesystem{
 	0x786F4256: {Name: "vboxsf", Class: classNetwork},
 	0x01161970: {Name: "gfs2", Class: classNetwork},
 	0x7461636F: {Name: "ocfs2", Class: classNetwork},
-	0x0BD00BD0: {Name: "lustre", Class: classNetwork},
+	0x0BD00BD0: {Name: "lustre", Class: classNetwork}, //nolint:misspell // Lustre is a filesystem.
 	0x47504653: {Name: "gpfs", Class: classNetwork},
 	0x65735546: {Name: "fuse", Class: classUnknown},
 }
