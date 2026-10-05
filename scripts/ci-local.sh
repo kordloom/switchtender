@@ -219,11 +219,13 @@ tree_files() {
 }
 
 # ensure_image builds the CI image unless the one present was built from these exact inputs: the
-# pins, the Dockerfile, and the Playwright lockfile whose browser it carries.
+# pins, the Dockerfile, the Playwright lockfile whose browser it carries, and the managed Ansible
+# runtime's locks whose wheels it carries.
 ensure_image() {
   local inputs have ctx
   inputs="$( { printf '%s\n' "${BUILD_ARGS[@]}"; cat scripts/ci-local.Dockerfile \
-    internal/ui/e2e/package.json internal/ui/e2e/package-lock.json; } | shasum -a 256 | cut -c1-64)"
+    internal/ui/e2e/package.json internal/ui/e2e/package-lock.json \
+    internal/ansibleruntime/locks/*.txt; } | shasum -a 256 | cut -c1-64)"
   have="$(docker image inspect --format "{{ index .Config.Labels \"$LABEL.inputs\" }}" "$IMAGE" \
     2>/dev/null || true)"
   if [ "$have" = "$inputs" ]; then
@@ -232,9 +234,10 @@ ensure_image() {
   fi
   say "Building the CI image (its pins, Dockerfile, or Playwright lockfile changed)"
   ctx="$RUN_DIR/image"
-  mkdir -p "$ctx/e2e"
+  mkdir -p "$ctx/e2e" "$ctx/ansible-locks"
   cp scripts/ci-local.Dockerfile "$ctx/Dockerfile"
   cp internal/ui/e2e/package.json internal/ui/e2e/package-lock.json "$ctx/e2e/"
+  cp internal/ansibleruntime/locks/*.txt "$ctx/ansible-locks/"
   docker build --progress=plain --label "$LABEL.inputs=$inputs" -t "$IMAGE" "${BUILD_ARGS[@]}" \
     "$ctx"
 }

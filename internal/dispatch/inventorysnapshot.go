@@ -388,7 +388,7 @@ func (d *Dispatcher) resolveDynamicSnapshot(ctx context.Context, r *run.Run, spe
 	if errors.Is(err, roundhouse.ErrAnsibleMissing) {
 		return nil, fmt.Errorf("%w: %w: this run's inventory is a dynamic source, and ansible-inventory "+
 			"is not installed on this executor. Install it with: %s", ErrInventorySnapshot,
-			inventory.ErrNeedsAnsible, inventory.AnsibleInstallHint)
+			inventory.ErrNeedsAnsible, d.installHint())
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: the dynamic inventory source could not be resolved: %s",

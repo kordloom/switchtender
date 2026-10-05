@@ -12,6 +12,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/ansibleruntime"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/inventorytest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -36,15 +37,19 @@ func TestComposedEngineFollowsTheDefinition(t *testing.T) {
 		HostFilter: "name__startswith=web or name__startswith=ec2"}
 	constructed := &inventory.Inventory{ID: "inv_k", Name: "built", Kind: inventory.KindConstructed,
 		InputIDs: []string{"inv_static"}}
+	managed := ansibleruntime.Commands{Source: ansibleruntime.SourceManaged, Release: "2.21.4",
+		Dir: "/srv/st/ansible/2.21.4/bin", Root: "/srv/st/ansible"}
 	tests := []struct {
-		Inventory       *inventory.Inventory
-		Plugin          bool
-		Missing         bool
-		Want            error
-		WantEngine      string
-		WantAnsibleCore string
-		WantHosts       []string
-		WantMessage     []string
+		Inventory         *inventory.Inventory
+		Plugin            bool
+		Missing           bool
+		Commands          ansibleruntime.Commands
+		Want              error
+		WantEngine        string
+		WantAnsibleCore   string
+		WantAnsibleSource string
+		WantHosts         []string
+		WantMessage       []string
 	}{{ // Test 0: Static inputs resolve natively though Ansible is installed.
 		Inventory: smart, WantEngine: inventory.EngineNative, WantHosts: []string{"web1", "web2"},
 	}, { // Test 1: Static inputs resolve natively without Ansible.
@@ -64,6 +69,16 @@ func TestComposedEngineFollowsTheDefinition(t *testing.T) {
 		Inventory: constructed, Missing: true, Want: inventory.ErrNeedsAnsible,
 		WantMessage: []string{`constructed inventory "built"`, "constructed plugin",
 			inventory.AnsibleInstallHint},
+	}, { // Test 6: Ansible from the managed runtime is recorded as the managed runtime's.
+		Inventory: constructed, Commands: managed, WantEngine: inventory.EngineAnsible,
+		WantAnsibleCore: "2.18.1", WantAnsibleSource: ansibleruntime.SourceManaged,
+		WantHosts: []string{"web1", "web2"},
+	}, { // Test 7: The install line names the runtime directory this server looks in.
+		Inventory: constructed, Missing: true, Want: inventory.ErrNeedsAnsible,
+		Commands: ansibleruntime.Commands{Source: ansibleruntime.SourcePath,
+			Root: "/srv/st/ansible"},
+		WantMessage: []string{"Install it with: switchtender ansible install --dir " +
+			"/srv/st/ansible, or on the system with: pipx install ansible-core"},
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -73,7 +88,7 @@ func TestComposedEngineFollowsTheDefinition(t *testing.T) {
 			_ = invs.Save(ctx, &inventory.Inventory{ID: "inv_static", Name: "static",
 				Content: "[web]\nweb1\nweb2 tier=gold\n"})
 			runner := &inventorytest.ListingRunner{Missing: test.Missing,
-				Canned: map[string]string{pluginConfig: pluginListing}}
+				Canned: map[string]string{pluginConfig: pluginListing}, Commands: test.Commands}
 			if test.Plugin {
 				_ = invs.Save(ctx, &inventory.Inventory{ID: "inv_cloud", Name: "cloud",
 					Content: pluginConfig})
@@ -93,9 +108,10 @@ func TestComposedEngineFollowsTheDefinition(t *testing.T) {
 				return
 			}
 			res := got.Resolution
-			if res.Engine != test.WantEngine || res.AnsibleCore != test.WantAnsibleCore {
-				t.Errorf("engine = %q %q, want %q %q", res.Engine, res.AnsibleCore,
-					test.WantEngine, test.WantAnsibleCore)
+			if res.Engine != test.WantEngine || res.AnsibleCore != test.WantAnsibleCore ||
+				res.AnsibleSource != test.WantAnsibleSource {
+				t.Errorf("engine = %q %q %q, want %q %q %q", res.Engine, res.AnsibleCore,
+					res.AnsibleSource, test.WantEngine, test.WantAnsibleCore, test.WantAnsibleSource)
 			}
 			if diff := cmp.Diff(test.WantHosts, res.Hosts); diff != "" {
 				t.Errorf("hosts mismatch (-want +got):\n%s", diff)
@@ -217,7 +233,8 @@ func TestCrossCheckBeforeAnsibleRuns(t *testing.T) {
 				Content: "[web]\nweb1 port=8080 ansible_password=hunter2\nweb2\n"})
 			_ = invs.Save(ctx, &inventory.Inventory{ID: "inv_s", Name: "webs",
 				Kind: inventory.KindSmart, HostFilter: "groups__name=web"})
-			lister := &inventorytest.ListingRunner{Rewrite: test.Rewrite, Missing: test.Missing}
+			lister := &inventorytest.ListingRunner{Rewrite: test.Rewrite, Missing: test.Missing,
+				Commands: ansibleruntime.Commands{Source: ansibleruntime.SourceManaged}}
 			var runner roundhouse.Runner = lister
 			if test.NoReader {
 				runner = listingOnly{lister: lister}
@@ -244,8 +261,8 @@ func TestCrossCheckBeforeAnsibleRuns(t *testing.T) {
 			}
 			if c := done.InventoryCheck; c != nil && test.WantStatus == run.StatusSucceeded {
 				res := done.InventoryResolution
-				if c.AnsibleCore != "2.18.1" || c.InputDigest != res.InputDigest ||
-					c.ResolvedDigest != res.ResolvedDigest {
+				if c.AnsibleCore != "2.18.1" || c.AnsibleSource != ansibleruntime.SourceManaged ||
+					c.InputDigest != res.InputDigest || c.ResolvedDigest != res.ResolvedDigest {
 					t.Errorf("check %+v does not match the resolution %+v", c, res)
 				}
 			}

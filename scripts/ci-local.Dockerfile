@@ -219,6 +219,18 @@ RUN set -eux; \
     sudo -u runner -H ./node_modules/.bin/playwright install chromium; \
     rm -rf /opt/ci-local/e2e/node_modules /var/lib/apt/lists/*
 
+# The wheels the managed Ansible runtime's locks pin, for this image's Python, checked against the
+# locks' hashes as they download. The test that installs a real runtime then runs here offline from
+# the wheel directory, the way an offline install does, and pip checks the same hashes again.
+COPY ansible-locks/ /opt/ci-local/ansible-locks/
+RUN set -eux; \
+    python3 -m venv /tmp/fetch; \
+    for lock in /opt/ci-local/ansible-locks/*.txt; do \
+      /tmp/fetch/bin/pip download --quiet --require-hashes --only-binary=:all: \
+        --dest /opt/ci-local/wheels -r "$lock"; \
+    done; \
+    rm -rf /tmp/fetch
+
 # CI's venv steps install from the wheels above without reaching PyPI.
 ENV PIP_NO_INDEX=1 \
     PIP_FIND_LINKS=/opt/ci-local/wheels \

@@ -35,6 +35,9 @@ type Syncer struct {
 	galaxyServer string
 	// galaxyToken authenticates to galaxyServer, empty for an unauthenticated server.
 	galaxyToken string
+	// galaxyCommand returns the ansible-galaxy to start, a path or a name PATH finds, or why the
+	// Ansible selected cannot be used. Nil is the one on PATH.
+	galaxyCommand func() (string, error)
 	// mu guards locks.
 	mu sync.Mutex
 	// locks holds one mutex per project id.
@@ -51,6 +54,13 @@ func WithGalaxy(server, token string) SyncerOption {
 		s.galaxyServer = server
 		s.galaxyToken = token
 	}
+}
+
+// WithGalaxyCommand starts ansible-galaxy as command returns it, asked on every install, so a
+// project's requirements are installed by the same Ansible its runs execute with. An error from it
+// fails the install rather than running another ansible-galaxy.
+func WithGalaxyCommand(command func() (string, error)) SyncerOption {
+	return func(s *Syncer) { s.galaxyCommand = command }
 }
 
 // galaxyDir is the directory inside a checkout that a sync installs its Ansible dependencies to.
@@ -441,7 +451,15 @@ func requirementKinds(path string) (roles, collections bool) {
 // runGalaxy runs an ansible-galaxy subcommand in the checkout and returns its combined output,
 // pointing collection installs at a configured private galaxy server through the environment.
 func (s *Syncer) runGalaxy(checkout string, args ...string) (string, error) {
-	cmd := exec.Command("ansible-galaxy", args...)
+	bin := "ansible-galaxy"
+	if s.galaxyCommand != nil {
+		located, err := s.galaxyCommand()
+		if err != nil {
+			return "", err
+		}
+		bin = located
+	}
+	cmd := exec.Command(bin, args...)
 	cmd.Dir = checkout
 	// Installing a requirements file runs code the repository chose, so it is handed the host's
 	// environment without SwitchTender's own configuration in it.

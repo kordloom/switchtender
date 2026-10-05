@@ -290,7 +290,8 @@ func (m *memStore) ListPage(ctx context.Context, filter ListFilter, limit, offse
 	return all, nil
 }
 
-// runTouchedHost reports whether the run's stored host summaries include the host.
+// runTouchedHost reports whether the run's stored host summaries include the host, matched in the
+// SummaryName form every summary here is written under.
 //
 // It takes the read lock itself. The comment here used to say the caller held it through ListPage's
 // call into List, and that was simply untrue: List takes the lock and releases it before returning,
@@ -299,6 +300,7 @@ func (m *memStore) ListPage(ctx context.Context, filter ListFilter, limit, offse
 func (m *memStore) runTouchedHost(runID, host string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	host = SummaryName(host)
 	for _, hs := range m.summaries[runID] {
 		if hs.Host == host {
 			return true
@@ -312,6 +314,7 @@ func (m *memStore) runTouchedHost(runID, host string) bool {
 func (m *memStore) runRanTask(runID, task string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	task = SummaryName(task)
 	for _, ts := range m.tasks[runID] {
 		if ts.Task == task {
 			return true

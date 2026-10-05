@@ -34,9 +34,34 @@ const (
 	EngineAnsible = "ansible"
 )
 
-// AnsibleInstallHint is the one line that installs Ansible's inventory and playbook commands on a
-// server, quoted in every error that says Ansible is needed.
-const AnsibleInstallHint = "pipx install ansible-core"
+const (
+	// AnsibleInstallCommand is the one line that installs the managed Ansible runtime, a pinned and
+	// hash-checked ansible-core under the server's data directory.
+	AnsibleInstallCommand = "switchtender ansible install"
+	// AnsibleSystemInstall installs ansible-core on the system instead, for the commands on PATH.
+	AnsibleSystemInstall = "pipx install ansible-core"
+	// AnsibleInstallHint is how to install Ansible's inventory and playbook commands for a server,
+	// quoted in every error that says Ansible is needed: the managed runtime, with a system install
+	// as the alternative.
+	AnsibleInstallHint = AnsibleInstallCommand + ", or on the system with: " + AnsibleSystemInstall
+)
+
+// AnsibleInstallHintFor returns AnsibleInstallHint with the managed runtime's directory named, so
+// the line installs where the server looks even when it is run from another directory. An empty
+// dir returns AnsibleInstallHint.
+func AnsibleInstallHintFor(dir string) string {
+	if dir == "" {
+		return AnsibleInstallHint
+	}
+	if !plainPath.MatchString(dir) {
+		dir = util.ShellQuote(dir)
+	}
+	return AnsibleInstallCommand + " --dir " + dir + ", or on the system with: " +
+		AnsibleSystemInstall
+}
+
+// plainPath matches a path a shell reads as itself, which the install line leaves unquoted.
+var plainPath = regexp.MustCompile(`^[A-Za-z0-9_./-]+$`)
 
 // TestedAnsibleCore lists the ansible-core releases, by minor version, the conformance corpus runs
 // against in CI. The native engine's agreement with Ansible is proven for these and no others, and

@@ -26,6 +26,7 @@ import (
 
 	"github.com/kordloom/switchtender/identity"
 	"github.com/kordloom/switchtender/internal/ai"
+	"github.com/kordloom/switchtender/internal/ansibleruntime"
 	"github.com/kordloom/switchtender/internal/attention"
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
@@ -529,9 +530,11 @@ func containerPullPolicyFromFlags() string {
 // flags decide the runtime, the pull policy, and the resource caps, while the caller passes the
 // command's own execution-environment and digest-pinning flags. Both commands go through here so a
 // cap or a policy can never reach one executor and miss the other.
-func newSelectiveRunnerFromFlags(allowContainer, requireDigest bool) roundhouse.Runner {
+func newSelectiveRunnerFromFlags(allowContainer, requireDigest bool,
+	ansible *ansibleruntime.Locator) roundhouse.Runner {
 	return roundhouse.NewSelectiveRunner(allowContainer, containerRuntimeFromFlags(),
-		containerPullPolicyFromFlags(), requireDigest, containerLimitsFromFlags())
+		containerPullPolicyFromFlags(), requireDigest, containerLimitsFromFlags(),
+		roundhouse.WithAnsibleLocator(ansible))
 }
 
 // galaxyServer holds the --galaxy-server flag: a private Ansible Galaxy or Automation Hub URL.
@@ -545,13 +548,16 @@ func registerGalaxyFlag(cmd *cobra.Command) {
 			"Token from SWITCHTENDER_GALAXY_TOKEN.")
 }
 
-// galaxySyncerOpts returns the project.Syncer options for a configured galaxy server and its token, or
-// nil when no server is set.
-func galaxySyncerOpts() []project.SyncerOption {
+// galaxySyncerOpts returns the project.Syncer options: ansible-galaxy started from where ansible
+// says the Ansible commands are, and a configured galaxy server with its token when one is set.
+func galaxySyncerOpts(ansible *ansibleruntime.Locator) []project.SyncerOption {
+	opts := []project.SyncerOption{project.WithGalaxyCommand(func() (string, error) {
+		return ansible.Locate().Command("ansible-galaxy")
+	})}
 	if galaxyServer == "" {
-		return nil
+		return opts
 	}
-	return []project.SyncerOption{project.WithGalaxy(galaxyServer, os.Getenv("SWITCHTENDER_GALAXY_TOKEN"))}
+	return append(opts, project.WithGalaxy(galaxyServer, os.Getenv("SWITCHTENDER_GALAXY_TOKEN")))
 }
 
 // pluginsDir returns the plugins directory to load: the flag when set, else the
@@ -664,6 +670,7 @@ func init() {
 	registerRunFilesFlag(serveCmd)
 	registerModuleFetchFlags(serveCmd)
 	registerGalaxyFlag(serveCmd)
+	registerAnsibleFlags(serveCmd)
 	registerFederationFlag(serveCmd)
 	registerCallbackFlags(serveCmd)
 	serveCmd.Flags().StringSliceVar(&serveTrustedProxy, "trusted-proxy", nil,
@@ -1510,8 +1517,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	defer closePlugins()
 
 	hub := live.NewHub()
-	runner := newSelectiveRunnerFromFlags(serveAllowContainerEE, serveRequireImageDigest)
-	syncer, err := project.NewSyncer(projectCacheDir(), galaxySyncerOpts()...)
+	ansible := ansibleLocator(serveDB)
+	runner := newSelectiveRunnerFromFlags(serveAllowContainerEE, serveRequireImageDigest, ansible)
+	syncer, err := project.NewSyncer(projectCacheDir(), galaxySyncerOpts(ansible)...)
 	if err != nil {
 		return fmt.Errorf("project cache: %w", err)
 	}

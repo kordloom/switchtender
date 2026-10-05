@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kordloom/switchtender/internal/ansibleruntime"
 )
 
 // AnsibleCoreReporter reports the ansible-core version installed where this process runs Ansible.
@@ -31,6 +33,14 @@ type InventoryReader interface {
 		names []string) ([][]byte, string, error)
 }
 
+// AnsibleCommandsReporter reports where the host's Ansible commands come from: a configured
+// directory, the managed runtime, or PATH.
+type AnsibleCommandsReporter interface {
+	// AnsibleCommands returns where they come from now. A run binds the answer to its context with
+	// WithAnsibleCommands.
+	AnsibleCommands() ansibleruntime.Commands
+}
+
 // ErrAnsibleMissing is returned when Ansible's commands are not installed where they are needed.
 var ErrAnsibleMissing = errors.New("ansible-inventory is not installed")
 
@@ -48,6 +58,8 @@ var coreBanner = regexp.MustCompile(`\[core ([0-9]+\.[0-9]+[0-9A-Za-z.+-]*)\]`)
 type versionCache struct {
 	// mu guards the fields below.
 	mu sync.Mutex
+	// bin is the command the version was read from, so a different one is read afresh.
+	bin string
 	// version is the last version read.
 	version string
 	// err is the last error reading it.
@@ -59,21 +71,29 @@ type versionCache struct {
 // hostVersions caches the host's ansible-core version for the process.
 var hostVersions versionCache
 
-// AnsibleCoreVersion returns the ansible-core version of the ansible-inventory on PATH.
+// AnsibleCoreVersion returns the ansible-core version of the ansible-inventory the host runs: the
+// configured directory's, the managed runtime's, or the one on PATH.
 func (a *ansibleRunner) AnsibleCoreVersion(ctx context.Context) (string, error) {
+	bin, release, err := a.command(ctx, defaultInventoryBinary)
+	if err != nil {
+		return "", err
+	}
+	defer release()
 	hostVersions.mu.Lock()
 	defer hostVersions.mu.Unlock()
-	if !hostVersions.at.IsZero() && time.Since(hostVersions.at) < versionCacheTTL {
+	if hostVersions.bin == bin && !hostVersions.at.IsZero() &&
+		time.Since(hostVersions.at) < versionCacheTTL {
 		return hostVersions.version, hostVersions.err
 	}
-	hostVersions.version, hostVersions.err = ansibleCoreVersion(ctx, a.baseEnv, "")
-	hostVersions.at = time.Now()
+	hostVersions.version, hostVersions.err = ansibleCoreVersion(ctx, bin, a.baseEnv, "")
+	hostVersions.bin, hostVersions.at = bin, time.Now()
 	return hostVersions.version, hostVersions.err
 }
 
-// ansibleCoreVersion runs ansible-inventory --version in env and dir and reads the version.
-func ansibleCoreVersion(ctx context.Context, env []string, dir string) (string, error) {
-	bin, err := exec.LookPath(defaultInventoryBinary)
+// ansibleCoreVersion runs the ansible-inventory named by name, a path or a name PATH finds, with
+// --version in env and dir and reads the version.
+func ansibleCoreVersion(ctx context.Context, name string, env []string, dir string) (string, error) {
+	bin, err := exec.LookPath(name)
 	if err != nil {
 		return "", ErrAnsibleMissing
 	}
@@ -120,7 +140,12 @@ const maxCheckStderr = 2048
 // ReadInventories reads each file with the host's ansible-inventory.
 func (a *ansibleRunner) ReadInventories(ctx context.Context, spec Spec, dir string,
 	names []string) ([][]byte, string, error) {
-	bin, err := exec.LookPath(defaultInventoryBinary)
+	name, release, err := a.command(ctx, defaultInventoryBinary)
+	if err != nil {
+		return nil, "", err
+	}
+	defer release()
+	bin, err := exec.LookPath(name)
 	if err != nil {
 		return nil, "", ErrAnsibleMissing
 	}
@@ -139,7 +164,7 @@ func (a *ansibleRunner) ReadInventories(ctx context.Context, spec Spec, dir stri
 		}
 		out[i] = data
 	}
-	version, err := ansibleCoreVersion(ctx, env, dir)
+	version, err := ansibleCoreVersion(ctx, bin, env, dir)
 	if err != nil {
 		return nil, "", err
 	}

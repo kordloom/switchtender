@@ -64,7 +64,7 @@ var commands = sync.OnceValue(func() commandTree {
 func TestTheCommandSurfaceIsWhatItSaysItIs(t *testing.T) {
 	t.Parallel()
 	want := []string{
-		"assess", "audit", "backup", "demo", "desktop", "examples", "import", "init",
+		"ansible", "assess", "audit", "backup", "demo", "desktop", "examples", "import", "init",
 		"license", "mcp",
 		"receipt", "restore", "serve", "token", "user", "verify", "version", "witness", "worker",
 	}
@@ -108,6 +108,8 @@ func TestSubcommandGroupsKeepTheirMembers(t *testing.T) {
 		Name: "worker", Parent: workerCmd, WantNames: []string{"key"},
 	}, { // Test 8: The delivery key tools a relay worker pool registers and rotates with.
 		Name: "worker key", Parent: workerKeyCmd, WantNames: []string{"new", "public"},
+	}, { // Test 9: The managed Ansible runtime.
+		Name: "ansible", Parent: ansibleCmd, WantNames: []string{"install", "list", "lock", "remove"},
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -283,8 +285,8 @@ func TestNoFlagDefaultCarriesASecret(t *testing.T) {
 func TestEveryStoreCommandTakesTheSameDatabaseFlag(t *testing.T) {
 	t.Parallel()
 	paths := []string{
-		"switchtender audit anchor", "switchtender audit bundle", "switchtender audit receipt",
-		"switchtender audit report", "switchtender audit run", "switchtender backup",
+		"switchtender ansible", "switchtender audit anchor", "switchtender audit bundle",
+		"switchtender audit receipt", "switchtender audit report", "switchtender audit run", "switchtender backup",
 		"switchtender examples", "switchtender import awx", "switchtender import cron",
 		"switchtender import jenkins", "switchtender import rundeck", "switchtender import semaphore",
 		"switchtender init", "switchtender license install", "switchtender license status",

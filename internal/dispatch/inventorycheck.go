@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kordloom/switchtender/internal/ansibleruntime"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -68,13 +69,17 @@ func (d *Dispatcher) crossCheckInventory(ctx context.Context, r *run.Run, spec r
 		return fmt.Errorf("%w: %w: an Ansible run against an inventory the native engine resolved is "+
 			"checked against Ansible's own reading first, and ansible-inventory is not installed on "+
 			"this executor. Install it with: %s", inventory.ErrResolve, inventory.ErrNeedsAnsible,
-			inventory.AnsibleInstallHint)
+			d.installHint())
 	}
 	if err != nil {
 		return fmt.Errorf("%w: Ansible could not read the inventory to check it: %s",
 			inventory.ErrResolve, mask(err.Error()))
 	}
-	check := &run.InventoryCheck{AnsibleCore: version, InputDigest: comp.Resolution.InputDigest}
+	check := &run.InventoryCheck{AnsibleCore: version, InputDigest: comp.Resolution.InputDigest,
+		AnsibleSource: d.ansibleSourceFor(ctx)}
+	if spec.Image != "" {
+		check.AnsibleSource = ansibleruntime.SourceImage
+	}
 	var diffs []string
 	for n, in := range natives {
 		seen, err := inventory.ParseListing(outs[n])

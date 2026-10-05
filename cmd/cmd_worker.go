@@ -139,6 +139,7 @@ func init() {
 	registerRunFilesFlag(workerCmd)
 	registerModuleFetchFlags(workerCmd)
 	registerGalaxyFlag(workerCmd)
+	registerAnsibleFlags(workerCmd)
 	registerFederationFlag(workerCmd)
 }
 
@@ -223,7 +224,8 @@ func runWorker(cmd *cobra.Command, _ []string) error {
 	opts = append(opts, dispatch.WithClaimGate(func() error {
 		return license.Allow(license.FeatureWorkers)
 	}))
-	runner := newSelectiveRunnerFromFlags(workerAllowContainerEE, workerRequireImageDigest)
+	runner := newSelectiveRunnerFromFlags(workerAllowContainerEE, workerRequireImageDigest,
+		ansibleLocator(workerDB))
 	disp := dispatch.New(store, runner, log, opts...)
 	defer disp.Close()
 
@@ -302,7 +304,7 @@ func workerStore(log *zap.Logger) (run.Store, []dispatch.Option, func(), error) 
 		policies = filePolicies
 	}
 	sealer := newSealerFromEnv(log)
-	syncer, err := project.NewSyncer(projectCacheDir(), galaxySyncerOpts()...)
+	syncer, err := project.NewSyncer(projectCacheDir(), galaxySyncerOpts(ansibleLocator(workerDB))...)
 	if err != nil {
 		_ = bundle.Close()
 		return nil, nil, nil, fmt.Errorf("project cache: %w", err)

@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/kordloom/switchtender/internal/ansibleruntime"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/util"
 )
@@ -287,6 +288,9 @@ func (p *pluginCache) log(msg string) {
 type ansibleRunner struct {
 	// binary is the ansible-playbook executable name or path.
 	binary string
+	// locator decides where the Ansible commands are started from: a configured directory, the
+	// managed runtime, or PATH. Nil is PATH.
+	locator *ansibleruntime.Locator
 	// baseEnv is the environment inherited by every execution.
 	baseEnv []string
 	// plugin materializes the callback plugin on first use.
@@ -301,6 +305,65 @@ func WithBinary(binary string) Option {
 	return func(a *ansibleRunner) { a.binary = binary }
 }
 
+// WithAnsibleLocator starts the host's Ansible commands from where l says, asked again for every
+// command, so a managed runtime installed or removed while the process runs takes effect on the
+// next run. The commands are always started as separate programs.
+func WithAnsibleLocator(l *ansibleruntime.Locator) Option {
+	return func(a *ansibleRunner) { a.locator = l }
+}
+
+// AnsibleCommands reports where the host's Ansible commands come from now. A run calls it once and
+// binds the answer to its context with WithAnsibleCommands, so its inventory reads, its play, and
+// its evidence all name the same Ansible.
+func (a *ansibleRunner) AnsibleCommands() ansibleruntime.Commands {
+	return a.locator.Locate()
+}
+
+// ansibleKey types the context value carrying a run's located Ansible commands.
+type ansibleKey struct{}
+
+// WithAnsibleCommands binds cmds to ctx, so every Ansible command the host runner starts for the
+// work ctx carries comes from cmds rather than from a fresh look. A run locates its Ansible once,
+// binds it, and records it in its evidence, and an install or remove that lands while it runs
+// changes nothing about it.
+func WithAnsibleCommands(ctx context.Context, cmds ansibleruntime.Commands) context.Context {
+	return context.WithValue(ctx, ansibleKey{}, cmds)
+}
+
+// AnsibleCommandsFrom returns the Ansible commands bound to ctx, and false when none are.
+func AnsibleCommandsFrom(ctx context.Context) (ansibleruntime.Commands, bool) {
+	cmds, ok := ctx.Value(ansibleKey{}).(ansibleruntime.Commands)
+	return cmds, ok
+}
+
+// commandsFor returns the Ansible commands for the work ctx carries: those bound to it, or located
+// now when none are.
+func (a *ansibleRunner) commandsFor(ctx context.Context) ansibleruntime.Commands {
+	if cmds, ok := AnsibleCommandsFrom(ctx); ok {
+		return cmds
+	}
+	return a.locator.Locate()
+}
+
+// command returns what to start the Ansible command name as for the work ctx carries, its path in
+// the located directory or the bare name for PATH to find, and the function that releases the hold
+// that keeps a managed runtime from being removed while the command runs. A located directory that
+// lacks the command is still where it is started from, so a misconfigured directory fails the run
+// rather than quietly running another Ansible nobody chose, and a managed runtime that cannot be
+// used fails it with the reason.
+func (a *ansibleRunner) command(ctx context.Context, name string) (string, func(), error) {
+	cmds := a.commandsFor(ctx)
+	path, err := cmds.Command(name)
+	if err != nil {
+		return "", nil, fmt.Errorf("%w: %w", ErrAnsibleMissing, err)
+	}
+	release, err := cmds.Hold()
+	if err != nil {
+		return "", nil, fmt.Errorf("%w: %w", ErrLaunch, err)
+	}
+	return path, release, nil
+}
+
 // NewAnsibleRunner returns a Runner that executes each Spec by its Tool: ansible-playbook for
 // Ansible and bash for bash. By default it resolves the tool binaries from PATH and inherits the
 // process environment. Container execution is off, so an image-bound Spec fails clearly.
@@ -312,7 +375,7 @@ func NewAnsibleRunner(opts ...Option) Runner {
 // InventoryDumper methods, such as the tool router, can hold the concrete type.
 func newAnsibleRunner(opts ...Option) *ansibleRunner {
 	a := &ansibleRunner{
-		binary: "ansible-playbook",
+		binary: defaultPlaybookBinary,
 		// The run inherits the host's environment but not SwitchTender's own configuration. The
 		// master encryption key, its salt, and every provider secret are read from there, and a run
 		// is exactly what they protect.
@@ -487,7 +550,16 @@ func (a *ansibleRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Resu
 	if err != nil {
 		return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
 	}
-	cmd := exec.CommandContext(ctx, a.binary, pargs...)
+	bin := a.binary
+	if bin == defaultPlaybookBinary {
+		path, release, err := a.command(ctx, bin)
+		if err != nil {
+			return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
+		}
+		defer release()
+		bin = path
+	}
+	cmd := exec.CommandContext(ctx, bin, pargs...)
 	cmd.Dir = spec.Dir
 	cmd.Env = env
 	return runProcess(ctx, cmd, out)
