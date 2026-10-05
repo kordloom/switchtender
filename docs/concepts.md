@@ -544,8 +544,10 @@ than continued.
 
 **Where to decide.** The approvals panel on the Runs page lists every waiting step with what already
 ran and what each answer runs next, and the run page of a waiting workflow shows its own. A step is
-decided by `POST /v1/runs/{id}/approve` or `/reject` with the step's id, or with the workflow's id
-when exactly one step is waiting. Deciding the workflow as a whole run is refused once it has started,
+decided by `POST /v1/runs/{id}/approve` or `/reject` with the step's id. The same call with the
+workflow's id is refused with 409, naming each waiting step and the call that decides it: only a
+step's own decision moves the workflow, since the step carries the rules that apply to it alone and
+the state its approver is shown. Deciding a workflow as a whole run is refused once it has started,
 since that would run it from the top.
 
 **Notifications and evidence.** Reaching an approval step notifies the same channels a held run does,
@@ -561,4 +563,8 @@ so a restart loses nothing, and whichever replica records the decision resumes i
 records in the store, without running finished steps again. Resuming is a compare-and-set on the
 workflow, so of every replica that sees the decision exactly one continues it, and every replica's
 janitor times out expired steps and resumes a decided workflow whose resume was lost to a crash.
-Canceling a paused workflow withdraws its waiting step.
+A process that dies after listing a step and before parking leaves the workflow running under a
+lease nobody renews, and the step can still be decided. Once that lease expires the janitor parks
+the workflow rather than interrupting it, and a decision made in the meantime resumes it like any
+other. A workflow with another step still executing, or ready to start, is interrupted as any run
+whose worker died is. Canceling a paused workflow withdraws its waiting step.

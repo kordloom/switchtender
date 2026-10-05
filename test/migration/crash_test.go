@@ -1,6 +1,8 @@
 package migration
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -65,6 +67,88 @@ func TestKilledServerDuringApprovalWaitResumesCorrectly(t *testing.T) {
 			ev := in.checkEvidence(back, wf.ID)
 			rec := ev.Receipts[wf.ID]
 			requireRecord(t, rec, recordWant{Launcher: "operator-laptop", OnBehalfOf: "operator"})
+			requireChildren(t, rec, map[string]string{
+				"build": "succeeded", "approve": "succeeded", "ship": "succeeded",
+			})
+			requireStepDecision(t, ev, step.ID, "approved", "approver-laptop")
+			requireReceiptDecision(t, rec, step.ID, "approved", "approver-laptop", "approver")
+		})
+	}
+}
+
+// startHeldServer starts a server whose coordinators stop in the moment between listing a
+// workflow's approval step and parking the workflow, and stay there until the server is killed.
+// The file at marker names the workflow once one is held.
+func (in *install) startHeldServer(name, marker string) *server {
+	in.t.Helper()
+	env := in.env
+	in.env = append(append([]string(nil), env...), holdParkEnv+"="+marker)
+	defer func() { in.env = env }()
+	return in.startServer(name)
+}
+
+// waitHeld waits until a held server's coordinator reached the park of workflowID.
+func (in *install) waitHeld(marker, workflowID string) {
+	in.t.Helper()
+	deadline := time.Now().Add(waitLimit)
+	for time.Now().Before(deadline) {
+		if got, err := os.ReadFile(marker); err == nil && string(got) == workflowID {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	in.t.Fatalf("the coordinator of workflow %s never reached its park", workflowID)
+}
+
+// TestKilledServerBeforeItsParkKeepsTheApproval kills the process coordinating an imported
+// workflow in the moment between listing the workflow's approval step and parking the workflow,
+// held there so the kill lands inside that moment every time. The workflow is left running under a
+// lease nobody renews while its step is still listed, and a person approves the step. The lease
+// sweep used to end the workflow as interrupted once that lease expired, so the accepted approval
+// was lost. It has to park the workflow instead and resume it on the approval, which ships exactly
+// once with the approval on the chain as the approver's. It runs on one server with SQLite,
+// restarted after the kill, and on two servers sharing PostgreSQL, where the survivor takes over.
+func TestKilledServerBeforeItsParkKeepsTheApproval(t *testing.T) {
+	t.Parallel()
+	for _, store := range []storeKind{onSQLite, onPostgres} {
+		t.Run(string(store), func(t *testing.T) {
+			t.Parallel()
+			in := newInstall(t, installOptions{Store: store})
+			marker := filepath.Join(in.root, "held-park")
+			holder := in.startHeldServer("holder", marker)
+			var survivor *server
+			if store == onPostgres {
+				survivor = in.startServer("survivor")
+			}
+
+			wf := in.launched(holder, "operator", "release", nil)
+			step := in.waitPending(holder, "operator", wf.ID)
+			in.waitHeld(marker, wf.ID)
+			if got := in.getRun(holder, wf.ID); got.Status != "running" {
+				t.Fatalf("the held workflow is %q, want running under its coordinator's lease: %s",
+					got.Status, describe(got.Raw))
+			}
+			holder.kill()
+
+			if survivor == nil {
+				survivor = in.startServer("restarted")
+			}
+			if again := in.waitPending(survivor, "operator", wf.ID); again.ID != step.ID {
+				t.Fatalf("after the kill the workflow waits at %+v, want step %s", again, step.ID)
+			}
+			// Accepted while the dead coordinator's lease still holds the workflow, so nothing can
+			// resume it yet: the lease sweep is what hands it on.
+			in.must(survivor, "approver", "POST", "/v1/runs/"+step.ID+"/approve",
+				map[string]any{"state_digest": step.StateDigest}, 200)
+			if done := in.waitDone(survivor, wf.ID); done.Status != "succeeded" {
+				t.Fatalf("the workflow after the kill = %s, want the approval honored: %s",
+					done.Status, describe(done.Raw))
+			}
+			in.requireSteps(survivor, wf.ID, map[string]int{"build": 1, "ship": 1, "page": 0})
+			in.noPending(survivor, wf.ID)
+
+			ev := in.checkEvidence(survivor, wf.ID)
+			rec := ev.Receipts[wf.ID]
 			requireChildren(t, rec, map[string]string{
 				"build": "succeeded", "approve": "succeeded", "ship": "succeeded",
 			})

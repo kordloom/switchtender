@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -282,6 +283,14 @@ func (d *Dispatcher) timeOutStep(ctx context.Context, node *run.Run) bool {
 // sees the decision exactly one resumes it. A parent held before it ever started is never resumed
 // here: that is a whole run awaiting its own approval, which only Approve releases.
 func (d *Dispatcher) resumeParked(ctx context.Context, parentID string) bool {
+	// A coordinator for the workflow still registered here has not finished handing it over, and it
+	// looks for decided work itself once it has. Resuming under it is a second walk of the same
+	// workflow: the lease sweep can park a workflow whose coordinator sat between opening its step
+	// and parking for longer than a lease, and that coordinator's own park then took the resumed
+	// workflow back from the walk this resume started.
+	if d.coordinating(parentID) {
+		return false
+	}
 	started, err := run.Started(ctx, d.store, parentID)
 	if err != nil || !started {
 		return false
@@ -487,14 +496,14 @@ func (d *Dispatcher) park(parent *run.Run) bool {
 		// nothing, which reads exactly like a cancel. Withdrawing the steps then ended a workflow
 		// nobody canceled. The store says which it was: a workflow held with no lease and no
 		// cancel requested is parked.
-		ok = d.parkedNow(parent.ID)
+		ok = d.handedOff(parent.ID)
 	}
 	if err == nil && ok {
 		d.log.Info("dispatch: workflow paused at an approval step", zap.String("run_id", parent.ID))
 		return true
 	}
 	if err != nil {
-		if d.parkedNow(parent.ID) {
+		if d.handedOff(parent.ID) {
 			d.log.Info("dispatch: workflow paused at an approval step",
 				zap.String("run_id", parent.ID))
 			return true
@@ -517,12 +526,36 @@ func (d *Dispatcher) park(parent *run.Run) bool {
 	return false
 }
 
-// parkedNow reports whether the store holds the workflow parked: held, with no lease and no cancel
-// requested.
-func (d *Dispatcher) parkedNow(id string) bool {
+// handedOff reports whether the store no longer has this process holding the workflow at an
+// approval step: parked, held with no lease and no cancel requested, or running under another
+// process's lease. The second is a workflow the lease sweep parked because this process sat between
+// opening the step and parking for longer than its lease, and that another process then resumed.
+// Its waiting steps are that process's to wait on, and withdrawing them ended a workflow somebody
+// else was walking.
+func (d *Dispatcher) handedOff(id string) bool {
 	cur, err := d.storeGetWithRetries(context.Background(), id)
-	return err == nil && cur.Status == run.StatusPendingApproval && cur.ClaimedBy == "" &&
-		!cur.CancelRequested
+	if err != nil {
+		return false
+	}
+	if cur.Status == run.StatusRunning && cur.ClaimedBy != "" && cur.ClaimedBy != d.owner {
+		return true
+	}
+	return cur.Status == run.StatusPendingApproval && cur.ClaimedBy == "" && !cur.CancelRequested
+}
+
+// defaultParkHook is the hook SetParkHook installed for every dispatcher created afterward.
+var defaultParkHook atomic.Pointer[func(workflowID string)]
+
+// SetParkHook installs fn, as WithParkHook would, in every Dispatcher created afterward that sets
+// no hook of its own. It exists for a test that runs the whole command in a process of its own and
+// kills that process in the moment the hook holds, and nothing outside tests calls it. Nil removes
+// it.
+func SetParkHook(fn func(workflowID string)) {
+	if fn == nil {
+		defaultParkHook.Store(nil)
+		return
+	}
+	defaultParkHook.Store(&fn)
 }
 
 // coordinating reports whether a coordinator for the workflow is registered on this process.

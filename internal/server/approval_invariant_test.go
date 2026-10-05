@@ -78,6 +78,8 @@ var approvalPaths = map[string]approvalPath{
 		Why: "the append-at-once form of DecisionEntry, called by nothing that decides"},
 	"internal/outcome/approval.go:CommitStepDecisionWith:StepDecisionEntry": {Surface: "system",
 		Why: "the append-at-once form used for a step's request"},
+	"internal/storetest/contract_approval.go:testSweepParksAStalledWorkflow:ClaimDecision": {
+		Surface: "store contract", Why: "exercises the store with no decider and no route"},
 	"internal/storetest/contract_decision_claim.go:testClaimDecisionOnce:ClaimDecision": {
 		Surface: "store contract", Why: "exercises the store with no decider and no route"},
 	"internal/storetest/contract_decision_claim.go:testClaimedRunIsFenced:ClaimDecision": {

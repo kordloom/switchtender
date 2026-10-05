@@ -63,7 +63,7 @@ type approveRequest struct {
 }
 
 // approveRunHandler releases a run held for approval so it can execute, or approves a workflow
-// approval step so the workflow continues down its approve path.
+// approval step, posted to the step's own id, so the workflow continues down its approve path.
 func approveRunHandler(approver Approver, store run.Store, authz *authorizer,
 	log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -89,7 +89,7 @@ func approveRunHandler(approver Approver, store run.Store, authz *authorizer,
 				respondError(w, log, http.StatusInternalServerError, "could not read run")
 				return
 			}
-			target, step, ok := resolveDecisionTarget(w, r, store, log, rn)
+			target, step, ok := resolveDecisionTarget(w, r, store, authz, log, rn)
 			if !ok {
 				return
 			}
@@ -202,13 +202,17 @@ type StepApprover interface {
 	DecideStep(ctx context.Context, id string, dec dispatch.StepDecision) (*run.Run, error)
 }
 
-// resolveDecisionTarget returns what a decision posted to rn decides: rn itself, or the approval
-// step a workflow is waiting at. A decision posted to the workflow reaches its step when exactly
-// one is waiting, which is what lets the run page, the email, and the chat link that name the
-// workflow decide it. With several waiting the caller has to say which. It writes the response and
-// reports false when the decision cannot go ahead.
-func resolveDecisionTarget(w http.ResponseWriter, r *http.Request, store run.Store, log *zap.Logger,
-	rn *run.Run) (*run.Run, bool, bool) {
+// resolveDecisionTarget returns what a decision posted to rn decides: rn itself, or, for rn an
+// approval step, that step. A decision posted to a workflow that is waiting at an approval step is
+// refused with 409, naming each waiting step and the call that decides it, once the caller has
+// shown it may use the workflow. Only the step's own decision may move the workflow: the step
+// carries the rules that apply to it alone, and the state its approver is shown binds to the step
+// rather than to the workflow. A release that predates approval steps refuses the same call,
+// because it reads the stored status of a parked workflow as one it does not know, so the same
+// request means the same thing on either side of an upgrade or a rollback. It writes the response
+// and reports false when the decision cannot go ahead.
+func resolveDecisionTarget(w http.ResponseWriter, r *http.Request, store run.Store, authz *authorizer,
+	log *zap.Logger, rn *run.Run) (*run.Run, bool, bool) {
 	if rn.Kind == run.KindApproval {
 		return rn, true, true
 	}
@@ -221,20 +225,30 @@ func resolveDecisionTarget(w http.ResponseWriter, r *http.Request, store run.Sto
 		respondError(w, log, http.StatusInternalServerError, "could not read the workflow's steps")
 		return nil, false, false
 	}
-	switch len(pending) {
-	case 0:
+	if len(pending) == 0 {
 		return rn, false, true
-	case 1:
-		return pending[0], true, true
 	}
-	names := make([]string, 0, len(pending))
-	for _, p := range pending {
-		names = append(names, fmt.Sprintf("%q (%s)", p.StepName, p.ID))
+	if authorizeRunAccess(w, r, authz, log, rn) {
+		return nil, false, false
 	}
-	respondError(w, log, http.StatusConflict, "this workflow is waiting at "+
-		strconv.Itoa(len(pending))+" approval steps, so decide each by its own id: "+
-		strings.Join(names, ", "))
+	respondError(w, log, http.StatusConflict, waitingStepsRefusal(pending))
 	return nil, false, false
+}
+
+// waitingStepsRefusal says why a decision posted to a workflow waiting at approval steps is
+// refused, naming each step and the call that decides it.
+func waitingStepsRefusal(pending []*run.Run) string {
+	calls := make([]string, 0, len(pending))
+	for _, p := range pending {
+		calls = append(calls, fmt.Sprintf("approval step %q is decided with POST /v1/runs/%s/approve "+
+			"or POST /v1/runs/%s/reject", p.StepName, p.ID, p.ID))
+	}
+	what := "an approval step"
+	if len(pending) > 1 {
+		what = strconv.Itoa(len(pending)) + " approval steps"
+	}
+	return "this workflow is waiting at " + what + ", and only a step's own decision moves it: " +
+		strings.Join(calls, ", and ")
 }
 
 // decideStep applies one decision to a workflow approval step and writes the response.
@@ -311,7 +325,7 @@ func rejectRunHandler(approver Approver, store run.Store, authz *authorizer,
 				respondError(w, log, http.StatusInternalServerError, "could not read run")
 				return
 			}
-			target, step, ok := resolveDecisionTarget(w, r, store, log, rn)
+			target, step, ok := resolveDecisionTarget(w, r, store, authz, log, rn)
 			if !ok {
 				return
 			}

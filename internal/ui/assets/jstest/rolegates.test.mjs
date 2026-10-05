@@ -48,6 +48,25 @@ test("an admin gets the decision controls", () => {
 	assert.equal(hidden(doc, "cancel-run"), false);
 });
 
+test("a workflow waiting at an approval step is decided by its step, not as a whole run", () => {
+	const page = loadPage("detail");
+	sandboxOf(page.app).localStorage.setItem("st_role", "admin");
+	page.app.renderHeader({ id: "run_w", playbook: "release", kind: "pipeline",
+		status: "pending_approval", started_at: "2026-10-05T12:00:00Z" });
+	assert.equal(hidden(page.document, "approve-run"), true);
+	assert.equal(hidden(page.document, "reject-run"), true);
+	assert.equal(hidden(page.document, "cancel-run"), false, "a paused workflow can still be canceled");
+});
+
+test("a workflow held before it started is still decided as a whole run", () => {
+	const page = loadPage("detail");
+	sandboxOf(page.app).localStorage.setItem("st_role", "admin");
+	page.app.renderHeader({ id: "run_w", playbook: "release", kind: "pipeline",
+		status: "pending_approval" });
+	assert.equal(hidden(page.document, "approve-run"), false);
+	assert.equal(hidden(page.document, "reject-run"), false);
+});
+
 test("an unknown role gates nothing, for open installs and unscoped tokens", () => {
 	const doc = mountDetailAs("");
 	assert.equal(hidden(doc, "approve-run"), false);

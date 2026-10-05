@@ -163,12 +163,12 @@ either licensed or absent.</li>
 <tr>
 <td>POST</td>
 <td><code>/v1/runs/{id}/approve</code></td>
-<td>Release a run held for approval so it runs. Given a workflow approval step's id, or a workflow waiting at exactly one, it approves the step, and an optional <code>state_digest</code> body field binds the decision to the state the approver was shown. An optional <code>reason</code> is recorded as audit evidence, as <a href="#approver-reasons">Approver reasons</a> describes.</td>
+<td>Release a run held for approval so it runs. Given a workflow approval step's id, it approves the step, and an optional <code>state_digest</code> body field binds the decision to the state the approver was shown. Given a workflow waiting at an approval step, it answers 409 naming each waiting step and the call that decides it, since only a step's own decision moves the workflow. An optional <code>reason</code> is recorded as audit evidence, as <a href="#approver-reasons">Approver reasons</a> describes.</td>
 </tr>
 <tr>
 <td>POST</td>
 <td><code>/v1/runs/{id}/reject</code></td>
-<td>Deny a run held for approval, or deny a workflow approval step so the workflow takes its deny path. An optional <code>reason</code> is recorded the same way.</td>
+<td>Deny a run held for approval, or deny a workflow approval step, given the step's id, so the workflow takes its deny path. A workflow waiting at an approval step is refused with 409 the way an approval is. An optional <code>reason</code> is recorded the same way.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -1066,8 +1066,9 @@ cycle or an unknown dependency is refused then rather than on every launch.</p>
 <p>A step with <code>&quot;type&quot;: &quot;approval&quot;</code> is an approval step: the workflow waits there until an admin
 approves or denies it. It takes a <code>description</code> and an <code>approval_timeout</code> in seconds, and a step
 names it in <code>if_denied</code> to run when it is denied or times out. <code>GET /v1/approvals</code> lists the steps
-waiting, and <code>POST /v1/runs/{id}/approve</code> or <code>/reject</code> decides one, optionally with
-<code>{&quot;state_digest&quot;: &quot;...&quot;}</code> from the listing so the decision binds to what was shown. A workflow
+waiting, and <code>POST /v1/runs/{id}/approve</code> or <code>/reject</code> with the step's id decides one, optionally
+with <code>{&quot;state_digest&quot;: &quot;...&quot;}</code> from the listing so the decision binds to what was shown. The same
+call with the workflow's id is refused with 409, naming the step and its call. A workflow
 reaching an approval step is announced with its own event, <code>workflow.step_awaiting_approval</code>, which
 names the step and what each answer runs next, so a receiver can tell it from a whole run held for
 approval. The <a href="/docs/concepts">concepts page</a> describes the semantics.</p>

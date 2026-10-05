@@ -153,7 +153,8 @@ func (h *stepHarness) waitStatus(t *testing.T, id string, want run.Status) {
 // TestApprovalStepThroughTheAPI pins the approval queue and the decision routes for a workflow
 // approval step: an agent sees the step it is waiting on and cannot approve it, the queue names
 // what comes next, a decision bound to a stale state is refused, and an approver releases the
-// workflow either by the step's id or by the workflow's.
+// workflow by the step's id. A decision posted to the workflow is refused, naming the step and the
+// call that decides it, since only the step's own decision may move the workflow.
 //
 //nolint:funlen // Test function.
 func TestApprovalStepThroughTheAPI(t *testing.T) {
@@ -178,10 +179,12 @@ func TestApprovalStepThroughTheAPI(t *testing.T) {
 	}, { // Test 2: An approver approves the step by its id, bound to what the queue showed.
 		Caller: "admin", Target: "step", Body: "shown", WantCode: http.StatusOK,
 		WantStatus: run.StatusSucceeded,
-	}, { // Test 3: An approver approves through the workflow, which waits at exactly one step.
-		Caller: "admin", Target: "workflow", WantCode: http.StatusOK, WantStatus: run.StatusSucceeded,
-	}, { // Test 4: An approver denies through the workflow and, with no deny path, it fails.
-		Caller: "admin", Target: "deny", WantCode: http.StatusOK, WantStatus: run.StatusFailed,
+	}, { // Test 3: An approval posted to the workflow is refused and the workflow keeps waiting.
+		Caller: "admin", Target: "workflow", WantCode: http.StatusConflict,
+		WantStatus: run.StatusPendingApproval,
+	}, { // Test 4: A denial posted to the workflow is refused and the workflow keeps waiting.
+		Caller: "admin", Target: "deny", WantCode: http.StatusConflict,
+		WantStatus: run.StatusPendingApproval,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -212,6 +215,10 @@ func TestApprovalStepThroughTheAPI(t *testing.T) {
 			code, resp := h.call(t, token, http.MethodPost, path, body)
 			if code != test.WantCode {
 				t.Fatalf("POST %s = %d %s, want %d", path, code, resp, test.WantCode)
+			}
+			decides := "POST /v1/runs/" + step.ID + "/approve"
+			if test.Target != "step" && !strings.Contains(resp, decides) {
+				t.Errorf("the refusal %s does not name %s, the call that decides it", resp, decides)
 			}
 			h.waitStatus(t, workflow, test.WantStatus)
 		})

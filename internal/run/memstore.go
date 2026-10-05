@@ -521,8 +521,9 @@ func (m *memStore) Heartbeat(_ context.Context, id, owner string) error {
 	return nil
 }
 
-// ReclaimStale requeues stale claimed pending runs, interrupts stale running runs, and interrupts
-// split or pipeline parents left pending with no coordinator. The lease was stamped by this same
+// ReclaimStale requeues stale claimed pending runs, parks stale workflows waiting only for a person,
+// interrupts every other stale running run, and interrupts split or pipeline parents left pending
+// with no coordinator. The lease was stamped by this same
 // process, so its own clock is the authoritative one. Interrupting a parent orphans its children, so
 // they are resolved in the same sweep. See AbandonedParent for what makes a parent unrecoverable.
 // ReclaimStaleSettled sweeps like ReclaimStale and names the top-level runs this sweep itself drove
@@ -548,7 +549,7 @@ func (m *memStore) reclaimStale(_ context.Context, ttl time.Duration) (int, []st
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	cutoff := time.Now().Add(-ttl)
-	changed := 0
+	changed := m.parkStalled(cutoff)
 	var settled []string
 	for id, r := range m.runs {
 		// An abandoned parent is interrupted before orphans are resolved, so its children settle in
@@ -606,6 +607,34 @@ func (m *memStore) reclaimStale(_ context.Context, ttl time.Duration) (int, []st
 		}
 	}
 	return changed + m.resolveOrphans(), settled, nil
+}
+
+// parkStalled parks every running workflow whose lease is older than cutoff and that
+// StalledAtApproval reads as waiting only for a person, the way its coordinator's park would have,
+// and returns how many it parked. It runs under m.mu before anything else the sweep changes, so
+// every workflow is judged on the records its coordinator left.
+func (m *memStore) parkStalled(cutoff time.Time) int {
+	children := map[string][]*Run{}
+	for _, r := range m.runs {
+		if r.ParentID != nil {
+			children[*r.ParentID] = append(children[*r.ParentID], r)
+		}
+	}
+	parked := 0
+	for id, r := range m.runs {
+		if r.Status != StatusRunning || r.ClaimedBy == "" || r.ClaimedAt == nil ||
+			!r.ClaimedAt.Before(cutoff) || !StalledAtApproval(r, children[id]) {
+			continue
+		}
+		r.Status = StatusPendingApproval
+		r.ClaimedBy = ""
+		r.ClaimedAt = nil
+		r.ClaimSecret = ""
+		m.parked[id] = true
+		m.noteStatus(r, StatusRunning)
+		parked++
+	}
+	return parked
 }
 
 // resolveOrphans settles the children of an interrupted parent, whose coordinator died holding the

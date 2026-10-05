@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/kordloom/switchtender/cmd"
+	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/license"
 )
 
@@ -36,6 +37,10 @@ const (
 	// requireFullEnv turns a missing tool from a skip into a failure, the switch every other
 	// suite in the repository reads for the same purpose.
 	requireFullEnv = "SWITCHTENDER_REQUIRE_FULL_SUITE"
+	// holdParkEnv names a file a child writes the workflow's id to when one of its coordinators
+	// reaches the moment between listing an approval step and parking the workflow, where the
+	// child then holds that coordinator until it is killed.
+	holdParkEnv = "SWITCHTENDER_SCENARIO_HOLD_PARK"
 )
 
 // TestMain runs the suite, or, in a child this suite started, the switchtender command.
@@ -50,6 +55,14 @@ func TestMain(m *testing.M) {
 // runChild trusts the suite's license key and runs the switchtender command with this process's
 // arguments. It never returns: the command exits the process with its own code.
 func runChild() {
+	if marker := os.Getenv(holdParkEnv); marker != "" {
+		dispatch.SetParkHook(func(id string) {
+			if err := os.WriteFile(marker, []byte(id), 0o600); err != nil {
+				fmt.Fprintln(os.Stderr, "scenario child: mark the held park: "+err.Error())
+			}
+			select {}
+		})
+	}
 	if raw := os.Getenv(licenseKeyEnv); raw != "" {
 		pub, err := hex.DecodeString(raw)
 		if err != nil || len(pub) != ed25519.PublicKeySize {
