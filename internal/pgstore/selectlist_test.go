@@ -38,6 +38,8 @@ func TestEverySelectedColumnIsDeclared(t *testing.T) {
 		{"policies", policyColumns},
 		{"schedules", scheduleColumns},
 		{"templates", templateColumns},
+		{"run_decisions", decisionColumns},
+		{"forge_links", forgeLinkColumns},
 	}
 	for _, tc := range tests {
 		have := declared(tc.Table)

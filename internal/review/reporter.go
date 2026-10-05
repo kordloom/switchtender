@@ -184,6 +184,8 @@ type Reporter struct {
 	ended map[string]time.Time
 	// adoptedAt is when the last adoption pass ran, on this process's clock.
 	adoptedAt time.Time
+	// prunedAt is when comment records were last pruned, on this process's clock.
+	prunedAt time.Time
 }
 
 // recheck is when an unchanged held plan is next read, and the gap that grows while it waits.
@@ -862,7 +864,17 @@ func (rp *Reporter) adoptDue() bool {
 func (rp *Reporter) adopt(ctx context.Context, now time.Time, all bool) {
 	rp.mu.Lock()
 	rp.adoptedAt = time.Now()
+	prune := rp.adoptedAt.Sub(rp.prunedAt) >= pruneEvery
+	if prune {
+		rp.prunedAt = rp.adoptedAt
+	}
 	rp.mu.Unlock()
+	if prune {
+		if _, err := rp.cfg.Store.PruneComments(ctx, now.Add(-CommentRetention)); err != nil &&
+			ctx.Err() == nil {
+			rp.cfg.Log.Warn("review: prune comment records: " + err.Error())
+		}
+	}
 	window := 3 * adoptEvery
 	if all {
 		window = adoptWindow
@@ -957,6 +969,10 @@ func (rp *Reporter) redact(ctx context.Context, r *run.Run, text string) (string
 
 // reportFor builds the report rec owes from what assess read.
 func (rp *Reporter) reportFor(ctx context.Context, tg *trigger.Trigger, rec *Record, a assessment) Report {
+	if rec.Kind == KindReply {
+		return Report{TemplateID: tg.TemplateID, Phase: PhaseReplied, Reason: rec.Reason,
+			At: rec.CreatedAt}
+	}
 	if rec.Kind != KindPlan {
 		return Report{
 			TemplateID: tg.TemplateID, TemplateName: rp.templateName(ctx, tg.TemplateID),
@@ -1166,6 +1182,9 @@ func (rp *Reporter) post(ctx context.Context, tg *trigger.Trigger, rec *Record, 
 	defer revoke(lease)
 	if err != nil {
 		return posted{}, err
+	}
+	if rec.Kind == KindReply {
+		return rp.postReply(ctx, client, tg, rec)
 	}
 	body := Render(rep)
 	statusContext := rec.StatusContext

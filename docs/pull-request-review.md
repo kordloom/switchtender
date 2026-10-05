@@ -13,9 +13,13 @@ opened or receives new commits, SwitchTender runs the trigger's template at the 
 commit in the tool's no-change mode, then writes one comment for that template on the pull request and
 sets a commit status on the head commit. Every later push updates the same comment in place.
 
-Applying stays in SwitchTender. After the pull request merges, the apply is an ordinary run of the
-template, launched the way it always is, and it goes through the same gate and approval queue as any
-other change. Nothing a pull request author writes on the pull request can approve or release it.
+Applying stays in SwitchTender's hands. After the pull request merges, the apply is an ordinary run
+of the template, launched the way it always is, and it goes through the same gate and approval queue
+as any other change. A person whose GitHub or GitLab account is linked to their SwitchTender account
+can also plan and apply from a comment on the pull request, as their SwitchTender account and under
+the same rules as the queue, as described in [planning and applying from a
+comment](#planning-and-applying-from-a-comment). Nothing else a pull request author writes on the
+pull request can approve or release a change.
 
 ## Plans and your approval rules
 
@@ -202,6 +206,9 @@ cannot be recorded is refused, the same as a push trigger's fire:
 | `/runs/<run>/outcome/<status>` | The plan run finished, committed like every run's outcome. |
 | `/hooks/<trigger>/review/<N>/report` | A comment and status are about to be posted. The entry commits to the plan run, the phase, the commit, the status state, and the SHA-256 of the exact comment body, or to `comment_skipped` with the reason no comment is written: `superseded` when a newer push's plan holds the comment, `fork` for a fork's refusal, `no_hosts` for a plan skipped because its inventory matched no hosts. A report that cannot be recorded is not posted, and a report retried after a failed write is not recorded twice. |
 | `/hooks/<trigger>/review/<N>/failed` | The plan could not be launched after the forge was already answered, so the failure is recorded here and in the server log. |
+| `/hooks/<trigger>/review/<N>/comment/<comment>/<command>` | A new comment carrying `/switchtender plan` or `/switchtender apply` arrived, before anything acts on it. The entry commits to the forge, the repository, the pull request, the comment's and its author's numeric ids, the SHA-256 of the comment body, and the command. A comment that cannot be recorded does nothing. |
+| `/hooks/<trigger>/review/<N>/comment/<comment>/<command>/<result>` | How the command ended: `accepted` for a plan handed to the review's own plan path, which records its own entries, `applied`, or `refused/` with the reason, such as `refused/unlinked`, `refused/fork`, `refused/bot`, `refused/head_moved`, or `refused/separation_of_duties`, and the run it launched or decided. |
+| `/runs/<run>/decision/approved` | An apply was approved from a comment. The entry commits to the comment as described in [what the evidence holds](#what-the-evidence-holds). |
 
 ## How reporting holds up
 
@@ -209,22 +216,22 @@ Each plan and each refusal has a report record in the database: the phase the pu
 told, the commit status state set, the SHA-256 of the comment body written, and when. The plan's run
 page and `GET /v1/runs/{id}` show it as `pull_request_report`.
 
-- **Once, across replicas.** Every server sharing the database looks for reports that are owed, and
+- Once, across replicas. Every server sharing the database looks for reports that are owed, and
   takes one the way the scheduler takes a due schedule: a compare-and-set on the record, which
   exactly one server wins. Two servers never write one pull request's comment at the same time.
-- **Across a restart.** A starting server reports whatever is owed, including the result of a plan
+- Across a restart. A starting server reports whatever is owed, including the result of a plan
   that finished while no server was running. A plan from the last hour whose webhook reached a
   server that stopped before recording it is found and reported too.
-- **In order.** A plan is reported as it moves, running, then waiting for approval if a rule holds
+- In order. A plan is reported as it moves, running, then waiting for approval if a rule holds
   it, then its result. The result waits for the plan's outcome entry on the audit chain, so the pull
   request is never told a plan finished before the chain records how. If the outcome entry has not
   arrived two minutes after the plan ended, the result is posted with a line saying the outcome is
   missing from the chain.
-- **The newest push keeps the comment.** Before writing, the server reads which commit the pull
+- The newest push keeps the comment. Before writing, the server reads which commit the pull
   request proposes now. A plan of a commit the pull request has moved past never takes the comment
   from the newer push's plan, even when its webhook arrived later. It sets the status on its own
   commit and updates only a comment it wrote itself.
-- **Retried when the forge fails.** A request the forge refuses or never answers is retried with a
+- Retried when the forge fails. A request the forge refuses or never answers is retried with a
   backoff that starts at two seconds and doubles to five minutes. The plan's run page shows the
   failure, the number of attempts, and when the next one goes out. A forge that keeps failing for
   24 hours, such as one whose token was revoked, is given up on, and the run says so.
@@ -232,6 +239,221 @@ page and `GET /v1/runs/{id}` show it as `pull_request_report`.
 A server that shuts down cleanly hands back the report it was making at once. One that dies partway
 through leaves the report claimed for six minutes, after which another server takes it and posts it
 again. The repeat updates the same comment rather than adding one.
+
+## Linking forge accounts
+
+A `/switchtender plan` or `/switchtender apply` comment acts as the SwitchTender account its author
+linked. Each person links their own GitHub or GitLab account once, on the Linked accounts page,
+through an OAuth application you register on the forge. A link grants nothing by itself. What a
+comment may then do is decided by the linked account's own role and grants, exactly as in the queue.
+
+A link is keyed on the forge's numeric account id, never the login. A login can be renamed and then
+taken by somebody else, and the numeric id cannot. SwitchTender never stores the login. The token
+the forge hands over while linking is used once, to read that id, and then dropped.
+
+### Register the OAuth application
+
+The callback URL is your server's public address followed by `/auth/forge/callback`, such as
+`https://switchtender.example.com/auth/forge/callback`. Linking needs `--public-url`, so the forge
+can send people back.
+
+On GitHub, open the organization's settings, then Developer settings, then OAuth Apps, and register
+a new application with the callback URL above. It needs no scopes, since linking reads only the
+numeric id of the account that authorized it. Generate a client secret. GitHub Enterprise Server is
+the same, in your server's own Developer settings.
+
+On GitLab, open Applications in the group's settings, or in the Admin area for the whole instance,
+and add one with the callback URL above, the `read_user` scope, and Confidential checked.
+Self-managed GitLab is the same, on your own instance.
+
+### Configure the server
+
+Pass one `--forge-oauth` per forge. The client secret comes from an environment variable or a file,
+never the command line:
+
+    switchtender serve --public-url https://switchtender.example.com \
+      --forge-oauth provider=github,client_id=Iv1.0123,secret_env=GITHUB_OAUTH_SECRET \
+      --forge-oauth provider=gitlab,client_id=4f2a,secret_file=/run/secrets/gitlab-oauth,web_url=https://gitlab.example.com
+
+`web_url` names a GitHub Enterprise Server or a self-managed GitLab, and its API base is taken to be
+`/api/v3` or `/api/v4` under it. Set `api_url` when yours is somewhere else. A link is kept per
+forge API base, the same base a review trigger names in `api_url`, so an account on GitHub
+Enterprise Server is never mistaken for one on github.com. The page has to be opened at the public
+address, since the browser that starts a link must be the one the forge sends back.
+
+### Link and unlink
+
+Open Linked accounts in the navigation, at `/ui/links`. Each forge the server is set up for has a
+Link button. It sends you to the forge to authorize the application, and the forge sends you back to
+the page with the account linked. The page shows the account by its forge, its host, and its numeric
+id.
+
+- One forge account links to one SwitchTender account, and a SwitchTender account links at most one
+  account on each forge. Unlink the old one first to move it.
+- A bot account cannot be linked: a GitHub account of type Bot, or a GitLab bot user such as the
+  account behind a project or group access token.
+- Only a person can link or unlink. An agent's token is refused.
+- A link finishes only in the browser that started it, within ten minutes. A link address sent to
+  somebody else does nothing when they open it, so nobody can tie their forge account to your
+  SwitchTender account, or yours to theirs.
+- Each link request is signed with a key derived from the server's encryption key together with the
+  application's client secret, so somebody holding the client secret alone cannot forge one. Linking
+  needs `SWITCHTENDER_ENCRYPTION_KEY` set, and a server without it refuses to start a link.
+- Unlinking takes effect at once. A comment from that forge account stops acting as you.
+- Deleting a SwitchTender account, through the API or with `switchtender user delete`, ends its
+  links first, each recorded on the audit chain as an unlink. A delete whose unlinks cannot be
+  recorded is refused, and the account and its links stay. A [backup](backup.md) does not carry
+  links, so after a restore each person links again.
+
+Each link and each unlink is an entry on the audit chain, at `/me/forge-links/<link id>/linked` and
+`/me/forge-links/<link id>/unlinked`, committing to the SwitchTender account, the forge, its API
+base, and the numeric id. The entry holds no login and no token. Each entry is written before the
+change it records, so a link never exists without its `linked` entry, and one the chain will not
+take is never made. An unlink the chain will not take leaves the link in place, and a link or an
+unlink that fails after its entry is written gets the entry that undoes it, so the chain and the
+links agree.
+
+The API is `GET`, `POST`, and `DELETE` on `/v1/me/forge-links`, listed in the
+[API reference](api.md).
+
+## Planning and applying from a comment
+
+A person whose GitHub or GitLab account is linked to their SwitchTender account can plan and apply
+from the pull request. The comment acts as their SwitchTender account, with the rights that account
+has in the approval queue and no others. See [linking forge accounts](#linking-forge-accounts) for
+how a person links an account.
+
+Two commands are read, on the first line of a new comment that is not blank:
+
+    /switchtender plan [-p TEMPLATE]
+    /switchtender apply [PLAN] [-p TEMPLATE]
+
+`PLAN` is the plan id every plan report shows, such as `Plan 0e4f984a`, and a succeeded plan's
+report ends with the exact command that applies it. `-p` names the template, by name or id, so when
+several review triggers watch one repository only that template's trigger acts and the others leave
+the comment alone. Lines after the first are ignored. A first line with anything else on it does
+nothing, and so does one indented by a tab or four spaces, which both forges show as a code block,
+so an example or a typo is never taken for a command. On GitHub the command goes in a comment on the
+pull request's conversation, the kind the Issue comments event delivers, and not in a review or a
+comment on a line of the diff.
+
+Before a comment plans or approves anything, SwitchTender reads it back from the forge by its id,
+with the trigger's token, and requires the forge's author, pull request, and body to match the
+webhook. A signed webhook alone is not enough, since whoever holds the trigger's signing secret
+could sign a comment the forge never held. A comment the forge does not confirm, or one more than 24
+hours old by the forge's clock, which is a redelivery or a replay, has no effect at all: no plan, no
+proposed apply, no record, no reply, and no chain entry beyond the one recording its arrival. A
+forged webhook changes nothing.
+
+`/switchtender plan` plans the pull request's current head, read from the forge when the comment
+arrives, exactly as a push to the pull request does. The plan runs as the commenter's account, which
+needs the operator role and use of everything a launch of the template needs in the queue: the
+template, its project, its inventory, its credentials, its registry pull credential, and its worker
+queue. Its result is reported in the same comment and commit status as every other plan.
+
+`/switchtender apply` approves and applies a plan SwitchTender reported for the pull request's
+current head, one its author could have read:
+
+- `/switchtender apply PLAN` applies exactly that plan, while it is still the head's current plan.
+  A plan of an older commit, or one a newer plan of the same commit replaced, is refused, and the
+  reply names the plan to use.
+- A bare `/switchtender apply` is taken only when the head has one reported plan and it was reported
+  before the comment was written. Otherwise nothing is applied, and the reply names the plan id to
+  comment with.
+
+It happens in two steps, the same way a reconcile is proposed from a drift check:
+
+1. The apply is proposed from the plan. It is the plan's own run, for real, pinned to the plan's
+   commit and fetched from the same pull request ref. A Terraform or OpenTofu apply carries the plan
+   file the plan saved, which is the plan the pull request was shown, with its digest bound into the
+   approval, so the tool refuses it if the state changed after the plan was made. The apply waits
+   for approval whatever the rules say, so the comment's decision is always recorded. A plan only
+   ever has one apply proposed from it. Its requester is the pull request's author, read from the
+   forge, when their forge account is linked, and otherwise the person who commented first.
+2. The comment approves that apply as the commenter's account, through the same checks as the
+   queue's approve button.
+
+Approving needs the admin role, as it does in the queue, and use of everything the plan runs. An
+operator's `/switchtender apply` proposes the apply and leaves it waiting for an approver. Because
+the pull request's author is the requester, a rule that requires a different approver keeps the
+author from approving their own change, whoever asked for the apply first.
+
+### When a comment does nothing
+
+| Situation | What happens |
+|---|---|
+| The pull request comes from a fork | Nothing, and no reply. A reply would let anybody able to open a pull request from a fork make your token write on it. A comment never acts on a fork's pull request, whatever `allow_forks` says. |
+| The forge does not hold the comment as delivered, or it is more than 24 hours old | Nothing, and no reply. |
+| The commenter's forge account is not linked | One reply saying how to link, pointing at the Linked accounts page when `--public-url` is set, once per commenter on each pull request. |
+| GitHub marks the comment as written by an app on its author's behalf | One reply. An agent working through an app may propose changes and never approve them. |
+| The commenter is a bot: a GitHub account of type Bot, or a GitLab bot user | One reply saying bots cannot plan or apply, linked or not. |
+| The pull request is closed | One reply. |
+| SwitchTender has reported no plan for the pull request | One reply. Comment `/switchtender plan` first. |
+| The pull request's head moved since the plan | One reply naming both commits. Nothing is applied until the new head's plan is reported. |
+| A bare apply could mean more than one plan, or its plan was reported after the comment was written | One reply naming the plan id to apply. |
+| The named plan is unknown, or a newer plan of the same commit replaced it | One reply. |
+| The plan failed, was rejected, or has not finished | One reply. |
+| A Terraform or OpenTofu plan kept no plan file | One reply. A plan that found no changes keeps none, and a newer plan of the same configuration replaces an older one's. |
+| The account lacks the role or a grant | One reply. An operator's apply is proposed and left waiting. |
+| A rule requires a different approver than the pull request's author or the person who asked for the apply | The apply stays held, and one reply says so. Another linked approver's `/switchtender apply` approves it, or an approver releases it in SwitchTender. |
+| A rule requires a reason to approve | The apply stays held. A comment carries no reason, so approve it in SwitchTender. |
+| The plan's apply was already decided | One reply naming the apply's run. |
+
+### What a comment costs
+
+The link is looked up on the server before anything is read from the forge. A refusal found there,
+such as an unlinked account, is answered once the forge confirms the comment and the pull request is
+not a fork's, which costs your token one read of the comment, one of the pull request, and the one
+reply that author is owed on that pull request. Every later comment from that author on that pull
+request costs the forge nothing, and so does a repeat of a comment the forge would not confirm,
+tried at most once in ten minutes. A refusal's reply goes out once per author, pull request, and
+reason, and a refusal whose words change, such as a head that moved again, is answered once more.
+
+Each forge account may have 20 commands acted on through one trigger in ten minutes. A command past
+that is answered `429` and leaves nothing behind: no record, no chain entry, and no forge call. The
+limit is counted on each server.
+
+The record that a comment was acted on, and the record of each reply, is kept for seven days and
+then removed. A comment older than 24 hours is refused anyway, so no comment can act twice after its
+record is gone.
+
+### Once, however often it arrives
+
+Each comment is acted on once. Its forge id, with the trigger it arrived through, keys a record in
+the database every server shares, so a redelivered webhook, or one delivery reaching two servers, is
+answered and ignored. A second `/switchtender apply` comment finds the apply the first one proposed,
+approves it only if it is still waiting, and otherwise says the plan was already decided. Each reply
+is posted once across replicas, by the same claim the plan reports use.
+
+Only a newly created comment is read. An edit or a deletion is ignored on both forges, so changing a
+comment afterward cannot plan, apply, or change what was approved.
+
+### What the evidence holds
+
+The decision's chain entry commits the forge, the repository, the pull request, the comment's
+numeric id, its author's numeric id, and the SHA-256 of the comment body as the forge holds it, and
+the plan run whose plan it approved. The decision is recorded under the commenter's SwitchTender
+account with the decider type `forge_comment`. The run's decisions, its evidence dossier, and its
+page in SwitchTender show that the decision came from a comment, with those ids and the
+fingerprint. An edit to the comment or its deletion afterward changes none of it.
+
+### Security
+
+- A comment is trusted only as far as the forge confirms it. GitHub's signature or GitLab's secret
+  token is verified before the body is read, and the comment is then read back from the forge by
+  its id before it plans or approves.
+- A forge account is known by its numeric user id, never its login. A renamed account keeps its
+  link, and somebody who later takes an old login gets nothing.
+- The comment acts with the linked account's own rights. A forge role, such as write access to the
+  repository, grants nothing in SwitchTender.
+- A fork's pull request is never answered, and any other refusal is answered once per author, pull
+  request, and reason, so nobody can use comments to make your token post again and again.
+- Bots are refused, a comment GitHub marks as written by an app for its author is refused, and an
+  agent's token can never link a forge account. Agents can propose changes. Only authorized humans
+  can approve them. Separation of duties can require an independent human when policy demands it.
+- What the forges cannot tell apart: GitLab marks nothing like GitHub's app marker, and neither
+  forge marks a comment written with a person's own access token. A person who hands an agent their
+  forge token hands it their approval rights, so keep such tokens out of agents' reach.
 
 ## Setting it up
 
@@ -273,7 +495,8 @@ planned as one run.
    The response carries `webhook_path` and `signing_secret`, each shown once.
 4. In the repository's settings, add a webhook. The payload URL is your server's public address
    followed by `webhook_path`. The content type is `application/json`. The secret is
-   `signing_secret`. Choose "Let me select individual events" and select Pull requests.
+   `signing_secret`. Choose "Let me select individual events" and select Pull requests. Select
+   Issue comments too for [comment commands](#planning-and-applying-from-a-comment).
 
 For GitHub Enterprise Server, add `"api_url": "https://github.example.com/api/v3"` to `review`.
 
@@ -286,7 +509,8 @@ For GitHub Enterprise Server, add `"api_url": "https://github.example.com/api/v3
    as `"platform/infra/network"`. For self-managed GitLab, add
    `"api_url": "https://gitlab.example.com/api/v4"`.
 4. In the project's Settings, then Webhooks, add a webhook. The URL is your server's public address
-   followed by `webhook_path`. The secret token is `signing_secret`. Select Merge request events.
+   followed by `webhook_path`. The secret token is `signing_secret`. Select Merge request events,
+   and Comments for [comment commands](#planning-and-applying-from-a-comment).
 
 GitLab sends its secret token as the `X-Gitlab-Token` header rather than signing the body, and the
 trigger compares it in constant time. GitHub signs the body with HMAC SHA-256, checked against
@@ -301,9 +525,10 @@ signing secret with `POST /v1/triggers/{id}/rotate-secret` and update the forge'
 
 ## What it does not do
 
-- Approving an apply from a pull request comment is not supported. SwitchTender has no way to tie a
-  forge account to a SwitchTender account it would trust to release a change, and a comment can be
-  written by anyone with access to the pull request. Approvals happen in SwitchTender.
+- A comment carries no reason for a decision. A rule that requires a reason to approve is satisfied
+  in SwitchTender, not from a comment.
+- A comment acts on the plan of the trigger its webhook arrived through. When several review
+  triggers watch one repository, each acts on its own template's plan, and each answers the comment.
 - Ansible's check mode is only as safe as the playbook. A playbook that sets `check_mode: false` is
   refused, as described above, but a custom module that claims to support check mode and acts
   anyway is not something the read can see. Review the playbooks a

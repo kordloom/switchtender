@@ -26,6 +26,8 @@ const (
 	// PhaseRefused means no plan was run: the pull request comes from a fork, or a rule refused
 	// the plan outright.
 	PhaseRefused = "refused"
+	// PhaseReplied is a comment command's reply, posted as a new comment.
+	PhaseReplied = "replied"
 )
 
 // Excerpt bounds. A forge caps a comment's size, GitHub at 65536 characters, and a plan worth
@@ -234,6 +236,9 @@ func Render(rep Report) string {
 	b.WriteString("### SwitchTender plan: " + code(rep.TemplateName) + "\n\n")
 	b.WriteString(headline(rep) + "\n\n")
 	var facts []string
+	if rep.RunID != "" {
+		facts = append(facts, "Plan "+code(PlanID(rep.RunID)))
+	}
 	if rep.CommitSHA != "" {
 		facts = append(facts, "Commit "+code(shortSHA(rep.CommitSHA)))
 	}
@@ -253,6 +258,10 @@ func Render(rep Report) string {
 	if rep.Phase == PhaseSucceeded {
 		writeSummary(&b, rep)
 		writePreview(&b, rep)
+		if rep.RunID != "" {
+			b.WriteString("A linked approver applies exactly this plan with " +
+				code("/switchtender apply "+PlanID(rep.RunID)) + ".\n\n")
+		}
 	}
 	if rep.Excerpt != "" {
 		f := fence(rep.Excerpt)

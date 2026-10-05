@@ -99,6 +99,32 @@ type Record struct {
 	// SeparationOfDuties is how separation of duties was evaluated for a decision on a run an agent
 	// asked for, nil for every other record.
 	SeparationOfDuties *SeparationOfDuties `json:"separation_of_duties,omitempty"`
+	// Comment is the pull request comment the decision was made from, nil for a decision made any
+	// other way.
+	Comment *Comment `json:"comment,omitempty"`
+}
+
+// Comment identifies the pull request or merge request comment a decision was made from. It names
+// the comment and its author by the forge's numeric ids and fixes the body by its SHA-256, so an
+// edit to the comment or its deletion afterward cannot change what the decision records.
+type Comment struct {
+	// Forge is github or gitlab.
+	Forge string `json:"forge"`
+	// APIURL is the REST API base of the forge the comment is on.
+	APIURL string `json:"api_url"`
+	// Repository is the repository the pull request belongs to: owner/name or group/project.
+	Repository string `json:"repository"`
+	// PullRequest is the pull request number on GitHub, the merge request iid on GitLab.
+	PullRequest int `json:"pull_request"`
+	// CommentID is the forge's numeric id of the comment.
+	CommentID int64 `json:"comment_id"`
+	// AuthorID is the forge's numeric id of the account that wrote the comment.
+	AuthorID int64 `json:"author_id"`
+	// BodySHA256 is the hex SHA-256 of the comment body as the forge holds it, which the webhook's
+	// copy was required to match.
+	BodySHA256 string `json:"body_sha256"`
+	// PlanRunID is the plan run whose saved plan the comment approved applying.
+	PlanRunID string `json:"plan_run_id,omitempty"`
 }
 
 // Reason is an approver's stated reason, as stored and as disclosed.
@@ -178,6 +204,10 @@ func (r *Record) Clone() *Record {
 	if r.SeparationOfDuties != nil {
 		sod := *r.SeparationOfDuties
 		out.SeparationOfDuties = &sod
+	}
+	if r.Comment != nil {
+		c := *r.Comment
+		out.Comment = &c
 	}
 	return &out
 }

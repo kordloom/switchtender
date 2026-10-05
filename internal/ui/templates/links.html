@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Linked accounts - SwitchTender</title>
+	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="links"{{if .ReadOnly}} data-readonly="true"{{end}}{{if .Demo}} data-demo="true"{{end}}{{if .SignIn}} data-signin="required"{{end}}>
+	<header class="topbar">
+		<div class="brand"><a href="/ui/"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="SwitchTender"></picture>SwitchTender</a></div>
+	</header>
+
+	<main class="content">
+		<a class="back" href="/ui/">Back to overview</a>
+		<h1>Linked accounts</h1>
+		<p class="muted">Link your GitHub or GitLab account and a <code>/switchtender plan</code> or <code>/switchtender apply</code> comment you write on a pull request acts as you, with exactly the approval rights you have here. A link stores the forge's numeric account id, never your login, and each link and unlink is recorded on the audit chain.</p>
+		<div id="links-notice" class="muted" hidden></div>
+		<div id="status" class="muted">Loading linked accounts.</div>
+		<div class="list-scroll">
+		<table class="runs" id="links-table" hidden>
+			<thead>
+				<tr>
+					<th>Forge</th>
+					<th>Host</th>
+					<th>Your account</th>
+					<th>Linked</th>
+					<th></th>
+				</tr>
+			</thead>
+			<tbody id="links"></tbody>
+		</table>
+		</div>
+	</main>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>

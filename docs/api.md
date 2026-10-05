@@ -145,6 +145,10 @@ Two more are enforced somewhere other than the request:
 | DELETE | `/v1/tokens/{id}`          | Revoke a token everywhere at once. Admin only.          |
 | GET    | `/auth/oidc/login`      | Start the OpenID Connect sign-in handshake.             |
 | GET    | `/auth/oidc/callback`   | Complete the OIDC handshake and issue a token.          |
+| GET    | `/v1/me/forge-links`       | The caller's own linked GitHub and GitLab accounts, and the forges this server can link. See [linking forge accounts](pull-request-review.md#linking-forge-accounts). |
+| POST   | `/v1/me/forge-links`       | Start linking a forge account to the caller's own account. Returns the forge's `authorize_url`. A person only, never an agent. |
+| DELETE | `/v1/me/forge-links/{id}`  | Unlink one of the caller's own forge accounts. Recorded on the audit chain. |
+| GET    | `/auth/forge/callback`  | Where the forge sends the browser back to finish a link. Public, checked by its signed state and the browser's cookie. |
 | GET    | `/auth/saml/login`      | Start the SAML sign-in handshake.                       |
 | POST   | `/auth/saml/acs`        | Consume the IdP assertion and issue a token.            |
 | GET    | `/auth/saml/metadata`   | Service provider metadata for IdP registration.         |
@@ -293,7 +297,7 @@ A profile is personal data and is treated as such. Only an admin may read it. `/
 the admin role and is not delegable by a manage grant. The values are never written to the logs, and
 a rejection names the offending field without echoing it. Each single-line field is capped at 320
 characters, `notes` at 2000, and an account may carry at most eight links. A link must be an `http`
-or `https` address; any other scheme is refused, because the admin page renders links as anchors.
+or `https` address. Any other scheme is refused, because the admin page renders links as anchors.
 
 ## Template run timeout
 
@@ -314,7 +318,7 @@ curl -X POST https://switchtender.example.com/v1/templates \
 
 Zero, or the field omitted, leaves launches on the server default set by `--run-timeout`, so a
 template saved before this field existed is unchanged. A run that exceeds its timeout is canceled
-and finalized as failed. A launch cannot raise the cap; the template's value is what applies.
+and finalized as failed. A launch cannot raise the cap. The template's value is what applies.
 
 ## Naming what a run targets
 
@@ -372,7 +376,7 @@ A template may carry `steps`, a pipeline graph, instead of a single tool. Such a
 template is a saved workflow: every path that fires a template, a launch, a schedule, or a webhook
 trigger, runs the graph as a pipeline, and the template's survey answers and extra vars reach every
 step. A workflow template sets no top-level `playbook`, `command`, `tool`, `shards`, or Ansible
-controls, since each step names its own; the graph is validated when the template is saved, so a
+controls, since each step names its own. The graph is validated when the template is saved, so a
 cycle or an unknown dependency is refused then rather than on every launch.
 
 A step with `"type": "approval"` is an approval step: the workflow waits there until an admin
@@ -536,11 +540,12 @@ guide](migration.md#the-awx-compatible-callback-address) for the AWX-compatible 
 
 ### What a request may carry
 
-A NUL byte or text that is not valid UTF-8 in the request path or a query parameter is refused with
-`400` before the request is routed, so it never reaches a store. A JSON body is held to the same
-rule: a string holding a NUL, written `\u0000`, is refused with `400` naming the field, such as
-`steps[1].name`. An import is checked the same way before it writes anything: an export holding
-such text in any object it would create is refused with `400` naming the object and the field.
+Text holding the NUL byte, or text that is not valid UTF-8, in the request path or a query parameter
+is refused with `400` before the request is routed, so it never reaches a store. A JSON body is held
+to the same rule: a string holding the NUL character, written `\u0000`, is refused with `400` naming
+the field, such as `steps[1].name`. An import is checked the same way before it writes anything: an
+export holding such text in any object it would create is refused with `400` naming the object and
+the field.
 
 Some values are stored under an index and have a bound. Past it the request is refused with `400`
 stating the bound.
@@ -742,7 +747,7 @@ follow.
 A malformed target is refused at create or update with the field it lacks, not dropped at
 delivery. A Twilio or email target names only a recipient. The account credentials stay in server
 flags, so a template never carries them. On read, webhook URLs, PagerDuty routing keys, and
-Grafana tokens come back masked; an edit that echoes the mask back keeps the stored value.
+Grafana tokens come back masked. An edit that echoes the mask back keeps the stored value.
 
 ## Notification targets
 
@@ -797,7 +802,7 @@ When a top-level run reaches an event, every target attached for that event to t
 from, the schedule that fired it, its project, its organization, or the organization that owns its
 template is told, once, however many of those it is attached through. The template is found through the run's source, so a target on a
 template hears the runs its schedules and triggers fire, and a rerun's runs as well. A split's shards
-and a pipeline's steps are not announced one by one. The parent is.
+and a pipeline's steps are announced through their parent rather than one by one.
 
 A read that fails while the template is being found, of the schedule, trigger, or run that names it,
 or of the template to learn its organization, counts as a database that cannot be read. The event
@@ -1005,7 +1010,7 @@ takes and how daylight-saving changes are handled.
 
 `/v1/fleet` and `/v1/tasks` take a `window`, the number of recent runs per host or per task the
 view considers, and `/v1/hosts/{host}/runs` takes a `limit`. All three default to 10. The window is
-capped at 100 and the host history limit at 500; a larger value is answered with the cap, and the
+capped at 100 and the host history limit at 500. A larger value is answered with the cap, and the
 response echoes the window it actually used. The caps exist because the per-host and per-task
 summaries are kept when their runs are deleted, so on a long-lived fleet the tables hold a row for
 every host of every run, and every row a window admits becomes an element of the answer.
@@ -1042,12 +1047,12 @@ presents the worker bearer token.
 | POST   | `/relay/v1/runs/{id}/host-facts`   | Save the facts the run gathered per host.     |
 | POST   | `/relay/v1/runs/{id}/task-summary` | Save the run's per-task summaries.            |
 
-Each report call is bounded twice. It presents the per-claim capability the claim response issued, so it
-can only write to the run this worker holds, and one call carries at most a few thousand items, so a
-worker cannot force an unbounded decode on the control node; the worker sends a wide run's evidence in
-several calls rather than losing it to that cap. Host facts are bounded further: a worker may write
-facts only for hosts its run has already reported results for, so nothing can be recorded about a
-machine no run claims to have touched.
+Each report call is bounded twice. It presents the per-claim capability the claim response issued,
+so it can only write to the run this worker holds, and one call carries at most a few thousand
+items, so a worker cannot force an unbounded decode on the control node. The worker sends a wide
+run's evidence in several calls rather than losing it to that cap. Host facts are bounded further: a
+worker may write facts only for hosts its run has already reported results for, so nothing can be
+recorded about a machine no run claims to have touched.
 
 What that does and does not give you: a worker authors its own results, so a worker you do not trust can
 still describe its own run untruthfully. What it cannot do is reach past that run into the recorded state

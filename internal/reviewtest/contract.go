@@ -43,6 +43,89 @@ func Contract(t *testing.T, newStore func() review.Store) {
 	t.Run("unrepresentable text stores the same on every backend", func(t *testing.T) {
 		testUnrepresentableText(t, newStore())
 	})
+	t.Run("a comment is marked handled once and owes no report", func(t *testing.T) {
+		testCommentMarkedOnce(t, newStore())
+	})
+	t.Run("pruning removes only old comment marks and done replies", func(t *testing.T) {
+		testPruneComments(t, newStore())
+	})
+}
+
+// testPruneComments pins that pruning bounds what comment commands leave behind without touching
+// anything still owed: old command marks and old done replies go, while a reply still owed, a new
+// mark, and a plan's record stay.
+func testPruneComments(t *testing.T, store review.Store) {
+	ctx := context.Background()
+	tg := &trigger.Trigger{ID: "trg_prune", Review: &trigger.Review{
+		Provider: trigger.ProviderGitHub, Repository: "acme/infra"}}
+	event := func(id int64) *review.CommentEvent {
+		return &review.CommentEvent{Provider: trigger.ProviderGitHub, Repository: "acme/infra",
+			Number: 7, CommentID: id, AuthorID: 1001, Body: "/switchtender apply"}
+	}
+	old, cutoff, fresh := base, base.Add(24*time.Hour), base.Add(48*time.Hour)
+	oldMark := review.CommandRecord(tg, event(1), old)
+	newMark := review.CommandRecord(tg, event(2), fresh)
+	doneReply := review.ReplyRecord(tg, event(3), "told", old)
+	doneReply.Done = true
+	owedReply := review.ReplyRecord(tg, event(4), "still owed", old)
+	plan := fullRecord("prune")
+	plan.CreatedAt = old
+	for _, rec := range []*review.Record{oldMark, newMark, doneReply, owedReply, plan} {
+		mustCreate(t, store, rec)
+	}
+	n, err := store.PruneComments(ctx, cutoff)
+	if err != nil {
+		t.Fatalf("PruneComments() error = %v", err)
+	}
+	if n != 2 {
+		t.Errorf("PruneComments() removed %d, want 2", n)
+	}
+	for _, id := range []string{oldMark.ID, doneReply.ID} {
+		if _, err := store.Get(ctx, id); !errors.Is(err, review.ErrRecordNotFound) {
+			t.Errorf("Get(%s) after prune = %v, want not found", id, err)
+		}
+	}
+	for _, id := range []string{newMark.ID, owedReply.ID, plan.ID} {
+		mustGet(t, store, id)
+	}
+}
+
+// testCommentMarkedOnce pins what makes a pull request comment act once across every process: the
+// record marking it is created once, a second create for the same comment reports that it exists,
+// and the record, born done, is never pending, while the comment's reply is.
+func testCommentMarkedOnce(t *testing.T, store review.Store) {
+	ctx := context.Background()
+	tg := &trigger.Trigger{ID: "trg_comment", Review: &trigger.Review{
+		Provider: trigger.ProviderGitHub, Repository: "acme/infra"}}
+	ev := &review.CommentEvent{Provider: trigger.ProviderGitHub, Repository: "acme/infra",
+		Number: 7, CommentID: 901, AuthorID: 1001, Body: "/switchtender apply"}
+	mark := review.CommandRecord(tg, ev, base)
+	created, err := store.Create(ctx, mark)
+	if err != nil || !created {
+		t.Fatalf("Create() of the comment's mark = %v, %v, want created", created, err)
+	}
+	again, err := store.Create(ctx, review.CommandRecord(tg, ev, base.Add(time.Second)))
+	if err != nil || again {
+		t.Fatalf("Create() of the same comment's mark = %v, %v, want an existing record", again, err)
+	}
+	reply := review.ReplyRecord(tg, ev, "Your GitHub account is not linked.", base)
+	mustCreate(t, store, reply)
+	got := mustGet(t, store, mark.ID)
+	if !got.Done || got.Kind != review.KindCommand || got.Reason != review.CommandApply {
+		t.Errorf("mark = done %v kind %q command %q, want a done command record for apply",
+			got.Done, got.Kind, got.Reason)
+	}
+	pending, err := store.Pending(ctx, 0)
+	if err != nil {
+		t.Fatalf("Pending() error = %v", err)
+	}
+	var ids []string
+	for _, r := range pending {
+		ids = append(ids, r.ID)
+	}
+	if diff := cmp.Diff([]string{reply.ID}, ids); diff != "" {
+		t.Errorf("pending mismatch (-want +got):\n%s", diff)
+	}
 }
 
 // base is the instant the contract's records are stamped around, carrying nanoseconds so a store

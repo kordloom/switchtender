@@ -26,7 +26,7 @@ the app at `/ui/docs`.
 | [Inventories](inventories.md) | Static, dynamic, smart, and constructed inventories, and the hosts a run resolved to.|
 | [Managed Ansible runtime](ansible-runtime.md) | One command installs a pinned, hash-checked ansible-core for runs to use.|
 | [Federated cloud credentials](federation.md) | Short-lived AWS, Google Cloud, and Azure access minted per run, with nothing stored.|
-| [Pull request review](pull-request-review.md) | Plan comments and commit statuses on GitHub and GitLab pull requests.|
+| [Pull request review](pull-request-review.md) | Plan comments and commit statuses on GitHub and GitLab pull requests, linked forge accounts, and planning and applying from a comment.|
 | [Desktop](desktop.md) | Run SwitchTender as a local desktop app.|
 | [Features](features.md) | The full capability list.|
 | [Compliance mapping](compliance.md) | What the record shows for SOC 2, ISO 27001, and HIPAA change controls.|

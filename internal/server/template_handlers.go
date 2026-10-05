@@ -672,6 +672,15 @@ func agentLaunchRefusal(r *http.Request, t *template.Template, req launchTemplat
 	return ""
 }
 
+// templateLaunchObjects returns every object a launch of t touches besides the template itself:
+// its project, the inventory it runs against, its registry pull credential, its worker queue, and
+// the credentials it runs with. A launch in the queue and a /switchtender plan comment authorize
+// this one list, so the two cannot drift apart.
+func templateLaunchObjects(t *template.Template, inventoryID string, credIDs []string) []string {
+	return append([]string{t.ProjectID, inventoryID, t.PullCredentialID, queueObject(t.Queue)},
+		credIDs...)
+}
+
 // launchTemplateHandler submits a run from a saved template in one action.
 func launchTemplateHandler(store template.Store, submitter Submitter, sealer *credential.Sealer, authz *authorizer,
 	log *zap.Logger) http.HandlerFunc {
@@ -747,8 +756,7 @@ func launchTemplateHandler(store template.Store, submitter Submitter, sealer *cr
 		// granted, including a credential chosen at launch. The queue is the template's own, so a
 		// template pinned to a confined queue cannot be used as a way around that confinement by
 		// somebody who may launch it but may not reach the queue.
-		objects := append([]string{t.ProjectID, inventoryID, t.PullCredentialID,
-			queueObject(t.Queue)}, credIDs...)
+		objects := templateLaunchObjects(t, inventoryID, credIDs)
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
 			return
 		}

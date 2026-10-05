@@ -851,6 +851,11 @@ func requiredRole(r *http.Request) user.Role {
 		// holds and on nothing else, so every role may do it. Requiring admin here left a viewer
 		// signed in with no way out.
 		return user.RoleViewer
+	case p == "/me/forge-links" || strings.HasPrefix(p, "/me/forge-links/"):
+		// Linking or unlinking your own forge account acts on your own account and on nothing
+		// else, so every role may do it. What a linked account may then approve is decided by the
+		// account's own role, exactly as in the queue. The handler refuses an agent.
+		return user.RoleViewer
 	case p == "/runs", p == "/pipelines":
 		return user.RoleOperator
 	case strings.HasPrefix(p, "/runs/") && strings.HasSuffix(p, "/explain"):
@@ -1037,6 +1042,11 @@ func (g *authGate) protects(r *http.Request) bool {
 	}
 	// The single sign-on handshake runs before the user has a token.
 	if method == http.MethodGet && strings.HasPrefix(p, "/auth/oidc/") {
+		return false
+	}
+	// A forge sends the browser back here after a person authorizes a link, carrying no token. The
+	// signed state and the cookie bound to the browser that started the link are its credential.
+	if method == http.MethodGet && p == forgeCallbackPath {
 		return false
 	}
 	// The SAML handshake also runs before the user has a token: the login redirect, the metadata an

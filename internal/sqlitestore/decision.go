@@ -14,7 +14,7 @@ import (
 // decisionColumns is the shared select list for decision record reads.
 const decisionColumns = `id, kind, decision_id, run_id, step_run_id, verdict, recorded_at, actor,
 	actor_type, on_behalf_of, reason_text, reason_random, reason_commitment, reason_masked,
-	redaction, sod`
+	redaction, sod, comment`
 
 // decisionStore is a decision.Store backed by the shared SQLite database.
 type decisionStore struct {
@@ -32,7 +32,7 @@ func (d *DB) Decisions() decision.Store {
 func (s *decisionStore) Save(ctx context.Context, r *decision.Record) error {
 	const q = `
 INSERT INTO run_decisions (` + decisionColumns + `)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	text, random, commitment, masked, redaction, err := reasonColumns(r)
 	if err != nil {
 		return err
@@ -41,9 +41,13 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	if err != nil {
 		return err
 	}
+	comment, err := commentColumn(r.Comment)
+	if err != nil {
+		return err
+	}
 	if _, err := s.db.ExecContext(ctx, q, r.ID, r.Kind, r.DecisionID, r.RunID, r.StepRunID,
 		r.Verdict, sqlutil.FormatTime(r.At), r.Actor, r.ActorType, r.OnBehalfOf, text, random,
-		commitment, masked, redaction, sod); err != nil {
+		commitment, masked, redaction, sod, comment); err != nil {
 		if isKeyConflict(err) {
 			return decision.ErrExists
 		}
@@ -233,16 +237,29 @@ func sodColumn(sod *decision.SeparationOfDuties) (string, error) {
 	return string(raw), nil
 }
 
+// commentColumn encodes the pull request comment a decision was made from, the empty string for
+// none.
+func commentColumn(c *decision.Comment) (string, error) {
+	if c == nil {
+		return "", nil
+	}
+	raw, err := json.Marshal(c)
+	if err != nil {
+		return "", fmt.Errorf("encode decision comment: %w", err)
+	}
+	return string(raw), nil
+}
+
 // scanDecision reads one decision record row.
 func scanDecision(sc scanner) (*decision.Record, error) {
 	var (
-		r                                            decision.Record
-		at, text, random, commitment, redaction, sod string
-		masked                                       int
+		r                                                     decision.Record
+		at, text, random, commitment, redaction, sod, comment string
+		masked                                                int
 	)
 	if err := sc.Scan(&r.ID, &r.Kind, &r.DecisionID, &r.RunID, &r.StepRunID, &r.Verdict, &at,
 		&r.Actor, &r.ActorType, &r.OnBehalfOf, &text, &random, &commitment, &masked, &redaction,
-		&sod); err != nil {
+		&sod, &comment); err != nil {
 		return nil, err
 	}
 	when, err := sqlutil.ParseTime(at)
@@ -267,6 +284,13 @@ func scanDecision(sc scanner) (*decision.Record, error) {
 			return nil, fmt.Errorf("parse separation of duties: %w", err)
 		}
 		r.SeparationOfDuties = &eval
+	}
+	if comment != "" {
+		var c decision.Comment
+		if err := json.Unmarshal([]byte(comment), &c); err != nil {
+			return nil, fmt.Errorf("parse decision comment: %w", err)
+		}
+		r.Comment = &c
 	}
 	return &r, nil
 }

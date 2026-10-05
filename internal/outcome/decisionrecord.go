@@ -21,6 +21,8 @@ type DecisionExtras struct {
 	ReasonCommitment string
 	// SeparationOfDuties is the evaluation for an agent-initiated run, nil otherwise.
 	SeparationOfDuties *decision.SeparationOfDuties
+	// Comment is the pull request comment the decision was made from, nil otherwise.
+	Comment *decision.Comment
 }
 
 // ExtrasOf returns what a decision record commits in its decision's body.
@@ -28,7 +30,8 @@ func ExtrasOf(rec *decision.Record) DecisionExtras {
 	if rec == nil {
 		return DecisionExtras{}
 	}
-	extras := DecisionExtras{ID: rec.DecisionID, SeparationOfDuties: rec.SeparationOfDuties}
+	extras := DecisionExtras{ID: rec.DecisionID, SeparationOfDuties: rec.SeparationOfDuties,
+		Comment: rec.Comment}
 	if rec.Reason != nil {
 		extras.ReasonCommitment = rec.Reason.Commitment
 	}

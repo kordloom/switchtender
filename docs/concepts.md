@@ -136,15 +136,13 @@ against it lands there, no matter how it was launched.
 
 ## Provable audit
 
-Every authenticated mutation is recorded in the audit trail, and each entry is linked into a SHA-256
-hash chain. Each entry commits to who acted, how they authenticated, the account whose authority
-they used, the method and path, a digest of the change payload, the install that wrote it, and the
-previous entry's hash.
-Altering,
-reordering, or deleting an entry breaks the chain, which `GET /v1/audit/verify` detects. `GET /v1/audit/bundle`
-seals the chain into a signed LoomSeal bundle, so the open `loomseal` verifier proves the trail is
-intact and unaltered offline, on the command line or in a browser, without trusting the server that
-produced it.
+Every authenticated mutation is recorded in the audit trail, and each entry is linked into a hash
+chain built on SHA-256. Each entry commits to who acted, how they authenticated, the account whose
+authority they used, the method and path, a digest of the change payload, the install that wrote it,
+and the previous entry's hash. Altering, reordering, or deleting an entry breaks the chain, which
+`GET /v1/audit/verify` detects. `GET /v1/audit/bundle` seals the chain into a signed LoomSeal
+bundle, so the open `loomseal` verifier proves the trail is intact and unaltered offline, on the
+command line or in a browser, without trusting the server that produced it.
 
 **The record covers the change, not only that a call was made.** The link commits to
 a digest of the request payload, so a recorded change cannot be re-cast as a different one while the
@@ -228,7 +226,7 @@ activity alongside the change trail.
 **Evidence comes out as documents, not screenshots.** `switchtender audit run <id>` emits one
 run's dossier: what ran, its risk grade, who approved it, what happened on each host, and the
 receipts and anchors behind all of it. `switchtender audit report --from --to` renders the period's
-change register, the sample a SOC 2 CC8.1 or ISO/IEC 27001 A.8.32 review asks for. Both are
+change register, the sample that SOC 2 CC8.1 and ISO/IEC 27001 A.8.32 reviews ask for. Both are
 self-contained HTML that a reviewer reads without tooling and checks against the live chain. The
 per-run dossier is free. The period register is a Team feature, so the evidence is yours either way
 and what a license pays for is the report that assembles it.
@@ -307,7 +305,7 @@ Point `--policy-file` at a YAML file and that file becomes the source of truth:
         tool: opentofu
         max_destroy: 5
 
-That file holds two policies, so it needs Pro, which holds five; Team removes the cap. Community
+That file holds two policies, so it needs Pro, which holds five. Team removes the cap. Community
 holds one, and a file carrying more is refused at startup naming the tier, rather than quietly
 enforcing a subset. Drop the second entry to run this example on Community.
 
@@ -474,6 +472,15 @@ trail, making who asked for a change and who signed off provable. A Terraform or
 marked this way is planned first instead, and the apply its plan proposes is what waits, carrying the
 saved plan the approval binds.
 
+A pull request comment is one more way to decide. A person whose GitHub or GitLab account is linked
+to their SwitchTender account can comment `/switchtender apply` on a pull request, naming the plan
+id its report showed, which approves the apply of that plan as their SwitchTender account, with the
+same admin role, grants, and separation of duties as the queue. The comment is read back from the
+forge before it decides, a bot's comment or one an app wrote for its author is refused, and the
+decision's chain entry records the comment's and its author's numeric ids, the SHA-256 of its body,
+and the plan it approved. See [planning and applying from a
+comment](pull-request-review.md#planning-and-applying-from-a-comment).
+
 Approval can also be required by policy rather than by choice. A policy matches runs by tool, command
 text, or target inventory, and any matching run is held automatically at submission, so the gate
 cannot be skipped by omitting the flag. A Terraform or OpenTofu apply a policy would hold is planned
@@ -483,10 +490,10 @@ launched by hand.
 
 A workflow is gated by the same policies as a single run. Every step is checked when the workflow is
 submitted, and a match holds the whole workflow before any step starts, so a gated command cannot be
-slipped past an approver by wrapping it in a workflow. The whole workflow is held rather than the one
-matching step, because a change applied halfway is worse than one that never started. Approving
-releases the workflow and it runs from the top; the step graph is stored with it, so an approval that
-arrives after a restart still runs the workflow that was approved.
+slipped past an approver by wrapping it in a workflow. The whole workflow is held rather than the
+one matching step, because a change applied halfway is worse than one that never started. Approving
+releases the workflow and it runs from the top. The step graph is stored with it, so an approval
+that arrives after a restart still runs the workflow that was approved.
 
 ## Approval steps in a workflow
 

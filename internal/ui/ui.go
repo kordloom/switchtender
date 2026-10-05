@@ -197,6 +197,7 @@ func (u *UI) Handler() http.Handler {
 	mux.HandleFunc("GET /ui/login", u.login)
 	mux.HandleFunc("GET /ui/users", u.users)
 	mux.HandleFunc("GET /ui/workers", u.workers)
+	mux.HandleFunc("GET /ui/links", u.links)
 	mux.HandleFunc("GET /ui/inventories", u.inventories)
 	mux.HandleFunc("GET /ui/sources", u.sources)
 	mux.HandleFunc("GET /ui/credentials", u.credentials)
@@ -330,6 +331,12 @@ func (u *UI) jobTemplates(w http.ResponseWriter, _ *http.Request) {
 // users renders the account management page.
 func (u *UI) users(w http.ResponseWriter, _ *http.Request) {
 	u.render(w, "users.html", map[string]any{"ReadOnly": u.readOnly, "TokensExist": u.tokensExist()})
+}
+
+// links renders the signed-in person's linked forge accounts page, where a GitHub or GitLab account
+// is linked so a pull request comment can act as them.
+func (u *UI) links(w http.ResponseWriter, _ *http.Request) {
+	u.render(w, "links.html", map[string]any{"ReadOnly": u.readOnly})
 }
 
 // workers renders the executor fleet page.

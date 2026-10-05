@@ -50,6 +50,11 @@ var approvalPaths = map[string]approvalPath{
 		Why: "the same route and the same dispatcher lock, carrying the approver's reason"},
 	"internal/server/handlers_approvals.go:decideRun:Reject": {Surface: "API",
 		Why: "a rejection releases nothing, and its route is admin like an approval's"},
+	"internal/server/review_comment.go:commentCall.decide:DecideRun": {Surface: "PR review",
+		Why: "a pull request comment decides as the human account its author's forge account is " +
+			"linked to, with that account's admin role, grants, and separation of duties, under the " +
+			"decider type forge_comment and never agent. A bot's comment is refused before any " +
+			"lookup (TestCommentRefusals), and approveRun still refuses an agent decider on its own"},
 	"internal/server/handlers_approvals.go:decideStep:DecideStep": {Surface: "workflow steps",
 		Why: "the approve route refuses an agent at the door, decideStep refuses it again, and " +
 			"DecideStep refuses an agent decider on its own"},

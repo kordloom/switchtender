@@ -24,6 +24,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/policy"
@@ -195,6 +196,10 @@ type reviewServer struct {
 	triggerID string
 	// provider is github or gitlab.
 	provider string
+	// decisions holds the decision records, nil unless the setup wired approvals.
+	decisions decision.Store
+	// disp is the dispatcher executing the runs.
+	disp *dispatch.Dispatcher
 }
 
 // reviewSetup customizes a review server before the trigger is created.
@@ -219,6 +224,10 @@ type reviewSetup struct {
 	// reading the answer a finished plan gives is not answered early on a busy machine; a test of
 	// the bound itself sets its own.
 	AnswerWithin time.Duration
+	// Approvals wires the dispatcher as the server's approver, keeping decision records.
+	Approvals bool
+	// Options adds server options, for a test wiring more than review.
+	Options []Option
 }
 
 // refusingSubmitter answers every Submit with err and passes everything else to the dispatcher it
@@ -309,10 +318,16 @@ func newReviewServer(t *testing.T, setup reviewSetup) *reviewServer {
 	}
 	// The run directories live in a root of this test's own, so no other process on the machine
 	// sweeping the shared default root can touch the files of a plan while it runs.
-	disp := dispatch.New(runs, runner, zap.NewNop(), dispatch.WithProjects(projects, syncer),
+	dopts := []dispatch.Option{dispatch.WithProjects(projects, syncer),
 		dispatch.WithCredentials(creds, sealer), dispatch.WithPolicies(policies),
 		dispatch.WithAudits(audits), dispatch.WithRunFilesRoot(t.TempDir()),
-		dispatch.WithClaimInterval(5*time.Millisecond))
+		dispatch.WithClaimInterval(5 * time.Millisecond)}
+	var decisions decision.Store
+	if setup.Approvals {
+		decisions = decision.NewMemStore()
+		dopts = append(dopts, dispatch.WithDecisions(decisions))
+	}
+	disp := dispatch.New(runs, runner, zap.NewNop(), dopts...)
 	var submitter Submitter = disp
 	if setup.SubmitErr != nil {
 		submitter = refusingSubmitter{Dispatcher: disp, err: setup.SubmitErr}
@@ -321,11 +336,16 @@ func newReviewServer(t *testing.T, setup reviewSetup) *reviewServer {
 	if within == 0 {
 		within = time.Minute
 	}
-	srv := New(runs, submitter, zap.NewNop(),
+	opts := []Option{
 		WithTriggers(trigger.NewMemStore(), sealer), WithTemplates(templates),
 		WithCredentials(creds, sealer), WithProjects(projects), WithPolicies(policies), WithAudit(audits),
 		WithReviewReporting("https://st.example.com", forge.Client(), 5*time.Millisecond),
-		WithShutdown(ctx), WithHookAnswerWithin(within))
+		WithShutdown(ctx), WithHookAnswerWithin(within),
+	}
+	if setup.Approvals {
+		opts = append(opts, WithApprover(disp), WithDecisions(decisions))
+	}
+	srv := New(runs, submitter, zap.NewNop(), append(opts, setup.Options...)...)
 	t.Cleanup(func() {
 		cancel()
 		srv.WaitForHooks(context.Background())
@@ -334,7 +354,8 @@ func newReviewServer(t *testing.T, setup reviewSetup) *reviewServer {
 	})
 	rs := &reviewServer{
 		handler: srv.Handler(), srv: srv, forge: forge, runs: runs, audits: audits, policies: policies,
-		specs: specs, origin: origin, headSHA: head, provider: setup.Provider,
+		specs: specs, origin: origin, headSHA: head, provider: setup.Provider, decisions: decisions,
+		disp: disp,
 	}
 	reqBody := map[string]any{
 		"name": "pr plans", "template_id": "tpl_net",

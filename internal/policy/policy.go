@@ -40,8 +40,10 @@ const (
 )
 
 // humanActorTypes are the authentication types that mean a person asked, in the audit chain's
-// vocabulary.
-var humanActorTypes = map[string]bool{"session": true, "token": true, "cli": true}
+// vocabulary. A forge comment is a person writing from the forge account linked to their own
+// SwitchTender account.
+var humanActorTypes = map[string]bool{"session": true, "token": true, "cli": true,
+	"forge_comment": true}
 
 // Policy is a rule that requires approval for the runs it matches. Each criterion is optional; an
 // empty criterion matches any value, so a policy with no criteria requires approval for every run.

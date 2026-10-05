@@ -879,9 +879,27 @@ CREATE TABLE IF NOT EXISTS run_decisions (
 	reason_commitment TEXT NOT NULL DEFAULT '',
 	reason_masked     INTEGER NOT NULL DEFAULT 0,
 	redaction         TEXT NOT NULL DEFAULT '',
-	sod               TEXT NOT NULL DEFAULT ''
+	sod               TEXT NOT NULL DEFAULT '',
+	-- The pull request comment a decision was made from, as JSON, empty for any other decision.
+	comment           TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_run_decisions_run ON run_decisions(run_id);
+
+-- Which forge account acts as which account when it writes a pull request comment, keyed on the
+-- forge's numeric user id and never on the login. A forge account links to one account, and an
+-- account links one account per forge, both decided by the unique indexes.
+CREATE TABLE IF NOT EXISTS forge_links (
+	id            TEXT PRIMARY KEY,
+	user_id       TEXT NOT NULL DEFAULT '',
+	provider      TEXT NOT NULL DEFAULT '',
+	api_url       TEXT NOT NULL DEFAULT '',
+	forge_user_id BIGINT NOT NULL DEFAULT 0,
+	created_at    TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_forge_links_account
+	ON forge_links(provider, api_url, forge_user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_forge_links_user
+	ON forge_links(user_id, provider, api_url);
 `
 
 // ErrForeignSchema is returned when the database holds tables of another application's under the

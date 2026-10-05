@@ -32,6 +32,11 @@ observed rather than configuration, so it belongs with the history a restore doe
 install answers the estate from the point it starts gathering, not from before the backup. Move the
 database itself if that history has to travel.
 
+Forge account links are not included either. A link is proven through the forge's own sign-in and
+recorded on the audit chain when it is made, and a restored link would let a pull request comment act
+as an account with no record of the link on the chain. After a restore, each person links their GitHub
+or GitLab account again on the Linked accounts page.
+
 The signing identity is not included either, and it is the one thing to copy by hand. `producer-key.json`
 sits in the state directory beside the database and is what makes a bundle attributable to this install:
 every entry and a tree anchor's Merkle leaves are bound to the install id derived from that key. A
@@ -47,7 +52,7 @@ Against PostgreSQL there is no directory beside the database, so the key has to 
 found: set `SWITCHTENDER_AUDIT_KEY` to one seed on every process, or place the same `producer-key.json` in
 each host's identity directory. A shared database with no identity supplied will not mint a per-host key,
 because two replicas signing as two installs is a fleet whose own anchors disagree with it. The server
-still starts and still records the chain; it warns, and runs with the chain unattributed and unbound, so
+still starts and still records the chain. It warns, and runs with the chain unattributed and unbound, so
 its entries commit to no install and its receipts can be lifted onto another one. Supply the key before
 the receipts matter to anybody.
 

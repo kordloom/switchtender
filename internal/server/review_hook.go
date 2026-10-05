@@ -94,6 +94,8 @@ type reviewHookDeps struct {
 	reviews *review.Reporter
 	// hooks runs the work a delivery starts, answering the forge before it stops waiting.
 	hooks *hookFlights
+	// comments acts on /switchtender commands in pull request comments, nil when nothing does.
+	comments *commentCommands
 	// log records failures.
 	log *zap.Logger
 }
@@ -121,8 +123,7 @@ func serveReviewHook(w http.ResponseWriter, r *http.Request, tg *trigger.Trigger
 	provider := tg.Review.Provider
 	ev, err := review.Parse(provider, r.Header.Get(review.EventHeader(provider)), body)
 	if errors.Is(err, review.ErrNotReviewEvent) {
-		respondJSON(w, d.log, http.StatusAccepted,
-			map[string]string{"trigger": tg.ID, "ignored": "not a pull request event"}, wantsPretty(r))
+		serveReviewComment(w, r, tg, d, body)
 		return
 	}
 	if err != nil {
@@ -149,8 +150,7 @@ func serveReviewHook(w http.ResponseWriter, r *http.Request, tg *trigger.Trigger
 		respondError(w, d.log, http.StatusConflict, reason)
 		return
 	}
-	number := strconv.Itoa(ev.Number)
-	hookPath := "/hooks/" + tg.ID + "/review/" + number
+	hookPath := "/hooks/" + tg.ID + "/review/" + strconv.Itoa(ev.Number)
 
 	// A fork's head is code from somebody who cannot push to the repository, and a plan executes it
 	// with the template's credentials. Refusing is recorded, because a pull request that was not
@@ -167,6 +167,18 @@ func serveReviewHook(w http.ResponseWriter, r *http.Request, tg *trigger.Trigger
 			map[string]string{"trigger": tg.ID, "refused": "pull request from a fork"}, wantsPretty(r))
 		return
 	}
+	launchReviewPlan(w, r, tg, d, ev, t, body)
+}
+
+// launchReviewPlan plans the head commit ev names for the pull request it names, the plan a push to
+// the pull request launches and the one a /switchtender plan comment asks for: deduped on the
+// verified body, held to the template's unattended survey, recorded before anything acts, and then
+// pre-checked and launched apart from the request. extra adds to the plan's submit options, such as
+// the account a comment acts as.
+func launchReviewPlan(w http.ResponseWriter, r *http.Request, tg *trigger.Trigger, d reviewHookDeps,
+	ev *review.Event, t *template.Template, body []byte, extra ...run.SubmitOption) {
+	number := strconv.Itoa(ev.Number)
+	hookPath := "/hooks/" + tg.ID + "/review/" + number
 
 	// Deduped on the verified body, the same as a push trigger: a redelivery collapses onto the plan
 	// the first delivery launched, and a new push is a new body with a new head.
@@ -216,7 +228,7 @@ func serveReviewHook(w http.ResponseWriter, r *http.Request, tg *trigger.Trigger
 	// pull request gets its status and comment either way. A failure after the forge was answered is
 	// recorded on the chain, since nobody was told.
 	ctx := context.WithoutCancel(r.Context())
-	opts := append(reviewPlanOptions(t, tg, ev, key), survey...)
+	opts := append(append(reviewPlanOptions(t, tg, ev, key), survey...), extra...)
 	answer, done := d.hooks.run(tg.ID+"\x00"+key, d.log,
 		func() hookAnswer { return planReview(ctx, d, tg, ev, t, opts, hookPath) },
 		func(a hookAnswer) { recordUnsent(ctx, d.audits, d.log, tg, hookPath+"/failed", a) })

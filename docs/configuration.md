@@ -105,6 +105,7 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--oidc-client-id` | none | OIDC client id. |
 | `--oidc-redirect-url` | none | OIDC redirect URL, for example `https://host/auth/oidc/callback`. |
 | `--oidc-default-role` | `viewer` | Role granted to an account created on first SSO sign-in: admin, operator, or viewer. |
+| `--forge-oauth` | none | A GitHub or GitLab OAuth application people link their forge account through, so a pull request comment can act as them. Comma-separated `provider=github` or `provider=gitlab`, `client_id=ID`, and the client secret from exactly one of `secret_env=VAR` or `secret_file=PATH`, never the command line. Add `web_url` for GitHub Enterprise Server or self-managed GitLab, and `api_url` when its API base is not the usual `/api/v3` or `/api/v4` under it. Repeatable, one per forge. Needs `--public-url` and `SWITCHTENDER_ENCRYPTION_KEY`, which signs each link request. See [linking forge accounts](pull-request-review.md#linking-forge-accounts). |
 | `--ldap-url` | none | LDAP directory URL to enable directory sign-in, for example `ldaps://ldap.example.com:636`. |
 | `--ldap-bind-dn` | none | Service account DN used to search for a user, empty for an anonymous search. |
 | `--ldap-base-dn` | none | Search base for finding a user. |
