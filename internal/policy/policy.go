@@ -460,11 +460,22 @@ func (p *Policy) Label() string {
 // and the approval binds the plan that runs. A run still held at submission, and a run already
 // released by a decision, are left to the hold they had, and so is a step of a workflow, which its
 // workflow's approval governs.
+//
+// Only a Terraform or OpenTofu apply that has not been planned yet is ever planned first, so any
+// other run is never plan gated, whatever the rules say. The dispatcher leaves a run it reads as
+// plan gated unheld, trusting the plan gate to hold the apply it proposes, and the plan gate never
+// takes a dry run, a run of another tool, or an apply a plan already proposed. A plan-content rule
+// that matched one of those used to release it from every hold: a destroy limit written without a
+// tool let an Ansible run past a rule holding everything, and one written for Terraform let the
+// apply a plan proposed past the hold its own rules placed.
 func PlanGated(policies []*Policy, r *run.Run) bool {
 	tool := run.NormalizeTool(r.Tool)
 	graded := (tool == run.ToolTerraform || tool == run.ToolOpenTofu) && !r.DryRun &&
 		r.ProposedFrom == ""
-	if graded && r.ParentID == nil && r.Status != run.StatusPendingApproval && r.DecisionID == "" &&
+	if !graded {
+		return false
+	}
+	if r.ParentID == nil && r.Status != run.StatusPendingApproval && r.DecisionID == "" &&
 		r.ApprovedSpecDigest == "" && (r.ApprovalRequested || Requiring(policies, r) != nil) {
 		return true
 	}
@@ -473,17 +484,15 @@ func PlanGated(policies []*Policy, r *run.Run) bool {
 		// the apply it then proposes faces the same policy again, which refuses it, so an
 		// undecidable policy never lets an unplanned apply through.
 		if p.Rego != nil {
-			if graded {
-				if d := p.Rego.Decide(r); d.Err != nil || d.PlanGate {
-					return true
-				}
+			if d := p.Rego.Decide(r); d.Err != nil || d.PlanGate {
+				return true
 			}
 			continue
 		}
 		if p.MaxDestroy >= 0 && p.Matches(r) {
 			return true
 		}
-		if graded && (p.MinRisk != "" || p.Reversibility != "") && p.matchesBeforeGrade(r) &&
+		if (p.MinRisk != "" || p.Reversibility != "") && p.matchesBeforeGrade(r) &&
 			!p.meetsGradeFloors(r) {
 			return true
 		}

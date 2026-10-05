@@ -124,11 +124,7 @@ func TestTheIssuerServeAndWorkerBuildRecordsEveryToken(t *testing.T) {
 func TestFederationFlagOnEveryExecutor(t *testing.T) {
 	t.Parallel()
 	for _, c := range []string{"serve", "worker"} {
-		cmd, _, err := rootCmd.Find([]string{c})
-		if err != nil {
-			t.Fatalf("Find(%s) error = %v", c, err)
-		}
-		if cmd.Flags().Lookup("federation-issuer") == nil {
+		if findCommand(t, c).Flags().Lookup("federation-issuer") == nil {
 			t.Errorf("%s has no --federation-issuer flag", c)
 		}
 	}
