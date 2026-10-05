@@ -377,30 +377,6 @@ func ExemptionHoldNote(r *Run, rule string, rego bool) string {
 		" does not exempt it", drop)
 }
 
-// AgentHoldNote is the hold message for an agent's dry run the built-in agent hold covers only
-// because the gate found it not change free: a dry run shown to change nothing is never held for
-// being an agent's. It names what was found, or what could not be read, and the two clean fixes,
-// the second being an exemption policy that covers the run. It returns the empty string for a run
-// with nothing recorded.
-func AgentHoldNote(r *Run) string {
-	return holdNote(r, "This dry run was not shown to change nothing, so the default hold on an "+
-		"agent's run applies", agentExemptFix)
-}
-
-// AgentPlanHoldNote is the hold message for an agent's Terraform or OpenTofu apply held before it
-// plans. An apply a rule holds is normally planned first and its proposed apply held, but planning
-// runs whatever the configuration runs while it plans, so an agent's apply whose plan was not shown
-// to change nothing is held at submission instead, before anything executes. scans are what the
-// gate read of that plan. It returns the empty string when they found nothing.
-func AgentPlanHoldNote(scans []DryRunScan) string {
-	return holdNote(&Run{DryRun: true, DryRunScans: scans}, "Planning this apply was not shown to "+
-		"change nothing, so the default hold on an agent's run applies before it plans",
-		agentExemptFix)
-}
-
-// agentExemptFix is the second fix a hold note offers when the built-in agent hold placed it.
-const agentExemptFix = "write a policy with effect exempt that covers this run"
-
 // holdNote builds a dry run's hold message: lead, the first thing its scans found, and the two
 // clean fixes, the second of which is second.
 func holdNote(r *Run, lead, second string) string {

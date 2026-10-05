@@ -96,7 +96,8 @@ var workerCmd = &cobra.Command{
 func init() {
 	workerCmd.Flags().StringVar(&workerDB, "db", defaultDBPath,
 		"SQLite file path, or a postgres:// DSN for the PostgreSQL backend. "+dbEnvVar+" sets it when "+
-			"this flag is absent. Ignored with --server.")
+			"this flag is absent. With --server the worker opens no database, and the value only "+
+			"places the managed Ansible runtime, in ansible/ beside it.")
 	workerCmd.Flags().StringVar(&workerServer, "server", "",
 		"Control node base URL to lease runs from over the mesh relay, for example "+
 			"https://switchtender.example.com. When set, the worker needs no database and dials one "+

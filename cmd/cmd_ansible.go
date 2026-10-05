@@ -50,8 +50,9 @@ var ansibleInstallCmd = &cobra.Command{
 	Long: "Install a pinned ansible-core into the managed runtime and make it the one runs use.\n\n" +
 		"With no --version it installs the newest supported release. Every file pip installs must " +
 		"match\na SHA-256 in the release's lock, and a mismatch fails the install with nothing " +
-		"changed. Running\nit again for an installed release only verifies it. --wheels installs " +
-		"offline from a directory\nof wheels, checked against the same hashes.",
+		"changed. Running\nit again for an installed release verifies it and makes it the one in use, " +
+		"reinstalling nothing.\n--wheels installs " +
+		"offline from a directory of wheels, checked against the same hashes.",
 	Args: cobra.NoArgs,
 	RunE: runAnsibleInstall,
 }

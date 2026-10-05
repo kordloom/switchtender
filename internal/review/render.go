@@ -259,8 +259,8 @@ func Render(rep Report) string {
 		writeSummary(&b, rep)
 		writePreview(&b, rep)
 		if rep.RunID != "" {
-			b.WriteString("A linked approver applies exactly this plan with " +
-				code("/switchtender apply "+PlanID(rep.RunID)) + ".\n\n")
+			b.WriteString("Where comment approvals are on, a linked approver applies exactly this " +
+				"plan with " + code("/switchtender apply "+PlanID(rep.RunID)) + ".\n\n")
 		}
 	}
 	if rep.Excerpt != "" {
@@ -274,8 +274,8 @@ func Render(rep Report) string {
 	if rep.Note != "" {
 		b.WriteString(rep.Note + "\n\n")
 	}
-	b.WriteString("_Plan only: this run used the tool's no-change mode. Applying happens in " +
-		"SwitchTender after merge, through the normal gate and approval queue._\n")
+	b.WriteString("_Plan only: this run used the tool's no-change mode. An apply happens in " +
+		"SwitchTender, through the normal gate and approval queue._\n")
 	out := b.String()
 	if len(out) > maxCommentBytes {
 		out = strings.ToValidUTF8(out[:maxCommentBytes], "") + "\n\n_Comment truncated._\n"
