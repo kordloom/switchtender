@@ -1,0 +1,6 @@
+all:
+  hosts:
+    h1:
+      raw: !unsafe "{{ not_templated }}"
+      plain: "{{ templated }}"
+      in_list: [!unsafe "{{ x }}", ok]

@@ -1,0 +1,21 @@
+# Anchors, aliases, and merge keys, with an explicit key winning over a merged one.
+base_vars: &base
+  region: us-east-1
+  size: small
+extra_vars: &extra
+  size: large
+  backup: true
+all:
+  children:
+    web:
+      vars:
+        <<: *base
+        size: medium
+      hosts:
+        w1:
+          <<: [*extra, *base]
+        w2: &w2vars
+          role: web
+    db:
+      hosts:
+        d1: *w2vars

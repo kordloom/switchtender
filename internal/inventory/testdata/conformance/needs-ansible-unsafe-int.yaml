@@ -1,0 +1,4 @@
+all:
+  hosts:
+    h1:
+      n: !unsafe 5

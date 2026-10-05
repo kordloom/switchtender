@@ -284,40 +284,12 @@ func scanText(text string, secrets *[]string) string {
 	out, found := util.RedactAssignments(text, RedactedValue)
 	for _, a := range found {
 		if !pathReference(a.Name, a.Value) {
-			addSecret(a.Value, secrets)
-			if v, ok := ansibleINIValue(a.Raw); ok {
-				addSecret(v, secrets)
+			for _, r := range a.Readings() {
+				addSecret(r, secrets)
 			}
 		}
 	}
 	return out
-}
-
-// ansibleINIValue decodes an INI inventory value the way Ansible does, reporting false when it is not
-// a quoted string. Ansible splits a host line as a shell would and reads what is left as a Python
-// literal, so a host variable written "'s3cret'" is the password s3cret. The masker has to hold that
-// form: holding the quoted one masks a string the run output never contains, and the bare secret
-// prints in the log.
-func ansibleINIValue(raw string) (string, bool) {
-	value := raw
-	if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
-		value = shellUnquote(value[1 : len(value)-1])
-	}
-	return util.PyUnquote(value)
-}
-
-// shellUnquote reads the inside of a double-quoted shell word, where a backslash escapes only a
-// backslash or a double quote.
-func shellUnquote(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\\' && i+1 < len(s) && (s[i+1] == '\\' || s[i+1] == '"') {
-			i++
-		}
-		b.WriteByte(s[i])
-	}
-	return b.String()
 }
 
 // addSecret appends value to secrets unless it is empty or already there, keeping the masker's list

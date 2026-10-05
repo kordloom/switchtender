@@ -18,6 +18,79 @@ func Contract(t *testing.T, newStore func() inventory.Store) {
 	t.Run("lifecycle", func(t *testing.T) { testLifecycle(t, newStore()) })
 	t.Run("list ordered", func(t *testing.T) { testList(t, newStore()) })
 	t.Run("update", func(t *testing.T) { testUpdate(t, newStore()) })
+	t.Run("composition round trip", func(t *testing.T) { testComposition(t, newStore()) })
+}
+
+// testComposition verifies a smart and a constructed inventory keep their kind and definition
+// through save, update, get, and list, and that a static inventory reads back as static.
+//
+// A store that dropped the kind would turn a smart inventory into an empty static one, and every
+// run against it would target nothing while reporting that it ran.
+func testComposition(t *testing.T, store inventory.Store) {
+	ctx := context.Background()
+	created := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	smart := &inventory.Inventory{
+		ID: "inv_smart", Name: "web everywhere", Kind: inventory.KindSmart,
+		HostFilter: `groups__name=web and not name__startswith="canary"`, CreatedAt: created,
+	}
+	built := &inventory.Inventory{
+		ID: "inv_built", Name: "shut down", Kind: inventory.KindConstructed,
+		InputIDs:   []string{"inv_a", "inv_b"},
+		SourceVars: "groups:\n  off: state == \"shutdown\"\n", Limit: "off",
+		CreatedAt: created.Add(time.Hour),
+	}
+	for _, i := range []*inventory.Inventory{smart, built} {
+		if err := store.Save(ctx, i); err != nil {
+			t.Fatalf("Save(%s) error = %v", i.ID, err)
+		}
+	}
+	for _, want := range []*inventory.Inventory{smart, built} {
+		got, err := store.Get(ctx, want.ID)
+		if err != nil {
+			t.Fatalf("Get(%s) error = %v", want.ID, err)
+		}
+		if got.Kind != want.Kind || got.HostFilter != want.HostFilter ||
+			!slices.Equal(got.InputIDs, want.InputIDs) || got.SourceVars != want.SourceVars ||
+			got.Limit != want.Limit {
+			t.Errorf("Get(%s) = %+v, want the saved composition %+v", want.ID, got, want)
+		}
+	}
+
+	if err := store.Update(ctx, &inventory.Inventory{
+		ID: "inv_built", Name: "shut down", Kind: inventory.KindConstructed,
+		InputIDs: []string{"inv_c"}, SourceVars: "strict: true\n", Limit: "all",
+	}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	got, err := store.Get(ctx, "inv_built")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if !slices.Equal(got.InputIDs, []string{"inv_c"}) || got.SourceVars != "strict: true\n" ||
+		got.Limit != "all" {
+		t.Errorf("after update = %+v, want inputs [inv_c], strict options, limit all", got)
+	}
+
+	if err := store.Update(ctx, &inventory.Inventory{ID: "inv_smart", Name: "now static",
+		Content: "[web]\nweb01\n"}); err != nil {
+		t.Fatalf("Update() to static error = %v", err)
+	}
+	got, err = store.Get(ctx, "inv_smart")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Kind != inventory.KindStatic || got.HostFilter != "" || got.Composed() {
+		t.Errorf("after update to static = %+v, want no kind and no filter", got)
+	}
+
+	list, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(list) != 2 || list[1].Kind != inventory.KindConstructed ||
+		!slices.Equal(list[1].InputIDs, []string{"inv_c"}) {
+		t.Errorf("List() = %+v, want the constructed inventory second with its inputs", list)
+	}
 }
 
 // testUpdate verifies an update changes name and content, preserves the creation time, and reports

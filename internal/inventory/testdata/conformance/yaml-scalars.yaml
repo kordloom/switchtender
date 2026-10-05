@@ -1,0 +1,22 @@
+all:
+  hosts:
+    h1:
+      strip: |-
+        no trailing newline
+      keep: |+
+        kept
+
+      folded_strip: >-
+        a
+        b
+      escapes: "tab\there \u00e9 \x41 quote\" slash\\"
+      single: 'it''s'
+      colon_value: "a: b"
+      hash_value: "a # b"
+      plain_hash: a#b
+      url: http://example.com:8080/x
+      number_key_quoted: {"123": x}
+      "quoted key": 1
+      empty_string: ""
+      empty_list: []
+      empty_map: {}

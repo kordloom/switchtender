@@ -1,0 +1,15 @@
+{
+  "web": {
+    "hosts": {
+      "w1": {"ansible_host": "10.0.0.1", "port": 8080, "ratio": 1.5, "exp": 1e5, "tiny": 1.5e-7,
+             "big": 123456789012345678901234567890, "flag": true, "none": null,
+             "tags": ["a", "b"], "nested": {"k": [1, {"deep": "v"}]}},
+      "w2": null
+    },
+    "children": {"canary": null},
+    "vars": {"group_var": "g"}
+  },
+  "canary": {"hosts": {"c1": {"unsafe": {"__ansible_unsafe": "{{ x }}"}}}},
+  "ungrouped": {"hosts": {"u1": {}}},
+  "all": {"vars": {"from_all": 0}}
+}
