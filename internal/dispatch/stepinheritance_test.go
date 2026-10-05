@@ -90,6 +90,7 @@ var stepFields = map[string]stepFieldRule{
 	"OrgID":        carries,
 	"Actor":        carries,
 	"ActorUserID":  carries,
+	"Account":      carries,
 	"ActorType":    carries,
 	"Labels":       carries,
 	"AuditReceipt": carries,

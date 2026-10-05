@@ -648,7 +648,8 @@ func (c *commentCall) plan(w http.ResponseWriter, r *http.Request, t *template.T
 		c.d.log.Error("server: record a comment command's result: " + err.Error())
 	}
 	launchReviewPlan(w, r.WithContext(ctx), c.tg, c.d, ev, t, c.body,
-		run.WithActor(u.Username), run.WithActorAccount(u.ID), run.WithActorType(actorTypeComment))
+		run.WithActor(u.Username), run.WithActorAccount(u.ID), run.WithAccount(u.Username),
+		run.WithActorType(actorTypeComment))
 }
 
 // grantRefusal answers a grant check that failed: a refusal for a denied grant, a failure for
@@ -856,6 +857,7 @@ func (c *commentCall) propose(ctx context.Context, requester *user.User, plan *r
 		run.WithProposedFrom(plan.ID),
 		run.WithSource(review.ApplySource, plan.ID),
 		run.WithActor(requester.Username), run.WithActorAccount(requester.ID),
+		run.WithAccount(requester.Username),
 		run.WithActorType(actorTypeComment),
 		run.WithIdempotencyKey(key),
 		run.WithLabels(map[string]string{review.LabelPullRequest: strconv.Itoa(c.ev.Number)}),

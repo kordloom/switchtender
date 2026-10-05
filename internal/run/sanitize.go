@@ -34,6 +34,7 @@ func (r *Run) Sanitize() {
 	r.Image = util.SafeText(r.Image)
 	r.Intent = util.SafeText(r.Intent)
 	r.Actor = util.SafeText(r.Actor)
+	r.Account = util.SafeText(r.Account)
 	r.HeldByPolicy = util.SafeText(r.HeldByPolicy)
 	r.Tags = util.SafeTexts(r.Tags)
 	r.SkipTags = util.SafeTexts(r.SkipTags)

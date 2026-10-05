@@ -33,6 +33,16 @@ func personRun(tool, command string) *run.Run {
 	return &run.Run{Actor: "dev-lead", ActorType: "session", Tool: tool, Command: command}
 }
 
+// boundAgentRun returns a run the named agent token submitted, bound to the named account.
+func boundAgentRun(name, account, tool, command string) *run.Run {
+	r := agentRun(name, tool, command)
+	r.Account = account
+	return r
+}
+
+// triageBot scopes an exemption to the triage agent on the ops account.
+func triageBot(p *Policy) { p.Actor, p.Account = "triage-bot", "ops" }
+
 // exemption returns an exemption with the given criteria set on it.
 func exemption(name string, set func(p *Policy)) *Policy {
 	p := &Policy{ID: "pol_" + name, Name: name, Effect: EffectExempt, MaxDestroy: DisabledMaxDestroy}
@@ -179,13 +189,14 @@ func TestTheBuiltInAgentHold(t *testing.T) {
 			return r
 		}(),
 		WantHeldBy: AgentDefaultName, WantNote: AgentDefaultName,
-	}, { // Test 18: An exemption naming one agent covers that agent.
-		Policies: []*Policy{exemption("triage bot", func(p *Policy) { p.Actor = "triage-bot" })},
-		Run:      agentRun("triage-bot", "bash", "collect logs"),
-		WantNote: `requested by an agent, exempt from the default hold by policy "triage bot"`,
+	}, { // Test 18: An exemption naming one agent and its account covers that agent.
+		Policies: []*Policy{exemption("triage bot", triageBot)},
+		Run:      boundAgentRun("triage-bot", "ops", "bash", "collect logs"),
+		WantNote: `requested by an agent bound to account "ops", exempt from the default hold ` +
+			`by policy "triage bot"`,
 	}, { // Test 19: And no other agent.
-		Policies:   []*Policy{exemption("triage bot", func(p *Policy) { p.Actor = "triage-bot" })},
-		Run:        agentRun("release-bot", "bash", "collect logs"),
+		Policies:   []*Policy{exemption("triage bot", triageBot)},
+		Run:        boundAgentRun("release-bot", "ops", "bash", "collect logs"),
 		WantHeldBy: AgentDefaultName, WantNote: AgentDefaultName,
 	}, { // Test 20: An exemption scoped to agents covers a run carrying an agent's identity.
 		Policies: []*Policy{exemption("agents", func(p *Policy) { p.ActorKind = ActorKindAgent })},
@@ -298,7 +309,7 @@ func TestValidateAnExemption(t *testing.T) {
 	}, { // Test 1: Every criterion an exemption takes.
 		Set: func(p *Policy) {
 			p.Tool, p.CommandContains, p.InventoryID, p.Queue = "bash", "smoke", "inv_lab", "staging"
-			p.Actor, p.ActorKind = "triage-bot", ActorKindAgent
+			p.Actor, p.Account, p.ActorKind = "triage-bot", "ops", ActorKindAgent
 		},
 		WantRefused: false,
 	}, { // Test 2: Scoped to people, it would lift a hold people never have.

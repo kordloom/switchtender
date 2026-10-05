@@ -20,14 +20,16 @@ import (
 )
 
 // smokeExemptNote is what the evidence records about an agent run the smoke exemption let through.
-const smokeExemptNote = "requested by an agent, exempt from the default hold by policy " +
-	`"nightly smoke"`
+const smokeExemptNote = `requested by an agent bound to account "dev-lead", exempt from the ` +
+	`default hold by policy "nightly smoke"`
 
 // agentOpts returns the options an agent token's request stamps on what it submits: the token's
-// label, its kind, and the identity evidence naming the account it is bound to.
+// label, its kind, the account it is bound to by id and by name, and the identity evidence naming
+// that account.
 func agentOpts() []run.SubmitOption {
 	return []run.SubmitOption{run.WithActor("release-agent"),
-		run.WithActorType(policy.ActorKindAgent),
+		run.WithActorType(policy.ActorKindAgent), run.WithActorAccount("usr_dev_lead"),
+		run.WithAccount("dev-lead"),
 		run.WithInitiator(&run.Initiator{InitiatedBy: "release-agent", BoundTo: "dev-lead"})}
 }
 
@@ -470,7 +472,7 @@ func TestAnAgentsWorkflowIsHeld(t *testing.T) {
 	}
 	byName := func(t *testing.T) policy.Store {
 		return rulesHolding(t, &policy.Policy{ID: "pol_agent", Name: "release agent",
-			Actor: "release-agent", Effect: policy.EffectExempt,
+			Actor: "release-agent", Account: "dev-lead", Effect: policy.EffectExempt,
 			MaxDestroy: policy.DisabledMaxDestroy})
 	}
 	tests := []struct {

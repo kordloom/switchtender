@@ -171,6 +171,7 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 	stampReceipt(ctx, r)
 	stampOrg(ctx, r)
 	stampInitiator(ctx, r)
+	stampAccount(ctx, r)
 	if err := requireToolInput(r); err != nil {
 		return nil, err
 	}
@@ -306,6 +307,7 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 	stampReceipt(ctx, parent)
 	stampOrg(ctx, parent)
 	stampInitiator(ctx, parent)
+	stampAccount(ctx, parent)
 	if err := d.validateRun(ctx, parent); err != nil {
 		return nil, err
 	}
@@ -386,6 +388,8 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		// A shard owns the same tenant as its parent. A shard names no stored object of its own, so
 		// without the parent's org it would be an objectless run readable across every tenant.
 		child.OrgID = parent.OrgID
+		// And it was asked for under the same account, which a policy's account criterion reads.
+		child.Account = parent.Account
 		if err := d.store.Save(ctx, child); err != nil {
 			return nil, d.abandonSplit(ctx, parent, children, count, err)
 		}
@@ -469,6 +473,19 @@ func stampInitiator(ctx context.Context, r *run.Run) {
 	}
 	if i := run.InitiatorFrom(ctx); i != nil && i.InitiatedBy == r.Actor {
 		r.Initiator = i
+	}
+}
+
+// stampAccount records the username of the account behind the request in flight on r, the name a
+// policy's account criterion matches. It is recorded only on a run whose actor is that account, so
+// a run that names its actor explicitly as somebody else never borrows the requester's account,
+// and one that already carries an account, such as a run derived from another, keeps it.
+func stampAccount(ctx context.Context, r *run.Run) {
+	if r.Account != "" || r.ActorUserID == "" {
+		return
+	}
+	if id, name := run.AccountFrom(ctx); id == r.ActorUserID {
+		r.Account = name
 	}
 }
 
@@ -597,6 +614,7 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string, opt
 	// A retry is authorized by the retry request, not by whatever authorized the parent weeks ago.
 	stampReceipt(ctx, retry)
 	stampInitiator(ctx, retry)
+	stampAccount(ctx, retry)
 	// It is a submission of its own, so it executes the inventory as the store holds it now, read
 	// once here, rather than the snapshot its parent ran, which was wiped when the parent ended.
 	if err := d.snapshotInventory(ctx, retry); err != nil {
@@ -664,6 +682,7 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string, opt
 		child.PolicyNotes = retry.PolicyNotes
 		child.AuditReceipt = retry.AuditReceipt
 		child.OrgID = retry.OrgID
+		child.Account = retry.Account
 		if err := d.store.Save(ctx, child); err != nil {
 			return nil, d.abandonSplit(ctx, retry, children, count, err)
 		}

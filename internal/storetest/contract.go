@@ -49,6 +49,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("initiator and reason rule round trip", func(t *testing.T) {
 		testInitiatorAndReasonRuleRoundTrip(t, newStore())
 	})
+	t.Run("account round trip", func(t *testing.T) { testAccountRoundTrip(t, newStore()) })
 	t.Run("stream ticket refuses a wrong run and an expiry", func(t *testing.T) {
 		testStreamTicketRefusesWrongRunAndExpiry(t, newStore())
 	})

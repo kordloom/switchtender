@@ -254,6 +254,7 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			}
 			ctx := run.WithAuditReceipt(context.WithValue(r.Context(), actorKey{}, actor), receipt)
 			ctx = withRecorded(g.stampInventoryAccess(g.stampSubmitterOrg(ctx, actor)), who)
+			ctx = run.WithAccountContext(ctx, u.ID, u.Username)
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
@@ -309,6 +310,10 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 		ctx := run.WithAuditReceipt(context.WithValue(r.Context(), actorKey{}, actor), receipt)
 		ctx = withRecorded(g.stampInventoryAccess(g.stampSubmitterOrg(ctx, actor)), who)
 		ctx = run.WithInitiatorContext(ctx, agentInitiator(tok, boundUser))
+		// The account the token is bound to, by name, which a policy's account criterion matches. A
+		// token's own label is chosen by whoever mints it and repeats across accounts, so this is
+		// what tells two agents with the same label apart.
+		ctx = run.WithAccountContext(ctx, tok.UserID, boundUser)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

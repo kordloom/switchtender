@@ -241,7 +241,8 @@ func verdictOf(r run.Run, note string) agentHoldVerdict {
 
 // exemptNote is the note a run carries when the named exemption let it proceed.
 func exemptNote(name string) string {
-	return fmt.Sprintf("requested by an agent, exempt from the default hold by policy %q", name)
+	return fmt.Sprintf("requested by an agent bound to account %q, exempt from the default hold "+
+		"by policy %q", "dev-lead", name)
 }
 
 // TestAgentHoldDirectSubmission proves the default on a fresh install: an agent's run is held for a
@@ -319,7 +320,7 @@ func TestAgentHoldExemption(t *testing.T) {
 				t.Parallel()
 				s := newAgentHoldServer(t, backend.Open(t), true)
 				body := `{"name":"` + name + `","effect":"exempt","tool":"bash",` +
-					`"command_contains":"smoke-test","actor":"release-agent"}`
+					`"command_contains":"smoke-test","actor":"release-agent","account":"dev-lead"}`
 				// The agent cannot write its own way past the hold.
 				if code, got := s.call(s.Agent, http.MethodPost, "/v1/policies",
 					body); code != http.StatusForbidden {
@@ -365,10 +366,17 @@ func TestAgentHoldExemptionIsCommunity(t *testing.T) {
 		}, { // Test 2: A hold scoped to agents is the full engine, the control for the gate.
 			Body:     `{"name":"agents need a person","actor_kind":"agent"}`,
 			WantCode: http.StatusForbidden,
-		}, { // Test 3: The exemption naming one agent is Community and fits the empty install.
+		}, { // Test 3: An exemption naming an agent's label without its account is refused.
 			Body:     `{"name":"smoke","effect":"exempt","actor":"release-agent","tool":"bash"}`,
+			WantCode: http.StatusBadRequest,
+		}, { // Test 4: A hold scoped to one account is the full engine, as one scoped to an actor is.
+			Body:     `{"name":"lead needs a person","account":"dev-lead"}`,
+			WantCode: http.StatusForbidden,
+		}, { // Test 5: The exemption naming one agent and its account is Community and fits.
+			Body: `{"name":"smoke","effect":"exempt","actor":"release-agent",` +
+				`"account":"dev-lead","tool":"bash"}`,
 			WantCode: http.StatusCreated,
-		}, { // Test 4: It took the one slot, so the cap refuses a second policy.
+		}, { // Test 6: It took the one slot, so the cap refuses a second policy.
 			Body:     `{"name":"hold everything"}`,
 			WantCode: http.StatusForbidden,
 		}}

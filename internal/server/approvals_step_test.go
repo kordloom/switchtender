@@ -76,7 +76,7 @@ func newStepHarness(t *testing.T) *stepHarness {
 	// tests decide on rather than waiting at submission.
 	policies := policy.NewMemStore()
 	if err := policies.Save(ctx, &policy.Policy{ID: policy.NewID(), Name: "workflow agent",
-		Actor: "deploy-bot", Effect: policy.EffectExempt,
+		Actor: "deploy-bot", Account: owner.Username, Effect: policy.EffectExempt,
 		MaxDestroy: policy.DisabledMaxDestroy}); err != nil {
 		t.Fatalf("policies.Save() error = %v", err)
 	}

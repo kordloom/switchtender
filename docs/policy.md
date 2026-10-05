@@ -64,38 +64,50 @@ built-in hold:
       - name: release-agent-smoke-tests
         effect: exempt
         actor: release-agent
+        account: release-bot-owner
         tool: bash
         queue: staging
         command_contains: ./smoke.sh
 
-An exemption matches on `tool`, `command_contains`, `inventory_id`, `queue`, and `actor`, and
-`actor_kind` may be left out or set to `agent`. It is refused with `min_risk`, `reversibility`,
-`exclude_dry_run`, `require_distinct_approver`, `require_reason`, or `max_destroy`, which belong
-on a rule that holds. It lifts the built-in hold and nothing else: a stored rule that holds or
-refuses the same run still does.
+An exemption matches on `tool`, `command_contains`, `inventory_id`, `queue`, `actor`, and
+`account`, and `actor_kind` may be left out or set to `agent`. `account` is the username of the
+account the agent's token is bound to, the one named by `--user` when the token was minted. An
+exemption that names `actor` must also name `account`, and one that does not is refused with a 400
+through the API and fails to load from the policy file: an `actor` is a token's label, chosen by
+whoever mints the token and not unique across accounts, so the label alone would also exempt a
+token minted for another account under the same name. An exemption may name `account` alone, which
+covers every agent token bound to that account. It is refused with `min_risk`, `reversibility`,
+`exclude_dry_run`, `require_distinct_approver`, `require_reason`, or `max_destroy`, which belong on
+a rule that holds. It lifts the built-in hold and nothing else: a stored rule that holds or refuses
+the same run still does.
 
-An exemption is a rule like any other. `GET /v1/policies` lists it, the rule set every run records
-as in force covers it and describes it as "lets an agent's run proceed without the default hold",
-and a run it lets through records the note
-`requested by an agent, exempt from the default hold by policy "release-agent-smoke-tests"` in its
-outcome, so the receipt and the dossier name the exemption. Write one through the API or the policy
-file, the same as any rule.
+The account travels with every run derived from the agent's request: the apply its plan proposes,
+the shards of its split, the steps of its workflow, and a retry, a rerun, or a relaunch it asks
+for. A run whose account cannot be read is never exempt.
+
+An exemption is a rule like any other. `GET /v1/policies` lists it, account included. The rule set
+every run records as in force covers it and describes it as "lets an agent's run proceed without the
+default hold, for agents bound to account "release-bot-owner"". A run it lets through records the
+note `requested by an agent bound to account "release-bot-owner", exempt from the default hold by
+policy "release-agent-smoke-tests"` in its outcome, so the receipt and the dossier name the account
+and the exemption. Write one through the API or the policy file, the same as any rule.
 
 The built-in hold is not a stored policy, so it counts against no license's policy limit and cannot
-be deleted. An exemption is a Community rule, one that names an `actor` included, and it counts as
-one policy, so a Community install's one policy can be the exemption.
+be deleted. An exemption is a Community rule, one that names an `actor` and an `account` included,
+and it counts as one policy, so a Community install's one policy can be the exemption.
 
 What an exemption risks is everything it matches, which then runs with no person looking. Keep it
 narrow.
 
 - `command_contains` matches text anywhere in the command, ignoring case, so an exemption for
   `smoke` also matches `smoke; rm -rf /`. Pair it with `tool`, `queue`, or `inventory_id`.
-- `actor` matches a token's label, and labels are not unique across accounts. A token minted for
-  another account under the same label is covered too.
+- An admin can mint a token for any account, so the exemption trusts whoever can mint tokens. Bind
+  each agent to an account of its own, and an exemption naming that account covers that agent
+  alone.
 - An exemption with no criteria exempts every agent run, which turns the default off.
 
-Prefer a named `actor` together with a queue or an inventory that reaches only what the agent's
-routine work needs.
+Prefer a named `actor` and its `account` together with a queue or an inventory that reaches only
+what the agent's routine work needs.
 
 ### Nothing an agent writes runs later as someone else
 
@@ -131,7 +143,10 @@ exemption for the routine work that should keep running unattended, and leave ev
         effect: deny
 
 A rule matches on `tool`, `command_contains` (ignoring case), `inventory_id`, `queue`, `actor_kind`,
-`actor`, `min_risk`, `reversibility`, and `exclude_dry_run`. A match holds the run, refuses it with
+`actor`, `account`, `min_risk`, `reversibility`, and `exclude_dry_run`. `account` is the username of
+the account the requesting credential is bound to: the person behind a token or a session, or the
+account an agent's token acts for. A run whose account cannot be read is matched by a rule that
+holds or refuses, and never by an exemption. A match holds the run, refuses it with
 `effect: deny`, or, with `effect: exempt`, lets an agent's run go ahead without the
 [built-in hold](#agent-runs-are-held-by-default). `require_distinct_approver` makes the release need
 someone other than the requester, and `max_destroy` plans a Terraform or OpenTofu apply first and
@@ -400,7 +415,7 @@ an empty value when the run has none, so a module never meets a missing field.
 | `actor.name` | The token label or username that fired the run. For an agent, its token's label. |
 | `actor.type` | How it authenticated: `agent`, `session`, `token`, `cli`, or `webhook`. |
 | `actor.kind` | `agent`, `human`, or `other` for a webhook, a schedule, or an unknown source. |
-| `actor.account` | The account behind the credential. For an agent, the person it acts for. |
+| `actor.account` | The id of the account behind the credential. For an agent, the account it acts for. A YAML rule's `account` matches the account's username instead. |
 | `plan.planned` | Whether a plan has been read for this apply. |
 | `plan.destroys` | How many resources the plan destroys, or null when nothing was planned. |
 | `risk.level` | `low`, `medium`, or `high`, the same grade `min_risk` reads. |

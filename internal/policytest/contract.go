@@ -84,14 +84,16 @@ func testGet(t *testing.T, store policy.Store) {
 // testExemptionRoundTrip verifies an exemption from the built-in agent hold loads back as the
 // exemption it was saved as. A store that dropped the effect would load it as a rule holding every
 // run it names, and one that dropped a criterion would load it exempting more agent runs than it
-// was written to, so the loaded rule is asked to judge runs as well as compared field by field.
+// was written to, so the loaded rule is asked to judge runs as well as compared field by field. The
+// account is the criterion that matters most: dropped, the exemption would cover a token minted for
+// any other account under the same label.
 func testExemptionRoundTrip(t *testing.T, store policy.Store) {
 	ctx := context.Background()
 	p := &policy.Policy{
 		ID: policy.NewID(), Name: "nightly smoke", Tool: "bash", CommandContains: "smoke",
 		InventoryID: "inv_lab", Queue: "staging", ActorKind: policy.ActorKindAgent,
-		Actor: "triage-bot", Effect: policy.EffectExempt, MaxDestroy: policy.DisabledMaxDestroy,
-		CreatedAt: time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC),
+		Actor: "triage-bot", Account: "ops", Effect: policy.EffectExempt,
+		MaxDestroy: policy.DisabledMaxDestroy, CreatedAt: time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC),
 	}
 	if err := p.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v, want the exemption accepted", err)
@@ -113,11 +115,11 @@ func testExemptionRoundTrip(t *testing.T, store policy.Store) {
 	if got.Effect != policy.EffectExempt || got.Tool != "bash" || got.CommandContains != "smoke" ||
 		got.InventoryID != "inv_lab" || got.Queue != "staging" ||
 		got.ActorKind != policy.ActorKindAgent || got.Actor != "triage-bot" ||
-		got.MaxDestroy != policy.DisabledMaxDestroy {
+		got.Account != "ops" || got.MaxDestroy != policy.DisabledMaxDestroy {
 		t.Errorf("Get() = %+v, want the saved exemption", got)
 	}
-	covered := &run.Run{Actor: "triage-bot", ActorType: policy.ActorKindAgent, Tool: "bash",
-		Command: "run smoke tests", InventoryID: "inv_lab", Queue: "staging"}
+	covered := &run.Run{Actor: "triage-bot", ActorType: policy.ActorKindAgent, Account: "ops",
+		Tool: "bash", Command: "run smoke tests", InventoryID: "inv_lab", Queue: "staging"}
 	if held := policy.Requiring(listed, covered); held != nil {
 		t.Errorf("the loaded exemption left the agent's run held by %q", held.Label())
 	}
@@ -125,6 +127,11 @@ func testExemptionRoundTrip(t *testing.T, store policy.Store) {
 	other.Actor = "release-bot"
 	if held := policy.Requiring(listed, &other); !policy.IsAgentDefault(held) {
 		t.Errorf("the loaded exemption covered an agent it does not name: held by %v", held)
+	}
+	sameLabel := *covered
+	sameLabel.Account = "lab"
+	if held := policy.Requiring(listed, &sameLabel); !policy.IsAgentDefault(held) {
+		t.Errorf("the loaded exemption covered the same label on another account: held by %v", held)
 	}
 	person := *covered
 	person.Actor, person.ActorType = "dev-lead", "session"

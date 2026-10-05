@@ -109,7 +109,9 @@ review, fails the build when a new path appears without a test proving an agent 
    hold applies to tokens minted with `switchtender token new --user <account> --agent`, and a token
    minted without `--agent` gets no agent hold. A dry run the scans prove change free may proceed.
    To let routine work through, write an exemption, a rule with `effect: exempt`, which Community
-   covers. The receipt proves who approved each run or which rule exempted it.
+   covers. An exemption that names the agent's `actor` label must also name the `account` its
+   token is bound to, since a label repeats across accounts. The receipt proves who approved each
+   run or which rule exempted it.
    [Agent runs are held by default](policy.md#agent-runs-are-held-by-default) covers the exemption
    and what it risks.
 
@@ -143,8 +145,9 @@ review, fails the build when a new path appears without a test proving an agent 
            tool: terraform
 
    `actor_kind: agent` scopes a rule to runs an agent submitted, identified by its minted token,
-   never guessed from traffic. `actor: prod-remediator` pins a rule to one named principal.
-   `min_risk` matches on the run's assessed risk grade, so "destructive operations need a person"
+   never guessed from traffic. `actor: prod-remediator` pins a rule to one named principal, and
+   `account: dev-lead` to the account a token is bound to, which tells apart two agents that share
+   a label. `min_risk` matches on the run's assessed risk grade, so "destructive operations need a person"
    is one line. `effect: deny` refuses the submission outright, and the refused request is still on the
    chain, because the gate records every mutation before anything acts on it.
    `require_distinct_approver: true` refuses a decision made by whoever asked for the change, which
@@ -157,8 +160,8 @@ review, fails the build when a new path appears without a test proving an agent 
    the rules quietly dropped. The gate itself is free on every tier: every run an agent submits
    waits for a person with no rule written, and that is the whole containment story on this page. A
    Community install also holds one plain rule, either a require-approval policy for everyone's runs
-   or one exemption. What Team buys is scoping holds by actor, risk, and reversibility, and a rule
-   that can refuse outright rather than wait.
+   or one exemption. What Team buys is scoping holds by actor, account, risk, and reversibility, and
+   a rule that can refuse outright rather than wait.
 
 4. Pin the policies by starting the server with `serve --policy-file policies.yml`. The file is the
    source of truth and the API refuses policy writes, so even an admin API caller cannot rewrite

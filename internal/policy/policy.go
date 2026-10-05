@@ -81,6 +81,14 @@ type Policy struct {
 	// Actor matches the exact requesting actor recorded on the run, for a rule scoped to one named
 	// principal. Empty matches any.
 	Actor string `json:"actor,omitempty"`
+	// Account matches the username of the account the requesting credential is bound to: the
+	// person behind a token or a session, or the account an agent's token acts for. Empty matches
+	// any. A token's label is chosen by whoever mints it and is not unique across accounts, so a
+	// rule that has to tell two agents apart names the account, which is.
+	//
+	// A run requested through an account whose name it does not carry is matched by a rule that
+	// holds or refuses and never by an exemption, so an account nobody can read fails closed.
+	Account string `json:"account,omitempty"`
 	// MinRisk matches only runs whose assessed risk is at least this level: low, medium, or high.
 	// Empty matches any risk. It turns the advisory risk grade into an enforceable criterion.
 	MinRisk string `json:"min_risk,omitempty"`
@@ -205,6 +213,9 @@ func (p *Policy) matchesActor(r *run.Run) bool {
 	if p.Actor != "" && p.Actor != r.Actor {
 		return false
 	}
+	if !p.matchesAccount(r) {
+		return false
+	}
 	switch p.ActorKind {
 	case "":
 		return true
@@ -230,7 +241,9 @@ func (p *Policy) matchesActor(r *run.Run) bool {
 // --policy-file, which is the path an install that takes policy seriously actually uses.
 //
 // Actor scoping belongs here because it is the criterion that turns a blanket hold into an
-// authorization boundary around a machine principal, which is the thing being sold.
+// authorization boundary around a machine principal, which is the thing being sold. Account scoping
+// belongs beside it for the same reason: it is the same boundary, drawn around the account a
+// credential acts for rather than the credential's label.
 // Reversibility belongs here for the same reason MinRisk does, and it drifted the same way: the
 // grade was added, the engine evaluated it, and this was not updated, so a rule holding on
 // irreversibility was free through --policy-file while the identical rule through the API was
@@ -252,7 +265,8 @@ func (p *Policy) Advanced() bool {
 		p.Reversibility != "" ||
 		p.RequireDistinctApprover ||
 		p.ActorKind != "" ||
-		p.Actor != ""
+		p.Actor != "" ||
+		p.Account != ""
 }
 
 // riskRank orders risk levels so MinRisk can compare them. An unknown level ranks above high, so a
@@ -497,7 +511,8 @@ func (p *Policy) Label() string {
 // takes a dry run, a run of another tool, or an apply a plan already proposed. A plan-content rule
 // that matched one of those used to release it from every hold: a destroy limit written without a
 // tool let an Ansible run past a rule holding everything, and one written for Terraform let the
-// apply a plan proposed past the hold its own rules placed.
+// apply a plan proposed past the hold its own rules placed, the default hold on an agent's run
+// included.
 func PlanGated(policies []*Policy, r *run.Run) bool {
 	tool := run.NormalizeTool(r.Tool)
 	graded := (tool == run.ToolTerraform || tool == run.ToolOpenTofu) && !r.DryRun &&
@@ -612,7 +627,8 @@ func reversibilityOf(r *run.Run) string {
 // beside it would read as narrowing the rule while changing nothing, and is refused.
 func (p *Policy) validateRego() error {
 	criteria := p.Tool != "" || p.CommandContains != "" || p.InventoryID != "" || p.Queue != "" ||
-		p.ActorKind != "" || p.Actor != "" || p.MinRisk != "" || p.Reversibility != "" ||
+		p.ActorKind != "" || p.Actor != "" || p.Account != "" || p.MinRisk != "" ||
+		p.Reversibility != "" ||
 		p.Effect != "" || p.ExcludeDryRun || p.RequireDistinctApprover || p.MaxDestroy >= 0
 	if criteria {
 		return fmt.Errorf("%w: a Rego policy decides in its package and cannot also set criteria",

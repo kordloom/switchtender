@@ -467,6 +467,13 @@ type Run struct {
 	// compares this: separation of duties keyed on the name alone let the same person submit with a
 	// token and approve in a browser.
 	ActorUserID string `json:"actor_user_id,omitempty"`
+	// Account is the username of the account the credential that requested the run is bound to: the
+	// person behind a token or a browser session, or the account an agent's token acts for. A
+	// policy's account criterion matches it, so it is carried to every run derived from the
+	// request: a shard, a workflow step, and the apply a plan proposes copy it, and a retry, a
+	// rerun, or a relaunch takes it from the request that asked for it. Empty when no account stands
+	// behind the request, such as a schedule, a webhook, or a token bound to no account.
+	Account string `json:"account,omitempty"`
 	// ActorType is how the requesting actor authenticated, in the audit chain's vocabulary: agent
 	// for an AI agent's token, session for a signed-in person, token for an owner-held API token,
 	// cli for the command line, webhook for a trigger. Empty when the server does not know. It is
@@ -927,6 +934,12 @@ func WithGitRef(ref string) SubmitOption {
 // WithActorAccount records the account behind the credential that fired the run. See Run.ActorUserID.
 func WithActorAccount(userID string) SubmitOption {
 	return func(r *Run) { r.ActorUserID = userID }
+}
+
+// WithAccount records the username of the account behind the credential that fired the run. See
+// Run.Account.
+func WithAccount(name string) SubmitOption {
+	return func(r *Run) { r.Account = name }
 }
 
 // WithActorType stamps how the requesting actor authenticated, so a policy can tell an agent's

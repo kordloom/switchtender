@@ -317,6 +317,7 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 	stampReceipt(ctx, parent)
 	stampOrg(ctx, parent)
 	stampInitiator(ctx, parent)
+	stampAccount(ctx, parent)
 	// The graph is stored on the parent so a pipeline held for approval can still be executed after
 	// a restart, and so a finished pipeline can show the shape it ran.
 	parent.Steps = steps
@@ -617,6 +618,9 @@ func stepRun(parent *run.Run, step run.PipelineStep, idx, attempt int, vars map[
 	// browser session record different names, so anything asking who caused a step to run gets a
 	// half-answer from the name alone.
 	child.ActorUserID = parent.ActorUserID
+	// And by name, which a policy's account criterion matches: a step of an agent's workflow is
+	// covered by the exemption written for that agent's account and by no other.
+	child.Account = parent.Account
 	// What Ansible was told to run and how much of it. These are the fields that decide which plays
 	// and tasks execute, so dropping them does not narrow a step, it widens it: a pipeline submitted
 	// with --skip-tags destructive ran every step with nothing skipped.

@@ -18,7 +18,7 @@ type policyStore struct {
 
 // policyColumns lists the policy columns in a stable order for reads and writes.
 const policyColumns = `id, name, tool, command_contains, inventory_id, queue, exclude_dry_run, max_destroy, actor_kind, actor, min_risk, reversibility, effect, distinct_approver, created_at,
-	require_reason`
+	require_reason, account`
 
 // Save stores a policy, inserting or replacing by id, refusing a Rego policy.
 func (s *policyStore) Save(ctx context.Context, p *policy.Policy) error {
@@ -29,20 +29,21 @@ func (s *policyStore) Save(ctx context.Context, p *policy.Policy) error {
 	}
 	const q = `
 INSERT INTO policies (id, name, tool, command_contains, inventory_id, queue, exclude_dry_run, max_destroy, actor_kind, actor, min_risk, reversibility, effect, distinct_approver, created_at,
-	require_reason)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	require_reason, account)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	name=excluded.name, tool=excluded.tool, command_contains=excluded.command_contains,
 	inventory_id=excluded.inventory_id, queue=excluded.queue,
 	exclude_dry_run=excluded.exclude_dry_run,
 	max_destroy=excluded.max_destroy, actor_kind=excluded.actor_kind, actor=excluded.actor,
 	min_risk=excluded.min_risk, reversibility=excluded.reversibility, effect=excluded.effect,
-	distinct_approver=excluded.distinct_approver, require_reason=excluded.require_reason`
+	distinct_approver=excluded.distinct_approver, require_reason=excluded.require_reason,
+	account=excluded.account`
 	_, err := s.db.ExecContext(ctx, q,
 		p.ID, p.Name, p.Tool, p.CommandContains, p.InventoryID, p.Queue,
 		sqlutil.BoolToInt(p.ExcludeDryRun), p.MaxDestroy, p.ActorKind, p.Actor, p.MinRisk, p.Reversibility,
 		p.Effect, sqlutil.BoolToInt(p.RequireDistinctApprover), sqlutil.FormatTime(p.CreatedAt),
-		p.RequireReason)
+		p.RequireReason, p.Account)
 	if err != nil {
 		return fmt.Errorf("save policy: %w", err)
 	}
@@ -111,7 +112,7 @@ func scanPolicy(sc scanner) (*policy.Policy, error) {
 	)
 	if err := sc.Scan(&p.ID, &p.Name, &p.Tool, &p.CommandContains, &p.InventoryID, &p.Queue, &dry,
 		&p.MaxDestroy, &p.ActorKind, &p.Actor, &p.MinRisk, &p.Reversibility, &p.Effect, &distinct,
-		&created, &p.RequireReason); err != nil {
+		&created, &p.RequireReason, &p.Account); err != nil {
 		return nil, err
 	}
 	p.ExcludeDryRun = dry != 0

@@ -119,6 +119,9 @@ CREATE TABLE IF NOT EXISTS runs (
 	-- Whether a Terraform or OpenTofu apply's own submission asked for approval, so the apply its
 	-- plan proposes is held. Set when the run is created and never cleared.
 	approval_requested INTEGER NOT NULL DEFAULT 0,
+	-- The username of the account the requesting credential is bound to, which a policy's account
+	-- criterion matches. Copied to every run derived from the request.
+	account TEXT NOT NULL DEFAULT '',
 	-- The digest of the image the container runtime pulled and ran.
 	image_digest TEXT NOT NULL DEFAULT '',
 	-- The decision that won a held run or an approval step: the id of its record and of the chain
@@ -178,6 +181,7 @@ ALTER TABLE runs ADD COLUMN IF NOT EXISTS plan_sha256 TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS plan_sealed TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS drift_plan_sealed TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS approval_requested INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS account TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS image_digest TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS decision_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS decision_claim TEXT NOT NULL DEFAULT '';
@@ -688,7 +692,8 @@ CREATE TABLE IF NOT EXISTS policies (
 	effect           TEXT NOT NULL DEFAULT '',
 	distinct_approver INTEGER NOT NULL DEFAULT 0,
 	created_at       TEXT NOT NULL,
-	require_reason   TEXT NOT NULL DEFAULT ''
+	require_reason   TEXT NOT NULL DEFAULT '',
+	account          TEXT NOT NULL DEFAULT ''
 );
 -- A policy can demand that the approver be someone other than the requester. The column rides an
 -- ALTER for databases from before it; without it the rule loaded back with the requirement off, so
@@ -706,6 +711,9 @@ ALTER TABLE policies ADD COLUMN IF NOT EXISTS reversibility TEXT NOT NULL DEFAUL
 ALTER TABLE policies ADD COLUMN IF NOT EXISTS effect TEXT NOT NULL DEFAULT '';
 ALTER TABLE policies ADD COLUMN IF NOT EXISTS queue TEXT NOT NULL DEFAULT '';
 ALTER TABLE policies ADD COLUMN IF NOT EXISTS require_reason TEXT NOT NULL DEFAULT '';
+-- The account a rule matches, by the username of the account the requesting credential is bound
+-- to. An exemption that names an agent's token label must name it too.
+ALTER TABLE policies ADD COLUMN IF NOT EXISTS account TEXT NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS inventories (
 	id             TEXT PRIMARY KEY,
 	name           TEXT NOT NULL DEFAULT '',

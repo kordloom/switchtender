@@ -60,11 +60,14 @@ function regoEffectTip(rego) {
 // appendCriteriaCells fills the criteria columns for a YAML or API policy, one per criterion.
 function appendCriteriaCells(tr, p, invByID) {
 	const whoCell = document.createElement("td");
-	if (p.actor) {
+	if (p.actor || p.account) {
 		const span = document.createElement("span");
 		span.className = "mono";
-		span.textContent = p.actor;
-		span.dataset.tip = "Only this named actor's runs match";
+		span.textContent = p.actor && p.account ? p.actor + " on " + p.account : p.actor || p.account;
+		span.dataset.tip = p.actor && p.account
+			? "Only this named actor's runs match, on this account"
+			: p.actor ? "Only this named actor's runs match"
+				: "Only runs asked for under this account match";
 		whoCell.appendChild(span);
 	} else if (p.actor_kind === "agent" || p.actor_kind === "human") {
 		const span = document.createElement("span");

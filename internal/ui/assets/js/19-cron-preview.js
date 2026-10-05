@@ -442,6 +442,7 @@ function openPolicyEdit(p) {
 		p.effect === "deny" || p.effect === "exempt" ? p.effect : "";
 	document.getElementById("policy-actor-kind").value = p.actor_kind || "";
 	document.getElementById("policy-actor").value = p.actor || "";
+	document.getElementById("policy-account").value = p.account || "";
 	document.getElementById("policy-min-risk").value = p.min_risk || "";
 	document.getElementById("policy-max-destroy").value =
 		(p.max_destroy !== undefined && p.max_destroy !== null && p.max_destroy >= 0) ? String(p.max_destroy) : "";
@@ -454,16 +455,20 @@ function openPolicyEdit(p) {
 	document.getElementById("policy-modal").hidden = false;
 }
 
-// ADVANCED_POLICY_FIELDS are the five inputs whose use makes a rule Team, matching exactly what
-// policy.Advanced() tests: a deny effect, a risk floor, distinct-approver separation of duties, and
-// either form of actor scoping. Marking them is not decoration. A Community reader filled the
-// dialog, pressed Save, and met a 403 explaining the tier after composing the whole rule, which is
-// the same shape as the evidence-pack refusal and just as avoidable.
+// ADVANCED_POLICY_FIELDS are the six inputs whose use makes a rule Team, matching exactly what
+// policy.Advanced() tests: a deny effect, a risk floor, distinct-approver separation of duties,
+// either form of actor scoping, and account scoping. An exemption is the one rule that may use the
+// account and the actor on Community, which the account's tip says. Marking them is not
+// decoration. A Community reader filled the dialog, pressed Save, and met a 403 explaining the
+// tier after composing the whole rule, which is the same shape as the evidence-pack refusal and
+// just as avoidable.
 const ADVANCED_POLICY_FIELDS = [
 	["policy-effect", "A rule that denies outright, rather than holding for a person, is Team. " +
 		"An exemption from the default agent hold is Community."],
 	["policy-actor-kind", "Scoping a rule to who is asking, such as agents as a class, is Team."],
 	["policy-actor", "Scoping a rule to one named actor is Team."],
+	["policy-account", "Scoping a hold or deny rule to one account is Team. An exemption names " +
+		"an account on Community."],
 	["policy-min-risk", "A risk floor, so a rule applies only above a grade, is Team."],
 	["policy-distinct-approver", "Requiring a different person to approve than asked is Team."],
 ];
@@ -495,6 +500,7 @@ function wirePolicyForm() {
 		document.getElementById("policy-effect").value = "";
 		document.getElementById("policy-actor-kind").value = "";
 		document.getElementById("policy-actor").value = "";
+		document.getElementById("policy-account").value = "";
 		document.getElementById("policy-min-risk").value = "";
 		document.getElementById("policy-max-destroy").value = "";
 		document.getElementById("policy-exclude-dry").checked = false;
@@ -530,6 +536,7 @@ function wirePolicyForm() {
 			effect: document.getElementById("policy-effect").value,
 			actor_kind: document.getElementById("policy-actor-kind").value,
 			actor: document.getElementById("policy-actor").value.trim(),
+			account: document.getElementById("policy-account").value.trim(),
 			min_risk: document.getElementById("policy-min-risk").value,
 			exclude_dry_run: document.getElementById("policy-exclude-dry").checked,
 			require_distinct_approver: document.getElementById("policy-distinct-approver").checked,

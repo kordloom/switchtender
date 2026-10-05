@@ -9,23 +9,24 @@ import { loadPage } from "./pages.mjs";
 import { reply } from "./net.mjs";
 import { fire } from "./dom.mjs";
 
-// exemption is a stored exemption for one named agent on one queue.
+// exemption is a stored exemption for one named agent, on the account its token is bound to, on one
+// queue.
 const exemption = {
 	id: "pol_ex", name: "nightly smoke", tool: "bash", command_contains: "smoke", inventory_id: "",
-	queue: "staging", actor_kind: "", actor: "release-agent", min_risk: "", effect: "exempt",
-	max_destroy: -1, exclude_dry_run: false, created_at: "2026-10-05T12:00:00Z",
+	queue: "staging", actor_kind: "", actor: "release-agent", account: "dev-lead", min_risk: "",
+	effect: "exempt", max_destroy: -1, exclude_dry_run: false, created_at: "2026-10-05T12:00:00Z",
 };
 
 // hold is a plain rule holding every bash run.
-const hold = { ...exemption, id: "pol_hold", name: "hold bash", effect: "", actor: "", queue: "",
-	command_contains: "" };
+const hold = { ...exemption, id: "pol_hold", name: "hold bash", effect: "", actor: "", account: "",
+	queue: "", command_contains: "" };
 
 test("an exemption survives the edit round trip as an exemption", async () => {
 	const tests = [
-		// Test 0: An exemption reads back and saves as exempt.
-		{ Rule: exemption, WantEffect: "exempt" },
+		// Test 0: An exemption reads back and saves as exempt, on its account.
+		{ Rule: exemption, WantEffect: "exempt", WantAccount: "dev-lead" },
 		// Test 1: A plain rule still reads back and saves as the default, the control.
-		{ Rule: hold, WantEffect: "" },
+		{ Rule: hold, WantEffect: "", WantAccount: "" },
 	];
 	for (const [testNum, tc] of tests.entries()) {
 		const puts = [];
@@ -42,10 +43,15 @@ test("an exemption survives the edit round trip as an exemption", async () => {
 		page.app.openPolicyEdit(tc.Rule);
 		assert.equal(page.document.getElementById("policy-effect").value, tc.WantEffect,
 			`test ${testNum}: the dialog read the effect back wrong`);
+		assert.equal(page.document.getElementById("policy-account").value, tc.WantAccount,
+			`test ${testNum}: the dialog read the account back wrong`);
 		fire(page.document.getElementById("policy-form"), "submit");
 		await page.clock.flush();
 		assert.equal(puts.length, 1, `test ${testNum}: the edit saved once`);
 		assert.equal(puts[0].effect, tc.WantEffect, `test ${testNum}: the edit saved another effect`);
+		// An edit that dropped the account would save an exemption naming a label alone, which the
+		// server refuses, or, with no label, one that exempts every agent.
+		assert.equal(puts[0].account, tc.WantAccount, `test ${testNum}: the edit lost the account`);
 	}
 });
 
@@ -62,6 +68,8 @@ test("the policy list names an exemption as one, not as a hold", async () => {
 	assert.equal(rows[0].cells[1].textContent, "exempt");
 	assert.ok(rows[0].cells[1].querySelector(".chip").dataset.tip.includes("default hold"));
 	assert.equal(rows[1].cells[1].textContent, "hold", "the plain rule still reads as a hold");
+	assert.equal(rows[0].cells[2].textContent, "release-agent on dev-lead",
+		"the exemption does not say which account it covers");
 });
 
 test("the held label gives the built-in hold as a reason and quotes a named rule", () => {
@@ -95,8 +103,8 @@ test("the empty policy list says agent runs are already held", async () => {
 
 // heldNote and exemptNote are what the server records on an agent's run about the built-in hold.
 const heldNote = "requested by an agent, held by default";
-const exemptNote =
-	"requested by an agent, exempt from the default hold by policy \"nightly smoke\"";
+const exemptNote = "requested by an agent bound to account \"dev-lead\", exempt from the " +
+	"default hold by policy \"nightly smoke\"";
 
 test("the runs list does not mark an agent's run as noted for the agent hold", () => {
 	const page = loadPage("runs");

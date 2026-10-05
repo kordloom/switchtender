@@ -667,5 +667,6 @@ function countUp(el, value) {
 // The server writes both into the run's notes so a receipt carries them, and the pages show them
 // apart, since the hold is not a warning and a held run did not go ahead past it.
 function isAgentHoldNote(note) {
-	return typeof note === "string" && note.startsWith("requested by an agent,");
+	return typeof note === "string" && (note.startsWith("requested by an agent,") ||
+		note.startsWith("requested by an agent bound to account "));
 }
