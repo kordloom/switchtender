@@ -227,13 +227,19 @@ func (s *store) ListPage(ctx context.Context, filter run.ListFilter, limit, offs
 			args = append(args, filter.LabelKey, filter.LabelValue)
 		}
 	}
+	// Both forms run.SummaryNameKeys gives are matched, so a name too long to index finds its runs
+	// whether they were summarized before such names were cut or after.
 	if filter.Host != "" {
-		q += " AND EXISTS (SELECT 1 FROM run_host_summary hs WHERE hs.run_id = runs.id AND hs.host = ?)"
-		args = append(args, filter.Host)
+		whole, stored := run.SummaryNameKeys(filter.Host)
+		q += " AND EXISTS (SELECT 1 FROM run_host_summary hs WHERE hs.run_id = runs.id" +
+			" AND hs.host IN (?, ?))"
+		args = append(args, whole, stored)
 	}
 	if filter.Task != "" {
-		q += " AND EXISTS (SELECT 1 FROM run_task_summary ts WHERE ts.run_id = runs.id AND ts.task = ?)"
-		args = append(args, filter.Task)
+		whole, stored := run.SummaryNameKeys(filter.Task)
+		q += " AND EXISTS (SELECT 1 FROM run_task_summary ts WHERE ts.run_id = runs.id" +
+			" AND ts.task IN (?, ?))"
+		args = append(args, whole, stored)
 	}
 	if filter.ClaimedBy != "" {
 		q += " AND claimed_by = ?"

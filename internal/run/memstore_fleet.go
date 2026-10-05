@@ -336,7 +336,8 @@ func (m *memStore) EstateAt(_ context.Context, at time.Time, limit int) ([]HostF
 func (m *memStore) HostFactsFor(_ context.Context, host string) (*HostFacts, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	f, ok := m.facts[host]
+	// Every fact here was written under SummaryName, so that is the one form a lookup matches.
+	f, ok := m.facts[SummaryName(host)]
 	if !ok {
 		return nil, ErrNotFound
 	}
@@ -353,6 +354,7 @@ func (m *memStore) HostHistory(_ context.Context, host string, limit int) ([]Hos
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	host = SummaryName(host)
 	var out []HostSummary
 	for _, list := range m.summaries {
 		for _, hs := range list {

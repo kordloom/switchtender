@@ -308,15 +308,19 @@ DELETE FROM host_facts_history WHERE host = $1 AND bucket NOT IN (
 	return nil
 }
 
-// HostFactsFor returns a host's stored facts, or run.ErrNotFound when it was never gathered.
+// HostFactsFor returns a host's stored facts, or run.ErrNotFound when it was never gathered. A host
+// name too long to index can be held both whole, from before such names were cut, and in its
+// run.SummaryName form, so both are matched and the newer gather wins.
 func (s *store) HostFactsFor(ctx context.Context, host string) (*run.HostFacts, error) {
-	const q = "SELECT host, run_id, facts, gathered_at FROM host_facts WHERE host = $1"
+	const q = `SELECT host, run_id, facts, gathered_at FROM host_facts WHERE host IN ($1, $2)
+ORDER BY rtrim(gathered_at, 'Z') DESC LIMIT 1`
 	var (
 		out      run.HostFacts
 		blob     string
 		gathered string
 	)
-	err := s.db.QueryRowContext(ctx, q, host).Scan(&out.Host, &out.RunID, &blob, &gathered)
+	whole, stored := run.SummaryNameKeys(host)
+	err := s.db.QueryRowContext(ctx, q, whole, stored).Scan(&out.Host, &out.RunID, &blob, &gathered)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, run.ErrNotFound
 	}
@@ -332,15 +336,19 @@ func (s *store) HostFactsFor(ctx context.Context, host string) (*run.HostFacts, 
 	return &out, nil
 }
 
-// HostHistory returns a host's most recent per run summaries, newest first, with run ids.
+// HostHistory returns a host's most recent per run summaries, newest first, with run ids. It matches
+// both forms run.SummaryNameKeys gives, so the history of a host name too long to index reads whole
+// across the rows written before such names were cut and the rows written since.
 func (s *store) HostHistory(ctx context.Context, host string, limit int) ([]run.HostSummary, error) {
 	if limit < 1 {
 		limit = 1
 	}
 	const q = `SELECT ` + hostSummaryColumns + `
-FROM run_host_summary WHERE host = $1 ORDER BY ` + sqlutil.TimeOrder + ` DESC, run_id DESC LIMIT $2`
+FROM run_host_summary WHERE host IN ($1, $2)
+ORDER BY ` + sqlutil.TimeOrder + ` DESC, run_id DESC LIMIT $3`
 
-	rows, err := s.db.QueryContext(ctx, q, host, limit)
+	whole, stored := run.SummaryNameKeys(host)
+	rows, err := s.db.QueryContext(ctx, q, whole, stored, limit)
 	if err != nil {
 		return nil, fmt.Errorf("host history: %w", err)
 	}

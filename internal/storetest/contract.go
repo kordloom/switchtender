@@ -92,6 +92,9 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("unrepresentable text in a summary stores the same on every backend", func(t *testing.T) {
 		testSummaryUnrepresentableText(t, newStore())
 	})
+	t.Run("a name too long to index is stored and found", func(t *testing.T) {
+		testSummaryLongNames(t, newStore())
+	})
 	t.Run("reclaim attribution is exact", func(t *testing.T) { testReclaimAttribution(t, newStore()) })
 	t.Run("drift status", func(t *testing.T) { testDriftStatus(t, newStore()) })
 	t.Run("drift and fleet health agree after a purge", func(t *testing.T) {

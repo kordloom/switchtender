@@ -230,13 +230,19 @@ func (s *store) ListPage(ctx context.Context, filter run.ListFilter, limit, offs
 			q += fmt.Sprintf(" AND NULLIF(labels, '')::jsonb ->> $%d = $%d", len(args)-1, len(args))
 		}
 	}
+	// Both forms run.SummaryNameKeys gives are matched, so a name too long to index finds its runs
+	// whether they were summarized before such names were cut or after.
 	if filter.Host != "" {
-		args = append(args, filter.Host)
-		q += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM run_host_summary hs WHERE hs.run_id = runs.id AND hs.host = $%d)", len(args))
+		whole, stored := run.SummaryNameKeys(filter.Host)
+		args = append(args, whole, stored)
+		q += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM run_host_summary hs WHERE hs.run_id = runs.id"+
+			" AND hs.host IN ($%d, $%d))", len(args)-1, len(args))
 	}
 	if filter.Task != "" {
-		args = append(args, filter.Task)
-		q += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM run_task_summary ts WHERE ts.run_id = runs.id AND ts.task = $%d)", len(args))
+		whole, stored := run.SummaryNameKeys(filter.Task)
+		args = append(args, whole, stored)
+		q += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM run_task_summary ts WHERE ts.run_id = runs.id"+
+			" AND ts.task IN ($%d, $%d))", len(args)-1, len(args))
 	}
 	if filter.ClaimedBy != "" {
 		args = append(args, filter.ClaimedBy)
