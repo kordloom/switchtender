@@ -35,6 +35,12 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("sealed material is wiped when a run ends", func(t *testing.T) {
 		testSealedMaterialWipes(t, newStore())
 	})
+	t.Run("a drift check's plan is kept for a reconcile", func(t *testing.T) {
+		testDriftPlanKept(t, newStore())
+	})
+	t.Run("a request's ask for approval is kept", func(t *testing.T) {
+		testApprovalRequestedKept(t, newStore())
+	})
 	t.Run("git ref round trip", func(t *testing.T) { testGitRefRoundTrip(t, newStore()) })
 	t.Run("dry run scans round trip", func(t *testing.T) {
 		testDryRunScansRoundTrip(t, newStore())

@@ -20,7 +20,7 @@ func TestHeldRunNamesTheRuleThatStoppedIt(t *testing.T) {
 	store := run.NewMemStore()
 	policies := policy.NewMemStore()
 	if err := policies.Save(context.Background(), &policy.Policy{
-		ID: "pol_1", Name: "prod terraform destroy", Tool: "terraform",
+		ID: "pol_1", Name: "prod bash deploy", Tool: "bash",
 		MaxDestroy: -1,
 	}); err != nil {
 		t.Fatalf("Save() policy error = %v", err)
@@ -29,14 +29,14 @@ func TestHeldRunNamesTheRuleThatStoppedIt(t *testing.T) {
 	defer d.Close()
 
 	r, err := d.Submit(context.Background(), "", "inv",
-		run.WithTool("terraform"), run.WithCommand("infra/prod"))
+		run.WithTool("bash"), run.WithCommand("deploy prod"))
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
 	if r.Status != run.StatusPendingApproval {
 		t.Fatalf("status = %q, want the run held", r.Status)
 	}
-	if r.HeldByPolicy != "prod terraform destroy" {
+	if r.HeldByPolicy != "prod bash deploy" {
 		t.Errorf("held by = %q, want the rule that held it", r.HeldByPolicy)
 	}
 

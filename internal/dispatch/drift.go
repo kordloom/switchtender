@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -54,24 +55,33 @@ type planCounts struct {
 	Import int
 }
 
-// recordPlanDrift records a drift signal for a dry run whose plan found pending changes, keyed on the
-// working directory so it lands on the Drift page beside Ansible hosts. The changed-resource count is
-// read from the run's captured plan output, falling back to one so the row still shows as drifted. It
-// is best effort: a failure is logged and does not affect the run result.
-func (d *Dispatcher) recordPlanDrift(r *run.Run) {
-	changes := d.planChanges(r.ID)
-	if changes < 1 {
-		changes = 1
+// recordPlanCheck records what a Terraform or OpenTofu drift check found, keyed on the working
+// directory so it lands on the Drift page beside Ansible hosts. A plan with pending changes records
+// drift, its changed-resource count read from the run's captured plan output and falling back to
+// one so the row still shows as drifted. A plan that found nothing records the directory in sync,
+// so the page shows where it stands now rather than the last drift any check saw, and offers no
+// reconcile for it. A check that failed observed nothing and records nothing. It is best effort: a
+// failure is logged and does not affect the run result.
+func (d *Dispatcher) recordPlanCheck(r *run.Run, res roundhouse.Result, runErr error) {
+	if !isPlanTool(r.Tool) || !r.DryRun || runErr != nil || res.ExitCode != 0 {
+		return
 	}
 	host := r.Command
 	if host == "" {
 		host = r.ID
 	}
-	summary := run.HostSummary{Host: host, Changed: changes, Worst: "changed", RanAt: r.CreatedAt}
+	summary := run.HostSummary{Host: host, OK: 1, Worst: "ok", RanAt: r.CreatedAt}
+	if res.Drift {
+		changes := d.planChanges(r.ID)
+		if changes < 1 {
+			changes = 1
+		}
+		summary = run.HostSummary{Host: host, Changed: changes, Worst: "changed", RanAt: r.CreatedAt}
+	}
 	if err := withRetries(func() error {
 		return d.store.SaveHostSummary(context.Background(), r.ID, []run.HostSummary{summary})
 	}); err != nil {
-		d.log.Error("dispatch: save plan drift: "+err.Error(), zap.String("run_id", r.ID))
+		d.log.Error("dispatch: save plan check: "+err.Error(), zap.String("run_id", r.ID))
 	}
 }
 

@@ -181,6 +181,7 @@ func (m *memStore) PurgeRunsBefore(_ context.Context, cutoff time.Time) (int, er
 		delete(m.events, id)
 		delete(m.logs, id)
 		delete(m.queued, id)
+		delete(m.driftPlans, id)
 		m.outcomes.forget(id)
 		deleted++
 	}

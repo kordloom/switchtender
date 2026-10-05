@@ -179,10 +179,10 @@ type reconcileRequest struct {
 
 // reconcileDriftHandler builds a reconcile proposal for a drifted target from the check run that
 // observed the drift, run for real instead of in check mode: an Ansible check reruns its playbook
-// limited to the drifted host, and a Terraform or OpenTofu check applies its working directory. The
-// proposal is deterministic, no model constructs it, and it is born held for approval, so a person
-// releases it or it never executes. The actor must hold use on every object the run will touch,
-// exactly as a template launch requires.
+// limited to the drifted host, and a Terraform or OpenTofu check's apply carries out the plan file
+// the check saved. The proposal is deterministic, no model constructs it, and it is born held for
+// approval, so a person releases it or it never executes. The actor must hold use on every object
+// the run will touch, exactly as a template launch requires.
 func reconcileDriftHandler(store run.Store, submitter Submitter, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if store == nil || submitter == nil {
 		panic("server: reconcileDriftHandler: Store and Submitter required")
@@ -269,6 +269,28 @@ func reconcileDriftHandler(store run.Store, submitter Submitter, authz *authoriz
 			// The Ansible fix reruns the playbook limited to the drifted host, applying exactly the
 			// divergent tasks.
 			opts = append(opts, run.WithLimit(host))
+		} else {
+			// A Terraform or OpenTofu fix carries out the plan the check saved, the plan its approver
+			// is shown, with its digest bound into the approval, and runs at the commit that plan was
+			// made from. Planning again when it runs would apply something nobody saw. A check that
+			// kept no plan is refused, and the operator runs the check again.
+			sealed, perr := store.DriftPlan(r.Context(), check.ID)
+			if perr != nil {
+				log.Error("server: reconcile drift plan: " + perr.Error())
+				respondError(w, log, http.StatusInternalServerError, "could not read the check's plan")
+				return
+			}
+			if sealed == "" {
+				respondError(w, log, http.StatusConflict, "this drift check kept no saved plan to "+
+					"reconcile from: it ran before plans were kept, its plan could not be kept, or a "+
+					"newer check of the same target replaced it. Run the drift check again, then "+
+					"propose the reconcile.")
+				return
+			}
+			opts = append(opts, run.WithPlanFile(sealed))
+			if check.CommitSHA != "" {
+				opts = append(opts, run.WithPinnedCommit(check.CommitSHA))
+			}
 		}
 		proposal, err := submitter.Submit(r.Context(), check.Playbook, check.Inventory, opts...)
 		switch {

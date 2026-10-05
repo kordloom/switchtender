@@ -195,6 +195,7 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 	if err := d.allowResolvedQueue(r); err != nil {
 		return nil, err
 	}
+	planFirstOnRequest(r)
 	// Deny is checked before the hold, and even for a run born held: a rule that refuses a
 	// submission outright must not be satisfied by parking the run in front of an approver.
 	if err := d.denied(ctx, r); err != nil {
@@ -752,15 +753,18 @@ func (d *Dispatcher) RelaunchFailedHosts(ctx context.Context, runID string, opts
 }
 
 // splitInventoryFile writes the stored inventory a split targets to a private file for listing its
-// hosts and returns its path and cleanup: the snapshot the split was submitted with for a plain
-// inventory, so the shards are cut from the content they execute, and the composed rendering held to
-// its resolution otherwise.
+// hosts and returns its path and cleanup: the snapshot the split was submitted with, the composed
+// result for a composed inventory, so the shards are cut from the content they execute.
 func (d *Dispatcher) splitInventoryFile(ctx context.Context, probe *run.Run) (string, func(), error) {
 	if probe.InventorySnapshot == nil {
 		path, cleanup, _, _, err := d.inventoryFile(ctx, probe.InventoryID, probe.InventoryResolution)
 		return path, cleanup, err
 	}
-	content, err := d.openSnapshot(probe)
+	opened, err := d.openSnapshot(probe)
+	if err != nil {
+		return "", func() {}, err
+	}
+	content, err := snapshotPlay(probe, opened)
 	if err != nil {
 		return "", func() {}, err
 	}

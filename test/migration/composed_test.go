@@ -109,9 +109,9 @@ func TestImportedComposedInventoriesRunOnTheHostsResolvedAtLaunch(t *testing.T) 
 		if diff := cmp.Diff(test.WantHosts, in.marked(test.Marker)); diff != "" {
 			t.Errorf("%s: hosts the play reached (-want +got):\n%s", test.Template, diff)
 		}
-		// The smart run was checked against the real ansible-inventory before its play. The
-		// resolved hosts and their variables did not change, so the resolved digest matches the
-		// launch's, while an input gained a host, so the input digest shows the inputs moved.
+		// The smart run was checked against the real ansible-inventory before its play. It executes
+		// the snapshot taken at launch and reads no input again, so both digests match the launch's
+		// although an input gained a host while it waited.
 		check, _ := done.Raw["inventory_check"].(map[string]any)
 		if (check != nil) != test.WantChecked {
 			t.Fatalf("%s: inventory_check = %v, want checked %v", test.Template, check,
@@ -128,8 +128,9 @@ func TestImportedComposedInventoriesRunOnTheHostsResolvedAtLaunch(t *testing.T) 
 			t.Errorf("%s: the cross-check read %s, the launch resolved %s", test.Template,
 				str(check["resolved_digest"]), str(res["resolved_digest"]))
 		}
-		if str(check["input_digest"]) == str(res["input_digest"]) {
-			t.Errorf("%s: an input gained a host and the input digest did not move", test.Template)
+		if str(check["input_digest"]) != str(res["input_digest"]) {
+			t.Errorf("%s: the cross-check read inputs %s, the launch snapshotted %s, so the run read "+
+				"an input again", test.Template, str(check["input_digest"]), str(res["input_digest"]))
 		}
 	}
 

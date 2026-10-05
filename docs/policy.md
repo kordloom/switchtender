@@ -39,8 +39,15 @@ plan destroys more than that many resources.
 
 The count is read from the plan file the plan saved, and the apply that follows carries out that
 saved plan, so the plan an approver releases is the plan that runs. If the infrastructure changed
-since the plan was made, the tool refuses the stale plan rather than applying a different one. The
+since the plan was made, the tool refuses the stale plan rather than applying a different one, and the
+apply has to be proposed again. The
 [Terraform page](tool-terraform.md#a-gated-apply-carries-out-the-approved-plan) has the details.
+
+A rule with no `max_destroy` that would hold a Terraform or OpenTofu apply plans it first as well.
+The apply is planned, the apply the plan proposes carries the saved plan, and the rules decide on that
+proposal, so the rule holds the planned apply and the approval binds the plan that runs rather than a
+request that would plan again when released. An apply whose own submission asks for approval is
+planned first as well, and the apply its plan proposes is held whether or not a rule covers it.
 
 ### Requiring the approver's reason
 

@@ -17,11 +17,15 @@ function imagePinLabel(run) {
 }
 
 // inventorySnapshotLabel states what the inventory snapshot a run executes holds: the hosts it
-// names, or that it is a dynamic source whose hosts resolve at execution. It returns the empty string
-// for a run with no snapshot.
+// names, the hosts a composed inventory resolved to, or that it is a dynamic source whose hosts
+// resolve at execution. It returns the empty string for a run with no snapshot.
 function inventorySnapshotLabel(run) {
 	const snap = run && run.inventory_snapshot;
 	if (!snap) return "";
+	if (run.inventory_resolution && !snap.dynamic) {
+		const hosts = Array.isArray(snap.hosts) ? snap.hosts : [];
+		return hosts.length + " host" + (hosts.length === 1 ? "" : "s") + " as resolved at submission";
+	}
 	if (snap.dynamic) {
 		const resolved = Array.isArray(run.resolved_hosts) ? run.resolved_hosts : [];
 		return resolved.length
@@ -35,8 +39,9 @@ function inventorySnapshotLabel(run) {
 
 // executionPinsNote explains, where an approver decides, what the approval binds about where and
 // against what the run executes: an image held to a tag alone, an inventory snapshot taken when the
-// run was submitted, or a dynamic source that resolves only at execution, and the plan file a gated
-// apply carries out. It returns null when there is nothing to say.
+// run was submitted, the result a composed inventory resolved to, or a dynamic source that resolves
+// only at execution, and the saved plan an apply carries out, with what to do when the tool refuses
+// that plan as stale. It returns null when there is nothing to say.
 function executionPinsNote(run) {
 	const lines = [];
 	if (run.image && !imagePinned(run.image)) {
@@ -51,15 +56,26 @@ function executionPinsNote(run) {
 			"the hosts it resolved to.");
 	} else if (snap) {
 		const hosts = Array.isArray(snap.hosts) ? snap.hosts : [];
-		lines.push("The run executes the inventory as it was submitted, " + hosts.length + " host" +
-			(hosts.length === 1 ? "" : "s") + (hosts.length ? ": " + hosts.slice(0, 20).join(", ") +
-			(hosts.length > 20 ? ", and " + (hosts.length - 20) + " more" : "") : "") +
-			". An edit to the inventory after approval does not reach it.");
+		const named = hosts.length + " host" + (hosts.length === 1 ? "" : "s") +
+			(hosts.length ? ": " + hosts.slice(0, 20).join(", ") +
+			(hosts.length > 20 ? ", and " + (hosts.length - 20) + " more" : "") : "");
+		lines.push(run.inventory_resolution
+			? "The run executes the composed inventory as it resolved when the run was submitted, " +
+				named + ", with their variables as its inputs held them then. An edit to an input after " +
+				"approval, a variable included, does not reach it."
+			: "The run executes the inventory as it was submitted, " + named +
+				". An edit to the inventory after approval does not reach it.");
 	}
 	if (run.plan_sha256) {
-		lines.push("Approving releases the saved plan file this apply carries out, and the apply runs " +
-			"that plan rather than planning again. If the infrastructure changed since, the tool " +
-			"refuses the stale plan.");
+		lines.push(run.source === "reconcile"
+			? "Approving releases the plan the drift check saved, the plan shown with that check, and " +
+				"the apply runs that plan rather than planning again. If the infrastructure changes " +
+				"before the approval lands, the tool refuses the stale plan and changes nothing, and the " +
+				"reconcile has to be proposed again from a new drift check."
+			: "Approving releases the saved plan file this apply carries out, the plan its plan run " +
+				"made, and the apply runs that plan rather than planning again. If the infrastructure " +
+				"changes before the approval lands, the tool refuses the stale plan and changes nothing, " +
+				"and the apply has to be submitted again to plan it afresh.");
 	}
 	if (!lines.length) return null;
 	const box = document.createElement("div");

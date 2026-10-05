@@ -60,6 +60,10 @@ type Transport interface {
 	// so this is the only path by which a plan-content gate completes on a worker.
 	ProposeApply(ctx context.Context, planID string, destroys int, read bool, plan []byte) (*run.Run,
 		error)
+	// KeepDriftPlanFile hands the control node the plan file the named drift check saved, which the
+	// control node seals and keeps so a reconcile proposed from the check carries out exactly that
+	// plan. An empty plan keeps nothing and drops the plan an earlier check of the same target kept.
+	KeepDriftPlanFile(ctx context.Context, checkID string, plan []byte) error
 	// SaveHostSummary records a run's per-host outcomes.
 	SaveHostSummary(ctx context.Context, runID string, summaries []run.HostSummary) error
 	// SaveHostFacts records the system facts a run gathered per host.
@@ -95,6 +99,12 @@ func (l loopback) Policies(context.Context) ([]*policy.Policy, error) {
 // which creates runs directly, so the caller submits rather than asking anyone.
 func (l loopback) ProposeApply(context.Context, string, int, bool, []byte) (*run.Run, error) {
 	return nil, ErrUnsupported
+}
+
+// KeepDriftPlanFile reports that a loopback transport does not relay a drift check's plan. It wraps
+// a local store, whose executor seals and keeps the plan itself.
+func (l loopback) KeepDriftPlanFile(context.Context, string, []byte) error {
+	return ErrUnsupported
 }
 
 // Claim delegates to the backing store.

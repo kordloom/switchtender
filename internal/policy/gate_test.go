@@ -263,9 +263,9 @@ func TestNewPolicyDisablesThePlanContentGate(t *testing.T) {
 		t.Error("a fresh policy did not hold a run at submission, so the gate it appears to be is not " +
 			"the gate it is")
 	}
-	if policy.PlanGated([]*policy.Policy{p}, &run.Run{Tool: run.ToolTerraform}) {
-		t.Error("a fresh policy scoped a run to the plan gate, so its hold would wait for a plan that " +
-			"a non-terraform run never produces")
+	if policy.PlanExceeds([]*policy.Policy{p}, &run.Run{Tool: run.ToolTerraform}, 1<<20) {
+		t.Error("a fresh policy weighed a plan's destroy count, so it is a plan-content rule rather " +
+			"than the blanket hold it appears to be")
 	}
 	// Two policies never share an id, or an approval recorded against one resolves to the other.
 	seen := map[string]bool{p.ID: true}

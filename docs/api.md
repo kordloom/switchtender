@@ -75,7 +75,7 @@ Two more are enforced somewhere other than the request:
 | POST   | `/v1/ai/draft`             | Advisory AI draft of a bash, python, powershell, or go step script from a description. Operator role. |
 | POST   | `/v1/ai/ask`               | Advisory AI answer to a fleet question, from run, health, and drift metadata. Rate limited. |
 | POST   | `/v1/ai/propose-run`       | Turn a plain-language request into a run proposal, validated and held for approval. Operator role. |
-| POST   | `/v1/drift/reconcile`      | Build a reconcile proposal for a drifted host, held for approval. Operator role. |
+| POST   | `/v1/drift/reconcile`      | Build a reconcile proposal for a drifted host, held for approval. A Terraform or OpenTofu proposal carries the plan the check saved, and a check that kept none answers `409`. Operator role. |
 | POST   | `/v1/pipelines`            | Submit ordered playbook steps as one pipeline.          |
 | POST   | `/v1/schedules`            | Cron or RFC 5545 recurrence schedule for a run, split, pipeline, or template. The response records `created_by`. |
 | GET    | `/v1/schedules`            | List schedules.                                         |
@@ -1036,6 +1036,7 @@ presents the worker bearer token.
 | POST   | `/relay/v1/runs/{id}/log`          | Append captured output.                       |
 | POST   | `/relay/v1/runs/{id}/events`       | Append structured events.                     |
 | POST   | `/relay/v1/runs/{id}/propose-apply`| Report a plan's findings so the control node holds its apply. |
+| POST   | `/relay/v1/runs/{id}/drift-plan`   | Hand over the plan a drift check saved, which the control node seals and keeps for a reconcile. |
 | POST   | `/relay/v1/runs/{id}/host-summary` | Save the run's per-host summaries.            |
 | POST   | `/relay/v1/runs/{id}/host-facts`   | Save the facts the run gathered per host.     |
 | POST   | `/relay/v1/runs/{id}/task-summary` | Save the run's per-task summaries.            |

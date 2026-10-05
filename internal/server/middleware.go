@@ -44,9 +44,9 @@ func uploadPath(p string) bool {
 	return strings.HasPrefix(clean, "/v1/import/") || strings.HasPrefix(clean, "/hooks/")
 }
 
-// planFilePath reports whether p is the relay route a worker hands a saved plan file to, which a plan
-// of an ordinary configuration outgrows the ordinary cap with. It matches the cleaned, lowercased path
-// exactly, as uploadPath does.
+// planFilePath reports whether p is a relay route a worker hands a saved plan file to, the plan
+// gate's proposal or a drift check's plan, which a plan of an ordinary configuration outgrows the
+// ordinary cap with. It matches the cleaned, lowercased path exactly, as uploadPath does.
 func planFilePath(p string) bool {
 	clean := path.Clean("/" + strings.TrimPrefix(strings.ToLower(p), "/"))
 	rest, ok := strings.CutPrefix(clean, "/relay/v1/runs/")
@@ -54,7 +54,7 @@ func planFilePath(p string) bool {
 		return false
 	}
 	id, tail, ok := strings.Cut(rest, "/")
-	return ok && id != "" && tail == "propose-apply"
+	return ok && id != "" && (tail == "propose-apply" || tail == "drift-plan")
 }
 
 // securityHeaders stamps every response with the browser hardening headers: no MIME sniffing, no

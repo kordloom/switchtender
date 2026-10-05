@@ -21,7 +21,7 @@ func TestPolicyHoldsMatchingRun(t *testing.T) {
 	store := run.NewMemStore()
 	policies := policy.NewMemStore()
 	if err := policies.Save(context.Background(), &policy.Policy{
-		ID: policy.NewID(), Name: "tf-destroy", Tool: "terraform", CommandContains: "destroy",
+		ID: policy.NewID(), Name: "bash-destroy", Tool: "bash", CommandContains: "destroy",
 		MaxDestroy: policy.DisabledMaxDestroy,
 	}); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -36,7 +36,7 @@ func TestPolicyHoldsMatchingRun(t *testing.T) {
 
 	// A matching run is held for approval with no opt-in.
 	held, err := d.Submit(context.Background(), "", "",
-		run.WithTool("terraform"), run.WithCommand("terraform destroy prod"))
+		run.WithTool("bash"), run.WithCommand("destroy prod"))
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}

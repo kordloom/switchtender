@@ -52,9 +52,9 @@ func TestPlanSummaryCountsEveryClause(t *testing.T) {
 }
 
 // TestPreviewApplyMatchesTheGate pins the decision a pull request is shown to the decision the
-// dispatcher would make on the real apply: a deny at submission, a blanket hold with its second
-// approver, a plan-content hold weighed on this plan's destroy count, an unreadable plan held, and
-// an apply nothing stops.
+// dispatcher would make on the real apply: a deny at submission, a blanket hold on the planned
+// apply with its second approver, a plan-content hold weighed on this plan's destroy count, an
+// unreadable plan held, and an apply nothing stops.
 func TestPreviewApplyMatchesTheGate(t *testing.T) {
 	t.Parallel()
 	denyAll := &policy.Policy{ID: "pol_d", Name: "no prod", Effect: policy.EffectDeny,
@@ -74,10 +74,10 @@ func TestPreviewApplyMatchesTheGate(t *testing.T) {
 	}, { // Test 1: A deny rule refuses at submission.
 		Policies: []*policy.Policy{denyAll}, Read: true,
 		WantPreview: ApplyPreview{Outcome: ApplyDenied, Rule: "no prod", Stage: StageSubmission},
-	}, { // Test 2: A blanket rule holds at submission and carries its second approver.
+	}, { // Test 2: A blanket rule holds the planned apply at the plan gate with its second approver.
 		Policies: []*policy.Policy{holdAll}, Read: true,
-		WantPreview: ApplyPreview{Outcome: ApplyHeld, Rule: "tf review", Stage: StageSubmission,
-			RequireDistinctApprover: true},
+		WantPreview: ApplyPreview{Outcome: ApplyHeld, Rule: "tf review", Stage: StagePlan,
+			RequireDistinctApprover: true, PlanGated: true},
 	}, { // Test 3: A destroy over the limit holds at the plan gate, naming the count.
 		Policies: []*policy.Policy{destroyGuard}, Destroys: 2, Read: true,
 		WantPreview: ApplyPreview{Outcome: ApplyHeld, Rule: "destroy guard (plan destroys 2, limit 0)",

@@ -9,7 +9,8 @@ An inventory is the list of hosts a run targets. SwitchTender keeps three kinds.
 | Constructed | The Ansible `constructed` plugin run over a list of input inventories at every launch, building groups and variables from the hosts' own variables. |
 
 Smart and constructed inventories hold no hosts of their own. They are composed from the others each
-time a run launches, so they always reflect what their inputs hold now.
+time a run launches, so a launch reflects what their inputs hold at that moment, and the run executes
+what that launch resolved to.
 
 ## Smart inventories
 
@@ -168,7 +169,8 @@ outside that range.
 Every Ansible run against an inventory the native engine resolved is checked once more just before
 the play starts. The executor has its own `ansible-inventory`, with the run's environment, the
 project's `ansible.cfg`, and the run's container image when it has one, read every input the native
-engine read and the inventory handed to the play, and compares each reading with the native one. On
+engine read, as the run's snapshot holds it, and the inventory handed to the play, and compares each
+reading with the native one. On
 any difference the run is refused, and its error and its evidence name each difference: the host,
 the group, or the variable, with its value and type, except that a secret variable is named and its
 value withheld. An executor without Ansible refuses such a run too, rather than running it
@@ -181,9 +183,9 @@ ansible-core version when Ansible did, a digest of the inputs, and a digest of t
 inventory: its hosts, groups, and variables. Both digests are SHA-256 over the secret-masked form,
 the one the API serves, so they identify what was resolved without committing to a password. The
 check before an Ansible run records the ansible-core that made it and the digests it read, which
-match the resolution's unless an input changed while the run waited for approval. The resolution is
-part of the approved spec, the check is part of the outcome record, and the dossier and receipt
-carry both.
+match the resolution's, since execution reads the inputs from the run's snapshot rather than from
+the store. The resolution is part of the approved spec, the check is part of the outcome record, and
+the dossier and receipt carry both.
 
 ## Access
 
@@ -221,6 +223,19 @@ of failed shards reaches only hosts in it. A rerun is a new launch and resolves 
 resolves to no host is never started against nothing: a launch by a person is refused, and a
 schedule or webhook fire is recorded as skipped, as [When nothing matches](#when-nothing-matches)
 describes.
+
+What it resolved to is snapshotted the way a static inventory is. Each input it drew from is read
+once, at launch, content and variables together, and the composed result, its hosts with their
+variables, is sealed with the server's key beside those inputs. The approval binds the result like a
+static snapshot: its hosts, a digest of its content with secret values masked, the digest of the
+sealed snapshot, and the credentials the composed inventory attaches. The run executes that snapshot
+and reads no input again, so an edit to an input after the launch, a host variable included, does
+not reach it. A run whose snapshot is missing, does not open, or no longer matches what was bound is
+refused, and the snapshot is wiped when the run ends, as a static one is. A relay worker receives it
+sealed to its pool's delivery key, inputs included, so it checks the inputs against Ansible's reading
+without reaching the inventory store. A retry of a split's failed shards is a submission of its own:
+it is composed again from its inputs as they stand, held to the hosts the first launch resolved to,
+and snapshotted the same way.
 
 The resolved set is part of the run's spec, so the digest an approver's decision commits and the
 digest the outcome entry commits both cover it, and a receipt discloses it. The run's evidence

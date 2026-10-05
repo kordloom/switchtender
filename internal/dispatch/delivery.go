@@ -465,9 +465,9 @@ func (d *Dispatcher) OpenSecrets(ctx context.Context, r *run.Run) (*handoff.Payl
 }
 
 // deliveryMode reports whether r will execute as a plan on the worker that claims it: a dry run, or
-// an apply a plan-content rule sends through the plan gate. The worker reads the same rules across
-// the relay and refuses a token minted for the other mode, so a rule edited in between fails the
-// run closed rather than handing a plan's token to an apply.
+// an apply a rule plans first. The worker reads the same rules across the relay and refuses a token
+// minted for the other mode, so a rule edited in between fails the run closed rather than handing a
+// plan's token to an apply.
 func (d *Dispatcher) deliveryMode(ctx context.Context, r *run.Run) (bool, error) {
 	if r.DryRun {
 		return true, nil

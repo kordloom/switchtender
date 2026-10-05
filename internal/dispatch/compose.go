@@ -88,13 +88,19 @@ func (d *Dispatcher) PreviewInventory(ctx context.Context, inv *inventory.Invent
 }
 
 // resolveComposed records on r the hosts its composed inventory resolves to for the actor on ctx,
-// clearing any resolution carried in from an earlier launch, since every launch resolves afresh. A
-// run against a static inventory, or against none, is left alone.
+// clearing any resolution carried in from an earlier launch, since every launch resolves afresh,
+// and snapshots what it resolved to: the composed result and every input it drew from, each read
+// once, now. A run against a static inventory, or against none, is left alone. A run derived from
+// another, the apply a plan proposes, arrives carrying its source's resolution and snapshot and
+// keeps both, since it is part of the same submission.
 //
 // It runs before the policy pass, so a rule scoped to an input inventory sees the run as touching
 // that inventory's hosts, and before the run is stored, so the record the approver reads and the
-// set execution is held to are the same.
+// inventory execution runs are the same.
 func (d *Dispatcher) resolveComposed(ctx context.Context, r *run.Run) error {
+	if r.InventoryResolution != nil && r.InventorySnapshot != nil && r.InventorySealed != "" {
+		return nil
+	}
 	r.InventoryResolution = nil
 	if r.InventoryID == "" || d.inventories == nil {
 		return nil
@@ -121,13 +127,14 @@ func (d *Dispatcher) resolveComposed(ctx context.Context, r *run.Run) error {
 			inv.Name)
 	}
 	r.InventoryResolution = c.Resolution
-	return nil
+	return d.snapshotComposed(r, inv, c)
 }
 
-// composedContent renders the inventory a run executes against, held to the resolution recorded
-// when it launched: only the inputs it drew from are read and only the hosts it resolved to are
-// kept. A composed run with no resolution is refused rather than resolved here, because execution
-// has no actor to ask, and resolving without one would reach every host on the install.
+// composedContent renders a composed inventory held to the resolution a run recorded when it
+// launched: only the inputs it drew from are read and only the hosts it resolved to are kept. It is
+// how the retry of a split's failed shards takes its snapshot. A composed run with no resolution is
+// refused rather than resolved here, because no actor is asked, and resolving without one would
+// reach every host on the install.
 func (d *Dispatcher) composedContent(ctx context.Context, inv *inventory.Inventory,
 	pinned *run.InventoryResolution) (*composed, error) {
 	if pinned == nil {

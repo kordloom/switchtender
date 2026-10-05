@@ -576,14 +576,15 @@ func TestProposeApplyOnARunTheControlNodeDoesNotHold(t *testing.T) {
 }
 
 // TestProposeApplyRefusesARunNoRuleGates pins that a proposal needs a rule that asked for one. A
-// worker plans a terraform apply first only when a plan-content rule sends it through the gate, so
-// with no rules, or with none that gates the run, no gate asked for an apply and the endpoint must
-// not mint one. The alternative let any worker holding a lease on a terraform apply have the
-// control node create a second real change from it.
+// worker plans a terraform apply first only when a plan-content rule sends it through the gate or
+// an approval rule would hold it, so with no rules, or with none that covers the run, no gate asked
+// for an apply and the endpoint must not mint one. The alternative let any worker holding a lease
+// on a terraform apply have the control node create a second real change from it.
 func TestProposeApplyRefusesARunNoRuleGates(t *testing.T) {
 	t.Parallel()
 	blanket := policy.NewMemStore()
-	blanketRule := policy.NewPolicy("terraform needs a person")
+	blanketRule := policy.NewPolicy("bash needs a person")
+	blanketRule.Tool = run.ToolBash
 	if err := blanket.Save(context.Background(), blanketRule); err != nil {
 		t.Fatalf("Save policy: %v", err)
 	}
@@ -598,8 +599,8 @@ func TestProposeApplyRefusesARunNoRuleGates(t *testing.T) {
 		Name     string
 	}{{ // Test 0: No policy store is configured, so the worker's gate could not have fired.
 		Name: "no policy store",
-	}, { // Test 1: A rule with no destroy limit holds at submission and never sends a run to the gate.
-		Name: "no plan-content rule", Policies: blanket,
+	}, { // Test 1: The only hold rule is for another tool, so nothing holds the apply.
+		Name: "a hold rule for another tool", Policies: blanket,
 	}, { // Test 2: The only plan-content rule is for another tool.
 		Name: "a plan-content rule for another tool", Policies: otherTool,
 	}}

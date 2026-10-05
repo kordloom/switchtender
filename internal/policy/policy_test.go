@@ -198,8 +198,9 @@ func TestRequireDistinctIsOrderIndependent(t *testing.T) {
 }
 
 // TestPlanGated covers the plan gate scope check: a plan-content policy (MaxDestroy >= 0) matching a
-// run gates it, a blanket policy (MaxDestroy < 0) does not, and a plan-content policy that does not
-// match does not gate.
+// run gates it, a plan-content policy that does not match does not, and any rule that would hold a
+// terraform or opentofu apply plans it first, so the approval binds the plan that applies, except
+// for a run its submission asked to hold, a run a decision already released, and a workflow step.
 func TestPlanGated(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -211,10 +212,10 @@ func TestPlanGated(t *testing.T) {
 		Name:     "matching plan-content gates",
 		Policies: []*policy.Policy{{Tool: "terraform", MaxDestroy: 0}},
 		Run:      run.Run{Tool: "terraform", Command: "infra"}, Want: true,
-	}, { // Test 1: A blanket policy never gates on plan content.
-		Name:     "blanket does not gate",
+	}, { // Test 1: A blanket policy that would hold the apply plans it first.
+		Name:     "blanket hold plans first",
 		Policies: []*policy.Policy{{Tool: "terraform", MaxDestroy: policy.DisabledMaxDestroy}},
-		Run:      run.Run{Tool: "terraform", Command: "infra"}, Want: false,
+		Run:      run.Run{Tool: "terraform", Command: "infra"}, Want: true,
 	}, { // Test 2: A plan-content policy that does not match does not gate.
 		Name:     "non-matching plan-content",
 		Policies: []*policy.Policy{{Tool: "opentofu", MaxDestroy: 3}},
@@ -230,11 +231,11 @@ func TestPlanGated(t *testing.T) {
 		Name:     "high risk floor plans first",
 		Policies: []*policy.Policy{{MinRisk: run.RiskHigh, MaxDestroy: policy.DisabledMaxDestroy}},
 		Run:      run.Run{Tool: "opentofu", Command: "infra"}, Want: true,
-	}, { // Test 6: A floor the apply already meets holds it at submission instead.
+	}, { // Test 6: A floor the apply already meets would hold it, so it plans first too.
 		Name: "floor already met",
 		Policies: []*policy.Policy{{Reversibility: run.ReversibleCostly,
 			MaxDestroy: policy.DisabledMaxDestroy}},
-		Run: run.Run{Tool: "terraform", Command: "infra"}, Want: false,
+		Run: run.Run{Tool: "terraform", Command: "infra"}, Want: true,
 	}, { // Test 7: A floor rule scoped to another tool leaves the apply alone.
 		Name: "floor for another tool",
 		Policies: []*policy.Policy{{Tool: "ansible", Reversibility: run.Irreversible,
@@ -260,6 +261,24 @@ func TestPlanGated(t *testing.T) {
 		Policies: []*policy.Policy{{Effect: policy.EffectDeny, Reversibility: run.Irreversible,
 			MaxDestroy: policy.DisabledMaxDestroy}},
 		Run: run.Run{Tool: "terraform", Command: "infra"}, Want: true,
+	}, { // Test 12: An apply its submission asked to hold keeps that hold.
+		Name:     "held at submission",
+		Policies: []*policy.Policy{{Tool: "terraform", MaxDestroy: policy.DisabledMaxDestroy}},
+		Run:      run.Run{Tool: "terraform", Command: "infra", Status: run.StatusPendingApproval},
+		Want:     false,
+	}, { // Test 13: An apply a decision already released is not held again.
+		Name:     "already decided",
+		Policies: []*policy.Policy{{Tool: "terraform", MaxDestroy: policy.DisabledMaxDestroy}},
+		Run:      run.Run{Tool: "terraform", Command: "infra", DecisionID: "dec_1"}, Want: false,
+	}, { // Test 14: A workflow step is governed by its workflow's approval.
+		Name:     "workflow step",
+		Policies: []*policy.Policy{{Tool: "terraform", MaxDestroy: policy.DisabledMaxDestroy}},
+		Run:      run.Run{Tool: "terraform", Command: "infra", ParentID: new("run_parent")}, Want: false,
+	}, { // Test 15: A deny rule alone holds nothing, so it plans nothing first.
+		Name: "deny without a floor",
+		Policies: []*policy.Policy{{Effect: policy.EffectDeny, Tool: "terraform",
+			MaxDestroy: policy.DisabledMaxDestroy}},
+		Run: run.Run{Tool: "terraform", Command: "infra"}, Want: false,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {

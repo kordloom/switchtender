@@ -61,6 +61,9 @@ type memStore struct {
 	// outcomes records the finished runs that owe the chain nothing: those stored already finished
 	// and those whose outcome was settled. See OwedOutcomes.
 	outcomes outcomeLedger
+	// driftPlans maps a drift check's id to the sealed plan file it kept, made on first use. See
+	// KeepDriftPlan.
+	driftPlans map[string]string
 }
 
 // NewMemStore returns an empty in-memory Store.
@@ -140,6 +143,8 @@ func (m *memStore) Save(_ context.Context, r *Run) error {
 		if prev.PlanSHA256 != "" {
 			cl.PlanSHA256 = prev.PlanSHA256
 		}
+		// A request's ask for approval is set when the run is created and never cleared.
+		cl.ApprovalRequested = cl.ApprovalRequested || prev.ApprovalRequested
 	}
 	m.outcomes.noteSave(m.runs[r.ID], cl)
 	if prev, ok := m.runs[r.ID]; ok {
@@ -793,6 +798,43 @@ func (m *memStore) SweepSealed(_ context.Context) (int, error) {
 		}
 	}
 	return n, nil
+}
+
+// KeepDriftPlan keeps the sealed plan file a running drift check saved and drops every plan another
+// run with the same project and working directory kept.
+func (m *memStore) KeepDriftPlan(_ context.Context, id, sealed string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.runs[id]
+	if !ok {
+		return ErrNotFound
+	}
+	if r.Status != StatusRunning || !r.DryRun {
+		return ErrNoDriftCheck
+	}
+	for other := range m.driftPlans {
+		if o := m.runs[other]; other != id && o != nil && o.ProjectID == r.ProjectID &&
+			o.Command == r.Command {
+			delete(m.driftPlans, other)
+		}
+	}
+	if sealed != "" {
+		if m.driftPlans == nil {
+			m.driftPlans = make(map[string]string)
+		}
+		m.driftPlans[id] = sealed
+	}
+	return nil
+}
+
+// DriftPlan returns the sealed plan file the drift check kept, empty when it kept none.
+func (m *memStore) DriftPlan(_ context.Context, id string) (string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if _, ok := m.runs[id]; !ok {
+		return "", ErrNotFound
+	}
+	return m.driftPlans[id], nil
 }
 
 // ParkForApproval moves a running parent this owner holds to pending_approval and clears its lease.

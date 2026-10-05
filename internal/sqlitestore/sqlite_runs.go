@@ -26,7 +26,7 @@ const runColumns = `id, playbook, inventory, status, exit_code, error, created_a
 	template_id, inventory_resolution, sealed_vars, use_fact_cache, fact_cache_timeout, git_ref,
 	dry_run_scans, hold_note, sealed_digests, policy_notes, inventory_check, initiator,
 	require_reason, inventory_snapshot, inventory_sealed, resolved_hosts, plan_sha256, plan_sealed,
-	image_digest, decision_id, decision_claim`
+	image_digest, decision_id, decision_claim, approval_requested`
 
 // Save inserts or replaces the run identified by r.ID. The cancel flag merges with MAX so a
 // replace from a stale snapshot cannot erase a cancel another process just requested.
@@ -47,8 +47,8 @@ INSERT INTO runs
 	 template_id, inventory_resolution, sealed_vars, use_fact_cache, fact_cache_timeout, git_ref,
 	 dry_run_scans, hold_note, sealed_digests, policy_notes, inventory_check, initiator,
 	 require_reason, inventory_snapshot, inventory_sealed, resolved_hosts, plan_sha256, plan_sealed,
-	 image_digest)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	 image_digest, approval_requested)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory,
 	status=CASE WHEN runs.status IN ('parked', 'deciding') AND excluded.status='pending_approval'
@@ -91,7 +91,8 @@ ON CONFLICT(id) DO UPDATE SET
 		ELSE runs.inventory_snapshot END,
 	inventory_sealed=runs.inventory_sealed, resolved_hosts=excluded.resolved_hosts,
 	plan_sha256=CASE WHEN runs.plan_sha256 = '' THEN excluded.plan_sha256 ELSE runs.plan_sha256 END,
-	plan_sealed=runs.plan_sealed, image_digest=excluded.image_digest`
+	plan_sealed=runs.plan_sealed, image_digest=excluded.image_digest,
+	approval_requested=MAX(runs.approval_requested, excluded.approval_requested)`
 	// The sealed answers are written once, by the insert that created the run, and kept by every
 	// later save. A run decoded from JSON, which is how a relay worker and every API reader holds
 	// one, does not carry them, so a whole-row save from such a copy would otherwise erase the
@@ -122,6 +123,7 @@ ON CONFLICT(id) DO UPDATE SET
 		run.InitiatorColumn(r.Initiator), r.RequireReason,
 		run.SnapshotColumn(r.InventorySnapshot), r.InventorySealed,
 		sqlutil.JSONStrings(r.ResolvedHosts), r.PlanSHA256, r.PlanSealed, r.ImageDigest,
+		sqlutil.BoolToInt(r.ApprovalRequested),
 	)
 	if err != nil {
 		if isCallbackConflict(err) {
@@ -460,6 +462,9 @@ func scanRun(s scanner) (*run.Run, error) {
 		snapshot string
 		// resolvedHosts are the hosts a dynamic source resolved to, stored as JSON.
 		resolvedHosts string
+		// approvalRequested is the request's ask for approval, stored as an integer like every other
+		// boolean on a run.
+		approvalRequested int
 	)
 	if err := s.Scan(&r.ID, &r.Playbook, &r.Inventory, &status, &exit, &r.Error,
 		&created, &started, &ended, &parent, &shardIdx, &shardCnt, &r.Limit,
@@ -474,9 +479,11 @@ func scanRun(s scanner) (*run.Run, error) {
 		&r.TemplateID, &resolution, &sealed, &factCache, &r.FactCacheTimeout, &r.GitRef,
 		&scans, &r.HoldNote, &sealedDigests, &policyNotes, &inventoryCheck, &initiator,
 		&r.RequireReason, &snapshot, &r.InventorySealed, &resolvedHosts, &r.PlanSHA256,
-		&r.PlanSealed, &r.ImageDigest, &r.DecisionID, &r.DecisionClaim); err != nil {
+		&r.PlanSealed, &r.ImageDigest, &r.DecisionID, &r.DecisionClaim,
+		&approvalRequested); err != nil {
 		return nil, err
 	}
+	r.ApprovalRequested = approvalRequested != 0
 	snap, err := run.ParseSnapshotColumn(snapshot)
 	if err != nil {
 		return nil, err
@@ -1110,6 +1117,49 @@ WHERE status IN (?, ?, ?, ?, ?) AND (inventory_sealed<>'' OR plan_sealed<>'')`,
 		return 0, fmt.Errorf("sweep sealed run material: %w", err)
 	}
 	return int(n), nil
+}
+
+// KeepDriftPlan keeps the sealed plan file a running drift check saved and drops every plan another
+// run with the same project and working directory kept. The keep is fenced to a running dry run, so
+// a plan never lands on a run that is not a drift check or on one that already ended.
+func (s *store) KeepDriftPlan(ctx context.Context, id, sealed string) error {
+	res, err := s.db.ExecContext(ctx,
+		"UPDATE runs SET drift_plan_sealed=? WHERE id=? AND status=? AND dry_run=1", sealed, id,
+		string(run.StatusRunning))
+	if err != nil {
+		return fmt.Errorf("keep drift plan: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("keep drift plan: %w", err)
+	}
+	if n == 0 {
+		if _, err := s.DriftPlan(ctx, id); err != nil {
+			return err
+		}
+		return run.ErrNoDriftCheck
+	}
+	if _, err := s.db.ExecContext(ctx, `
+UPDATE runs SET drift_plan_sealed=''
+WHERE drift_plan_sealed<>'' AND id<>?
+	AND project_id=(SELECT project_id FROM runs WHERE id=?)
+	AND command=(SELECT command FROM runs WHERE id=?)`, id, id, id); err != nil {
+		return fmt.Errorf("drop superseded drift plans: %w", err)
+	}
+	return nil
+}
+
+// DriftPlan returns the sealed plan file the drift check kept, empty when it kept none.
+func (s *store) DriftPlan(ctx context.Context, id string) (string, error) {
+	var sealed string
+	err := s.db.QueryRowContext(ctx, "SELECT drift_plan_sealed FROM runs WHERE id=?", id).Scan(&sealed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", run.ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("read drift plan: %w", err)
+	}
+	return sealed, nil
 }
 
 // FinalizeRunning moves a running run to its terminal status and records the exit code, failure

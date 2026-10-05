@@ -37,35 +37,39 @@ func (d *Dispatcher) validateInventory(ctx context.Context, id string) error {
 // list, so a variable such as ansible_password is masked in the run's output, and for a composed
 // inventory what it resolved to, which the cross-check before an Ansible run reads.
 //
-// A plain stored inventory is the snapshot the run was submitted with, opened through src, never the
-// inventory as the store holds it now. A composed inventory is rendered from its inputs held to the
-// hosts it resolved to at submission. A run naming a stored inventory with neither is refused: it
-// would otherwise execute whatever the inventory holds when it is claimed, which nobody approved.
+// The inventory is the snapshot the run was submitted with, opened through src, never the inventory
+// as the store holds it now. For a composed inventory that is the result it resolved to, its hosts
+// with their variables, and the inputs it drew from, each as it was read then. A run naming a
+// stored inventory without a snapshot is refused: it would otherwise execute whatever the inventory
+// or its inputs hold when it is claimed, which nobody approved.
 func (d *Dispatcher) materializeInventory(ctx context.Context, src secretSource, r *run.Run,
 	spec *roundhouse.Spec) (func(), []string, *composed, error) {
 	cleanup := func() {}
 	if r.InventoryID == "" {
 		return cleanup, nil, nil, nil
 	}
-	if r.InventorySnapshot != nil {
-		content, err := src.inventorySnapshot(ctx, r)
-		if err != nil {
-			return cleanup, nil, nil, err
-		}
-		remove, secrets, err := d.materializeSnapshot(r, content, spec)
-		return remove, secrets, nil, err
-	}
-	if r.InventoryResolution == nil {
+	if r.InventorySnapshot == nil {
 		return cleanup, nil, nil, fmt.Errorf("%w: this run names stored inventory %s and carries no "+
 			"snapshot of it, so it is refused rather than run against whatever the inventory holds "+
 			"now. Submit it again", ErrInventorySnapshot, r.InventoryID)
 	}
-	path, remove, secrets, comp, err := d.inventoryFile(ctx, r.InventoryID, r.InventoryResolution)
+	content, err := src.inventorySnapshot(ctx, r)
 	if err != nil {
 		return cleanup, nil, nil, err
 	}
-	spec.Inventory = path
-	return remove, secrets, comp, nil
+	if r.InventoryResolution == nil {
+		remove, secrets, err := d.materializeSnapshot(r, content, spec)
+		return remove, secrets, nil, err
+	}
+	comp, err := composedFromSnapshot(r, content)
+	if err != nil {
+		return cleanup, nil, nil, err
+	}
+	remove, secrets, err := d.materializeSnapshot(r, comp.Content, spec)
+	for _, in := range comp.inputs {
+		secrets = append(secrets, inventorySecrets(in.content)...)
+	}
+	return remove, secrets, comp, err
 }
 
 // inventoryFile materializes a stored inventory to a file in a directory of its own and returns its

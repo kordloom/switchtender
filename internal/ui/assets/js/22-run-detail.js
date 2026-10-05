@@ -1131,14 +1131,20 @@ function renderHeader(run) {
 		snap.querySelector(".value").dataset.tip = run.inventory_snapshot.dynamic
 			? "A dynamic source resolves at execution. The approval binds its definition, and the " +
 				"outcome records the hosts it resolved to."
-			: "The inventory as it was when the run was submitted. The run executes this snapshot, and " +
-				"an approval binds it.";
+			: run.inventory_resolution
+				? "The composed inventory as it resolved when the run was submitted, its hosts with " +
+					"their variables. The run executes this snapshot, and an approval binds it."
+				: "The inventory as it was when the run was submitted. The run executes this snapshot, " +
+					"and an approval binds it.";
 		el.appendChild(snap);
 	}
 	if (run.plan_sha256) {
 		const plan = field("Plan file", shortId("sha256:" + run.plan_sha256), null, run.plan_sha256);
-		plan.querySelector(".value").dataset.tip = "The saved plan this apply carries out. An approval " +
-			"binds it, and the apply runs it rather than planning again.";
+		plan.querySelector(".value").dataset.tip = (run.source === "reconcile"
+			? "The plan the drift check saved, which this reconcile carries out. "
+			: "The saved plan this apply carries out. ") +
+			"An approval binds it, and the apply runs it rather than planning again. A plan the tool " +
+			"refuses as stale has to be proposed again.";
 		el.appendChild(plan);
 	}
 	if (run.dry_run) {
@@ -1209,7 +1215,8 @@ function renderHeader(run) {
 		link.href = "/ui/runs/" + run.proposed_from;
 		link.textContent = shortId(run.proposed_from);
 		link.title = run.proposed_from;
-		el.appendChild(field("Proposed from drift check", null, link));
+		el.appendChild(field(run.source === "reconcile" ? "Proposed from drift check" : "Planned by",
+			null, link));
 		if (run.limit) {
 			el.appendChild(field("Limited to", run.limit));
 		}

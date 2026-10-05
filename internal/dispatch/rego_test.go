@@ -45,9 +45,9 @@ func TestARegoPolicyGatesASubmission(t *testing.T) {
 	input.run.tool == "bash"
 }
 
-hold contains "terraform needs a person" if input.run.tool == "terraform"
+hold contains "python needs a person" if input.run.tool == "python"
 
-require_distinct_approver if input.run.tool == "terraform"`)
+require_distinct_approver if input.run.tool == "python"`)
 	listed, err := policies.List(context.Background())
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
@@ -58,14 +58,14 @@ require_distinct_approver if input.run.tool == "terraform"`)
 	defer d.Close()
 	ctx := context.Background()
 
-	held, err := d.Submit(ctx, "", "", run.WithTool("terraform"), run.WithCommand("infra/prod"))
+	held, err := d.Submit(ctx, "", "", run.WithTool("python"), run.WithCommand("print('deploy')"))
 	if err != nil {
-		t.Fatalf("Submit(terraform) error = %v", err)
+		t.Fatalf("Submit(python) error = %v", err)
 	}
 	if held.Status != run.StatusPendingApproval {
 		t.Fatalf("status = %q, want held", held.Status)
 	}
-	wantHeld := "rego gate (terraform needs a person, rego sha256:" + digest[:12] + ")"
+	wantHeld := "rego gate (python needs a person, rego sha256:" + digest[:12] + ")"
 	if held.HeldByPolicy != wantHeld {
 		t.Errorf("held by %q, want %q", held.HeldByPolicy, wantHeld)
 	}

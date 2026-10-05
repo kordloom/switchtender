@@ -13,32 +13,51 @@ names that directory, relative to the project checkout.
 ## What runs
 
 `terraform init` runs first. If it fails the run stops there with init's result. Then `terraform
-apply -auto-approve` applies the configuration. A dry run runs `terraform plan` instead, so it
-previews the change without touching infrastructure. All three run with `-input=false -no-color`, so
-a run never blocks on a prompt.
+apply -auto-approve` applies the configuration. A dry run runs `terraform plan` instead and saves
+the plan file, so it previews the change without touching infrastructure. All three run with
+`-input=false -no-color`, so a run never blocks on a prompt.
 
 ### A gated apply carries out the approved plan
 
-An apply a plan-content rule scopes, one with `max_destroy` or a Rego `plan_gate`, runs in two
-steps. First it plans and saves the plan file with `-out`. The gate measures what the plan destroys
-from that saved file, rendered with `terraform show -json`, never from the text the tool printed.
-The apply it proposes then carries out exactly that file with `terraform apply <planfile>`, and the
-approval binds the plan file's digest. If anything changed the state after the plan was made,
-Terraform itself refuses the stale plan, and the apply fails without changing anything rather than
-planning again and applying what nobody weighed.
+An apply runs in two steps when a rule covers it: a plan-content rule, one with `max_destroy` or a
+Rego `plan_gate`, or any approval rule that would hold it. First it plans and saves the plan file
+with `-out`. The gate measures what the plan destroys from that saved file, rendered with
+`terraform show -json`, never from the text the tool printed. The apply it proposes carries the saved
+plan, the rules decide on that proposal, and an apply they hold waits with the plan its approver is
+shown. Once released it carries out exactly that file with `terraform apply <planfile>`, and the
+approval binds the plan file's digest. A rule that holds an apply therefore holds the planned
+proposal rather than the request, so the approval covers the plan that runs. An apply whose own
+submission asks for approval, through `require_approval` or an AI proposal, is planned first the same
+way: the request is not held, and the apply its plan proposes waits for a person with the saved plan,
+whatever the rules say.
+
+If anything changed the state after the plan was made, Terraform itself refuses the stale plan with
+`Saved plan is stale`, and the apply fails without changing anything rather than planning again and
+applying what nobody weighed. The run then says the proposal has to be made again: submit the apply
+again, and it is planned afresh.
+
+A [drift check](drift.md) works the same way. A dry run saves its plan file too, and a check that
+finds drift keeps it, sealed, so the [reconcile](drift.md#reconcile-a-drifted-target) proposed from
+the check carries out exactly that plan, the one shown with the check, with its digest bound into the
+approval. A later check of the same working directory drops the plan an earlier check kept, whether
+or not it finds drift. A reconcile is refused for a check that kept no plan, and one whose plan went
+stale before its approval landed fails the same way an apply does, saying to run the check again and
+propose the reconcile from it.
 
 A plan file holds the values the configuration was planned with, sensitive ones included, so it is
 handled as a secret. It is sealed with the server's key while the apply waits, written only into the
-run's private directory, never written to the run log, and wiped when the apply ends. The values it
-marks sensitive are added to the masker before the apply prints anything. On a relay worker, the
-plan's worker hands the saved plan file to the control node, which seals it, and the apply's worker
-receives it sealed to its pool's delivery key, like a credential, so a pool with no delivery key
-cannot run a gated apply. A plan file crosses the relay only up to 19 MiB. A larger one is refused
-with its size and the limit stated, and the plan fails without proposing an apply, so run it on a
+run's private directory, never written to the run log, and wiped when the apply ends. A drift check's
+plan stays sealed at rest until a newer check of the same working directory replaces it. The values
+a plan marks sensitive are added to the masker before the tool prints anything. On a relay worker,
+the plan's worker, or the drift check's, hands the saved plan file to the control node, which seals
+it, and the apply's worker receives it sealed to its pool's delivery key, like a credential, so a
+pool with no delivery key cannot run a gated apply. A plan file crosses the relay only up to 19 MiB.
+A larger one is refused with its size and the limit stated: the plan fails without proposing an
+apply, and a drift check keeps no plan and says a reconcile cannot be proposed from it. Run it on a
 queue the control node executes or split the configuration.
 
-An apply that no plan-content rule scopes still runs `apply -auto-approve`, which plans and applies
-in one step with nothing saved in between.
+An apply that no rule covers still runs `apply -auto-approve`, which plans and applies in one step
+with nothing saved in between.
 
 ## What a plan runs, and what the gate reads
 

@@ -113,6 +113,12 @@ CREATE TABLE IF NOT EXISTS runs (
 	-- ciphertext only, wiped when the run ends.
 	plan_sha256 TEXT NOT NULL DEFAULT '',
 	plan_sealed TEXT NOT NULL DEFAULT '',
+	-- The plan file a drift check saved, ciphertext only, kept past the check's end so a reconcile
+	-- carries out exactly that plan, and dropped when a newer check of the same target lands.
+	drift_plan_sealed TEXT NOT NULL DEFAULT '',
+	-- Whether a Terraform or OpenTofu apply's own submission asked for approval, so the apply its
+	-- plan proposes is held. Set when the run is created and never cleared.
+	approval_requested INTEGER NOT NULL DEFAULT 0,
 	-- The digest of the image the container runtime pulled and ran.
 	image_digest TEXT NOT NULL DEFAULT '',
 	-- The decision that won a held run or an approval step: the id of its record and of the chain
@@ -170,6 +176,8 @@ ALTER TABLE runs ADD COLUMN IF NOT EXISTS inventory_sealed TEXT NOT NULL DEFAULT
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS resolved_hosts TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS plan_sha256 TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS plan_sealed TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS drift_plan_sealed TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS approval_requested INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS image_digest TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS decision_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS decision_claim TEXT NOT NULL DEFAULT '';
