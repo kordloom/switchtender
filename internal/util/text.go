@@ -87,3 +87,18 @@ func safeAny(v any) any {
 		return v
 	}
 }
+
+// JoinWords joins words the way a sentence lists them, with conjunction before the last: "a",
+// "a and b", "a, b, and c". A list interpolated into a sentence reads as prose rather than as a
+// slice printed into the middle of one.
+func JoinWords(words []string, conjunction string) string {
+	switch len(words) {
+	case 0:
+		return ""
+	case 1:
+		return words[0]
+	case 2:
+		return words[0] + " " + conjunction + " " + words[1]
+	}
+	return strings.Join(words[:len(words)-1], ", ") + ", " + conjunction + " " + words[len(words)-1]
+}

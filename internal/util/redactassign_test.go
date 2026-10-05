@@ -2,6 +2,7 @@ package util
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"slices"
 	"strings"
 	"testing"
@@ -314,4 +315,218 @@ func TestRedactAssignmentsStopsAValueWhereItsSyntaxDoes(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestRedactAssignmentsReadsTheWholeShellWord covers values a shell assembles from more than one
+// piece: quoted runs joined to each other and to bare text, escapes, and quotes nested inside a
+// string a line opened earlier.
+//
+// The patterns used to take one quoted run or one run of bare text. The shell joins all of them up to
+// the first unquoted space, so an empty quote pair before the value masked the quotes and left the
+// password in the text, handed the masker an empty string in its place, and redacted differently the
+// second time, when the leftover text read as part of the mask's word.
+func TestRedactAssignmentsReadsTheWholeShellWord(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// Name says which shape is being read.
+		Name string
+		// In is the text as an operator submits it.
+		In string
+		// WantText is the redaction.
+		WantText string
+		// WantValues are the values a program receives, which the masker matches in its output.
+		WantValues []string
+	}{{ // Test 0: An empty quote pair joined onto the value.
+		Name: "empty quote pair", In: `password=''x deploy`,
+		WantText: `password=X deploy`, WantValues: []string{"x"},
+	}, { // Test 1: The idiom for a quote inside single quotes.
+		Name: "quote inside single quotes", In: `PGPASSWORD='pa'\''ss' psql`,
+		WantText: `PGPASSWORD=X psql`, WantValues: []string{"pa'ss"},
+	}, { // Test 2: An escaped space.
+		Name: "escaped space", In: `password=x\ y deploy`,
+		WantText: `password=X deploy`, WantValues: []string{"x y"},
+	}, { // Test 3: Runs of each quote and bare text.
+		Name: "mixed runs", In: `password="a"'b'c next`,
+		WantText: `password=X next`, WantValues: []string{"abc"},
+	}, { // Test 4: ANSI-C quoting.
+		Name: "ansi-c", In: `password=$'p\x40ss\tw' next`,
+		WantText: `password=X next`, WantValues: []string{"p@ss\tw"},
+	}, { // Test 5: An escaped quote inside a string a line opened earlier.
+		Name: "escaped quote in a string", In: `sh -c "password=a\"b c"`,
+		WantText: `sh -c "password=X c"`, WantValues: []string{`a"b`},
+	}, { // Test 6: An escaped quote pair grouping a value inside such a string.
+		Name: "escaped quote pair", In: `ssh host "export PASS=\"a b\""`,
+		WantText: `ssh host "export PASS=X"`, WantValues: []string{"a b"},
+	}, { // Test 7: Single quotes grouping a value inside a double-quoted string.
+		Name: "single inside double", In: `sh -c "PASS='a b' deploy"`,
+		WantText: `sh -c "PASS=X deploy"`, WantValues: []string{"a b"},
+	}, { // Test 8: Double quotes grouping a value inside a single-quoted string.
+		Name: "double inside single", In: `echo 'password="a b"'`,
+		WantText: `echo 'password=X'`, WantValues: []string{"a b"},
+	}, { // Test 9: An apostrophe earlier on the line, which reads as an open quote.
+		Name: "apostrophe before", In: `don't reuse password='a b' here`,
+		WantText: `don't reuse password=X here`, WantValues: []string{"a b"},
+	}, { // Test 10: A quoted value across lines, as a pasted key is.
+		Name: "multiline quoted", In: "password=\"line one\nline two\" next",
+		WantText: "password=X next", WantValues: []string{"line one\nline two"},
+	}, { // Test 11: A backslash joining two lines.
+		Name: "line continuation", In: "password=abc\\\ndef next",
+		WantText: "password=X next", WantValues: []string{"abcdef"},
+	}, { // Test 12: A quoted name, as HCL writes it.
+		Name: "quoted name", In: `"db_password" = "hunter2"`,
+		WantText: `"db_password" = X`, WantValues: []string{"hunter2"},
+	}, { // Test 13: A quote that never closes still takes the rest of the word.
+		Name: "unclosed quote", In: `password="abc def`,
+		WantText: `password=X def`, WantValues: []string{`"abc`},
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			got, found := RedactAssignments(test.In, "X")
+			if diff := cmp.Diff(test.WantText, got); diff != "" {
+				t.Errorf("redacted text mismatch (-want +got):\n%s", diff)
+			}
+			values := make([]string, 0, len(found))
+			for _, a := range found {
+				values = append(values, a.Value)
+			}
+			if diff := cmp.Diff(test.WantValues, values, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("reported values mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// TestRedactAssignmentsReadsJSONAndYAMLValues covers the name: value form where YAML and JSON write
+// their own quoting, which is not the shell's.
+//
+// A JSON body named its keys in quotes, so the quote between the name and the colon hid every
+// secret in it: curl -d '{"password":"x"}' reached the receipt, the dossier, the evidence page, and
+// the text sent to an LLM in the clear, and the masker never learned the password.
+func TestRedactAssignmentsReadsJSONAndYAMLValues(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// Name says which shape is being read.
+		Name string
+		// In is the text as an operator submits it.
+		In string
+		// WantText is the redaction.
+		WantText string
+		// WantValues are the values a program receives, which the masker matches in its output.
+		WantValues []string
+	}{{ // Test 0: A compact JSON body on a curl line, which keeps its quotes and stays JSON.
+		Name: "json body", In: `curl -d '{"password":"hunter2","user":"bob"}' https://api`,
+		WantText:   `curl -d '{"password":"X","user":"bob"}' https://api`,
+		WantValues: []string{"hunter2"},
+	}, { // Test 1: A spaced JSON document.
+		Name: "spaced json", In: `{"api_key": "abc123", "user": "bob"}`,
+		WantText: `{"api_key": "X", "user": "bob"}`, WantValues: []string{"abc123"},
+	}, { // Test 2: JSON escapes are decoded.
+		Name: "json escapes", In: `{"password":"a\"b\\cA"}`,
+		WantText: `{"password":"X"}`, WantValues: []string{`a"b\cA`},
+	}, { // Test 3: A doubled single quote is one quote.
+		Name: "yaml doubled quote", In: `password: 'it''s'`,
+		WantText: `password: X`, WantValues: []string{"it's"},
+	}, { // Test 4: A comment after a quoted scalar is masked with it.
+		Name: "comment after quoted", In: `password: "abc" # note`,
+		WantText: `password: X`, WantValues: []string{"abc"},
+	}, { // Test 5: A block scalar takes its indented lines.
+		Name:       "block scalar",
+		In:         "ssh_private_key: |\n  -----BEGIN KEY-----\n  c2VjcmV0\n  -----END KEY-----\nnext: 1",
+		WantText:   "ssh_private_key: X\nnext: 1",
+		WantValues: []string{"-----BEGIN KEY-----\nc2VjcmV0\n-----END KEY-----"},
+	}, { // Test 6: Text joined onto a quoted scalar.
+		Name: "joined scalar", In: "token: 'a'b c",
+		WantText: "token: X", WantValues: []string{"ab"},
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			got, found := RedactAssignments(test.In, "X")
+			if diff := cmp.Diff(test.WantText, got); diff != "" {
+				t.Errorf("redacted text mismatch (-want +got):\n%s", diff)
+			}
+			values := make([]string, 0, len(found))
+			for _, a := range found {
+				values = append(values, a.Value)
+			}
+			if diff := cmp.Diff(test.WantValues, values, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("reported values mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// TestAssignmentReadings pins the strings the masker is handed for one assignment: what a program
+// receives first, then the value as written, then Ansible's Python readings of an INI value, of a
+// host line after a shell's split and of a group's vars line as written.
+func TestAssignmentReadings(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// In is the assignment.
+		In string
+		// WantResult is every reading, in order.
+		WantResult []string
+	}{
+		{In: `ansible_password='"quoted secret"'`, WantResult: []string{`"quoted secret"`, "quoted secret"}}, // Test 0: Ansible's reading.
+		{In: `password="a\"b"`, WantResult: []string{`a"b`, `a\"b`}},                                         // Test 1: As written.
+		{In: `password=plain`, WantResult: []string{"plain"}},                                                // Test 2: One reading.
+		{In: `password=""`, WantResult: nil},                                                                 // Test 3: Nothing.
+		{In: `ansible_become_password='multi\nline'`, WantResult: []string{`multi\nline`, "multi\nline"}},    // Test 4: A group's vars line.
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			_, found := RedactAssignments(test.In, "X")
+			if len(found) != 1 {
+				t.Fatalf("found %d assignments in %q, want 1", len(found), test.In)
+			}
+			if diff := cmp.Diff(test.WantResult, found[0].Readings(), cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("Readings() mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// TestRedactAssignmentsIsIdempotent pins that redacting redacted text changes nothing.
+//
+// The redacted text is what gets stored, signed, and disclosed, and more than one path redacts the
+// same text: a record redacted when it was written is redacted again when a page or a dossier
+// serves it. A value cut short left text after the mask that the next pass read as part of it, so
+// one redaction and two disagreed, and a digest over one did not match the other. The inputs are
+// drawn from the syntax that decides where a value ends, joined at random from a fixed seed.
+func TestRedactAssignmentsIsIdempotent(t *testing.T) {
+	t.Parallel()
+	pieces := []string{"password", "token", "a", "x", "=", ":", " ", "'", `"`, `\`, ";", "\n", "://",
+		"@", "#", "|", ",", "}", "$"}
+	masks := []string{"«redacted»", "[redacted]", "***", "X"}
+	rng := rand.New(rand.NewPCG(1, 2))
+	for range 20000 {
+		var b strings.Builder
+		for range 1 + rng.IntN(8) {
+			b.WriteString(pieces[rng.IntN(len(pieces))])
+		}
+		in := b.String()
+		for _, mask := range masks {
+			once, _ := RedactAssignments(in, mask)
+			if twice, _ := RedactAssignments(once, mask); twice != once {
+				t.Fatalf("redacting %q with %q gave %q, and redacting that gave %q", in, mask, once, twice)
+			}
+		}
+	}
+}
+
+// FuzzRedactAssignmentsIsIdempotent searches for text whose redaction changes when it is redacted
+// again, seeded with shapes that once did.
+func FuzzRedactAssignmentsIsIdempotent(f *testing.F) {
+	for _, seed := range []string{`password=''x`, `pass:'' b@`, `token="a"b`, `{"password":"x","u":"y"}`,
+		"key: |\n  a\nnext: 1", `sh -c "password=a\"b c"`, `password: "abc" # note`} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, in string) {
+		once, _ := RedactAssignments(in, "«redacted»")
+		if twice, _ := RedactAssignments(once, "«redacted»"); twice != once {
+			t.Errorf("redacting %q gave %q, and redacting that gave %q", in, once, twice)
+		}
+	})
 }

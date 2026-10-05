@@ -258,3 +258,40 @@ func TestSafeAnyMapSurvivesDeepNesting(t *testing.T) {
 		t.Errorf("the deepest leaf was not cleaned (-want +got):\n%s", diff)
 	}
 }
+
+// TestJoinWords pins how a list reads inside a sentence, for either conjunction.
+func TestJoinWords(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		In          []string
+		Conjunction string
+		WantResult  string
+	}{{ // Test 0: Nothing.
+		In: nil, Conjunction: "or", WantResult: "",
+	}, { // Test 1: An empty slice.
+		In: []string{}, Conjunction: "or", WantResult: "",
+	}, { // Test 2: One word.
+		In: []string{"go"}, Conjunction: "or", WantResult: "go",
+	}, { // Test 3: Two words.
+		In: []string{"terraform", "go"}, Conjunction: "or", WantResult: "terraform or go",
+	}, { // Test 4: Three words.
+		In: []string{"a", "b", "c"}, Conjunction: "or", WantResult: "a, b, or c",
+	}, { // Test 5: Four words.
+		In: []string{"a", "b", "c", "d"}, Conjunction: "or", WantResult: "a, b, c, or d",
+	}, { // Test 6: An empty word.
+		In: []string{""}, Conjunction: "or", WantResult: "",
+	}, { // Test 7: Two words joined with and.
+		In: []string{"cert", "key"}, Conjunction: "and", WantResult: "cert and key",
+	}, { // Test 8: Three words joined with and.
+		In: []string{"A", "B", "C"}, Conjunction: "and", WantResult: "A, B, and C",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			if diff := cmp.Diff(test.WantResult, JoinWords(test.In, test.Conjunction)); diff != "" {
+				t.Errorf("JoinWords(%v, %q) mismatch (-want +got):\n%s", test.In, test.Conjunction,
+					diff)
+			}
+		})
+	}
+}
