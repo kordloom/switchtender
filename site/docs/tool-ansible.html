@@ -60,7 +60,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible" class="active">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible" class="active">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/ansible-runtime">Managed Ansible runtime</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/upgrading">Upgrading</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -69,18 +69,27 @@
 that names no tool is an Ansible run. It is also the most instrumented one, because the embedded
 callback plugin reports every task on every host as a structured event, and those events paint the
 live host-by-task matrix, feed fleet memory, and drive drift detection.</p>
+<p>The server and each worker need ansible-core, which the binary does not carry. They take the
+<code>ansible-playbook</code> and <code>ansible-inventory</code> from <code>--ansible-bin</code> when it is set, then from the pinned
+ansible-core <code>switchtender ansible install</code> sets up, then from the PATH, as
+<a href="/docs/ansible-runtime#which-ansible-a-run-uses">which Ansible a run uses</a> describes. A run in a
+container image uses the image's own.</p>
 <h2 id="what-runs">What runs</h2>
 <p>The playbook path is the run's target, resolved inside the project checkout when the run sources a
 project, so relative paths and roles behave the way they do in the repository. A project's
 <code>requirements.yml</code> roles and collections install on sync before the play starts. A dry run passes
 <code>--check</code>, which reports what would change without changing it; drift detection is built from
 exactly those check runs. Ansible still runs any play, block, task, role, or include that sets
-<code>check_mode: false</code> for real under <code>--check</code>. The gate reads for that before it treats a dry run
-as a preview, and a dry run that forces real work is held by a rule that excludes dry runs as
-though it were a real run. The hold names the forcing task and the two clean fixes: rework the
-task so check mode is safe, or drop <code>exclude_dry_run</code> from that rule. See
-<a href="/docs/concepts#dry-runs-and-exclude-dry-run">dry runs and <code>exclude_dry_run</code></a>, which covers the
-common read-only command and a role the project does not hold.</p>
+<code>check_mode: false</code> for real under <code>--check</code>, and a <code>pipe</code> lookup runs its command on the controller
+while a template renders, under <code>--check</code> too. The gate reads for both before it treats a dry run as
+a preview, and a dry run that forces real work or runs a <code>pipe</code> lookup is held by a rule that
+excludes dry runs as though it were a real run. The hold names the task and the two clean fixes:
+rework it so check mode is safe, or drop <code>exclude_dry_run</code> from that rule. Other lookups and plugins
+run code on the controller too, and the scan does not judge them, so a rule that excludes dry runs
+trusts the playbooks it lets through. An agent's check run waits for a person whatever the scan
+finds, unless an exemption covers it. See <a href="/docs/concepts#dry-runs-and-exclude-dry-run">dry runs and
+<code>exclude_dry_run</code></a>, which covers the common read-only
+command and a role the project does not hold.</p>
 <p>Ansible runs are the ones that split. A split run shards the inventory across parallel slices,
 packs hosts onto shards by their measured durations from past runs, and merges every slice back
 into one matrix. Failed shards retry alone, and <code>relaunch-failed</code> re-runs only the hosts a finished

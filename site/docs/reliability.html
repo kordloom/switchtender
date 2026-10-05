@@ -60,7 +60,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability" class="active">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability" class="active">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/ansible-runtime">Managed Ansible runtime</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/upgrading">Upgrading</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -129,7 +129,7 @@ file in the cache, so two processes never clone or reset the same checkout at on
 <p>The overview's Needs attention panel answers, for every run that is not moving, what is stopping it.
 It sorts the waiting work into four counts, each a list a click away:</p>
 <ul>
-<li><strong>Worker lost.</strong> The worker running it stopped renewing its lease. The panel names the worker,
+<li><strong>Worker lost.</strong> The worker running it stopped renewing its lease. The panel names the worker, <!-- slop-chop-ignore -->
 says how long ago it last reported, and counts down to the automatic reclaim the sweep above makes
 once the lease expires. It alerts only when that reclaim has not happened within two lease
 periods, which means no server is sweeping.</li>
@@ -253,7 +253,7 @@ a run reaches a terminal state, the final save is retried a few times so a brief
 does not lose the outcome.</p>
 <p>The schema is applied idempotently on both stores, guarded by <code>IF NOT EXISTS</code>, so starting a newer
 binary against an existing database is safe to repeat.</p>
-<p>The audit trail is a SHA-256 hash chain. Every recorded mutation carries the previous entry's hash
+<p>The audit trail is a hash chain built on SHA-256. Every recorded mutation carries the previous entry's hash
 and its own hash over its content, so altering, reordering, or dropping an entry breaks the chain,
 which <code>GET /v1/audit/verify</code> detects. The chain is tamper-evident with no key configured. <code>GET /v1/audit/bundle</code>
 seals the chain into a signed LoomSeal bundle, and the open <code>loomseal</code> verifier confirms the trail
@@ -286,12 +286,19 @@ a compare-and-set state transition, so two concurrent approvals release a held r
 the loser gets a clear conflict.</p>
 <p>Stored events are ordered and written once per batch. A batch replayed after a transient error
 appends rather than deduplicates, so a consumer keys on the event sequence number.</p>
-<p>Notifications, on all eleven server-wide channels from webhook and Slack to PagerDuty, Twilio SMS,
-and email, and on any per-template targets, are best effort. Each is attempted at least once with one
-retry, then logged and dropped, and the run's extra vars are stripped from the payload so survey and
-template values never leave the system. Notifications do not block a run from finishing, and shutdown
-waits for the deliveries already in flight. Treat a notification as a signal, and the store as the
-source of truth.</p>
+<p>Notifications to named targets, the ones defined once and attached to templates, workflows,
+schedules, projects, or organizations, are queued in the database in the same write that records the
+run's event. Deliveries to each target are attempted in the run's event order, a failed attempt is
+tried four more times over about three minutes, and a delivery pending when a server stops is made
+by the next server to start. One that still fails is kept as failed on the run, on the target, and
+in the doctor. <a href="/docs/api#delivery-order">Delivery order</a> has the details.</p>
+<p>The eleven server-wide channels, from webhook and Slack to PagerDuty, Twilio SMS, and email, and a
+template's own notification list are best effort. Each is attempted at least once with one retry,
+then logged and dropped, and the run's extra vars are stripped from the payload so survey and template
+values never leave the system. Notifications do not block a run from finishing. On shutdown a server
+waits for the best-effort deliveries already in flight, and a named-target attempt it cuts short is
+made by the next server instead. Treat a notification as a signal, and the store as the source of
+truth.</p>
 <h2 id="how-this-compares">How this compares</h2>
 <p>SwitchTender coordinates a fleet with database leasing, so the same one binary adds capacity without a
 separate mesh to stand up. It splits by measured duration rather than round-robin, so a run finishes

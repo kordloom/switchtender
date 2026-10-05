@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Managed Ansible runtime | SwitchTender docs</title>
+	<meta name="description" content="SwitchTender runs Ansible as a separate program and never links it into the binary, because Ansible is GPLv3.">
+	<link rel="canonical" href="https://switchtender.com/docs/ansible-runtime">
+	<meta property="og:title" content="Managed Ansible runtime | SwitchTender docs">
+	<meta property="og:description" content="SwitchTender runs Ansible as a separate program and never links it into the binary, because Ansible is GPLv3.">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="https://switchtender.com/docs/ansible-runtime">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
+	<meta name="twitter:card" content="summary_large_image">
+	<meta name="twitter:title" content="Managed Ansible runtime | SwitchTender docs">
+	<meta name="twitter:description" content="SwitchTender runs Ansible as a separate program and never links it into the binary, because Ansible is GPLv3.">
+	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
+	<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "TechArticle",
+ "about": {
+  "@type": "SoftwareApplication",
+  "name": "SwitchTender",
+  "url": "https://switchtender.com/"
+ },
+ "description": "SwitchTender runs Ansible as a separate program and never links it into the binary, because Ansible is GPLv3.",
+ "headline": "Managed Ansible runtime",
+ "isPartOf": {
+  "@type": "WebSite",
+  "name": "SwitchTender docs",
+  "url": "https://switchtender.com/docs/"
+ },
+ "publisher": {
+  "@type": "Organization",
+  "name": "KordLoom LLC",
+  "url": "https://kordloom.com"
+ },
+ "url": "https://switchtender.com/docs/ansible-runtime"
+}
+</script>
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=2">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/kordloom/switchtender">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/ansible-runtime" class="active">Managed Ansible runtime</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/upgrading">Upgrading</a><a href="/docs/vendor-risk">Vendor risk review</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="managed-ansible-runtime">Managed Ansible runtime</h1>
+<p>SwitchTender runs Ansible as a separate program and never links it into the binary, because Ansible
+is GPLv3. That used to mean installing Ansible on every server and worker before an Ansible run could
+start. The managed runtime does that install for you. One command builds a Python virtual
+environment under the server's data directory, installs a pinned ansible-core release into it, and
+checks every file pip installs against a hash this binary carries:</p>
+<pre><code>switchtender ansible install
+</code></pre>
+<p>Runs, inventory resolution, the inventory cross-check, project requirements installs, and doctor
+use it from the next run on, with no restart. A smart or constructed inventory is resolved when the
+run is submitted, with the Ansible in use at that moment. When the run starts, it looks up its
+Ansible once more, and its cross-check, its play, and their evidence use that one, whatever an
+install or a remove does while it runs. It is still a separate program: the server starts its
+<code>ansible-playbook</code> and <code>ansible-inventory</code> the same way it starts the ones on PATH.</p>
+<p>The container image already ships Ansible on PATH and does not need it.</p>
+<h2 id="what-it-needs">What it needs</h2>
+<p>A <code>python3</code> that the release supports as a control node, with its <code>venv</code> module, and access to
+PyPI, a mirror named with <code>--index-url</code>, or a directory of wheels, as described under
+<a href="#offline-installs">offline installs</a>:</p>
+<table>
+<thead>
+<tr>
+<th>ansible-core</th>
+<th>Python</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2.16.19</td>
+<td>3.10 to 3.12</td>
+</tr>
+<tr>
+<td>2.17.14</td>
+<td>3.10 to 3.12</td>
+</tr>
+<tr>
+<td>2.18.19</td>
+<td>3.11 to 3.13</td>
+</tr>
+<tr>
+<td>2.19.13</td>
+<td>3.11 to 3.13</td>
+</tr>
+<tr>
+<td>2.20.9</td>
+<td>3.12 to 3.14</td>
+</tr>
+<tr>
+<td>2.21.4</td>
+<td>3.12 to 3.14</td>
+</tr>
+</tbody>
+</table>
+<p>The install tries <code>python3</code> on PATH, then <code>python3.N</code> for each version in the range, newest first.
+<code>--python</code> names an interpreter instead. When none fits, the install stops before it builds an
+environment and says which range the release needs and which interpreters it found. The default
+release needs Python 3.12 or newer, so on an older Python pick an older release: <code>--version 2.19</code>
+on Python 3.11, and <code>--version 2.17</code> on Python 3.10. The <code>python3</code> macOS ships is 3.9, which no
+pinned release supports, so install a newer Python there first. On Debian and Ubuntu the <code>venv</code>
+module is a separate package, such as <code>python3.12-venv</code>, and the install names the package when it
+is missing.</p>
+<p>ansible-core does not run on Windows as a control node, so the install refuses there.</p>
+<h2 id="install">Install</h2>
+<pre><code>switchtender ansible install                  # the newest supported release, 2.21.4
+switchtender ansible install --version 2.18   # the release this build pins for 2.18
+</code></pre>
+<p>Any release in the supported range can be installed, and the newest is the default. A minor version
+picks the release this build pins for it. Another patch release of a supported minor is refused with
+the pinned one named, since there is no lock for it.</p>
+<p>An install finds a supported Python, creates the environment in a directory nothing else uses,
+checks the Python the environment itself runs against the release's range and records that version,
+installs the release's lock with pip in hash-checking mode, runs the environment's <code>ansible --version</code> and checks it reports the pinned release, and only then writes the marker that makes the
+environment count as installed and makes it current. An install never deletes or rebuilds an
+existing environment. A failed install removes only the directory it was building and leaves
+<code>current</code> as it was, so the runtime in use before stays in use.</p>
+<p>Running the install again for an installed release verifies it and makes it the one in use, with
+nothing reinstalled, as long as this binary's lock for that release has not changed. Installing
+another release keeps the first one and makes the new one current.</p>
+<p>The install prints pip's progress to standard error and the result as JSON to standard output.</p>
+<h2 id="where-it-lives">Where it lives</h2>
+<p>The runtime directory is the first of these that is set:</p>
+<ol>
+<li><code>--dir</code> on the <code>ansible</code> commands, or <code>--ansible-runtime-dir</code> on <code>serve</code> and <code>worker</code>.</li>
+<li>The <code>SWITCHTENDER_ANSIBLE_RUNTIME_DIR</code> environment variable.</li>
+<li><code>ansible/</code> in the data directory. That is the directory of the SQLite database, <code>switchtender.db</code>
+in the working directory unless <code>--db</code> or <code>SWITCHTENDER_DB</code> says otherwise. A PostgreSQL
+install has no database file, so it uses <code>switchtender/ansible</code> in the account's configuration
+directory.</li>
+</ol>
+<p>Each install has its own environment, <code>&lt;runtime directory&gt;/&lt;release&gt;-&lt;digest&gt;</code>, named for the
+release and the start of its lock's SHA-256, with a random suffix when that name is taken, and the
+file <code>current</code> names the one in use. A server started with <code>--db /var/lib/switchtender/switchtender.db</code> looks in <code>/var/lib/switchtender/ansible</code>.</p>
+<p>An upgrade of SwitchTender can carry a new lock for a release that is already installed. Installing
+it then builds a new environment beside the one in use, and runs keep using the old one until the
+new one verifies.</p>
+<p>Run the install as the account the server runs as, pointed at the same database or directory. The
+install prints the directory it used. Doctor shows the directory the server looks in, and an error
+that says Ansible is needed gives the install line with that directory in it.</p>
+<p><code>switchtender desktop</code> keeps its database in a per-user directory, <code>~/Library/Application Support/SwitchTender</code> on macOS and <code>~/.config/SwitchTender</code> on Linux, so point the install at the
+<code>ansible</code> directory inside it:</p>
+<pre><code>switchtender ansible install --dir &quot;$HOME/Library/Application Support/SwitchTender/ansible&quot;
+</code></pre>
+<p>Each worker runs its plays with its own Ansible, so install on every worker host as the worker's
+account. A worker looks in <code>ansible/</code> beside its <code>--db</code> value, and a relay worker started with
+<code>--server</code> does too, although it opens no database. A worker on a shared PostgreSQL database looks
+in <code>switchtender/ansible</code> in its account's configuration directory. <code>--ansible-runtime-dir</code> on
+<code>worker</code> makes the location explicit.</p>
+<p>The runtime directory, every directory above it, and everything in an environment must belong to
+the account that uses it or to root, and no other account may be able to write them. The install
+refuses a runtime directory that fails this, and never runs anything in an environment that fails
+it. A server refuses to run from such a runtime too. So <code>sudo switchtender ansible install</code> into a
+directory the server's account owns, such as the default one, is refused: a play running as that
+account could have left code there for the install to run as root. A volume mounted
+group-writable, as Kubernetes mounts one with <code>fsGroup</code>, fails the check as well. The container
+image ships Ansible on PATH, so it needs no managed runtime.</p>
+<h2 id="which-ansible-a-run-uses">Which Ansible a run uses</h2>
+<p>The server picks the Ansible commands in this order:</p>
+<ol>
+<li>The configured directory, <code>--ansible-bin</code> or <code>SWITCHTENDER_ANSIBLE_BIN</code>, which holds
+<code>ansible-playbook</code> and <code>ansible-inventory</code>. When it is set, it is used even if those commands are
+missing from it, so a mistake fails the run rather than running another Ansible nobody chose. A
+relative value is resolved once, against the server's working directory when it starts, never
+against a project's checkout. The value <code>system</code> selects the commands on PATH even when a
+managed runtime is installed.</li>
+<li>The managed runtime, when <code>current</code> names one. A runtime in use that is broken, unfinished, or
+that another account can write is not skipped: every run that needs Ansible fails with the
+reason, and doctor reports it, rather than quietly running whatever is first on PATH.</li>
+<li>The commands on PATH, when no managed runtime is in use.</li>
+</ol>
+<p>The order is the same for playbook runs, inventory resolution, the cross-check, <code>ansible-galaxy</code>
+when a project's requirements install, and doctor. A run in a container image uses the image's own
+Ansible.</p>
+<h2 id="supply-chain">Supply chain</h2>
+<ul>
+<li>The locks ship in the binary, one per supported release. In the repository they are under
+<code>internal/ansibleruntime/locks</code>. Each pins ansible-core and every package it depends on to an
+exact version, with the SHA-256 of every wheel PyPI publishes for that version.</li>
+<li>pip runs in hash-checking mode. A file whose hash the lock does not record fails the install with
+nothing installed. A mirror or a proxy can serve the files, because only the recorded bytes pass.</li>
+<li>Only prebuilt wheels are installed, so nothing is compiled and no build step runs code the lock
+does not pin.</li>
+<li>The lock is read before pip sees it and refused if it holds anything but pinned, hashed
+requirements: no index or find-links options, no included files, no editable or URL
+requirements, and no environment variables. Because pip splits lines at more than a newline,
+the lock is also refused if it holds a carriage return, a form feed, a Unicode line separator,
+or any other character pip would read as a line break or a control character, so no line can
+hide from the check inside a comment.</li>
+<li>The interpreter and pip run isolated. No <code>PYTHON*</code> or <code>PIP_*</code> variable and no pip
+configuration file reaches them, so no requirement, index, or code comes from anywhere but the
+lock and the command line. What is honored is <code>--wheels</code>, <code>--index-url</code>, and the proxy and
+certificate variables <code>HTTPS_PROXY</code>, <code>HTTP_PROXY</code>, <code>NO_PROXY</code>, <code>ALL_PROXY</code>, <code>SSL_CERT_FILE</code>,
+<code>SSL_CERT_DIR</code>, <code>REQUESTS_CA_BUNDLE</code>, and <code>CURL_CA_BUNDLE</code>.</li>
+<li>Once pip finishes, the install takes group and other write permission off everything in the
+environment, so a permissive umask does not leave it open to other accounts.</li>
+<li><code>switchtender ansible lock</code> prints the lock a release installs from.</li>
+</ul>
+<p>The hashes cover what pip installs, not what happens to the files afterwards. A host run executes as
+the server's account, so a playbook can change a runtime that account owns, just as it can change an
+Ansible installed with pipx in that account's home. To keep runs from changing it, install it as
+another account, such as root, into a directory the server can read but not write, and point the
+server at it:</p>
+<pre><code>sudo switchtender ansible install --dir /opt/switchtender/ansible
+switchtender serve --ansible-runtime-dir /opt/switchtender/ansible ...
+</code></pre>
+<p>The server only reads the runtime directory. Installing and removing are the only operations that
+write to it.</p>
+<h2 id="offline-installs">Offline installs</h2>
+<p>On a machine with network access, with the server's operating system, CPU architecture, and Python
+version:</p>
+<pre><code>switchtender ansible lock --version 2.21 &gt; ansible-core.lock
+python3 -m pip download --require-hashes --only-binary=:all: --dest wheels -r ansible-core.lock
+</code></pre>
+<p>pip can also fetch for another machine when told the target with <code>--platform</code> and
+<code>--python-version</code>. Copy the <code>wheels</code> directory to the server and install from it alone:</p>
+<pre><code>switchtender ansible install --version 2.21 --wheels ./wheels
+</code></pre>
+<p>A relative <code>--wheels</code> is taken from the directory the command runs in, and it must be an existing
+directory. The hashes are checked the same way. To install from an internal mirror instead, name it
+with <code>--index-url</code>, and the hashes are checked against what it serves. pip's environment variables
+and configuration files are not read.</p>
+<h2 id="list-and-remove">List and remove</h2>
+<pre><code>switchtender ansible list
+switchtender ansible remove --version 2.18
+switchtender ansible remove
+</code></pre>
+<p><code>list</code> prints every installed environment, the Python each one runs, and which one is current.
+<code>remove</code> with a version removes every environment of that release, and when one of them was in use
+the newest one left becomes current. <code>remove</code> alone removes every release, and the runtime directory
+too when nothing else is in it, and runs go back to the Ansible on PATH. Only directories the
+installer made are removed. A remove refuses, removing nothing, while a play or an inventory read is
+running from an environment it would delete. Run it again once they finish.</p>
+<h2 id="evidence-and-doctor">Evidence and doctor</h2>
+<p>When Ansible resolves a smart or constructed inventory, or cross-checks a natively resolved one
+before a play, the run's record names the ansible-core version and where it came from: <code>managed</code>,
+<code>configured</code>, <code>path</code>, or <code>image</code>. A cross-check comes from the lookup the run made when it started,
+the same one its play runs from. A smart or constructed inventory's resolution comes from the
+lookup made when the run was submitted, so a run that waited for approval while the runtime changed
+records the release that resolved its inventory, which can differ from the one its play ran. The
+run dossier reads, for example, &quot;Ansible, ansible-core 2.21.4 from the managed runtime&quot;. The outcome
+record commits to both.</p>
+<p>Doctor, at <code>/ui/doctor</code> and <code>GET /v1/doctor</code>, reports the server's ansible-core version, where its
+commands come from, their directory, and the runtime directory it looks in, and warns when the
+version is outside the releases the <a href="/docs/inventories">inventory engine</a> is tested against. A
+managed runtime in use that cannot be used is a broken finding, with the reason and the line that
+installs it again.</p>
+<h2 id="regenerating-the-locks">Regenerating the locks</h2>
+<pre><code>python3 scripts/ansible-runtime-locks.py
+</code></pre>
+<p>It needs <code>uv</code> and network access to PyPI. It reads the ansible-core matrix from
+<code>.github/workflows/ci.yml</code>, resolves each release with
+<code>uv pip compile --universal --generate-hashes --only-binary :all:</code> against PyPI alone, and writes
+one lock per release with the Python range read from that release's metadata on PyPI. A test fails
+when the locks and the tested releases differ. Review the diff before committing it. A changed hash
+for a version that did not change means PyPI served different bytes, and that is a reason to stop.</p>
+
+		</main>
+	</div>
+	<div class="foot-legal" style="text-align:center;margin:26px auto 34px;font-size:12px;opacity:.75">SwitchTender&trade; is a trademark of KordLoom LLC. Copyright 2026 KordLoom LLC.</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

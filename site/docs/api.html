@@ -60,7 +60,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api" class="active">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api" class="active">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/ansible-runtime">Managed Ansible runtime</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/upgrading">Upgrading</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -105,7 +105,7 @@ with a message naming the feature rather than failing in some subtler way:</p>
 <tr>
 <td><code>POST</code> and <code>PUT /v1/policies</code></td>
 <td>Team, past the free set</td>
-<td>Deny rules, risk floors, actor scoping, and distinct-approver separation of duties. One require-approval policy is Community, Pro holds five, Team is uncapped.</td>
+<td>Deny rules, risk floors, actor and account scoping, and distinct-approver separation of duties. One require-approval policy or one exemption is Community, Pro holds five, Team is uncapped. The built-in hold on agent runs is not a stored policy and counts toward no limit.</td>
 </tr>
 <tr>
 <td>A named <code>queue</code> on <code>POST /v1/runs</code>, <code>POST /v1/pipelines</code>, and <code>POST</code> or <code>PUT</code> on <code>/v1/templates</code> and <code>/v1/inventories</code></td>
@@ -163,17 +163,17 @@ either licensed or absent.</li>
 <tr>
 <td>POST</td>
 <td><code>/v1/runs/{id}/approve</code></td>
-<td>Release a run held for approval so it runs. Given a workflow approval step's id, it approves the step, and an optional <code>state_digest</code> body field binds the decision to the state the approver was shown. Given a workflow waiting at an approval step, it answers 409 naming each waiting step and the call that decides it, since only a step's own decision moves the workflow. An optional <code>reason</code> is recorded as audit evidence, as <a href="#approver-reasons">Approver reasons</a> describes.</td>
+<td>Release a run held for approval so it runs. Given a workflow approval step's id, it approves the step, and an optional <code>state_digest</code> body field binds the decision to the state the approver was shown. Given a workflow waiting at an approval step, it answers 409 naming each waiting step and the call that decides it, since only a step's own decision moves the workflow. A run that is no longer waiting, because another decision or a cancel settled it first on this server or another, answers 409 and records nothing. An optional <code>reason</code> is recorded as audit evidence, as <a href="#approver-reasons">Approver reasons</a> describes.</td>
 </tr>
 <tr>
 <td>POST</td>
 <td><code>/v1/runs/{id}/reject</code></td>
-<td>Deny a run held for approval, or deny a workflow approval step, given the step's id, so the workflow takes its deny path. A workflow waiting at an approval step is refused with 409 the way an approval is. An optional <code>reason</code> is recorded the same way.</td>
+<td>Deny a run held for approval, or deny a workflow approval step, given the step's id, so the workflow takes its deny path. A workflow waiting at an approval step, and a run that is no longer waiting, are refused with 409 the way an approval is. An optional <code>reason</code> is recorded the same way.</td>
 </tr>
 <tr>
 <td>GET</td>
 <td><code>/v1/runs/{id}/decisions</code></td>
-<td>The run's decision records: each approval and denial a person made on it or on its approval steps, the reason given, its corrections, any redaction, and for an agent-initiated run the separation-of-duties evaluation. Admin, or the actor who asked for the run.</td>
+<td>The run's decision records: each approval and denial a person made on it or on its approval steps, the reason given, its corrections, any redaction, for an agent-initiated run the separation-of-duties evaluation, and for a decision made from a pull request comment a <code>comment</code> object naming the forge, the comment, its author, the SHA-256 of its body, and the plan it approved. Admin, or the actor who asked for the run.</td>
 </tr>
 <tr>
 <td>POST</td>
@@ -458,7 +458,7 @@ either licensed or absent.</li>
 <tr>
 <td>POST</td>
 <td><code>/hooks/{token}</code></td>
-<td>Fire a trigger from a git push, or plan a pull request for a review trigger. A required HMAC signature, or GitLab's token, is checked first. A fire whose inventory matches no hosts is skipped and answered <code>200</code> with <code>skipped</code>. Answers within five seconds, with <code>accepted</code> when the launch is still going.</td>
+<td>Fire a trigger from a git push, or, for a review trigger, plan a pull request and act on a <code>/switchtender plan</code> or <code>/switchtender apply</code> comment, as <a href="/docs/pull-request-review#planning-and-applying-from-a-comment">planning and applying from a comment</a> describes. A required HMAC signature, or GitLab's token, is checked first. A fire whose inventory matches no hosts is skipped and answered <code>200</code> with <code>skipped</code>. Answers within five seconds, with <code>accepted</code> when the launch is still going.</td>
 </tr>
 <tr>
 <td>POST</td>
@@ -619,6 +619,26 @@ either licensed or absent.</li>
 <td>GET</td>
 <td><code>/auth/oidc/callback</code></td>
 <td>Complete the OIDC handshake and issue a token.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/me/forge-links</code></td>
+<td>The caller's own linked GitHub and GitLab accounts, and the forges this server can link. See <a href="/docs/pull-request-review#linking-forge-accounts">linking forge accounts</a>.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/v1/me/forge-links</code></td>
+<td>Start linking a forge account to the caller's own account. Returns the forge's <code>authorize_url</code>. A person only, never an agent.</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/v1/me/forge-links/{id}</code></td>
+<td>Unlink one of the caller's own forge accounts. Recorded on the audit chain.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/auth/forge/callback</code></td>
+<td>Where the forge sends the browser back to finish a link. Public, checked by its signed state and the browser's cookie.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -808,7 +828,7 @@ either licensed or absent.</li>
 <tr>
 <td>POST</td>
 <td><code>/v1/policies</code></td>
-<td>Create a policy that holds or denies matching runs.</td>
+<td>Create a policy that holds, denies, or exempts matching runs. <code>effect</code> is <code>require_approval</code>, the default, <code>deny</code>, or <code>exempt</code>. <code>account</code> matches the username of the account the requesting credential is bound to. An exempt policy lets the agent runs it matches go ahead without the built-in agent hold, takes only <code>tool</code>, <code>command_contains</code>, <code>inventory_id</code>, <code>queue</code>, <code>actor</code>, <code>account</code>, and <code>actor_kind: agent</code>, and is Community. An exempt policy that names <code>actor</code> without <code>account</code> is refused with 400, since a token label is not unique across accounts. See <a href="/docs/policy#agent-runs-are-held-by-default">Agent runs are held by default</a>.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -967,7 +987,7 @@ only the parts that changed. An omitted field clears.</p>
 the admin role and is not delegable by a manage grant. The values are never written to the logs, and
 a rejection names the offending field without echoing it. Each single-line field is capped at 320
 characters, <code>notes</code> at 2000, and an account may carry at most eight links. A link must be an <code>http</code>
-or <code>https</code> address; any other scheme is refused, because the admin page renders links as anchors.</p>
+or <code>https</code> address. Any other scheme is refused, because the admin page renders links as anchors.</p>
 <h2 id="template-run-timeout">Template run timeout</h2>
 <p>A template may cap how long its launches are allowed to execute with <code>timeout</code>, a whole number of
 seconds. It is accepted on create and update, and every launch of the template carries it onto the
@@ -983,7 +1003,7 @@ run, whether the launch came from the API, a schedule, or a webhook trigger.</p>
 </code></pre>
 <p>Zero, or the field omitted, leaves launches on the server default set by <code>--run-timeout</code>, so a
 template saved before this field existed is unchanged. A run that exceeds its timeout is canceled
-and finalized as failed. A launch cannot raise the cap; the template's value is what applies.</p>
+and finalized as failed. A launch cannot raise the cap. The template's value is what applies.</p>
 <h2 id="naming-what-a-run-targets">Naming what a run targets</h2>
 <p>Two fields name a target and they are not interchangeable.</p>
 <p><code>inventory_id</code> names a stored inventory, the kind the UI creates and the one almost every
@@ -1061,7 +1081,7 @@ template carries its own <code>extra_vars</code> and a launch may merge more ove
 template is a saved workflow: every path that fires a template, a launch, a schedule, or a webhook
 trigger, runs the graph as a pipeline, and the template's survey answers and extra vars reach every
 step. A workflow template sets no top-level <code>playbook</code>, <code>command</code>, <code>tool</code>, <code>shards</code>, or Ansible
-controls, since each step names its own; the graph is validated when the template is saved, so a
+controls, since each step names its own. The graph is validated when the template is saved, so a
 cycle or an unknown dependency is refused then rather than on every launch.</p>
 <p>A step with <code>&quot;type&quot;: &quot;approval&quot;</code> is an approval step: the workflow waits there until an admin
 approves or denies it. It takes a <code>description</code> and an <code>approval_timeout</code> in seconds, and a step
@@ -1219,11 +1239,12 @@ bound. See <a href="/docs/tool-ansible#provisioning-callbacks">the Ansible guide
 how the launch is recorded, and <a href="/docs/migration#the-awx-compatible-callback-address">the migration
 guide</a> for the AWX-compatible address.</p>
 <h3 id="what-a-request-may-carry">What a request may carry</h3>
-<p>A NUL byte or text that is not valid UTF-8 in the request path or a query parameter is refused with
-<code>400</code> before the request is routed, so it never reaches a store. A JSON body is held to the same
-rule: a string holding a NUL, written <code>\u0000</code>, is refused with <code>400</code> naming the field, such as
-<code>steps[1].name</code>. An import is checked the same way before it writes anything: an export holding
-such text in any object it would create is refused with <code>400</code> naming the object and the field.</p>
+<p>Text holding the NUL byte, or text that is not valid UTF-8, in the request path or a query parameter
+is refused with <code>400</code> before the request is routed, so it never reaches a store. A JSON body is held
+to the same rule: a string holding the NUL character, written <code>\u0000</code>, is refused with <code>400</code> naming
+the field, such as <code>steps[1].name</code>. An import is checked the same way before it writes anything: an
+export holding such text in any object it would create is refused with <code>400</code> naming the object and
+the field.</p>
 <p>Some values are stored under an index and have a bound. Past it the request is refused with <code>400</code>
 stating the bound.</p>
 <table>
@@ -1516,7 +1537,7 @@ follow.</p>
 <p>A malformed target is refused at create or update with the field it lacks, not dropped at
 delivery. A Twilio or email target names only a recipient. The account credentials stay in server
 flags, so a template never carries them. On read, webhook URLs, PagerDuty routing keys, and
-Grafana tokens come back masked; an edit that echoes the mask back keeps the stored value.</p>
+Grafana tokens come back masked. An edit that echoes the mask back keeps the stored value.</p>
 <h2 id="notification-targets">Notification targets</h2>
 <p>A notification target is a channel defined once and attached to many objects, the way AWX attaches
 a notification template. It takes the same kinds and fields as a
@@ -1574,7 +1595,7 @@ that leaves one still missing is saved, and the target keeps waiting.</p>
 from, the schedule that fired it, its project, its organization, or the organization that owns its
 template is told, once, however many of those it is attached through. The template is found through the run's source, so a target on a
 template hears the runs its schedules and triggers fire, and a rerun's runs as well. A split's shards
-and a pipeline's steps are not announced one by one. The parent is.</p>
+and a pipeline's steps are announced through their parent rather than one by one.</p>
 <p>A read that fails while the template is being found, of the schedule, trigger, or run that names it,
 or of the template to learn its organization, counts as a database that cannot be read. The event
 is asked for again and is not recorded for the other targets alone, as described under
@@ -1769,7 +1790,7 @@ takes and how daylight-saving changes are handled.</p>
 <h2 id="fleet-view-windows">Fleet view windows</h2>
 <p><code>/v1/fleet</code> and <code>/v1/tasks</code> take a <code>window</code>, the number of recent runs per host or per task the
 view considers, and <code>/v1/hosts/{host}/runs</code> takes a <code>limit</code>. All three default to 10. The window is
-capped at 100 and the host history limit at 500; a larger value is answered with the cap, and the
+capped at 100 and the host history limit at 500. A larger value is answered with the cap, and the
 response echoes the window it actually used. The caps exist because the per-host and per-task
 summaries are kept when their runs are deleted, so on a long-lived fleet the tables hold a row for
 every host of every run, and every row a window admits becomes an element of the answer.</p>
@@ -1860,12 +1881,12 @@ presents the worker bearer token.</p>
 </tr>
 </tbody>
 </table>
-<p>Each report call is bounded twice. It presents the per-claim capability the claim response issued, so it
-can only write to the run this worker holds, and one call carries at most a few thousand items, so a
-worker cannot force an unbounded decode on the control node; the worker sends a wide run's evidence in
-several calls rather than losing it to that cap. Host facts are bounded further: a worker may write
-facts only for hosts its run has already reported results for, so nothing can be recorded about a
-machine no run claims to have touched.</p>
+<p>Each report call is bounded twice. It presents the per-claim capability the claim response issued,
+so it can only write to the run this worker holds, and one call carries at most a few thousand
+items, so a worker cannot force an unbounded decode on the control node. The worker sends a wide
+run's evidence in several calls rather than losing it to that cap. Host facts are bounded further: a
+worker may write facts only for hosts its run has already reported results for, so nothing can be
+recorded about a machine no run claims to have touched.</p>
 <p>What that does and does not give you: a worker authors its own results, so a worker you do not trust can
 still describe its own run untruthfully. What it cannot do is reach past that run into the recorded state
 of the rest of the fleet. Give a queue only to workers you would let touch the hosts that queue targets.</p>

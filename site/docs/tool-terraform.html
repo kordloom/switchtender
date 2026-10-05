@@ -60,7 +60,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform" class="active">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform" class="active">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/ansible-runtime">Managed Ansible runtime</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/upgrading">Upgrading</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -83,6 +83,11 @@ proposal rather than the request, so the approval covers the plan that runs. An 
 submission asks for approval, through <code>require_approval</code> or an AI proposal, is planned first the same
 way: the request is not held, and the apply its plan proposes waits for a person with the saved plan,
 whatever the rules say.</p>
+<p>An apply an AI agent asks for is the exception. It is held before anything plans, since planning
+runs provider code with the server's credentials. Once a person releases it, it plans, and the apply
+its plan proposes is held again with the saved plan, so it takes two approvals. An apply an
+exemption covers takes the path above, the way a person's does, as <a href="/docs/policy#agent-runs-are-held-by-default">agent runs are held by
+default</a> describes.</p>
 <p>If anything changed the state after the plan was made, Terraform itself refuses the stale plan with
 <code>Saved plan is stale</code>, and the apply fails without changing anything rather than planning again and
 applying what nobody weighed. The run then says the proposal has to be made again: submit the apply
@@ -109,23 +114,28 @@ queue the control node executes or split the configuration.</p>
 with nothing saved in between.</p>
 <h2 id="what-a-plan-runs-and-what-the-gate-reads">What a plan runs, and what the gate reads</h2>
 <p>A plan changes no infrastructure, but it is not free of execution. It runs the provider plugins the
-configuration names, with the run's credentials, and every <code>external</code> data source runs the program
-it names while the plan runs, with the same credentials and environment. Providers are trusted code
-the team chose and installed, and the gate does not judge them. Before it exempts a plan from a rule
-with <code>exclude_dry_run</code>, it reads the configuration and every module it calls for external data
-sources, and for anything it cannot read. A plan that declares one, or that the gate cannot read in
-full, is held as the real run it may be and named by address, such as
+configuration names, with the run's credentials, and it reads every data source with the same
+credentials and environment: an <code>external</code> data source runs the program it names, an
+<code>aws_lambda_invocation</code> data source invokes its function, and an <code>http</code> data source sends its
+request. Providers are trusted code the team chose and installed, and the gate does not judge them.
+Before it exempts a plan from a rule with <code>exclude_dry_run</code>, it reads the configuration and every
+module it calls for <code>external</code> and <code>aws_lambda_invocation</code> data sources, for <code>http</code> data sources
+whose method is anything but GET or HEAD or that carry a request body, and for anything it cannot
+read. A method it cannot read as a plain value counts as a write. A plan that declares one, or that
+the gate cannot read in full, is held as the real run it may be and named by address, such as
 <code>module.network.data.external.lookup</code>, and a pull request's plan of it is refused rather than run.
-Before it reads registry and remote modules, the gate downloads them with <code>terraform get</code> in a
-private copy of the configuration, with the run's own credentials and only where the plan runs, and
-reads them where the get installed them. A <code>.terraform</code> the gate did not install, committed or left
-in a working directory, is never read, and no setting makes it trusted: vendor a module and call it
-by a local path to have it read from the repository. The get installs no provider and runs nothing the
+An agent's plan waits for a person whatever the scan finds, unless an exemption covers it. Before it
+reads registry and remote modules, the gate downloads them with <code>terraform get</code> in a private copy of
+the configuration, with the run's own credentials and only where the plan runs, and reads them where
+the get installed them. A <code>.terraform</code> the gate did not install, committed or left in a working
+directory, is never read, and no setting makes it trusted: vendor a module and call it by a local
+path to have it read from the repository. The get installs no provider and runs nothing the
 configuration names. A module it could not download is left unread. The run then executes exactly
 the modules the gate read: their digest is in the scan evidence and the approval, the gate's copy is
 put in place, and <code>terraform init</code> runs with <code>-get=false</code>, so it resolves no version again. A run
-that cannot get the same modules is refused. The scan targets explicit program execution and
-unreadable configuration only. See <a href="/docs/concepts#dry-runs-and-exclude-dry-run">dry runs and
+that cannot get the same modules is refused. The scan targets those three data sources and
+unreadable configuration only, so it does not prove a plan harmless, and a rule that exempts plans
+trusts the configurations it lets through. See <a href="/docs/concepts#dry-runs-and-exclude-dry-run">dry runs and
 <code>exclude_dry_run</code></a>.</p>
 <h2 id="how-values-reach-the-configuration">How values reach the configuration</h2>
 <ul>

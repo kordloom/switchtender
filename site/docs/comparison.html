@@ -22,18 +22,18 @@
  "applicationCategory": "DeveloperApplication",
  "description": "The control plane for infrastructure automation. Every change it runs, whether from a person, a schedule, or an AI agent, passes one governed path of request, policy, and approval, and leaves a cryptographically signed receipt that can be verified offline without the vendor. It does not claim every change to your infrastructure went through it: anyone holding their own SSH key can change a host behind it. Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go from a single self-hosted Go binary, agentless over SSH.",
  "featureList": [
-  "Agentless: reaches managed hosts over SSH with nothing installed on them",
+  "Agentless: reaches managed hosts over SSH with no SwitchTender agent installed on them",
   "Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go",
   "Reads secrets from HashiCorp Vault (KV v1 and v2, and dynamic secrets minted per run and revoked when it ends), AWS Secrets Manager, Azure Key Vault, Google Secret Manager, CyberArk (Conjur and CCP), and 1Password",
   "Per-object access grants: read, use, or manage on one project, template, inventory, or credential, layered over global roles",
-  "Single sign-on through OIDC, SAML, LDAP, and JWT",
+  "Single sign-on through OIDC, SAML, LDAP, and JWT, on the Pro tier",
   "Pipelines with a dependency graph and parallel branches, built in a drag-and-drop editor",
   "Approval gates enforced by policy before a run executes",
   "Tamper-evident hash-chained audit trail a third party can verify offline",
   "Live host-by-task matrix and per-host history across runs",
   "Drift detection from a dry run",
-  "One static Go binary and one SQLite file, with PostgreSQL optional",
-  "One-command import from AWX, Ansible Automation Platform, Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab"
+  "One static Go binary and one SQLite file, with PostgreSQL optional, where creating a new schema is on the Team tier",
+  "One-command import from AWX-format exports (AWX, Tower, and Automation Controller), Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab"
  ],
  "license": "https://mariadb.com/bsl11/",
  "name": "SwitchTender",
@@ -80,7 +80,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison" class="active">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison" class="active">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/ansible-runtime">Managed Ansible runtime</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/upgrading">Upgrading</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -123,7 +123,7 @@ set rather than by not finding it.</p>
 </tr>
 <tr>
 <td>Datastore</td>
-<td>SQLite, Postgres optional</td>
+<td>SQLite, Postgres optional (creating a new schema is Team, opening an existing one is never gated)</td>
 <td>PostgreSQL 15 [1]</td>
 <td>PostgreSQL 15 [2]</td>
 <td>SQLite, MySQL or Postgres [3]</td>
@@ -194,8 +194,8 @@ set rather than by not finding it.</p>
 <td>Yes, and finely grained; GUI editor is commercial [30]</td>
 </tr>
 <tr>
-<td>Drift detection</td>
-<td>Yes, from a dry run</td>
+<td>Drift report and reconcile</td>
+<td>Yes, from a scheduled dry run, with one-click reconcile on Team</td>
 <td>Not documented</td>
 <td>Not documented</td>
 <td>Not documented</td>
@@ -293,8 +293,8 @@ than &quot;structured versus scrollback&quot;.</p>
 <tr>
 <td>Fleet memory</td>
 <td>Flaky-host detection, outcome sparklines, per-host history, and task duration trends across runs.</td>
-<td>Not available.</td>
-<td>Not available.</td>
+<td>Per-host job summaries, with no flaky-host detection or duration trends.</td>
+<td>Each task's log, with no host tracked across runs.</td>
 </tr>
 <tr>
 <td>Distributed workers</td>
@@ -306,19 +306,13 @@ than &quot;structured versus scrollback&quot;.</p>
 <td>Instance groups</td>
 <td>A queue pins work at the run, template, or inventory level, most specific wins, so jobs land on the right worker group (Team).</td>
 <td>Instance groups.</td>
-<td>Not available.</td>
+<td>Runner tag routing, Pro.</td>
 </tr>
 <tr>
 <td>High availability</td>
 <td>Active-active replicas on PostgreSQL behind any load balancer: store-claimed work, compare-and-set schedules and approvals, automatic failover through stale-lease reclaim, proven by a two-replica integration suite.</td>
 <td>Via Kubernetes replicas.</td>
-<td>Not documented.</td>
-</tr>
-<tr>
-<td>Per-run provenance</td>
-<td>Every run records the exact commit it executed.</td>
-<td>Partial.</td>
-<td>Partial.</td>
+<td>With Redis [3].</td>
 </tr>
 <tr>
 <td>Provable audit</td>
@@ -340,14 +334,14 @@ than &quot;structured versus scrollback&quot;.</p>
 </tr>
 <tr>
 <td>Directory-driven roles</td>
-<td>A directory or token group sets a user's role on every sign-in, over LDAP, SAML, or a bearer JWT. OIDC provisions every account at one configurable default role instead.</td>
+<td>A directory or token group sets a user's role on every sign-in, over LDAP, SAML, or a bearer JWT, on Pro. OIDC provisions every account at one configurable default role instead.</td>
 <td>Organization mapping, complex.</td>
-<td>No. Every user is assigned a role by hand.</td>
+<td>Identity group mapping in its Enterprise tier.</td>
 </tr>
 <tr>
 <td>Notification channels</td>
 <td>Eleven server-wide: webhook, email, Slack, Mattermost, Rocket.Chat, Discord, Teams, ntfy, PagerDuty, Grafana, and Twilio. All eleven take a per-template target, so a team pages its own channel; a Twilio or email target names only a recipient and sends through the server-held account, so the account secret never lives in a template. A named target is defined once and attached to templates, schedules, projects, and organizations, the way AWX attaches a notification template.</td>
-<td>A similar set plus IRC, without Discord or ntfy, attached per job template.</td>
+<td>A similar set plus IRC, without Discord or ntfy, attached to organizations, projects, job templates, workflows, and each inventory source.</td>
 <td>Fewer, some in a paid tier.</td>
 </tr>
 </tbody>
@@ -363,7 +357,7 @@ than &quot;structured versus scrollback&quot;.</p>
 <tbody>
 <tr>
 <td>Multiple runtimes</td>
-<td>SwitchTender runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, each with a dry run. AWX is Ansible-only. Semaphore runs Ansible, Terraform, OpenTofu, PowerShell, Bash, and Python, but not Go, and without a uniform dry run across tools.</td>
+<td>SwitchTender runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go. Ansible check mode and a Terraform or OpenTofu plan preview a change, and a Bash, PowerShell, Python, or Go dry run only checks the script without running it, which previews nothing. AWX is Ansible-only. Semaphore runs Ansible, Terraform, OpenTofu, PowerShell, Bash, and Python, but not Go.</td>
 </tr>
 <tr>
 <td>Container execution environments</td>
@@ -390,6 +384,10 @@ than &quot;structured versus scrollback&quot;.</p>
 <td>All three launch on a git push.</td>
 </tr>
 <tr>
+<td>Planning and applying from a pull request</td>
+<td>SwitchTender plans a GitHub or GitLab pull request and comments the plan with the decision its apply would get. A person whose forge account is linked can comment <code>/switchtender apply</code> to approve and apply that plan, with the same role, grants, and separation of duties as the queue, the way Atlantis applies from a comment. A rule that requires the approver's reason still needs the decision made in SwitchTender, since a comment carries none.</td>
+</tr>
+<tr>
 <td>Metrics</td>
 <td>SwitchTender exposes Prometheus metrics for scraping.</td>
 </tr>
@@ -399,7 +397,7 @@ than &quot;structured versus scrollback&quot;.</p>
 </tr>
 <tr>
 <td>Paid tiers</td>
-<td>SwitchTender: Community free, Pro $500 a year to 500 hosts (SSO, five approval policies, and email support), Team $9,900 to $54,000 by fleet band (full policy engine, PostgreSQL active-active HA, distributed workers, drift reconcile, change register), Enterprise from $75,000. AWX: free, no paid tier; the paid product is Ansible Automation Platform. Semaphore: Community free, Pro $490 a year to 500 managed nodes, Enterprise by contract.</td>
+<td>SwitchTender: Community free with one plain rule, Pro $500 a year to 500 hosts (SSO, five approval policies, and email support), Team $9,900 to $54,000 by fleet band (full policy engine, PostgreSQL active-active HA, distributed workers, drift reconcile, change register), Enterprise from $75,000. AWX: free, no paid tier; the paid product is Ansible Automation Platform. Semaphore: Community free, Pro $490 a year to 500 managed nodes, Enterprise by contract.</td>
 </tr>
 </tbody>
 </table>
@@ -418,15 +416,11 @@ than &quot;structured versus scrollback&quot;.</p>
 </tr>
 <tr>
 <td>Policy language</td>
-<td>Approval policies are YAML or Rego, the Open Policy Agent language, so OPA and Conftest rules port. A Sentinel rule does not, because Sentinel is proprietary to HashiCorp, and has to be rewritten in Rego.</td>
+<td>Approval policies are YAML or, on Team, Rego, the Open Policy Agent language, so OPA rules port. A Sentinel rule does not, because Sentinel is proprietary to HashiCorp, and has to be rewritten in Rego.</td>
 </tr>
 <tr>
-<td>Approving from a pull request</td>
-<td>A plan is commented onto the pull request that proposed it, with the decision the apply would get, but the apply is approved in SwitchTender's own queue. Atlantis applies from a comment on the pull request itself.</td>
-</tr>
-<tr>
-<td>A few AWX forms</td>
-<td>An approval node joined by an &quot;always&quot; edge, injector templates that use Jinja beyond plain substitution, and IRC notifications do not come across. The import report names each one rather than bringing it over changed.</td>
+<td>Some AWX forms</td>
+<td>An approval node joined by an &quot;always&quot; edge, injector templates that use Jinja beyond plain substitution, and IRC notifications do not come across. Neither does a workflow with a node that runs another workflow or a sync, a path taken on failure, nodes from more than one project, or an always path beside a success path on one node, nor a project that is not on git, nor a team. The import report names each one rather than bringing it over changed.</td>
 </tr>
 </tbody>
 </table>

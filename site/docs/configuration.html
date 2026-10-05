@@ -60,7 +60,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration" class="active">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration" class="active">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/ansible-runtime">Managed Ansible runtime</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/upgrading">Upgrading</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -87,9 +87,9 @@ believes it has a control it does not have.</p>
 <td>Any <code>--oidc-*</code>, <code>--saml-*</code>, <code>--ldap-*</code>, or <code>--jwt-*</code> flag. <code>serve</code> refuses to start with one set and no license.</td>
 </tr>
 <tr>
-<td>The full policy engine: deny rules, risk floors, actor scoping, distinct-approver separation of duties</td>
+<td>The full policy engine: deny rules, risk and reversibility floors, actor scoping, distinct-approver separation of duties, and Rego policies</td>
 <td>Team</td>
-<td>Creating a policy that uses one. A single require-approval policy stays Community.</td>
+<td>Creating a policy that uses one. A single require-approval policy or one exemption stays Community.</td>
 </tr>
 <tr>
 <td>More approval policies at once</td>
@@ -201,6 +201,16 @@ believes it has a control it does not have.</p>
 <td>Token for the <code>--galaxy-server</code> URL, read from the environment so it never lands on the command line.</td>
 </tr>
 <tr>
+<td><code>SWITCHTENDER_ANSIBLE_BIN</code></td>
+<td>serve, worker</td>
+<td>Default for <code>--ansible-bin</code>, the directory of Ansible commands runs use, or <code>system</code> for the ones on PATH.</td>
+</tr>
+<tr>
+<td><code>SWITCHTENDER_ANSIBLE_RUNTIME_DIR</code></td>
+<td>serve, worker, ansible</td>
+<td>The <a href="/docs/ansible-runtime">managed Ansible runtime</a> directory when no flag names one. Defaults to <code>ansible/</code> in the data directory.</td>
+</tr>
+<tr>
 <td><code>SWITCHTENDER_FEDERATION_ISSUER</code></td>
 <td>serve, worker</td>
 <td>Default for <code>--federation-issuer</code>, the external URL this install is an OpenID Connect issuer at for federated cloud credentials. Every process on one database must see the same value.</td>
@@ -213,7 +223,7 @@ believes it has a control it does not have.</p>
 <tr>
 <td><code>SWITCHTENDER_EGRESS_PROXY</code></td>
 <td>serve, worker</td>
-<td>Proxy for the server's own outbound requests: notifications, federation token exchange, forge review calls, external secret sources, git remotes, and the registry lookups <code>--image-digest-lookup</code> makes. An http, https, or socks5 URL. The ambient <code>HTTP_PROXY</code> and <code>HTTPS_PROXY</code> are never used, so a forgotten proxy variable cannot route these requests somewhere that skips the cloud metadata and loopback checks. When this is set, each target is resolved and held to those checks before the request reaches the proxy, and an IP-literal target is refused. The proxy's own egress policy is then the boundary for a hostname that rebinds after the check, so point it at the hosts the server is meant to reach.</td>
+<td>Proxy for the server's own outbound requests: notifications, federation token exchange, forge review calls, external secret sources, git remotes, and the registry lookups <code>--image-digest-lookup</code> makes. Its scheme is http, https, or socks5. The ambient <code>HTTP_PROXY</code> and <code>HTTPS_PROXY</code> are never used, so a forgotten proxy variable cannot route these requests somewhere that skips the cloud metadata and loopback checks. When this is set, each target is resolved and held to those checks before the request reaches the proxy, and an IP-literal target is refused. The proxy's own egress policy is then the boundary for a hostname that rebinds after the check, so point it at the hosts the server is meant to reach.</td>
 </tr>
 <tr>
 <td><code>SWITCHTENDER_RUNFILES_DIR</code></td>
@@ -378,6 +388,11 @@ that variable is unset.</p>
 <td>Role granted to an account created on first SSO sign-in: admin, operator, or viewer.</td>
 </tr>
 <tr>
+<td><code>--forge-oauth</code></td>
+<td>none</td>
+<td>A GitHub or GitLab OAuth application people link their forge account through, so a pull request comment can act as them. Comma-separated <code>provider=github</code> or <code>provider=gitlab</code>, <code>client_id=ID</code>, and the client secret from exactly one of <code>secret_env=VAR</code> or <code>secret_file=PATH</code>, never the command line. Add <code>web_url</code> for GitHub Enterprise Server or self-managed GitLab, and <code>api_url</code> when its API base is not the usual <code>/api/v3</code> or <code>/api/v4</code> under it. Repeatable, one per forge. Needs <code>--public-url</code> and <code>SWITCHTENDER_ENCRYPTION_KEY</code>, which signs each link request. See <a href="/docs/pull-request-review#linking-forge-accounts">linking forge accounts</a>.</td>
+</tr>
+<tr>
 <td><code>--ldap-url</code></td>
 <td>none</td>
 <td>LDAP directory URL to enable directory sign-in, for example <code>ldaps://ldap.example.com:636</code>.</td>
@@ -410,7 +425,7 @@ that variable is unset.</p>
 <tr>
 <td><code>--public-url</code></td>
 <td>none</td>
-<td>Public base URL of this server, such as <code>https://switchtender.example.com</code>. A <a href="/docs/pull-request-review">pull request review</a> links its comment and commit status to the run under it. Empty posts run ids without links.</td>
+<td>Public base URL of this server, such as <code>https://switchtender.example.com</code>. A <a href="/docs/pull-request-review">pull request review</a> links its comment and commit status to the run under it. Empty posts run ids without links. Linking a forge account through <code>--forge-oauth</code> needs it, since the forge sends the person back to this address.</td>
 </tr>
 <tr>
 <td><code>--saml-idp-metadata-url</code></td>
@@ -683,6 +698,16 @@ that variable is unset.</p>
 <td>Private Ansible Galaxy or Automation Hub URL for project collection installs. Token from <code>SWITCHTENDER_GALAXY_TOKEN</code>.</td>
 </tr>
 <tr>
+<td><code>--ansible-bin</code></td>
+<td>none</td>
+<td>Directory holding the <code>ansible-playbook</code> and <code>ansible-inventory</code> runs use, or <code>system</code> for the ones on PATH. A relative value is resolved against the working directory at startup. Empty uses the <a href="/docs/ansible-runtime">managed Ansible runtime</a> when one is in use, then PATH. Also <code>SWITCHTENDER_ANSIBLE_BIN</code>.</td>
+</tr>
+<tr>
+<td><code>--ansible-runtime-dir</code></td>
+<td><code>ansible/</code> in the data directory</td>
+<td>Managed Ansible runtime directory. Also <code>SWITCHTENDER_ANSIBLE_RUNTIME_DIR</code>.</td>
+</tr>
+<tr>
 <td><code>--federation-issuer</code></td>
 <td>none</td>
 <td>External https URL this install is an OpenID Connect issuer at, so a run reaches AWS, Google Cloud, or Azure with short-lived federated credentials and nothing durable is stored. Serves the discovery document and public keys under it and needs the encryption key and salt, which seal the signing key. Falls back to <code>SWITCHTENDER_FEDERATION_ISSUER</code>. See <a href="/docs/federation">Federated cloud credentials</a>.</td>
@@ -892,7 +917,7 @@ node over the mesh relay, with no database access of its own.</p>
 <tr>
 <td><code>--db</code></td>
 <td><code>switchtender.db</code></td>
-<td>SQLite file path, or a <code>postgres://</code> DSN. Ignored with <code>--server</code>.</td>
+<td>SQLite file path, or a <code>postgres://</code> DSN. With <code>--server</code> the worker opens no database, and the value only places the <a href="/docs/ansible-runtime#where-it-lives">managed Ansible runtime</a>, in <code>ansible/</code> beside it.</td>
 </tr>
 <tr>
 <td><code>--server</code></td>
@@ -1015,6 +1040,16 @@ node over the mesh relay, with no database access of its own.</p>
 <td>Private Ansible Galaxy or Automation Hub URL for project collection installs. Token from <code>SWITCHTENDER_GALAXY_TOKEN</code>.</td>
 </tr>
 <tr>
+<td><code>--ansible-bin</code></td>
+<td>none</td>
+<td>Directory holding the <code>ansible-playbook</code> and <code>ansible-inventory</code> runs use, or <code>system</code> for the ones on PATH. A relative value is resolved against the working directory at startup. Empty uses the <a href="/docs/ansible-runtime">managed Ansible runtime</a> when one is in use, then PATH. Also <code>SWITCHTENDER_ANSIBLE_BIN</code>.</td>
+</tr>
+<tr>
+<td><code>--ansible-runtime-dir</code></td>
+<td><code>ansible/</code> in the data directory</td>
+<td>Managed Ansible runtime directory. Also <code>SWITCHTENDER_ANSIBLE_RUNTIME_DIR</code>.</td>
+</tr>
+<tr>
 <td><code>--federation-issuer</code></td>
 <td>none</td>
 <td>The same issuer URL serve is given. The worker signs the identity tokens of the runs it executes with the keys every process on the database shares, under this URL. Falls back to <code>SWITCHTENDER_FEDERATION_ISSUER</code>.</td>
@@ -1039,6 +1074,28 @@ and its key id as one JSON line:</p>
 </code></pre>
 <p><code>switchtender worker key public FILE</code> prints the same line for a key file that already exists, and
 refuses one another account can read. The file is a standard PKCS #8 X25519 private key, so <code>openssl genpkey -algorithm X25519 -out FILE</code> makes an equivalent one, and <code>openssl pkey -in FILE -pubout -outform DER | tail -c 32 | base64</code> prints the base64 that follows <code>x25519:</code>.</p>
+<h2 id="ansible">ansible</h2>
+<p>Installs, lists, and removes the <a href="/docs/ansible-runtime">managed Ansible runtime</a>: a Python virtual
+environment holding one pinned ansible-core release, installed with pip in hash-checking mode from a
+lock this binary carries. Runs use it when no <code>--ansible-bin</code> is configured. A <code>python3</code> the release
+supports must be installed.</p>
+<ul>
+<li><code>ansible install [--version &lt;release&gt;] [--python &lt;path&gt;] [--wheels &lt;dir&gt;] [--index-url &lt;url&gt;]</code>
+installs a release and makes it the one runs use. <code>--version</code> takes a release such as <code>2.21.4</code> or
+a minor version such as <code>2.21</code>, and defaults to the newest supported release. <code>--python</code> names the
+interpreter to build with, and defaults to <code>python3</code>, then <code>python3.N</code>, on PATH. <code>--wheels</code>
+installs offline from a directory of wheels, relative to where the command runs, checked against
+the same hashes. <code>--index-url</code> downloads from a mirror instead of PyPI. pip's own environment
+variables and configuration files are not read. Installing an installed release verifies it and
+makes it the one runs use, reinstalling nothing.</li>
+<li><code>ansible list</code> prints the installed releases and which one is current.</li>
+<li><code>ansible remove [--version &lt;release&gt;]</code> removes one release, or every release and the directory
+when nothing else is in it.</li>
+<li><code>ansible lock [--version &lt;release&gt;]</code> prints the requirements lock a release installs from.</li>
+</ul>
+<p>Every <code>ansible</code> subcommand takes <code>--dir</code> for the runtime directory, which defaults to
+<code>SWITCHTENDER_ANSIBLE_RUNTIME_DIR</code>, then <code>ansible/</code> in the data directory of <code>--db</code>, and <code>--pretty</code>
+for indented JSON.</p>
 <h2 id="token">token</h2>
 <p>Manages API tokens. A public bind on an empty database mints an initial admin token at startup.</p>
 <ul>
@@ -1051,9 +1108,12 @@ service, or an AI agent. See <a href="/docs/agents">running an agent</a>.</li>
 operator whatever role its account holds, so an agent can launch and propose work but can never
 manage identity, access, or secrets, and can never approve its own held run. Every action it takes
 is recorded in the chain as <code>actor_type: agent</code> with the account it acts for beside it, which is
-what <code>actor_kind: agent</code> policy rules match on. It requires <code>--user</code>, so the chain always records
-the human the agent acts for; without one the command refuses. Mint every agent token with it: a
-token without <code>--agent</code> is indistinguishable from a person's in the record.</li>
+what <code>actor_kind: agent</code> policy rules match on. Every run such a token asks for waits for a
+person's approval unless a rule with <code>effect: exempt</code> covers it, as
+<a href="/docs/policy#agent-runs-are-held-by-default">Agent runs are held by default</a> describes. It requires
+<code>--user</code>, so the chain always records the human the agent acts for. Without one the command
+refuses. Mint every agent token with it: a token without <code>--agent</code> is indistinguishable from a
+person's in the record, and gets no agent hold.</li>
 <li><code>token list</code> lists tokens without their secrets.</li>
 <li><code>token revoke &lt;id&gt;</code> deletes a token.</li>
 </ul>
@@ -1341,10 +1401,12 @@ what the witness tells operators to publish and the hex key is what the document
 the check proves only that the attestation is internally consistent, which a forger with their own
 key satisfies trivially.</p>
 <h2 id="mcp">mcp</h2>
-<p>Serves the Model Context Protocol over stdio, so an agent can list templates, propose a run, and read
-what happened. Every tool call is an ordinary authenticated API request carrying the token given
-here, so it passes the same authorization, the same approval policy, and the same fail-closed audit
-append as a request from a person. See <a href="/docs/agents">Agents</a>.</p>
+<p>Serves the Model Context Protocol over stdio, so an agent can list templates, propose a run, and
+read what happened. Every tool call is an ordinary authenticated API request carrying the token
+given here, so it passes the same authorization, the same approval policy, and the same fail-closed
+audit append as a request from a person. A run it proposes waits for a person's approval unless a
+rule with <code>effect: exempt</code> covers it, as <a href="/docs/policy#agent-runs-are-held-by-default">agent runs are held by
+default</a> describes. See <a href="/docs/agents">Agents</a>.</p>
 <pre><code>export SWITCHTENDER_MCP_TOKEN=swt_...
 switchtender mcp --server https://switchtender.internal
 </code></pre>
@@ -1370,7 +1432,7 @@ reach.</p>
 <tr>
 <td><code>--allow-adhoc</code></td>
 <td>off</td>
-<td>Also expose the ad-hoc run tool, letting the agent compose a run rather than launch a template an operator defined. Approval policy still applies.</td>
+<td>Also expose the ad-hoc run tool, letting the agent compose a run rather than launch a template an operator defined. The default hold on agent runs and approval policy still apply.</td>
 </tr>
 <tr>
 <td><code>--token</code></td>
@@ -1515,7 +1577,7 @@ backup was written with, and it never deletes objects absent from the file.</p>
 <p>Both are the standard Cobra built-ins. <code>help</code> prints usage for any command, and <code>completion</code> emits a
 shell completion script for bash, zsh, fish, or PowerShell.</p>
 <h2 id="output-flags">Output flags</h2>
-<p>JSON goes to stdout compact by default. Three commands take <code>--pretty</code> to indent it; it is not a
+<p>JSON goes to stdout compact by default. Four commands take <code>--pretty</code> to indent it. It is not a
 global flag, so passing it elsewhere is an error rather than a no-op.</p>
 <table>
 <thead>
@@ -1528,7 +1590,7 @@ global flag, so passing it elsewhere is an error rather than a no-op.</p>
 <tbody>
 <tr>
 <td><code>--pretty</code></td>
-<td><code>token</code> and its subcommands, <code>audit anchor</code>, <code>audit receipt</code></td>
+<td><code>token</code> and its subcommands, <code>ansible</code> and its subcommands, <code>audit anchor</code>, <code>audit receipt</code></td>
 <td>Indent JSON output instead of the compact default.</td>
 </tr>
 </tbody>
@@ -1555,7 +1617,7 @@ run list, the fleet and drift views, the host pages, and the change log.</p>
 no per-row id are served whole only to a caller nothing is hidden from, because such a total is
 every other group's volume in one number. On an install with no grants at all that is everybody,
 which is the common case and is unaffected. It stays unaffected by a grant on a template or a worker
-queue, since neither can hide a run; what changes it is a grant on a project, an inventory, or a
+queue, since neither can hide a run. What changes it is a grant on a project, an inventory, or a
 credential that the caller does not hold.</p>
 <p>For a caller in that position each surface answers differently, and the difference is worth knowing
 before you point a dashboard at one:</p>
@@ -1705,7 +1767,7 @@ matches on <code>queue</code>:</p>
     require_distinct_approver: true
 </code></pre>
 <p>A policy with <code>queue</code> holds only what is routed to that queue, and a run on a named queue executes
-only when a worker serving that queue claims it; the control node's own runner takes unqueued runs
+only when a worker serving that queue claims it. The control node's own runner takes unqueued runs
 alone. On an install without relay workers, a queued run therefore waits as <code>pending</code> indefinitely,
 even after approval. To gate runs the server itself executes, write the policy without <code>queue</code>.</p>
 <h2 id="delivering-secrets-to-relay-workers">Delivering secrets to relay workers</h2>

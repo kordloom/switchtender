@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Upgrading | SwitchTender docs</title>
+	<meta name="description" content="This page lists what an install running v1.102.0 notices when it upgrades to this release, and what to do about each change.">
+	<link rel="canonical" href="https://switchtender.com/docs/upgrading">
+	<meta property="og:title" content="Upgrading | SwitchTender docs">
+	<meta property="og:description" content="This page lists what an install running v1.102.0 notices when it upgrades to this release, and what to do about each change.">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="https://switchtender.com/docs/upgrading">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
+	<meta name="twitter:card" content="summary_large_image">
+	<meta name="twitter:title" content="Upgrading | SwitchTender docs">
+	<meta name="twitter:description" content="This page lists what an install running v1.102.0 notices when it upgrades to this release, and what to do about each change.">
+	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
+	<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "TechArticle",
+ "about": {
+  "@type": "SoftwareApplication",
+  "name": "SwitchTender",
+  "url": "https://switchtender.com/"
+ },
+ "description": "This page lists what an install running v1.102.0 notices when it upgrades to this release, and what to do about each change.",
+ "headline": "Upgrading",
+ "isPartOf": {
+  "@type": "WebSite",
+  "name": "SwitchTender docs",
+  "url": "https://switchtender.com/docs/"
+ },
+ "publisher": {
+  "@type": "Organization",
+  "name": "KordLoom LLC",
+  "url": "https://kordloom.com"
+ },
+ "url": "https://switchtender.com/docs/upgrading"
+}
+</script>
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=2">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/kordloom/switchtender">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/ansible-runtime">Managed Ansible runtime</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/upgrading" class="active">Upgrading</a><a href="/docs/vendor-risk">Vendor risk review</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="upgrading">Upgrading</h1>
+<p>This page lists what an install running v1.102.0 notices when it upgrades to this release, and what
+to do about each change. Upgrading is replacing the binary, the package, or the image and starting
+it again. Each process carries the database schema forward when it opens the database, so there is
+no separate migration step.</p>
+<h2 id="before-you-upgrade">Before you upgrade</h2>
+<ul>
+<li>Take a backup with v1.102.0, <code>switchtender backup --db &lt;database&gt; --out before-upgrade.stbak</code>, if
+you might roll back. This release writes backup format version 3, which v1.102.0 refuses to
+restore.</li>
+<li>Decide every run waiting for approval and let queued runs finish. A run submitted before the
+upgrade that names a stored inventory is refused when it starts afterward, as <a href="#runs-submitted-before-the-upgrade">runs submitted
+before the upgrade</a> explains.</li>
+<li>On a server whose clock is not set to UTC, give each schedule that names no time zone the zone it
+is meant to fire in, as <a href="#schedules-with-no-time-zone-run-in-utc">schedules with no time zone run in
+UTC</a> explains.</li>
+<li>List your tokens with <code>switchtender token list</code> and check that every AI agent's token has the kind
+<code>agent</code>. Only those are held as an agent's.</li>
+<li>Upgrade every server and relay worker together, and write a rule with <code>effect: exempt</code> only once
+all of them run this release. v1.102.0 does not know that effect.</li>
+</ul>
+<h2 id="agent-runs-are-held-by-default">Agent runs are held by default</h2>
+<p>A run an agent token asks for now waits for a person before it executes, with no policy written,
+under a built-in rule named <code>requested by an agent, held by default</code>. Its dry runs wait too, since a
+check or a plan still runs code with the server's credentials, whatever the dry-run scan finds. Its
+Terraform or OpenTofu apply takes two approvals: it is held before anything plans, and once a person
+releases it, the apply its plan proposes is held again, carrying the saved plan. A person's runs are
+unaffected. Under v1.102.0 such a run went ahead unless a policy held it.</p>
+<p>What to do:</p>
+<ul>
+<li>Write a rule with <code>effect: exempt</code> for the routine agent work that should keep running unattended,
+and leave everything else held. An exemption that names an agent's <code>actor</code> must also name the
+<code>account</code> its token is bound to, and one that names the <code>actor</code> alone is refused. A Community
+install's one rule can be that exemption. <a href="/docs/policy#agent-runs-are-held-by-default">Agent runs are held by
+default</a> covers what an exemption matches and what it
+risks.</li>
+<li>Plan for two approvals on each Terraform or OpenTofu apply an agent asks for, or cover the routine
+ones with an exemption, which lets an apply plan and apply as the rules allow for a person's.</li>
+<li>A token minted without <code>--agent</code> is recorded as a person's and is never held. Mint a replacement
+with <code>switchtender token new --user &lt;account&gt; --agent</code> for any agent holding such a token, then
+revoke the old one.</li>
+<li>Make sure a person with the admin role is there to approve, since an agent never can.</li>
+</ul>
+<h2 id="dry-runs-a-rule-exempts-are-scanned-first">Dry runs a rule exempts are scanned first</h2>
+<p>Under v1.102.0, <code>exclude_dry_run</code> let through any run submitted as a dry run. It now lets through
+only a dry run the gate read in full without finding a known way for it to act for real. These are
+matched as the real run would be, and a hold the scan caused carries a note naming what it found:</p>
+<ul>
+<li>An Ansible dry run whose playbook sets <code>check_mode</code> to anything but true, or runs a <code>pipe</code> lookup,
+written as <code>lookup</code>, <code>query</code>, or <code>q</code> or as a <code>with_pipe</code> loop, in a play's vars or environment or
+anywhere in a task. The lookup runs its command on the controller under <code>--check</code>.</li>
+<li>A Terraform or OpenTofu plan whose configuration declares an <code>external</code> or <code>aws_lambda_invocation</code>
+data source, or an <code>http</code> data source with a write method or a request body. A method the scan
+cannot read counts as a write.</li>
+<li>A dry run whose playbook, configuration, or modules could not be read in full. The gate does not
+download modules for a plan routed to a named queue, so such a plan that calls registry or remote
+modules is not exempt either.</li>
+<li>A dry run of a tool a plugin or the SDK added, which nothing scans.</li>
+</ul>
+<p>The scan finds the known ways a preview acts. It does not prove one harmless, since lookups,
+plugins, and providers run code during a check or a plan, so a rule with <code>exclude_dry_run</code> trusts
+the playbooks and configurations it lets through.</p>
+<p>What to do: read the hold note, then rework the task, the lookup, or the data source it names, or
+vendor the module into the repository and call it by a local path. Keep <code>exclude_dry_run</code> to rules
+over code your team reviews. <a href="/docs/concepts#when-a-dry-run-you-expected-to-pass-is-held">When a dry run you expected to pass is
+held</a> walks through the common cases.</p>
+<h2 id="a-held-terraform-or-opentofu-apply-is-planned-first">A held Terraform or OpenTofu apply is planned first</h2>
+<p>Under v1.102.0, only a <code>max_destroy</code> rule, or a risk or reversibility floor, planned an apply first.
+An apply any other rule held, or one submitted with a request for approval, waited without a plan.
+It is now planned at once, with the run's credentials, and the apply the plan proposes is what
+waits, carrying the saved plan the approval binds. An agent's apply is held before anything plans
+and again carrying the saved plan, as <a href="#agent-runs-are-held-by-default">agent runs are held by
+default</a> describes.</p>
+<p>What to do: expect a plan run to start as soon as such an apply is submitted, and approve the apply
+it proposes. <a href="/docs/tool-terraform#a-gated-apply-carries-out-the-approved-plan">A gated apply carries out the approved
+plan</a> has the details.</p>
+<h2 id="runs-submitted-before-the-upgrade">Runs submitted before the upgrade</h2>
+<p>This release takes a snapshot of a run's stored inventory when the run is submitted, the approval
+binds that snapshot, and the run executes against it. A run submitted under v1.102.0 carries no
+snapshot, so one that names a stored inventory and starts after the upgrade is refused, with a
+message saying to submit it again. That includes a run that was waiting for approval during the
+upgrade.</p>
+<p>What to do: decide held runs and let queued ones finish before you upgrade, and submit again any run
+refused this way. The new submission takes its snapshot and is held again where a rule holds it.</p>
+<h2 id="schedules-with-no-time-zone-run-in-utc">Schedules with no time zone run in UTC</h2>
+<p>Under v1.102.0, a schedule that named no time zone fired by the clock of whichever server evaluated
+it. It now fires in UTC. The first server of this release to open the database writes <code>UTC</code> onto
+every such schedule, an edit that names no zone keeps it in UTC, and so does restoring it from a
+backup. A schedule created or imported from now on without a zone is given the server's own zone, by
+name. A schedule whose cron expression or recurrence rule names its zone is unaffected.</p>
+<p>What to do: on a server whose clock is not set to UTC, set <code>timezone</code> on each of those schedules to
+the zone it is meant to fire in, before or after the upgrade. The published container image and the
+Helm chart run in UTC, so those installs see no change. <a href="/docs/api#schedule-timezone">Schedule
+timezone</a> has the details.</p>
+<h2 id="backups-are-format-version-3">Backups are format version 3</h2>
+<p>This release writes backup format version 3 and restores versions 2 and 3. Version 3 carries
+notification targets and their attachments, a template's sealed provisioning callback key, and a
+secret survey question's sealed default. v1.102.0 refuses a version 3 file rather than restoring
+part of it. A backup carries no forge account links, so after a restore each person links their
+GitHub or GitLab account again.</p>
+<p>What to do: keep a backup taken with v1.102.0 for as long as you might roll back to it.
+<a href="/docs/backup#restore">Restore</a> has the rest.</p>
+<h2 id="a-decision-on-a-run-that-is-no-longer-waiting-is-answered-409">A decision on a run that is no longer waiting is answered 409</h2>
+<p>An approve or a reject on a run that is no longer waiting for a decision is answered <code>409</code> and now
+records nothing. That covers a run another decision or a cancel settled first, on this server or on
+another one sharing the database. A decision claims the run before it is recorded, so the decision
+that loses leaves no entry on the audit chain. Under v1.102.0, a decision that lost a race could
+stay on the chain after the run's outcome, and checking the chain could then report it as not
+verified. A <code>/switchtender apply</code> comment that arrives after the decision gets a reply naming the
+run.</p>
+<p>What to do: in scripts and chat bots, read a <code>409</code> from approve or reject as already decided, and
+read the run to see which decision took effect.</p>
+<h2 id="a-terraform-directory-the-gate-did-not-install-is-never-trusted">A <code>.terraform</code> directory the gate did not install is never trusted</h2>
+<p>The gate never reads a <code>.terraform</code> directory it did not install, whether a commit carries it or a
+working directory on the server holds it. It copies the configuration without it, downloads the
+registry and remote modules itself, and reads those. A run the gate downloaded modules for executes
+exactly those modules, with <code>init</code> told to install none, and is refused when its modules no longer
+match the digest the gate recorded, or when it sets <code>TF_DATA_DIR</code> to a directory of its own.</p>
+<p>What to do: stop relying on a committed <code>.terraform</code>. Vendor a module into the repository and call
+it by a local path to have it read from the commit, make registry modules reachable with the run's
+own credentials from where the plan runs, and remove <code>TF_DATA_DIR</code> from the runs and credentials
+that set it. <a href="/docs/concepts#dry-runs-and-exclude-dry-run">Dry runs and <code>exclude_dry_run</code></a> has the
+details.</p>
+<h2 id="run-files-have-a-private-directory-the-server-checks-at-startup">Run files have a private directory the server checks at startup</h2>
+<p>Each run now stages its keys, tokens, and secret files in a private directory under a root the
+server proves before it serves: owned by its account, closed to other accounts, on a local
+filesystem it knows, and with locks that hold. A root on NFS, SMB, FUSE, or another filesystem it
+does not know, or <code>/dev/shm</code>, stops the process with the reason and the flag to set. Under a systemd
+unit written by v1.102.0, which sets no <code>RuntimeDirectory=</code>, run files go to the temporary
+directory, and the server and the doctor warn about it. A Docker Compose install also stages them in
+the container's temporary directory. The Helm chart mounts a 256Mi memory-backed volume for them,
+which counts against the pod's memory limit.</p>
+<p>What to do: add these lines to the <code>[Service]</code> section of a unit written by v1.102.0, then run
+<code>systemctl daemon-reload</code> and restart the service:</p>
+<pre><code>RuntimeDirectory=switchtender
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=no
+LimitCORE=0
+KillMode=mixed
+TimeoutStopSec=90
+</code></pre>
+<p>Elsewhere, point <code>--runfiles-dir</code> at a private tmpfs. On Kubernetes, raise a tight pod memory limit.
+<a href="/docs/run-files#where-run-files-live">Where run files live</a> and <a href="/docs/run-files#kubernetes">Kubernetes</a>
+have the details.</p>
+<h2 id="cloud-command-line-tools-keep-their-state-in-the-runs-directory">Cloud command line tools keep their state in the run's directory</h2>
+<p>A run that hands the AWS, Google Cloud, or Azure command line tools a credential now points their
+configuration and cache variables into the run's private directory, so what they write leaves with
+the run. Such a run no longer reads the configuration in the home directory of the account
+SwitchTender runs as, such as the region in <code>~/.aws/config</code>. A run that hands a tool no credential
+is unaffected.</p>
+<p>What to do: set the region, and any other setting such a run took from that home directory, on the
+credential. <a href="/docs/run-files#tool-state">Tool state</a> lists the variables.</p>
+<h2 id="a-runs-container-image-is-fixed-when-it-is-submitted">A run's container image is fixed when it is submitted</h2>
+<p>For a run that executes in a container image, which <code>--allow-container-ee</code> turns on, the image is
+now chosen when the run is submitted, from the run, its template, its project, or the server's
+<code>--default-image</code>, and resolved to the digest its registry serves. <code>--image-digest-lookup</code> is on by
+default, so the server asks the registry when the run is submitted. The approval covers that exact
+image. A worker's own <code>--default-image</code> never applies to an approved run, so a run approved to
+execute on the host is refused there rather than moved into another image.</p>
+<p>What to do: set the fallback image with <code>--default-image</code> on <code>serve</code>, and turn
+<code>--image-digest-lookup</code> off where the server cannot reach a registry.
+<a href="/docs/configuration#serve">serve</a> describes both flags.</p>
+<h2 id="a-plans-submission-can-wait-for-its-modules">A plan's submission can wait for its modules</h2>
+<p>A Terraform or OpenTofu dry run whose configuration calls registry or remote modules is read by the
+gate before the submission answers, and the gate downloads those modules first.
+<code>--module-fetch-timeout</code> bounds the download at two minutes by default. A webhook still answers
+within five seconds.</p>
+<p>What to do: let API clients that submit plans wait that long. <a href="/docs/api#how-long-a-submission-can-take">How long a submission can
+take</a> has the details.</p>
+<h2 id="attention-alerts-are-on">Attention alerts are on</h2>
+<p>The server now alerts on the notification channels already configured when waiting work cannot move:
+a run with no connected worker serving its queue for 15 minutes, a run blocked for 15 minutes, and a
+lost worker's run one minute after it last reported. Each condition alerts once. An approval that
+waits never alerts unless a thresholds file turns that on.</p>
+<p>What to do: tune the thresholds, or turn an alert off, in the file <code>--attention-file</code> names.
+<a href="/docs/configuration#attention-thresholds">Attention thresholds</a> lists them.</p>
+<h2 id="requests-that-are-refused-with-400">Requests that are refused with 400</h2>
+<p>A request whose path, query, or JSON body holds the NUL character, or text that is not valid UTF-8,
+is now refused with <code>400</code> naming the field, and an import holding such text is refused before it
+writes anything. An <code>Idempotency-Key</code> header, a queue, a username, or a token name past 255 bytes,
+and a grant or membership id past 512 bytes, are refused with <code>400</code> stating the bound.</p>
+<p>What to do: nothing for an ordinary client. A script that sent such values now gets <code>400</code>. <a href="/docs/api#what-a-request-may-carry">What a
+request may carry</a> has the bounds.</p>
+<h2 id="decisions-made-from-a-pull-request-comment">Decisions made from a pull request comment</h2>
+<p>This release adds approving and applying from a GitHub or GitLab pull request comment. A decision
+made that way is a <code>DECISION</code> entry at <code>/runs/&lt;id&gt;/decision/approved</code> like any other, recorded under
+the commenter's SwitchTender account with the decider type <code>forge_comment</code>, and it commits the
+forge, the comment's and its author's numeric ids, the SHA-256 of the comment body, and the plan it
+approved. A run a comment plans or proposes carries <code>forge_comment</code> as its actor type, which a
+policy reads as a person's, so a rule with <code>actor_kind: human</code> matches it.</p>
+<p>What to do: nothing, unless a tool of yours reads the chain or the decisions API and expects only
+the decider types it already knew. Comments act only for people who link a forge account, which
+needs <code>--forge-oauth</code> and <code>--public-url</code>. <a href="/docs/pull-request-review#what-the-evidence-holds">What the evidence
+holds</a> has the details.</p>
+<h2 id="smaller-changes">Smaller changes</h2>
+<ul>
+<li>An Ansible run whose inventory the native engine resolved is checked against the executor's own
+<code>ansible-inventory</code> just before the play, and refused on any difference, with each difference
+named. <a href="/docs/inventories#how-the-agreement-is-kept">How the agreement is kept</a> describes the check.</li>
+<li>Secret masking also catches quoted and escaped assignments, so a log can show <code>***</code> where it used
+to show a value.</li>
+<li><code>switchtender ansible install</code> can put a pinned ansible-core beside the database. Nothing changes
+until it is run, and once it is, runs use that ansible-core ahead of the one on the PATH unless
+<code>--ansible-bin</code> names another, as <a href="/docs/ansible-runtime#which-ansible-a-run-uses">which Ansible a run
+uses</a> describes.</li>
+</ul>
+
+		</main>
+	</div>
+	<div class="foot-legal" style="text-align:center;margin:26px auto 34px;font-size:12px;opacity:.75">SwitchTender&trade; is a trademark of KordLoom LLC. Copyright 2026 KordLoom LLC.</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>
