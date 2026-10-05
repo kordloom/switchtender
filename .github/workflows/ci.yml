@@ -220,7 +220,13 @@ jobs:
           git -C "$RUNNER_TEMP/loomseal" checkout --quiet "$ref"
           echo "SWITCHTENDER_LOOMSEAL_REPO=$RUNNER_TEMP/loomseal" >> "$GITHUB_ENV"
       - name: Install ansible for the drift contract
-        run: pipx install --force ansible-core==2.18.1
+        # The runner ships its own ansible-core under a root-owned pipx home, so a pipx install of
+        # another version either keeps the runner's or cannot replace it. A venv first on the PATH
+        # is the version this job names, whatever the image carries.
+        run: |
+          python3 -m venv "$RUNNER_TEMP/ansible"
+          "$RUNNER_TEMP/ansible/bin/pip" install --quiet "ansible-core==2.18.1"
+          echo "$RUNNER_TEMP/ansible/bin" >> "$GITHUB_PATH"
       - name: Install the engines this runner does not ship
         env:
           TOFU_VERSION: "1.8.7"
@@ -292,7 +298,13 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Install ansible-core ${{ matrix.ansible-core }}
-        run: pipx install --force "ansible-core==${{ matrix.ansible-core }}"
+        # The runner ships its own ansible-core under a root-owned pipx home, so a pipx install of
+        # another version either keeps the runner's or cannot replace it. A venv first on the PATH
+        # is the version this job names, whatever the image carries.
+        run: |
+          python3 -m venv "$RUNNER_TEMP/ansible"
+          "$RUNNER_TEMP/ansible/bin/pip" install --quiet "ansible-core==${{ matrix.ansible-core }}"
+          echo "$RUNNER_TEMP/ansible/bin" >> "$GITHUB_PATH"
       # The test checks that the ansible-core it found is the one this job installed, and the full
       # suite switch turns a missing ansible-inventory into a failure rather than a skip.
       - name: Run the conformance corpus
@@ -423,7 +435,13 @@ jobs:
       # Pinned for the same reason every tool here is: a gate whose toolchain floats changes
       # behavior without a commit.
       - name: Install ansible
-        run: pipx install --force ansible-core==2.18.1
+        # The runner ships its own ansible-core under a root-owned pipx home, so a pipx install of
+        # another version either keeps the runner's or cannot replace it. A venv first on the PATH
+        # is the version this job names, whatever the image carries.
+        run: |
+          python3 -m venv "$RUNNER_TEMP/ansible"
+          "$RUNNER_TEMP/ansible/bin/pip" install --quiet "ansible-core==2.18.1"
+          echo "$RUNNER_TEMP/ansible/bin" >> "$GITHUB_PATH"
       # The engine contract holds the real tools to what the runners believe about them, and the
       # contract turns an absent tool into a failure rather than a skip, because a skip reports as a
       # pass. That makes installing them part of the gate rather than a convenience: v1.96.0 was
