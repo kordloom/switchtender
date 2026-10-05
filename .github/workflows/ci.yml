@@ -202,9 +202,12 @@ jobs:
     env:
       SWITCHTENDER_TEST_POSTGRES_DSN: postgres://switchtender:switchtender@localhost:5432/switchtender?sslmode=disable
     steps:
+      # Full depth with tags: the downgrade tests build the previous release from its tag, and
+      # under the full-suite switch a missing tag fails them rather than skipping them.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
