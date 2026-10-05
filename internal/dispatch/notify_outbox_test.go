@@ -526,6 +526,21 @@ func TestStepAndAttentionNoticesKeepTheRunsOrder(t *testing.T) {
 		}
 		return false
 	})
+	// The pager never hears the step's notice, so the alert's page goes out at once. It has to be
+	// on record before the clock moves: a minute is the outbox's lease, and a page still in flight
+	// when the clock jumped would read as an abandoned claim and go out a second time.
+	waitUntil(t, "the alert's page on record", func() bool {
+		list, err := store.Deliveries(ctx, named.DeliveryFilter{RunID: parent.ID})
+		if err != nil {
+			return false
+		}
+		for _, dl := range list {
+			if dl.NotificationID == page.ID && dl.Status == named.DeliveryDelivered {
+				return true
+			}
+		}
+		return false
+	})
 	clock.advance(time.Minute)
 	d.outbox.Wake()
 	waitUntil(t, "both notices", func() bool {
