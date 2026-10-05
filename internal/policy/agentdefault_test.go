@@ -88,7 +88,8 @@ func TestAgentRequested(t *testing.T) {
 // TestTheBuiltInAgentHold walks the built-in hold through Requiring and AgentNote, the two answers
 // the dispatcher records: which rule held a run, and what the evidence says about the hold. Each
 // case that holds sits beside the control that does not, so the hold is shown to come from who
-// asked, from what a dry run was found to do, or from a missing exemption, and from nothing else.
+// asked and from a missing exemption, and from nothing else. A dry run is held whatever its scans
+// found, since a clean scan does not make an agent's preview safe to run unattended.
 //
 //nolint:funlen // Test function.
 func TestTheBuiltInAgentHold(t *testing.T) {
@@ -121,9 +122,10 @@ func TestTheBuiltInAgentHold(t *testing.T) {
 		Run: &run.Run{Actor: "system:scheduler", ActorType: "system", Tool: "bash",
 			Command: "deploy", Initiator: &run.Initiator{InitiatedBy: "bot", BoundTo: "dev-lead"}},
 		WantHeldBy: AgentDefaultName, WantNote: AgentDefaultName,
-	}, { // Test 3: An agent's dry run shown to change nothing proceeds and records nothing.
+	}, { // Test 3: An agent's dry run the scans found nothing in is held all the same.
 		Run: dryRun(agentRun("bot", "ansible", ""), run.DryRunScan{Tool: "ansible",
 			Inputs: []string{"site.yml"}}),
+		WantHeldBy: AgentDefaultName, WantNote: AgentDefaultName,
 	}, { // Test 4: An agent's dry run whose playbook forces real work is held.
 		Run: dryRun(agentRun("bot", "ansible", ""), run.DryRunScan{Tool: "ansible",
 			Findings: []string{forcedFinding}}),
@@ -406,7 +408,9 @@ func TestInForceDescribesAnExemption(t *testing.T) {
 }
 
 // TestPlanGatedFollowsTheAgentHold holds a Terraform or OpenTofu apply the built-in hold covers to
-// planning first, so the apply it proposes is what waits and the approval binds the saved plan.
+// planning first, so the apply it proposes is what waits and the approval binds the saved plan. It
+// stays planned first once a person has released the request, since that release is the first of
+// two, and a step of a workflow is left to its workflow's approval.
 func TestPlanGatedFollowsTheAgentHold(t *testing.T) {
 	t.Parallel()
 	exempt := exemption("tf bot", func(p *Policy) { p.Tool = "terraform" })
@@ -426,6 +430,28 @@ func TestPlanGatedFollowsTheAgentHold(t *testing.T) {
 		WantPlanned: false,
 	}, { // Test 3: An OpenTofu apply plans first the same way.
 		Run: agentRun("bot", "opentofu", "infra"), WantPlanned: true,
+	}, { // Test 4: A released agent request still plans first rather than applying straight.
+		Run: func() *run.Run {
+			r := agentRun("bot", "terraform", "infra")
+			r.DecisionID, r.ApprovedSpecDigest = "dec_1", "sha256:abc"
+			return r
+		}(),
+		WantPlanned: true,
+	}, { // Test 5: A released person's request is left to its hold, the control for test 4.
+		Run: func() *run.Run {
+			r := personRun("terraform", "infra")
+			r.DecisionID, r.ApprovedSpecDigest = "dec_1", "sha256:abc"
+			return r
+		}(),
+		WantPlanned: false,
+	}, { // Test 6: A step of an agent's workflow is left to the workflow's approval.
+		Run: func() *run.Run {
+			r := agentRun("bot", "terraform", "infra")
+			parent := "run_flow"
+			r.ParentID = &parent
+			return r
+		}(),
+		WantPlanned: false,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

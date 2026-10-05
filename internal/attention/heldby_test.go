@@ -2,9 +2,11 @@ package attention
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/kordloom/switchtender/internal/policy"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // TestHeldBySaysWhatHeldTheRun holds the end of the sentence an attention alert writes about a held
@@ -29,6 +31,42 @@ func TestHeldBySaysWhatHeldTheRun(t *testing.T) {
 			t.Parallel()
 			if got := heldBy(test.Rule); got != test.WantText {
 				t.Errorf("heldBy(%q) = %q, want %q", test.Rule, got, test.WantText)
+			}
+		})
+	}
+}
+
+// TestAnAlertSaysWhyAnAgentsPreviewWaits holds an alert about a run the built-in hold keeps waiting
+// to saying why when what the agent asked for runs code with this server's credentials: a dry run
+// or an apply nothing has planned. A plain change and a run a stored rule held add nothing, which
+// are the controls.
+func TestAnAlertSaysWhyAnAgentsPreviewWaits(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// Run is the held run.
+		Run *run.Run
+		// WantPart is what the alert adds, empty when it adds nothing.
+		WantPart string
+	}{{ // Test 0: An agent's check-mode run.
+		Run: &run.Run{Tool: run.ToolAnsible, DryRun: true, ActorType: policy.ActorKindAgent,
+			HeldByPolicy: policy.AgentDefaultName},
+		WantPart: "check mode still runs lookups",
+	}, { // Test 1: An agent's apply nothing has planned.
+		Run: &run.Run{Tool: run.ToolTerraform, ActorType: policy.ActorKindAgent,
+			HeldByPolicy: policy.AgentDefaultName},
+		WantPart: "before anything plans",
+	}, { // Test 2: An agent's plain change, the control.
+		Run: &run.Run{Tool: run.ToolBash, ActorType: policy.ActorKindAgent,
+			HeldByPolicy: policy.AgentDefaultName},
+	}, { // Test 3: A dry run a stored rule held, the control.
+		Run: &run.Run{Tool: run.ToolAnsible, DryRun: true, HeldByPolicy: "hold ansible"},
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			got := agentHoldWhy(test.Run)
+			if (got == "") != (test.WantPart == "") || !strings.Contains(got, test.WantPart) {
+				t.Errorf("agentHoldWhy() = %q, want it to say %q", got, test.WantPart)
 			}
 		})
 	}

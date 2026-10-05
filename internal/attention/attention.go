@@ -627,6 +627,7 @@ func (e *eval) heldRun(r *run.Run) Condition {
 		reason = "The change proposed from run " + r.ProposedFrom + " is held for approval" +
 			heldBy(r.HeldByPolicy) + "."
 	}
+	reason += agentHoldWhy(r)
 	return Condition{
 		Blocker: ApprovalNeeded, RunID: r.ID, Since: r.CreatedAt, queue: r.Queue, Approval: ap,
 		Reason: reason, WhoCanAct: approverSentence(approvers),
@@ -646,6 +647,19 @@ func heldBy(rule string) string {
 		return ": " + rule
 	}
 	return " by rule " + quoted(rule)
+}
+
+// agentHoldWhy returns the sentence an alert adds about a run the built-in agent hold keeps waiting
+// when what the agent asked for runs code with this server's credentials, such as a dry run or an
+// apply nothing has planned, led by a space. It is empty for every other run.
+func agentHoldWhy(r *run.Run) string {
+	if r.HeldByPolicy != policy.AgentDefaultName {
+		return ""
+	}
+	if why := policy.AgentHoldReason(r); why != "" {
+		return " " + why
+	}
+	return ""
 }
 
 // stepApproval returns the approval condition of a workflow waiting at one of its approval steps.

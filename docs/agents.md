@@ -107,7 +107,9 @@ review, fails the build when a new path appears without a test proving an agent 
 3. Decide what a human must approve. You do not need a policy for the agent's own runs: every run
    an agent token asks for waits for a person's approval unless a written policy exempts it. The
    hold applies to tokens minted with `switchtender token new --user <account> --agent`, and a token
-   minted without `--agent` gets no agent hold. A dry run the scans prove change free may proceed.
+   minted without `--agent` gets no agent hold. A dry run waits too, since check mode and a plan
+   still run code with this server's credentials, and a Terraform or OpenTofu apply takes two
+   approvals: one before it plans, and one for the apply its plan proposes with the saved plan.
    To let routine work through, write an exemption, a rule with `effect: exempt`, which Community
    covers. An exemption that names the agent's `actor` label must also name the `account` its
    token is bound to, since a label repeats across accounts. The receipt proves who approved each

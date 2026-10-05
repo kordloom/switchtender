@@ -30,8 +30,10 @@ import (
 // An agent asked to look before it leaps proposes a dry run, and a rule that excludes dry runs is
 // the natural one for an operator to write for an agent: let it preview freely, hold everything
 // else. Ansible runs a task that sets check_mode to false for real under --check, so an agent
-// proposing a dry run of such a playbook changed hosts with no person involved. The run must be
-// held, and what the agent and the approver read back must say why.
+// proposing a dry run of such a playbook changed hosts with no person involved. Check mode also
+// runs lookups, vars files, and plugins on the controller whatever the tasks say, so the built-in
+// hold keeps every dry run an agent asks for waiting, clean or not, and the rule cannot release it.
+// What the agent and the approver read back must say why, and the scan must still be on the run.
 //
 //nolint:funlen // Test function.
 func TestAnAgentDryRunThatForcesRealTasksIsHeld(t *testing.T) {
@@ -40,14 +42,18 @@ func TestAnAgentDryRunThatForcesRealTasksIsHeld(t *testing.T) {
 		Playbook   string
 		WantStatus run.Status
 		WantForced string
-	}{{ // Test 0: A clean dry run is a preview the agent may run unattended.
+		// WantNote is what the hold note the agent reads back must say.
+		WantNote string
+	}{{ // Test 0: A clean dry run is held too, since check mode still runs code on the controller.
 		Playbook:   "- hosts: all\n  tasks:\n    - name: Look\n      ansible.builtin.ping:\n",
-		WantStatus: run.StatusSucceeded,
+		WantStatus: run.StatusPendingApproval,
+		WantNote:   "check mode still runs lookups",
 	}, { // Test 1: A dry run whose playbook forces a real restart is held for a person.
 		Playbook: "- hosts: all\n  tasks:\n    - name: Restart web\n" +
 			"      ansible.builtin.service: name=web state=restarted\n      check_mode: false\n",
 		WantStatus: run.StatusPendingApproval,
 		WantForced: `site.yml: task "Restart web" sets check_mode to false`,
+		WantNote:   "check mode still runs lookups",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -130,15 +136,15 @@ func TestAnAgentDryRunThatForcesRealTasksIsHeld(t *testing.T) {
 				t.Fatalf("the agent's dry run reached %q, want %q. Recorded: %q", got,
 					test.WantStatus, proposed.DryRunFindings())
 			}
+			if !strings.Contains(proposed.HoldNote, test.WantNote) {
+				t.Errorf("the agent's reply does not carry the hold note: %s", reply)
+			}
 			if test.WantForced == "" {
 				return
 			}
 			// What the agent reads back, and what the approver's view of the run says.
 			if !strings.Contains(strings.Join(proposed.DryRunFindings(), "\n"), test.WantForced) {
 				t.Errorf("the agent's reply does not say why the dry run is held: %s", reply)
-			}
-			if !strings.Contains(proposed.HoldNote, "Two clean fixes") {
-				t.Errorf("the agent's reply does not carry the hold note: %s", reply)
 			}
 			view := httptest.NewRecorder()
 			req := httptest.NewRequest("GET", "/v1/runs/"+proposed.ID, nil)

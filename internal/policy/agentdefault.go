@@ -55,23 +55,73 @@ func Exempting(policies []*Policy, r *run.Run) *Policy {
 	return nil
 }
 
-// AgentHolds reports whether the built-in agent hold holds r: an agent requested it, it is not a
-// dry run the gate's scans prove changes nothing, and no exemption covers it.
+// AgentHolds reports whether the built-in agent hold holds r: an agent requested it and no
+// exemption covers it.
 //
-// The dry-run reading is the one exclude_dry_run uses, so the two cannot disagree about what a
-// preview is. A dry run whose playbook forces real work under check mode, or whose Terraform or
-// OpenTofu configuration runs a program while it plans, is a change, and so is one the gate could
-// not read in full.
+// A dry run is held like any other run an agent asks for. Check mode and a plan are not inert:
+// Ansible runs lookups, vars files, and plugins on the controller under --check, and a Terraform
+// or OpenTofu plan runs provider code and data sources, all with this server's credentials, so an
+// agent's preview can read a secret and send it anywhere. Whether a dry run changes anything is
+// the wrong question for an agent, and no scan of a playbook or a configuration can answer the
+// right one, so the scans are recorded on the run and decide nothing here.
 func AgentHolds(policies []*Policy, r *run.Run) bool {
-	return AgentRequested(r) && !r.ChangeFree() && Exempting(policies, r) == nil
+	return AgentRequested(r) && Exempting(policies, r) == nil
+}
+
+// AgentPlansFirst reports whether r is an agent's Terraform or OpenTofu apply that the built-in
+// hold covers and that nothing has planned yet. Such an apply is held where it was submitted,
+// before anything plans, since planning runs provider code with this server's credentials. Once a
+// person releases it, the plan gate plans it, and the apply its plan proposes is held again
+// carrying the saved plan, so a second approval binds the exact plan that runs. A step of a
+// workflow is left to its workflow's approval, as every rule leaves it.
+func AgentPlansFirst(policies []*Policy, r *run.Run) bool {
+	return unplannedApply(r) && r.ParentID == nil && AgentHolds(policies, r)
+}
+
+// unplannedApply reports whether r is a Terraform or OpenTofu apply nothing has planned yet: not a
+// dry run, and not the apply a plan proposed.
+func unplannedApply(r *run.Run) bool {
+	tool := run.NormalizeTool(r.Tool)
+	return (tool == run.ToolTerraform || tool == run.ToolOpenTofu) && !r.DryRun &&
+		r.ProposedFrom == ""
+}
+
+// AgentHoldReason says why the built-in hold keeps an agent's run waiting when what the agent asked
+// for runs code with this server's credentials even though it is meant to change nothing yet: a
+// dry run, an apply nothing has planned, or the apply an agent's plan proposed. It is empty for any
+// other run, where the hold's name says enough.
+func AgentHoldReason(r *run.Run) string {
+	tool := run.NormalizeTool(r.Tool)
+	terraform := tool == run.ToolTerraform || tool == run.ToolOpenTofu
+	switch {
+	case r.DryRun && tool == run.ToolAnsible:
+		return "An agent asked for this check-mode run, and check mode still runs lookups, vars " +
+			"files, and plugins on the controller with this server's credentials, so it waits for " +
+			"a person or for an exemption that covers it."
+	case r.DryRun && terraform:
+		return "An agent asked for this plan, and a plan still runs provider code and data " +
+			"sources with this server's credentials, so it waits for a person or for an exemption " +
+			"that covers it."
+	case r.DryRun:
+		return "An agent asked for this dry run, and a dry run still runs code with this " +
+			"server's credentials, so it waits for a person or for an exemption that covers it."
+	case terraform && r.ProposedFrom != "":
+		return "An agent asked for this apply, and its plan is done. This is the apply that plan " +
+			"proposes, carrying the saved plan, so approving it applies exactly that plan."
+	case terraform:
+		return "An agent asked for this apply, and planning it runs provider code and data " +
+			"sources with this server's credentials, so it waits for a person before anything " +
+			"plans. Approving it plans the apply, and the apply its plan proposes waits for a " +
+			"second approval carrying the saved plan."
+	}
+	return ""
 }
 
 // AgentNote returns what the evidence records about the built-in agent hold for r: that it held r,
 // or which exemption let r go ahead without it, naming the account the agent is bound to. It is
-// empty for a run no agent requested and for a dry run shown to change nothing, which the hold
-// never covers.
+// empty for a run no agent requested.
 func AgentNote(policies []*Policy, r *run.Run) string {
-	if !AgentRequested(r) || r.ChangeFree() {
+	if !AgentRequested(r) {
 		return ""
 	}
 	p := Exempting(policies, r)

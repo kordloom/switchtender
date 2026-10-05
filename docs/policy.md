@@ -34,21 +34,30 @@ workflow, and a retry, a rerun, or a relaunch of failed shards the agent asks fo
 carries the agent's identity, so it faces the same hold. The receipt for the run proves who
 approved it or which rule exempted it.
 
-A dry run the gate proves changes nothing goes ahead, under the same reading `exclude_dry_run` uses.
-An Ansible dry run whose playbook sets `check_mode` to anything but true runs that work for real, a
-Terraform or OpenTofu plan whose configuration has an external data source runs a program while it
-plans, and a playbook or configuration the gate cannot read in full may do either, so each of them
-is held. The hold note says what the scan found and the two fixes: make the dry run change free, or
-write an exemption that covers it.
+A dry run waits like any other run an agent asks for. Check mode and a plan are not inert: Ansible
+runs lookups, vars files, and plugins on the controller under `--check`, and a Terraform or OpenTofu
+plan runs provider code and data sources, all with this server's credentials, so a preview can read
+a secret and send it anywhere, even with a request that only reads. Whether a dry run changes
+anything is the wrong question for an agent, and no scan can prove a plan safe. The gate still scans
+the dry run and records what it read on the run, as evidence, and the hold note says why the run
+waits: what the agent asked for runs code with this server's credentials, so it waits for a person
+or for an exemption that covers it. A person's dry run is decided exactly as before, under
+`exclude_dry_run` and every other rule.
 
-An agent's Terraform or OpenTofu apply that the rules would plan first is planned, and the apply its
-plan proposes is held, carrying the saved plan, the way a person's is. Planning runs the
-configuration's programs, though, so the gate first reads the configuration the way it reads a dry
-run. When that read does not show the plan changes nothing, because an external data source runs its
-program while the tool plans or a module could not be read, the apply is held at submission instead,
-before anything executes, and its hold note says what was found and the two fixes: replace the
-external data source, or write a policy with `effect: exempt` that covers the run. A person's apply
-is planned first as before.
+An agent's Terraform or OpenTofu apply takes two approvals. It is held where it was submitted,
+before anything plans, since planning runs provider code with this server's credentials. When a
+person releases it, it is planned, and the apply its plan proposes is held again, carrying the saved
+plan, so the second approval binds the exact plan that applies. A released request is never applied
+without that plan, whatever other rules are in force: a `max_destroy` limit, a risk or
+reversibility floor, or a Rego `plan_gate`. A rerun, a retry, or a relaunch the agent asks for takes
+the same path. An apply an exemption covers plans and applies as the rules allow for a person's. A
+step of an agent's workflow is governed by the workflow's own approval, as every rule leaves it.
+
+SwitchTender knows an agent by its agent token, and only by that. A caller that signs in with a
+federated JWT is treated as the person or pipeline its claims map to: it is recorded as a session,
+with the role its group claim maps to, and gets no agent hold. An AI agent that reaches SwitchTender
+through a workload JWT is therefore not held by default, and if its claims map to admin, it can
+approve. Give every AI agent an agent token, and never a JWT mapped to a role that can approve.
 
 The built-in hold sits beside the stored rules and replaces none of them. A deny rule still refuses
 an agent's run outright, and a stored rule that holds the run is the one the hold names, with its
@@ -125,8 +134,9 @@ one.
 ### Upgrading
 
 An existing install gets the built-in hold when it upgrades. There is no migration and no setting.
-An agent whose runs went ahead unattended before the upgrade now waits for a person, so write an
-exemption for the routine work that should keep running unattended, and leave everything else held.
+An agent whose runs went ahead unattended before the upgrade now waits for a person, its dry runs
+included, and its Terraform or OpenTofu applies take two approvals. Write an exemption for the
+routine work that should keep running unattended, and leave everything else held.
 
 ## YAML rules
 

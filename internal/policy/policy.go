@@ -513,12 +513,20 @@ func (p *Policy) Label() string {
 // tool let an Ansible run past a rule holding everything, and one written for Terraform let the
 // apply a plan proposed past the hold its own rules placed, the default hold on an agent's run
 // included.
+//
+// An agent's apply that the built-in hold covers is the one exception to leaving a released run to
+// its hold. It is held at submission before anything plans, and its release is a release to plan,
+// so it is planned first even once a person has approved it: AgentPlansFirst says which applies.
 func PlanGated(policies []*Policy, r *run.Run) bool {
-	tool := run.NormalizeTool(r.Tool)
-	graded := (tool == run.ToolTerraform || tool == run.ToolOpenTofu) && !r.DryRun &&
-		r.ProposedFrom == ""
-	if !graded {
+	if !unplannedApply(r) {
 		return false
+	}
+	// An agent's apply the built-in hold covers is planned first whether or not a person already
+	// released it. That release is the first of two: it lets the apply plan, and the apply its plan
+	// proposes waits again carrying the saved plan. Read as released and left to its hold, the
+	// request applied without a plan anybody saw.
+	if r.ParentID == nil && AgentHolds(policies, r) {
+		return true
 	}
 	if r.ParentID == nil && r.Status != run.StatusPendingApproval && r.DecisionID == "" &&
 		r.ApprovedSpecDigest == "" && (r.ApprovalRequested || Requiring(policies, r) != nil) {

@@ -391,9 +391,12 @@ func TestAgentHoldExemptionIsCommunity(t *testing.T) {
 	})
 }
 
-// TestAgentHoldDryRun proves a dry run the gate shows to change nothing proceeds for an agent, and
-// one whose playbook forces a real task under check mode is held, both with no policy written. The
-// control is the same bash command submitted as a change, which is held.
+// TestAgentHoldDryRun proves every dry run an agent asks for waits for a person with no policy
+// written, clean or not, since a dry run still runs code with this server's credentials, and that
+// the hold says why. An exemption covering the dry run lets it through, and the controls are the
+// same dry runs from a person, which proceed.
+//
+//nolint:funlen // Test function.
 func TestAgentHoldDryRun(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -408,35 +411,120 @@ func TestAgentHoldDryRun(t *testing.T) {
 			t.Fatalf("write playbook: %v", err)
 		}
 	}
+	const checks = `{"name":"lead checks","effect":"exempt","actor":"release-agent",` +
+		`"account":"dev-lead","command_contains":"rotate-certs"}`
 	tests := []struct {
-		// Body is the agent's submission.
+		// Body is the submission.
 		Body string
+		// Person submits as the person rather than the agent.
+		Person bool
+		// Exemption is a policy the admin writes first, empty for none.
+		Exemption string
 		// WantHeld reports the run waits for a person.
 		WantHeld bool
-	}{{ // Test 0: A bash dry run is a syntax check and proceeds.
-		Body: `{"tool":"bash","command":"./rotate-certs.sh","dry_run":true}`,
-	}, { // Test 1: The same command as a change is held, the control.
-		Body: `{"tool":"bash","command":"./rotate-certs.sh"}`, WantHeld: true,
-	}, { // Test 2: A clean Ansible check proceeds.
-		Body: `{"playbook":"` + clean + `","inventory":"localhost,","dry_run":true}`,
-	}, { // Test 3: A check whose playbook forces a real restart is held.
+		// WantNote is what the hold note must say when the run is held.
+		WantNote string
+	}{{ // Test 0: A bash dry run is held.
+		Body:     `{"tool":"bash","command":"./rotate-certs.sh","dry_run":true}`,
+		WantHeld: true, WantNote: "a dry run still runs code",
+	}, { // Test 1: A clean Ansible check is held, since check mode still runs code.
+		Body:     `{"playbook":"` + clean + `","inventory":"localhost,","dry_run":true}`,
+		WantHeld: true, WantNote: "check mode still runs lookups",
+	}, { // Test 2: A check whose playbook forces a real restart is held.
 		Body:     `{"playbook":"` + forced + `","inventory":"localhost,","dry_run":true}`,
-		WantHeld: true,
+		WantHeld: true, WantNote: "check mode still runs lookups",
+	}, { // Test 3: An exemption covering the agent's dry run lets it through.
+		Body:      `{"tool":"bash","command":"./rotate-certs.sh","dry_run":true}`,
+		Exemption: checks,
+	}, { // Test 4: A person's clean Ansible check proceeds, the control for test 1.
+		Body:   `{"playbook":"` + clean + `","inventory":"localhost,","dry_run":true}`,
+		Person: true,
+	}, { // Test 5: A person's bash dry run proceeds, the control for test 0.
+		Body:   `{"tool":"bash","command":"./rotate-certs.sh","dry_run":true}`,
+		Person: true,
 	}}
 	for _, backend := range agentHoldBackends() {
 		for testNum, test := range tests {
 			t.Run(fmt.Sprintf("%s test %d", backend.Name, testNum), func(t *testing.T) {
 				t.Parallel()
 				s := newAgentHoldServer(t, backend.Open(t), true)
-				got := s.submit(t, s.Agent, http.MethodPost, "/v1/runs", test.Body)
-				if held := got.Status == run.StatusPendingApproval; held != test.WantHeld {
-					t.Errorf("held = %t, want %t: %+v", held, test.WantHeld, got)
+				if test.Exemption != "" {
+					if code, got := s.call(s.Admin, http.MethodPost, "/v1/policies",
+						test.Exemption); code != http.StatusCreated {
+						t.Fatalf("admin writing the exemption = %d: %s", code, got)
+					}
 				}
-				if test.WantHeld && got.HeldByPolicy != policy.AgentDefaultName {
+				token := s.Agent
+				if test.Person {
+					token = s.Person
+				}
+				got := s.submit(t, token, http.MethodPost, "/v1/runs", test.Body)
+				if held := got.Status == run.StatusPendingApproval; held != test.WantHeld {
+					t.Fatalf("held = %t, want %t: held by %q", held, test.WantHeld,
+						got.HeldByPolicy)
+				}
+				if !test.WantHeld {
+					return
+				}
+				if got.HeldByPolicy != policy.AgentDefaultName {
 					t.Errorf("held_by_policy = %q, want %q", got.HeldByPolicy,
 						policy.AgentDefaultName)
 				}
+				if !strings.Contains(got.HoldNote, test.WantNote) ||
+					!strings.Contains(got.HoldNote, "this server's credentials") {
+					t.Errorf("hold note = %q, want it to say %q and why", got.HoldNote,
+						test.WantNote)
+				}
 			})
+		}
+	}
+}
+
+// TestAgentHoldApplyWaitsBeforeItPlans proves an agent's Terraform apply is held where it was
+// submitted, before anything plans, through the API, and so is a rerun of a person's apply that
+// the agent asks for. The release that follows lets it plan, and the dispatcher tests follow it to
+// the second approval. The control is the same requests from a person, which are not held.
+func TestAgentHoldApplyWaitsBeforeItPlans(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// Path and Body are the request.
+		Path string
+		// Body is the request body.
+		Body string
+	}{{ // Test 0: An apply submitted directly.
+		Path: "/v1/runs", Body: `{"tool":"terraform","command":"infra"}`,
+	}, { // Test 1: A rerun of a person's finished apply.
+		Path: "/v1/runs/run_tf_done/rerun", Body: `{}`,
+	}}
+	for _, backend := range agentHoldBackends() {
+		for testNum, test := range tests {
+			for _, person := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s test %d person %v", backend.Name, testNum, person),
+					func(t *testing.T) {
+						t.Parallel()
+						s := newAgentHoldServer(t, backend.Open(t), true)
+						done := &run.Run{ID: "run_tf_done", Tool: run.ToolTerraform,
+							Command: "infra", Status: run.StatusSucceeded,
+							CreatedAt: time.Now().Add(-time.Hour), Actor: "dev-lead-cli",
+							ActorType: "token"}
+						if err := s.DB.runs.Save(context.Background(), done); err != nil {
+							t.Fatalf("runs.Save() error = %v", err)
+						}
+						token := s.Agent
+						if person {
+							token = s.Person
+						}
+						got := s.submit(t, token, http.MethodPost, test.Path, test.Body)
+						if held := got.Status == run.StatusPendingApproval; held == person {
+							t.Fatalf("held = %t for person %v (held by %q)", held, person,
+								got.HeldByPolicy)
+						}
+						if !person && !strings.Contains(got.HoldNote, "before anything plans") {
+							t.Errorf("hold note = %q, want it to say the apply waits before "+
+								"it plans", got.HoldNote)
+						}
+					})
+			}
 		}
 	}
 }

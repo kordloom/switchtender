@@ -222,6 +222,14 @@ function renderRiskCallout(run) {
 	if (why.children.length) host.appendChild(why);
 	const scanned = scanNote(run);
 	if (scanned) host.appendChild(scanned);
+	// A hold note the scan's box does not carry is shown on its own, such as why the built-in hold
+	// keeps an agent's dry run or apply waiting, so the approver reads why before deciding.
+	if (!scanned && run.hold_note) {
+		const note = document.createElement("p");
+		note.className = "risk-hold-note";
+		note.textContent = run.hold_note;
+		host.appendChild(note);
+	}
 	const facts = factCacheNote(run);
 	if (facts) host.appendChild(facts);
 	const pins = executionPinsNote(run);

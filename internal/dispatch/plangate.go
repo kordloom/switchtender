@@ -266,6 +266,8 @@ func gateProposal(policies []*policy.Policy, proposal *run.Run) error {
 	if p := policy.Requiring(policies, gp); p != nil {
 		proposal.Status = run.StatusPendingApproval
 		proposal.HeldByPolicy = maskPolicyText(gp, p.Label())
+		// The second hold on an agent's apply says what the approval it waits for binds.
+		proposal.HoldNote = agentHoldNote(policies, gp, proposal.HoldNote)
 		proposal.RequireDistinctApprover = proposal.RequireDistinctApprover ||
 			policy.RequireDistinct(policies, gp)
 		proposal.RequireReason = decision.Stricter(proposal.RequireReason,

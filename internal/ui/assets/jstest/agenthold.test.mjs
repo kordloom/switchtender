@@ -151,3 +151,30 @@ test("the run page shows the agent hold apart from policy warnings", () => {
 		}
 	}
 });
+
+test("a held agent apply shows why it waits where the decision is made", () => {
+	const applyNote = "An agent asked for this apply, and planning it runs provider code and data " +
+		"sources with this server's credentials, so it waits for a person before anything plans.";
+	const tests = [
+		// Test 0: An apply with no scan shows its hold note on its own.
+		{ Run: { hold_note: applyNote }, WantNotes: 1 },
+		// Test 1: A held run with no note shows none, the control.
+		{ Run: {}, WantNotes: 0 },
+		// Test 2: A dry run whose scan found something shows the note once, in the scan's box.
+		{ Run: { hold_note: applyNote, dry_run: true, dry_run_scans: [{ tool: "ansible",
+			findings: ["site.yml: task \"Restart web\" sets check_mode to false"],
+			inputs: ["site.yml"], classification: "not_change_free" }] }, WantNotes: 1 },
+	];
+	for (const [testNum, tc] of tests.entries()) {
+		const page = loadPage("detail");
+		page.app.renderHeader({ id: "run_tf", playbook: "", tool: "terraform", command: "infra",
+			status: "pending_approval", held_by_policy: "requested by an agent, held by default",
+			risk: { level: "medium", reasons: [] }, ...tc.Run });
+		const host = page.document.getElementById("risk-callout");
+		const notes = host.querySelectorAll(".risk-hold-note");
+		assert.equal(notes.length, tc.WantNotes, `test ${testNum}: hold notes shown`);
+		if (tc.WantNotes) {
+			assert.equal(notes[0].textContent, applyNote, `test ${testNum}: the note shown`);
+		}
+	}
+});

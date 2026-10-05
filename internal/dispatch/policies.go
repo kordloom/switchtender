@@ -55,19 +55,18 @@ func (d *Dispatcher) requiresApproval(ctx context.Context, r *run.Run) (bool, er
 		// A terraform or opentofu apply a rule holds is planned first, and the request is not held:
 		// the apply its plan proposes is, carrying the saved plan, after the rules decide on it. A
 		// request held here would be approved without its plan and then plan when it ran.
-		planFirst := r.Status != run.StatusPendingApproval && policy.PlanGated(policies, gr)
-		scans, unproven := d.agentPlanUnproven(r, planFirst)
-		if planFirst && !unproven {
+		//
+		// An agent's apply is the exception. Planning it runs provider code and data sources with
+		// this server's credentials before anybody approved anything, so it is held here, before
+		// anything plans. Its release is a release to plan: the plan gate plans it then, and the
+		// apply its plan proposes is held again carrying the saved plan.
+		if !policy.AgentPlansFirst(policies, gr) && r.Status != run.StatusPendingApproval &&
+			policy.PlanGated(policies, gr) {
 			return false, nil
 		}
 		r.HeldByPolicy = maskPolicyText(gr, p.Label())
 		r.HoldNote = exemptionHoldNote(policies, gr, p)
-		if unproven {
-			// Planning first would run what the configuration runs while it plans before anybody
-			// approved anything, so an agent's apply is held where it stands, saying what was found.
-			r.DryRunScans = scans
-			r.HoldNote = maskPolicyText(gr, run.AgentPlanHoldNote(scans))
-		}
+		r.HoldNote = agentHoldNote(policies, gr, r.HoldNote)
 		// The label names the first rule for the evidence; the flag is the OR of every matching
 		// rule, and an explicitly requested distinct approver is never lowered by a policy.
 		r.RequireDistinctApprover = r.RequireDistinctApprover || policy.RequireDistinct(policies, gr)
@@ -79,20 +78,18 @@ func (d *Dispatcher) requiresApproval(ctx context.Context, r *run.Run) (bool, er
 	return false, nil
 }
 
-// agentPlanUnproven reports whether planning r first would execute something nobody approved on
-// an agent's behalf: r is an apply an agent requested that the rules plan first, and the gate's read
-// of the plan it would run, the same read a dry run of it gets, did not show it changes nothing. It
-// returns what that read found. A Terraform or OpenTofu external data source runs its program while
-// the tool plans, so a plan is a change exactly when its dry run is, and the agent hold reads it
-// the way it reads a dry run.
-func (d *Dispatcher) agentPlanUnproven(r *run.Run, planFirst bool) ([]run.DryRunScan, bool) {
-	if !planFirst || !policy.AgentRequested(r) {
-		return nil, false
+// agentHoldNote returns the hold note for the graded run gr: why the built-in hold keeps it waiting
+// when the hold covers it and what the agent asked for runs code with this server's credentials,
+// and note, the note any other rule wrote, otherwise. What the gate's scans read of a dry run is
+// recorded on the run either way, and decides nothing for an agent.
+func agentHoldNote(policies []*policy.Policy, gr *run.Run, note string) string {
+	if !policy.AgentHolds(policies, gr) {
+		return note
 	}
-	probe := *r
-	probe.DryRun = true
-	scans := d.graded(&probe).DryRunScans
-	return scans, !run.ScansChangeFree(scans)
+	if why := policy.AgentHoldReason(gr); why != "" {
+		return maskPolicyText(gr, why)
+	}
+	return note
 }
 
 // listPolicies returns the stored policies, or none when the dispatcher has no policy store. An

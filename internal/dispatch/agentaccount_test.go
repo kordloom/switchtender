@@ -43,7 +43,8 @@ var exemptOnDevLead = fmt.Sprintf("requested by an agent bound to account %q, ex
 // criterion closes. Two agent tokens share the label release-agent, one bound to dev-lead and one
 // to ops-lead, and the only exemption names the label on dev-lead. The dev-lead agent's run goes
 // ahead, and so do the runs derived from its request: a retry of a failed split with its shards,
-// and the apply its plan proposes. The ops-lead agent's identical requests are held by default.
+// and the apply its plan proposes. The ops-lead agent's identical requests are held by default,
+// its apply before it plans and again once its plan proposes the apply.
 //
 //nolint:funlen // Test function.
 func TestAnExemptionCoversOneAccountsAgentAndItsDerivedRuns(t *testing.T) {
@@ -133,6 +134,13 @@ func TestAnExemptionCoversOneAccountsAgentAndItsDerivedRuns(t *testing.T) {
 				run.WithCommand(dir))...)
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
+			}
+			// A held agent's apply waits before it plans, and its release lets it plan.
+			judge(t, "the apply request", created, test.Account, test.WantHeld)
+			if test.WantHeld {
+				if _, err := d.Approve(ctx, created.ID, decider("approver", "session")); err != nil {
+					t.Fatalf("Approve() error = %v", err)
+				}
 			}
 			if final := waitTerminal(t, store, created.ID); final.Status != run.StatusSucceeded {
 				t.Fatalf("plan status = %q, want succeeded", final.Status)
