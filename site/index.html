@@ -3,10 +3,10 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>SwitchTender: one gate for every change to production</title>
-	<meta name="description" content="One gate for every change to production, including the ones AI agents make. People, pipelines, schedules, and AI agents answer to the same policies, an agent can never approve its own run, and every change leaves a signed receipt you can verify offline. Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go in one self-hosted Go binary. Import from AWX, Ansible Automation Platform, Semaphore, Rundeck, or Jenkins in one command.">
-	<meta property="og:title" content="SwitchTender: one gate for every change to production">
-	<meta property="og:description" content="Including the ones AI agents make. People, pipelines, schedules, and agents answer to the same policies, an agent can never approve its own run, and every change leaves a signed receipt you can verify offline.">
+	<title>SwitchTender: approve exactly what runs</title>
+	<meta name="description" content="Approve exactly what runs. Prove it to anyone. An approval binds the inventory, image, commit, and saved plan the approver saw, an AI agent's run waits for a person by default, an agent can never approve, and every change leaves a signed receipt you can verify offline. Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go in one self-hosted Go binary. Import from AWX, Ansible Automation Platform, Semaphore, Rundeck, or Jenkins in one command.">
+	<meta property="og:title" content="SwitchTender: approve exactly what runs">
+	<meta property="og:description" content="Prove it to anyone. An approval binds what the approver saw, an AI agent's run waits for a person by default, an agent can never approve, and every change leaves a signed receipt you can verify offline.">
 	<meta property="og:type" content="website">
 	<meta property="og:url" content="https://switchtender.com/">
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
@@ -103,12 +103,13 @@
 		<section class="hero wrap">
 			<div class="hero-copy reveal">
 				<span class="eyebrow">Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</span>
-				<h1><span class="h1-long">One gate for <span class="grad">every change</span> to production, including the ones AI agents make.</span><span class="h1-short">One gate for <span class="grad">every change</span>, AI agents included.</span></h1>
+				<h1><span class="h1-long">Approve <span class="grad">exactly what runs</span>. Prove it to anyone.</span><span class="h1-short">Approve <span class="grad">exactly what runs</span>.</span></h1>
 				<p class="lede">
-					People, pipelines, schedules, and AI agents answer to the same policies, and
-					<strong>an agent can never approve its own run</strong>. Every change it records leaves a
-					signed receipt you can verify offline. It runs Ansible, Terraform, and scripts,
-					and takes over from AWX with a one-command import.
+					An approval binds the run the approver saw: its inventory snapshot, its image digest,
+					its commit, and for a Terraform or OpenTofu apply, the saved plan. People, pipelines,
+					and AI agents go through the same gate, an AI agent's run waits for a person by
+					default, and <strong>an agent can never approve</strong>. Every change leaves a signed
+					receipt anyone can verify offline.
 				</p>
 				<div class="hero-cta">
 					<a class="btn big" href="https://demo.switchtender.com/ui/runs?status=pending_approval">Watch it stop a change</a>

@@ -30,11 +30,12 @@
     alt="License"></a>
 </p>
 
-**One gate for every change to production, including the ones AI agents make.** People, pipelines,
-schedules, and AI agents answer to the same policies, and an agent can never approve its own run.
-SwitchTender puts each of them through the same identity checks, policy, approval, and evidence,
-and takes over from AWX with a one-command import. It runs Ansible, Terraform, OpenTofu, Bash,
-PowerShell, Python, and Go, paints every run live as a host-by-task matrix instead of a text scroll,
+**Approve exactly what runs. Prove it to anyone.** An approval binds the run the approver saw: its
+inventory snapshot, its image digest, its commit, and for a Terraform or OpenTofu apply, the saved
+plan. People, pipelines, and AI agents go through the same identity checks, policy, approval, and
+evidence, an AI agent's run waits for a person by default, and an agent can never approve.
+SwitchTender runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, takes over from AWX
+with a one-command import, paints every run live as a host-by-task matrix instead of a text scroll,
 and hands back a signed receipt anyone can verify offline.
 No Kubernetes operator, no Postgres, no Redis, no message bus. One process, one SQLite file.
 
