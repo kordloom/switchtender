@@ -10,8 +10,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
@@ -66,6 +68,10 @@ type Record struct {
 	Inventory string `json:"inventory,omitempty"`
 	// Image is the container image reference the run executed in, empty for a host run.
 	Image string `json:"image,omitempty"`
+	// ImageDigest is the digest of the image the container runtime pulled and ran, so the record
+	// names the bytes that executed even when the reference was a tag. Absent for a host run, which
+	// reduces to the bytes it always did.
+	ImageDigest string `json:"image_digest,omitempty"`
 	// StartedAt is when execution began.
 	StartedAt *time.Time `json:"started_at,omitempty"`
 	// EndedAt is when the run reached its terminal state.
@@ -83,6 +89,29 @@ type Record struct {
 	// DryRun reports the run executed in its tool's no-change mode, so a preview cannot later be
 	// presented as the change itself.
 	DryRun bool `json:"dry_run,omitempty"`
+	// DryRunScans is what the gate read of the dry run before judging it, one entry per scan: the
+	// scanner and its version, the files it examined, what it found running work for real, what it
+	// could not read, and the classification that followed. Without it a dry run that changed hosts,
+	// or ran a program while it planned, committed the same record as a preview that changed
+	// nothing, so the one receipt meant to tell them apart said "dry run" over real work. Absent
+	// for any run the gate did not scan, which reduces to the bytes it always did.
+	DryRunScans []run.DryRunScan `json:"dry_run_scans,omitempty"`
+	// PolicyNotes are the warnings a Rego policy set to warn: note recorded on the run instead of
+	// holding it, each naming the policy, its messages, and its bundle. A run that went ahead past a
+	// warning carries what it was warned about into the chain, so a receipt shows the warning beside
+	// the rule set that let the run through. Absent for a run nothing noted, which reduces to the
+	// bytes it always did.
+	PolicyNotes []string `json:"policy_notes,omitempty"`
+	// InventoryCheck is the cross-check an Ansible run against a natively resolved inventory made
+	// before it executed: the ansible-core that read the inventory and the digests both engines
+	// agreed on, or the differences that refused the run. Absent for every other run, which reduces
+	// to the bytes it always did.
+	InventoryCheck *run.InventoryCheck `json:"inventory_check,omitempty"`
+	// ResolvedHosts are the hosts a dynamic inventory source resolved to when the run executed. A
+	// dynamic source resolves against live systems by nature, so what it reached is recorded here
+	// rather than bound at approval. Absent for every other run, which reduces to the bytes it always
+	// did.
+	ResolvedHosts []string `json:"resolved_hosts,omitempty"`
 	// PolicySet is the approval rule set that was in force when this run was submitted: a digest, how
 	// many rules it covers, and how those rules read. Without it the record could show what a gate
 	// stopped and never that nothing should have stopped a run that went straight through, so a rule
@@ -102,6 +131,14 @@ type Record struct {
 	// left no record anywhere. Each child's log digest is included, which is what lets a reader hold
 	// the stored output of any one step against the receipt.
 	Children []RecordChild `json:"children,omitempty"`
+	// Initiator is the identity evidence of an agent-initiated run, committed with what it did:
+	// which agent asked, the account it is bound to, and who provisioned its token. Who approved it
+	// and how separation of duties was evaluated are committed by each decision entry. Absent on
+	// every run an agent did not ask for, which reduces to the bytes it always did.
+	Initiator *run.Initiator `json:"initiator,omitempty"`
+	// Oversize is set only on a summary, the form a record too large to disclose whole is committed
+	// and disclosed in, and names the full record it stands in for. Body never sets it.
+	Oversize *Oversize `json:"oversize,omitempty"`
 }
 
 // RecordHost is one host's result in a run, the counts an auditor reads.
@@ -157,7 +194,13 @@ func Commit(ctx context.Context, audits audit.Store, store run.Store, r *run.Run
 	if err != nil {
 		return err
 	}
-	digest, nonce, err := audit.ContentDigestOf(body)
+	// Committed under the exact form, over the bytes a receipt will disclose, so any LoomSeal
+	// verifier checks the outcome without this product's redaction rules.
+	committed, err := Committed(body)
+	if err != nil {
+		return err
+	}
+	digest, nonce, err := audit.ExactDigestOf(committed)
 	if err != nil {
 		return err
 	}
@@ -200,6 +243,9 @@ func Body(ctx context.Context, store run.Store, r *run.Run) ([]byte, error) {
 		Tool: r.Tool, Playbook: r.Playbook, Inventory: r.Inventory, Image: r.Image,
 		StartedAt: utcOrNil(r.StartedAt), EndedAt: utcOrNil(r.EndedAt), LogSHA256: logSHA,
 		SpecDigest: specDigest, CommitSHA: r.CommitSHA, DryRun: r.DryRun, PolicySet: r.PolicySet,
+		DryRunScans: r.DryRunScans, PolicyNotes: r.PolicyNotes, InventoryCheck: r.InventoryCheck,
+		ImageDigest: r.ImageDigest, ResolvedHosts: r.ResolvedHosts,
+		Initiator: r.Initiator,
 	}
 	for _, h := range hosts {
 		out.Hosts = append(out.Hosts, RecordHost{
@@ -264,10 +310,53 @@ func logDigest(ctx context.Context, store run.Store, runID string) (string, erro
 
 // Parse decodes a disclosed outcome body, the JSON Body produces, so a verifier can read what a run
 // did after confirming the body matches the digest the chain committed.
+//
+// A member is read by its exact name. encoding/json matches a JSON member to a struct field
+// case-insensitively, so a body carrying both status and Status would decode the case variant into
+// the Status field a reader of the verdict summary never sees. The body is rejected when it carries
+// two members that differ only in letter case, at any object level, so what the summary reads is what
+// the body says.
 func Parse(body []byte) (Record, error) {
+	var tree any
+	if err := json.Unmarshal(body, &tree); err != nil {
+		return Record{}, err
+	}
+	if err := rejectCaseVariantKeys(tree); err != nil {
+		return Record{}, err
+	}
 	var rec Record
 	err := json.Unmarshal(body, &rec)
 	return rec, err
+}
+
+// rejectCaseVariantKeys refuses an object that carries two members equal under ASCII case folding,
+// at any level, since a case-insensitive struct decode would fold them onto one field and read the
+// one that appears last rather than the exact member a reader sees.
+func rejectCaseVariantKeys(v any) error {
+	switch t := v.(type) {
+	case map[string]any:
+		folded := make(map[string]string, len(t))
+		for k := range t {
+			lower := strings.ToLower(k)
+			if other, seen := folded[lower]; seen {
+				return fmt.Errorf("outcome body carries members %q and %q, which differ only in case",
+					other, k)
+			}
+			folded[lower] = k
+		}
+		for _, child := range t {
+			if err := rejectCaseVariantKeys(child); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for _, child := range t {
+			if err := rejectCaseVariantKeys(child); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // childRecords assembles the shards or pipeline steps a coordinator ran, newest attempt included, so

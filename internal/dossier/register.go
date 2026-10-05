@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/scrub"
 	"github.com/kordloom/switchtender/internal/util"
@@ -149,6 +150,7 @@ func CollectRegister(ctx context.Context, runs run.Store, audits audit.Store,
 
 	scan := audit.NewChainScanner(true)
 	anchorScan := audit.NewAnchorScanner(anchors, producer)
+	credits := creditedBy(ctx, runs)
 	err = audits.ChainScan(ctx, 0, func(e *audit.Entry) error {
 		scan.Feed(e)
 		anchorScan.Feed(e)
@@ -159,9 +161,10 @@ func CollectRegister(ctx context.Context, runs run.Store, audits audit.Store,
 		if id := outcomeOf(e); id != "" && !e.At.Before(from) && e.At.Before(to) && !listed[id] {
 			pruned[id] = true
 		}
-		if id, verdict := decisionOf(e); id != "" {
-			// The newest decision wins: a rejection redone as an approval reads as the chain
-			// tells it, in order.
+		if id, verdict := decisionOf(e); id != "" && credits(e) {
+			// The decision the run, or its approval step, stores as its winner is the one
+			// credited. A run decided before winners were stored credits the newest decision,
+			// as the chain tells it, in order.
 			in.Decisions[id] = Decision{Verdict: verdict, Actor: e.Actor, OnBehalfOf: onBehalfOf(e),
 				At: e.At, Seq: e.Seq}
 		}
@@ -203,6 +206,33 @@ func trimAt(rows []*run.Run, at time.Time) []*run.Run {
 	return rows[:cut]
 }
 
+// creditedBy returns the check the register credits a decision entry with: the run, or the approval
+// step, it names must credit it. The subjects are read as decision entries arrive, which are few.
+// A subject that cannot be read is credited, as it was before winners were stored.
+func creditedBy(ctx context.Context, runs run.Store) func(*audit.Entry) bool {
+	subjects := map[string]*run.Run{}
+	return func(e *audit.Entry) bool {
+		id, ok := strings.CutPrefix(e.Path, "/runs/")
+		if !ok {
+			return true
+		}
+		if _, stepID, _, isStep := outcome.ParseStepDecisionPath(e.Path); isStep {
+			id = stepID
+		} else {
+			id, _, _ = strings.Cut(id, "/")
+		}
+		subject, seen := subjects[id]
+		if !seen {
+			got, err := runs.Get(ctx, id)
+			if err != nil {
+				return true
+			}
+			subject, subjects[id] = got, got
+		}
+		return outcome.Credits(subject, e.ID)
+	}
+}
+
 // decisionOf reads an approval or rejection from a chain entry, returning the run id it decided
 // and the verdict, or empty strings for ordinary activity.
 //
@@ -214,6 +244,18 @@ func trimAt(rows []*run.Run, at time.Time) []*run.Run {
 // committed, carries the deciding actor, and its digest binds the exact spec decided on.
 func decisionOf(e *audit.Entry) (id, verdict string) {
 	if e.Method != audit.MethodDecision {
+		return "", ""
+	}
+	// A workflow approval step's decision is credited to the workflow it released or stopped, so a
+	// workflow that waited for a person mid-run does not read as one nobody decided on. Its request
+	// and its timeout are not decisions anybody made, so they are not credited.
+	if runID, _, verdict, ok := outcome.ParseStepDecisionPath(e.Path); ok {
+		switch verdict {
+		case outcome.StepApproved:
+			return runID, "Approved"
+		case outcome.StepRejected:
+			return runID, "Rejected"
+		}
 		return "", ""
 	}
 	runID, v, ok := strings.Cut(strings.TrimPrefix(e.Path, "/runs/"), "/decision/")
@@ -252,8 +294,12 @@ type registerRow struct {
 	DecisionSeq int64
 	// Outcome is the run's terminal or current status.
 	Outcome string
-	// DryRun is true for a no-change run.
+	// DryRun is true for a run submitted in its tool's no-change mode.
 	DryRun bool
+	// NotChangeFree is true for a dry run the gate did not find change free: its playbook forces
+	// work to run for real, or its configuration runs a program while it plans, or the scan could
+	// not read all of it. That is not the no-change run the dry-run mark alone would claim.
+	NotChangeFree bool
 }
 
 // registerView is the data rendered into the register.
@@ -315,15 +361,16 @@ func RenderRegister(in *RegisterInput) ([]byte, error) {
 	for _, r := range in.Runs {
 		risk := run.AssessRisk(r)
 		row := registerRow{
-			When:    r.CreatedAt.UTC().Format("2006-01-02 15:04"),
-			Run:     r.ID,
-			Change:  changeOf(r),
-			Actor:   r.Actor,
-			Source:  strings.TrimSpace(r.Source + " " + r.SourceID),
-			Risk:    risk.Level,
-			Held:    r.HeldByPolicy,
-			Outcome: string(r.Status),
-			DryRun:  r.DryRun,
+			When:          r.CreatedAt.UTC().Format("2006-01-02 15:04"),
+			Run:           r.ID,
+			Change:        changeOf(r),
+			Actor:         r.Actor,
+			Source:        strings.TrimSpace(r.Source + " " + r.SourceID),
+			Risk:          risk.Level,
+			Held:          r.HeldByPolicy,
+			Outcome:       string(r.Status),
+			DryRun:        r.DryRun,
+			NotChangeFree: r.DryRun && !r.ChangeFree(),
 		}
 		if d, ok := in.Decisions[r.ID]; ok {
 			// A decision an install serving open on loopback recorded before decisions named their

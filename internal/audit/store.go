@@ -15,6 +15,9 @@ type memStore struct {
 	mu sync.RWMutex
 	// entries holds every appended entry in chain order.
 	entries []*Entry
+	// ids holds the id of every appended entry, so an id is appended once, as the database stores
+	// refuse a second row under one primary key.
+	ids map[string]bool
 	// installID stamps every appended entry, empty when no identity is bound.
 	installID string
 	// anchors holds every recorded anchor.
@@ -71,13 +74,24 @@ func NewMemStore() Store {
 }
 
 // Append records one entry, linking it to the current head so the chain stays intact. A span
-// marker entry is refused: only AppendSpanBeat mints beats.
+// marker entry is refused: only AppendSpanBeat mints beats. A run's second outcome entry is refused
+// with ErrOutcomeRecorded.
 func (m *memStore) Append(_ context.Context, e *Entry) error {
 	if IsSpanMarker(e) {
 		return fmt.Errorf("append audit entry: %w", ErrReservedSpan)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.ids[e.ID] {
+		return fmt.Errorf("append audit entry %s: %w", e.ID, ErrDuplicateID)
+	}
+	if runID, ok := OutcomeRunID(e); ok {
+		for _, held := range m.entries {
+			if heldRun, isOutcome := OutcomeRunID(held); isOutcome && heldRun == runID {
+				return fmt.Errorf("append audit entry: run %s: %w", runID, ErrOutcomeRecorded)
+			}
+		}
+	}
 	BindEntryInstall(e, m.installID)
 	var prev *Entry
 	if n := len(m.entries); n > 0 {
@@ -89,19 +103,27 @@ func (m *memStore) Append(_ context.Context, e *Entry) error {
 	StampAppendTime(prev, &cp, time.Now())
 	Link(prev, &cp)
 	m.entries = append(m.entries, &cp)
+	if m.ids == nil {
+		m.ids = map[string]bool{}
+	}
+	m.ids[cp.ID] = true
 	*e = cp
 	return nil
 }
 
 // AppendSpanBeat mints and appends the next span beat under the append mutex, so the beat read and
 // the append are one atomic step and concurrent callers cannot mint the same beat. A time that does
-// not advance past the newest beat is refused with ErrClockBehind and nothing is written: a beat's
-// time is a signed claim, so writing a time the clock did not read would be a false statement in an
-// attestation. The skipped beat surfaces as a reported gap, and its number waits for the next beat
-// the chain accepts.
+// not advance past the newest beat, or that falls behind the newest entry, is refused with
+// ErrClockBehind and nothing is written: a beat's time is a signed claim, so writing a time the
+// clock did not read would be a false statement in an attestation. The skipped beat surfaces as a
+// reported gap, and its number waits for the next beat the chain accepts. A zero time is read from
+// the clock under the mutex.
 func (m *memStore) AppendSpanBeat(_ context.Context, at time.Time, cadenceS int) (*Entry, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if at.IsZero() {
+		at = time.Now()
+	}
 	var prev *Entry
 	var headSeq int64
 	if n := len(m.entries); n > 0 {
@@ -129,10 +151,19 @@ func (m *memStore) AppendSpanBeat(_ context.Context, at time.Time, cadenceS int)
 	if err := CheckBeatAdvance(at, lastSpanAt, beat); err != nil {
 		return nil, fmt.Errorf("append span beat: %w", err)
 	}
+	if prev != nil {
+		if err := CheckBeatAfterHead(at, prev.At, beat); err != nil {
+			return nil, fmt.Errorf("append span beat: %w", err)
+		}
+	}
 	e := NewSpanEntry(at, beat, count, cadenceS)
 	BindEntryInstall(e, m.installID)
 	Link(prev, e)
 	m.entries = append(m.entries, e)
+	if m.ids == nil {
+		m.ids = map[string]bool{}
+	}
+	m.ids[e.ID] = true
 	cp := *e
 	return &cp, nil
 }

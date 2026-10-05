@@ -554,7 +554,7 @@ func TestCommitRecordsTheOutcomeAgainstTheRunAndItsActor(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Body() error = %v", err)
 			}
-			if !audit.VerifyContentDigest(e.ContentDigest, e.Nonce, body) {
+			if !VerifyBody(e.ContentDigest, e.Nonce, body) {
 				t.Errorf("the rebuilt outcome does not match the digest the chain committed:\n%s",
 					body)
 			}

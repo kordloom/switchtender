@@ -16,6 +16,7 @@ import (
 	"github.com/kordloom/loomseal/seal"
 
 	"github.com/kordloom/switchtender/identity"
+	"github.com/kordloom/switchtender/internal/decision"
 )
 
 // ErrVerify is returned when a bundle cannot be checked at all: it does not parse, or its producer
@@ -90,6 +91,62 @@ type BundleReport struct {
 	// outcome it released. False means the record shows a run executing before it was approved,
 	// which is the gate not holding, and it fails the receipt.
 	ApprovalPrecedesRun bool
+	// CorrectionsPresent counts the corrections to a decision's reason the receipt disclosed.
+	CorrectionsPresent int
+	// CorrectionsFailed reports a disclosed correction that does not match the digest its chain entry
+	// committed or whose text does not open its commitment. It is a failure flag rather than an OK
+	// flag so a report that discloses no corrections, or one built before corrections existed, reads
+	// as having nothing wrong with them.
+	CorrectionsFailed bool
+	// Corrections are the verified corrections.
+	Corrections []DisclosedCorrection
+	// SpansUnbound reports that a span beat's members disagree with the path its link committed. It
+	// is a failure flag, so a document with no span beats reads as having nothing wrong with them.
+	SpansUnbound bool
+	// CaseVariants lists, as "claim N member", each payload member whose name differs only in case
+	// from a member a check reads on that claim. A reader folding case would take it for the member
+	// that was checked, so any entry fails the document.
+	CaseVariants []string
+	// LegacyRecords lists, as "claim N member", each disclosed record verified against the legacy
+	// unkeyed digest form from before nonces. It verifies, and anyone who can guess its body can
+	// confirm the guess against the digest, which is why it is named.
+	LegacyRecords []string
+	// LegacyAfterKeyed lists, as "claim N member", each disclosed record under the unkeyed form on an
+	// entry after the first keyed one. This product keys every entry from then on, so such a record
+	// is not one from before nonces, and any entry fails the document.
+	LegacyAfterKeyed []string
+	// Disclosed lists every payload member the chain link does not commit, each checked against a
+	// commitment, redacted, or unchecked, with what it was held against or why not.
+	Disclosed []DisclosedMember
+	// DisclosedUnchecked is how many disclosed records are unchecked, a member and the one it travels
+	// with counted once. A document with any never verifies as plain VERIFIED.
+	DisclosedUnchecked int
+	// memberStates holds what each check established about the members it covered.
+	memberStates map[int]map[string]memberSettled
+}
+
+// Reason states, for a decision or a correction whose body commits a reason.
+const (
+	// ReasonVerified is a disclosed reason whose text and random value open the commitment.
+	ReasonVerified = "verified"
+	// ReasonRedacted is a reason removed by a redaction, whose commitment can no longer be opened.
+	ReasonRedacted = "redacted"
+	// ReasonWithheld is a reason the chain committed that the document does not disclose.
+	ReasonWithheld = "withheld"
+)
+
+// DisclosedCorrection is one correction to a decision's reason read back from a receipt.
+type DisclosedCorrection struct {
+	// Actor is who wrote it, as the chain committed it.
+	Actor string
+	// DecisionID is the decision it corrects.
+	DecisionID string
+	// Reason is the correction's text, when disclosed and verified.
+	Reason string
+	// ReasonState is verified, redacted, or withheld.
+	ReasonState string
+	// RedactedCategory is the redaction's category when the text was redacted.
+	RedactedCategory string
 }
 
 // DisclosedDecision is one digest-verified approval decision read back from a receipt.
@@ -105,6 +162,19 @@ type DisclosedDecision struct {
 	Verdict string
 	// SpecDigest is the digest of the spec the decision bound to.
 	SpecDigest string
+	// DecisionID is the decision record's id the body commits, empty on a decision recorded before
+	// decision records existed.
+	DecisionID string
+	// Reason is the approver's reason, set when it was disclosed and opens the commitment the body
+	// carries.
+	Reason string
+	// ReasonState is verified, redacted, or withheld for a decision whose body commits a reason, and
+	// empty for one given no reason.
+	ReasonState string
+	// RedactedCategory is the redaction's category when the reason was redacted.
+	RedactedCategory string
+	// SeparationOfDuties is the evaluation the body commits for a decision on an agent's run.
+	SeparationOfDuties *decision.SeparationOfDuties
 }
 
 // OK reports whether every check passed, the single question a verify command answers yes or no. A
@@ -114,7 +184,8 @@ type DisclosedDecision struct {
 func (r *BundleReport) OK() bool {
 	return r.SignatureOK && r.ChainOK && r.AnchorsOK &&
 		(!r.OutcomePresent || r.OutcomeDigestOK) && r.DecisionsOK && r.SpecConsistent &&
-		r.ApprovalPrecedesRun
+		r.ApprovalPrecedesRun && !r.CorrectionsFailed && !r.SpansUnbound &&
+		len(r.CaseVariants) == 0 && len(r.LegacyAfterKeyed) == 0
 }
 
 // VerifyBundle checks a signed bundle with no store and no network: it confirms the producer's
@@ -145,6 +216,13 @@ func verifyBundle(signed []byte, pinnedKeyID, acceptedInstall string) (*BundleRe
 	var b Bundle
 	if err := json.Unmarshal(signed, &b); err != nil {
 		return nil, fmt.Errorf("%w: parse bundle: %w", ErrVerify, err)
+	}
+	// Refuse a case variant of any known member before a verdict reads a struct field decoded from it.
+	// The struct decode above matches members case-insensitively, so without this a claim carrying
+	// both at and At, or a producer carrying install_id and Install_ID, would fold the variant into
+	// the field this verifier reads while a reader and the leaf saw the exact member.
+	if err := checkExactMembers(signed); err != nil {
+		return nil, err
 	}
 	rep := &BundleReport{
 		KeyID: b.Producer.KeyID, Subject: b.Subject,
@@ -278,8 +356,11 @@ func verifyBundle(signed []byte, pinnedKeyID, acceptedInstall string) (*BundleRe
 	}
 	verifyOutcomeDisclosure(b.Claims, rep)
 	verifyDecisionDisclosures(b.Claims, rep)
+	verifyCorrectionDisclosures(b.Claims, rep)
 	verifySpecConsistency(b.Claims, rep)
+	verifySpanBinding(b.Claims, rep)
 	verifyTimeOrder(b.Claims, rep)
+	classifyDisclosed(&b, rep)
 	return rep, nil
 }
 
@@ -378,9 +459,12 @@ func runIDFromPath(path string) string {
 // with no disclosed decisions leaves DecisionsOK true and is judged on its chain alone.
 func verifyDecisionDisclosures(claims []BundleClaim, rep *BundleReport) {
 	rep.DecisionsOK = true
-	for _, c := range claims {
-		method, _ := c.Payload["method"].(string)
-		if method != MethodDecision {
+	keyedAt := firstKeyed(claims)
+	for i, c := range claims {
+		if recordKindOf(c.Payload) != recordDecision {
+			continue
+		}
+		if !recordFormHolds(i, c.Payload, recordDecision, "decision_body", keyedAt, rep) {
 			continue
 		}
 		bodyVal, hasBody := c.Payload["decision_body"]
@@ -390,26 +474,200 @@ func verifyDecisionDisclosures(claims []BundleClaim, rep *BundleReport) {
 		}
 		rep.DecisionsPresent++
 		nonce, _ := c.Payload["decision_nonce"].(string)
-		body, err := json.Marshal(bodyVal)
-		if err != nil || !VerifyContentDigest(digest, nonce, body) {
+		if !disclosedRecordVerifies(digest, nonce, bodyVal) {
+			rep.DecisionsOK = false
+			continue
+		}
+		// The digest above commits the whole body. Its fields are then read from the exact canonical
+		// members of the body object, never from a case-insensitive struct decode of the re-marshaled
+		// bytes, so a case variant such as Spec_Digest beside spec_digest cannot be read in place of
+		// the member the digest committed and a reader sees.
+		bodyMap, ok := bodyVal.(map[string]any)
+		if !ok {
 			rep.DecisionsOK = false
 			continue
 		}
 		var rec struct {
-			Verdict    string `json:"verdict"`
-			SpecDigest string `json:"spec_digest"`
+			Verdict            string
+			SpecDigest         string
+			DecisionID         string
+			ReasonCommitment   string
+			SeparationOfDuties *decision.SeparationOfDuties
 		}
-		if err := json.Unmarshal(body, &rec); err != nil {
-			rep.DecisionsOK = false
-			continue
-		}
+		rec.Verdict, _ = bodyMap["verdict"].(string)
+		rec.SpecDigest, _ = bodyMap["spec_digest"].(string)
+		rec.DecisionID, _ = bodyMap["decision_id"].(string)
+		rec.ReasonCommitment, _ = bodyMap["reason_commitment"].(string)
+		rec.SeparationOfDuties = separationOfDuties(bodyMap["separation_of_duties"])
+		rep.settleRecord(i, digest, "decision_body", "decision_nonce")
 		actor, _ := c.Payload["actor"].(string)
 		actorType, _ := c.Payload["actor_type"].(string)
 		onBehalfOf, _ := c.Payload["on_behalf_of"].(string)
-		rep.Decisions = append(rep.Decisions, DisclosedDecision{
+		d := DisclosedDecision{
 			Actor: actor, ActorType: actorType, OnBehalfOf: onBehalfOf, Verdict: rec.Verdict,
-			SpecDigest: rec.SpecDigest,
-		})
+			SpecDigest: rec.SpecDigest, DecisionID: rec.DecisionID,
+			SeparationOfDuties: rec.SeparationOfDuties,
+		}
+		state, text, category, ok := checkReason(c.Payload, rec.ReasonCommitment, rec.DecisionID)
+		if !ok {
+			rep.DecisionsOK = false
+		} else {
+			rep.settleReason(i, state)
+		}
+		d.ReasonState, d.Reason, d.RedactedCategory = state, text, category
+		rep.Decisions = append(rep.Decisions, d)
+	}
+}
+
+// disclosedRecordVerifies checks a disclosed decision or correction body against the digest its
+// entry committed. The canonical bytes of the body as disclosed are checked first, with nothing
+// reduced, which is the check every LoomSeal verifier makes. A receipt issued before bodies were
+// disclosed in their canonical redacted form carried the body as it was assembled, which matches
+// only after this product's redaction, so that is the fallback. The body's fields are read by the
+// caller from its exact members, never from a decode of these bytes.
+func disclosedRecordVerifies(digest, nonce string, bodyVal any) bool {
+	body, err := json.Marshal(bodyVal)
+	if err != nil {
+		return false
+	}
+	if canonical, cerr := jcs.Canonicalize(body); cerr == nil &&
+		VerifyCanonicalDigest(digest, nonce, canonical) {
+		return true
+	}
+	return VerifyContentDigest(digest, nonce, body)
+}
+
+// recordFormHolds checks what a record claim must hold before its record is read: no member whose
+// name differs only in case from one the record is read for, and no record under the unkeyed digest
+// form after the first keyed entry. It records a failure and reports false when either is broken.
+func recordFormHolds(i int, payload map[string]any, kind, body string, keyedAt int,
+	rep *BundleReport) bool {
+	if variant, found := caseVariant(payload, recordMembers(kind)); found {
+		rep.CaseVariants = append(rep.CaseVariants, fmt.Sprintf("claim %d %s", i, variant))
+		return false
+	}
+	digest, _ := payload["content_digest"].(string)
+	if _, disclosed := payload[body]; disclosed && isUnkeyed(digest) && keyedAt >= 0 && keyedAt < i {
+		rep.LegacyAfterKeyed = append(rep.LegacyAfterKeyed, fmt.Sprintf("claim %d %s", i, body))
+		return false
+	}
+	return true
+}
+
+// settleRecord records a verified record's members as checked, against the legacy unkeyed form when
+// that is the form its entry committed, which is also listed so a reader sees the digest confirms a
+// guess.
+func (r *BundleReport) settleRecord(claim int, digest string, members ...string) {
+	if !isUnkeyed(digest) {
+		r.settleChecked(claim, members...)
+		return
+	}
+	r.LegacyRecords = append(r.LegacyRecords, fmt.Sprintf("claim %d %s", claim, members[0]))
+	for _, m := range members {
+		r.settle(claim, m, MemberChecked, legacyDetail)
+	}
+}
+
+// separationOfDuties decodes the separation-of-duties evaluation a decision body commits, from the
+// exact member the body carries. It is a display field on the disclosed decision, never compared for
+// a verdict, and is re-marshaled from the committed member rather than read field by field because its
+// shape is owned elsewhere. A nil or non-object member yields nil.
+func separationOfDuties(v any) *decision.SeparationOfDuties {
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return nil
+	}
+	raw, err := json.Marshal(obj)
+	if err != nil {
+		return nil
+	}
+	var sod decision.SeparationOfDuties
+	if json.Unmarshal(raw, &sod) != nil {
+		return nil
+	}
+	return &sod
+}
+
+// checkReason reads the reason a decision or correction claim discloses against the commitment its
+// verified body carries. It reports the reason's state, its text when verified, the redaction's
+// category, and false when the claim discloses something the chain does not back: text that does
+// not open the commitment, or a reason where the body commits none.
+func checkReason(payload map[string]any, commitment, eventID string) (state, text, category string,
+	ok bool) {
+	text, hasText := payload["reason_text"].(string)
+	random, _ := payload["reason_random"].(string)
+	category, redacted := payload["reason_redacted"].(string)
+	if commitment == "" {
+		// A reason disclosed beside a body that commits none is text the chain never fixed, and a
+		// reader must not be shown it as part of the record.
+		return "", "", "", !hasText && !redacted
+	}
+	switch {
+	case hasText:
+		if !decision.Verify(commitment, eventID, random, text) {
+			return "", "", "", false
+		}
+		return ReasonVerified, text, "", true
+	case redacted:
+		return ReasonRedacted, "", category, true
+	default:
+		return ReasonWithheld, "", "", true
+	}
+}
+
+// verifyCorrectionDisclosures checks every disclosed correction to a decision's reason the way a
+// decision is checked: the body against the digest its chain entry committed, and the text against
+// the commitment the body carries. A receipt with no disclosed corrections fails nothing here.
+func verifyCorrectionDisclosures(claims []BundleClaim, rep *BundleReport) {
+	keyedAt := firstKeyed(claims)
+	for i, c := range claims {
+		if recordKindOf(c.Payload) != recordCorrection {
+			continue
+		}
+		if !recordFormHolds(i, c.Payload, recordCorrection, "correction_body", keyedAt, rep) {
+			continue
+		}
+		bodyVal, hasBody := c.Payload["correction_body"]
+		digest, _ := c.Payload["content_digest"].(string)
+		if !hasBody || digest == "" {
+			continue
+		}
+		rep.CorrectionsPresent++
+		nonce, _ := c.Payload["correction_nonce"].(string)
+		if !disclosedRecordVerifies(digest, nonce, bodyVal) {
+			rep.CorrectionsFailed = true
+			continue
+		}
+		// The digest commits the whole body; its fields are read from the exact canonical members,
+		// not a case-insensitive struct decode, for the reason the decision check states.
+		bodyMap, ok := bodyVal.(map[string]any)
+		if !ok {
+			rep.CorrectionsFailed = true
+			continue
+		}
+		var rec struct {
+			DecisionID       string
+			CorrectionID     string
+			ReasonCommitment string
+		}
+		rec.DecisionID, _ = bodyMap["decision_id"].(string)
+		rec.CorrectionID, _ = bodyMap["correction_id"].(string)
+		rec.ReasonCommitment, _ = bodyMap["reason_commitment"].(string)
+		if rec.ReasonCommitment == "" {
+			rep.CorrectionsFailed = true
+			continue
+		}
+		state, text, category, ok := checkReason(c.Payload, rec.ReasonCommitment, rec.CorrectionID)
+		if !ok {
+			rep.CorrectionsFailed = true
+			continue
+		}
+		rep.settleRecord(i, digest, "correction_body", "correction_nonce")
+		rep.settleReason(i, state)
+		actor, _ := c.Payload["actor"].(string)
+		rep.Corrections = append(rep.Corrections, DisclosedCorrection{Actor: actor,
+			DecisionID: rec.DecisionID, Reason: text, ReasonState: state,
+			RedactedCategory: category})
 	}
 }
 
@@ -422,11 +680,13 @@ func verifySpecConsistency(claims []BundleClaim, rep *BundleReport) {
 	rep.SpecConsistent = true
 	var outcomeSpec string
 	if rep.OutcomePresent && rep.OutcomeDigestOK {
-		var rec struct {
-			SpecDigest string `json:"spec_digest"`
-		}
-		if json.Unmarshal(rep.OutcomeBody, &rec) == nil {
-			outcomeSpec = rec.SpecDigest
+		// The outcome body is the exact bytes the producer ordered and the digest committed, so its
+		// spec digest is read from the exact canonical member, never a case-insensitive struct decode.
+		// Folding a Spec_Digest the producer placed after spec_digest would let the spec-consistency
+		// check compare a value no reader sees against the decisions and the disclosed spec.
+		var m map[string]any
+		if json.Unmarshal(rep.OutcomeBody, &m) == nil {
+			outcomeSpec, _ = m["spec_digest"].(string)
 		}
 	}
 	// Every disclosed spec is compared, not the first. Breaking at the first one let a second,
@@ -434,11 +694,18 @@ func verifySpecConsistency(claims []BundleClaim, rep *BundleReport) {
 	// consistent: two disclosures that disagree about what was approved is exactly the state this
 	// check exists to catch.
 	var disclosed string
-	for _, c := range claims {
+	var specClaims []int
+	for i, c := range claims {
+		// A spec is read only on the outcome claim, where this product discloses it. The same name on
+		// any other claim is an ordinary member, which nothing commits.
+		if recordKindOf(c.Payload) != recordOutcome {
+			continue
+		}
 		specVal, has := c.Payload["spec_body"]
 		if !has {
 			continue
 		}
+		specClaims = append(specClaims, i)
 		// The spec is disclosed as the exact canonical bytes its digest was taken over. Reading it as
 		// a tree and marshaling it again would have to reproduce those bytes exactly, which it cannot
 		// for a number wider than a float, so a run with such a value in its extra vars read as
@@ -475,6 +742,16 @@ func verifySpecConsistency(claims []BundleClaim, rep *BundleReport) {
 			rep.SpecConsistent = false
 		}
 	}
+	// A disclosed spec is checked only when something verified named a digest to hold it against.
+	compared := outcomeSpec != "" || len(rep.Decisions) > 0
+	for _, i := range specClaims {
+		switch {
+		case rep.SpecConsistent && compared:
+			rep.settleChecked(i, "spec_body")
+		case !compared:
+			rep.settle(i, "spec_body", MemberUnchecked, "nothing verified names a spec digest")
+		}
+	}
 }
 
 // verifyOutcomeDisclosure checks a receipt that discloses a run's outcome. The outcome claim carries
@@ -491,10 +768,12 @@ func verifyOutcomeDisclosure(claims []BundleClaim, rep *BundleReport) {
 	// the chain committed, under a VERIFIED verdict. OutcomeDigestOK is an assertion about what the
 	// reader is being shown, so it has to hold for all of it. The decision disclosures next door
 	// already work this way.
-	for _, c := range claims {
-		method, _ := c.Payload["method"].(string)
-		path, _ := c.Payload["path"].(string)
-		if method != MethodRun || !strings.Contains(path, "/outcome/") {
+	keyedAt := firstKeyed(claims)
+	for i, c := range claims {
+		if recordKindOf(c.Payload) != recordOutcome {
+			continue
+		}
+		if !recordFormHolds(i, c.Payload, recordOutcome, "outcome_body", keyedAt, rep) {
 			continue
 		}
 		bodyVal, hasBody := c.Payload["outcome_body"]
@@ -517,6 +796,9 @@ func verifyOutcomeDisclosure(claims []BundleClaim, rep *BundleReport) {
 		}
 		body := []byte(text)
 		ok := VerifyContentDigest(digest, nonce, body)
+		if ok {
+			rep.settleRecord(i, digest, "outcome_body", "outcome_nonce")
+		}
 		if !rep.OutcomePresent {
 			// The first disclosure is the one the report shows, so the body a reader sees is
 			// unchanged; what changes is that a later bad one can no longer be vouched for.
@@ -873,11 +1155,7 @@ func verifyBundleAnchors(b *Bundle) bool {
 func verifyBundleProofs(b *Bundle) (int, []string) {
 	var verified int
 	var problems []string
-	// Claim times by seq, for the backdate rule: a token commits to a link that hashes a claim
-	// carrying its own time, so an authority cannot honestly have signed it earlier. Both clocks
-	// are real and neither is authoritative, so a few minutes of skew is allowed and a backdated
-	// month is not, the same allowance the reference verifier applies.
-	const anchorClockSkew = 5 * time.Minute
+	// Claim times by seq, for the backdate rule. See AnchorClockSkew.
 	claimAt := make(map[int64]time.Time, len(b.Claims))
 	for i := range b.Claims {
 		if at, err := time.Parse(time.RFC3339, b.Claims[i].At); err == nil {
@@ -894,7 +1172,7 @@ func verifyBundleProofs(b *Bundle) (int, []string) {
 			continue
 		}
 		if at, ok := claimAt[a.Seq]; ok && !genTime.IsZero() &&
-			genTime.Before(at.Add(-anchorClockSkew)) {
+			genTime.Before(at.Add(-AnchorClockSkew)) {
 			problems = append(problems, fmt.Sprintf(
 				"anchor at %d attests %s over an entry the bundle says happened at %s: a timestamp"+
 					" cannot precede the entry it covers", a.Seq,

@@ -51,6 +51,16 @@ func Contract(t *testing.T, rawStore func() audit.Store) {
 	t.Run("span beat refuses a clock behind the last beat", func(t *testing.T) {
 		testSpanBeatAdvances(t, newStore())
 	})
+	t.Run("span beat refuses a time behind the newest entry", func(t *testing.T) {
+		testSpanBeatBehindHead(t, newStore())
+	})
+	t.Run("span beat with no time reads the store clock", func(t *testing.T) {
+		testSpanBeatReadsTheStoreClock(t, newStore())
+	})
+	t.Run("a run's outcome is appended once", func(t *testing.T) { testOutcomeOnce(t, newStore()) })
+	t.Run("a fast clock does not drag the chain forward", func(t *testing.T) {
+		testFastClockIsHeld(t, newStore())
+	})
 	t.Run("ordinary append refuses the span marker", func(t *testing.T) {
 		testReservedSpan(t, newStore())
 	})

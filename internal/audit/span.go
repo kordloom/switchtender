@@ -32,8 +32,15 @@ const MethodRun = "RUN"
 const MethodDecision = "DECISION"
 
 // MethodSchedule is the method recorded for the entry a schedule's fire commits before the run it
-// launches exists, so a scheduled run carries creation evidence like any other.
+// launches exists, so a scheduled run carries creation evidence like any other, for the entry a fire
+// the schedule refused commits in its place, and for the entry a fire commits when it is skipped
+// because its inventory matched no hosts.
 const MethodSchedule = "SCHEDULE"
+
+// MethodToken is the method recorded for the entry a federated identity token's issuance commits,
+// naming the run it was minted for and the id of the key that signed it, before the token leaves
+// the process.
+const MethodToken = "TOKEN"
 
 // SpanPath encodes one beat's payload into the entry path. The encoding is part of what the
 // chain hash commits to, so it is fixed: beat in the path, count and cadence as ordered query
@@ -114,6 +121,29 @@ func CheckBeatAdvance(at, prev time.Time, beat int64) error {
 		return nil
 	}
 	return &ClockBehindError{Prev: prev, At: at, Beat: beat}
+}
+
+// CheckBeatAfterHead reports whether a beat carrying at may be appended after the chain's newest
+// entry, recorded at head. It returns a ClockBehindError naming beat, the head's time, and at when
+// the beat would be written behind that entry. A zero head means the chain is empty.
+//
+// CheckBeatAdvance holds a beat against the newest beat only, and the newest entry is often not a
+// beat: a request that took the append lock between the beat's clock reading and the beat reaching
+// the store, or a replica whose clock is a few seconds ahead, leaves an ordinary entry dated after
+// the beat's time. Written there, the beat makes the chain's recorded times run backward on an
+// install where nothing was tampered with, and every bundle over the pair reports a time problem.
+// The beat cannot be moved forward to fit, for the same reason a beat behind the last beat cannot,
+// so it is refused and its number waits for the next beat. Equal times are fine, as they are
+// between any two entries.
+func CheckBeatAfterHead(at, head time.Time, beat int64) error {
+	if head.IsZero() {
+		return nil
+	}
+	at, head = at.Truncate(BeatGranularity), head.Truncate(BeatGranularity)
+	if !at.Before(head) {
+		return nil
+	}
+	return &ClockBehindError{Prev: head, At: at, Beat: beat}
 }
 
 // SpanScanLimit returns how many span-marked rows a store may read to answer a request for limit

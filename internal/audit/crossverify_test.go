@@ -301,8 +301,14 @@ func TestMirrorAgreesWithTheReferenceCorpus(t *testing.T) {
 				}
 				return
 			}
-			// A must-not-verify vector must never be called fully good.
-			if err == nil && rep.SignatureOK && rep.ChainOK && rep.AnchorsOK {
+			// A must-not-verify vector must never be called fully good. A record or span vector
+			// breaks only what a claim carries beside its link, so its signature, chain, and
+			// anchors all hold and the refusal lives in the mirror's whole verdict.
+			good := rep != nil && rep.SignatureOK && rep.ChainOK && rep.AnchorsOK
+			if v.FailingCheck == "record" || v.FailingCheck == "span" {
+				good = rep != nil && rep.OK()
+			}
+			if err == nil && good {
 				t.Errorf("the mirror fully verified a must-not-verify vector (%s)", v.FailingCheck)
 			}
 		})

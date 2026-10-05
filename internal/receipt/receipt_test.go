@@ -71,7 +71,9 @@ func heldWith(t *testing.T, verdict string,
 	}
 	r.ApprovedSpecDigest = specDigest
 
-	// The run finishes and its outcome is committed, which is what makes it receiptable.
+	// The run finishes and its outcome is committed, which is what makes it receiptable. It is
+	// committed the way every path that finishes a run commits it, so the store records the outcome
+	// as on the chain and no longer owed.
 	ended := time.Now()
 	code := 0
 	r.Status = run.StatusSucceeded
@@ -80,8 +82,8 @@ func heldWith(t *testing.T, verdict string,
 	if err := runs.Save(ctx, r); err != nil {
 		t.Fatalf("save terminal run: %v", err)
 	}
-	if err := outcome.Commit(ctx, audits, runs, r, "system:test", nil); err != nil {
-		t.Fatalf("Commit outcome: %v", err)
+	if err := outcome.CommitOwed(ctx, audits, runs, r, "system:test", nil); err != nil {
+		t.Fatalf("CommitOwed outcome: %v", err)
 	}
 	return runs, audits, id, r
 }

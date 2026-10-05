@@ -78,7 +78,7 @@ func TestOutcomeDigestSurvivesTheStoreRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Body(stored) error = %v", err)
 	}
-	if !audit.VerifyContentDigest(committed.ContentDigest, committed.Nonce, rebuilt) {
+	if !outcome.VerifyBody(committed.ContentDigest, committed.Nonce, rebuilt) {
 		t.Errorf("the rebuilt outcome does not match the digest the chain committed, so every "+
 			"receipt from this install reports a failed outcome:\n%s", rebuilt)
 	}

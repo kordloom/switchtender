@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -36,6 +37,11 @@ type Options struct {
 	// From, when above zero, proves with a consistency proof that the log only appended since that
 	// size. It applies to a sparse receipt.
 	From int64
+	// Decisions holds the decision records kept beside the chain: approver reasons, corrections, and
+	// separation-of-duties evaluations. A contiguous receipt rebuilds each decision body from its
+	// record and discloses the reason's text and random value beside it, so the commitment the chain
+	// holds can be checked offline. Nil discloses decisions recorded without a record only.
+	Decisions decision.Store
 }
 
 // Result is a built receipt and what a caller needs to say about it.
@@ -156,7 +162,7 @@ func Build(ctx context.Context, runs run.Store, audits audit.Store, id audit.Ide
 	// therefore proves its own entries belong to the log, and names the outcome entry and the digest it
 	// committed, without reproducing the body.
 	if !opts.Sparse {
-		switch body, berr := outcome.Body(ctx, runs, r); {
+		switch body, berr := disclosedOutcome(ctx, runs, r, outcomeEntry.ContentDigest); {
 		case berr != nil:
 			res.Notes = append(res.Notes, "the outcome could not be rebuilt, so the receipt proves "+
 				"the chain but does not show what the run did: "+berr.Error())
@@ -191,7 +197,7 @@ func Build(ctx context.Context, runs run.Store, audits audit.Store, id audit.Ide
 				}
 			}
 		}
-		discloseDecisions(doc, entries, r)
+		discloseDecisions(ctx, runs, opts.Decisions, doc, entries, r)
 	}
 
 	if anchorScan != nil {
@@ -216,6 +222,18 @@ func Build(ctx context.Context, runs run.Store, audits audit.Store, id audit.Ide
 	}
 	res.Signed = append(signed, '\n')
 	return res, nil
+}
+
+// disclosedOutcome rebuilds the run's outcome and returns the bytes its receipt discloses for an
+// entry committed under digest: the redacted bytes the entry committed under the exact form, which
+// any LoomSeal verifier checks as they are, or the record itself under an older form, which only
+// this product's verifier can check.
+func disclosedOutcome(ctx context.Context, runs run.Store, r *run.Run, digest string) ([]byte, error) {
+	body, err := outcome.Body(ctx, runs, r)
+	if err != nil {
+		return nil, err
+	}
+	return outcome.Disclosed(digest, body)
 }
 
 // rangeBundle builds the contiguous receipt: the chain segment from the request that created the run
@@ -300,26 +318,212 @@ func discloseSpec(claim *audit.BundleClaim, r *run.Run) error {
 // outcome is disclosed, so a verifier can show who approved exactly what and prove the chain
 // committed it. The bodies are rebuilt from the run, so a row that changed since the decision
 // produces a body the committed digest refuses, which is the tamper this disclosure exists to
-// surface.
-func discloseDecisions(doc *audit.Bundle, entries []*audit.Entry, r *run.Run) {
+// surface. A workflow's approval steps are disclosed the same way, each body rebuilt from the
+// workflow and the step records the approver decided on.
+//
+// A decision recorded with a decision record is rebuilt with what its record commits, and its
+// reason is disclosed beside it: the text and the random value, which open the commitment in the
+// body, or the category of the redaction that removed them. A correction inside the receipt's
+// segment is disclosed the same way.
+func discloseDecisions(ctx context.Context, runs run.Store, records decision.Store,
+	doc *audit.Bundle, entries []*audit.Entry, r *run.Run) {
 	prefix := "/runs/" + r.ID + "/decision/"
+	states := map[string]*outcome.StepState{}
 	for _, e := range entries {
-		if e.Method != audit.MethodDecision || !strings.HasPrefix(e.Path, prefix) {
+		if e.Method == audit.MethodReason {
+			discloseCorrection(ctx, records, doc, e, r)
 			continue
 		}
-		body, _, err := outcome.DecisionBody(r, strings.TrimPrefix(e.Path, prefix))
-		if err != nil {
+		if e.Method != audit.MethodDecision {
 			continue
 		}
-		var bodyObj any
-		if json.Unmarshal(body, &bodyObj) != nil {
+		if !creditedDecision(ctx, runs, r, e) {
+			continue
+		}
+		rec := recordFor(ctx, records, e.ID)
+		var build func(outcome.DecisionExtras) ([]byte, error)
+		switch {
+		case strings.HasPrefix(e.Path, prefix):
+			verdict := strings.TrimPrefix(e.Path, prefix)
+			build = func(extras outcome.DecisionExtras) ([]byte, error) {
+				b, _, err := outcome.DecisionBodyWith(r, verdict, extras)
+				return b, err
+			}
+		default:
+			runID, stepID, verdict, ok := outcome.ParseStepDecisionPath(e.Path)
+			if !ok || runID != r.ID {
+				continue
+			}
+			state, err := stepStateFor(ctx, runs, r, stepID, states)
+			if err != nil {
+				continue
+			}
+			build = func(extras outcome.DecisionExtras) ([]byte, error) {
+				b, _, err := outcome.StepDecisionBodyWith(state, verdict, extras)
+				return b, err
+			}
+		}
+		body, ok := decisionBody(build, rec, e)
+		if !ok {
+			continue
+		}
+		bodyObj, ok := disclosedRecord(body)
+		if !ok {
 			continue
 		}
 		if claim := claimForEntry(doc, audit.MethodDecision, e.Path, e.Seq); claim != nil {
 			claim.Payload["decision_body"] = bodyObj
 			claim.Payload["decision_nonce"] = e.Nonce
+			discloseReason(claim, rec)
 		}
 	}
+}
+
+// disclosedRecord returns a decision or correction body as a receipt discloses it: its canonical
+// redacted form, the exact bytes the entry's digest was taken over, parsed for the claim.
+// Disclosing the body as it was assembled instead put text the digest never covered beside it
+// whenever a step name, an account name, or a token label carried something the redaction rewrites,
+// such as a password assignment: an open verifier, which hashes what it is shown, refused the
+// receipt, and the receipt showed the very value the redaction had removed. It reports false for a
+// body that will not reduce, which is withheld rather than disclosed unredacted.
+func disclosedRecord(body []byte) (any, bool) {
+	reduced, err := audit.CanonicalRedacted(body)
+	if err != nil {
+		return nil, false
+	}
+	var obj any
+	if json.Unmarshal(reduced, &obj) != nil {
+		return nil, false
+	}
+	return obj, true
+}
+
+// creditedDecision reports whether the receipt discloses a decision entry as a decision: the one
+// the run, or the approval step it names, stores as its winner. An entry another release wrote for
+// a decision that lost stays in the segment, since the chain needs it, but is not disclosed, so the
+// verifier never lists it as a verified decision. A step's request is not a decision and is always
+// disclosed.
+func creditedDecision(ctx context.Context, runs run.Store, r *run.Run, e *audit.Entry) bool {
+	if strings.HasPrefix(e.Path, "/runs/"+r.ID+"/decision/") {
+		return outcome.Credits(r, e.ID)
+	}
+	runID, stepID, verdict, ok := outcome.ParseStepDecisionPath(e.Path)
+	if !ok || runID != r.ID || verdict == outcome.StepRequested {
+		return true
+	}
+	step, err := runs.Get(ctx, stepID)
+	if err != nil {
+		return true
+	}
+	return outcome.Credits(step, e.ID)
+}
+
+// recordFor reads the decision record a chain entry committed, nil when there is no store or no
+// record, which is a decision recorded before records existed.
+func recordFor(ctx context.Context, records decision.Store, id string) *decision.Record {
+	if records == nil {
+		return nil
+	}
+	rec, err := records.Get(ctx, id)
+	if err != nil {
+		return nil
+	}
+	return rec
+}
+
+// decisionBody rebuilds the body a decision entry committed. With its record in hand the body is
+// the record's, disclosed whatever it verifies as, so a run row changed since the decision shows as
+// a body the chain refuses. Without one the decision is either older than records, committing no
+// record id, or one whose record is not at hand, and the shape the chain committed is the one
+// disclosed. When neither shape matches, the first is disclosed anyway, for the same reason: a
+// receipt never quietly drops a decision that no longer rebuilds, because that is what tampering
+// with the run looks like. It reports false only when nothing could be built.
+func decisionBody(build func(outcome.DecisionExtras) ([]byte, error), rec *decision.Record,
+	e *audit.Entry) ([]byte, bool) {
+	if rec != nil {
+		body, err := build(outcome.ExtrasOf(rec))
+		return body, err == nil
+	}
+	var first []byte
+	for _, extras := range []outcome.DecisionExtras{{}, {ID: e.ID}} {
+		body, err := build(extras)
+		if err != nil {
+			continue
+		}
+		if first == nil {
+			first = body
+		}
+		if audit.VerifyContentDigest(e.ContentDigest, e.Nonce, body) {
+			return body, true
+		}
+	}
+	return first, first != nil
+}
+
+// discloseReason attaches a decision record's reason to its claim: the text and the random value
+// that open the commitment its body carries, or, once redacted, the category of the redaction, so a
+// reader knows a reason was given and why it is gone. Nothing is attached for a decision given no
+// reason.
+func discloseReason(claim *audit.BundleClaim, rec *decision.Record) {
+	if !rec.HasReason() {
+		return
+	}
+	if rec.Reason.Redacted != nil {
+		claim.Payload["reason_redacted"] = rec.Reason.Redacted.Category
+		return
+	}
+	claim.Payload["reason_text"] = rec.Reason.Text
+	claim.Payload["reason_random"] = rec.Reason.Random
+}
+
+// discloseCorrection attaches a correction's body, nonce, and reason to its claim when the
+// correction was recorded inside the receipt's segment. A correction made after the run finished
+// lies past the outcome and is in the run's dossier instead.
+func discloseCorrection(ctx context.Context, records decision.Store, doc *audit.Bundle,
+	e *audit.Entry, r *run.Run) {
+	entry, ok := decision.ParseReasonPath(e.Path)
+	if !ok || entry.Redacted || entry.RunID != r.ID {
+		return
+	}
+	rec := recordFor(ctx, records, e.ID)
+	if rec == nil || rec.Kind != decision.KindCorrection {
+		return
+	}
+	body, err := outcome.CorrectionBody(rec)
+	if err != nil {
+		return
+	}
+	bodyObj, ok := disclosedRecord(body)
+	if !ok {
+		return
+	}
+	if claim := claimForEntry(doc, audit.MethodReason, e.Path, e.Seq); claim != nil {
+		claim.Payload["correction_body"] = bodyObj
+		claim.Payload["correction_nonce"] = e.Nonce
+		discloseReason(claim, rec)
+	}
+}
+
+// stepStateFor rebuilds the state one approval step was decided on, once per step, since a step
+// carries a request and a decision that both commit the same state.
+func stepStateFor(ctx context.Context, runs run.Store, parent *run.Run, stepID string,
+	cache map[string]*outcome.StepState) (*outcome.StepState, error) {
+	if state, ok := cache[stepID]; ok {
+		return state, nil
+	}
+	node, err := runs.Get(ctx, stepID)
+	if err != nil {
+		return nil, err
+	}
+	if node.Kind != run.KindApproval || node.ParentID == nil || *node.ParentID != parent.ID {
+		return nil, fmt.Errorf("%s is not an approval step of %s", stepID, parent.ID)
+	}
+	state, err := outcome.StepStateOf(ctx, runs, parent, node)
+	if err != nil {
+		return nil, err
+	}
+	cache[stepID] = state
+	return state, nil
 }
 
 // outcomeClaim returns the claim carrying this run's own outcome entry, matched on that entry's

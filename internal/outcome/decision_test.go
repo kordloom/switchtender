@@ -109,11 +109,10 @@ func TestDecisionBodyIsReproducible(t *testing.T) {
 // that changes what the run does to a system and is not covered by the digest is a field an
 // approval can be lifted from one change and dropped onto another.
 //
-// The excluded fields are excluded on purpose and are pinned here for the same reason: the image is
-// resolved onto the run after approval by a project or server default, so including it would make
-// every such run fail its own check, and the resolved image is committed by the outcome record
-// instead. Scheduling and provenance say where and why a run was asked for rather than what it
-// does.
+// The excluded fields are excluded on purpose and are pinned here for the same reason. Scheduling
+// and provenance say where and why a run was asked for rather than what it does, and what execution
+// learns, the commit a sync checked out, the digest of the image the runtime pulled, the hosts a
+// dynamic source resolved to, is committed by the outcome record instead.
 func TestDecisionBodyBindsToEveryFieldThatChangesWhatRuns(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -178,9 +177,9 @@ func TestDecisionBodyBindsToEveryFieldThatChangesWhatRuns(t *testing.T) {
 			r.Steps = []run.PipelineStep{{Name: "s", Playbook: "p.yml"}}
 		},
 		WantBound: true,
-	}, { // Test 21: The image is resolved after approval by a project or server default, so binding
-		// it would fail every run that used one. The outcome record commits what actually ran.
-		Name: "image", Mutate: func(r *run.Run) { r.Image = "evil:latest" }, WantBound: false,
+	}, { // Test 21: The image is the container the tool and its credentials run in, pinned onto the
+		// run when it is submitted, so an approval covers it.
+		Name: "image", Mutate: func(r *run.Run) { r.Image = "evil:latest" }, WantBound: true,
 	}, { // Test 22: The run id names the decision, not the spec, and it is committed separately.
 		Name: "run id", Mutate: func(r *run.Run) { r.ID = "run_other" }, WantBound: false,
 	}, { // Test 23: Who asked is provenance, not content.
@@ -192,6 +191,20 @@ func TestDecisionBodyBindsToEveryFieldThatChangesWhatRuns(t *testing.T) {
 		WantBound: false,
 	}, { // Test 26: The commit is stamped by the project sync after the decision.
 		Name: "commit sha", Mutate: func(r *run.Run) { r.CommitSHA = "deadbeef" }, WantBound: false,
+	}, { // Test 27: The sealed inventory snapshot decides which hosts the run reaches and how.
+		Name: "inventory snapshot",
+		Mutate: func(r *run.Run) {
+			r.InventorySnapshot = &run.InventorySnapshot{SealedSHA256: "other", ContentSHA256: "c",
+				Hosts: []string{"web1"}}
+		},
+		WantBound: true,
+	}, { // Test 28: The plan file is the change a gated apply makes.
+		Name: "plan file", Mutate: func(r *run.Run) { r.PlanSHA256 = "other-plan" }, WantBound: true,
+	}, { // Test 29: The pulled image digest is learned at execution and committed by the outcome.
+		Name: "image digest", Mutate: func(r *run.Run) { r.ImageDigest = "sha256:x" }, WantBound: false,
+	}, { // Test 30: A dynamic source's resolved hosts are learned at execution, likewise.
+		Name: "resolved hosts", Mutate: func(r *run.Run) { r.ResolvedHosts = []string{"x"} },
+		WantBound: false,
 	}}
 	base, err := SpecDigest(decisionRun())
 	if err != nil {
