@@ -7,7 +7,7 @@
     "build:bin": "go build -o .bin/switchtender ../../..",
     "test": "npm run build:bin && npm run build:assess && playwright test",
     "test:ci": "playwright test",
-    "build:assess": "cd ../../.. && GOOS=js GOARCH=wasm go build -ldflags=\"-s -w\" -o site/assess/assess.wasm ./cmd/assessweb && cp \"$(go env GOROOT)/lib/wasm/wasm_exec.js\" site/assess/wasm_exec.js"
+    "build:assess": "cd ../../.. && GOOS=js GOARCH=wasm go build -ldflags=\"-s -w\" -o site/assess/assess.wasm ./cmd/assessweb && cp -f \"$(go env GOROOT)/lib/wasm/wasm_exec.js\" site/assess/wasm_exec.js"
   },
   "devDependencies": {
     "@playwright/test": "1.56.0"
