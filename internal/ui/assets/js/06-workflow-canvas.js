@@ -668,6 +668,9 @@ function applyReadOnly() {
 			if (btn.dataset.demoSafe) continue;
 			btn.disabled = true;
 		}
+		// A form whose own submit is demo-safe works here, so it is not labeled as disabled. The
+		// workflow step dialog said "Disabled in this read-only demo" beside a Save step that saved.
+		if (form.querySelector('button[type="submit"][data-demo-safe]')) continue;
 		const actions = form.querySelector(".launch-actions") || form;
 		if (!actions.querySelector(".ro-note")) {
 			const note = document.createElement("span");
