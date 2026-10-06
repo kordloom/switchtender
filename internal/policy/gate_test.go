@@ -114,6 +114,13 @@ func TestEveryCriterionMatchesAndRefuses(t *testing.T) {
 			Tool: run.ToolTerraform, Command: "terraform destroy -auto-approve",
 			InventoryID: "inv_prod", Queue: "dmz", ActorType: "agent", Actor: "bot",
 		}, WantMatch: false,
+	}, { // Test 22: A person acting through a pull request comment from their linked forge account
+		// is a human actor, so a rule binding people binds the apply their comment asks for.
+		Policy: policy.Policy{ActorKind: policy.ActorKindHuman},
+		Run:    run.Run{ActorType: "forge_comment"}, WantMatch: true,
+	}, { // Test 23: The same comment is not an agent.
+		Policy: policy.Policy{ActorKind: policy.ActorKindAgent},
+		Run:    run.Run{ActorType: "forge_comment"}, WantMatch: false,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

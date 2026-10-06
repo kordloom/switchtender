@@ -100,12 +100,15 @@ type filePolicy struct {
 	RequireDistinctApprover bool `yaml:"require_distinct_approver,omitempty" json:"require_distinct_approver,omitempty"`
 	// Actor matches the exact requesting actor recorded on the run. Omit to match any.
 	Actor string `yaml:"actor,omitempty" json:"actor,omitempty"`
+	// Account matches the username of the account the requesting credential is bound to. Omit to
+	// match any. An exemption that names an actor must name it too.
+	Account string `yaml:"account,omitempty" json:"account,omitempty"`
 	// MinRisk matches only runs assessed at least this risky: low, medium, or high. Omit for any.
 	MinRisk string `yaml:"min_risk,omitempty" json:"min_risk,omitempty"`
 	// Reversibility matches only runs at least as hard to undo as this class: reversible, costly,
 	// or irreversible. It is a floor, so costly covers costly and irreversible. Omit for any.
 	Reversibility string `yaml:"reversibility,omitempty" json:"reversibility,omitempty"`
-	// Effect is what a match does: require_approval, the default, or deny.
+	// Effect is what a match does: require_approval, the default, deny, or exempt.
 	Effect string `yaml:"effect,omitempty" json:"effect,omitempty"`
 	// RequireReason asks for the approver's reason on a decision: denials or always. Omit for none.
 	RequireReason string `yaml:"require_reason,omitempty" json:"require_reason,omitempty"`
@@ -217,6 +220,7 @@ func (s *FileStore) load() ([]*Policy, error) {
 			ActorKind:               fp.ActorKind,
 			RequireDistinctApprover: fp.RequireDistinctApprover,
 			Actor:                   fp.Actor,
+			Account:                 fp.Account,
 			MinRisk:                 fp.MinRisk,
 			Reversibility:           fp.Reversibility,
 			Effect:                  fp.Effect,

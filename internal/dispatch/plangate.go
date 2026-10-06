@@ -266,6 +266,8 @@ func gateProposal(policies []*policy.Policy, proposal *run.Run) error {
 	if p := policy.Requiring(policies, gp); p != nil {
 		proposal.Status = run.StatusPendingApproval
 		proposal.HeldByPolicy = maskPolicyText(gp, p.Label())
+		// The second hold on an agent's apply says what the approval it waits for binds.
+		proposal.HoldNote = agentHoldNote(policies, gp, proposal.HoldNote)
 		proposal.RequireDistinctApprover = proposal.RequireDistinctApprover ||
 			policy.RequireDistinct(policies, gp)
 		proposal.RequireReason = decision.Stricter(proposal.RequireReason,
@@ -390,7 +392,7 @@ func applyOptions(r *run.Run, policies []*policy.Policy, destroys int, read bool
 		// a username, never matched, and the chain then recorded the release as correctly approved.
 		// This is the highest blast radius run the gate governs, so it is the last place to lose it.
 		opts = append(opts, run.WithActor(r.Actor), run.WithActorType(r.ActorType),
-			run.WithActorAccount(r.ActorUserID))
+			run.WithActorAccount(r.ActorUserID), run.WithAccount(r.Account))
 		// An agent's plan proposes an apply that is still the agent's change, so the apply carries
 		// the same identity evidence: which agent, the account it is bound to, and who provisioned
 		// it. The apply is built by the executor, where no request context carries any of it.

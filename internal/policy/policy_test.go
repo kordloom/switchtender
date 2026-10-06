@@ -416,8 +416,11 @@ func TestDenying(t *testing.T) {
 	if got := policy.Denying(policies, agentDrop); got != deny {
 		t.Errorf("Denying(agent drop) = %v, want the deny policy", got)
 	}
-	if got := policy.Requiring(policies, agentDrop); got != nil {
-		t.Errorf("Requiring(agent drop) = %v, want nil: a denied run is refused, not held", got)
+	// The built-in agent hold covers the agent's run, but no stored rule may: a deny rule never
+	// doubles as an approval rule, and the dispatcher refuses the run before it asks for a hold.
+	if got := policy.Requiring(policies, agentDrop); got != nil && !policy.IsAgentDefault(got) {
+		t.Errorf("Requiring(agent drop) = %v, want no stored rule: a denied run is refused, not "+
+			"held", got)
 	}
 
 	humanDrop := &run.Run{Tool: "bash", Command: "psql -c 'drop database prod'", ActorType: "session"}

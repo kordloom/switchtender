@@ -34,6 +34,9 @@ type createPolicyRequest struct {
 	ActorKind string `json:"actor_kind,omitempty"`
 	// Actor matches the exact requesting actor recorded on the run, empty for any.
 	Actor string `json:"actor,omitempty"`
+	// Account matches the username of the account the requesting credential is bound to, empty
+	// for any. An exemption that names an actor must name it too.
+	Account string `json:"account,omitempty"`
 	// MinRisk matches only runs assessed at least this risky: low, medium, or high. Empty for any.
 	MinRisk string `json:"min_risk,omitempty"`
 	// Reversibility matches only runs at least as hard to undo as this class: reversible, costly,
@@ -72,7 +75,7 @@ func usesFullPolicyEngine(req createPolicyRequest) bool {
 	return (&policy.Policy{
 		Effect: req.Effect, MinRisk: req.MinRisk, Reversibility: req.Reversibility,
 		RequireDistinctApprover: req.RequireDistinctApprover,
-		ActorKind:               req.ActorKind, Actor: req.Actor,
+		ActorKind:               req.ActorKind, Actor: req.Actor, Account: req.Account,
 	}).Advanced()
 }
 
@@ -116,8 +119,8 @@ func createPolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusBadRequest, "tool is not a supported execution tool")
 			return
 		}
-		// One plain require-approval policy is Community; the full engine and a second policy are
-		// Team. The check sits before the write so a refusal changes nothing.
+		// One plain require-approval policy is Community and five are Pro. The full engine and a sixth
+		// policy are Team. The check sits before the write so a refusal changes nothing.
 		advanced := usesFullPolicyEngine(req)
 		existing, lerr := store.List(r.Context())
 		if lerr != nil {
@@ -139,7 +142,7 @@ func createPolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 			ID: policy.NewID(), Name: req.Name, Tool: req.Tool,
 			CommandContains: req.CommandContains, InventoryID: req.InventoryID, Queue: req.Queue,
 			ExcludeDryRun: req.ExcludeDryRun, MaxDestroy: resolveMaxDestroy(req.MaxDestroy),
-			ActorKind: req.ActorKind, Actor: req.Actor, MinRisk: req.MinRisk,
+			ActorKind: req.ActorKind, Actor: req.Actor, Account: req.Account, MinRisk: req.MinRisk,
 			Reversibility: req.Reversibility, Effect: req.Effect,
 			RequireDistinctApprover: req.RequireDistinctApprover,
 			RequireReason:           req.RequireReason,
@@ -206,7 +209,7 @@ func updatePolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 			ID: id, Name: req.Name, Tool: req.Tool,
 			CommandContains: req.CommandContains, InventoryID: req.InventoryID, Queue: req.Queue,
 			ExcludeDryRun: req.ExcludeDryRun, MaxDestroy: resolveMaxDestroy(req.MaxDestroy),
-			ActorKind: req.ActorKind, Actor: req.Actor, MinRisk: req.MinRisk,
+			ActorKind: req.ActorKind, Actor: req.Actor, Account: req.Account, MinRisk: req.MinRisk,
 			Reversibility: req.Reversibility, Effect: req.Effect,
 			RequireDistinctApprover: req.RequireDistinctApprover,
 			RequireReason:           req.RequireReason,

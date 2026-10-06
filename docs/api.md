@@ -34,7 +34,7 @@ with a message naming the feature rather than failing in some subtler way:
 |----------|------|------|
 | `GET /v1/audit/register` | Team | The period change register, covering the last 90 days unless `from` and `to` name another period, each a date or an RFC 3339 timestamp. Per-run dossiers, receipts, bundles, and `GET /v1/audit/verify` are free. |
 | `POST /v1/drift/reconcile` | Team | One-click reconcile. Drift detection is free. |
-| `POST` and `PUT /v1/policies` | Team, past the free set | Deny rules, risk floors, actor scoping, and distinct-approver separation of duties. One require-approval policy is Community, Pro holds five, Team is uncapped. |
+| `POST` and `PUT /v1/policies` | Team, past the free set | Deny rules, risk floors, actor and account scoping, and distinct-approver separation of duties. One require-approval policy or one exemption is Community, Pro holds five, Team is uncapped. The built-in hold on agent runs is not a stored policy and counts toward no limit. |
 | A named `queue` on `POST /v1/runs`, `POST /v1/pipelines`, and `POST` or `PUT` on `/v1/templates` and `/v1/inventories` | Team | Only a worker serves a named queue, and every worker is Team. The default queue is the server's own pool and is always allowed. A run that inherits a queue from its template or inventory is refused the same way. |
 
 Two more are enforced somewhere other than the request:
@@ -53,9 +53,9 @@ Two more are enforced somewhere other than the request:
 | POST   | `/v1/runs/{id}/cancel`     | Cancel a pending or running run.                        |
 | POST   | `/v1/runs/{id}/retry`      | New split from only the failed shards of a finished one.|
 | POST   | `/v1/runs/{id}/relaunch-failed` | Re-run only the hosts a finished run left failed or unreachable. |
-| POST   | `/v1/runs/{id}/approve`    | Release a run held for approval so it runs. Given a workflow approval step's id, it approves the step, and an optional `state_digest` body field binds the decision to the state the approver was shown. Given a workflow waiting at an approval step, it answers 409 naming each waiting step and the call that decides it, since only a step's own decision moves the workflow. An optional `reason` is recorded as audit evidence, as [Approver reasons](#approver-reasons) describes. |
-| POST   | `/v1/runs/{id}/reject`     | Deny a run held for approval, or deny a workflow approval step, given the step's id, so the workflow takes its deny path. A workflow waiting at an approval step is refused with 409 the way an approval is. An optional `reason` is recorded the same way. |
-| GET    | `/v1/runs/{id}/decisions`  | The run's decision records: each approval and denial a person made on it or on its approval steps, the reason given, its corrections, any redaction, and for an agent-initiated run the separation-of-duties evaluation. Admin, or the actor who asked for the run. |
+| POST   | `/v1/runs/{id}/approve`    | Release a run held for approval so it runs. Given a workflow approval step's id, it approves the step, and an optional `state_digest` body field binds the decision to the state the approver was shown. Given a workflow waiting at an approval step, it answers 409 naming each waiting step and the call that decides it, since only a step's own decision moves the workflow. A run that is no longer waiting, because another decision or a cancel settled it first on this server or another, answers 409 and records nothing. An optional `reason` is recorded as audit evidence, as [Approver reasons](#approver-reasons) describes. |
+| POST   | `/v1/runs/{id}/reject`     | Deny a run held for approval, or deny a workflow approval step, given the step's id, so the workflow takes its deny path. A workflow waiting at an approval step, and a run that is no longer waiting, are refused with 409 the way an approval is. An optional `reason` is recorded the same way. |
+| GET    | `/v1/runs/{id}/decisions`  | The run's decision records: each approval and denial a person made on it or on its approval steps, the reason given, its corrections, any redaction, for an agent-initiated run the separation-of-duties evaluation, and for a decision made from a pull request comment a `comment` object naming the forge, the comment, its author, the SHA-256 of its body, and the plan it approved. Admin, or the actor who asked for the run. |
 | POST   | `/v1/runs/{id}/decisions/{decision}/corrections` | Append a correction to a decision's reason, `{"text": "..."}`. A reason is never edited. Admin. |
 | POST   | `/v1/runs/{id}/decisions/{record}/redact` | Remove a reason's text and random value, `{"category": "personal_data"}` (or `secret`, `other`), recorded on the chain. Admin. |
 | GET    | `/v1/approvals`            | Workflow approval steps waiting for a decision: the workflow, the step and its description, the steps it waited behind, what each answer runs, when it times out, and the `state_digest` to decide against. Viewer role. |
@@ -64,7 +64,7 @@ Two more are enforced somewhere other than the request:
 | GET    | `/v1/runs/{id}/steps`      | Step runs of a pipeline.                                |
 | GET    | `/v1/runs/{id}/logs`       | Captured output as plain text, streamed. `?tail=<bytes>` returns only the end, capped at 4 MiB; when anything was dropped the response carries `Switchtender-Log-Truncated: 1` and `Switchtender-Log-Omitted-Bytes`. |
 | GET    | `/v1/runs/{id}/evidence`   | Self-contained HTML evidence document for one run. `?format=json` returns the same content as JSON. |
-| GET    | `/v1/runs/{id}/receipt`    | Signed LoomSeal receipt proving what this run did. `?sparse` discloses only this run's own entries, each proved to belong to the whole chain; `?from=<size>` adds a consistency proof that the log only appended since that size. The response carries the signing key's id in a `Switchtender-Key-Id` header. |
+| GET    | `/v1/runs/{id}/receipt`    | Signed LoomSeal receipt proving what this run did. `?sparse=1` discloses only this run's own entries, each proved to belong to the whole chain, without the outcome or the decisions, and a non-admin always receives that form; `?from=<size>` adds a consistency proof that the log only appended since that size. The response carries the signing key's id in a `Switchtender-Key-Id` header. |
 | POST   | `/v1/runs/{id}/rerun`      | Submit a fresh run with this run's execution settings.  |
 | POST   | `/v1/runs/{id}/stream-ticket` | Mint a short-lived, single-use ticket for opening this run's event stream. |
 | GET    | `/v1/runs/{id}/events`     | Structured events as JSON. `?after=<seq>` and `?limit` page them, and the response carries `next_after` to continue. `?download=1` streams the same events as newline-delimited JSON with a filename attachment. |
@@ -112,7 +112,7 @@ Two more are enforced somewhere other than the request:
 | POST   | `/v1/triggers/{id}/rotate-secret` | Rotate the signing secret, shown once.           |
 | GET    | `/v1/triggers`             | List webhook triggers, each with `last_error` saying why its last delivery started no run. |
 | DELETE | `/v1/triggers/{id}`        | Delete a trigger, revoking its webhook.                 |
-| POST   | `/hooks/{token}`        | Fire a trigger from a git push, or plan a pull request for a review trigger. A required HMAC signature, or GitLab's token, is checked first. A fire whose inventory matches no hosts is skipped and answered `200` with `skipped`. Answers within five seconds, with `accepted` when the launch is still going.|
+| POST   | `/hooks/{token}`        | Fire a trigger from a git push, or, for a review trigger, plan a pull request and act on a `/switchtender plan` or `/switchtender apply` comment, as [planning and applying from a comment](pull-request-review.md#planning-and-applying-from-a-comment) describes. A required HMAC signature, or GitLab's token, is checked first. A fire whose inventory matches no hosts is skipped and answered `200` with `skipped`. Answers within five seconds, with `accepted` when the launch is still going.|
 | POST   | `/v1/notifications`        | Create a named notification target. Its address and key are sealed at rest and never returned. Admin. |
 | GET    | `/v1/notifications`        | List notification targets, secrets never included. Operator role. |
 | GET    | `/v1/notifications/{id}`   | One notification target. Operator role. |
@@ -145,6 +145,10 @@ Two more are enforced somewhere other than the request:
 | DELETE | `/v1/tokens/{id}`          | Revoke a token everywhere at once. Admin only.          |
 | GET    | `/auth/oidc/login`      | Start the OpenID Connect sign-in handshake.             |
 | GET    | `/auth/oidc/callback`   | Complete the OIDC handshake and issue a token.          |
+| GET    | `/v1/me/forge-links`       | The caller's own linked GitHub and GitLab accounts, and the forges this server can link. See [linking forge accounts](pull-request-review.md#linking-forge-accounts). |
+| POST   | `/v1/me/forge-links`       | Start linking a forge account to the caller's own account. Returns the forge's `authorize_url`. A person only, never an agent. |
+| DELETE | `/v1/me/forge-links/{id}`  | Unlink one of the caller's own forge accounts. Recorded on the audit chain. |
+| GET    | `/auth/forge/callback`  | Where the forge sends the browser back to finish a link. Public, checked by its signed state and the browser's cookie. |
 | GET    | `/auth/saml/login`      | Start the SAML sign-in handshake.                       |
 | POST   | `/auth/saml/acs`        | Consume the IdP assertion and issue a token.            |
 | GET    | `/auth/saml/metadata`   | Service provider metadata for IdP registration.         |
@@ -182,7 +186,7 @@ Two more are enforced somewhere other than the request:
 | DELETE | `/v1/inventories/{id}/facts/{host}` | Clear one host's cached facts, so the next run gathers them afresh. |
 | POST   | `/v1/inventories/preview`  | Resolve an unsaved smart or constructed inventory and list the hosts it reaches for the caller, with the `engine` that resolved it and the `ansible_core` version when Ansible did. |
 | POST   | `/v1/inventories/{id}/preview` | Resolve a stored smart or constructed inventory and list the hosts a launch by the caller would reach, with the same `engine` and `ansible_core`. |
-| POST   | `/v1/policies`             | Create a policy that holds or denies matching runs.     |
+| POST   | `/v1/policies`             | Create a policy that holds, denies, or exempts matching runs. `effect` is `require_approval`, the default, `deny`, or `exempt`. `account` matches the username of the account the requesting credential is bound to. An exempt policy lets the agent runs it matches go ahead without the built-in agent hold, takes only `tool`, `command_contains`, `inventory_id`, `queue`, `actor`, `account`, and `actor_kind: agent`, and is Community. An exempt policy that names `actor` without `account` is refused with 400, since a token label is not unique across accounts. See [Agent runs are held by default](policy.md#agent-runs-are-held-by-default). |
 | GET    | `/v1/policies`             | List approval policies. A Rego policy from the policy file carries a `rego` object with its `package`, `syntax`, bundle `sha256`, `modules`, `warn` (`hold` or `note`), and `timeout`. See [Approval policies](policy.md). |
 | PUT    | `/v1/policies/{id}`        | Update an approval policy.                              |
 | DELETE | `/v1/policies/{id}`        | Delete an approval policy.                              |
@@ -293,7 +297,7 @@ A profile is personal data and is treated as such. Only an admin may read it. `/
 the admin role and is not delegable by a manage grant. The values are never written to the logs, and
 a rejection names the offending field without echoing it. Each single-line field is capped at 320
 characters, `notes` at 2000, and an account may carry at most eight links. A link must be an `http`
-or `https` address; any other scheme is refused, because the admin page renders links as anchors.
+or `https` address. Any other scheme is refused, because the admin page renders links as anchors.
 
 ## Template run timeout
 
@@ -314,7 +318,7 @@ curl -X POST https://switchtender.example.com/v1/templates \
 
 Zero, or the field omitted, leaves launches on the server default set by `--run-timeout`, so a
 template saved before this field existed is unchanged. A run that exceeds its timeout is canceled
-and finalized as failed. A launch cannot raise the cap; the template's value is what applies.
+and finalized as failed. A launch cannot raise the cap. The template's value is what applies.
 
 ## Naming what a run targets
 
@@ -372,7 +376,7 @@ A template may carry `steps`, a pipeline graph, instead of a single tool. Such a
 template is a saved workflow: every path that fires a template, a launch, a schedule, or a webhook
 trigger, runs the graph as a pipeline, and the template's survey answers and extra vars reach every
 step. A workflow template sets no top-level `playbook`, `command`, `tool`, `shards`, or Ansible
-controls, since each step names its own; the graph is validated when the template is saved, so a
+controls, since each step names its own. The graph is validated when the template is saved, so a
 cycle or an unknown dependency is refused then rather than on every launch.
 
 A step with `"type": "approval"` is an approval step: the workflow waits there until an admin
@@ -536,11 +540,12 @@ guide](migration.md#the-awx-compatible-callback-address) for the AWX-compatible 
 
 ### What a request may carry
 
-A NUL byte or text that is not valid UTF-8 in the request path or a query parameter is refused with
-`400` before the request is routed, so it never reaches a store. A JSON body is held to the same
-rule: a string holding a NUL, written `\u0000`, is refused with `400` naming the field, such as
-`steps[1].name`. An import is checked the same way before it writes anything: an export holding
-such text in any object it would create is refused with `400` naming the object and the field.
+Text holding the NUL byte, or text that is not valid UTF-8, in the request path or a query parameter
+is refused with `400` before the request is routed, so it never reaches a store. A JSON body is held
+to the same rule: a string holding the NUL character, written `\u0000`, is refused with `400` naming
+the field, such as `steps[1].name`. An import is checked the same way before it writes anything: an
+export holding such text in any object it would create is refused with `400` naming the object and
+the field.
 
 Some values are stored under an index and have a bound. Past it the request is refused with `400`
 stating the bound.
@@ -742,7 +747,7 @@ follow.
 A malformed target is refused at create or update with the field it lacks, not dropped at
 delivery. A Twilio or email target names only a recipient. The account credentials stay in server
 flags, so a template never carries them. On read, webhook URLs, PagerDuty routing keys, and
-Grafana tokens come back masked; an edit that echoes the mask back keeps the stored value.
+Grafana tokens come back masked. An edit that echoes the mask back keeps the stored value.
 
 ## Notification targets
 
@@ -797,7 +802,7 @@ When a top-level run reaches an event, every target attached for that event to t
 from, the schedule that fired it, its project, its organization, or the organization that owns its
 template is told, once, however many of those it is attached through. The template is found through the run's source, so a target on a
 template hears the runs its schedules and triggers fire, and a rerun's runs as well. A split's shards
-and a pipeline's steps are not announced one by one. The parent is.
+and a pipeline's steps are announced through their parent rather than one by one.
 
 A read that fails while the template is being found, of the schedule, trigger, or run that names it,
 or of the template to learn its organization, counts as a database that cannot be read. The event
@@ -1005,7 +1010,7 @@ takes and how daylight-saving changes are handled.
 
 `/v1/fleet` and `/v1/tasks` take a `window`, the number of recent runs per host or per task the
 view considers, and `/v1/hosts/{host}/runs` takes a `limit`. All three default to 10. The window is
-capped at 100 and the host history limit at 500; a larger value is answered with the cap, and the
+capped at 100 and the host history limit at 500. A larger value is answered with the cap, and the
 response echoes the window it actually used. The caps exist because the per-host and per-task
 summaries are kept when their runs are deleted, so on a long-lived fleet the tables hold a row for
 every host of every run, and every row a window admits becomes an element of the answer.
@@ -1042,12 +1047,12 @@ presents the worker bearer token.
 | POST   | `/relay/v1/runs/{id}/host-facts`   | Save the facts the run gathered per host.     |
 | POST   | `/relay/v1/runs/{id}/task-summary` | Save the run's per-task summaries.            |
 
-Each report call is bounded twice. It presents the per-claim capability the claim response issued, so it
-can only write to the run this worker holds, and one call carries at most a few thousand items, so a
-worker cannot force an unbounded decode on the control node; the worker sends a wide run's evidence in
-several calls rather than losing it to that cap. Host facts are bounded further: a worker may write
-facts only for hosts its run has already reported results for, so nothing can be recorded about a
-machine no run claims to have touched.
+Each report call is bounded twice. It presents the per-claim capability the claim response issued,
+so it can only write to the run this worker holds, and one call carries at most a few thousand
+items, so a worker cannot force an unbounded decode on the control node. The worker sends a wide
+run's evidence in several calls rather than losing it to that cap. Host facts are bounded further: a
+worker may write facts only for hosts its run has already reported results for, so nothing can be
+recorded about a machine no run claims to have touched.
 
 What that does and does not give you: a worker authors its own results, so a worker you do not trust can
 still describe its own run untruthfully. What it cannot do is reach past that run into the recorded state

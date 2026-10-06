@@ -60,7 +60,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents" class="active">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents" class="active">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/ansible-runtime">Managed Ansible runtime</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/upgrading">Upgrading</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -92,15 +92,16 @@ run that used it.</p>
 you asked to execute with that credential in scope, so it can print the value in a form the log
 masker does not recognize, exactly as it can in Jenkins, GitHub Actions, or any other runner. The
 masker removes a secret that appears verbatim, which stops the ordinary accident of echoing a
-variable; it is not a boundary against a script written to defeat it. Scope the operator token to
+variable. It is not a boundary against a script written to defeat it. Scope the operator token to
 the credentials it genuinely needs, and treat the ability to attach a credential to a run as
 equivalent to holding it.</p>
 <p>The operator role bounds what the door allows. An operator can submit, cancel, and retry runs and
 launch templates. It cannot approve runs, manage configuration, or read the audit page. Approving a
 held run is admin-only, so an operator-bound agent can never approve its own work.</p>
 <p>Agents can propose changes. Only authorized humans can approve them. Separation of duties can
-require an independent human when policy demands it. An approval comes from a person's session or a
-person's own token, never from an agent's.</p>
+require an independent human when policy demands it. An approval comes from a person's session, a
+person's own token, or a pull request comment from the forge account a person linked, never from an
+agent's.</p>
 <p>That holds on two independent locks. The door caps an agent's token below the role every approval
 route needs. Behind it, the dispatcher refuses any approval whose decider is an agent, for a held run
 and for a workflow approval step alike, so a token that somehow reached the route still releases
@@ -147,47 +148,61 @@ authentication is on before the agent holds any credential. Make sure a human ad
 exists too, so the agent's held runs have somebody who can approve them.</p>
 </li>
 <li>
-<p>Decide what a human must approve. An approval policy with no criteria matches every run, so one
+<p>Decide what a human must approve. You do not need a policy for the agent's own runs: every run an
+agent token asks for waits for a person's approval unless a rule with <code>effect: exempt</code> covers it.
+The hold applies to tokens minted with <code>switchtender token new --user &lt;account&gt; --agent</code>, and a
+token minted without <code>--agent</code> gets no agent hold. A dry run waits too, since check mode and a
+plan still run code with this server's credentials, and a Terraform or OpenTofu apply takes two
+approvals: one before it plans, and one for the apply its plan proposes with the saved plan. To
+let routine work through, write an exemption, a rule with <code>effect: exempt</code>, which Community
+covers. An exemption that names the agent's <code>actor</code> label must also name the <code>account</code> its token
+is bound to, since a label repeats across accounts. The receipt proves who approved each run or
+which rule exempted it. <a href="/docs/policy#agent-runs-are-held-by-default">Agent runs are held by
+default</a> covers the exemption and what it risks.</p>
+<p>Policies gate people's runs too. An approval policy with no criteria matches every run, so one
 empty policy is a gate-everything switch:</p>
 <pre><code>policies:
   - name: hold-everything
 </code></pre>
-<p>Or scope policies to the dangerous cases and let routine runs flow:</p>
+<p>Or scope policies to the dangerous cases and let a person's routine runs flow:</p>
 <pre><code>policies:
   - name: prod-terraform-destroy
     tool: terraform
     command_contains: destroy
 </code></pre>
-<p>Policies also see who is asking, how risky the operation grades, and can refuse outright rather
-than hold. That is what turns a policy file into an agent's authorization scope: what it may do
-freely, what needs a person first, and what it may never do at all:</p>
+<p>Policies also see who is asking, how risky the operation grades, and how hard it is to undo, and
+they can refuse outright rather than hold. The default hold already makes an agent's runs wait
+for a person, so the rules worth writing for an agent are the ones it does not cover: what the
+agent may never do at all, and which of its changes need a second person:</p>
 <pre><code>policies:
   - name: agents-never-drop-databases
     actor_kind: agent
     command_contains: &quot;drop database&quot;
     effect: deny
-  - name: agent-destructive-needs-a-person
+  - name: agent-high-risk-needs-another-person
     actor_kind: agent
     min_risk: high
-  - name: agent-terraform-needs-a-person
-    actor_kind: agent
-    tool: terraform
+    require_distinct_approver: true
 </code></pre>
 <p><code>actor_kind: agent</code> scopes a rule to runs an agent submitted, identified by its minted token,
-never guessed from traffic. <code>actor: prod-remediator</code> pins a rule to one named principal.
-<code>min_risk</code> matches on the run's assessed risk grade, so &quot;destructive operations need a person&quot;
-is one line. <code>effect: deny</code> refuses the submission outright; the refused request is still on the
+never guessed from traffic. <code>actor: prod-remediator</code> pins a rule to one named principal, and
+<code>account: dev-lead</code> to the account a token is bound to, which tells apart two agents that share
+a label. <code>min_risk</code> matches on the run's assessed risk grade. <code>effect: deny</code> refuses the
+submission outright, so no person can release it either, and the refused request is still on the
 chain, because the gate records every mutation before anything acts on it.
 <code>require_distinct_approver: true</code> refuses a decision made by whoever asked for the change, which
-matters for admins, since an agent or operator can never approve anything. The requirement is
-copied onto each run the rule holds, so editing the rule later cannot weaken a pending decision.</p>
+for an agent's run is the account the agent is bound to, so the person the agent acts for cannot
+release its high-risk work alone. The requirement is copied onto each run the rule holds, so
+editing the rule later cannot weaken a pending decision. A rule that holds still applies to a run
+an exemption covers, since an exemption lifts only the default hold.</p>
 <p>Every criterion in that file is the full policy engine, which a Team license covers: actor
 scoping, risk floors, deny rules, and distinct-approver separation of duties. A server started
 with a policy file it is not licensed for refuses at startup and says so, rather than running with
-the rules quietly dropped. The gate itself is free: a Community install holds one plain
-require-approval policy, and one empty rule already holds every run an agent submits for a person,
-which is the whole containment story on this page. What Team buys is scoping that hold, so agents
-are held while people are not, and so a rule can refuse outright rather than wait.</p>
+the rules quietly dropped. The gate itself is free on every tier: every run an agent submits
+waits for a person with no rule written, and that is the whole containment story on this page. A
+Community install also holds one plain rule, either a require-approval policy for everyone's runs
+or one exemption. What Team buys is scoping holds by actor, account, risk, and reversibility, and
+a rule that can refuse outright rather than wait.</p>
 </li>
 <li>
 <p>Pin the policies by starting the server with <code>serve --policy-file policies.yml</code>. The file is the
@@ -207,22 +222,22 @@ Protocol, which many agent runtimes speak natively. Put the operator-bound token
 </code></pre>
 <p>The agent gets a small, deliberate set of tools: list job templates, propose a run, read a run and
 its log, pull a run's evidence dossier, list recent runs, and list the workflow approval steps
-waiting for a person. Every tool call is an ordinary
-authenticated API request under that same token, so it passes the same authorization, the same
-approval policy, and the same fail-closed audit append as a call from a person. A proposed run lands
-in the chain under the agent's account before it executes, and a policy-covered run waits for a human
-to release it.</p>
+waiting for a person. Every tool call is an ordinary authenticated API request under that same
+token, so it passes the same authorization, the same approval policy, and the same fail-closed audit
+append as a call from a person. A proposed run lands in the chain under the agent's account before
+it executes, and it waits for a human to release it, a dry run included, unless a rule with
+<code>effect: exempt</code> covers it.</p>
 <p>The tool set is narrow on purpose. There is no approve tool, so an agent cannot release its own work
 however it is prompted, and no credential, account, token, grant, or policy tool, so it cannot widen
 its own reach. The command refuses to start on an admin token. Ad-hoc runs, where the agent composes
 a command instead of launching a template a person defined, stay off unless you pass <code>--allow-adhoc</code>,
-and the approval policy still covers them when they are on.</p>
+and the default hold and the approval policy still cover them when they are on.</p>
 <p>The narrowness holds inside a template launch too, which is where it would otherwise leak, and it
 holds on the server, so it applies the same whether the agent connects over MCP or calls the API
 directly:</p>
 <ul>
 <li>An agent cannot supply extra vars. Extra vars sit at Ansible's highest precedence, above everything
-the template and the inventory set, so an agent that could send them could rewrite what a vetted
+the template and the inventory set, so an agent allowed to send them would rewrite what a vetted
 template does while the audit trail recorded the template's name. Survey answers are the supported
 channel: the operator declares which fields a caller may fill, and the template says so. That
 includes a secret field, so an agent can supply a password a template asks for. The answer is
@@ -235,8 +250,9 @@ template against the target and with the credentials the operator gave it.</li>
 <li>An argument the tool does not define is refused rather than dropped. A model writing <code>check_mode</code>
 instead of <code>dry_run</code> is told so, rather than having the flag silently ignored and a real change
 reported back as a preview.</li>
-<li>An agent can read the evidence and the signed receipt for runs it proposed. Another actor's
-evidence needs an admin.</li>
+<li>An agent can read the evidence and the signed receipt for the runs of the account it is bound
+to, the runs a person submitted under that account included. Another account's evidence needs an
+admin, and a non-admin, an agent included, always receives the sparse receipt described below.</li>
 </ul>
 <h2 id="waiting-for-a-decision">Waiting for a decision</h2>
 <p>A held run does not block the agent. The submission answers at once with the run, and the run's
@@ -251,6 +267,10 @@ not poll can stream the run instead: <code>POST /v1/runs/{id}/stream-ticket</cod
 and <code>GET /v1/runs/{id}/stream?ticket=...</code> delivers the run's events as it is released, executes, and
 ends. Reading is all it can do about the decision: an agent that tries to approve its own run is
 refused with 403.</p>
+<p>An agent's workflow cannot apply Terraform or OpenTofu. A workflow it submits or launches with an
+apply step that is not a dry run is refused with a 403 that names the step, since a workflow's
+approval never shows the plan the step applies: the agent asks for the apply as its own run instead,
+which plans first and waits for approval of the saved plan, unless an exemption covers the step.</p>
 <p>A workflow the agent launched can also stop partway, at an approval step. The workflow's steps up
 to it run, and then it waits. <code>GET /v1/approvals</code>, or the <code>list_pending_approvals</code> tool, shows the
 step waiting, what already ran, and what an approval or a denial runs next, so the agent can tell a
@@ -285,13 +305,15 @@ a third party recomputes and checks without trusting the operator or the agent.<
 <p>Every mutation response other than signing in or out carries an <code>Audit-Receipt: seq:hash</code> header.
 The agent, or the system driving it, can retain receipts and later check each one against the chain,
 so the party an entry belongs to can detect an omission.</p>
-<p>Runs record their source, one of api, template, schedule, rerun, reconcile, propose, or trigger,
-along with the actor. <code>actor:agent-bot</code> in run search pulls everything the agent ran, and
-<code>source:api</code> separates direct API submissions from scheduled or triggered work.</p>
+<p>Runs record their actor, and most record their source: api, template, schedule, trigger, callback,
+rerun, relaunch, reconcile, propose, review, or review_apply. A workflow and a retry of failed shards
+record no source. <code>actor:agent-bot</code> in run search pulls every run asked for under that token label,
+from any account, so give each agent a label of its own. <code>source:api</code> finds the single runs
+submitted directly through the API, apart from scheduled or triggered work.</p>
 <p>An approval is a chain entry of its own. When a person releases a held run, the chain gains a
 DECISION entry naming the approver and committing a digest of the exact spec released, and the
 executor refuses a spec that changed after the decision. So the record does not say &quot;someone
-approved run 123&quot;; it says this person approved exactly this change, and exactly this change ran.
+approved run 123&quot;. It says this person approved exactly this change, and exactly this change ran.
 The entry names the approver exactly as the request that carried the decision is recorded: the
 token's label, how it authenticated, and the account it is bound to.</p>
 <h2 id="the-whole-path-end-to-end">The whole path, end to end</h2>
@@ -302,12 +324,15 @@ token's label, how it authenticated, and the account it is bound to.</p>
 anything acts, attributed <code>actor_type: agent</code>, on behalf of its human.</p>
 </li>
 <li>
-<p>Policy sees an agent asking. A deny rule refuses it outright, with the rule named. A matching
-approval rule holds it: the run is born <code>pending_approval</code> and no executor can claim it.</p>
+<p>Policy sees an agent asking. A deny rule refuses it outright, with the rule named. Unless a rule
+with <code>effect: exempt</code> covers it, the run is held, a dry run included: it is born
+<code>pending_approval</code> and no executor can claim it.</p>
 </li>
 <li>
 <p>A person reviews the held run, its assessed risk, and its parameters, and approves. The DECISION
-entry commits who approved, the account they approved under, and the digest of exactly what.</p>
+entry commits who approved, the account they approved under, and the digest of exactly what. For
+a Terraform or OpenTofu apply, that approval lets it plan, and the apply its plan proposes waits
+for a second approval carrying the saved plan, which is the plan step 4 applies.</p>
 </li>
 <li>
 <p>The run executes, on whichever worker claims it, after re-checking the approved digest. The
@@ -321,8 +346,11 @@ switchtender verify run.receipt --pubkey sha256:&lt;the fingerprint the install 
 </code></pre>
 <p>Verify reads one file, touches no database and no network, and prints who asked, who approved
 exactly what, and what happened, with every claim recomputed from the chain. <code>--sparse</code> produces
-a receipt that proves the same chain facts while disclosing nothing about the entries around the
-run, for handing to an outside auditor on a shared install.</p>
+a receipt that discloses only the run's own chain entries, each proved to belong to the chain,
+and nothing about the entries around them, for handing to an outside auditor on a shared install.
+It names the outcome entry and the digest it committed without reproducing the outcome, so it
+does not show what the run did, the decisions, or the spec the approval bound. Only an admin
+receives the full receipt from the API, and anyone else gets the sparse one.</p>
 </li>
 </ol>
 <p><code>switchtender audit bundle</code> exports the whole chain the same way, and a third party can verify
@@ -341,7 +369,7 @@ so for that agent the record is not just intact, it is the whole story.</p>
 <p><strong>Is this the built-in advisory AI?</strong> No. The <a href="/docs/ai">advisory AI</a> is the other direction: a model
 that proposes text and never executes, with anything runnable born held for a human. This page is
 about an external agent, yours, that operates SwitchTender through the API the way a person would.
-The advisory AI is a feature you switch on; an agent is a client you let in.</p>
+The advisory AI is a feature you switch on. An agent is a client you let in.</p>
 <p><strong>Can the agent approve its own runs?</strong> No. Approving a held run is admin-only, the agent's token is
 operator-bound, and the dispatcher refuses an agent's approval even if one reached the route. A held
 run the agent submits waits for a human admin. The account the agent is bound to may be that admin,

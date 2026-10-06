@@ -111,7 +111,7 @@ func TestHookProbeDoesNotAppendToTheChain(t *testing.T) {
 func TestHookEndpointIsRateLimited(t *testing.T) {
 	t.Parallel()
 	handler := hookHandler(trigger.NewMemStore(), template.NewMemStore(), &fakeSubmitter{},
-		nil, nil, nil, nil, newHookFlights(), zap.NewNop())
+		nil, nil, nil, nil, newHookFlights(), nil, zap.NewNop())
 
 	limited := false
 	for i := 0; i < hookWindowMax+20; i++ {

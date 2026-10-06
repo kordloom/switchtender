@@ -60,17 +60,21 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart" class="active">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart" class="active">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/ansible-runtime">Managed Ansible runtime</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/upgrading">Upgrading</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
 			<h1 id="quickstart">Quickstart</h1>
 <p>No install needed to look around. The <a href="https://demo.switchtender.com/ui/runs?status=pending_approval">live demo</a> is a seeded, read-only instance of exactly what you get.</p>
 <h2 id="requirements">Requirements</h2>
-<p>The tools your runs use, on the PATH: <code>ansible-playbook</code> and <code>ansible-inventory</code> for Ansible, and
-<code>terraform</code>, <code>tofu</code>, <code>python3</code>, <code>pwsh</code> (PowerShell 7), or <code>go</code> for the rest. Bash runs use the
-system shell. Nothing else for the default SQLite setup. Building from source instead of installing
-the release binary needs Go 1.26, and Docker Compose is an alternative, where
+<p>An Ansible run needs ansible-core, which the binary does not carry. Use the <code>ansible-playbook</code> and
+<code>ansible-inventory</code> already on your PATH, or, once the binary is installed, let
+<code>switchtender ansible install</code> put a pinned, hash-checked ansible-core beside the database, as
+<a href="#install-ansible">install Ansible</a> shows. That install needs a <code>python3</code> from 3.10 to 3.14 with its
+<code>venv</code> module, and it does not run on Windows.</p>
+<p>The other tools come from the PATH: <code>terraform</code>, <code>tofu</code>, <code>python3</code>, <code>pwsh</code> (PowerShell 7), or <code>go</code>.
+Bash runs use the system shell. Nothing else for the default SQLite setup. Building from source
+instead of installing the release binary needs Go 1.26, and Docker Compose is an alternative, where
 <code>docker compose --profile stack up --build</code> builds the image from this repository. That image
 already carries Ansible, Python, Terraform, and OpenTofu.</p>
 <h2 id="install">Install</h2>
@@ -84,6 +88,20 @@ directory is often not on PATH, so the script says so and prints its closing com
 path; add the line it gives you to run <code>switchtender</code> by name. Running in about a minute. Prefer to build it
 yourself, or want to hack on it? <code>go build -o switchtender .</code> from a clone produces the same
 binary; the commands below assume it is on your PATH, so prefix a locally built binary with <code>./</code>.</p>
+<h2 id="install-ansible">Install Ansible</h2>
+<p>Skip this when <code>ansible-playbook</code> is already on your PATH, or when you only run the other tools.
+Otherwise run the install in the directory you will start the server in, as the account that will
+run it:</p>
+<pre><code>switchtender ansible install
+</code></pre>
+<p>It downloads ansible-core 2.21.4 from PyPI, checks every file against a hash the binary carries, and
+installs it into <code>ansible/</code> beside <code>switchtender.db</code>, where the server finds it with no restart.
+That release needs Python 3.12 to 3.14. On Python 3.11 add <code>--version 2.19</code>, and on 3.10
+<code>--version 2.17</code>. The <code>python3</code> macOS ships is 3.9, so install a newer Python there first. Debian
+and Ubuntu package the <code>venv</code> module separately, such as <code>python3.12-venv</code>, and the install names
+the package when it is missing. The directory and every directory above it must be writable only by
+that account or root, or the install refuses it. <a href="/docs/ansible-runtime">Managed Ansible runtime</a>
+covers offline installs, workers, and the desktop app.</p>
 <h2 id="run-the-server">Run the server</h2>
 <pre><code>export SWITCHTENDER_ENCRYPTION_KEY=$(openssl rand -hex 32)
 export SWITCHTENDER_ENCRYPTION_SALT=$(openssl rand -hex 16)

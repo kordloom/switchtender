@@ -659,6 +659,7 @@ const ROUTE_WORDS = [
 	[/^\/ui\/audit$/, "Click to open the audit trail"],
 	[/^\/ui\/policies$/, "Click to open approval policies"],
 	[/^\/ui\/doctor$/, "Click to run the reference health checks"],
+	[/^\/ui\/links$/, "Click to open your linked accounts"],
 	[/^\/ui\/docs\/[^/]+$/, "Click to open this guide"],
 	[/^\/ui\/docs$/, "Click to open the documentation"],
 	[/^\/ui\/?$/, "Click to open the overview"],

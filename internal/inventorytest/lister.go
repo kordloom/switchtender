@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/kordloom/switchtender/internal/ansibleruntime"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 )
@@ -35,6 +36,8 @@ type ListingRunner struct {
 	Version string
 	// Missing makes it report Ansible as not installed.
 	Missing bool
+	// Commands is where it reports its Ansible commands come from.
+	Commands ansibleruntime.Commands
 	// Rewrite, when set, replaces what ReadInventories reports for the file named name, so a test
 	// can make Ansible's reading disagree with the native engine's.
 	Rewrite func(name string, listing []byte) []byte
@@ -82,6 +85,11 @@ func (l *ListingRunner) Reads() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.reads
+}
+
+// AnsibleCommands reports Commands.
+func (l *ListingRunner) AnsibleCommands() ansibleruntime.Commands {
+	return l.Commands
 }
 
 // AnsibleCoreVersion reports Version, or roundhouse.ErrAnsibleMissing when Missing is set.

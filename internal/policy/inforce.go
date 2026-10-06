@@ -81,6 +81,7 @@ func canonicalRule(p *Policy) string {
 		Queue           string `json:"queue,omitempty"`
 		ActorKind       string `json:"actor_kind,omitempty"`
 		Actor           string `json:"actor,omitempty"`
+		Account         string `json:"account,omitempty"`
 		MinRisk         string `json:"min_risk,omitempty"`
 		Reversibility   string `json:"reversibility,omitempty"`
 		Effect          string `json:"effect,omitempty"`
@@ -93,8 +94,8 @@ func canonicalRule(p *Policy) string {
 		RequireReason   string `json:"require_reason,omitempty"`
 	}{
 		Tool: p.Tool, CommandContains: p.CommandContains, InventoryID: p.InventoryID,
-		Queue: p.Queue, ActorKind: p.ActorKind, Actor: p.Actor, MinRisk: p.MinRisk,
-		Reversibility: p.Reversibility, Effect: p.Effect,
+		Queue: p.Queue, ActorKind: p.ActorKind, Actor: p.Actor, Account: p.Account,
+		MinRisk: p.MinRisk, Reversibility: p.Reversibility, Effect: p.Effect,
 		ExcludeDryRun: p.ExcludeDryRun, MaxDestroy: p.MaxDestroy,
 		DistinctApprove: p.RequireDistinctApprover, RequireReason: p.RequireReason,
 	}
@@ -145,6 +146,11 @@ func describeRule(p *Policy) string {
 	switch {
 	case p.Denies():
 		effect = "denies"
+	case p.Exempts() && p.Account != "":
+		effect = fmt.Sprintf("lets an agent's run proceed without the default hold, for agents "+
+			"bound to account %q", p.Account)
+	case p.Exempts():
+		effect = "lets an agent's run proceed without the default hold"
 	case p.MaxDestroy >= 0:
 		effect = fmt.Sprintf("requires approval over %d destroys", p.MaxDestroy)
 	}

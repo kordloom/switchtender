@@ -108,6 +108,11 @@ var (
 	repeatSchema = &hcl.BodySchema{Attributes: []hcl.AttributeSchema{
 		{Name: "count"}, {Name: "for_each"},
 	}}
+	// httpSchema selects the attributes that decide whether an http data source only reads: its
+	// method and whether it sends a request body.
+	httpSchema = &hcl.BodySchema{Attributes: []hcl.AttributeSchema{
+		{Name: "method"}, {Name: "request_body"},
+	}}
 	// registryNamespace matches a namespace or name in a module registry address.
 	registryNamespace = regexp.MustCompile(`^[0-9A-Za-z](?:[0-9A-Za-z_-]{0,62}[0-9A-Za-z])?$`)
 	// registrySystem matches the target system in a module registry address.
@@ -263,12 +268,18 @@ type parsedFile struct {
 	modules []moduleBlock
 }
 
-// externalBlock is one data or ephemeral block of type external.
+// externalBlock is one data or ephemeral block that runs work during a plan: an external program,
+// a Lambda invocation, or an HTTP request that is not a plain read.
 type externalBlock struct {
 	// kind is data or ephemeral.
 	kind string
+	// sourceType is the block's type label, such as external, aws_lambda_invocation, or http. It is
+	// what a plan addresses the block by and what decides that the block runs work during a plan.
+	sourceType string
 	// name is the block's name label.
 	name string
+	// verb is how the finding says what the block does during a plan.
+	verb string
 	// check names the check block it is scoped to, empty at the top level.
 	check string
 	// file is the file declaring it.
@@ -435,21 +446,80 @@ func (s *scan) parse(name string) *parsedFile {
 	return f
 }
 
-// externalOf returns the block as an external block when its type is external. The type label is
-// what selects the external provider's schema, whatever local name the provider was given, so the
-// label alone decides.
+// externalOf returns the block as a finding when it runs work during a plan: a data or ephemeral
+// block of type external, which runs a program; aws_lambda_invocation, which invokes a function;
+// or http that is not a plain read, which sends a request with a side effect. The type label is
+// what selects the provider's schema and what a plan addresses the block by, whatever local name
+// the provider was given, so the label alone decides.
 func externalOf(b *hcl.Block, check string) (externalBlock, bool) {
-	if len(b.Labels) < 2 || b.Labels[0] != "external" {
+	if len(b.Labels) < 2 {
+		return externalBlock{}, false
+	}
+	verb, ok := planTimeSideEffect(b)
+	if !ok {
 		return externalBlock{}, false
 	}
 	ext := externalBlock{
-		kind: b.Type, name: b.Labels[1], check: check,
+		kind: b.Type, sourceType: b.Labels[0], name: b.Labels[1], verb: verb, check: check,
 		file: b.DefRange.Filename, line: b.DefRange.Start.Line,
 	}
 	if attrs, _, _ := b.Body.PartialContent(repeatSchema); attrs != nil {
 		ext.repeat = repeatOf(attrs.Attributes)
 	}
 	return ext, true
+}
+
+// planTimeSideEffect reports how a data or ephemeral block runs work while the tool plans, and
+// whether it does at all. It names the three sources whose read is an execution rather than a
+// lookup, and leaves every ordinary read-only data source alone, since those change nothing.
+func planTimeSideEffect(b *hcl.Block) (string, bool) {
+	ephemeral := b.Type == "ephemeral"
+	switch b.Labels[0] {
+	case "external":
+		if ephemeral {
+			return "may run a program during plan", true
+		}
+		return "runs a program during plan", true
+	case "aws_lambda_invocation":
+		// The aws_lambda_invocation data source invokes the function synchronously when it is read,
+		// which a plan does, so the function runs for real during a plan.
+		return "invokes a Lambda function during plan", true
+	case "http":
+		// An http data source is a plain read only as a GET with no body. A write method or a
+		// request body makes its read a request that changes something at the far end, so a method
+		// the scan cannot read as GET or HEAD, or a request body, is a side effect during plan.
+		if httpWrites(b) {
+			return "sends a request that is not a plain read during plan", true
+		}
+	}
+	return "", false
+}
+
+// httpWrites reports whether an http data block sends a request that is not a plain read: a method
+// other than GET or HEAD, a method the scan cannot read as a literal, or a request body. It fails
+// closed, so a method decided only when the run plans counts as a write rather than a safe read.
+func httpWrites(b *hcl.Block) bool {
+	attrs, _, _ := b.Body.PartialContent(httpSchema)
+	if attrs == nil {
+		return false
+	}
+	if _, ok := attrs.Attributes["request_body"]; ok {
+		return true
+	}
+	a, ok := attrs.Attributes["method"]
+	if !ok {
+		return false
+	}
+	method, known := literal(a)
+	if !known {
+		return true
+	}
+	switch strings.ToUpper(strings.TrimSpace(method)) {
+	case "GET", "HEAD", "":
+		return false
+	default:
+		return true
+	}
 }
 
 // moduleOf reads a module call's source, version, and repetition.
@@ -493,9 +563,9 @@ func literal(a *hcl.Attribute) (string, bool) {
 	return v.AsString(), true
 }
 
-// found records an external block as a finding, by the address a plan gives it.
+// found records a plan-time side effect as a finding, by the address a plan gives it.
 func (s *scan) found(c call, ext externalBlock) {
-	addr := c.address + ext.kind + ".external." + clip(ext.name)
+	addr := c.address + ext.kind + "." + clip(ext.sourceType) + "." + clip(ext.name)
 	if s.listed["finding\x00"+addr] {
 		return
 	}
@@ -514,11 +584,7 @@ func (s *scan) found(c call, ext externalBlock) {
 	if len(notes) > 0 {
 		where += ", " + strings.Join(notes, ", ")
 	}
-	verb := "runs a program during plan"
-	if ext.kind == "ephemeral" {
-		verb = "may run a program during plan"
-	}
-	s.findings = append(s.findings, addr+" "+verb+" ("+where+")")
+	s.findings = append(s.findings, addr+" "+ext.verb+" ("+where+")")
 }
 
 // follow reads the module a call names, when the scan can tell which files that is.

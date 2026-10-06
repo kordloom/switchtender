@@ -488,6 +488,8 @@ document.addEventListener("DOMContentLoaded", () => {
 		}
 	} else if (page === "workers") {
 		loadWorkers();
+	} else if (page === "links") {
+		loadForgeLinks();
 	} else if (page === "inventories") {
 		wireModal("inventory");
 		wireInventoryForm();

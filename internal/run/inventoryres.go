@@ -23,6 +23,9 @@ type InventoryResolution struct {
 	Engine string `json:"engine,omitempty"`
 	// AnsibleCore is the ansible-core version that resolved it, when Ansible did.
 	AnsibleCore string `json:"ansible_core,omitempty"`
+	// AnsibleSource is where that Ansible came from: configured, managed for the managed runtime, or
+	// path. Empty when Ansible did not resolve it, or the runner could not say.
+	AnsibleSource string `json:"ansible_source,omitempty"`
 	// InputDigest is the digest of the inputs it drew hosts from, each by id and its content as the
 	// API serves it, secrets masked.
 	InputDigest string `json:"input_digest,omitempty"`
@@ -49,6 +52,9 @@ func (r *InventoryResolution) Clone() *InventoryResolution {
 type InventoryCheck struct {
 	// AnsibleCore is the ansible-core version that read the inventory on the executor.
 	AnsibleCore string `json:"ansible_core"`
+	// AnsibleSource is where that Ansible came from: configured, managed for the managed runtime,
+	// path, or image for the run's container image. Empty when the runner could not say.
+	AnsibleSource string `json:"ansible_source,omitempty"`
 	// InputDigest is the digest of the inputs as execution read them, comparable to the
 	// resolution's InputDigest: they match unless an input changed between launch and execution.
 	InputDigest string `json:"input_digest,omitempty"`

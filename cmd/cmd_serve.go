@@ -26,6 +26,7 @@ import (
 
 	"github.com/kordloom/switchtender/identity"
 	"github.com/kordloom/switchtender/internal/ai"
+	"github.com/kordloom/switchtender/internal/ansibleruntime"
 	"github.com/kordloom/switchtender/internal/attention"
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
@@ -36,6 +37,7 @@ import (
 	"github.com/kordloom/switchtender/internal/extplugin"
 	"github.com/kordloom/switchtender/internal/factcache"
 	"github.com/kordloom/switchtender/internal/federation"
+	"github.com/kordloom/switchtender/internal/forgelink"
 	"github.com/kordloom/switchtender/internal/forward"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/imageref"
@@ -529,9 +531,11 @@ func containerPullPolicyFromFlags() string {
 // flags decide the runtime, the pull policy, and the resource caps, while the caller passes the
 // command's own execution-environment and digest-pinning flags. Both commands go through here so a
 // cap or a policy can never reach one executor and miss the other.
-func newSelectiveRunnerFromFlags(allowContainer, requireDigest bool) roundhouse.Runner {
+func newSelectiveRunnerFromFlags(allowContainer, requireDigest bool,
+	ansible *ansibleruntime.Locator) roundhouse.Runner {
 	return roundhouse.NewSelectiveRunner(allowContainer, containerRuntimeFromFlags(),
-		containerPullPolicyFromFlags(), requireDigest, containerLimitsFromFlags())
+		containerPullPolicyFromFlags(), requireDigest, containerLimitsFromFlags(),
+		roundhouse.WithAnsibleLocator(ansible))
 }
 
 // galaxyServer holds the --galaxy-server flag: a private Ansible Galaxy or Automation Hub URL.
@@ -545,13 +549,16 @@ func registerGalaxyFlag(cmd *cobra.Command) {
 			"Token from SWITCHTENDER_GALAXY_TOKEN.")
 }
 
-// galaxySyncerOpts returns the project.Syncer options for a configured galaxy server and its token, or
-// nil when no server is set.
-func galaxySyncerOpts() []project.SyncerOption {
+// galaxySyncerOpts returns the project.Syncer options: ansible-galaxy started from where ansible
+// says the Ansible commands are, and a configured galaxy server with its token when one is set.
+func galaxySyncerOpts(ansible *ansibleruntime.Locator) []project.SyncerOption {
+	opts := []project.SyncerOption{project.WithGalaxyCommand(func() (string, error) {
+		return ansible.Locate().Command("ansible-galaxy")
+	})}
 	if galaxyServer == "" {
-		return nil
+		return opts
 	}
-	return []project.SyncerOption{project.WithGalaxy(galaxyServer, os.Getenv("SWITCHTENDER_GALAXY_TOKEN"))}
+	return append(opts, project.WithGalaxy(galaxyServer, os.Getenv("SWITCHTENDER_GALAXY_TOKEN")))
 }
 
 // pluginsDir returns the plugins directory to load: the flag when set, else the
@@ -664,6 +671,7 @@ func init() {
 	registerRunFilesFlag(serveCmd)
 	registerModuleFetchFlags(serveCmd)
 	registerGalaxyFlag(serveCmd)
+	registerAnsibleFlags(serveCmd)
 	registerFederationFlag(serveCmd)
 	registerCallbackFlags(serveCmd)
 	serveCmd.Flags().StringSliceVar(&serveTrustedProxy, "trusted-proxy", nil,
@@ -700,6 +708,10 @@ func init() {
 		"OIDC redirect URL, for example https://host/auth/oidc/callback.")
 	serveCmd.Flags().StringVar(&serveOIDCDefaultRole, "oidc-default-role", "viewer",
 		"Role granted to an account created on first SSO sign-in: admin, operator, or viewer.")
+	serveCmd.Flags().StringArrayVar(&serveForgeOAuth, "forge-oauth", nil,
+		"A forge OAuth application people link their GitHub or GitLab account through, as "+
+			"provider=github|gitlab,client_id=ID,secret_env=VAR or secret_file=PATH, with web_url "+
+			"and api_url for GitHub Enterprise Server or self-managed GitLab. Repeatable.")
 	serveCmd.Flags().StringVar(&serveLDAPURL, "ldap-url", "",
 		"LDAP directory URL to enable directory sign-in, for example ldaps://ldap.example.com:636.")
 	serveCmd.Flags().StringVar(&serveLDAPBindDN, "ldap-bind-dn", "",
@@ -883,6 +895,8 @@ type storeBundle interface {
 	FactCache() factcache.Store
 	// ReviewReports returns the pull request review report store.
 	ReviewReports() review.Store
+	// ForgeLinks returns the store of links between forge accounts and SwitchTender accounts.
+	ForgeLinks() forgelink.Store
 	// Decisions returns the approval decision record store: approver reasons, their corrections and
 	// redactions, and the separation-of-duties evaluations of agent-initiated runs.
 	Decisions() decision.Store
@@ -1510,8 +1524,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	defer closePlugins()
 
 	hub := live.NewHub()
-	runner := newSelectiveRunnerFromFlags(serveAllowContainerEE, serveRequireImageDigest)
-	syncer, err := project.NewSyncer(projectCacheDir(), galaxySyncerOpts()...)
+	ansible := ansibleLocator(serveDB)
+	runner := newSelectiveRunnerFromFlags(serveAllowContainerEE, serveRequireImageDigest, ansible)
+	syncer, err := project.NewSyncer(projectCacheDir(), galaxySyncerOpts(ansible)...)
 	if err != nil {
 		return fmt.Errorf("project cache: %w", err)
 	}
@@ -1863,6 +1878,13 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	// A forge application that cannot be read refuses to start, rather than leaving linking off
+	// for a forge the operator set up.
+	forgeApps, err := parseForgeOAuth(serveForgeOAuth, os.Getenv, os.ReadFile)
+	if err != nil {
+		return err
+	}
+
 	// Worker pools are loaded before the server is built, so a malformed file refuses to start
 	// rather than quietly falling back to one token that may lease from every queue.
 	var workerPools *relay.Pools
@@ -1928,6 +1950,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		server.WithAttention(attentionSrc),
 		server.WithReviewReporting(servePublicURL, nil, 0),
 		server.WithReviewStore(bundle.ReviewReports()),
+		server.WithForgeLinks(bundle.ForgeLinks(), forgeApps...),
 		server.WithTeams(bundle.Teams()),
 		server.WithOrgs(bundle.Orgs()),
 		server.WithGrants(bundle.Grants(), serveStrictGrants),

@@ -35,6 +35,9 @@ var notBackedUp = map[string]string{
 	"Attention": "worker reports and raised attention alerts are runtime state the fleet rebuilds " +
 		"within seconds of starting, and restoring another install's alerts would silence ones " +
 		"this install never raised",
+	"ForgeLinks": "a forge account link is proven through the forge's own sign-in and recorded on " +
+		"this install's chain when it is made, and restoring one would let a pull request comment " +
+		"act as an account with no record of the link on the chain, so each person links again",
 }
 
 // TestEveryStoreIsBackedUpOrDeliberatelyNot pins that a store either database exposes is either

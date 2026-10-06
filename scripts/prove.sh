@@ -13,9 +13,9 @@
 #   ./scripts/prove.sh [path-to-switchtender]
 #
 # With no argument it uses the switchtender on PATH. PROVE_PORT picks the loopback port (default
-# 18799), and SWITCHTENDER_LICENSE, when it holds a Team license, shows the full rule rather than the
-# Community fallback. It needs curl and python3, writes only inside its own temporary directory, and
-# removes it on exit.
+# 18799). No approval policy is written at any point: the agent's run is held by the hold every
+# install starts with, which is the default this demonstrates. It needs curl and python3, writes
+# only inside its own temporary directory, and removes it on exit.
 
 set -euo pipefail
 
@@ -59,7 +59,6 @@ mkdir -p "$SANDBOX"
 echo "the quarterly backups nobody kept a second copy of" > "$SANDBOX/backups.txt"
 SWITCHTENDER_ENCRYPTION_KEY="$(python3 -c 'import secrets;print(secrets.token_hex(32))')" \
 SWITCHTENDER_ENCRYPTION_SALT="$(python3 -c 'import secrets;print(secrets.token_hex(16))')" \
-SWITCHTENDER_LICENSE="${SWITCHTENDER_LICENSE:-}" \
   "$BIN" serve --addr "127.0.0.1:${PORT}" --db "$DB" >"$WORK/server.log" 2>&1 &
 SRV=$!
 for _ in $(seq 1 60); do
@@ -72,48 +71,14 @@ done
   || fail "the server answered without a token, so nothing below would prove anything"
 ok "running, answering nobody without a token, and holding a sandbox at $SANDBOX"
 
-step "1. A policy: nothing irreversible runs without a second person"
-# The rule this product is actually about holds on the reversibility grade and refuses a
-# self-approval. Both are Team, so on a Community install this falls back to the blanket hold
-# Community does have. The fallback is announced rather than hidden: a demonstration that quietly
-# proves something weaker than it claims is the thing this whole script exists to be the opposite
-# of.
-POLICY=$(curl -sS -X POST "$API/v1/policies" -H "authorization: Bearer $PERSON" \
-  -H 'content-type: application/json' -d '{
-  "name": "irreversible needs a second pair of eyes",
-  "reversibility": "irreversible",
-  "effect": "require_approval",
-  "require_distinct_approver": true
-}')
-POLICY_ID=$(echo "$POLICY" | jqp 'd.get("id","")')
-TIER="team"
-if [ -z "$POLICY_ID" ]; then
-  case "$POLICY" in
-    *"requires a Team license"*)
-      TIER="community"
-      printf '   \033[33mnote\033[0m this install is Community, where a rule cannot hold on the
-'
-      printf '        reversibility grade and cannot demand a distinct approver. Falling back to
-'
-      printf '        the blanket hold Community does have, so the rest of this still runs. Set
-'
-      printf '        SWITCHTENDER_LICENSE to a Team license to see the real rule.
-'
-      POLICY=$(curl -sS -X POST "$API/v1/policies" -H "authorization: Bearer $PERSON" \
-  -H 'content-type: application/json' -d '{
-        "name": "hold every bash run",
-        "tool": "bash"
-      }')
-      POLICY_ID=$(echo "$POLICY" | jqp 'd.get("id","")')
-      ;;
-  esac
-fi
-[ -n "$POLICY_ID" ] || fail "policy was not created: $POLICY"
-if [ "$TIER" = "team" ]; then
-  ok "written. It holds on the grade, not on a command string somebody has to keep updating."
-else
-  ok "written, as a blanket hold on the tool."
-fi
+step "1. No approval policy, on purpose"
+# Nothing is written here. An agent's run waits for a person by default, so the hold below comes
+# from the install as it starts, not from a rule somebody remembered to add. A person reading the
+# policy list sees it empty.
+POLICIES=$(curl -sS -H "authorization: Bearer $PERSON" "$API/v1/policies")
+COUNT=$(echo "$POLICIES" | jqp 'd.get("count", -1)')
+[ "$COUNT" = "0" ] || fail "the install already holds approval policies: $POLICIES"
+ok "the policy list is empty. Nothing below depends on a rule being written first."
 
 step "2. An agent asks to delete the backups"
 SUBMIT=$(curl -sS -X POST "$API/v1/runs" -H 'content-type: application/json' \
@@ -134,13 +99,17 @@ import sys,json
 d=json.load(sys.stdin)
 print('   asked by     :', d.get('actor'), '(' + str(d.get('actor_type')) + ')')
 print('   status       :', d.get('status'))
+print('   held by      :', d.get('held_by_policy'))
 print('   risk         :', (d.get('risk') or {}).get('level'))
 print('   reversibility:', (d.get('reversibility') or {}).get('class'))
 for r in (d.get('reversibility') or {}).get('reasons') or []:
     print('     reason     :', r)
 "
 [ "$STATUS" = "pending_approval" ] || fail "the run was not held; status was $STATUS"
-ok "held. The sandbox is still there:"
+HELD=$(echo "$DETAIL" | jqp 'd.get("held_by_policy","")')
+[ "$HELD" = "requested by an agent, held by default" ] \
+  || fail "the run was held by \"$HELD\", not by the default hold on an agent's run"
+ok "held by default, because an agent asked. No policy was written. The sandbox is still there:"
 ls "$SANDBOX" | sed 's/^/     /'
 
 step "4. The agent tries to approve its own request"
@@ -240,11 +209,12 @@ ok "the altered bundle is refused"
 printf '\n\033[1mThat is the product.\033[0m\n'
 cat <<'EOF'
 
-  An agent asked to destroy something with a token of its own. It was graded,
-  held, and refused when it tried to approve itself. A person approved the exact
-  specification that was graded. It ran, and the deletion was real. What is left
-  is a signed record, naming the agent and the person it acted for, that verifies
-  against the server's published key and stops verifying the moment anyone edits it.
+  An agent asked to destroy something with a token of its own. It was graded and
+  held with no policy written, and refused when it tried to approve itself. A
+  person approved the exact specification that was graded. It ran, and the
+  deletion was real. What is left is a signed record, naming the agent and the
+  person it acted for, that verifies against the server's published key and
+  stops verifying the moment anyone edits it.
 
   Nothing above trusted this tool's own word for anything: the sandbox really was
   deleted, and the last check fails on purpose.

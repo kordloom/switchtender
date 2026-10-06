@@ -63,7 +63,7 @@ func TestEveryReExecutionAuthorizesThroughOneFunction(t *testing.T) {
 				// The owner is allowed to name it, and so is the direct launch, which authorizes a
 				// queue the request itself asked for rather than one inherited from a finished run.
 				switch fn.Name.Name {
-				case "authorizeReexecute", "queueObject":
+				case "reexecuteAuthorization", "queueObject":
 					owners++
 				default:
 					offenders = append(offenders,

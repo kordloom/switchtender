@@ -13,7 +13,9 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
+	"github.com/kordloom/switchtender/internal/forgelink"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/user"
 )
@@ -649,14 +651,21 @@ func listUsersHandler(users user.Store, log *zap.Logger) http.HandlerFunc {
 	}
 }
 
-// deleteUserHandler removes an account. Its tokens stop working on their next use.
-func deleteUserHandler(users user.Store, log *zap.Logger) http.HandlerFunc {
+// deleteUserHandler removes an account. Its tokens stop working on their next use, and its forge
+// account links end before it goes, each recorded on the chain as unlinked, so a forge account it
+// linked can be linked again, no pull request comment acts as an account that is gone, and the
+// chain and the links agree.
+func deleteUserHandler(users user.Store, links forgelink.Store, audits audit.Store,
+	log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if users == nil {
 			respondError(w, log, http.StatusNotFound, "accounts not enabled")
 			return
 		}
 		id := r.PathValue("id")
+		if !unlinkDeletedUser(w, r, users, links, audits, log, id) {
+			return
+		}
 		// The count and the delete are one statement in the store. Asking first and deleting after
 		// let two concurrent deletes of the last two admins both see a survivor and both proceed.
 		deleted, err := users.DeleteUnlessLastAdmin(r.Context(), id)
@@ -675,4 +684,75 @@ func deleteUserHandler(users user.Store, log *zap.Logger) http.HandlerFunc {
 		}
 		respondJSON(w, log, http.StatusOK, map[string]string{"deleted": r.PathValue("id")}, wantsPretty(r))
 	}
+}
+
+// unlinkDeletedUser ends the forge links of the account id that is about to be deleted, recording
+// each on the chain as unlinked before it is removed, and reports whether the delete may go on. It
+// writes the refusal when it may not.
+//
+// A link left behind would act as nobody, since its account is gone, but it would hold the forge
+// account, which then could never be linked to anybody again, and the chain would show it linked
+// for good. The links end first and fail closed: an unlink the chain cannot record keeps that link,
+// and the account, and refuses the delete. An account that is missing, or the install's last admin,
+// is answered before any link is touched, so a delete that is refused anyway ends no link.
+func unlinkDeletedUser(w http.ResponseWriter, r *http.Request, users user.Store,
+	links forgelink.Store, audits audit.Store, log *zap.Logger, id string) bool {
+	if links == nil {
+		return true
+	}
+	ctx := r.Context()
+	owned, err := links.ForUser(ctx, id)
+	if err != nil {
+		log.Error("server: list a deleted user's forge links: " + err.Error())
+		respondError(w, log, http.StatusInternalServerError, "could not delete user")
+		return false
+	}
+	if len(owned) == 0 {
+		return true
+	}
+	target, err := users.Get(ctx, id)
+	if errors.Is(err, user.ErrNotFound) {
+		respondError(w, log, http.StatusNotFound, "user not found")
+		return false
+	}
+	if err != nil {
+		log.Error("server: read user: " + err.Error())
+		respondError(w, log, http.StatusInternalServerError, "could not delete user")
+		return false
+	}
+	if target.Role == user.RoleAdmin && lastAdmin(ctx, users) {
+		respondError(w, log, http.StatusConflict, "cannot delete the last admin")
+		return false
+	}
+	who, _ := recordedFrom(ctx)
+	name, typ := who.Name, who.Type
+	if actor, ok := actorFrom(ctx); ok && name == "" {
+		name, typ = actor.Name, actor.Type
+	}
+	if _, err := forgelink.UnlinkUser(ctx, links, id, func(l *forgelink.Link) error {
+		return recordForgeLink(ctx, audits, forgelink.ActionUnlinked, l, name, typ)
+	}); err != nil {
+		log.Error("server: unlink a deleted user's forge accounts: " + err.Error())
+		respondError(w, log, http.StatusServiceUnavailable, "refused: the account's forge links could "+
+			"not be recorded as unlinked in the audit trail, so the account was kept")
+		return false
+	}
+	return true
+}
+
+// lastAdmin reports whether the install holds one admin or none, which the account about to be
+// deleted would leave with nobody to manage it. A store that cannot answer counts as last, so an
+// unlink never runs ahead of a delete that cannot be checked.
+func lastAdmin(ctx context.Context, users user.Store) bool {
+	list, err := users.List(ctx)
+	if err != nil {
+		return true
+	}
+	admins := 0
+	for _, u := range list {
+		if u.Role == user.RoleAdmin {
+			admins++
+		}
+	}
+	return admins <= 1
 }

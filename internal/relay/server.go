@@ -1308,7 +1308,9 @@ func (s *relayServer) proposeApply(w http.ResponseWriter, r *http.Request) {
 		list, err = s.policies.List(r.Context())
 	}
 	switch {
-	case s.policies == nil && !plan.ApprovalRequested:
+	// With no stored rules, an apply whose submission asked for approval, or one an agent asked for
+	// and the built-in hold covers, still planned first, so it still has an apply to propose.
+	case s.policies == nil && !plan.ApprovalRequested && !policy.PlanGated(nil, plan):
 		writeErr(w, http.StatusConflict, "this install holds no approval policies, so no plan gate "+
 			"asked for an apply from this run")
 		return

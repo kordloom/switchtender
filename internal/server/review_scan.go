@@ -47,7 +47,7 @@ func precheckRefusal(ctx context.Context, d reviewHookDeps, tg *trigger.Trigger,
 		return hookAnswer{}, false
 	}
 	scans := scanner.DryRunScansAt(ctx, probe)
-	if run.ScansChangeFree(scans) {
+	if planChangeFree(scans, probe.Tool) {
 		return hookAnswer{}, false
 	}
 	receipt, err := appendHookEntry(ctx, d.audits, tg, hookPath+"/refused")
@@ -56,16 +56,35 @@ func precheckRefusal(ctx context.Context, d reviewHookDeps, tg *trigger.Trigger,
 		return hookAnswer{status: http.StatusServiceUnavailable,
 			message: "refused: the webhook could not be recorded in the audit trail"}, true
 	}
-	message, reason := dryRunRefusal(scans)
+	message, reason := dryRunRefusal(scans, probe.Tool)
 	d.reviews.Refuse(tg, ev, message, receipt)
 	return hookAnswer{status: http.StatusAccepted, receipt: receipt,
 		body: map[string]string{"trigger": tg.ID, "refused": reason}}, true
 }
 
-// dryRunRefusal is what a pull request is told when its plan is refused because the gate did not
-// find it change free, and the short reason the webhook's answer gives. It is worded for the tool
-// whose scan stopped it, and names what was found, or what could not be read, and what to change.
-func dryRunRefusal(scans []run.DryRunScan) (string, string) {
+// planChangeFree reports whether the gate can show a pull request's plan of tool changes nothing:
+// every scan of it came back change free, and a plan nothing scanned is a built-in tool's inert
+// check. A tool a plugin or the SDK added defines its own plan and runs it as whatever the plugin
+// coded, so with nothing to read, nothing shows it changes nothing.
+func planChangeFree(scans []run.DryRunScan, tool string) bool {
+	if len(scans) == 0 {
+		return run.IsBuiltinTool(tool)
+	}
+	return run.ScansChangeFree(scans)
+}
+
+// dryRunRefusal is what a pull request is told when its plan of tool is refused because the gate
+// did not find it change free, and the short reason the webhook's answer gives. It is worded for the
+// tool whose scan stopped it, and names what was found, or what could not be read, and what to
+// change.
+func dryRunRefusal(scans []run.DryRunScan, tool string) (string, string) {
+	if len(scans) == 0 {
+		return "This plan is of " + tool + ", a tool a plugin or the SDK added. The gate cannot " +
+				"read what such a plan runs, so nothing shows a plan of it would change nothing, and " +
+				"it would run the plugin's code from a branch nobody merged. Review it with a " +
+				"template whose tool the gate can read: Ansible, Terraform, or OpenTofu.",
+			"a plugin tool's plan cannot be read"
+	}
 	var held run.DryRunScan
 	for _, s := range scans {
 		if !s.ChangeFree() {
@@ -91,8 +110,8 @@ func dryRunRefusal(scans []run.DryRunScan) (string, string) {
 			"the configuration could not be read in full"
 	case terraform:
 		return "This configuration runs a program while it plans, so a plan of it would execute " +
-				"code from a branch nobody merged: " + list + ". Replace the external data source " +
-				"with one that runs no program, or review it with a template whose configuration " +
+				"code from a branch nobody merged: " + list + ". Replace what that names with a " +
+				"data source that only reads, or review it with a template whose configuration " +
 				"declares none.",
 			"the configuration runs a program while it plans"
 	case len(held.Findings) == 0:
@@ -102,8 +121,9 @@ func dryRunRefusal(scans []run.DryRunScan) (string, string) {
 				"whose playbook the gate can read in full.",
 			"the playbook could not be read in full"
 	}
-	return "This playbook runs work for real even under check mode, so a plan of it would change " +
-			"hosts from a branch nobody merged: " + list + ". Remove check_mode: false from what " +
-			"runs in this plan, or review it with a template whose playbook forces nothing.",
+	return "This playbook runs work for real even under check mode, so a plan of it would act " +
+			"from a branch nobody merged: " + list + ". Remove what that names, such as " +
+			"check_mode: false or a pipe lookup, from what runs in this plan, or review it with a " +
+			"template whose playbook forces nothing.",
 		"the playbook runs tasks for real under check mode"
 }

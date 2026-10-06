@@ -172,6 +172,19 @@ function undoBadge(undo) {
 	return span;
 }
 
+// AGENT_DEFAULT_HOLD is how the server names the built-in hold on a run an agent asked for, the
+// same string as policy.AgentDefaultName.
+const AGENT_DEFAULT_HOLD = "requested by an agent, held by default";
+
+// heldLabel says why a held run waits: the rule that held it, quoted as its name, or for the
+// built-in agent hold, the reason itself, since it is not a rule anybody wrote or can find in the
+// policy list.
+function heldLabel(rule) {
+	if (!rule) return "Held for approval";
+	if (rule === AGENT_DEFAULT_HOLD) return "Held for approval: " + rule;
+	return "Held for approval by \"" + rule + "\"";
+}
+
 // renderRiskCallout spells out why a held run is graded as it is, in the place the decision is made.
 // A tooltip is enough for a run that is only being read, but an approver deciding whether to let a
 // change through should not have to hover to find out that it destroys infrastructure. It shows only
@@ -190,9 +203,7 @@ function renderRiskCallout(run) {
 	const head = document.createElement("div");
 	head.className = "risk-callout-head";
 	const label = document.createElement("strong");
-	label.textContent = run.held_by_policy
-		? "Held for approval by \"" + run.held_by_policy + "\""
-		: "Held for approval";
+	label.textContent = heldLabel(run.held_by_policy);
 	head.appendChild(label);
 	head.appendChild(riskBadge(risk));
 	if (run.reversibility) head.appendChild(undoBadge(run.reversibility));
@@ -211,6 +222,14 @@ function renderRiskCallout(run) {
 	if (why.children.length) host.appendChild(why);
 	const scanned = scanNote(run);
 	if (scanned) host.appendChild(scanned);
+	// A hold note the scan's box does not carry is shown on its own, such as why the built-in hold
+	// keeps an agent's dry run or apply waiting, so the approver reads why before deciding.
+	if (!scanned && run.hold_note) {
+		const note = document.createElement("p");
+		note.className = "risk-hold-note";
+		note.textContent = run.hold_note;
+		host.appendChild(note);
+	}
 	const facts = factCacheNote(run);
 	if (facts) host.appendChild(facts);
 	const pins = executionPinsNote(run);
@@ -900,11 +919,36 @@ function renderPolicyNotes(run) {
 	const host = document.getElementById("run-policy-notes");
 	if (!host) return;
 	host.textContent = "";
-	const notes = run.policy_notes;
-	if (!Array.isArray(notes) || !notes.length) {
+	const all = Array.isArray(run.policy_notes) ? run.policy_notes : [];
+	const agent = all.filter(isAgentHoldNote);
+	const notes = all.filter((n) => !isAgentHoldNote(n));
+	if (!all.length) {
 		host.hidden = true;
 		return;
 	}
+	host.hidden = false;
+	if (agent.length) {
+		const agentHead = document.createElement("div");
+		agentHead.className = "risk-callout-head";
+		const agentLabel = document.createElement("strong");
+		agentLabel.textContent = "Agent hold";
+		agentHead.appendChild(agentLabel);
+		host.appendChild(agentHead);
+		const agentLead = document.createElement("div");
+		agentLead.className = "muted";
+		agentLead.textContent = "An agent asked for this run, so it waits for a person unless an " +
+			"exemption covers it. This is part of the run's evidence.";
+		host.appendChild(agentLead);
+		const agentList = document.createElement("ul");
+		agentList.className = "risk-reasons";
+		for (const note of agent) {
+			const li = document.createElement("li");
+			li.textContent = note;
+			agentList.appendChild(li);
+		}
+		host.appendChild(agentList);
+	}
+	if (!notes.length) return;
 	const head = document.createElement("div");
 	head.className = "risk-callout-head";
 	const label = document.createElement("strong");

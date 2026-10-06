@@ -26,7 +26,7 @@ const runColumns = `id, playbook, inventory, status, exit_code, error, created_a
 	template_id, inventory_resolution, sealed_vars, use_fact_cache, fact_cache_timeout, git_ref,
 	dry_run_scans, hold_note, sealed_digests, policy_notes, inventory_check, initiator,
 	require_reason, inventory_snapshot, inventory_sealed, resolved_hosts, plan_sha256, plan_sealed,
-	image_digest, decision_id, decision_claim, approval_requested`
+	image_digest, decision_id, decision_claim, approval_requested, account`
 
 // Save inserts or replaces the run identified by r.ID. The cancel flag merges with MAX so a
 // replace from a stale snapshot cannot erase a cancel another process just requested.
@@ -47,8 +47,8 @@ INSERT INTO runs
 	 template_id, inventory_resolution, sealed_vars, use_fact_cache, fact_cache_timeout, git_ref,
 	 dry_run_scans, hold_note, sealed_digests, policy_notes, inventory_check, initiator,
 	 require_reason, inventory_snapshot, inventory_sealed, resolved_hosts, plan_sha256, plan_sealed,
-	 image_digest, approval_requested)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	 image_digest, approval_requested, account)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory,
 	status=CASE WHEN runs.status IN ('parked', 'deciding') AND excluded.status='pending_approval'
@@ -92,7 +92,8 @@ ON CONFLICT(id) DO UPDATE SET
 	inventory_sealed=runs.inventory_sealed, resolved_hosts=excluded.resolved_hosts,
 	plan_sha256=CASE WHEN runs.plan_sha256 = '' THEN excluded.plan_sha256 ELSE runs.plan_sha256 END,
 	plan_sealed=runs.plan_sealed, image_digest=excluded.image_digest,
-	approval_requested=MAX(runs.approval_requested, excluded.approval_requested)`
+	approval_requested=MAX(runs.approval_requested, excluded.approval_requested),
+	account=excluded.account`
 	// The sealed answers are written once, by the insert that created the run, and kept by every
 	// later save. A run decoded from JSON, which is how a relay worker and every API reader holds
 	// one, does not carry them, so a whole-row save from such a copy would otherwise erase the
@@ -123,7 +124,7 @@ ON CONFLICT(id) DO UPDATE SET
 		run.InitiatorColumn(r.Initiator), r.RequireReason,
 		run.SnapshotColumn(r.InventorySnapshot), r.InventorySealed,
 		sqlutil.JSONStrings(r.ResolvedHosts), r.PlanSHA256, r.PlanSealed, r.ImageDigest,
-		sqlutil.BoolToInt(r.ApprovalRequested),
+		sqlutil.BoolToInt(r.ApprovalRequested), r.Account,
 	)
 	if err != nil {
 		if isCallbackConflict(err) {
@@ -227,13 +228,19 @@ func (s *store) ListPage(ctx context.Context, filter run.ListFilter, limit, offs
 			args = append(args, filter.LabelKey, filter.LabelValue)
 		}
 	}
+	// Both forms run.SummaryNameKeys gives are matched, so a name too long to index finds its runs
+	// whether they were summarized before such names were cut or after.
 	if filter.Host != "" {
-		q += " AND EXISTS (SELECT 1 FROM run_host_summary hs WHERE hs.run_id = runs.id AND hs.host = ?)"
-		args = append(args, filter.Host)
+		whole, stored := run.SummaryNameKeys(filter.Host)
+		q += " AND EXISTS (SELECT 1 FROM run_host_summary hs WHERE hs.run_id = runs.id" +
+			" AND hs.host IN (?, ?))"
+		args = append(args, whole, stored)
 	}
 	if filter.Task != "" {
-		q += " AND EXISTS (SELECT 1 FROM run_task_summary ts WHERE ts.run_id = runs.id AND ts.task = ?)"
-		args = append(args, filter.Task)
+		whole, stored := run.SummaryNameKeys(filter.Task)
+		q += " AND EXISTS (SELECT 1 FROM run_task_summary ts WHERE ts.run_id = runs.id" +
+			" AND ts.task IN (?, ?))"
+		args = append(args, whole, stored)
 	}
 	if filter.ClaimedBy != "" {
 		q += " AND claimed_by = ?"
@@ -491,7 +498,7 @@ func scanRun(s scanner) (*run.Run, error) {
 		&scans, &r.HoldNote, &sealedDigests, &policyNotes, &inventoryCheck, &initiator,
 		&r.RequireReason, &snapshot, &r.InventorySealed, &resolvedHosts, &r.PlanSHA256,
 		&r.PlanSealed, &r.ImageDigest, &r.DecisionID, &r.DecisionClaim,
-		&approvalRequested); err != nil {
+		&approvalRequested, &r.Account); err != nil {
 		return nil, err
 	}
 	r.ApprovalRequested = approvalRequested != 0

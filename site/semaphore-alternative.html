@@ -4,7 +4,7 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Semaphore UI alternative with governance built in | SwitchTender</title>
-	<meta name="description" content="SwitchTender is a source-available alternative to Ansible Semaphore: the same one-binary simplicity, plus a live host-by-task matrix, seven tools including Go with a uniform dry run on every one, RBAC with per-object grants, tamper-evident audit, and a one-command Semaphore import.">
+	<meta name="description" content="SwitchTender is a source-available alternative to Ansible Semaphore: the same one-binary simplicity, plus a live host-by-task matrix, seven tools including Go, RBAC with per-object grants, tamper-evident audit, and a one-command Semaphore import.">
 	<link rel="canonical" href="https://switchtender.com/semaphore-alternative">
 	<meta property="og:title" content="Semaphore UI alternative with governance built in | SwitchTender">
 	<meta property="og:description" content="Semaphore's simplicity with a control plane on top: live run matrix, seven tools, enforced approvals, provable audit, and a one-command import of your Semaphore backup.">
@@ -27,18 +27,18 @@
  "applicationCategory": "DeveloperApplication",
  "description": "The control plane for infrastructure automation. Every change it runs, whether from a person, a schedule, or an AI agent, passes one governed path of request, policy, and approval, and leaves a cryptographically signed receipt that can be verified offline without the vendor. It does not claim every change to your infrastructure went through it: anyone holding their own SSH key can change a host behind it. Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go from a single self-hosted Go binary, agentless over SSH.",
  "featureList": [
-  "Agentless: reaches managed hosts over SSH with nothing installed on them",
+  "Agentless: reaches managed hosts over SSH with no SwitchTender agent installed on them",
   "Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go",
   "Reads secrets from HashiCorp Vault (KV v1 and v2, and dynamic secrets minted per run and revoked when it ends), AWS Secrets Manager, Azure Key Vault, Google Secret Manager, CyberArk (Conjur and CCP), and 1Password",
   "Per-object access grants: read, use, or manage on one project, template, inventory, or credential, layered over global roles",
-  "Single sign-on through OIDC, SAML, LDAP, and JWT",
+  "Single sign-on through OIDC, SAML, LDAP, and JWT, on the Pro tier",
   "Pipelines with a dependency graph and parallel branches, built in a drag-and-drop editor",
   "Approval gates enforced by policy before a run executes",
   "Tamper-evident hash-chained audit trail a third party can verify offline",
   "Live host-by-task matrix and per-host history across runs",
   "Drift detection from a dry run",
-  "One static Go binary and one SQLite file, with PostgreSQL optional",
-  "One-command import from AWX, Ansible Automation Platform, Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab"
+  "One static Go binary and one SQLite file, with PostgreSQL optional, where creating a new schema is on the Team tier",
+  "One-command import from AWX-format exports (AWX, Tower, and Automation Controller), Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab"
  ],
  "license": "https://mariadb.com/bsl11/",
  "name": "SwitchTender",
@@ -96,7 +96,7 @@
 		<section class="wrap gs-hero reveal">
 			<span class="eyebrow">Ansible Semaphore alternative</span>
 			<h1>Semaphore's simplicity.<br><span class="grad">A control plane on top.</span></h1>
-			<p class="lede">Semaphore proved a one-binary Ansible UI is the right shape. SwitchTender keeps that shape and adds what teams go looking for next. Every run paints as a live host-by-task matrix instead of scrollback. Go joins the tool list, and every tool gets a uniform dry run. RBAC, teams, and enforced approvals are in the core. External secret managers plug in, from HashiCorp Vault to 1Password and CyberArk, where Semaphore reaches Vault, OpenBao, AWS and Azure. And there's an audit trail you can prove offline. Your Semaphore backup imports in one command.</p>
+			<p class="lede">Semaphore proved a one-binary Ansible UI is the right shape. SwitchTender keeps that shape and adds what teams go looking for next. Every run paints as a live host-by-task matrix instead of scrollback. Go joins the tool list, and Ansible check mode or a Terraform or OpenTofu plan previews a change before it runs, while a script's dry run only checks the script without running it. RBAC, teams, and enforced approvals are in the core. External secret managers plug in, from HashiCorp Vault to 1Password and CyberArk, where Semaphore reaches Vault, OpenBao, AWS, Azure, and Devolutions Server. And there's an audit trail you can prove offline. Your Semaphore backup imports in one command.</p>
 			<div class="hero-cta">
 				<a class="btn big" href="/get-started">Get started</a>
 				<a class="ghost big" href="/docs/migration">Read the migration guide</a>
@@ -119,7 +119,7 @@
 				</article>
 				<article class="card reveal">
 					<h3>The fleet has no memory</h3>
-					<p>Semaphore forgets a run the moment it ends. SwitchTender tracks every host across runs: flaky hosts flagged, durations trended, drift detected from a dry run, and big jobs split across shards balanced by measured host cost.</p>
+					<p>Semaphore keeps each task's log, but no host's history across runs. SwitchTender tracks every host across runs: flaky hosts flagged, durations trended, drift detected from a dry run, and big jobs split across shards balanced by measured host cost.</p>
 				</article>
 			</div>
 		</section>
@@ -137,24 +137,24 @@
 					<tbody>
 						<tr><td>Deploy without Kubernetes</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
 						<tr><td>Live host-by-task matrix</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Tools</td><td class="us">Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go, each with a dry run</td><td><span class="muted">No Go, no uniform dry run</span></td></tr>
+						<tr><td>Tools</td><td class="us">Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</td><td><span class="muted">No Go</span></td></tr>
 						<tr><td>Per-object grants</td><td class="us"><i class="y"></i></td><td><span class="muted">Four fixed roles free, custom roles enterprise</span></td></tr>
-						<tr><td>External secret managers: Vault, AWS, Azure, GCP, CyberArk, 1Password</td><td class="us"><i class="y"></i></td><td><span class="muted">Vault, OpenBao, AWS, Azure</span></td></tr>
+						<tr><td>External secret managers: Vault, AWS, Azure, GCP, CyberArk, 1Password</td><td class="us"><i class="y"></i></td><td><span class="muted">Vault, OpenBao, AWS, Azure, Devolutions Server</span></td></tr>
 						<tr><td>Enforced approval policies</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Tamper-evident, signed audit</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Duration-balanced job splitting</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Fleet memory: flaky hosts, trends</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Drift detection from a dry run</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Drift detection from a dry run</td><td class="us"><i class="y"></i></td><td><span class="muted">Dry-run tasks, no drift report or reconcile</span></td></tr>
 						<tr><td>Drag-and-drop workflow editor</td><td class="us"><i class="y"></i></td><td><span class="muted">On the roadmap</span></td></tr>
-						<tr><td>Distributed workers in the core</td><td class="us"><i class="y"></i> <span class="muted">Team</span></td><td><span class="muted">global runners free; isolated runners and tag routing Pro</span></td></tr>
-						<tr><td>Active-active HA on PostgreSQL</td><td class="us"><i class="y"></i> <span class="muted">creating the schema is Team; opening an existing one is never gated</span></td><td><span class="muted">enterprise</span></td></tr>
+						<tr><td>Distributed workers in the core</td><td class="us"><i class="y"></i> <span class="muted">Team</span></td><td><span class="muted">global runners free, isolated runners and tag routing Pro</span></td></tr>
+						<tr><td>Active-active HA on PostgreSQL</td><td class="us"><i class="y"></i> <span class="muted">creating the schema is Team, opening an existing one is never gated</span></td><td><span class="muted">With Redis, per its documentation</span></td></tr>
 						<tr><td>Advisory AI triage and fleet answers</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Drop-in Go plugins: tools, secrets, AI, notifiers</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Import from the other side</td><td class="us">One command</td><td><i class="n"></i></td></tr>
+						<tr><td>Import from other tools</td><td class="us">One command</td><td><i class="n"></i></td></tr>
 					</tbody>
 				</table>
 			</div>
-			<p class="gs-note reveal">Checked against Semaphore&rsquo;s own documentation on 2026-08-10, for Semaphore 2.19.7. Semaphore was at 2.19.12 on 2026-09-07, whose releases since are bugfix-only and change no row. A comparison decays the day it is written, so check a row against the current release before you rely on it. <a href="/docs/comparison">Full table and sources</a>.</p>
+			<p class="gs-note reveal">Checked against Semaphore's own documentation on 2026-08-10, for Semaphore 2.19.7. Semaphore was at 2.19.12 on 2026-09-07, whose releases since are bugfix-only and change no row. A comparison decays the day it is written, so check a row against the current release before you rely on it. <a href="/docs/comparison">Full table and sources</a>.</p>
 		</section>
 
 		<section class="section wrap">
@@ -167,7 +167,7 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>Move in one command</h2>
-				<p>Export a Semaphore backup, import it into SwitchTender. Projects, inventories, templates, and schedules come across, with a dry run first so you see the plan before anything is written.</p>
+				<p>Export a Semaphore backup, import it into SwitchTender. Projects, inventories, templates with their survey variables, schedules, and keys as credential shells come across, with a dry run first so you see the plan before anything is written.</p>
 			</div>
 			<div class="gs-steps">
 				<ol>
@@ -199,7 +199,7 @@
 			<div class="cards cards-3">
 				<article class="card reveal">
 					<h3>Does it need an agent on each host?</h3>
-					<p>No. It reaches the machines it manages over SSH, the same way Ansible does, and installs nothing on them. There is no per-host daemon to deploy, patch, or account for. You run the one server binary. Worker processes for extra throughput are a Team feature, and they are pool members rather than agents belonging to a host.</p>
+					<p>No. It reaches the machines it manages over SSH, the same way Ansible does, and installs no agent on them. There is no per-host daemon to deploy, patch, or account for. You run the one server binary. Worker processes for extra throughput are a Team feature, and they are pool members rather than agents belonging to a host.</p>
 				</article>
 				<article class="card reveal">
 					<h3>Can it read secrets from AWS Secrets Manager, Azure Key Vault, or Vault?</h3>
@@ -207,11 +207,11 @@
 				</article>
 				<article class="card reveal">
 					<h3>Can I run a Terraform plan, hold it for approval, then run Ansible?</h3>
-					<p>Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency graph with parallel branches, built on a drag-and-drop canvas. The approval is not a convention somebody can skip: a policy decides which runs are held, the core enforces the hold, and the approval binds to the exact plan reviewed, so a run cannot be approved as one thing and executed as another.</p>
+					<p>Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency graph with parallel branches, built on a drag-and-drop canvas. A policy decides which runs are held, an agent&#39;s run is held unless a written policy exempts it, the core enforces the hold, and the approval binds to the exact plan reviewed, so a run cannot be approved as one thing and executed as another. By default an admin may approve a run they launched. Requiring a different person is a Team rule.</p>
 				</article>
 				<article class="card reveal">
 					<h3>What if Semaphore adds signed receipts too?</h3>
-					<p>Then the market wanted them, which is better news for us than the alternative. Nothing in a hash chain is hard to build and we have never claimed otherwise. But a receipt signed by the same product whose runs it describes is still that system&#39;s word about itself, and at this tier ours is no different. The property neither of us can self-provide is an outside party watching the chain and countersigning what it saw, which is what our Enterprise tier is. Until then, judge us on the seven engines and on whether the receipt verifies with a tool we do not control.</p>
+					<p>Then the market wanted them, which is better news for us than the alternative. Nothing in a hash chain is hard to build and we have never claimed otherwise. But a receipt signed by the same product whose runs it describes is still that system&#39;s word about itself, and at this tier ours is no different. The property neither of us can self-provide is an outside party watching the chain and countersigning what it saw, which is what our Enterprise tier includes and what the hosted witness add-on brings to Team. Until then, judge us on the seven engines and on whether the receipt verifies with an open-source verifier, published separately, that you can read and run yourself.</p>
 				</article>
 			</div>
 			<script type="application/ld+json">
@@ -224,7 +224,7 @@
    "name": "Does it need an agent on each host?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "No. It reaches the machines it manages over SSH, the same way Ansible does, and installs nothing on them. There is no per-host daemon to deploy, patch, or account for. You run the one server binary. Worker processes for extra throughput are a Team feature, and they are pool members rather than agents belonging to a host."
+    "text": "No. It reaches the machines it manages over SSH, the same way Ansible does, and installs no agent on them. There is no per-host daemon to deploy, patch, or account for. You run the one server binary. Worker processes for extra throughput are a Team feature, and they are pool members rather than agents belonging to a host."
    }
   },
   {
@@ -240,7 +240,7 @@
    "name": "Can I run a Terraform plan, hold it for approval, then run Ansible?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency graph with parallel branches, built on a drag-and-drop canvas. The approval is not a convention somebody can skip: a policy decides which runs are held, the core enforces the hold, and the approval binds to the exact plan reviewed, so a run cannot be approved as one thing and executed as another."
+    "text": "Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency graph with parallel branches, built on a drag-and-drop canvas. A policy decides which runs are held, an agent's run is held unless a written policy exempts it, the core enforces the hold, and the approval binds to the exact plan reviewed, so a run cannot be approved as one thing and executed as another. By default an admin may approve a run they launched. Requiring a different person is a Team rule."
    }
   },
   {
@@ -248,7 +248,7 @@
    "name": "What if Semaphore adds signed receipts too?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "Then the market wanted them, which is better news for us than the alternative. Nothing in a hash chain is hard to build and we have never claimed otherwise. But a receipt signed by the same product whose runs it describes is still that system's word about itself, and at this tier ours is no different. The property neither of us can self-provide is an outside party watching the chain and countersigning what it saw, which is what our Enterprise tier is. Until then, judge us on the seven engines and on whether the receipt verifies with a tool we do not control."
+    "text": "Then the market wanted them, which is better news for us than the alternative. Nothing in a hash chain is hard to build and we have never claimed otherwise. But a receipt signed by the same product whose runs it describes is still that system's word about itself, and at this tier ours is no different. The property neither of us can self-provide is an outside party watching the chain and countersigning what it saw, which is what our Enterprise tier includes and what the hosted witness add-on brings to Team. Until then, judge us on the seven engines and on whether the receipt verifies with an open-source verifier, published separately, that you can read and run yourself."
    }
   }
  ]

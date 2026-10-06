@@ -60,7 +60,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/" class="active">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/" class="active">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/ansible-runtime">Managed Ansible runtime</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/upgrading">Upgrading</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -83,8 +83,12 @@ the app at <code>/ui/docs</code>.</p>
 <td>Zero to a first run in a few minutes.</td>
 </tr>
 <tr>
+<td><a href="/docs/upgrading">Upgrading</a></td>
+<td>What an install on v1.102.0 notices when it upgrades, and what to do about each change.</td>
+</tr>
+<tr>
 <td><a href="/docs/switching-from-awx">Switching from AWX</a></td>
-<td>Import what you have, or set up from scratch.</td>
+<td>Import projects, inventories, templates, workflows, surveys, schedules, notification templates, and organizations with a dry run first, or set up from scratch.</td>
 </tr>
 <tr>
 <td><a href="/docs/tutorials">Tutorials</a></td>
@@ -115,12 +119,16 @@ the app at <code>/ui/docs</code>.</p>
 <td>Static, dynamic, smart, and constructed inventories, and the hosts a run resolved to.</td>
 </tr>
 <tr>
+<td><a href="/docs/ansible-runtime">Managed Ansible runtime</a></td>
+<td>One command installs a pinned, hash-checked ansible-core for runs to use.</td>
+</tr>
+<tr>
 <td><a href="/docs/federation">Federated cloud credentials</a></td>
 <td>Short-lived AWS, Google Cloud, and Azure access minted per run, with nothing stored.</td>
 </tr>
 <tr>
 <td><a href="/docs/pull-request-review">Pull request review</a></td>
-<td>Plan comments and commit statuses on GitHub and GitLab pull requests.</td>
+<td>Plan comments and commit statuses on GitHub and GitLab pull requests, linked forge accounts, and planning and applying from a comment.</td>
 </tr>
 <tr>
 <td><a href="/docs/desktop">Desktop</a></td>
@@ -157,6 +165,42 @@ the app at <code>/ui/docs</code>.</p>
 <tr>
 <td><a href="/docs/api">HTTP API</a></td>
 <td>Every endpoint the server exposes.</td>
+</tr>
+<tr>
+<td><a href="/docs/inventories#which-engine-resolves-an-inventory">Inventory engine</a></td>
+<td>How a static inventory is read without Ansible, held in CI to every ansible-core minor from 2.16 to 2.21.</td>
+</tr>
+<tr>
+<td><a href="/docs/tool-ansible#provisioning-callbacks">Provisioning callbacks</a></td>
+<td>A host launches its template against itself, answering at the AWX callback address too.</td>
+</tr>
+<tr>
+<td><a href="/docs/concepts#dry-runs-and-exclude-dry-run">Dry runs</a></td>
+<td>When a rule lets a dry run through, and when the gate holds it as the real run it could be.</td>
+</tr>
+<tr>
+<td><a href="/docs/federation#signing-keys">Key rotation</a></td>
+<td>How the federation signing key rotates on schedule, or at once in an emergency.</td>
+</tr>
+<tr>
+<td><a href="/docs/configuration#delivering-secrets-to-relay-workers">Relay worker secrets</a></td>
+<td>Each run's secrets sealed to a worker pool's key and bound to the claim.</td>
+</tr>
+<tr>
+<td><a href="/docs/api#delivery-order">Notification delivery</a></td>
+<td>Deliveries to named targets attempted in the run's order from a queue in the database, retried, and resumed by the next server.</td>
+</tr>
+<tr>
+<td><a href="/docs/tutorial-schedule-a-job">Schedules</a></td>
+<td>Cron or RFC 5545 recurrence rules, previewed before saving, with one run per occurrence across restarts.</td>
+</tr>
+<tr>
+<td><a href="/docs/concepts#provable-audit">Receipts</a></td>
+<td>What a run's receipt discloses, and what a LoomSeal verifier from 1.7.0 on checks in it.</td>
+</tr>
+<tr>
+<td><a href="/docs/benchmarks">Benchmarks</a></td>
+<td>Binary size, idle memory, and boot time, with the method and the date.</td>
 </tr>
 <tr>
 <td><a href="/docs/migration">Migration</a></td>

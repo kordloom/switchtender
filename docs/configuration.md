@@ -20,7 +20,7 @@ believes it has a control it does not have.
 | Capability | Tier | Turned on by |
 |------------|------|--------------|
 | Directory sign-in (OIDC, SAML, LDAP, JWT) | Pro | Any `--oidc-*`, `--saml-*`, `--ldap-*`, or `--jwt-*` flag. `serve` refuses to start with one set and no license. |
-| The full policy engine: deny rules, risk floors, actor scoping, distinct-approver separation of duties | Team | Creating a policy that uses one. A single require-approval policy stays Community. |
+| The full policy engine: deny rules, risk and reversibility floors, actor scoping, distinct-approver separation of duties, and Rego policies | Team | Creating a policy that uses one. A single require-approval policy or one exemption stays Community. |
 | More approval policies at once | Pro holds five, Team is uncapped | Creating policies. Community holds one. |
 | The period change register | Team | `audit report`, and `GET /v1/audit/register`. |
 | Distributed workers | Team | Every `switchtender worker`, whether it shares the database or reaches the server over the mesh relay with `--server`. |
@@ -48,9 +48,11 @@ believes it has a control it does not have.
 | `SWITCHTENDER_GALAXY_SERVER` | serve, worker | Default for `--galaxy-server`, a private Ansible Galaxy or Automation Hub URL. |
 | `SWITCHTENDER_PUBLIC_URL` | serve | Default for `--public-url`, this server's public address for links in pull request reviews. |
 | `SWITCHTENDER_GALAXY_TOKEN` | serve, worker | Token for the `--galaxy-server` URL, read from the environment so it never lands on the command line. |
+| `SWITCHTENDER_ANSIBLE_BIN` | serve, worker | Default for `--ansible-bin`, the directory of Ansible commands runs use, or `system` for the ones on PATH. |
+| `SWITCHTENDER_ANSIBLE_RUNTIME_DIR` | serve, worker, ansible | The [managed Ansible runtime](ansible-runtime.md) directory when no flag names one. Defaults to `ansible/` in the data directory. |
 | `SWITCHTENDER_FEDERATION_ISSUER` | serve, worker | Default for `--federation-issuer`, the external URL this install is an OpenID Connect issuer at for federated cloud credentials. Every process on one database must see the same value. |
 | `SWITCHTENDER_PLUGINS_DIR` | serve, worker | Directory of extension plugin binaries, read when `--plugins-dir` is unset. |
-| `SWITCHTENDER_EGRESS_PROXY` | serve, worker | Proxy for the server's own outbound requests: notifications, federation token exchange, forge review calls, external secret sources, git remotes, and the registry lookups `--image-digest-lookup` makes. An http, https, or socks5 URL. The ambient `HTTP_PROXY` and `HTTPS_PROXY` are never used, so a forgotten proxy variable cannot route these requests somewhere that skips the cloud metadata and loopback checks. When this is set, each target is resolved and held to those checks before the request reaches the proxy, and an IP-literal target is refused. The proxy's own egress policy is then the boundary for a hostname that rebinds after the check, so point it at the hosts the server is meant to reach. |
+| `SWITCHTENDER_EGRESS_PROXY` | serve, worker | Proxy for the server's own outbound requests: notifications, federation token exchange, forge review calls, external secret sources, git remotes, and the registry lookups `--image-digest-lookup` makes. Its scheme is http, https, or socks5. The ambient `HTTP_PROXY` and `HTTPS_PROXY` are never used, so a forgotten proxy variable cannot route these requests somewhere that skips the cloud metadata and loopback checks. When this is set, each target is resolved and held to those checks before the request reaches the proxy, and an IP-literal target is refused. The proxy's own egress policy is then the boundary for a hostname that rebinds after the check, so point it at the hosts the server is meant to reach. |
 | `SWITCHTENDER_RUNFILES_DIR` | serve, worker | Default for `--runfiles-dir`, the private directory runs stage their keys, tokens, and secret files under. See [Run files](run-files.md). |
 | `SWITCHTENDER_ADMIN_PASSWORD` | init | Password for the first admin account. When unset, init generates one and prints it once. |
 | `SWITCHTENDER_DESKTOP_NO_BROWSER` | desktop | Set to any value to skip opening the browser, for a headless or remote run. |
@@ -103,13 +105,14 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--oidc-client-id` | none | OIDC client id. |
 | `--oidc-redirect-url` | none | OIDC redirect URL, for example `https://host/auth/oidc/callback`. |
 | `--oidc-default-role` | `viewer` | Role granted to an account created on first SSO sign-in: admin, operator, or viewer. |
+| `--forge-oauth` | none | A GitHub or GitLab OAuth application people link their forge account through, so a pull request comment can act as them. Comma-separated `provider=github` or `provider=gitlab`, `client_id=ID`, and the client secret from exactly one of `secret_env=VAR` or `secret_file=PATH`, never the command line. Add `web_url` for GitHub Enterprise Server or self-managed GitLab, and `api_url` when its API base is not the usual `/api/v3` or `/api/v4` under it. Repeatable, one per forge. Needs `--public-url` and `SWITCHTENDER_ENCRYPTION_KEY`, which signs each link request. See [linking forge accounts](pull-request-review.md#linking-forge-accounts). |
 | `--ldap-url` | none | LDAP directory URL to enable directory sign-in, for example `ldaps://ldap.example.com:636`. |
 | `--ldap-bind-dn` | none | Service account DN used to search for a user, empty for an anonymous search. |
 | `--ldap-base-dn` | none | Search base for finding a user. |
 | `--ldap-user-filter` | `(uid=%s)` | Search filter with one `%s` for the username. |
 | `--ldap-default-role` | `viewer` | Role for an account created on first directory sign-in. |
 | `--ldap-role-map` | none | Map a directory group to a role as `groupDN=role`. A matched group sets the role on every sign-in. Repeatable. |
-| `--public-url` | none | Public base URL of this server, such as `https://switchtender.example.com`. A [pull request review](pull-request-review.md) links its comment and commit status to the run under it. Empty posts run ids without links. |
+| `--public-url` | none | Public base URL of this server, such as `https://switchtender.example.com`. A [pull request review](pull-request-review.md) links its comment and commit status to the run under it. Empty posts run ids without links. Linking a forge account through `--forge-oauth` needs it, since the forge sends the person back to this address. |
 | `--saml-idp-metadata-url` | none | SAML IdP metadata URL to enable SAML sign-in. Empty leaves SAML off. |
 | `--saml-base-url` | none | Public base URL of this server, used to build the SAML entity id and ACS endpoint. |
 | `--saml-cert` | none | Path to the service provider certificate, PEM. |
@@ -164,6 +167,8 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--container-runfiles-size` | `64m` | Size of the in-memory filesystem a containerized run's private directory is mounted as, nosuid and nodev with exec allowed. It counts against `--container-memory` as it fills. See [Run files](run-files.md). |
 | `--runfiles-dir` | none | Private directory each run stages its keys, tokens, and secret files under. Empty picks the systemd runtime directory, then a private `XDG_RUNTIME_DIR`, then the temporary directory, which the doctor warns about. It must be on a known local filesystem, a tmpfs for preference, and startup refuses one that is not. Also `SWITCHTENDER_RUNFILES_DIR`. See [Run files](run-files.md). |
 | `--galaxy-server` | none | Private Ansible Galaxy or Automation Hub URL for project collection installs. Token from `SWITCHTENDER_GALAXY_TOKEN`. |
+| `--ansible-bin` | none | Directory holding the `ansible-playbook` and `ansible-inventory` runs use, or `system` for the ones on PATH. A relative value is resolved against the working directory at startup. Empty uses the [managed Ansible runtime](ansible-runtime.md) when one is in use, then PATH. Also `SWITCHTENDER_ANSIBLE_BIN`. |
+| `--ansible-runtime-dir` | `ansible/` in the data directory | Managed Ansible runtime directory. Also `SWITCHTENDER_ANSIBLE_RUNTIME_DIR`. |
 | `--federation-issuer` | none | External https URL this install is an OpenID Connect issuer at, so a run reaches AWS, Google Cloud, or Azure with short-lived federated credentials and nothing durable is stored. Serves the discovery document and public keys under it and needs the encryption key and salt, which seal the signing key. Falls back to `SWITCHTENDER_FEDERATION_ISSUER`. See [Federated cloud credentials](federation.md). |
 | `--strict-grants` | `false` | Deny non-admins access to an object that has no grants, instead of deferring to the global role. Off by default, which means separation between organizations is not enforced until you turn it on: see below. |
 | `--read-only` | `false` | Reject every mutating request, for a safely exposable instance. |
@@ -231,7 +236,7 @@ node over the mesh relay, with no database access of its own.
 
 | Flag | Default | Purpose |
 |------|---------|---------|
-| `--db` | `switchtender.db` | SQLite file path, or a `postgres://` DSN. Ignored with `--server`. |
+| `--db` | `switchtender.db` | SQLite file path, or a `postgres://` DSN. With `--server` the worker opens no database, and the value only places the [managed Ansible runtime](ansible-runtime.md#where-it-lives), in `ansible/` beside it. |
 | `--server` | none | Control node base URL to lease runs from over the mesh relay, for example `https://switchtender.example.com`. When set, the worker needs no database and dials one outbound connection. Token from `SWITCHTENDER_WORKER_TOKEN`. |
 | `--name` | host and pid | Worker name stamped on the runs it executes. |
 | `--queue` | none | Queue this worker serves. Repeatable. Without any, it serves the default pool. |
@@ -256,6 +261,8 @@ node over the mesh relay, with no database access of its own.
 | `--container-runfiles-size` | `64m` | Size of the in-memory filesystem a containerized run's private directory is mounted as, nosuid and nodev with exec allowed. It counts against `--container-memory` as it fills. See [Run files](run-files.md). |
 | `--runfiles-dir` | none | Private directory each run stages its keys, tokens, and secret files under. Empty picks the systemd runtime directory, then a private `XDG_RUNTIME_DIR`, then the temporary directory, which the doctor warns about. It must be on a known local filesystem, a tmpfs for preference, and startup refuses one that is not. Also `SWITCHTENDER_RUNFILES_DIR`. See [Run files](run-files.md). |
 | `--galaxy-server` | none | Private Ansible Galaxy or Automation Hub URL for project collection installs. Token from `SWITCHTENDER_GALAXY_TOKEN`. |
+| `--ansible-bin` | none | Directory holding the `ansible-playbook` and `ansible-inventory` runs use, or `system` for the ones on PATH. A relative value is resolved against the working directory at startup. Empty uses the [managed Ansible runtime](ansible-runtime.md) when one is in use, then PATH. Also `SWITCHTENDER_ANSIBLE_BIN`. |
+| `--ansible-runtime-dir` | `ansible/` in the data directory | Managed Ansible runtime directory. Also `SWITCHTENDER_ANSIBLE_RUNTIME_DIR`. |
 | `--federation-issuer` | none | The same issuer URL serve is given. The worker signs the identity tokens of the runs it executes with the keys every process on the database shares, under this URL. Falls back to `SWITCHTENDER_FEDERATION_ISSUER`. |
 | `--policy-file` | none | YAML file holding the approval policies, the same file the control node reads, with the Rego modules it names beside it. |
 | `--delivery-key` | none | Private key file a relay worker opens the run secrets its control node seals to the worker's pool with, made by `switchtender worker key new`. Repeatable, so a worker holds its pool's old and new key while the pool rotates. Only with `--server`. A file another account can read is refused. See [Delivering secrets to relay workers](#delivering-secrets-to-relay-workers). |
@@ -273,6 +280,30 @@ refuses one another account can read. The file is a standard PKCS #8 X25519 priv
 genpkey -algorithm X25519 -out FILE` makes an equivalent one, and `openssl pkey -in FILE -pubout
 -outform DER | tail -c 32 | base64` prints the base64 that follows `x25519:`.
 
+## ansible
+
+Installs, lists, and removes the [managed Ansible runtime](ansible-runtime.md): a Python virtual
+environment holding one pinned ansible-core release, installed with pip in hash-checking mode from a
+lock this binary carries. Runs use it when no `--ansible-bin` is configured. A `python3` the release
+supports must be installed.
+
+- `ansible install [--version <release>] [--python <path>] [--wheels <dir>] [--index-url <url>]`
+  installs a release and makes it the one runs use. `--version` takes a release such as `2.21.4` or
+  a minor version such as `2.21`, and defaults to the newest supported release. `--python` names the
+  interpreter to build with, and defaults to `python3`, then `python3.N`, on PATH. `--wheels`
+  installs offline from a directory of wheels, relative to where the command runs, checked against
+  the same hashes. `--index-url` downloads from a mirror instead of PyPI. pip's own environment
+  variables and configuration files are not read. Installing an installed release verifies it and
+  makes it the one runs use, reinstalling nothing.
+- `ansible list` prints the installed releases and which one is current.
+- `ansible remove [--version <release>]` removes one release, or every release and the directory
+  when nothing else is in it.
+- `ansible lock [--version <release>]` prints the requirements lock a release installs from.
+
+Every `ansible` subcommand takes `--dir` for the runtime directory, which defaults to
+`SWITCHTENDER_ANSIBLE_RUNTIME_DIR`, then `ansible/` in the data directory of `--db`, and `--pretty`
+for indented JSON.
+
 ## token
 
 Manages API tokens. A public bind on an empty database mints an initial admin token at startup.
@@ -286,9 +317,12 @@ Manages API tokens. A public bind on an empty database mints an initial admin to
   operator whatever role its account holds, so an agent can launch and propose work but can never
   manage identity, access, or secrets, and can never approve its own held run. Every action it takes
   is recorded in the chain as `actor_type: agent` with the account it acts for beside it, which is
-  what `actor_kind: agent` policy rules match on. It requires `--user`, so the chain always records
-  the human the agent acts for; without one the command refuses. Mint every agent token with it: a
-  token without `--agent` is indistinguishable from a person's in the record.
+  what `actor_kind: agent` policy rules match on. Every run such a token asks for waits for a
+  person's approval unless a rule with `effect: exempt` covers it, as
+  [Agent runs are held by default](policy.md#agent-runs-are-held-by-default) describes. It requires
+  `--user`, so the chain always records the human the agent acts for. Without one the command
+  refuses. Mint every agent token with it: a token without `--agent` is indistinguishable from a
+  person's in the record, and gets no agent hold.
 - `token list` lists tokens without their secrets.
 - `token revoke <id>` deletes a token.
 
@@ -501,10 +535,12 @@ key satisfies trivially.
 
 ## mcp
 
-Serves the Model Context Protocol over stdio, so an agent can list templates, propose a run, and read
-what happened. Every tool call is an ordinary authenticated API request carrying the token given
-here, so it passes the same authorization, the same approval policy, and the same fail-closed audit
-append as a request from a person. See [Agents](agents.md).
+Serves the Model Context Protocol over stdio, so an agent can list templates, propose a run, and
+read what happened. Every tool call is an ordinary authenticated API request carrying the token
+given here, so it passes the same authorization, the same approval policy, and the same fail-closed
+audit append as a request from a person. A run it proposes waits for a person's approval unless a
+rule with `effect: exempt` covers it, as [agent runs are held by
+default](policy.md#agent-runs-are-held-by-default) describes. See [Agents](agents.md).
 
     export SWITCHTENDER_MCP_TOKEN=swt_...
     switchtender mcp --server https://switchtender.internal
@@ -518,7 +554,7 @@ reach.
 | Flag | Default | Purpose |
 |------|---------|---------|
 | `--server` | required | SwitchTender API base URL. |
-| `--allow-adhoc` | off | Also expose the ad-hoc run tool, letting the agent compose a run rather than launch a template an operator defined. Approval policy still applies. |
+| `--allow-adhoc` | off | Also expose the ad-hoc run tool, letting the agent compose a run rather than launch a template an operator defined. The default hold on agent runs and approval policy still apply. |
 | `--token` | none | API token the agent presents. Prefer `SWITCHTENDER_MCP_TOKEN`. |
 | `--timeout` | `1m0s` | Bounds one API call. |
 | `--allow-admin-token` | `false` | Start even when the token has admin rights. An agent should hold an operator-bound token, so this is a deliberate override. |
@@ -595,12 +631,12 @@ shell completion script for bash, zsh, fish, or PowerShell.
 
 ## Output flags
 
-JSON goes to stdout compact by default. Three commands take `--pretty` to indent it; it is not a
+JSON goes to stdout compact by default. Four commands take `--pretty` to indent it. It is not a
 global flag, so passing it elsewhere is an error rather than a no-op.
 
 | Flag | Where | Purpose |
 |------|-------|---------|
-| `--pretty` | `token` and its subcommands, `audit anchor`, `audit receipt` | Indent JSON output instead of the compact default. |
+| `--pretty` | `token` and its subcommands, `ansible` and its subcommands, `audit anchor`, `audit receipt` | Indent JSON output instead of the compact default. |
 
 
 ## Separation between organizations is opt-in
@@ -631,7 +667,7 @@ One consequence is worth knowing before you write your first grant. Install-wide
 no per-row id are served whole only to a caller nothing is hidden from, because such a total is
 every other group's volume in one number. On an install with no grants at all that is everybody,
 which is the common case and is unaffected. It stays unaffected by a grant on a template or a worker
-queue, since neither can hide a run; what changes it is a grant on a project, an inventory, or a
+queue, since neither can hide a run. What changes it is a grant on a project, an inventory, or a
 credential that the caller does not hold.
 
 For a caller in that position each surface answers differently, and the difference is worth knowing
@@ -756,7 +792,7 @@ matches on `queue`:
         require_distinct_approver: true
 
 A policy with `queue` holds only what is routed to that queue, and a run on a named queue executes
-only when a worker serving that queue claims it; the control node's own runner takes unqueued runs
+only when a worker serving that queue claims it. The control node's own runner takes unqueued runs
 alone. On an install without relay workers, a queued run therefore waits as `pending` indefinitely,
 even after approval. To gate runs the server itself executes, write the policy without `queue`.
 

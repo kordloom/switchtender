@@ -19,7 +19,8 @@ var whitespaceRun = regexp.MustCompile(`\s+`)
 
 // pricingSurfaces lists every hand-written file a buyer reads prices or commitments from. The
 // rendered docs under site/docs are left out because sitegen builds them from docs/*.md, which are
-// read here instead.
+// read here instead. site/llms.txt is the summary an AI assistant reads, so it quotes prices to
+// buyers too: it went on saying $490 after the pricing page moved to $500.
 func pricingSurfaces(t *testing.T) []string {
 	t.Helper()
 	var files []string
@@ -30,7 +31,7 @@ func pricingSurfaces(t *testing.T) []string {
 		}
 		files = append(files, matches...)
 	}
-	return append(files, "LICENSING.md", "README.md", "SECURITY.md")
+	return append(files, "LICENSING.md", "README.md", "SECURITY.md", "site/llms.txt")
 }
 
 // readFlat returns a file's text with every whitespace run collapsed to one space.
@@ -185,6 +186,8 @@ func TestProReadsTheSameEverywhere(t *testing.T) {
 		File: "site/awx-alternative.html", Pattern: `unlocked by Pro at \$(?P<price>[\d,]+) a year`,
 	}, { // Test 8: The Semaphore comparison.
 		File: "site/semaphore-alternative.html", Pattern: `SwitchTender at \$(?P<price>[\d,]+) a year for up to (?P<hosts>[\d,]+) hosts`,
+	}, { // Test 9: The summary AI assistants read.
+		File: "site/llms.txt", Pattern: `Pro \$(?P<price>[\d,]+)/year to (?P<hosts>[\d,]+) hosts`,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

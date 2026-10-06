@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -126,10 +127,12 @@ func (m *mcpSession) tool(name string, args map[string]any) (string, bool) {
 }
 
 // TestAgentStartsTheImportedWorkflowAndOnlyAPersonReleasesIt is scenario five. An agent connected
-// over MCP with its own token starts the imported release workflow. It can see the workflow
-// waiting at the approval step and cannot decide it, through any route; a person can. The chain
-// and the workflow's receipt name both: the agent, on behalf of the account it acts for, as the one
-// that launched, and the person as the one that released.
+// over MCP with its own token starts the imported release workflow. With no policy written, the
+// workflow waits at submission, held by default because an agent asked for it, until a person
+// releases it. It then waits at its approval step, which the agent can see and cannot decide,
+// through any route; a person can. The chain and the workflow's receipt name both: the agent, on
+// behalf of the account it acts for, as the one that launched, and the person as the one that
+// released.
 func TestAgentStartsTheImportedWorkflowAndOnlyAPersonReleasesIt(t *testing.T) {
 	t.Parallel()
 	in := newInstall(t, installOptions{Store: onSQLite})
@@ -143,6 +146,13 @@ func TestAgentStartsTheImportedWorkflowAndOnlyAPersonReleasesIt(t *testing.T) {
 		t.Fatalf("the agent's proposal was refused: %s", text)
 	}
 	wf := decodeRun(t, []byte(text))
+	// Nobody wrote a policy, and the agent's workflow still waits for a person before any step runs.
+	if held := str(wf.Raw["held_by_policy"]); wf.Status != "pending_approval" ||
+		held != "requested by an agent, held by default" {
+		t.Fatalf("the agent's workflow = %s held by %q, want it held by default", wf.Status, held)
+	}
+	in.requireSteps(s, wf.ID, map[string]int{"build": 0, "ship": 0, "page": 0})
+	in.must(s, "approver", "POST", "/v1/runs/"+wf.ID+"/approve", nil, 200)
 	step := in.waitPending(s, "agent", wf.ID)
 	if waiting, _ := agent.tool("list_pending_approvals", nil); !strings.Contains(waiting, step.ID) {
 		t.Errorf("the agent's list_pending_approvals does not show the step it is waiting on: %s",
@@ -179,9 +189,16 @@ func TestAgentStartsTheImportedWorkflowAndOnlyAPersonReleasesIt(t *testing.T) {
 
 	ev := in.checkEvidence(s, wf.ID)
 	rec := ev.Receipts[wf.ID]
+	// The person who released the held submission is on the receipt, beside the step's approver.
 	requireRecord(t, rec, recordWant{
 		Launcher: "release-agent", LauncherType: "agent", OnBehalfOf: "operator",
+		Approver: "approver-laptop",
 	})
+	notes := stringsOf(rec.outcome(t).Outcome["policy_notes"])
+	if !slices.Contains(notes, "requested by an agent, held by default") {
+		t.Errorf("the receipt's outcome notes %v do not say the agent's workflow was held by "+
+			"default", notes)
+	}
 	requireChildren(t, rec, map[string]string{
 		"build": "succeeded", "approve": "succeeded", "ship": "succeeded",
 	})

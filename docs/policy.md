@@ -17,6 +17,139 @@ Open Policy Agent language and decide in code, so an existing OPA or Conftest ru
 being rewritten as criteria. Both are loaded from the same file, reloaded on the same edit, enforced
 at the same points, and recorded in the same evidence.
 
+## Agent runs are held by default
+
+A run an AI agent asked for waits for a person before it executes, with no policy written first.
+The hold is built in. It is named `requested by an agent, held by default` on the held run, in the
+approval queue, and in the run's dossier, and the outcome the audit chain commits carries the same
+words as a note, so a receipt for the run says why it waited. A person's run is unaffected: the
+built-in hold looks only at who asked, and the rules below decide a person's run exactly as before.
+
+Who asked is read from the token, never guessed from the request. The hold applies to agent
+tokens, the ones minted with `switchtender token new --user <account> --agent`. A token minted
+without `--agent` is recorded as a person's and gets no agent hold, so mint every agent's token
+with it. A run counts as an agent's when an agent token submitted it, and when it derives from an
+agent's request: the apply an agent's plan proposes, a shard of an agent's split, a step of its
+workflow, and a retry, a rerun, or a relaunch of failed shards the agent asks for. The derived run
+carries the agent's identity, so it faces the same hold. The receipt for the run proves who
+approved it or which rule exempted it.
+
+A dry run waits like any other run an agent asks for. Check mode and a plan are not inert: Ansible
+runs lookups, vars files, and plugins on the controller under `--check`, and a Terraform or OpenTofu
+plan runs provider code and data sources, all with this server's credentials, so a preview can read
+a secret and send it anywhere, even with a request that only reads. Whether a dry run changes
+anything is the wrong question for an agent, and no scan can prove a plan safe. The gate still scans
+the dry run and records what it read on the run, as evidence, and the hold note says why the run
+waits: what the agent asked for runs code with this server's credentials, so it waits for a person
+or for an exemption that covers it. A person's dry run is decided exactly as before, under
+`exclude_dry_run` and every other rule.
+
+An agent's Terraform or OpenTofu apply takes two approvals. It is held where it was submitted,
+before anything plans, since planning runs provider code with this server's credentials. When a
+person releases it, it is planned, and the apply its plan proposes is held again, carrying the saved
+plan, so the second approval binds the exact plan that applies. A released request is never applied
+without that plan, whatever other rules are in force: a `max_destroy` limit, a risk or
+reversibility floor, or a Rego `plan_gate`. A rerun, a retry, or a relaunch the agent asks for takes
+the same path. An apply an exemption covers plans and applies as the rules allow for a person's.
+
+An agent cannot carry an apply inside a workflow. A workflow's approval binds the workflow as
+submitted and never shows the plan a step applies, so an agent's workflow, or a saved workflow an
+agent launches, is refused at submission with a 403 when it holds a Terraform or OpenTofu step that
+is not a dry run, unless an exemption covers that step. The step is judged as the run it would
+become, under the agent's label and account. The refusal names the step, is recorded on the chain
+under the name `an agent's workflow may not apply Terraform or OpenTofu`, and says what to do
+instead: ask for the apply as its own run, which plans first and waits for approval of the saved
+plan, or write an exemption that covers the step. This holds however the workflow arrives: submitted
+whole, launched from a saved workflow, or launched through an MCP tool. A finished workflow is never
+rerun as such, by anybody, only launched again from its saved workflow, which faces the same check.
+An agent's workflow whose infrastructure steps are all plans, or that has none, is held as a whole as
+before. A person's workflow is unchanged.
+
+SwitchTender knows an agent by its agent token, and only by that. A caller that signs in with a
+federated JWT is treated as the person or pipeline its claims map to: it is recorded as a session,
+with the role its group claim maps to, and gets no agent hold. An AI agent that reaches SwitchTender
+through a workload JWT is therefore not held by default, and if its claims map to admin, it can
+approve. Give every AI agent an agent token, and never a JWT mapped to a role that can approve.
+
+The built-in hold sits beside the stored rules and replaces none of them. A deny rule still refuses
+an agent's run outright, and a stored rule that holds the run is the one the hold names, with its
+distinct-approver and reason requirements. Releasing an agent's run works as it always did: a
+person with the admin role approves it, and an agent never can.
+
+### Exempting an agent's routine work
+
+An exemption is a stored rule with `effect: exempt`. The agent runs it matches go ahead without the
+built-in hold:
+
+    policies:
+      - name: release-agent-smoke-tests
+        effect: exempt
+        actor: release-agent
+        account: release-bot-owner
+        tool: bash
+        queue: staging
+        command_contains: ./smoke.sh
+
+An exemption matches on `tool`, `command_contains`, `inventory_id`, `queue`, `actor`, and
+`account`, and `actor_kind` may be left out or set to `agent`. `account` is the username of the
+account the agent's token is bound to, the one named by `--user` when the token was minted. An
+exemption that names `actor` must also name `account`, and one that does not is refused with a 400
+through the API and fails to load from the policy file: an `actor` is a token's label, chosen by
+whoever mints the token and not unique across accounts, so the label alone would also exempt a
+token minted for another account under the same name. An exemption may name `account` alone, which
+covers every agent token bound to that account. It is refused with `min_risk`, `reversibility`,
+`exclude_dry_run`, `require_distinct_approver`, `require_reason`, or `max_destroy`, which belong on
+a rule that holds. It lifts the built-in hold and nothing else: a stored rule that holds or refuses
+the same run still does.
+
+The account travels with every run derived from the agent's request: the apply its plan proposes,
+the shards of its split, the steps of its workflow, and a retry, a rerun, or a relaunch it asks
+for. A run whose account cannot be read is never exempt.
+
+An exemption is a rule like any other. `GET /v1/policies` lists it, account included. The rule set
+every run records as in force covers it and describes it as "lets an agent's run proceed without the
+default hold, for agents bound to account "release-bot-owner"". A run it lets through records the
+note `requested by an agent bound to account "release-bot-owner", exempt from the default hold by
+policy "release-agent-smoke-tests"` in its outcome, so the receipt and the dossier name the account
+and the exemption. Write one through the API or the policy file, the same as any rule.
+
+The built-in hold is not a stored policy, so it counts against no license's policy limit and cannot
+be deleted. An exemption is a Community rule, one that names an `actor` and an `account` included,
+and it counts as one policy, so a Community install's one policy can be the exemption.
+
+What an exemption risks is everything it matches, which then runs with no person looking. Keep it
+narrow.
+
+- `command_contains` matches text anywhere in the command, ignoring case, so an exemption for
+  `smoke` also matches `smoke; rm -rf /`. Pair it with `tool`, `queue`, or `inventory_id`.
+- An admin can mint a token for any account, so the exemption trusts whoever can mint tokens. Bind
+  each agent to an account of its own, and an exemption naming that account covers that agent
+  alone.
+- An exemption with no criteria exempts every agent run, which turns the default off.
+
+Prefer a named `actor` and its `account` together with a queue or an inventory that reaches only
+what the agent's routine work needs.
+
+### Nothing an agent writes runs later as someone else
+
+An agent's token is capped at the operator role, and creating or editing a schedule, a trigger and
+its webhook, a template, a workflow, an inventory, a project, a credential, or a policy is admin
+work. A manage grant does not open any of it to an agent either, since a grant is delegation between
+people. So nothing an agent writes fires a run later under a schedule's or a webhook's name.
+
+Everything an agent can launch faces the hold under the agent's own name: a run, a split, a
+workflow, a template launch, a drift reconcile, a rerun, a retry, a relaunch of failed shards, a
+tool call through MCP, and the apply a plan proposes, on the control node or on a relay worker. A
+pull request comment acts for the person whose forge account is linked, and an agent cannot link
+one.
+
+### Upgrading
+
+An existing install gets the built-in hold when it upgrades. There is no migration and no setting.
+An agent whose runs went ahead unattended before the upgrade now waits for a person, its dry runs
+included, and its Terraform or OpenTofu applies take two approvals. Write an exemption for the
+routine work that should keep running unattended, and leave everything else held.
+
 ## YAML rules
 
     policies:
@@ -32,10 +165,14 @@ at the same points, and recorded in the same evidence.
         effect: deny
 
 A rule matches on `tool`, `command_contains` (ignoring case), `inventory_id`, `queue`, `actor_kind`,
-`actor`, `min_risk`, `reversibility`, and `exclude_dry_run`. A match holds the run, or refuses it
-with `effect: deny`. `require_distinct_approver` makes the release need someone other than the
-requester, and `max_destroy` plans a Terraform or OpenTofu apply first and holds it only when the
-plan destroys more than that many resources.
+`actor`, `account`, `min_risk`, `reversibility`, and `exclude_dry_run`. `account` is the username of
+the account the requesting credential is bound to: the person behind a token or a session, or the
+account an agent's token acts for. A run whose account cannot be read is matched by a rule that
+holds or refuses, and never by an exemption. A match holds the run, refuses it with
+`effect: deny`, or, with `effect: exempt`, lets an agent's run go ahead without the
+[built-in hold](#agent-runs-are-held-by-default). `require_distinct_approver` makes the release need
+someone other than the requester, and `max_destroy` plans a Terraform or OpenTofu apply first and
+holds it only when the plan destroys more than that many resources.
 
 The count is read from the plan file the plan saved, and the apply that follows carries out that
 saved plan, so the plan an approver releases is the plan that runs. If the infrastructure changed
@@ -48,6 +185,22 @@ The apply is planned, the apply the plan proposes carries the saved plan, and th
 proposal, so the rule holds the planned apply and the approval binds the plan that runs rather than a
 request that would plan again when released. An apply whose own submission asks for approval is
 planned first as well, and the apply its plan proposes is held whether or not a rule covers it.
+
+### What a workflow's approval binds
+
+A workflow is approved as a whole, and the approval binds the workflow as it was submitted. The
+decision commits a digest of its spec: every step as written, with its tool, its command or playbook,
+its inventory, whether it is a dry run, and the steps it depends on, along with the workflow's
+variables, the digests of its secret answers, its credentials, its image, and the inventory snapshot
+it was submitted with. A workflow held while it reads from a project is pinned to the commit its
+branch pointed at when it was held, and every step runs that commit.
+
+What a step works out only when it runs is not part of that approval. A Terraform or OpenTofu apply
+step plans and applies when the step runs, so the plan it applies is never shown to the person who
+approves the workflow. To approve an exact plan, run the apply on its own, held for approval by a
+rule or by asking for approval when it is submitted: it plans first, and the approval binds the saved
+plan. An agent's workflow cannot carry an apply step at all, as
+[Agent runs are held by default](#agent-runs-are-held-by-default) describes.
 
 ### Requiring the approver's reason
 
@@ -166,8 +319,9 @@ The setting covers `warn` and nothing else.
 - Setting `warn: note` on a package with no `warn` rule is refused at load. It would read as
   softening the rules that are there while changing nothing.
 
-A dry run whose playbook forces real tasks is judged twice, as [described below](#dry-runs-that-are-not-change-free),
-and a policy that notes records what either pass warned about.
+A dry run the scan did not find change free is judged twice, as [described
+below](#dry-runs-that-are-not-change-free), and a policy that notes records what either pass warned
+about.
 
 #### Per project: staging notes, production holds
 
@@ -213,9 +367,13 @@ each warning holds the run:
         some msg in checks.findings
     }
 
-A staging run without a ticket label goes ahead carrying the note `staging-advice (no change ticket on
-the run, ...)`. The same run in production waits for approval, held by `production-advice`. A run in
-any other project is decided by neither entry. `GET /v1/projects` lists each project's id.
+A person's staging run without a ticket label goes ahead carrying the note
+`staging-advice (no change ticket on the run, ...)`. The same run in production waits for approval,
+held by `production-advice`. A run in any other project is decided by neither entry.
+`GET /v1/projects` lists each project's id.
+An agent's run is [held by default](#agent-runs-are-held-by-default) whatever these entries decide,
+unless a rule with `effect: exempt` covers it, and it still carries the staging note, so the
+approver sees it.
 
 The same shape scopes a warning to one job instead of a project. A rule reads the playbook the job
 runs, `input.run.playbook`, or `input.run.template_id`, which names the template however the run was
@@ -280,12 +438,12 @@ an empty value when the run has none, so a module never meets a missing field.
 | `run.queue` | The worker queue the run is routed to. |
 | `run.project_id` | The git project the run reads from. |
 | `run.dry_run` | Whether the run was asked for as a no-change preview: the tool's dry-run flag, `--check` for Ansible. |
-| `run.dry_run_findings` | For a dry run, why the gate's scan did not find it change free. For Ansible, each play, block, task, role, or include that sets `check_mode` to anything but true, naming the file. For Terraform and OpenTofu, each external data source by its address, naming the file and line. For both, whatever the scan could not read. Empty for a dry run read in full that runs nothing, and for any other run. |
-| `run.change_free` | Whether the run is a dry run that changes nothing: `dry_run` is true and `dry_run_findings` is empty. |
+| `run.dry_run_findings` | For a dry run, why the gate's scan did not find it change free. For Ansible, each play, block, task, role, or include that sets `check_mode` to anything but true, and each play or task that runs a `pipe` lookup, naming the file. For Terraform and OpenTofu, each `external` or `aws_lambda_invocation` data source, and each `http` data source with a write method or a request body, by its address, naming the file and line. For both, whatever the scan could not read. Empty for a dry run read in full that found none of these, for a dry run of a tool nothing scans, and for any other run. |
+| `run.change_free` | Whether the gate reads the run as a dry run that changes nothing: `dry_run` is true, `dry_run_findings` is empty, and the tool is one the gate scans or a built-in one whose dry run runs nothing. A dry run of a tool a plugin or the SDK added is never change free. |
 | `run.kind` | Empty for a plain run, or `split` or `pipeline` for a coordinator. |
 | `run.step_name` | The pipeline step's name, for a step. |
-| `run.source` | What fired the run: `manual`, `api`, `template`, `schedule`, `rerun`, `reconcile`, or `propose`. |
-| `run.source_id` | The template or schedule behind `run.source`, or the origin run of a rerun. |
+| `run.source` | What fired the run: `api`, `template`, `schedule`, `trigger`, `callback`, `rerun`, `relaunch`, `reconcile`, `propose`, `review` for a pull request plan, or `review_apply` for an apply a pull request comment proposed. |
+| `run.source_id` | The template or schedule behind `run.source`, the origin run of a rerun, or the plan run a comment's apply was proposed from. |
 | `run.template_id` | The job template the run executes, however it was fired: launched directly, by a schedule, by a trigger, or by a callback, and carried to a rerun, a retry, a shard, and a pipeline step. Empty for a run no template launched. |
 | `run.proposed_from` | The plan run an apply was proposed from, empty otherwise. |
 | `run.intent` | The plain-language request an AI proposal was built from. |
@@ -295,9 +453,9 @@ an empty value when the run has none, so a module never meets a missing field.
 | `run.extra_var_names` | The names of the extra variables, sorted. Values are withheld, since they are where secrets ride. |
 | `run.credential_ids` | The stored credentials the run executes with, by id. |
 | `actor.name` | The token label or username that fired the run. For an agent, its token's label. |
-| `actor.type` | How it authenticated: `agent`, `session`, `token`, `cli`, or `webhook`. |
-| `actor.kind` | `agent`, `human`, or `other` for a webhook, a schedule, or an unknown source. |
-| `actor.account` | The account behind the credential. For an agent, the person it acts for. |
+| `actor.type` | How it authenticated: `agent`, `session`, `token`, `cli`, `forge_comment` for a person commenting from the forge account linked to their SwitchTender account, `webhook`, or `host` for a provisioning callback. |
+| `actor.kind` | `agent`, `human` for a session, a person's token, the command line, or a forge comment, or `other` for a webhook, a schedule, a callback, or an unknown source. |
+| `actor.account` | The id of the account behind the credential. For an agent, the account it acts for. A YAML rule's `account` matches the account's username instead. |
 | `plan.planned` | Whether a plan has been read for this apply. |
 | `plan.destroys` | How many resources the plan destroys, or null when nothing was planned. |
 | `risk.level` | `low`, `medium`, or `high`, the same grade `min_risk` reads. |
@@ -355,7 +513,7 @@ names the policy, the limit, and the bundle:
 
 The limit applies to each evaluation, and one submission can evaluate a policy several times. The
 gate asks it separately whether to refuse, whether to hold, what to note, whether a second approver
-is needed, and whether to plan an apply first, and a dry run whose playbook forces real tasks is
+is needed, and whether to plan an apply first, and a dry run the scan did not find change free is
 evaluated twice for each. A person is waiting on every one of them, so a policy that needs more than
 the default is worth making cheaper before its limit is raised.
 
@@ -424,21 +582,40 @@ carrying one is refused at restore.
 
 A dry run is a promise about the tool, not about what it is given. An Ansible dry run is
 `ansible-playbook --check`, and a playbook can set `check_mode: false` on a play, block, task, role,
-or include to run that work for real anyway. A Terraform or OpenTofu dry run is `plan`, and a plan
-runs the program every `external` data source names, with the run's credentials. The gate reads the
-playbook, or the configuration and every module it calls, before it judges a dry run, and records
-what it found in `run.dry_run_findings`: each forcing task by its file, each external data source by
-its address, file, and line. Anything it could not read is recorded there too, since it could run
-work for real as well: a role that is not in the project, a registry module the gate could not
-download, a module source only known at run time, or a file that does not parse.
+or include to run that work for real anyway, and a `pipe` lookup runs its command on the controller
+whenever a template renders, under `--check` too. A Terraform or OpenTofu dry run is `plan`, and a
+plan reads every data source with the run's credentials: an `external` data source runs the program
+it names, an `aws_lambda_invocation` data source invokes its function, and an `http` data source
+sends its request. The gate reads the playbook, or the configuration and every module it calls,
+before it judges a dry run, and records what it found in `run.dry_run_findings`:
 
-A dry run with anything in `run.dry_run_findings` is evaluated twice: once with the input as it
-is, and once as the real run it may be, with `run.dry_run` false. The stricter answer stands:
-every deny, every hold, a demand for a distinct approver, and a plan gate from either pass. A
-module that exempts previews by reading `run.dry_run`, the way a YAML rule sets `exclude_dry_run`,
-therefore holds such a dry run exactly where the YAML rule does, and lets a change-free dry run
-through exactly where the YAML rule does. A module that wants to say so directly reads
-`run.change_free`:
+- Each task that forces real work with `check_mode`, by its file.
+- Each `pipe` lookup in a play's `vars` or `environment` or anywhere in a task, written as `lookup`,
+  `query`, or `q`, with or without the `ansible.builtin.` prefix, or as a `with_pipe` loop, by its
+  play or task and file.
+- Each `external` or `aws_lambda_invocation` data source, and each `http` data source whose method
+  is anything but GET or HEAD or that carries a `request_body`, by its address, file, and line. A
+  method the scan cannot read as a plain value counts as a write.
+
+Input the scan could not read is recorded there too, because unread input can act for real as well:
+a role that is not in the project, a registry module the gate could not download, a module source
+only known at run time, or a file that does not parse. A dry run of a tool a plugin or the SDK added
+is never change free, since the plugin runs its dry run as it was coded and nothing scans it.
+
+The scan finds the known ways a check or a plan acts. It does not prove a preview harmless: other
+lookups and plugins run code on the controller under `--check`, a module that claims to support
+check mode can act anyway, and a plan runs provider code, all with the run's credentials. A rule
+that exempts dry runs trusts the playbooks and configurations it lets through, so keep it to code
+your team reviews. An agent's dry run is held by the [built-in
+hold](#agent-runs-are-held-by-default) whatever the scan finds, unless an exemption covers it, and
+the scan is recorded on it as evidence.
+
+A dry run that is not change free is evaluated twice: once with the input as it is, and once as the
+real run it may be, with `run.dry_run` false. The stricter answer stands: every deny, every hold, a
+demand for a distinct approver, and a plan gate from either pass. A module that exempts previews by
+reading `run.dry_run`, the way a YAML rule sets `exclude_dry_run`, therefore holds such a dry run
+exactly where the YAML rule does, and lets a change-free dry run through exactly where the YAML rule
+does. A module that wants to say so directly reads `run.change_free`:
 
     hold contains "a change in production waits for a person" if {
         input.run.labels.env == "prod"

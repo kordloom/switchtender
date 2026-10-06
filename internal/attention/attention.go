@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/schedule"
 )
@@ -621,23 +622,44 @@ func (e *eval) heldRun(r *run.Run) Condition {
 		ap.OnApprove += " No connected worker serves " + queueName(r.Queue) +
 			" right now, so it would wait for one."
 	}
-	reason := "It is held for approval"
-	if r.HeldByPolicy != "" {
-		reason += " by rule " + quoted(r.HeldByPolicy)
-	}
-	reason += "."
+	reason := "It is held for approval" + heldBy(r.HeldByPolicy) + "."
 	if r.ProposedFrom != "" {
-		reason = "The change proposed from run " + r.ProposedFrom + " is held for approval"
-		if r.HeldByPolicy != "" {
-			reason += " by rule " + quoted(r.HeldByPolicy)
-		}
-		reason += "."
+		reason = "The change proposed from run " + r.ProposedFrom + " is held for approval" +
+			heldBy(r.HeldByPolicy) + "."
 	}
+	reason += agentHoldWhy(r)
 	return Condition{
 		Blocker: ApprovalNeeded, RunID: r.ID, Since: r.CreatedAt, queue: r.Queue, Approval: ap,
 		Reason: reason, WhoCanAct: approverSentence(approvers),
 		Next: "Approve: " + ap.OnApprove + " Deny: " + ap.OnDeny,
 	}
+}
+
+// heldBy says what held a run, as the end of a sentence that begins "held for approval": the rule
+// that held it, quoted by name, or for the built-in hold on a run an agent asked for, the reason
+// itself, since that is not a rule anybody wrote or can find in the policy list. It is empty when
+// nothing is named.
+func heldBy(rule string) string {
+	switch rule {
+	case "":
+		return ""
+	case policy.AgentDefaultName:
+		return ": " + rule
+	}
+	return " by rule " + quoted(rule)
+}
+
+// agentHoldWhy returns the sentence an alert adds about a run the built-in agent hold keeps waiting
+// when what the agent asked for runs code with this server's credentials, such as a dry run or an
+// apply nothing has planned, led by a space. It is empty for every other run.
+func agentHoldWhy(r *run.Run) string {
+	if r.HeldByPolicy != policy.AgentDefaultName {
+		return ""
+	}
+	if why := policy.AgentHoldReason(r); why != "" {
+		return " " + why
+	}
+	return ""
 }
 
 // stepApproval returns the approval condition of a workflow waiting at one of its approval steps.

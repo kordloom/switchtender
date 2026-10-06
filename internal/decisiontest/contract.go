@@ -28,6 +28,9 @@ func Contract(t *testing.T, newStore func() decision.Store) {
 	t.Run("a pending redaction is finished once", func(t *testing.T) {
 		testFinishRedaction(t, newStore())
 	})
+	t.Run("a decision made from a comment keeps the comment", func(t *testing.T) {
+		testComment(t, newStore())
+	})
 }
 
 // base is the time every contract record is recorded relative to, at the precision the stores keep.
@@ -222,5 +225,43 @@ func testDelete(t *testing.T, store decision.Store) {
 	}
 	if err := store.Delete(ctx, "aud_withdraw"); !errors.Is(err, decision.ErrNotFound) {
 		t.Errorf("Delete(again) error = %v, want ErrNotFound", err)
+	}
+}
+
+// testComment verifies a decision made from a pull request comment reads back with the comment's
+// forge, ids, and body fingerprint, through Get and ForRun alike, and that a decision made any
+// other way reads back with none. A store that dropped the comment would leave the evidence of
+// where a decision came from on the chain alone.
+func testComment(t *testing.T, store decision.Store) {
+	ctx := context.Background()
+	commented := reasoned(t, "aud_comment", "run_comment", base)
+	commented.ActorType = "forge_comment"
+	commented.Comment = &decision.Comment{
+		Forge: "github", APIURL: "https://github.example.com/api/v3", Repository: "acme/infra",
+		PullRequest: 42, CommentID: 2151093021, AuthorID: 583231,
+		BodySHA256: "6f1ed002ab5595859014ebf0951522d9f2a0a7b5d6a3a4a6c1f6f7e1d2c3b4a5",
+	}
+	plain := &decision.Record{ID: "aud_uncommented", Kind: decision.KindDecision,
+		DecisionID: "aud_uncommented", RunID: "run_comment", Verdict: "approved",
+		At: base.Add(time.Second), Actor: "ops-admin", ActorType: "session"}
+	for _, r := range []*decision.Record{commented, plain} {
+		if err := store.Save(ctx, r); err != nil {
+			t.Fatalf("Save(%s) error = %v", r.ID, err)
+		}
+	}
+	got, err := store.Get(ctx, "aud_comment")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if diff := cmp.Diff(commented, got, cmpopts.EquateApproxTime(0)); diff != "" {
+		t.Errorf("Get() mismatch (-want +got):\n%s", diff)
+	}
+	thread, err := store.ForRun(ctx, "run_comment")
+	if err != nil {
+		t.Fatalf("ForRun() error = %v", err)
+	}
+	want := []*decision.Record{commented, plain}
+	if diff := cmp.Diff(want, thread, cmpopts.EquateApproxTime(0)); diff != "" {
+		t.Errorf("ForRun() mismatch (-want +got):\n%s", diff)
 	}
 }

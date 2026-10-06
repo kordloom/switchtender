@@ -83,7 +83,7 @@ file in the cache, so two processes never clone or reset the same checkout at on
 The overview's Needs attention panel answers, for every run that is not moving, what is stopping it.
 It sorts the waiting work into four counts, each a list a click away:
 
-- **Worker lost.** The worker running it stopped renewing its lease. The panel names the worker,
+- **Worker lost.** The worker running it stopped renewing its lease. The panel names the worker, <!-- slop-chop-ignore -->
   says how long ago it last reported, and counts down to the automatic reclaim the sweep above makes
   once the lease expires. It alerts only when that reclaim has not happened within two lease
   periods, which means no server is sweeping.
@@ -228,7 +228,7 @@ does not lose the outcome.
 The schema is applied idempotently on both stores, guarded by `IF NOT EXISTS`, so starting a newer
 binary against an existing database is safe to repeat.
 
-The audit trail is a SHA-256 hash chain. Every recorded mutation carries the previous entry's hash
+The audit trail is a hash chain built on SHA-256. Every recorded mutation carries the previous entry's hash
 and its own hash over its content, so altering, reordering, or dropping an entry breaks the chain,
 which `GET /v1/audit/verify` detects. The chain is tamper-evident with no key configured. `GET /v1/audit/bundle`
 seals the chain into a signed LoomSeal bundle, and the open `loomseal` verifier confirms the trail
@@ -266,12 +266,20 @@ the loser gets a clear conflict.
 Stored events are ordered and written once per batch. A batch replayed after a transient error
 appends rather than deduplicates, so a consumer keys on the event sequence number.
 
-Notifications, on all eleven server-wide channels from webhook and Slack to PagerDuty, Twilio SMS,
-and email, and on any per-template targets, are best effort. Each is attempted at least once with one
-retry, then logged and dropped, and the run's extra vars are stripped from the payload so survey and
-template values never leave the system. Notifications do not block a run from finishing, and shutdown
-waits for the deliveries already in flight. Treat a notification as a signal, and the store as the
-source of truth.
+Notifications to named targets, the ones defined once and attached to templates, workflows,
+schedules, projects, or organizations, are queued in the database in the same write that records the
+run's event. Deliveries to each target are attempted in the run's event order, a failed attempt is
+tried four more times over about three minutes, and a delivery pending when a server stops is made
+by the next server to start. One that still fails is kept as failed on the run, on the target, and
+in the doctor. [Delivery order](api.md#delivery-order) has the details.
+
+The eleven server-wide channels, from webhook and Slack to PagerDuty, Twilio SMS, and email, and a
+template's own notification list are best effort. Each is attempted at least once with one retry,
+then logged and dropped, and the run's extra vars are stripped from the payload so survey and template
+values never leave the system. Notifications do not block a run from finishing. On shutdown a server
+waits for the best-effort deliveries already in flight, and a named-target attempt it cuts short is
+made by the next server instead. Treat a notification as a signal, and the store as the source of
+truth.
 
 ## How this compares
 

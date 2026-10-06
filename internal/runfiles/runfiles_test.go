@@ -232,6 +232,20 @@ func TestCreateRefusesAnUnsafeRoot(t *testing.T) {
 func TestHeartbeatCountsOnATimer(t *testing.T) {
 	t.Parallel()
 	root := filepath.Join(t.TempDir(), "root")
+	// A new directory's counter starts at zero. It is read from a directory whose timer cannot fire
+	// during the test: with a millisecond timer, a loaded machine ticked it before the first read.
+	still, err := create(root, "still", time.Hour)
+	if err != nil {
+		t.Fatalf("create() error = %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(still.Path(), beatName)); err != nil {
+		t.Fatalf("read the counter: %v", err)
+	} else if !bytes.Equal(got, encodeBeat(0)) {
+		t.Fatalf("a new directory's counter = %q, want %q", got, encodeBeat(0))
+	}
+	if err := still.Remove(); err != nil {
+		t.Fatalf("Remove() error = %v", err)
+	}
 	d, err := create(root, "beat", time.Millisecond)
 	if err != nil {
 		t.Fatalf("create() error = %v", err)
@@ -240,9 +254,6 @@ func TestHeartbeatCountsOnATimer(t *testing.T) {
 	first, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read the counter: %v", err)
-	}
-	if !bytes.Equal(first, encodeBeat(0)) {
-		t.Fatalf("a new directory's counter = %q, want %q", first, encodeBeat(0))
 	}
 	deadline := time.Now().Add(10 * time.Second)
 	for {

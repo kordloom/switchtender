@@ -47,6 +47,23 @@ ON CONFLICT(id) DO NOTHING`
 	return n > 0, nil
 }
 
+// PruneComments removes the command marks and done replies made before before. The stored times
+// compare as text, which orders them correctly to the second, and the cutoff is days old.
+func (s *reviewStore) PruneComments(ctx context.Context, before time.Time) (int, error) {
+	res, err := s.db.ExecContext(ctx, `
+DELETE FROM review_reports
+WHERE (kind='command' OR (kind='reply' AND done<>0)) AND created_at<>'' AND created_at<?`,
+		sqlutil.FormatTime(before))
+	if err != nil {
+		return 0, fmt.Errorf("prune comment records: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("prune comment records: %w", err)
+	}
+	return int(n), nil
+}
+
 // Get returns the record with id, or review.ErrRecordNotFound.
 func (s *reviewStore) Get(ctx context.Context, id string) (*review.Record, error) {
 	rec, err := scanReviewRecord(s.db.QueryRowContext(ctx,

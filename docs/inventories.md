@@ -105,12 +105,15 @@ plugins read it.
 What an inventory is decides its engine, never whether Ansible happens to be installed, so the same
 inventory resolves the same way on every server. When the engine is Ansible and Ansible is not
 installed, the launch and the preview are refused with the reason it is needed and the one line that
-installs it:
+installs it, the [managed Ansible runtime](ansible-runtime.md), with a system install as the
+alternative:
 
+    switchtender ansible install
     pipx install ansible-core
 
 Ansible is always run as a separate program, `ansible-inventory`, and never linked into the binary.
-The container image ships it.
+The server uses a configured Ansible first, then the managed runtime, then the one on PATH. The
+container image ships it.
 
 ### What the native engine reproduces
 

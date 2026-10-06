@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -109,7 +108,7 @@ func TestAModuleTreeHasOneDigest(t *testing.T) {
 		Want: errModulesUnpinned,
 	}, { // Test 8: Nor anything that is not a file, a directory, or a link.
 		Change: func(t *testing.T, dir string) {
-			if err := syscall.Mkfifo(filepath.Join(dir, "net", "pipe"), 0o600); err != nil {
+			if err := makeFIFO(filepath.Join(dir, "net", "pipe")); err != nil {
 				t.Skipf("no named pipes here: %v", err)
 			}
 		},

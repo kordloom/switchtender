@@ -60,11 +60,14 @@ function regoEffectTip(rego) {
 // appendCriteriaCells fills the criteria columns for a YAML or API policy, one per criterion.
 function appendCriteriaCells(tr, p, invByID) {
 	const whoCell = document.createElement("td");
-	if (p.actor) {
+	if (p.actor || p.account) {
 		const span = document.createElement("span");
 		span.className = "mono";
-		span.textContent = p.actor;
-		span.dataset.tip = "Only this named actor's runs match";
+		span.textContent = p.actor && p.account ? p.actor + " on " + p.account : p.actor || p.account;
+		span.dataset.tip = p.actor && p.account
+			? "Only this named actor's runs match, on this account"
+			: p.actor ? "Only this named actor's runs match"
+				: "Only runs asked for under this account match";
 		whoCell.appendChild(span);
 	} else if (p.actor_kind === "agent" || p.actor_kind === "human") {
 		const span = document.createElement("span");
@@ -174,7 +177,8 @@ async function loadPolicies() {
 		const data = await getJSON("/policies");
 		const policies = data.policies || [];
 		if (policies.length === 0) {
-			showEmpty("No policies yet. Add one to require approval for the runs it matches.");
+			showEmpty("No policies yet. A run an agent asks for is held for approval by default. " +
+				"Add a rule to hold more, or an exemption to let a routine agent run through.");
 			return;
 		}
 		const tbody = document.getElementById("policies");
@@ -193,6 +197,13 @@ async function loadPolicies() {
 				chip.className = "chip failed";
 				chip.textContent = "deny";
 				chip.dataset.tip = "A matching submission is refused outright and never created";
+				effectCell.appendChild(chip);
+			} else if (p.effect === "exempt") {
+				const chip = document.createElement("span");
+				chip.className = "chip";
+				chip.textContent = "exempt";
+				chip.dataset.tip = "A matching run an agent asked for goes ahead without the default " +
+					"hold. Any rule that holds or denies it still does";
 				effectCell.appendChild(chip);
 			} else {
 				const span = document.createElement("span");

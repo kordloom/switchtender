@@ -5,6 +5,7 @@ const PAGE_NAV = {
 	sources: "sources", jobtemplates: "templates", schedules: "schedules", workflows: "workflows",
 	migrate: "migrate", credentials: "credentials", users: "users", audit: "audit",
 	policies: "policies", doctor: "doctor", docs: "docs", notifications: "notifications",
+	links: "links",
 };
 
 // NAV_ICONS holds the inline SVG body for each nav key, stroked in the current color.
@@ -31,6 +32,7 @@ const NAV_ICONS = {
 	policies: '<path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><polyline points="9 12 11 14 15 10"/>',
 	doctor: '<path d="M14.7 6.3a4.8 4.8 0 0 0-6.4 6.4L3 18l3 3 5.3-5.3a4.8 4.8 0 0 0 6.4-6.4l-3.1 3.1-3-3z"/>',
 	docs: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
+	links: '<path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1 1"/><path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1-1"/>',
 };
 
 // mountTopbar adds docs and repository links to the top bar on every page, so the guides and the

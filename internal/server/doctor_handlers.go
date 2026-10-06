@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/identity"
+	"github.com/kordloom/switchtender/internal/ansibleruntime"
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/federation"
 	"github.com/kordloom/switchtender/internal/inventory"
@@ -80,21 +81,44 @@ type doctorAnsible struct {
 	Tested []string `json:"tested"`
 	// InRange reports whether the installed version is one of them.
 	InRange bool `json:"in_range"`
+	// Source is where the server's Ansible commands come from: configured for --ansible-bin,
+	// managed for the managed runtime, or path.
+	Source string `json:"source,omitempty"`
+	// Dir is the directory the commands are started from, empty when PATH finds them.
+	Dir string `json:"dir,omitempty"`
+	// RuntimeDir is the managed runtime's directory the server looks in.
+	RuntimeDir string `json:"runtime_dir,omitempty"`
+	// Problem says why the Ansible selected cannot be used, such as a managed runtime in use that is
+	// broken, empty when it can.
+	Problem string `json:"problem,omitempty"`
 }
 
-// AnsibleCoreFunc reports the ansible-core version installed on the server, or
-// roundhouse.ErrAnsibleMissing.
-type AnsibleCoreFunc func(ctx context.Context) (string, error)
+// AnsibleCoreFunc reports the ansible-core version installed on the server and where its commands
+// come from, or roundhouse.ErrAnsibleMissing.
+type AnsibleCoreFunc func(ctx context.Context) (string, ansibleruntime.Commands, error)
 
-// ansibleCoreOf returns the dispatcher's ansible-core report when the previewer is one that has it.
+// ansibleCoreOf returns the dispatcher's ansible-core report when the previewer is one that has it,
+// with where its Ansible commands come from when it can say.
 func ansibleCoreOf(previewer InventoryPreviewer) AnsibleCoreFunc {
-	if r, ok := previewer.(interface {
+	r, ok := previewer.(interface {
 		// AnsibleCore reports the server's ansible-core version.
 		AnsibleCore(ctx context.Context) (string, error)
-	}); ok {
-		return r.AnsibleCore
+	})
+	if !ok {
+		return nil
 	}
-	return nil
+	cmds, _ := previewer.(interface {
+		// AnsibleCommands reports where the server's Ansible commands come from.
+		AnsibleCommands() (ansibleruntime.Commands, bool)
+	})
+	return func(ctx context.Context) (string, ansibleruntime.Commands, error) {
+		var c ansibleruntime.Commands
+		if cmds != nil {
+			c, _ = cmds.AnsibleCommands()
+		}
+		v, err := r.AnsibleCore(ctx)
+		return v, c, err
+	}
 }
 
 // ansibleFindings reports the server's ansible-core: a warning when it is outside the releases the
@@ -106,9 +130,20 @@ func ansibleFindings(ctx context.Context, ansible AnsibleCoreFunc, invs inventor
 		return
 	}
 	tested := strings.Join(inventory.TestedAnsibleCore, ", ")
-	version, err := ansible(ctx)
-	info := &doctorAnsible{Tested: inventory.TestedAnsibleCore}
+	version, cmds, err := ansible(ctx)
+	info := &doctorAnsible{Tested: inventory.TestedAnsibleCore, Source: cmds.Source, Dir: cmds.Dir,
+		RuntimeDir: cmds.Root, Problem: cmds.Problem}
 	report.Ansible = info
+	if cmds.Problem != "" {
+		report.Findings = append(report.Findings, doctorFinding{
+			Severity: "broken", ObjectType: "install", ObjectID: "ansible",
+			ObjectName: "Ansible runtime",
+			Problem: "The Ansible this server is set to run cannot be used, so every run that needs " +
+				"Ansible fails rather than running another one: " + cmds.Problem + ". Install it " +
+				"again with: " + inventory.AnsibleInstallHintFor(cmds.Root),
+			FixPath: "/ui/docs/ansible-runtime",
+		})
+	}
 	switch {
 	case errors.Is(err, roundhouse.ErrAnsibleMissing):
 	case err != nil:
@@ -160,7 +195,7 @@ func ansibleFindings(ctx context.Context, ansible AnsibleCoreFunc, invs inventor
 			ObjectName: namedOr(inv.Name, inv.ID),
 			Problem: "Needs Ansible because " + why + ", and ansible-inventory is not installed " +
 				"on this server, so it cannot resolve here. Install it with: " +
-				inventory.AnsibleInstallHint,
+				inventory.AnsibleInstallHintFor(cmds.Root),
 			FixPath: "/ui/inventories",
 		})
 	}

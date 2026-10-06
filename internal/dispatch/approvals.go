@@ -79,6 +79,10 @@ func (d *Dispatcher) approveRun(ctx context.Context, id string, dec RunDecision)
 	if err != nil {
 		return nil, fmt.Errorf("record the approval decision: %w", err)
 	}
+	if dec.Comment != nil {
+		c := *dec.Comment
+		rec.Comment = &c
+	}
 	// A parent goes straight to running, never through pending.
 	//
 	// The abandoned-parent sweep interrupts a split or pipeline parent that is pending, unclaimed,

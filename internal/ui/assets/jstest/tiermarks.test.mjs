@@ -24,10 +24,10 @@ test("the policy dialog marks every field that makes a rule Team", async () => {
 	app.wirePolicyForm();
 	await clock.flush();
 
-	// Exactly the set policy.Advanced() tests: deny, actor kind, named actor, risk floor, and
-	// distinct approver.
-	for (const id of ["policy-effect", "policy-actor-kind", "policy-actor", "policy-min-risk",
-		"policy-distinct-approver"]) {
+	// Exactly the set policy.Advanced() tests: deny, actor kind, named actor, account, risk floor,
+	// and distinct approver.
+	for (const id of ["policy-effect", "policy-actor-kind", "policy-actor", "policy-account",
+		"policy-min-risk", "policy-distinct-approver"]) {
 		const el = document.getElementById(id);
 		assert.ok(el, id + " is missing from the dialog");
 		const label = el.closest(".field-label") || el.parentElement;

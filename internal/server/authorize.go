@@ -796,14 +796,30 @@ func authorizeRunAccess(w http.ResponseWriter, r *http.Request, authz *authorize
 // network its queue names, and reads must not start requiring a queue grant.
 func authorizeReexecute(w http.ResponseWriter, r *http.Request, authz *authorizer,
 	log *zap.Logger, rn *run.Run) bool {
-	if authorizeRunAccess(w, r, authz, log, rn) {
-		return true
+	return denyOnAuthzError(w, log, reexecuteAuthorization(r.Context(), authz, rn))
+}
+
+// reexecuteAuthorization is the one answer to what re-running rn's spec requires of the actor in
+// ctx: use of the objects reading it needs, and then of its worker queue. It returns nil when the
+// actor may, the authorizer's refusal when it may not, and any other error when it could not be
+// decided. authorizeReexecute answers it on a request, and a pull request comment that applies a
+// reported plan asks the same question.
+func reexecuteAuthorization(ctx context.Context, authz *authorizer, rn *run.Run) error {
+	if err := authz.authorizeRun(ctx, grant.AccessUse, rn); err != nil {
+		return err
 	}
 	if rn.Queue == "" {
-		return false
+		return nil
 	}
-	return denyOnAuthzError(w, log,
-		authz.authorizeAll(r.Context(), grant.AccessUse, grant.QueueObject(rn.Queue)))
+	return authz.authorizeAll(ctx, grant.AccessUse, grant.QueueObject(rn.Queue))
+}
+
+// authzRefused reports whether err is the object-level rules refusing the actor, a grant it does not
+// hold or an organization it does not belong to, as opposed to a failure to decide. A caller that
+// answers somewhere other than an HTTP response, such as a pull request comment, tells the two apart
+// with it.
+func authzRefused(err error) bool {
+	return errors.Is(err, errForbiddenGrant) || errors.Is(err, errForbiddenOrg)
 }
 
 // orgForUpdate resolves the owning organization an update should store: the one the request names,

@@ -16,6 +16,7 @@ import (
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/dispatch"
+	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/user"
@@ -71,8 +72,16 @@ func newStepHarness(t *testing.T) *stepHarness {
 			return roundhouse.Result{ExitCode: 0}, nil
 		},
 	)
+	// The agent's workflow is exempt from the default hold, so it runs to the approval step these
+	// tests decide on rather than waiting at submission.
+	policies := policy.NewMemStore()
+	if err := policies.Save(ctx, &policy.Policy{ID: policy.NewID(), Name: "workflow agent",
+		Actor: "deploy-bot", Account: owner.Username, Effect: policy.EffectExempt,
+		MaxDestroy: policy.DisabledMaxDestroy}); err != nil {
+		t.Fatalf("policies.Save() error = %v", err)
+	}
 	d := dispatch.New(store, runner, zap.NewNop(), dispatch.WithAudits(audits),
-		dispatch.WithNoJanitor())
+		dispatch.WithNoJanitor(), dispatch.WithPolicies(policies))
 	t.Cleanup(d.Close)
 	handler := New(store, d, zap.NewNop(), WithTokens(tokens), WithUsers(users), WithAudit(audits),
 		WithApprover(d)).Handler()

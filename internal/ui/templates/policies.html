@@ -60,6 +60,7 @@
 					<select id="policy-effect" class="input">
 						<option value="">Hold for approval</option>
 						<option value="deny">Deny outright</option>
+						<option value="exempt">Exempt an agent's run from the default hold</option>
 					</select>
 				</label>
 				<label class="field-label">Who is asking
@@ -71,6 +72,9 @@
 				</label>
 				<label class="field-label">Named actor
 					<input id="policy-actor" class="input mono" placeholder="prod-remediator">
+				</label>
+				<label class="field-label">Account
+					<input id="policy-account" class="input mono" placeholder="dev-lead">
 				</label>
 				<label class="field-label">Minimum risk
 					<select id="policy-min-risk" class="input">

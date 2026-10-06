@@ -4,16 +4,16 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Concepts | SwitchTender docs</title>
-	<meta name="description" content="A run is one execution of a playbook against an inventory. SwitchTender shells out to ansible-playbook and captures both a human log and a structured event stream through an embedded callback plugin">
+	<meta name="description" content="A run is one execution of a tool: a playbook against an inventory, a script, or a Terraform or OpenTofu working directory.">
 	<link rel="canonical" href="https://switchtender.com/docs/concepts">
 	<meta property="og:title" content="Concepts | SwitchTender docs">
-	<meta property="og:description" content="A run is one execution of a playbook against an inventory. SwitchTender shells out to ansible-playbook and captures both a human log and a structured event stream through an embedded callback plugin">
+	<meta property="og:description" content="A run is one execution of a tool: a playbook against an inventory, a script, or a Terraform or OpenTofu working directory.">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/concepts">
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
 	<meta name="twitter:card" content="summary_large_image">
 	<meta name="twitter:title" content="Concepts | SwitchTender docs">
-	<meta name="twitter:description" content="A run is one execution of a playbook against an inventory. SwitchTender shells out to ansible-playbook and captures both a human log and a structured event stream through an embedded callback plugin">
+	<meta name="twitter:description" content="A run is one execution of a tool: a playbook against an inventory, a script, or a Terraform or OpenTofu working directory.">
 	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
 	<script type="application/ld+json">
 {
@@ -24,7 +24,7 @@
   "name": "SwitchTender",
   "url": "https://switchtender.com/"
  },
- "description": "A run is one execution of a playbook against an inventory. SwitchTender shells out to ansible-playbook and captures both a human log and a structured event stream through an embedded callback plugin",
+ "description": "A run is one execution of a tool: a playbook against an inventory, a script, or a Terraform or OpenTofu working directory.",
  "headline": "Concepts",
  "isPartOf": {
   "@type": "WebSite",
@@ -60,16 +60,18 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts" class="active">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts" class="active">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/ansible-runtime">Managed Ansible runtime</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/upgrading">Upgrading</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
 			<h1 id="concepts">Concepts</h1>
 <h2 id="runs">Runs</h2>
-<p>A run is one execution of a playbook against an inventory. SwitchTender shells out to
-<code>ansible-playbook</code> and captures both a human log and a structured event stream through an embedded
-callback plugin, so a run is queryable data, not just scrollback. Every run records its status,
-timing, exit code, the extra vars going in, and the <code>set_stats</code> outputs coming out.</p>
+<p>A run is one execution of a tool: a playbook against an inventory, a script, or a Terraform or
+OpenTofu working directory. For Ansible, SwitchTender shells out to <code>ansible-playbook</code>, from the
+PATH or from the pinned ansible-core <a href="/docs/ansible-runtime"><code>switchtender ansible install</code></a> sets up,
+and captures both a human log and a structured event stream through an embedded callback plugin, so
+a run is queryable data, not just scrollback. Every run records its status, timing, exit code, the
+extra vars going in, and the <code>set_stats</code> outputs coming out.</p>
 <h2 id="splits">Splits</h2>
 <p>A split shards one inventory across parallel slices that run the same playbook, each limited to its
 hosts, with the parent rolling up the result into one merged host matrix. Hosts are packed into
@@ -163,15 +165,13 @@ template pins every launch, or an inventory pins every run that targets it. The 
 run, then template, then inventory. Pin a DMZ inventory to workers inside the DMZ and every run
 against it lands there, no matter how it was launched.</p>
 <h2 id="provable-audit">Provable audit</h2>
-<p>Every authenticated mutation is recorded in the audit trail, and each entry is linked into a SHA-256
-hash chain. Each entry commits to who acted, how they authenticated, the account whose authority
-they used, the method and path, a digest of the change payload, the install that wrote it, and the
-previous entry's hash.
-Altering,
-reordering, or deleting an entry breaks the chain, which <code>GET /v1/audit/verify</code> detects. <code>GET /v1/audit/bundle</code>
-seals the chain into a signed LoomSeal bundle, so the open <code>loomseal</code> verifier proves the trail is
-intact and unaltered offline, on the command line or in a browser, without trusting the server that
-produced it.</p>
+<p>Every authenticated mutation is recorded in the audit trail, and each entry is linked into a hash
+chain built on SHA-256. Each entry commits to who acted, how they authenticated, the account whose
+authority they used, the method and path, a digest of the change payload, the install that wrote it,
+and the previous entry's hash. Altering, reordering, or deleting an entry breaks the chain, which
+<code>GET /v1/audit/verify</code> detects. <code>GET /v1/audit/bundle</code> seals the chain into a signed LoomSeal
+bundle, so the open <code>loomseal</code> verifier proves the trail is intact and unaltered offline, on the
+command line or in a browser, without trusting the server that produced it.</p>
 <p><strong>The record covers the change, not only that a call was made.</strong> The link commits to
 a digest of the request payload, so a recorded change cannot be re-cast as a different one while the
 chain still verifies. The digest is taken over the payload with its secret fields redacted first, so
@@ -245,7 +245,7 @@ activity alongside the change trail.</p>
 <p><strong>Evidence comes out as documents, not screenshots.</strong> <code>switchtender audit run &lt;id&gt;</code> emits one
 run's dossier: what ran, its risk grade, who approved it, what happened on each host, and the
 receipts and anchors behind all of it. <code>switchtender audit report --from --to</code> renders the period's
-change register, the sample a SOC 2 CC8.1 or ISO/IEC 27001 A.8.32 review asks for. Both are
+change register, the sample that SOC 2 CC8.1 and ISO/IEC 27001 A.8.32 reviews ask for. Both are
 self-contained HTML that a reviewer reads without tooling and checks against the live chain. The
 per-run dossier is free. The period register is a Team feature, so the evidence is yours either way
 and what a license pays for is the report that assembles it.</p>
@@ -303,6 +303,12 @@ an agent that token and nothing else.</p>
 <p>Approval policies decide which runs a person has to sign off, so who may change them is the whole
 question. Held as rows they are changed by anyone the API lets through, and the change leaves a row
 indistinguishable from the row before it.</p>
+<p>One rule needs no file and no row. A run an AI agent asked for is held for a person by default,
+named <code>requested by an agent, held by default</code>, unless a stored rule with <code>effect: exempt</code> covers
+it. Its dry runs wait too, and its Terraform or OpenTofu apply waits twice: once before it plans,
+and again for the apply its plan proposes. People's runs are unaffected. <a href="/docs/policy#agent-runs-are-held-by-default">Agent runs are held by
+default</a> covers the exemption, what it risks, and the
+upgrade.</p>
 <p>Point <code>--policy-file</code> at a YAML file and that file becomes the source of truth:</p>
 <pre><code>policies:
   - name: prod-terraform-destroy
@@ -312,7 +318,7 @@ indistinguishable from the row before it.</p>
     tool: opentofu
     max_destroy: 5
 </code></pre>
-<p>That file holds two policies, so it needs Pro, which holds five; Team removes the cap. Community
+<p>That file holds two policies, so it needs Pro, which holds five. Team removes the cap. Community
 holds one, and a file carrying more is refused at startup naming the tier, rather than quietly
 enforcing a subset. Drop the second entry to run this example on Community.</p>
 <p>A change to what needs approval is then a diff. It goes through whatever review the repository
@@ -330,32 +336,52 @@ reads, and how its decisions map onto the YAML ones. A Rego <code>warn</code> ho
 policy can set <code>warn: note</code> to record its warnings on the run and in the evidence without holding
 it, so one set of checks can hold production runs and only note staging ones.</p>
 <h3 id="dry-runs-and-exclude-dry-run">Dry runs and <code>exclude_dry_run</code></h3>
-<p>Setting <code>exclude_dry_run</code> leaves a dry run unmatched, so a preview that changes nothing does not
-wait for a person. A <a href="/docs/pull-request-review#plans-and-your-approval-rules">pull request review</a>
-plan is a dry run, so this one line is what lets plans of pull requests run without waiting while
-the apply after merge is still held. A tool's dry-run mode is a promise about the tool, not about
-what it is given, so the gate reads what a dry run executes before it exempts it, and exempts only
-a dry run it can classify as change free. A dry run it cannot classify is matched as the real run
-it may be, and graded that way for <code>min_risk</code> and <code>reversibility</code> too. A Rego policy is evaluated on
-such a dry run both as it is and as the real run, and the stricter answer stands, so a module that
-exempts <code>input.run.dry_run</code> holds it where the YAML rule does. <a href="/docs/policy#dry-runs-that-are-not-change-free">Approval
+<p>Setting <code>exclude_dry_run</code> leaves a dry run unmatched, so a preview does not wait for a person. A
+<a href="/docs/pull-request-review#plans-and-your-approval-rules">pull request review</a> plan is a dry run, so
+this one line is what lets plans of pull requests run without waiting while the apply after merge is
+still held. A tool's dry-run mode is a promise about the tool, not about what it is given, so the
+gate reads what a dry run executes before it exempts it, and exempts only a dry run it can classify
+as change free. A dry run it cannot classify is matched as the real run it may be, and graded that
+way for <code>min_risk</code> and <code>reversibility</code> too. A Rego policy is evaluated on such a dry run both as it
+is and as the real run, and the stricter answer stands, so a module that exempts
+<code>input.run.dry_run</code> holds it where the YAML rule does. <a href="/docs/policy#dry-runs-that-are-not-change-free">Approval
 policies</a> has the details.</p>
+<p>The scan looks for the known ways a check or a plan acts for real, and for anything it could not
+read. It cannot prove a preview harmless: Ansible lookups and plugins, and Terraform and OpenTofu
+providers, run code during a check or a plan, and apart from the <code>pipe</code> lookup the scan does not
+judge that code. So <code>exclude_dry_run</code> trusts the playbooks and configurations it lets through, and
+belongs on rules for code your team reviews. It cannot release an agent's dry run on its own: the
+built-in hold keeps that run waiting for a person whatever the scan finds, unless an exemption
+covers it.</p>
 <p>An Ansible dry run is <code>ansible-playbook --check</code>, and check mode is not a promise about the
 playbook: a play, block, task, role, or include that sets <code>check_mode: false</code> (or <code>no</code>, or a
-templated value) runs that work for real even under <code>--check</code>. The gate reads the playbook and
-everything it pulls in, and a dry run whose playbook forces real tasks with <code>check_mode</code> is not
-exempt.</p>
-<p>A Terraform or OpenTofu dry run is <code>plan</code>, and a plan runs the program every <code>external</code> data source
-names, with the run's credentials and environment. The gate reads the configuration in the run's
-working directory, and every module it calls, with the HCL parser Terraform is built on, and a plan
-that declares an external data source anywhere is not exempt. The hold names each one by the
-address a plan gives it, such as <code>module.network.data.external.lookup</code>, with its file and line. A
-data source scoped to a <code>check</code> block counts, since a plan reads it too. The scan does not evaluate
-<code>count</code> or <code>for_each</code>, so a data source that a count of zero switches off is still reported.</p>
+templated value) runs that work for real even under <code>--check</code>. So does a <code>pipe</code> lookup, which runs
+its command on the controller while a template renders, before any host is reached. The gate reads
+the playbook and everything it pulls in, and a dry run is not exempt when a play, block, task, role,
+or include forces real work with <code>check_mode</code>, or when a <code>pipe</code> lookup appears in a play's <code>vars</code> or
+<code>environment</code> or anywhere in a task: its arguments, its vars, or its loop, a role's tasks and
+handlers included. The lookup is found written as <code>lookup</code>, <code>query</code>, or <code>q</code>, with or without the
+<code>ansible.builtin.</code> prefix and in any case, and as a <code>with_pipe</code> loop.</p>
+<p>A Terraform or OpenTofu dry run is <code>plan</code>, and a plan reads every data source, with the run's
+credentials and environment. Three of them act when they are read: an <code>external</code> data source runs
+the program it names, an <code>aws_lambda_invocation</code> data source invokes its function, and an <code>http</code>
+data source sends its request, which writes when its method is anything but GET or HEAD or it
+carries a <code>request_body</code>. The gate reads the configuration in the run's working directory, and every
+module it calls, with the HCL parser Terraform is built on, and a plan that declares an <code>external</code>
+or <code>aws_lambda_invocation</code> data source anywhere, or an <code>http</code> data source with a write method or a
+request body, is not exempt. A method the scan cannot read as a plain value, such as one built from
+a variable, counts as a write. The hold names each one by the address a plan gives it, such as
+<code>module.network.data.external.lookup</code>, with its file and line. A data source scoped to a <code>check</code>
+block counts, since a plan reads it too. The scan does not evaluate <code>count</code> or <code>for_each</code>, so a data
+source that a count of zero switches off is still reported.</p>
 <p>A plan also runs provider code, with the same credentials. Providers are code the team chose and
-installed, and the scan does not judge them: it looks for explicit program execution and for
+installed, and the scan does not judge them: it looks for those three data sources and for
 configuration it could not read, nothing else. A finding means the plan cannot be classified as
-change free, not that it has side effects.</p>
+change free, not that it has side effects, and the absence of one does not prove the plan has none.</p>
+<p>A dry run of a tool a plugin or the SDK added is never change free. The plugin defines that dry run
+and runs it as it was coded, and nothing scans it, so a rule with <code>exclude_dry_run</code> matches it as
+the real run. A Bash, Python, PowerShell, or Go dry run only checks the script and runs none of it,
+so it is change free with nothing to scan.</p>
 <p>Both scans fail closed. What a scan cannot read could run work for real too, so a dry run with any
 of it is not exempt either:</p>
 <ul>
@@ -395,9 +421,10 @@ the run downloads its modules again and goes ahead only if they have the same di
 is refused before anything runs, with both digests named, and the plan has to be submitted again so
 the gate reads the current modules. The kept copies live under the run-files directory, at most
 <code>--module-keep-max-mib</code> of them, 2 GiB by default, the oldest dropped first.</p>
-<p>Only a dry run whose input was read in full and runs nothing keeps the exemption, and that is true
-whichever way it arrives: from a person, a schedule, a webhook, a template, a pull request, or an
-agent through MCP.</p>
+<p>Only a dry run whose input was read in full and showed none of these keeps the exemption, and that
+is true whichever way it arrives: from a person, a schedule, a webhook, a template, or a pull
+request. An agent's dry run, through MCP or the API, waits for a person under the built-in hold
+whatever the scan finds, and the scan is recorded on it as evidence.</p>
 <p>The run records each scan as <code>dry_run_scans</code>: the scanner and its version, the files it read, what
 it found, what it could not read, and the classification, <code>change_free</code>, <code>not_change_free</code>, or
 <code>incomplete</code>. A scan the gate downloaded modules for carries <code>fetch</code>: the command, its exit status,
@@ -431,9 +458,20 @@ one from Galaxy that the project does not list, cannot be read, so the dry run i
 keep the exemption, list the role in the project's <code>requirements.yml</code> with <code>install_deps</code> on, so
 the sync installs it where the gate reads it, or commit the role to the repository. Otherwise
 drop <code>exclude_dry_run</code>.</li>
+<li>A <code>pipe</code> lookup. Its command runs on the controller whenever the template renders, under
+<code>--check</code> too. To keep the exemption, pass the value in as a variable, which a survey answer or a
+template variable supplies, or read it on the host with a module that reads under check mode on
+its own. If the command has to run, drop <code>exclude_dry_run</code>.</li>
 <li>An external data source. To keep the exemption, replace it with a provider data source that
 reads the same thing, or pass the value in as a variable, which a survey answer or template
 variable delivers as <code>TF_VAR_</code>. If the program has to run, drop <code>exclude_dry_run</code>.</li>
+<li>An <code>aws_lambda_invocation</code> data source, or an <code>http</code> data source with a write method or a request
+body. To keep the exemption, read the value with a data source that only reads, such as an <code>http</code>
+GET with no body, or pass it in as a variable. If the call has to happen during the plan, drop
+<code>exclude_dry_run</code>.</li>
+<li>A tool a plugin or the SDK added. Its dry run is never exempt, since nothing scans it, so a rule
+that holds the tool holds its dry runs too. Narrow the rule so it leaves the tool out, or let
+those dry runs wait.</li>
 <li>A registry or remote module. The gate downloads it before it reads the plan, so a hold here
 means the download did not complete, and the hold says why. To keep the exemption, make the
 module reachable with the run's own credentials from where the plan runs, such as an <code>env</code>
@@ -452,12 +490,23 @@ never picks up, until an admin approves it, which releases it to run, or rejects
 An operator can request the run, but only an admin can release it, so duties are separated. Set
 <code>require_distinct_approver</code> on the policy and the separation covers admins too: the person who asked
 for the change cannot be the one who approves it, and the requirement is recorded on the run at the
-moment it is held, so editing the policy afterward cannot loosen a decision already pending. A held
-run submitted by an AI agent is released the same way, only by a human admin, so an operator-bound
-agent never approves its own work. Both the request and the decision are recorded in the audit
-trail, making who asked for a change and who signed off provable. A Terraform or OpenTofu apply
-marked this way is planned first instead, and the apply its plan proposes is what waits, carrying the
-saved plan the approval binds.</p>
+moment it is held, so editing the policy afterward cannot loosen a decision already pending. A run
+submitted by an AI agent is held this way by default, with no policy written first, unless a rule
+with <code>effect: exempt</code> covers it, and it is released the same way, only by a human admin, so an
+operator-bound agent never approves its own work. See <a href="/docs/policy#agent-runs-are-held-by-default">Agent runs are held by
+default</a>. Both the request and the decision are recorded
+in the audit trail, making who asked for a change and who signed off provable. A Terraform or
+OpenTofu apply marked this way is planned first instead, and the apply its plan proposes is what
+waits, carrying the saved plan the approval binds. An agent's apply waits twice, since planning runs
+provider code: once before anything plans, and again for the apply its plan proposes.</p>
+<p>A pull request comment is one more way to decide. A person whose GitHub or GitLab account is linked
+to their SwitchTender account can comment <code>/switchtender apply</code> on a pull request, naming the plan
+id its report showed, or naming none when the head has one plan reported before the comment, which
+approves the apply of that plan as their SwitchTender account, with the same admin role, grants, and
+separation of duties as the queue. The comment is read back from the forge before it decides, a
+bot's comment or one an app wrote for its author is refused, and the decision's chain entry records
+the comment's and its author's numeric ids, the SHA-256 of its body, and the plan it approved. See
+<a href="/docs/pull-request-review#planning-and-applying-from-a-comment">planning and applying from a comment</a>.</p>
 <p>Approval can also be required by policy rather than by choice. A policy matches runs by tool, command
 text, or target inventory, and any matching run is held automatically at submission, so the gate
 cannot be skipped by omitting the flag. A Terraform or OpenTofu apply a policy would hold is planned
@@ -466,10 +515,20 @@ Policies are enforced in the dispatcher, so a scheduled or triggered run is gate
 launched by hand.</p>
 <p>A workflow is gated by the same policies as a single run. Every step is checked when the workflow is
 submitted, and a match holds the whole workflow before any step starts, so a gated command cannot be
-slipped past an approver by wrapping it in a workflow. The whole workflow is held rather than the one
-matching step, because a change applied halfway is worse than one that never started. Approving
-releases the workflow and it runs from the top; the step graph is stored with it, so an approval that
-arrives after a restart still runs the workflow that was approved.</p>
+slipped past an approver by wrapping it in a workflow. The whole workflow is held rather than the
+one matching step, because a change applied halfway is worse than one that never started. Approving
+releases the workflow and it runs from the top. The step graph is stored with it, so an approval
+that arrives after a restart still runs the workflow that was approved.</p>
+<p>The approval binds the workflow as it was submitted: every step as written, with its tool, its
+command or playbook, its inventory, whether it is a dry run, and what it depends on, along with the
+workflow's variables, the digests of its secret answers, its credentials, its image, and the
+inventory snapshot it was submitted with. A held workflow that reads from a project is pinned to the
+commit its branch pointed at when it was held, and every step runs that commit. It does not bind
+what a step works out when it runs: a Terraform or OpenTofu apply step plans and applies when the
+step runs, so the person who approves the workflow never sees that plan. To approve an exact plan,
+run the apply on its own, held for approval: it plans first, and the approval binds the saved plan.
+An agent's workflow with an apply step is refused at submission for that reason, as
+<a href="/docs/policy#agent-runs-are-held-by-default">Agent runs are held by default</a> describes.</p>
 <h2 id="approval-steps-in-a-workflow">Approval steps in a workflow</h2>
 <p>A workflow can also stop partway and wait for a person, at an approval step. The steps the approval
 step depends on run first. When nothing else in the workflow can move, it pauses at the step until
@@ -511,7 +570,8 @@ approval steps, matched by account so a token and a browser session are one pers
 run, the launcher can always deny, which withdraws their own request.</p>
 <p><strong>What an approval binds to.</strong> An approver approves the state they were shown: the workflow's spec,
 every step the approval waited behind with how it ended and what it published, and the steps each
-answer runs. <code>GET /v1/approvals</code> returns that state's <code>state_digest</code>, and sending it back with the
+answer runs. A Terraform or OpenTofu apply step that runs after the approval plans when it runs, so
+its plan is not part of that state either. <code>GET /v1/approvals</code> returns that state's <code>state_digest</code>, and sending it back with the
 decision refuses the decision if the workflow no longer matches. The decision is committed to the
 audit chain with that digest before it takes effect, and the workflow is held to it when it resumes:
 a workflow whose finished steps or published values changed after the approval is refused rather

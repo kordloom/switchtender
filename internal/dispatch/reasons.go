@@ -26,6 +26,9 @@ type RunDecision struct {
 	ConfirmedMask string
 	// By names the decider.
 	By outcome.Decider
+	// Comment is the pull request comment the decision was made from, nil for a decision made any
+	// other way. It is kept on the decision record and committed in the decision's chain entry.
+	Comment *decision.Comment
 }
 
 // ReasonMaskedError is returned when the secret masker changed an approver's reason and the

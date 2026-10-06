@@ -21,6 +21,7 @@ import (
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/factcache"
 	"github.com/kordloom/switchtender/internal/federation"
+	"github.com/kordloom/switchtender/internal/forgelink"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/importer"
 	"github.com/kordloom/switchtender/internal/inventory"
@@ -128,6 +129,17 @@ func WithApprover(a Approver) Option {
 // decisions route, its evidence dossier, and its receipt.
 func WithDecisions(store decision.Store) Option {
 	return func(srv *Server) { srv.decisions = store }
+}
+
+// WithForgeLinks keeps the links between forge accounts and SwitchTender accounts in store, and
+// lets people link an account on each forge in apps through that forge's OAuth application. A pull
+// request comment from a linked account acts as its SwitchTender account. Without it no comment
+// acts as anybody, and every commenter is told how linking is set up.
+func WithForgeLinks(store forgelink.Store, apps ...forgelink.App) Option {
+	return func(srv *Server) {
+		srv.forgeLinks = store
+		srv.forgeApps = apps
+	}
 }
 
 // WithSchedules enables the schedule endpoints backed by the given store.
@@ -493,6 +505,11 @@ type Server struct {
 	attention *attention.Source
 	// hooks runs the work webhook deliveries start, answering each sender before it stops waiting.
 	hooks *hookFlights
+	// forgeLinks holds the links between forge accounts and SwitchTender accounts, nil when no
+	// pull request comment may act as anybody.
+	forgeLinks forgelink.Store
+	// forgeApps are the forge OAuth applications people link their accounts through.
+	forgeApps []forgelink.App
 }
 
 // New returns a Server. It panics if store or submitter is nil; a nil logger becomes a no-op.
@@ -717,6 +734,13 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("GET /auth/oidc/login", s.oidc.login)
 		mux.HandleFunc("GET /auth/oidc/callback", s.oidc.callback)
 	}
+	mux.Handle("GET /v1/me/forge-links",
+		forgeLinksListHandler(s.forgeLinks, s.forgeApps, s.reviewPublicURL, s.log))
+	mux.Handle("POST /v1/me/forge-links",
+		forgeLinkStartHandler(s.forgeLinks, s.forgeApps, s.sealer, s.reviewPublicURL, s.log))
+	mux.Handle("DELETE /v1/me/forge-links/{id}", forgeLinkDeleteHandler(s.forgeLinks, s.audits, s.log))
+	mux.Handle("GET /auth/forge/callback", forgeLinkCallbackHandler(s.forgeLinks, s.forgeApps,
+		s.users, s.audits, s.sealer, s.reviewClient, s.reviewPublicURL, s.log))
 	if s.saml != nil {
 		mux.HandleFunc("GET /auth/saml/login", s.saml.login)
 		mux.HandleFunc("POST /auth/saml/acs", s.saml.acs)
@@ -725,7 +749,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/users", createUserHandler(s.users, s.log))
 	mux.Handle("PUT /v1/users/{id}", updateUserHandler(s.users, s.log))
 	mux.Handle("GET /v1/users", listUsersHandler(s.users, s.log))
-	mux.Handle("DELETE /v1/users/{id}", deleteUserHandler(s.users, s.log))
+	mux.Handle("DELETE /v1/users/{id}", deleteUserHandler(s.users, s.forgeLinks, s.audits, s.log))
 	mux.Handle("POST /v1/credential-types", createCredTypeHandler(s.credTypes, s.log))
 	mux.Handle("GET /v1/credential-types", listCredTypesHandler(s.credTypes, s.log))
 	mux.Handle("GET /v1/credential-types/{id}", getCredTypeHandler(s.credTypes, s.log))
@@ -799,7 +823,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /v1/notifications/{id}/attachments/{attachment}",
 		detachNotificationHandler(s.notifications, authz, s.log))
 	mux.Handle("POST /hooks/{token}", hookHandler(s.triggers, s.templates, s.submitter, s.store,
-		s.sealer, s.audits, s.reviews, s.hooks, s.log))
+		s.sealer, s.audits, s.reviews, s.hooks, s.commentCommands(authz), s.log))
 	mux.Handle("POST /v1/templates", createTemplateHandler(s.templates, s.sealer, authz, s.log))
 	mux.Handle("PUT /v1/templates/{id}", updateTemplateHandler(s.templates, s.sealer, authz, s.log))
 	mux.Handle("GET /v1/templates", listTemplatesHandler(s.templates, authz, s.log))

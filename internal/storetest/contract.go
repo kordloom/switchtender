@@ -49,6 +49,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("initiator and reason rule round trip", func(t *testing.T) {
 		testInitiatorAndReasonRuleRoundTrip(t, newStore())
 	})
+	t.Run("account round trip", func(t *testing.T) { testAccountRoundTrip(t, newStore()) })
 	t.Run("stream ticket refuses a wrong run and an expiry", func(t *testing.T) {
 		testStreamTicketRefusesWrongRunAndExpiry(t, newStore())
 	})
@@ -91,6 +92,9 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("append summaries accumulate", func(t *testing.T) { testAppendSummaries(t, newStore()) })
 	t.Run("unrepresentable text in a summary stores the same on every backend", func(t *testing.T) {
 		testSummaryUnrepresentableText(t, newStore())
+	})
+	t.Run("a name too long to index is stored and found", func(t *testing.T) {
+		testSummaryLongNames(t, newStore())
 	})
 	t.Run("reclaim attribution is exact", func(t *testing.T) { testReclaimAttribution(t, newStore()) })
 	t.Run("drift status", func(t *testing.T) { testDriftStatus(t, newStore()) })

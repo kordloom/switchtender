@@ -170,6 +170,15 @@ func (r *Run) ChangeFree() bool {
 	if r == nil || !r.DryRun {
 		return false
 	}
+	// A dry run the gate never scanned is proven to change nothing only for a built-in tool, whose
+	// no-change mode is a fixed syntax, compile, or parse check that executes nothing: bash -n,
+	// py_compile, go vet, a PowerShell parse. Ansible, Terraform, and OpenTofu always carry a scan
+	// here, so an empty scan set means one of those inert built-ins, or a tool a plugin added. A
+	// plugin tool defines its own dry run and runs it on the host as whatever the plugin coded, so
+	// nothing proves it changes nothing and it is not read as a preview.
+	if len(r.DryRunScans) == 0 {
+		return IsBuiltinTool(r.Tool)
+	}
 	return ScansChangeFree(r.DryRunScans)
 }
 
@@ -360,6 +369,17 @@ func toolLabel(tool string) string {
 // saying "this one is safe" is a claim the gate cannot check, written by whoever wants the run to
 // go through, which is the bypass the scan exists to close.
 func ExemptionHoldNote(r *Run, rule string, rego bool) string {
+	drop := "drop exclude_dry_run from " + quoteRule(rule)
+	if rego {
+		drop = "stop exempting dry runs in the module of " + quoteRule(rule)
+	}
+	return holdNote(r, "This dry run was not shown to change nothing, so "+quoteRule(rule)+
+		" does not exempt it", drop)
+}
+
+// holdNote builds a dry run's hold message: lead, the first thing its scans found, and the two
+// clean fixes, the second of which is second.
+func holdNote(r *Run, lead, second string) string {
 	entries := r.DryRunFindings()
 	if len(entries) == 0 {
 		return ""
@@ -368,14 +388,10 @@ func ExemptionHoldNote(r *Run, rule string, rego bool) string {
 	if n := len(entries); n > 1 {
 		first = fmt.Sprintf("%s (and %d more)", first, n-1)
 	}
-	drop := "drop exclude_dry_run from " + quoteRule(rule)
-	if rego {
-		drop = "stop exempting dry runs in the module of " + quoteRule(rule)
-	}
+	drop := second
 	tool, incomplete := heldScan(r)
 	var b strings.Builder
-	fmt.Fprintf(&b, "This dry run was not shown to change nothing, so %s does not exempt it: %s. ",
-		quoteRule(rule), first)
+	fmt.Fprintf(&b, "%s: %s. ", lead, first)
 	switch {
 	case tool == ToolAnsible && incomplete:
 		fmt.Fprintf(&b, "Two clean fixes: make what the playbook pulls in readable to the gate, "+

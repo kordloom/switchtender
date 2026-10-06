@@ -9,10 +9,11 @@
 
 SwitchTender runs as a local desktop application with one command. Because the whole product is a
 single binary with an embedded web UI, it needs no database server, no container, and no Kubernetes.
-What a run needs is its own tool on the PATH, such as `ansible-playbook` for an Ansible run and
-`bash` for a Bash run. macOS and Linux ship `bash`, so a Bash run works there as soon as the binary
-does. Windows does not ship one, so on Windows a Bash run needs a `bash` installed and on the PATH
-first.
+What a run needs is its own tool, such as `bash` for a Bash run, on the PATH. An Ansible run needs
+`ansible-playbook` on the PATH, or a pinned ansible-core that `switchtender ansible install` puts in
+the desktop app's data directory, as [where it lives](ansible-runtime.md#where-it-lives) shows.
+macOS and Linux ship `bash`, so a Bash run works there as soon as the binary does. Windows does not
+ship one, so on Windows a Bash run needs a `bash` installed and on the PATH first.
 
 ## Download
 

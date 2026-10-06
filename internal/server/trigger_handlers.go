@@ -393,7 +393,7 @@ func deleteTriggerHandler(triggers trigger.Store, authz *authorizer, log *zap.Lo
 // executes the commit that was just pushed.
 func hookHandler(triggers trigger.Store, templates template.Store, submitter Submitter,
 	store run.Store, sealer *credential.Sealer, audits audit.Store, reviews *review.Reporter,
-	hooks *hookFlights, log *zap.Logger) http.HandlerFunc {
+	hooks *hookFlights, comments *commentCommands, log *zap.Logger) http.HandlerFunc {
 	if hooks == nil {
 		panic("hookHandler: hook flights required")
 	}
@@ -420,7 +420,8 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 		if tg.Review != nil {
 			serveReviewHook(w, r, tg, reviewHookDeps{
 				templates: templates, triggers: triggers, submitter: submitter, store: store,
-				sealer: sealer, audits: audits, reviews: reviews, hooks: hooks, log: log,
+				sealer: sealer, audits: audits, reviews: reviews, hooks: hooks, comments: comments,
+				log: log,
 			})
 			return
 		}

@@ -279,7 +279,31 @@ function decisionLine(r) {
 			(s.independent ? " is independent of it." : " is the same account.");
 		line.appendChild(sod);
 	}
+	if (r.comment) line.appendChild(commentSource(r));
 	return line;
+}
+
+// commentSource says that a decision was made from a pull request comment and names that comment
+// the way the chain committed to it: the forge, the repository and pull request, the comment and
+// its author by the forge's numeric ids, and the SHA-256 of the body as delivered, which an edit
+// or a deletion afterward cannot change.
+function commentSource(r) {
+	const c = r.comment;
+	const gitlab = c.forge === "gitlab";
+	const p = document.createElement("p");
+	p.className = "muted decision-comment";
+	let host = "";
+	try {
+		host = new URL(c.api_url).host;
+	} catch {
+		host = "";
+	}
+	p.textContent = (r.verdict === "rejected" ? "Rejected" : "Approved") + " from a pull request " +
+		"comment on " + (gitlab ? "GitLab" : "GitHub") + (host ? " (" + host + ")" : "") + ": " +
+		c.repository + (gitlab ? " merge request !" : " pull request #") + c.pull_request +
+		", comment " + c.comment_id + " by account id " + c.author_id + ". Comment body SHA-256 " +
+		c.body_sha256 + ".";
+	return p;
 }
 
 // addCorrection appends a correction to a decision. The reason it corrects is never edited.

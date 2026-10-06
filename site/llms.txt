@@ -3,30 +3,34 @@
 > SwitchTender is a fleet automation control plane that runs from one binary. It runs Ansible,
 > Terraform, OpenTofu, Bash, PowerShell, Python, and Go across a fleet, paints
 > every run as a live host-by-task matrix, splits big jobs by measured host cost, records a
-> tamper-evident audit trail, and imports AWX projects, inventories, templates, surveys, and
-> schedules in one command. Every change returns a chain receipt, every run exports an evidence
+> tamper-evident audit trail, and imports AWX projects, inventories (smart and constructed),
+> templates, workflows with approval steps (apart from shapes the import names and leaves out),
+> surveys, schedules, notification templates, and organizations in one command, with a dry run
+> first. Every recorded change returns a chain receipt, every run exports an evidence
 > dossier, a change register covers each period, an external witness countersigns attestations,
 > and the chain exports as a LoomSeal bundle verified offline. State lives in one SQLite file by default, with Postgres optional.
 > No Kubernetes, no Redis, no message bus. The tools themselves are not inside the binary: a run
-> uses its tool from the PATH, and the container image carries Ansible, Python, Terraform, and
+> uses its tool from the PATH, or for Ansible a pinned ansible-core that `switchtender ansible
+> install` manages, and the container image carries Ansible, Python, Terraform, and
 > OpenTofu. Source-available under BSL 1.1: the controller, every
 > tool, and the full evidence chain are free to self-host with no seat, host, or run limits. Paid
-> tiers add what an organization needs around it: SSO, the full policy engine, PostgreSQL and
-> active-active HA, distributed workers, drift reconcile, and audit-ready change registers. Each
+> tiers add what an organization needs around it: SSO, more approval policies and the full policy
+> engine, creating a new PostgreSQL schema, distributed workers, drift reconcile, and audit-ready change registers. Each
 > release converts to Apache 2.0 two years after it ships.
 
 Install: `go install github.com/kordloom/switchtender@latest`, Homebrew, or release binaries
 with SHA256SUMS for Linux, macOS, and Windows at https://github.com/kordloom/switchtender/releases.
-Quickstart: run `switchtender serve`, open the browser UI. Try `switchtender demo` for a
-seeded read-only tour.
+Quickstart: run `switchtender serve`, open the browser UI. Ansible runs need ansible-core:
+use the one on the PATH, or run `switchtender ansible install` for a pinned, hash-checked one
+beside the database. Try `switchtender demo` for a seeded read-only tour.
 
 ## Start here
 - Live demo, read-only and seeded with real runs, nothing to install: https://demo.switchtender.com
 
 - [Homepage](https://switchtender.com/): what it is and the live matrix
-- [Pricing](https://switchtender.com/pricing): Community free forever, Pro $490/year for SSO and five approval policies, Team from $9,900/year flat per org by fleet band, Enterprise from $75,000/year for independent witnessing and evidence operations
+- [Pricing](https://switchtender.com/pricing): Community free forever with one plain rule, a require-approval policy or one exemption, Pro $500/year to 500 hosts for SSO and five approval policies, Team from $9,900/year flat per org by fleet band, Enterprise from $75,000/year for services outside your install, scoped on the order form
 - [Get started](https://switchtender.com/get-started): install and first run
-- [AI agents](https://switchtender.com/agents): give an agent one operator-bound token, gate every run behind human approval, and prove what it did
+- [AI agents](https://switchtender.com/agents): give an agent one operator-bound token, hold its runs for a person by default with no policy written, dry runs included, take two approvals for its Terraform or OpenTofu apply, and prove what it did
 - [Quickstart](https://switchtender.com/docs/quickstart): first job in minutes
 - [FAQ](https://switchtender.com/docs/faq): the questions everyone asks
 
@@ -43,14 +47,22 @@ seeded read-only tour.
 ## Docs
 
 - [Concepts](https://switchtender.com/docs/concepts): jobs, templates, fleets, runs
-- [Provable audit](https://switchtender.com/docs/concepts#provable-audit): every mutation is recorded in a fail-closed hash chain before it executes, or refused with a 503
+- [Provable audit](https://switchtender.com/docs/concepts#provable-audit): every mutation other than signing in or out is recorded in a fail-closed hash chain before it executes, or refused with a 503
 - [Compliance mapping](https://switchtender.com/docs/compliance): the record mapped to SOC 2 CC8.1, ISO 27001 A.8.32, HIPAA 164.312(b)
 - [Sample evidence pack](https://switchtender.com/docs/sample-evidence-pack): what a reviewer's sample looks like, produced from a real chain
 - Offline verification: signed LoomSeal bundles verify on an air-gapped machine against the key the server publishes at /.well-known/loomseal.json
-- Receipts: every mutation returns an Audit-Receipt header (seq:hash) that later proves the chain still holds that exact entry at that exact position
+- Receipts: every mutation other than signing in or out returns an Audit-Receipt header (seq:hash) that later proves the chain still holds that exact entry at that exact position
+- Receipt contents: a run's receipt discloses its spec, its outcome, and each approval decision, and LoomSeal verifiers from 1.7.0 on check each against the digests the chain committed
 - [Tools](https://switchtender.com/docs/features): Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go
 - [Reliability](https://switchtender.com/docs/reliability): sharding, retries, drift detection
 - [Secrets](https://switchtender.com/docs/secrets)
+- [Approval policies](https://switchtender.com/docs/policy): agent runs held by default, YAML rules and Rego policies (Rego is Team), evaluated offline, and dry runs scanned for the known ways a preview acts before a rule lets them through, which the scan cannot prove harmless
+- [Managed Ansible runtime](https://switchtender.com/docs/ansible-runtime): `switchtender ansible install` puts a pinned ansible-core beside the database, every file checked against a hash the binary carries
+- [Inventories](https://switchtender.com/docs/inventories): static, dynamic, smart, and constructed inventories, static and smart ones read natively the way ansible-core 2.16 to 2.21 reads them, and the snapshot an approval binds
+- [Federated cloud credentials](https://switchtender.com/docs/federation): short-lived AWS, Google Cloud, and Azure access minted per run with nothing stored, and signing keys that rotate
+- [Provisioning callbacks](https://switchtender.com/docs/tool-ansible#provisioning-callbacks): a host launches a template against itself, AWX-compatible, and an imported template answers at its AWX address
+- [Pull request review](https://switchtender.com/docs/pull-request-review): plan comments and commit statuses on GitHub and GitLab pull requests, and planning, approving, and applying from a comment by a linked account
+- [Upgrading](https://switchtender.com/docs/upgrading): what an existing install notices on upgrade, and what to do about it
 - [API](https://switchtender.com/docs/api)
 - [Benchmarks](https://switchtender.com/docs/benchmarks)
 

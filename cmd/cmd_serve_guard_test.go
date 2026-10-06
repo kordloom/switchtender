@@ -116,7 +116,7 @@ func TestSelectiveRunnerFromFlagsAppliesContainerFlags(t *testing.T) {
 			setString(t, &containerPullPolicy, "always")
 			argv := fakeRuntime(t, "podman")
 
-			runner := newSelectiveRunnerFromFlags(true, true)
+			runner := newSelectiveRunnerFromFlags(true, true, nil)
 			spec := roundhouse.Spec{
 				Playbook: "/checkout/site.yml", Dir: "/checkout", Image: test.Image,
 			}

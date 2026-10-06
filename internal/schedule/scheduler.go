@@ -275,6 +275,17 @@ func (s *Scheduler) fireDue(sc *Schedule, now time.Time) {
 	// checked before the row is claimed so a skipped tick still advances the next run time, which is
 	// what keeps the schedule on its cadence instead of firing the moment the slow run ends.
 	if waiting := s.overlaps(sc); waiting != "" {
+		// The run still going can be this occurrence's own. A stop that cut a fire short after its
+		// submit had saved the run hands the occurrence back with a note saying it fires later, and
+		// the scheduler that takes it up finds that run pending. Skipped as an overlap, the
+		// occurrence was consumed with no record of its run, and the note stayed as the schedule's
+		// last error until the next fire, which for the last occurrence of a bounded rule never
+		// comes. The occurrence's fire did create its run, so the fire is recorded with that run,
+		// which clears the note.
+		if own := s.occurrenceRun(sc.ID, due); own != "" {
+			s.recordOccurrenceRun(sc, due, next, final, now, own)
+			return
+		}
 		if _, err := s.claim(sc, next, final); err != nil {
 			s.log.Error("schedule: advance past overlap: "+err.Error(),
 				zap.String("schedule_id", sc.ID))
@@ -313,6 +324,41 @@ func (s *Scheduler) fireDue(sc *Schedule, now time.Time) {
 		return
 	}
 	s.recordFire(sc.ID, due, now, runID, err)
+}
+
+// occurrenceRun returns the run the occurrence due of schedule id already holds under its
+// idempotency key, or the empty string when it holds none, when no lookup is wired, or when the
+// lookup fails, which leaves the fire to the overlap check as before.
+func (s *Scheduler) occurrenceRun(id string, due time.Time) string {
+	if s.runByKey == nil {
+		return ""
+	}
+	runID, err := s.runByKey(s.ctx, run.ScheduleKey(id, due))
+	if err != nil {
+		if s.ctx.Err() == nil {
+			s.log.Error("schedule: find the run of a due occurrence: "+err.Error(),
+				zap.String("schedule_id", id))
+		}
+		return ""
+	}
+	return runID
+}
+
+// recordOccurrenceRun claims the occurrence due, whose run already exists, and records its fire
+// with that run instead of firing it again. The claim marks the occurrence in flight like any
+// other, so a stop before the record leaves it for the sweep, which finds the same run by its key.
+func (s *Scheduler) recordOccurrenceRun(sc *Schedule, due, next time.Time, final bool, now time.Time, runID string) {
+	won, err := s.claimFire(sc, next, final)
+	if err != nil {
+		s.log.Error("schedule: claim due: "+err.Error(), zap.String("schedule_id", sc.ID))
+		return
+	}
+	if !won {
+		return
+	}
+	s.log.Info("schedule: a handed back fire had already created its run, so it is recorded",
+		zap.String("schedule_id", sc.ID), zap.String("run_id", runID))
+	s.recordFire(sc.ID, due, now, runID, nil)
 }
 
 // recordFire records what the fire of the occurrence due came to, the run it created or why it

@@ -707,7 +707,7 @@ func runMeta(r *run.Run) []metaRow {
 			len(res.Hosts), noun))
 		switch {
 		case res.AnsibleCore != "":
-			add("Resolved by", "Ansible, ansible-core "+res.AnsibleCore)
+			add("Resolved by", "Ansible, ansible-core "+res.AnsibleCore+ansibleFrom(res.AnsibleSource))
 		case res.Engine != "":
 			add("Resolved by", "the native engine")
 		}
@@ -716,11 +716,12 @@ func runMeta(r *run.Run) []metaRow {
 	}
 	if c := r.InventoryCheck; c != nil {
 		if len(c.Differences) == 0 {
-			add("Inventory cross-check", "ansible-core "+c.AnsibleCore+" read the same hosts, "+
-				"groups, and variables before the play ran")
+			add("Inventory cross-check", "ansible-core "+c.AnsibleCore+ansibleFrom(c.AnsibleSource)+
+				" read the same hosts, groups, and variables before the play ran")
 		} else {
-			add("Inventory cross-check", fmt.Sprintf("refused: ansible-core %s read it "+
-				"differently in %d places", c.AnsibleCore, len(c.Differences)))
+			add("Inventory cross-check", fmt.Sprintf("refused: ansible-core %s%s read it "+
+				"differently in %d places", c.AnsibleCore, ansibleFrom(c.AnsibleSource),
+				len(c.Differences)))
 		}
 		for _, diff := range c.Differences {
 			add("Inventory difference", diff)
@@ -886,4 +887,21 @@ func snapshotText(snap *run.InventorySnapshot, composed bool) string {
 			"submission: %s", len(snap.Hosts), strings.Join(snap.Hosts, ", "))
 	}
 	return fmt.Sprintf("%d host(s) as submitted: %s", len(snap.Hosts), strings.Join(snap.Hosts, ", "))
+}
+
+// ansibleFrom returns the words that say where an ansible-core came from, as a run's evidence
+// records it, beginning with a space, and nothing when the evidence does not say.
+func ansibleFrom(source string) string {
+	switch source {
+	case "managed":
+		return " from the managed runtime"
+	case "configured":
+		return " from the configured Ansible directory"
+	case "path":
+		return " from PATH"
+	case "image":
+		return " in the run's image"
+	default:
+		return ""
+	}
 }

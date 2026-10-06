@@ -22,18 +22,18 @@
  "applicationCategory": "DeveloperApplication",
  "description": "The control plane for infrastructure automation. Every change it runs, whether from a person, a schedule, or an AI agent, passes one governed path of request, policy, and approval, and leaves a cryptographically signed receipt that can be verified offline without the vendor. It does not claim every change to your infrastructure went through it: anyone holding their own SSH key can change a host behind it. Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go from a single self-hosted Go binary, agentless over SSH.",
  "featureList": [
-  "Agentless: reaches managed hosts over SSH with nothing installed on them",
+  "Agentless: reaches managed hosts over SSH with no SwitchTender agent installed on them",
   "Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go",
   "Reads secrets from HashiCorp Vault (KV v1 and v2, and dynamic secrets minted per run and revoked when it ends), AWS Secrets Manager, Azure Key Vault, Google Secret Manager, CyberArk (Conjur and CCP), and 1Password",
   "Per-object access grants: read, use, or manage on one project, template, inventory, or credential, layered over global roles",
-  "Single sign-on through OIDC, SAML, LDAP, and JWT",
+  "Single sign-on through OIDC, SAML, LDAP, and JWT, on the Pro tier",
   "Pipelines with a dependency graph and parallel branches, built in a drag-and-drop editor",
   "Approval gates enforced by policy before a run executes",
   "Tamper-evident hash-chained audit trail a third party can verify offline",
   "Live host-by-task matrix and per-host history across runs",
   "Drift detection from a dry run",
-  "One static Go binary and one SQLite file, with PostgreSQL optional",
-  "One-command import from AWX, Ansible Automation Platform, Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab"
+  "One static Go binary and one SQLite file, with PostgreSQL optional, where creating a new schema is on the Team tier",
+  "One-command import from AWX-format exports (AWX, Tower, and Automation Controller), Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab"
  ],
  "license": "https://mariadb.com/bsl11/",
  "name": "SwitchTender",
@@ -80,7 +80,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features" class="active">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features" class="active">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/ansible-runtime">Managed Ansible runtime</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/upgrading">Upgrading</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -88,7 +88,8 @@
 <p>What SwitchTender does today. Almost all of it runs on Community, which needs no license. Six
 capabilities are licensed, and the rows below say so where they appear: directory sign-in is Pro,
 and the full policy engine, the period change register, distributed workers, creating a new
-PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
+PostgreSQL schema, and one-click drift reconcile are Team. The number of approval policies is
+licensed too: one on Community, five on Pro, and any number on Team. Tiers are at
 <a href="https://switchtender.com/pricing">https://switchtender.com/pricing</a>.</p>
 <table>
 <thead>
@@ -104,7 +105,11 @@ PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
 </tr>
 <tr>
 <td>Multi-tool</td>
-<td>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go through one engine, one UI, and one audit trail, each with a dry-run mode.</td>
+<td>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go through one engine, one UI, and one audit trail. Ansible check mode and a Terraform or OpenTofu plan preview a change. A dry run of a Bash, PowerShell, Python, or Go script only checks the script without running it, so it shows nothing about what the script would change.</td>
+</tr>
+<tr>
+<td>Managed Ansible runtime</td>
+<td><code>switchtender ansible install</code> builds a Python virtual environment beside the database and installs a pinned ansible-core release into it, checking every file pip installs against a hash the binary carries, so a server with the binary and a supported <code>python3</code> can run Ansible. Runs, inventory resolution, and doctor use it with no restart, ahead of the Ansible on the PATH, and an offline install reads a directory of wheels (<a href="/docs/ansible-runtime">Managed Ansible runtime</a>).</td>
 </tr>
 <tr>
 <td>Live view</td>
@@ -160,7 +165,11 @@ PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
 </tr>
 <tr>
 <td>Approvals</td>
-<td>Mark a run to require sign-off, or require it automatically by policy on tool, command, target, assessed risk, or who is asking. Community holds one such policy, and matching on risk or on who is asking is part of the full engine, which is Team. A held run never executes until an admin approves or rejects it. The decision is a chain entry committing a digest of the exact spec released, the executor refuses a spec that changed after the decision, and the receipt proves the approved and executed change are the same. An approver can give a reason, up to 1,000 characters, masked for known secrets and confirmed when the masker changed it, kept as audit evidence and committed so the receipt opens it offline. A rule can require one, and a reason is corrected by appending, never edited.</td>
+<td>Mark a run to require sign-off, or require it automatically by policy on tool, command, target, assessed risk, or who is asking. A run an agent token asks for is held with no policy written, its dry runs included, and its Terraform or OpenTofu apply is held twice, before it plans and again for the apply its plan proposes (<a href="/docs/policy#agent-runs-are-held-by-default">Agent runs are held by default</a>). Community holds one such policy, and matching on risk or on who is asking is part of the full engine, which is Team. A held run never executes until an admin approves or rejects it. The decision is a chain entry committing a digest of the exact spec released, the executor refuses a spec that changed after the decision, and the receipt proves the approved and executed change are the same. An approver can give a reason, up to 1,000 characters, masked for known secrets and confirmed when the masker changed it, kept as audit evidence and committed so the receipt opens it offline. A rule can require one, and a reason is corrected by appending, never edited.</td>
+</tr>
+<tr>
+<td>Approval binding</td>
+<td>An approval binds what will run, not only the request: a static, smart, or constructed inventory as snapshotted at submission, the container image by the digest its registry serves, and for a Terraform or OpenTofu apply the saved plan the apply carries out, whether a person marked the apply for approval, a rule held it, or a drift reconcile built it. At claim the executor recomputes the digest of the spec it is about to run and refuses a run that no longer matches the one approved. A dynamic inventory source binds its definition, and the outcome records the hosts it reached (<a href="/docs/threat-model">Threat model</a>).</td>
 </tr>
 <tr>
 <td>Approval steps</td>
@@ -168,7 +177,7 @@ PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
 </tr>
 <tr>
 <td>Reversibility</td>
-<td>Every run is graded on whether it can be taken back: reversible, costly, or irreversible. It is a different question from risk, and the two come apart constantly: restarting a fleet is high risk and undoes itself, while deleting a backup set reads quietly and is permanent. An Ansible run is graded from what it actually runs: the playbook's plays, tasks, and blocks, and every role, role dependency, task include, and imported playbook they pull in, installed Galaxy roles and collections included, read from the project at the commit the run executes. A Terraform or OpenTofu apply is graded from what its plan says it destroys, and a finished run from what it actually did, so a run that changed nothing has nothing to undo. An approval policy can hold on the grade, which is the rule most people want and could not write: a change nobody can take back needs a second person to agree to it. A rule with a risk or reversibility floor sends a Terraform or OpenTofu apply to be planned first, since its grade is only known once the plan has said what it destroys, and then holds or refuses the apply the plan proposes on that grade.</td>
+<td>Every run is graded on whether it can be taken back: reversible, costly, or irreversible. It is a different question from risk, and the two come apart constantly: restarting a fleet is high risk and undoes itself, while deleting a backup set reads quietly and is permanent. An Ansible run is graded from what it actually runs: the playbook's plays, tasks, and blocks, and every role, role dependency, task include, and imported playbook they pull in, installed Galaxy roles and collections included, read from the project at the commit the run executes. A Terraform or OpenTofu apply is graded from what its plan says it destroys, and a finished run from what it actually did, so a run that changed nothing has nothing to undo. An approval policy can hold on the grade, which is the rule most people want and could not write: on Team, a change nobody can take back can need a second person to agree to it, through a reversibility floor and a distinct approver. A rule with a risk or reversibility floor sends a Terraform or OpenTofu apply to be planned first, since its grade is only known once the plan has said what it destroys, and then holds or refuses the apply the plan proposes on that grade.</td>
 </tr>
 <tr>
 <td>Estate history</td>
@@ -179,8 +188,12 @@ PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
 <td>Label runs with a change and read the whole arc as one thing: <code>GET /v1/changes/{name}</code> returns every run that served one intent, its span, everyone who acted, and an outcome derived from the runs rather than declared. A rollback followed by a fix-forward reads as one mixed change, which is what really happened and what a single run can never express.</td>
 </tr>
 <tr>
-<td>Policy as code (Team past one plain rule)</td>
-<td>Point <code>--policy-file</code> at a YAML file and it becomes the source of truth for policies. A rule can hold a run for approval or deny it outright (<code>effect: deny</code>), can scope itself to agents or people (<code>actor_kind</code>), to one named principal (<code>actor</code>), or to a risk floor (<code>min_risk</code>), and can demand that the approver be someone other than the requester (<code>require_distinct_approver</code>), so an agent's authorization boundary is a reviewed diff with a commit behind it. The same file can load Rego policies, so an existing Open Policy Agent or Conftest rule ports as it is, evaluated offline against a documented input and recorded in the evidence by the digest of its exact bundle (<a href="/docs/policy">Approval policies</a>). The API refuses policy writes with a 409 that says where to make the change, and a malformed file stops the server rather than silently gating nothing.</td>
+<td>Policy as code (Pro past one plain rule, Team past five or for advanced rules)</td>
+<td>Point <code>--policy-file</code> at a YAML file and it becomes the source of truth for policies. Community holds one plain rule and Pro holds five. Deny rules, actor, account, and risk scoping, reversibility floors, distinct approvers, and Rego need Team, as does a sixth rule. A rule can hold a run for approval or deny it outright (<code>effect: deny</code>), can scope itself to agents or people (<code>actor_kind</code>), to one named principal (<code>actor</code>) or the account its token is bound to (<code>account</code>), or to a risk floor (<code>min_risk</code>), and can demand that the approver be someone other than the requester (<code>require_distinct_approver</code>), so an agent's authorization boundary is a reviewed diff with a commit behind it. With no rule written, every run an agent token asks for already waits for a person, a dry run included, an agent's Terraform or OpenTofu apply waits once before it plans and again carrying the saved plan, and a Community rule with <code>effect: exempt</code> lets named routine work through, naming the <code>account</code> an agent's token is bound to whenever it names the agent's <code>actor</code> (<a href="/docs/policy#agent-runs-are-held-by-default">Agent runs are held by default</a>). The same file can load Rego policies, so an existing Open Policy Agent or Conftest rule ports as it is, evaluated offline against a documented input and recorded in the evidence by the digest of its exact bundle (<a href="/docs/policy">Approval policies</a>). The API refuses policy writes with a 409 that says where to make the change, and a malformed file stops the server rather than silently gating nothing.</td>
+</tr>
+<tr>
+<td>Dry-run scan</td>
+<td>A rule that lets dry runs through first reads each one for the known ways a check or a plan acts for real. The gate reads the playbook and everything it pulls in for tasks that set <code>check_mode: false</code> and for <code>pipe</code> lookups, which run a command on the controller while a template renders, and the Terraform or OpenTofu configuration and every module it calls for <code>external</code> and <code>aws_lambda_invocation</code> data sources and for <code>http</code> data sources with a write method or a request body. It records what it found in <code>run.dry_run_findings</code> and holds a dry run that could act for real the way the real run would be held, as it does a dry run of a tool a plugin added, which nothing scans. The scan does not prove a preview harmless, since lookups, plugins, and providers run code too, so a rule that exempts dry runs trusts the code it lets through. An agent's dry run waits for a person whatever the scan finds, unless an exemption covers it (<a href="/docs/concepts#dry-runs-and-exclude-dry-run">Dry runs</a>).</td>
 </tr>
 <tr>
 <td>Observability</td>
@@ -188,7 +201,7 @@ PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
 </tr>
 <tr>
 <td>Tamper-evident audit</td>
-<td>Every mutation is linked into a SHA-256 hash chain. <code>GET /v1/audit/verify</code> flags the first altered or deleted entry, and a signed LoomSeal bundle proves the whole chain offline to a third party running an open verifier this project does not control. A change that cannot be recorded is refused rather than performed silently.</td>
+<td>Every mutation is linked into a hash chain of SHA-256 digests. <code>GET /v1/audit/verify</code> flags the first altered or deleted entry, and a signed LoomSeal bundle proves the whole chain offline to a third party running an open-source verifier published separately. A change that cannot be recorded is refused rather than performed silently.</td>
 </tr>
 <tr>
 <td>Anchored history</td>
@@ -197,6 +210,10 @@ PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
 <tr>
 <td>Audit receipts</td>
 <td>Every mutation other than signing in or out returns an <code>Audit-Receipt</code> header naming where it landed in the chain. <code>switchtender audit receipt</code> redeems one, so a party who holds a receipt can prove their entry was not dropped.</td>
+</tr>
+<tr>
+<td>Receipt contents</td>
+<td>A run's receipt discloses its spec, its outcome, and each approval decision and correction beside the digests the chain committed. A LoomSeal verifier from 1.7.0 on checks every one of them as carried, so a receipt edited and signed again fails in this product's verifier and in LoomSeal's alike, and a member nothing commits is reported as unchecked rather than read as verified.</td>
 </tr>
 <tr>
 <td>Evidence report (Team)</td>
@@ -220,7 +237,7 @@ PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
 </tr>
 <tr>
 <td>Change register (Team)</td>
-<td><code>switchtender audit report --from --to</code>, or the audit page's Evidence pack button, renders every change in the period with its actor, chain-recorded decision, risk grade, and outcome. That is the change-management sample a SOC 2 CC8.1 or ISO/IEC 27001 A.8.32 review asks for.</td>
+<td><code>switchtender audit report --from --to</code>, or the audit page's Evidence pack button, renders every change in the period with its actor, chain-recorded decision, risk grade, and outcome. That is the change-management sample that SOC 2 CC8.1 and ISO/IEC 27001 A.8.32 reviews ask for.</td>
 </tr>
 <tr>
 <td>Chain witness</td>
@@ -243,6 +260,10 @@ PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
 <td>Stored inventories referenced by id, materialized on whichever executor runs the play.</td>
 </tr>
 <tr>
+<td>Inventory engine</td>
+<td>Static INI, YAML, and JSON inventories, and smart inventories over them, resolve inside the binary the way Ansible's own plugins read them, quirks included, so a server without Ansible still reads them. A conformance corpus holds that reading in CI to every ansible-core minor from 2.16 to 2.21, and every Ansible run whose inventory the native engine resolved, at least in part, is checked against the executor's own <code>ansible-inventory</code> before the play starts and refused on any difference (<a href="/docs/inventories">Inventories</a>).</td>
+</tr>
+<tr>
 <td>Dynamic sources</td>
 <td>Inventory plugins and scripts refreshed into stored inventories, with cloud auth from an env credential.</td>
 </tr>
@@ -252,15 +273,15 @@ PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
 </tr>
 <tr>
 <td>Credentials</td>
-<td>Fifteen kinds: SSH keys and SSH passwords, vault passwords, become passwords and full become settings, network device logins, env bundles for cloud SDKs, API tokens and JWTs, registry logins, Kubernetes kubeconfigs, and typed AWS, Azure, GCP, VMware, and OpenStack cloud credentials, all encrypted at rest. Custom types add their own fields and inject them as environment variables, extra vars, and private files. Four federated kinds, for AWS, Google Cloud, Azure, and any OpenID Connect relying party, store nothing and hand each run a short-lived identity token instead, as <a href="/docs/federation">workload identity federation</a> describes.</td>
+<td>Fifteen kinds: SSH keys and SSH passwords, vault passwords, become passwords and full become settings, network device logins, env bundles for cloud SDKs, API tokens and JWTs, registry logins, Kubernetes kubeconfigs, and typed AWS, Azure, GCP, VMware, and OpenStack cloud credentials, all encrypted at rest. Custom types add their own fields and inject them as environment variables, extra vars, and private files. Four federated kinds, for AWS, Google Cloud, Azure, and any OpenID Connect relying party, store nothing and hand each run a short-lived identity token instead, as <a href="/docs/federation">workload identity federation</a> describes. The key that signs those tokens rotates on a fixed two-phase schedule, or at once in an emergency (<a href="/docs/federation#signing-keys">Signing keys</a>).</td>
 </tr>
 <tr>
 <td>Secret masking</td>
 <td>Credential values are redacted from run logs, live streams, and events, so a tool that echoes a secret shows <code>***</code> instead of the value.</td>
 </tr>
 <tr>
-<td>High availability (Team)</td>
-<td>Two servers on one database share the schedule without double-firing. Tokens can carry a lifetime.</td>
+<td>High availability</td>
+<td>Two servers on one PostgreSQL database share the schedule without double-firing. It has no license check of its own: creating a new PostgreSQL schema is Team, and opening one that already exists is never gated. A token can carry a lifetime (<code>token new --ttl</code>) on any tier.</td>
 </tr>
 <tr>
 <td>Git triggers</td>
@@ -268,7 +289,7 @@ PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
 </tr>
 <tr>
 <td>Pull request review</td>
-<td>A GitHub or GitLab pull request is planned at its head commit in the tool's no-change mode, and the result is posted back as one comment per template, updated on every push, with a commit status. The comment carries the plan summary, the destroy count the rules weigh, the decision the apply would get after merge, a link to the run, and the receipt. A plan a rule holds says it is waiting for approval and links to where it is approved. Each report goes out once across replicas, survives a restart, waits for the plan's outcome on the chain, and is retried when the forge fails. Applying stays in SwitchTender. See <a href="/docs/pull-request-review">pull request review</a>.</td>
+<td>A GitHub or GitLab pull request is planned at its head commit in the tool's no-change mode, and the result is posted back as one comment per template, updated on every push, with a commit status. The comment carries the plan summary, the destroy count the rules weigh, the decision the apply would get after merge, a link to the run, and the receipt. A plan a rule holds says it is waiting for approval and links to where it is approved. Each report goes out once across replicas, survives a restart, waits for the plan's outcome on the chain, and is retried when the forge fails. A person whose GitHub or GitLab account is linked through OAuth, by its numeric id, can comment <code>/switchtender plan</code> or <code>/switchtender apply</code>, which acts as their SwitchTender account with the same role, grants, and separation of duties as the queue. A bot, a comment GitHub marks as an app's, and a fork's pull request are refused. An apply approves exactly the plan id the comment names, or the head's only plan when it was reported before the comment was written, after reading the comment back from the forge. The decision's chain entry records the forge, the comment's and author's ids, the SHA-256 of the comment body, and the plan it approved, and the run's receipt discloses them. See <a href="/docs/pull-request-review">pull request review</a>.</td>
 </tr>
 <tr>
 <td>Surveys</td>
@@ -287,6 +308,10 @@ PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
 <td>One action re-runs only the hosts a finished run left failed or unreachable, targeted at exactly that set, so a partial outage is closed without repeating the hosts that already succeeded.</td>
 </tr>
 <tr>
+<td>Provisioning callbacks</td>
+<td>A template with <code>allow_callbacks</code> on lets a host in its inventory launch it against itself by posting a key, which is AWX's provisioning callback: matched to the caller by AWX's rules, limited to that host, gated by the same policies, and written to the audit chain before the run exists. A template imported from AWX also answers at its AWX callback address once the import knows its AWX id (<a href="/docs/tool-ansible#provisioning-callbacks">Provisioning callbacks</a>).</td>
+</tr>
+<tr>
 <td>Worker queues (Team)</td>
 <td>Target a run at a named queue. A worker serving that queue runs it and default workers leave it alone. Pin a queue on a run, a template, or an inventory, most specific wins, so queues work like AWX instance groups. A queue is grantable as <code>queue:&lt;name&gt;</code> and matchable in a policy, so choosing one is access-controlled on both sides rather than only on the worker's.</td>
 </tr>
@@ -296,7 +321,7 @@ PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
 </tr>
 <tr>
 <td>Execution environments</td>
-<td>A template, run, or project pins a container image and its runs execute inside it, with their own tool and system dependencies, for any of the seven tools. The most specific wins: run, then template, then project. Private registries pull with a stored credential.</td>
+<td>A template, run, or project pins a container image and its runs execute inside it, with their own tool and system dependencies, for any of the seven tools. The most specific wins: run, then template, then project. Private registries pull with a stored credential. It is off until <code>--allow-container-ee</code> turns it on, and the host needs Docker or Podman.</td>
 </tr>
 <tr>
 <td>Teams and grants</td>
@@ -308,7 +333,7 @@ PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
 </tr>
 <tr>
 <td>Backup and restore</td>
-<td>One encrypted file holds the whole control plane: credentials, projects, templates, inventories, schedules, triggers, notification targets, and access. Sealed with the deployment key, so it is confidential and tamper-evident, and it restores into either SQLite or Postgres.</td>
+<td>One encrypted file holds the whole control plane: credentials, projects, templates, inventories, schedules, triggers, notification targets, and access. Sealed with the deployment key, so it is confidential and tamper-evident, and it restores into either SQLite or Postgres. Forge account links stay out of it, so each person links again after a restore (<a href="/docs/backup">Backup and restore</a>).</td>
 </tr>
 <tr>
 <td>Retention</td>
@@ -336,7 +361,7 @@ PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
 </tr>
 <tr>
 <td>ntfy</td>
-<td>A notification publishes to an ntfy topic when a run finishes or is held for approval, at raised priority for a failure or a hold, with optional token auth for a protected topic.</td>
+<td>A notification publishes to the configured ntfy topic when a run finishes or is held for approval, at raised priority for a failure or a hold, with optional token auth for a protected topic.</td>
 </tr>
 <tr>
 <td>PagerDuty</td>
@@ -400,7 +425,7 @@ PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
 </tr>
 <tr>
 <td>Schedule timezones</td>
-<td>A schedule reads its cron expression in an IANA timezone such as <code>America/New_York</code>, following that zone's daylight-saving shifts, so a nightly window stays put across the year instead of drifting with the server clock. On the day a zone falls back the repeated hour fires once, not twice, and on the day it springs forward a slot inside the hour that never happens fires at the instant the clocks jumped, so a nightly job runs every night of the year.</td>
+<td>A schedule reads its cron expression in an IANA timezone such as <code>America/New_York</code>, following that zone's daylight-saving shifts, so a nightly window stays put across the year instead of drifting with the server clock. A schedule created without a zone is given the server's zone by name, and one an earlier release stored without a zone runs in UTC (<a href="/docs/upgrading#schedules-with-no-time-zone-run-in-utc">Upgrading</a>). On the day a zone falls back the repeated hour fires once, not twice, and on the day it springs forward a slot inside the hour that never happens fires at the instant the clocks jumped, so a nightly job runs every night of the year.</td>
 </tr>
 <tr>
 <td>Schedule recurrences</td>
@@ -446,14 +471,16 @@ notification templates and their attachments across, an organization's own inclu
 <li>Each run's notifications reach a target in the run's event order. A failed one is retried, then
 kept as failed on the run, on the target, and in the doctor, and the next one still goes with a
 note saying an earlier one failed. The Notifications page shows each target's delivery status and
-what it still needs.</li>
+what it still needs. Each delivery is queued in the database in the same write that records its
+event, so a server that stops leaves it for the next server to make rather than losing it.</li>
 <li>The overview charts runs per day, and every outcome tick in fleet health links to its run.</li>
 </ul>
 <h2 id="run-provenance-and-search">Run provenance and search</h2>
 <ul>
-<li>Every run records what fired it: the API, a template, a schedule, a rerun, a drift fix, or a
-proposal, along with the authenticated actor and the object behind it. The runs list shows an
-Origin column that links back to the template, schedule, or earlier run.</li>
+<li>Every run records what fired it: the API, a template, a schedule, a webhook trigger, a rerun, a
+drift fix, a proposal, or a pull request review, along with the authenticated actor and the object
+behind it. The runs list shows an Origin column that links back to the template, schedule, or
+earlier run.</li>
 <li>A rerun records the run it replayed, so lineage survives across repeated executions.</li>
 <li>Runs carry labels, arbitrary key values such as env=prod or ticket=OPS-123, set at launch and
 clickable in the list to filter by that pair.</li>

@@ -36,7 +36,7 @@ type Record struct {
 	// the pull request, the commit, and the reason, so a redelivered webhook finds the record its
 	// first delivery made.
 	ID string
-	// Kind is plan, refusal, fork, or no_hosts.
+	// Kind is plan, refusal, fork, no_hosts, command, or reply.
 	Kind string
 	// RunID is the plan run, empty for a refusal.
 	RunID string
@@ -229,6 +229,11 @@ type Store interface {
 	// the claim produced, and reports whether it landed. A false means the claim lapsed and another
 	// process took the record, so nothing was written.
 	Settle(ctx context.Context, rec *Record, version int64) (bool, error)
+	// PruneComments removes the records comment commands leave behind, the marks of comments acted
+	// on and the replies already done, that were made before before, and reports how many it
+	// removed. A comment older than the window a command acts in is refused anyway, so its mark is
+	// no longer needed to stop it acting twice.
+	PruneComments(ctx context.Context, before time.Time) (int, error)
 }
 
 // memStore is an in-memory Store guarded by a mutex. It serves a single process: a server with no
@@ -320,6 +325,26 @@ func (m *memStore) Settle(_ context.Context, rec *Record, version int64) (bool, 
 	}
 	applySettle(r, rec)
 	return true, nil
+}
+
+// PruneComments removes the command marks and done replies made before before.
+func (m *memStore) PruneComments(_ context.Context, before time.Time) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for id, r := range m.records {
+		if prunable(r) && r.CreatedAt.Before(before) {
+			delete(m.records, id)
+			n++
+		}
+	}
+	return n, nil
+}
+
+// prunable reports whether r is a record a comment command left that PruneComments may remove: a
+// command mark, or a reply that is done.
+func prunable(r *Record) bool {
+	return r.Kind == KindCommand || (r.Kind == KindReply && r.Done)
 }
 
 // applySettle copies what a settle writes from rec onto stored, releases the claim, and moves the

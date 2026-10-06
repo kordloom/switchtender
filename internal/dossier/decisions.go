@@ -60,6 +60,9 @@ type reasonRow struct {
 	Correction bool
 	// SoD is the separation-of-duties line for a decision on an agent's run.
 	SoD string
+	// Comment says which pull request comment the decision was made from, empty for a decision
+	// made any other way.
+	Comment string
 }
 
 // identityView is an agent-initiated run's identity evidence as the dossier renders it.
@@ -124,7 +127,23 @@ func reasonRowOf(rec *decision.Record) reasonRow {
 	if s := rec.SeparationOfDuties; s != nil {
 		row.SoD = sodSentence(s)
 	}
+	if c := rec.Comment; c != nil {
+		row.Comment = commentSentence(c)
+	}
 	return row
+}
+
+// commentSentence says which pull request comment a decision was made from, by the forge's numeric
+// ids and the SHA-256 of the body the webhook delivered, which an edit to the comment cannot
+// change.
+func commentSentence(c *decision.Comment) string {
+	what := "pull request"
+	if c.Forge == "gitlab" {
+		what = "merge request"
+	}
+	return fmt.Sprintf("Decided from a %s comment: %s %s %s #%d, comment %d by %s account %d, "+
+		"body SHA-256 %s.", what, c.Forge, c.APIURL, c.Repository, c.PullRequest, c.CommentID,
+		c.Forge, c.AuthorID, c.BodySHA256)
 }
 
 // sodSentence says how separation of duties applied to a decision on an agent's run.

@@ -312,10 +312,11 @@ type Run struct {
 	// before this was recorded.
 	PolicySet *PolicySet `json:"policy_set,omitempty"`
 	// PinnedCommit is the commit this run is only allowed to execute. It is set when a run stands in
-	// for work already judged at a known revision, which today means the apply a plan gate proposes:
-	// the approver read that plan, so releasing an apply of different code would be a substitution
-	// nothing in the record shows. The executor compares it against what the project sync produced and
-	// refuses a mismatch. Empty on an ordinary run, which runs whatever the branch holds.
+	// for work already judged at a known revision: the apply a plan gate proposes, whose plan the
+	// approver read, and any git-backed run held for approval, pinned when it is held. Releasing
+	// different code would be a substitution nothing in the record shows. The executor compares it
+	// against what the project sync produced and refuses a mismatch. Empty on a run never held, which
+	// runs whatever the branch holds.
 	PinnedCommit string `json:"pinned_commit,omitempty"`
 	// GitRef is the git reference the project sync fetches this run's commit from instead of the
 	// project's branch, such as refs/pull/12/head for a GitHub pull request or
@@ -466,6 +467,13 @@ type Run struct {
 	// compares this: separation of duties keyed on the name alone let the same person submit with a
 	// token and approve in a browser.
 	ActorUserID string `json:"actor_user_id,omitempty"`
+	// Account is the username of the account the credential that requested the run is bound to: the
+	// person behind a token or a browser session, or the account an agent's token acts for. A
+	// policy's account criterion matches it, so it is carried to every run derived from the
+	// request: a shard, a workflow step, and the apply a plan proposes copy it, and a retry, a
+	// rerun, or a relaunch takes it from the request that asked for it. Empty when no account stands
+	// behind the request, such as a schedule, a webhook, or a token bound to no account.
+	Account string `json:"account,omitempty"`
 	// ActorType is how the requesting actor authenticated, in the audit chain's vocabulary: agent
 	// for an AI agent's token, session for a signed-in person, token for an owner-held API token,
 	// cli for the command line, webhook for a trigger. Empty when the server does not know. It is
@@ -926,6 +934,12 @@ func WithGitRef(ref string) SubmitOption {
 // WithActorAccount records the account behind the credential that fired the run. See Run.ActorUserID.
 func WithActorAccount(userID string) SubmitOption {
 	return func(r *Run) { r.ActorUserID = userID }
+}
+
+// WithAccount records the username of the account behind the credential that fired the run. See
+// Run.Account.
+func WithAccount(name string) SubmitOption {
+	return func(r *Run) { r.Account = name }
 }
 
 // WithActorType stamps how the requesting actor authenticated, so a policy can tell an agent's

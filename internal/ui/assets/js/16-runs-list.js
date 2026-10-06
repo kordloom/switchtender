@@ -439,8 +439,10 @@ function typeCellEl(r) {
 		cell.appendChild(chip);
 	}
 	// A run a policy noted went ahead past a warning, so it is marked where runs are scanned rather
-	// than only on its own page, and the mark names the first warning.
-	const notes = Array.isArray(r.policy_notes) ? r.policy_notes : [];
+	// than only on its own page, and the mark names the first warning. What the built-in agent hold
+	// did is recorded beside the notes and is not a warning, so it does not mark the run.
+	const notes = (Array.isArray(r.policy_notes) ? r.policy_notes : [])
+		.filter((n) => !isAgentHoldNote(n));
 	for (const kind of [r.kind === "split" ? "split" : "", (r.kind === "pipeline" || stepped) ? "pipeline" : "", r.dry_run ? "dry" : "", notes.length ? "noted" : ""]) {
 		if (!kind) continue;
 		const tag = document.createElement("span");
@@ -660,3 +662,11 @@ function countUp(el, value) {
 	requestAnimationFrame(step);
 }
 
+// isAgentHoldNote reports whether a note records what the built-in agent hold did to a run an agent
+// asked for, held by default or let through by an exemption, rather than a warning a policy noted.
+// The server writes both into the run's notes so a receipt carries them, and the pages show them
+// apart, since the hold is not a warning and a held run did not go ahead past it.
+function isAgentHoldNote(note) {
+	return typeof note === "string" && (note.startsWith("requested by an agent,") ||
+		note.startsWith("requested by an agent bound to account "));
+}

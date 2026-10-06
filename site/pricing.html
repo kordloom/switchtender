@@ -4,10 +4,10 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Pricing | SwitchTender</title>
-	<meta name="description" content="Automation is free. Audit season is not. Running every tool and proving what ran cost nothing, on any number of hosts. You pay for directory sign-in, more than one approval policy, active-active HA, and the period change register assembled from your real run history.">
+	<meta name="description" content="Automation is free. Audit season is not. Running every tool and proving what ran cost nothing, on any number of hosts. You pay for directory sign-in, more than one approval rule, creating the PostgreSQL schema that active-active HA runs on, and the period change register assembled from your real run history.">
 	<link rel="canonical" href="https://switchtender.com/pricing">
 	<meta property="og:title" content="Pricing | SwitchTender">
-	<meta property="og:description" content="Automation is free. Audit season is not. Running every tool and proving what ran cost nothing, on any number of hosts. You pay for directory sign-in, more than one approval policy, active-active HA, and the period change register assembled from your real run history.">
+	<meta property="og:description" content="Automation is free. Audit season is not. Running every tool and proving what ran cost nothing, on any number of hosts. You pay for directory sign-in, more than one approval rule, creating the PostgreSQL schema that active-active HA runs on, and the period change register assembled from your real run history.">
 	<meta property="og:type" content="website">
 	<meta property="og:url" content="https://switchtender.com/pricing">
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
@@ -140,18 +140,18 @@
  "applicationCategory": "DeveloperApplication",
  "description": "The control plane for infrastructure automation. Every change it runs, whether from a person, a schedule, or an AI agent, passes one governed path of request, policy, and approval, and leaves a cryptographically signed receipt that can be verified offline without the vendor. It does not claim every change to your infrastructure went through it: anyone holding their own SSH key can change a host behind it. Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go from a single self-hosted Go binary, agentless over SSH.",
  "featureList": [
-  "Agentless: reaches managed hosts over SSH with nothing installed on them",
+  "Agentless: reaches managed hosts over SSH with no SwitchTender agent installed on them",
   "Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go",
   "Reads secrets from HashiCorp Vault (KV v1 and v2, and dynamic secrets minted per run and revoked when it ends), AWS Secrets Manager, Azure Key Vault, Google Secret Manager, CyberArk (Conjur and CCP), and 1Password",
   "Per-object access grants: read, use, or manage on one project, template, inventory, or credential, layered over global roles",
-  "Single sign-on through OIDC, SAML, LDAP, and JWT",
+  "Single sign-on through OIDC, SAML, LDAP, and JWT, on the Pro tier",
   "Pipelines with a dependency graph and parallel branches, built in a drag-and-drop editor",
   "Approval gates enforced by policy before a run executes",
   "Tamper-evident hash-chained audit trail a third party can verify offline",
   "Live host-by-task matrix and per-host history across runs",
   "Drift detection from a dry run",
-  "One static Go binary and one SQLite file, with PostgreSQL optional",
-  "One-command import from AWX, Ansible Automation Platform, Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab"
+  "One static Go binary and one SQLite file, with PostgreSQL optional, where creating a new schema is on the Team tier",
+  "One-command import from AWX-format exports (AWX, Tower, and Automation Controller), Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab"
  ],
  "license": "https://mariadb.com/bsl11/",
  "name": "SwitchTender",
@@ -213,7 +213,7 @@
 				Every run leaves evidence anyone can verify offline: a tamper-evident chain, a signed
 				receipt, and an open verifier that never contacts us. That part is free forever, with
 				no host cap, no seat cap, and no expiry. You pay when an organization has to answer
-				for the work: directory sign-in, more than one approval policy, active-active HA, distributed
+				for the work: directory sign-in, more than one approval policy, a new PostgreSQL schema, distributed
 				workers, and the period change register assembled from your real run history. One
 				binary, four tiers, and a signed license the binary checks offline, so nothing ever
 				phones home.
@@ -239,11 +239,11 @@
 							<li>Live host-by-task matrix, balanced splits, fleet memory, and drift detection</li>
 							<li>Drag-and-drop workflow editor, pipelines, schedules, webhooks, notifications</li>
 							<li>Local users with roles, organizations, and teams</li>
-							<li><b>One approval policy</b>, digest-bound: a held run is approved as the exact content the approver saw</li>
+							<li><b>One plain rule</b>, either a require-approval policy or one exemption, with every approval digest-bound: a held run is approved as the exact content the approver saw</li>
 							<li>The full evidence engine: hash chain, RFC 3161 anchoring, signed per-run receipts, the run dossier, and offline verification with the open verifier</li>
 							<li>Sealed credentials with secrets masking in logs</li>
-							<li>The <b>MCP agent gate</b>: an AI agent gets one operator-bound token and can only propose runs through the same approvals a person faces</li>
-							<li>Advisory AI, read-only; community support on GitHub</li>
+							<li>The <b>MCP agent gate</b>: an AI agent gets one operator-bound token, its runs wait for a person's approval with no policy written, unless <a href="/docs/policy#agent-runs-are-held-by-default" style="color: var(--accent);">a rule with <code>effect: exempt</code></a> covers them, and it can never approve one</li>
+							<li>Advisory AI that can propose a run and never runs one, and community support on GitHub</li>
 						</ul>
 					</div>
 				</article>
@@ -258,7 +258,7 @@
 						<a class="ghost" href="mailto:licensing@switchtender.com?subject=Buy%20SwitchTender%20Pro">Buy Pro</a>
 					</div>
 					<div class="tier-body">
-						<div class="tier-payoff">Community gates changes with one policy, which is one sentence about your whole estate. Pro is for when production needs a rule of its own, and people should sign in from the directory you already run. <b>A lapsed license takes nothing</b>: sign-in falls back to local accounts, and your data, evidence, and every Community feature keep working.</div>
+						<div class="tier-payoff">Community gives you the built-in hold on agent runs and one rule of your own, and one rule is one sentence about your whole estate. Pro is for when production needs a rule of its own, and people should sign in from the directory you already run. <b>A lapsed license takes nothing</b>: sign-in falls back to local accounts, and your data, evidence, and every Community feature keep working.</div>
 						<p class="tier-inherit">Everything in Community, plus:</p>
 						<ul class="tier-list">
 							<li><b>Five approval policies</b> instead of one, so production, Terraform, and a risky command can each have a rule of their own where one rule has to choose. Deny rules, risk and reversibility floors, separation of duties, and agent scoping are the full engine, in Team</li>
@@ -283,12 +283,12 @@
 						<ul class="tier-list">
 							<li><b>The period change register</b>: evidence relevant to SOC 2 CC8.1 and ISO 27001 A.8.32, assembled from your real run history</li>
 							<li><b>The full policy engine</b>: unlimited policies, outright denials, risk floors, separation of duties, agent-scoped rules, and Rego (Open Policy Agent) policies</li>
-							<li><b>PostgreSQL</b> and active-active <b>HA</b></li>
+							<li><b>Creating a new PostgreSQL schema</b>, the shared database active-active <b>HA</b> runs on. Opening one that already exists is never gated</li>
 							<li><b>Distributed workers</b> and queues, for fleets one machine cannot reach</li>
 							<li><b>One-click drift reconcile</b>, from detection to a held, approvable fix</li>
 							<li><b>Support with a clock on it</b>: a Severity 1 report, production runs blocked with no workaround, gets an engineer's first response within one business day. Severities and clocks are <a href="/terms#support" style="color: var(--accent);">defined in the terms</a>, not implied</li>
 						</ul>
-						<p class="fineprint" style="margin-top:12px;">A signed license file, verified offline by the binary you already run. Thirty-day trial from an email, no card. Purchase by invoice, net 30, and the signed license usually lands within hours. <b>A lapsed license takes nothing</b>: paid features stop, and your data, evidence, and every Community feature keep working.</p>
+						<p class="fineprint" style="margin-top:12px;">A signed license file, verified offline by the binary you already run. Thirty-day trial from an email, no card. Purchase by invoice, net 30, and the signed license usually lands within hours. <b>A lapsed license takes nothing</b>: paid features stop, apart from the few the FAQ names, and your data, evidence, and every Community feature keep working.</p>
 						<p class="fineprint"><b>Hosted witness add-on</b>, $3,000 a year, flat per org: a KordLoom-operated witness, outside your install, records and signs the chain heads and counters it observes. It receives no run content, host names, credentials, or personal data. Scoped on the order form.</p>
 					</div>
 				</article>
@@ -371,13 +371,13 @@
 			<div class="assurance reveal">
 				<div>
 					<h3>What is free today stays free</h3>
-					<p>The Community tier as published at launch never shrinks. We add paid features; we
+					<p>The Community tier as published at launch never shrinks. We add paid features, and we
 					never move a Community feature behind the key.</p>
 				</div>
 				<div>
 					<h3>A lapsed license takes nothing</h3>
 					<p>Data, evidence, receipts, and every Community feature keep working. Paid features
-					stop. Nothing is deleted, locked, or held for ransom, and dropping to Community needs no
+					stop, apart from the few the FAQ below names. Nothing is deleted, locked, or held for ransom, and dropping to Community needs no
 					restart.</p>
 				</div>
 				<div>
@@ -458,7 +458,7 @@
 				</details>
 				<details>
 					<summary>What happens when a license lapses?</summary>
-					<p>Paid features stop at their next license check, with no restart, and nothing is deleted, locked, or held. Your data, your evidence, your receipts, and every Community feature keep working, and a database you initialized on PostgreSQL stays fully usable forever. Two things deliberately keep going. Approval policies keep enforcing, advanced rules included, because a gate that opened on the day a term lapsed would release the runs it was written to hold. Directory sign-in stays on until the server next starts, then falls back to local accounts. We built the gate so that it cannot hold your data hostage even if we wanted it to.</p>
+					<p>Paid features stop at their next license check, with no restart, and nothing is deleted, locked, or held. Your data, your evidence, your receipts, and every Community feature keep working, and a database you initialized on PostgreSQL stays fully usable forever. A few things deliberately keep going. Approval policies keep enforcing, advanced rules included, because a gate that opened on the day a term lapsed would release the runs it was written to hold. Directory sign-in stays on until the server next starts, then falls back to local accounts. The policy file still reloads, so rules the API would refuse on a lapsed license can still be added there, and servers already sharing a PostgreSQL schema keep sharing it. We built the gate so that it cannot hold your data hostage even if we wanted it to.</p>
 				</details>
 				<details>
 					<summary>What support comes with each tier?</summary>
@@ -482,7 +482,7 @@
 				<details>
 					<summary>What exactly is the license file?</summary>
 					<p>A small signed JSON document. The binary carries our public key and verifies the
-					signature offline; nothing is fetched, ever. Install it with
+					signature offline. Nothing is fetched, ever. Install it with
 					<code>switchtender license install</code>, see where you stand with
 					<code>switchtender license status</code>. No license server, no activation, no
 					phone-home, and losing internet changes nothing.</p>
@@ -509,7 +509,7 @@
 
 		<section class="cta wrap reveal">
 			<h2>Leave AWX on Community. License Team the week the org grows into it.</h2>
-			<p>One binary either way, and the proofs are free forever. Team is an email and a signed file away; Enterprise is a conversation. If you need off AWX in a hurry, ask about the Migration Program.</p>
+			<p>One binary either way, and the proofs are free forever. Team is an email and a signed file away. Enterprise is a conversation. If you need off AWX in a hurry, ask about the Migration Program.</p>
 			<div class="hero-cta center">
 				<a class="btn big" href="/get-started">Get started</a>
 				<a class="ghost big" href="https://demo.switchtender.com/ui/runs?status=pending_approval">Live demo</a>

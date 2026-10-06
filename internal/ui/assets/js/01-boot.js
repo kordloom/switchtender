@@ -88,6 +88,7 @@ const NAV_GROUPS = [
 		{ key: "audit", href: "/ui/audit", label: "Audit", desc: "Tamper-evident change log", admin: true },
 		{ key: "policies", href: "/ui/policies", label: "Policies", desc: "Approval rules", admin: true },
 		{ key: "doctor", href: "/ui/doctor", label: "Doctor", desc: "Reference health checks", admin: true },
+		{ key: "links", href: "/ui/links", label: "Linked accounts", desc: "Your forge accounts" },
 	] },
 	{ label: "Help", items: [
 		{ key: "docs", href: "/ui/docs", label: "Docs", desc: "Guides and reference" },

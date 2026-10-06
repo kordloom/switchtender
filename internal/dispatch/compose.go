@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/ansibleruntime"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -150,6 +151,7 @@ func (d *Dispatcher) compose(ctx context.Context, inv *inventory.Inventory, acce
 	pinned *run.InventoryResolution) (*composed, error) {
 	ctx, cancel := context.WithTimeout(ctx, composeTimeout)
 	defer cancel()
+	ctx = d.bindAnsible(ctx)
 	inputs, err := d.composeInputs(ctx, inv, access, pinned)
 	if err != nil {
 		return nil, err
@@ -209,6 +211,7 @@ func (d *Dispatcher) compose(ctx context.Context, inv *inventory.Inventory, acce
 	}
 	if ansibleCore != "" {
 		res.Engine, res.AnsibleCore = inventory.EngineAnsible, ansibleCore
+		res.AnsibleSource = d.ansibleSourceFor(ctx)
 	}
 	if pinned != nil {
 		res.Inputs = slices.Clone(pinned.Inputs)
@@ -297,21 +300,61 @@ func (d *Dispatcher) composeInputs(ctx context.Context, inv *inventory.Inventory
 }
 
 // needsAnsibleError says that resolving what is named needs Ansible, why, and how to install it.
-func needsAnsibleError(what, why string) error {
+func (d *Dispatcher) needsAnsibleError(what, why string) error {
 	return fmt.Errorf("%w: %w: %s needs Ansible because %s, and ansible-inventory is not installed "+
 		"on this server. Install it with: %s", inventory.ErrResolve, inventory.ErrNeedsAnsible, what,
-		why, inventory.AnsibleInstallHint)
+		why, d.installHint())
+}
+
+// AnsibleCommands reports where this process's Ansible commands come from, a configured directory,
+// the managed runtime, or PATH, and false when its runner cannot say.
+func (d *Dispatcher) AnsibleCommands() (ansibleruntime.Commands, bool) {
+	r, ok := d.runner.(roundhouse.AnsibleCommandsReporter)
+	if !ok {
+		return ansibleruntime.Commands{}, false
+	}
+	return r.AnsibleCommands(), true
+}
+
+// installHint returns the line that installs Ansible for this process, naming the managed
+// runtime's directory it looks in.
+func (d *Dispatcher) installHint() string {
+	c, _ := d.AnsibleCommands()
+	return inventory.AnsibleInstallHintFor(c.Root)
+}
+
+// bindAnsible binds the host's Ansible, located once, to ctx, so every Ansible command started for
+// the work ctx carries, and the source its evidence records, name the same one whatever an install
+// or remove does meanwhile. A context with one bound already keeps it.
+func (d *Dispatcher) bindAnsible(ctx context.Context) context.Context {
+	if _, ok := roundhouse.AnsibleCommandsFrom(ctx); ok {
+		return ctx
+	}
+	cmds, ok := d.AnsibleCommands()
+	if !ok {
+		return ctx
+	}
+	return roundhouse.WithAnsibleCommands(ctx, cmds)
+}
+
+// ansibleSourceFor returns where the Ansible bound to ctx comes from, as a run's evidence names it,
+// and empty when none is bound.
+func (d *Dispatcher) ansibleSourceFor(ctx context.Context) string {
+	if cmds, ok := roundhouse.AnsibleCommandsFrom(ctx); ok {
+		return cmds.Source
+	}
+	return ""
 }
 
 // ansibleCore returns the server's ansible-core version, or a needsAnsibleError naming what needs
 // it when Ansible is not installed.
 func (d *Dispatcher) ansibleCore(ctx context.Context, what, why string) (string, error) {
 	if d.invLister == nil || d.ansibleCoreReporter == nil {
-		return "", needsAnsibleError(what, why)
+		return "", d.needsAnsibleError(what, why)
 	}
 	v, err := d.ansibleCoreReporter.AnsibleCoreVersion(ctx)
 	if errors.Is(err, roundhouse.ErrAnsibleMissing) {
-		return "", needsAnsibleError(what, why)
+		return "", d.needsAnsibleError(what, why)
 	}
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", inventory.ErrResolve, err)

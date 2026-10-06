@@ -116,10 +116,13 @@ rests on.
 The agent holds one credential: a scoped SwitchTender token. It holds no SSH keys and no cloud
 credentials; those are injected by the executor at run time and never pass through the agent. The
 token is operator-bound, so the agent can propose runs and launch what policy allows, and it cannot
-approve anything, touch identity or secrets, or read the audit surface. Every action it takes is
+approve anything, touch identity or secrets, or read the audit surface. Every run it asks for waits
+for a person's approval unless a rule with `effect: exempt` covers it, as [agent runs are held by
+default](policy.md#agent-runs-are-held-by-default) describes, and it cannot write a schedule, a
+trigger, or a template that would launch one later under another name. Every action it takes is
 chained with its actor type recorded, and with the human it acted for named when one delegated. A
-high-risk change it proposes is held by the same rules that hold a human's, decided by a human
-admin the agent cannot be.
+high-risk change it proposes is held by the same rules that hold a human's, decided by a human admin
+the agent cannot be.
 
 ### A reader who does not trust this server
 

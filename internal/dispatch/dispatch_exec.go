@@ -400,6 +400,11 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	allSecrets = append(allSecrets, ownSecrets...)
 	mask.set(allSecrets)
 
+	// The run's Ansible is located once, here, so its inventory reads, its play, and its evidence all
+	// name the same one, whatever an install or remove does while it runs.
+	if spec.Image == "" && run.NormalizeTool(r.Tool) == run.ToolAnsible {
+		ctx = d.bindAnsible(ctx)
+	}
 	// A dynamic inventory source is resolved here, once, with the run's environment, and the play is
 	// handed exactly that resolution, so the hosts the outcome records are the hosts the play reached.
 	dynSecrets, err := d.resolveDynamicSnapshot(ctx, r, &spec, mask.redactString)

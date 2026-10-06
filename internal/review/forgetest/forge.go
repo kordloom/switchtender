@@ -31,10 +31,112 @@ type Comment struct {
 	Number int
 	// Author is the account that posted it.
 	Author string
+	// AuthorID is the numeric id of the account that posted it, zero for the token's own.
+	AuthorID int64
 	// Body is its current text.
 	Body string
 	// Edits counts how many times it was updated in place.
 	Edits int
+	// CreatedAt is when it was posted.
+	CreatedAt time.Time
+}
+
+// Hold records a comment a person posted on pull request number, with the forge's numeric comment
+// id and the author's numeric id, so a comment command's webhook names a comment the forge holds.
+func (f *Forge) Hold(number int, id, authorID int64, body string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.comments = append(f.comments, &Comment{ID: id, Number: number,
+		Author: "account-" + strconv.FormatInt(authorID, 10), AuthorID: authorID, Body: body,
+		CreatedAt: time.Now().UTC()})
+}
+
+// SetCommentCreated changes when comment id was written, for a test of how old a comment may be or
+// of which plan its author could have read.
+func (f *Forge) SetCommentCreated(id int64, at time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, c := range f.comments {
+		if c.ID == id {
+			c.CreatedAt = at
+		}
+	}
+}
+
+// SetCommentBody changes the body of comment id, as an edit on the forge does.
+func (f *Forge) SetCommentBody(id int64, body string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, c := range f.comments {
+		if c.ID == id {
+			c.Body = body
+		}
+	}
+}
+
+// held returns a copy of comment id on pull request number, or nil.
+func (f *Forge) held(number int, id int64) *Comment {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, c := range f.comments {
+		if c.ID == id && c.Number == number {
+			cp := *c
+			return &cp
+		}
+	}
+	return nil
+}
+
+// commentGitHub answers a GitHub issue comment read by id.
+func (f *Forge) commentGitHub(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(r.PathValue("b"), 10, 64)
+	f.mu.Lock()
+	var found *Comment
+	for _, c := range f.comments {
+		if c.ID == id {
+			cp := *c
+			found = &cp
+		}
+	}
+	f.mu.Unlock()
+	if found == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id": found.ID, "body": found.Body, "created_at": found.CreatedAt,
+		"issue_url": f.Server.URL + "/api/v3/repos/" + f.Repository + "/issues/" +
+			strconv.Itoa(found.Number),
+		"user":                     map[string]any{"id": found.AuthorID, "type": "User"},
+		"performed_via_github_app": nil,
+	})
+}
+
+// issuesGitHub routes a GitHub read under issues: a comment by id, or a pull request's comments.
+func (f *Forge) issuesGitHub(w http.ResponseWriter, r *http.Request) {
+	if r.PathValue("a") == "comments" {
+		f.commentGitHub(w, r)
+		return
+	}
+	if r.PathValue("b") != "comments" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
+		return
+	}
+	r.SetPathValue("n", r.PathValue("a"))
+	f.listGitHub(w, r)
+}
+
+// noteGitLab answers a GitLab merge request note read by id.
+func (f *Forge) noteGitLab(w http.ResponseWriter, r *http.Request) {
+	number, _ := strconv.Atoi(r.PathValue("n"))
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	c := f.held(number, id)
+	if c == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"message": "404 Not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"id": c.ID, "body": c.Body, "system": false,
+		"created_at": c.CreatedAt, "author": map[string]any{"id": c.AuthorID}})
 }
 
 // Status is a commit status the fake was sent.
@@ -89,6 +191,104 @@ type Forge struct {
 	requests int
 	// delay holds every request before it is answered, so two processes reporting at once overlap.
 	delay time.Duration
+	// forks holds the pull requests whose head lives in a fork.
+	forks map[int]bool
+	// bots holds the account ids the forge marks as bots.
+	bots map[int64]bool
+	// closed holds the pull requests that are closed.
+	closed map[int]bool
+	// authors maps a pull request number to the numeric id of the account that opened it.
+	authors map[int]int64
+}
+
+// SetAuthor records the numeric id of the account that opened pull request number.
+func (f *Forge) SetAuthor(number int, id int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.authors == nil {
+		f.authors = map[int]int64{}
+	}
+	f.authors[number] = id
+}
+
+// author returns the numeric id of the account that opened pull request number, zero when unset.
+func (f *Forge) author(number int) int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.authors[number]
+}
+
+// SetClosed marks pull request number as closed, or open again.
+func (f *Forge) SetClosed(number int, closed bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed == nil {
+		f.closed = map[int]bool{}
+	}
+	f.closed[number] = closed
+}
+
+// state returns the provider's word for pull request number's state.
+func (f *Forge) state(number int) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	switch {
+	case f.closed[number]:
+		return "closed"
+	case f.Provider == "gitlab":
+		return "opened"
+	default:
+		return "open"
+	}
+}
+
+// SetFork marks pull request number as coming from a fork, or not.
+func (f *Forge) SetFork(number int, fork bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.forks == nil {
+		f.forks = map[int]bool{}
+	}
+	f.forks[number] = fork
+}
+
+// SetBot marks the account with numeric id as a bot, or not.
+func (f *Forge) SetBot(id int64, bot bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.bots == nil {
+		f.bots = map[int64]bool{}
+	}
+	f.bots[id] = bot
+}
+
+// fork reports whether pull request number comes from a fork.
+func (f *Forge) fork(number int) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.forks[number]
+}
+
+// account answers an account read by numeric id with whether the forge marks it as a bot, in the
+// field and vocabulary the provider uses.
+func (f *Forge) account(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
+		return
+	}
+	f.mu.Lock()
+	bot := f.bots[id]
+	f.mu.Unlock()
+	if f.Provider == "gitlab" {
+		writeJSON(w, http.StatusOK, map[string]any{"id": id, "bot": bot})
+		return
+	}
+	kind := "User"
+	if bot {
+		kind = "Bot"
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"id": id, "type": kind})
 }
 
 // NewGitHub starts a fake GitHub Enterprise style API for repo, answering under /api/v3.
@@ -100,11 +300,12 @@ func NewGitHub(t *testing.T, token, repo string) *Forge {
 	mux.HandleFunc("GET /api/v3/user", f.guard(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"login": f.Login})
 	}))
-	mux.HandleFunc("GET "+base+"/issues/{n}/comments", f.guard(f.listGitHub))
+	mux.HandleFunc("GET "+base+"/issues/{a}/{b}", f.guard(f.issuesGitHub))
 	mux.HandleFunc("POST "+base+"/issues/{n}/comments", f.guard(f.create))
 	mux.HandleFunc("PATCH "+base+"/issues/comments/{id}", f.guard(f.update))
 	mux.HandleFunc("POST "+base+"/statuses/{sha}", f.guard(f.status("context")))
 	mux.HandleFunc("GET "+base+"/pulls/{n}", f.guard(f.headGitHub))
+	mux.HandleFunc("GET /api/v3/user/{id}", f.guard(f.account))
 	f.Server = httptest.NewTLSServer(mux)
 	t.Cleanup(f.Server.Close)
 	return f
@@ -121,10 +322,12 @@ func NewGitLab(t *testing.T, token, repo string) *Forge {
 		writeJSON(w, http.StatusOK, map[string]any{"id": f.UserID, "username": f.Login})
 	}))
 	mux.HandleFunc("GET "+base+"/merge_requests/{n}/notes", f.guard(f.project(f.listGitLab)))
+	mux.HandleFunc("GET "+base+"/merge_requests/{n}/notes/{id}", f.guard(f.project(f.noteGitLab)))
 	mux.HandleFunc("POST "+base+"/merge_requests/{n}/notes", f.guard(f.project(f.create)))
 	mux.HandleFunc("PUT "+base+"/merge_requests/{n}/notes/{id}", f.guard(f.project(f.update)))
 	mux.HandleFunc("POST "+base+"/statuses/{sha}", f.guard(f.project(f.status("name"))))
 	mux.HandleFunc("GET "+base+"/merge_requests/{n}", f.guard(f.project(f.headGitLab)))
+	mux.HandleFunc("GET /api/v4/users/{id}", f.guard(f.account))
 	f.Server = httptest.NewTLSServer(mux)
 	t.Cleanup(f.Server.Close)
 	return f
@@ -402,8 +605,18 @@ func (f *Forge) headGitHub(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
 		return
 	}
-	writeJSON(w, http.StatusOK,
-		map[string]any{"number": number, "head": map[string]any{"sha": sha}})
+	headRepo := f.Repository
+	if f.fork(number) {
+		headRepo = "someone/fork-of-" + strings.ReplaceAll(f.Repository, "/", "-")
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"number": number, "state": f.state(number), "user": map[string]any{"id": f.author(number)},
+		"html_url": f.Server.URL + "/" + f.Repository + "/pull/" + strconv.Itoa(number),
+		"head": map[string]any{"sha": sha, "ref": "feature",
+			"repo": map[string]any{"full_name": headRepo}},
+		"base": map[string]any{"sha": "base", "ref": "main",
+			"repo": map[string]any{"full_name": f.Repository}},
+	})
 }
 
 // headGitLab answers a GitLab merge request read with its head commit.
@@ -413,7 +626,16 @@ func (f *Forge) headGitLab(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"message": "404 Not found"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"iid": number, "sha": sha})
+	source := 5
+	if f.fork(number) {
+		source = 9
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"iid": number, "sha": sha, "state": f.state(number), "source_branch": "feature",
+		"source_project_id": source, "target_project_id": 5,
+		"author":  map[string]any{"id": f.author(number)},
+		"web_url": f.Server.URL + "/" + f.Repository + "/-/merge_requests/" + strconv.Itoa(number),
+	})
 }
 
 // status records a commit status, reading its name from the field the provider uses.

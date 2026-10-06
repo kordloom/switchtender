@@ -249,6 +249,10 @@ func TestCredentialedRunsKeepToolStateInTheRunDirectory(t *testing.T) {
 	t.Parallel()
 	kube := fakeKubeAPI(t)
 	python := botocorePython()
+	if python == "" && os.Getenv("SWITCHTENDER_REQUIRE_BOTOCORE") == "1" {
+		t.Fatal("SWITCHTENDER_REQUIRE_BOTOCORE is set and no python3 imports botocore, so the AWS " +
+			"SDK's caches would go unchecked")
+	}
 	var caches []string
 	if python != "" {
 		caches = botocoreCachesIn(python)

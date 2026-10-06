@@ -65,7 +65,7 @@
    "name": "What is a dry run?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "A run in the tool's no-change mode. Ansible runs in check mode, Terraform runs plan instead of apply, and Bash and Python are syntax checked without executing. A dry run set on a sharded run is carried to every shard. The mode is a promise about the tool, not about what it is given: a task can set check_mode: false, and a plan runs the program an external data source names. So a rule that excludes dry runs exempts only a dry run the gate read in full and found running nothing. See dry runs and exclude_dry_run."
+    "text": "A run in the tool's no-change mode. Ansible runs in check mode, and Terraform and OpenTofu run plan instead of apply. Those are the only dry runs that preview a change. A Bash, Python, or PowerShell dry run only checks the script's syntax, and a Go dry run runs go vet, so none of the four executes the script or says what it would change. A dry run set on a sharded run is carried to every shard. The mode is a promise about the tool, not about what it is given: a task can set check_mode: false, a pipe lookup runs a command while a template renders, and a plan runs the program an external data source names, invokes the function an aws_lambda_invocation data source names, and sends whatever request an http data source describes, a write included. A rule that excludes dry runs lets through only a dry run the gate read in full without finding a forced task, a pipe lookup, one of those two data sources, or an http data source with a write method or a request body, and never the dry run of a tool a plugin added, which nothing scans. The scan cannot see everything a check or a plan runs, since lookups, plugins, and providers run code too, so the rule trusts the playbooks and configurations it lets through. An agent's dry run waits for a person whatever the scan finds, unless an exemption covers it. See dry runs and exclude_dry_run."
    }
   },
   {
@@ -137,7 +137,7 @@
    "name": "Can an AI agent operate SwitchTender?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "Yes, through the API, holding one credential: a token bound to an operator account. The agent submits and manages runs like any operator, every mutation it makes is chained before it executes, and a run held for approval waits for a human admin, since an operator token cannot approve. Run an AI agent through the gate covers the setup."
+    "text": "Yes, through the API, holding one credential: a token bound to an operator account. The agent submits and manages runs like any operator, every mutation it makes is chained before it executes, and a run held for approval waits for a human admin, since an operator token cannot approve. Every run an agent token asks for is held that way by default, its dry runs included, and its Terraform or OpenTofu apply is held twice: before anything plans, and again for the apply its plan proposes. A rule with effect: exempt lifts the hold for routine work, and one that names the agent's actor label must also name the account its token is bound to, as agent runs are held by default describes. Run an AI agent through the gate covers the setup."
    }
   },
   {
@@ -185,7 +185,7 @@
    "name": "Can I run a Terraform plan, hold it for approval, then run Ansible?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "Yes, and that sequence is the reason pipelines exist here rather than a workaround for them. A pipeline is an ordered set of steps or a dependency graph with parallel branches, built on a drag-and-drop canvas or posted as JSON. Steps can mix tools freely, so a Terraform plan, an approval, and an Ansible play are three steps of one run. A failure skips exactly the steps that depended on it, and set_stats output flows to dependent steps as extra vars. The approval is not a convention someone can skip. A policy decides which runs are held, the hold is enforced in the core, and the approval is bound to the exact plan that was reviewed, so a run cannot be approved as one thing and executed as another. A Community install holds one approval policy and Pro holds five. Team removes the cap and adds the rest of the policy engine: outright denials, risk floors, actor-scoped rules, and distinct-approver separation of duties."
+    "text": "Yes, and that sequence is the reason pipelines exist here rather than a workaround for them. A pipeline is an ordered set of steps or a dependency graph with parallel branches, built on a drag-and-drop canvas or posted as JSON. Steps can mix tools freely, so a Terraform plan, an approval, and an Ansible play are three steps of one run. A failure skips exactly the steps that depended on it, and set_stats output flows to dependent steps as extra vars. The approval is not a convention someone can skip. A policy decides which runs are held, the hold is enforced in the core, and the approval is bound to the exact plan that was reviewed, so a run cannot be approved as one thing and executed as another. A Community install holds one plain rule, either a require-approval policy or one exemption, and Pro holds five. Team removes the cap and adds the rest of the policy engine: outright denials, risk floors, actor-scoped rules, distinct-approver separation of duties, and Rego policies."
    }
   },
   {
@@ -209,7 +209,7 @@
    "name": "What is the license?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "Business Source License 1.1: free to self-host and modify, with a restriction on offering it as a competing hosted service, and it converts to Apache 2.0 two years after each release. The Community tier is free and complete on its own. Pro adds directory sign-in and five approval policies instead of one. Team adds the full policy engine, the period change register, distributed workers, initializing a new PostgreSQL database, and one-click drift reconcile. Both unlock with a signed license file the binary verifies offline, flat per organization by fleet band, and a lapsed license takes nothing: paid features stop while your data, evidence, and every Community feature keep working. There is no license server and nothing ever phones home."
+    "text": "Business Source License 1.1: free to self-host and modify, with a restriction on offering it as a competing hosted service, and it converts to Apache 2.0 two years after each release. The Community tier is free and complete on its own, with the built-in hold on agent runs and one plain rule of your own. Pro adds directory sign-in and five approval policies instead of one. Team adds the full policy engine, the period change register, distributed workers, initializing a new PostgreSQL database, and one-click drift reconcile. Both unlock with a signed license file the binary verifies offline, flat per organization by fleet band, and a lapsed license takes nothing: paid features stop while your data, evidence, and every Community feature keep working. There is no license server and nothing ever phones home."
    }
   }
  ]
@@ -236,7 +236,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq" class="active">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq" class="active">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/ansible-runtime">Managed Ansible runtime</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/upgrading">Upgrading</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -259,12 +259,21 @@ refuses to start and says <code>Initializing a new PostgreSQL database requires 
 a PostgreSQL database that already holds the schema is never gated, in any license state, so a
 lapsed license never locks a server out of its own data.</p>
 <h2 id="what-is-a-dry-run">What is a dry run?</h2>
-<p>A run in the tool's no-change mode. Ansible runs in check mode, Terraform runs plan instead of
-apply, and Bash and Python are syntax checked without executing. A dry run set on a sharded run is
-carried to every shard. The mode is a promise about the tool, not about what it is given: a task
-can set <code>check_mode: false</code>, and a plan runs the program an <code>external</code> data source names. So a rule
-that excludes dry runs exempts only a dry run the gate read in full and found running nothing. See
-<a href="/docs/concepts#dry-runs-and-exclude-dry-run">dry runs and <code>exclude_dry_run</code></a>.</p>
+<p>A run in the tool's no-change mode. Ansible runs in check mode, and Terraform and OpenTofu run plan
+instead of apply. Those are the only dry runs that preview a change. A Bash, Python, or PowerShell
+dry run only checks the script's syntax, and a Go dry run runs <code>go vet</code>, so none of the four
+executes the script or says what it would change. A dry run set on a sharded run is carried to every
+shard. The mode is a promise about the tool, not about what it is given: a task can set
+<code>check_mode: false</code>, a <code>pipe</code> lookup runs a command while a template renders, and a plan runs the
+program an <code>external</code> data source names, invokes the function an <code>aws_lambda_invocation</code> data source
+names, and sends whatever request an <code>http</code> data source describes, a write included. A rule that
+excludes dry runs lets through only a dry run the gate read in full without finding a forced task, a
+pipe lookup, one of those two data sources, or an <code>http</code> data source with a write method or a
+request body, and never the dry run of a tool a plugin added, which nothing scans. The scan cannot
+see everything a check or a plan runs, since lookups, plugins, and providers run code too, so the
+rule trusts the playbooks and configurations it lets through. An agent's dry run waits for a person
+whatever the scan finds, unless an exemption covers it. See <a href="/docs/concepts#dry-runs-and-exclude-dry-run">dry runs and
+<code>exclude_dry_run</code></a>.</p>
 <h2 id="how-do-i-migrate-from-awx">How do I migrate from AWX?</h2>
 <p>From the command line:</p>
 <pre><code>switchtender import awx export.json           # preview the plan, changes nothing
@@ -360,8 +369,13 @@ land in the audit trail.</p>
 <h2 id="can-an-ai-agent-operate-switchtender">Can an AI agent operate SwitchTender?</h2>
 <p>Yes, through the API, holding one credential: a token bound to an operator account. The agent
 submits and manages runs like any operator, every mutation it makes is chained before it executes,
-and a run held for approval waits for a human admin, since an operator token cannot approve.
-<a href="/docs/agents">Run an AI agent through the gate</a> covers the setup.</p>
+and a run held for approval waits for a human admin, since an operator token cannot approve. Every
+run an agent token asks for is held that way by default, its dry runs included, and its Terraform or
+OpenTofu apply is held twice: before anything plans, and again for the apply its plan proposes. A
+rule with <code>effect: exempt</code> lifts the hold for routine work, and one that names the agent's <code>actor</code>
+label must also name the <code>account</code> its token is bound to, as <a href="/docs/policy#agent-runs-are-held-by-default">agent runs are held by
+default</a> describes. <a href="/docs/agents">Run an AI agent through the
+gate</a> covers the setup.</p>
 <h2 id="can-i-extend-switchtender">Can I extend SwitchTender?</h2>
 <p>Yes, in Go, two ways: compile an extension into the binary, or drop a plugin binary into
 <code>--plugins-dir</code> on a stock release. Both register execution tools, AI providers, secret engines,
@@ -426,9 +440,9 @@ depended on it, and <code>set_stats</code> output flows to dependent steps as ex
 <p>The approval is not a convention someone can skip. A policy decides which runs are held, the hold
 is enforced in the core, and the approval is bound to the exact plan that was reviewed, so a run
 cannot be approved as one thing and executed as another.</p>
-<p>A Community install holds one approval policy and Pro holds five. Team removes the cap and adds the
-rest of the policy engine: outright denials, risk floors, actor-scoped rules, and distinct-approver
-separation of duties.</p>
+<p>A Community install holds one plain rule, either a require-approval policy or one exemption, and
+Pro holds five. Team removes the cap and adds the rest of the policy engine: outright denials, risk
+floors, actor-scoped rules, distinct-approver separation of duties, and Rego policies.</p>
 <h2 id="how-fine-grained-is-access-control">How fine-grained is access control?</h2>
 <p>Beyond the global admin, operator, and viewer roles, users group into teams and a team gets read,
 use, or manage on one specific project, template, inventory, or credential, each level implying
@@ -451,13 +465,14 @@ outliving the company is a documented path rather than a hope. The <a href="/doc
 <a href="/docs/vendor-risk">vendor risk</a> pages cover the rest.</p>
 <h2 id="what-is-the-license">What is the license?</h2>
 <p>Business Source License 1.1: free to self-host and modify, with a restriction on offering it as a
-competing hosted service, and it converts to Apache 2.0 two years after each release. The
-Community tier is free and complete on its own. Pro adds directory sign-in and five approval
-policies instead of one. Team adds the full policy engine, the period change register, distributed
-workers, initializing a new PostgreSQL database, and one-click drift reconcile. Both unlock with a
-signed license file the binary verifies offline, flat per organization by fleet band, and a lapsed
-license takes nothing: paid features stop while your data, evidence, and every Community feature
-keep working. There is no license server and nothing ever phones home.</p>
+competing hosted service, and it converts to Apache 2.0 two years after each release. The Community
+tier is free and complete on its own, with the built-in hold on agent runs and one plain rule of
+your own. Pro adds directory sign-in and five approval policies instead of one. Team adds the full
+policy engine, the period change register, distributed workers, initializing a new PostgreSQL
+database, and one-click drift reconcile. Both unlock with a signed license file the binary verifies
+offline, flat per organization by fleet band, and a lapsed license takes nothing: paid features stop
+while your data, evidence, and every Community feature keep working. There is no license server and
+nothing ever phones home.</p>
 
 		</main>
 	</div>

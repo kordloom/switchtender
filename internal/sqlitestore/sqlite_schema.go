@@ -120,6 +120,9 @@ CREATE TABLE IF NOT EXISTS runs (
 	-- Whether a Terraform or OpenTofu apply's own submission asked for approval, so the apply its
 	-- plan proposes is held. Set when the run is created and never cleared.
 	approval_requested INTEGER NOT NULL DEFAULT 0,
+	-- The username of the account the requesting credential is bound to, which a policy's account
+	-- criterion matches. Copied to every run derived from the request.
+	account TEXT NOT NULL DEFAULT '',
 	-- The digest of the image the container runtime pulled and ran.
 	image_digest TEXT NOT NULL DEFAULT '',
 	-- The decision that won a held run or an approval step: the id of its record and of the chain
@@ -589,7 +592,8 @@ CREATE TABLE IF NOT EXISTS policies (
 	effect           TEXT NOT NULL DEFAULT '',
 	distinct_approver INTEGER NOT NULL DEFAULT 0,
 	created_at       TEXT NOT NULL,
-	require_reason   TEXT NOT NULL DEFAULT ''
+	require_reason   TEXT NOT NULL DEFAULT '',
+	account          TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS inventories (
 	id             TEXT PRIMARY KEY,
@@ -735,9 +739,27 @@ CREATE TABLE IF NOT EXISTS run_decisions (
 	reason_commitment TEXT NOT NULL DEFAULT '',
 	reason_masked     INTEGER NOT NULL DEFAULT 0,
 	redaction         TEXT NOT NULL DEFAULT '',
-	sod               TEXT NOT NULL DEFAULT ''
+	sod               TEXT NOT NULL DEFAULT '',
+	-- The pull request comment a decision was made from, as JSON, empty for any other decision.
+	comment           TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_run_decisions_run ON run_decisions(run_id);
+
+-- Which forge account acts as which account when it writes a pull request comment, keyed on the
+-- forge's numeric user id and never on the login. A forge account links to one account, and an
+-- account links one account per forge, both decided by the unique indexes.
+CREATE TABLE IF NOT EXISTS forge_links (
+	id            TEXT PRIMARY KEY,
+	user_id       TEXT NOT NULL DEFAULT '',
+	provider      TEXT NOT NULL DEFAULT '',
+	api_url       TEXT NOT NULL DEFAULT '',
+	forge_user_id INTEGER NOT NULL DEFAULT 0,
+	created_at    TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_forge_links_account
+	ON forge_links(provider, api_url, forge_user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_forge_links_user
+	ON forge_links(user_id, provider, api_url);
 `
 
 // createPrivate creates the database file readable by its owner alone when it does not exist yet.
@@ -1069,7 +1091,7 @@ func migrateRuns(db *sql.DB) error {
 		"dry_run_scans", "hold_note", "sealed_digests", "policy_notes", "inventory_check",
 		"initiator", "require_reason", "inventory_snapshot", "inventory_sealed", "resolved_hosts",
 		"plan_sha256", "plan_sealed", "image_digest", "decision_id", "decision_claim",
-		"drift_plan_sealed"} {
+		"drift_plan_sealed", "account"} {
 		if _, err := db.Exec(
 			"ALTER TABLE runs ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''"); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {
@@ -1387,7 +1409,7 @@ func migratePolicies(db *sql.DB) error {
 		return fmt.Errorf("migrate policies: %w", err)
 	}
 	for _, column := range []string{"actor_kind", "actor", "min_risk", "effect", "queue",
-		"reversibility"} {
+		"reversibility", "require_reason", "account"} {
 		if _, err := db.Exec(
 			"ALTER TABLE policies ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''"); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {

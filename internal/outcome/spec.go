@@ -219,6 +219,10 @@ type DecisionRecord struct {
 	// SeparationOfDuties is how separation of duties was evaluated for a decision on a run an agent
 	// asked for, omitted for every other run.
 	SeparationOfDuties *decision.SeparationOfDuties `json:"separation_of_duties,omitempty"`
+	// Comment is the pull request comment the decision was made from: the forge, the comment's
+	// and its author's numeric ids, and the SHA-256 of its body. Omitted for a decision made any
+	// other way, which reduces to the bytes it always did.
+	Comment *decision.Comment `json:"comment,omitempty"`
 }
 
 // DecisionBody assembles the canonical decision record for r and returns its JSON with the spec
@@ -237,7 +241,7 @@ func DecisionBodyWith(r *run.Run, verdict string, extras DecisionExtras) (body [
 	}
 	body, err = json.Marshal(DecisionRecord{RunID: r.ID, Verdict: verdict, SpecDigest: specDigest,
 		DecisionID: extras.ID, ReasonCommitment: extras.ReasonCommitment,
-		SeparationOfDuties: extras.SeparationOfDuties})
+		SeparationOfDuties: extras.SeparationOfDuties, Comment: extras.Comment})
 	if err != nil {
 		return nil, "", err
 	}

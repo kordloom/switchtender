@@ -18,6 +18,11 @@ var ErrUnreachable = errors.New("approval policies are not reachable from this p
 // policy that cannot decide is read as a refusal, never as a pass.
 var ErrRego = errors.New("rego policy")
 
+// ErrExemptionAccount is returned when an exemption names an agent's token label without the
+// account the token is bound to. A label is not unique across accounts, so an exemption keyed on it
+// alone also covers a token minted for another account under the same name.
+var ErrExemptionAccount = errors.New("an exemption that names an actor must also name its account")
+
 // ErrRegoNotStored is returned by a database-backed store asked to save a Rego policy. A Rego policy
 // is read from the policy file, and a store that accepted one would keep its name and drop its
 // modules, leaving a rule with no criteria that holds every run.

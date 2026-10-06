@@ -23,6 +23,7 @@ const PAGE_DOCS = {
 	audit: { slug: "features", label: "Features" },
 	policies: { slug: "features", label: "Features" },
 	doctor: { slug: "concepts", label: "Concepts" },
+	links: { slug: "pull-request-review", label: "Pull request review" },
 	docs: { slug: "", label: "All guides" },
 };
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -74,6 +75,11 @@ var (
 // never created. The refused request is still evidence: the gate records every mutation on the
 // audit chain before its handler acts.
 var ErrPolicyDenied = errors.New("submission denied by policy")
+
+// ErrAgentWorkflowApply is returned, wrapped in ErrPolicyDenied, when an agent's workflow carries a
+// Terraform or OpenTofu apply step no exemption covers. A workflow's approval does not show its
+// steps' plans, so the apply would run a plan nobody approved.
+var ErrAgentWorkflowApply = errors.New(policy.AgentWorkflowApplyName)
 
 // ErrPolicyUnavailable is returned when the approval policies cannot be read, so the dispatcher
 // cannot tell whether a run needs sign-off. The submission is refused rather than run: a gate that

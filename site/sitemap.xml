@@ -53,6 +53,7 @@
   <url><loc>https://switchtender.com/docs/comparison</loc></url>
   <url><loc>https://switchtender.com/docs/agents</loc></url>
   <url><loc>https://switchtender.com/docs/ai</loc></url>
+  <url><loc>https://switchtender.com/docs/ansible-runtime</loc></url>
   <url><loc>https://switchtender.com/docs/backup</loc></url>
   <url><loc>https://switchtender.com/docs/benchmarks</loc></url>
   <url><loc>https://switchtender.com/docs/community-baseline</loc></url>
@@ -65,5 +66,6 @@
   <url><loc>https://switchtender.com/docs/run-files</loc></url>
   <url><loc>https://switchtender.com/docs/sdk</loc></url>
   <url><loc>https://switchtender.com/docs/supertest</loc></url>
+  <url><loc>https://switchtender.com/docs/upgrading</loc></url>
   <url><loc>https://switchtender.com/docs/vendor-risk</loc></url>
 </urlset>

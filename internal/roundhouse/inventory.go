@@ -10,8 +10,14 @@ import (
 	"strings"
 )
 
-// defaultInventoryBinary is the executable used to enumerate inventory hosts.
-const defaultInventoryBinary = "ansible-inventory"
+// The Ansible commands the host runner starts, by name, from the directory its locator names or
+// from PATH.
+const (
+	// defaultInventoryBinary is the executable used to enumerate inventory hosts.
+	defaultInventoryBinary = "ansible-inventory"
+	// defaultPlaybookBinary is the executable a playbook runs with.
+	defaultPlaybookBinary = "ansible-playbook"
+)
 
 // HostLister enumerates the hosts in an inventory so a run can be split across them. A non-empty
 // limit narrows enumeration to the hosts an Ansible pattern matches, so a shard cannot reach a host
@@ -52,7 +58,12 @@ func (a *ansibleRunner) ListInventory(ctx context.Context, sources []string, lim
 	if limit != "" {
 		args = append(args, "--limit", limit)
 	}
-	cmd := exec.CommandContext(ctx, defaultInventoryBinary, args...)
+	bin, release, err := a.command(ctx, defaultInventoryBinary)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Env = a.baseEnv
 	out, err := cmd.Output()
 	if err != nil {
@@ -75,7 +86,12 @@ func (a *ansibleRunner) Dump(ctx context.Context, source string, env []string) (
 	if source == "" {
 		return nil, ErrNoInventory
 	}
-	cmd := exec.CommandContext(ctx, defaultInventoryBinary, "-i", source, "--list")
+	bin, release, err := a.command(ctx, defaultInventoryBinary)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	cmd := exec.CommandContext(ctx, bin, "-i", source, "--list")
 	cmd.Env = append(append([]string{}, a.baseEnv...), env...)
 	out, err := cmd.Output()
 	if err != nil {
@@ -95,7 +111,12 @@ func (a *ansibleRunner) Hosts(ctx context.Context, inventory, limit string) ([]s
 	if limit != "" {
 		args = append(args, "--limit", limit)
 	}
-	cmd := exec.CommandContext(ctx, defaultInventoryBinary, args...)
+	bin, release, err := a.command(ctx, defaultInventoryBinary)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Env = a.baseEnv
 	out, err := cmd.Output()
 	if err != nil {

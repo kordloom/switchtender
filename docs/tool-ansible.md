@@ -12,6 +12,12 @@ that names no tool is an Ansible run. It is also the most instrumented one, beca
 callback plugin reports every task on every host as a structured event, and those events paint the
 live host-by-task matrix, feed fleet memory, and drive drift detection.
 
+The server and each worker need ansible-core, which the binary does not carry. They take the
+`ansible-playbook` and `ansible-inventory` from `--ansible-bin` when it is set, then from the pinned
+ansible-core `switchtender ansible install` sets up, then from the PATH, as
+[which Ansible a run uses](ansible-runtime.md#which-ansible-a-run-uses) describes. A run in a
+container image uses the image's own.
+
 ## What runs
 
 The playbook path is the run's target, resolved inside the project checkout when the run sources a
@@ -19,12 +25,16 @@ project, so relative paths and roles behave the way they do in the repository. A
 `requirements.yml` roles and collections install on sync before the play starts. A dry run passes
 `--check`, which reports what would change without changing it; drift detection is built from
 exactly those check runs. Ansible still runs any play, block, task, role, or include that sets
-`check_mode: false` for real under `--check`. The gate reads for that before it treats a dry run
-as a preview, and a dry run that forces real work is held by a rule that excludes dry runs as
-though it were a real run. The hold names the forcing task and the two clean fixes: rework the
-task so check mode is safe, or drop `exclude_dry_run` from that rule. See
-[dry runs and `exclude_dry_run`](concepts.md#dry-runs-and-exclude-dry-run), which covers the
-common read-only command and a role the project does not hold.
+`check_mode: false` for real under `--check`, and a `pipe` lookup runs its command on the controller
+while a template renders, under `--check` too. The gate reads for both before it treats a dry run as
+a preview, and a dry run that forces real work or runs a `pipe` lookup is held by a rule that
+excludes dry runs as though it were a real run. The hold names the task and the two clean fixes:
+rework it so check mode is safe, or drop `exclude_dry_run` from that rule. Other lookups and plugins
+run code on the controller too, and the scan does not judge them, so a rule that excludes dry runs
+trusts the playbooks it lets through. An agent's check run waits for a person whatever the scan
+finds, unless an exemption covers it. See [dry runs and
+`exclude_dry_run`](concepts.md#dry-runs-and-exclude-dry-run), which covers the common read-only
+command and a role the project does not hold.
 
 Ansible runs are the ones that split. A split run shards the inventory across parallel slices,
 packs hosts onto shards by their measured durations from past runs, and merges every slice back

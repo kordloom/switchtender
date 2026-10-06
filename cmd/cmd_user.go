@@ -13,6 +13,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/forgelink"
 	"github.com/kordloom/switchtender/internal/user"
 )
 
@@ -156,7 +157,10 @@ func runUserList(cmd *cobra.Command, _ []string) error {
 	return printJSON(list)
 }
 
-// runUserDelete removes the account with the given id.
+// runUserDelete removes the account with the given id. Its forge account links end first, each
+// recorded on the chain as unlinked, the same as a delete through the API, so the forge accounts it
+// linked can be linked again and the chain and the links agree. An unlink the chain cannot record
+// keeps that link and the account.
 func runUserDelete(cmd *cobra.Command, args []string) error {
 	bundle, err := openExisting(userDB)
 	if err != nil {
@@ -164,11 +168,23 @@ func runUserDelete(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = bundle.Close() }()
 
-	if err := recordUserChange(cmd.Context(), bundle.Audits(), "/cli/user/delete",
+	ctx := cmd.Context()
+	if err := recordUserChange(ctx, bundle.Audits(), "/cli/user/delete",
 		userChange{ID: args[0]}); err != nil {
 		return err
 	}
-	if err := bundle.Users().Delete(cmd.Context(), args[0]); err != nil {
+	if _, err := forgelink.UnlinkUser(ctx, bundle.ForgeLinks(), args[0],
+		func(l *forgelink.Link) error {
+			body, err := forgelink.ChangeBody(forgelink.ActionUnlinked, l)
+			if err != nil {
+				return err
+			}
+			return recordCLIChange(ctx, bundle.Audits(), userDB,
+				forgelink.ChangePath(l.ID, forgelink.ActionUnlinked), body)
+		}); err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+	if err := bundle.Users().Delete(ctx, args[0]); err != nil {
 		return fmt.Errorf("delete user: %w", err)
 	}
 	return printJSON(map[string]string{"deleted": args[0]})

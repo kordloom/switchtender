@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -51,6 +52,10 @@ var ErrResolve = errors.New("secret resolve failed")
 // ResolverFunc fetches a value from a source's config at run time.
 type ResolverFunc func(ctx context.Context, config string) (string, error)
 
+// registry guards resolvers and minters. Plugins register at startup, but a registration can still
+// land while runs resolve, so every read and write of either table holds it.
+var registry sync.RWMutex
+
 // resolvers maps a source kind to its resolver. Register adds engines such as AWS Secrets Manager or
 // 1Password without touching the core.
 var resolvers = map[string]ResolverFunc{
@@ -67,6 +72,8 @@ var resolvers = map[string]ResolverFunc{
 // Register adds a resolver for a source kind so a new secrets engine plugs in. It panics on a
 // duplicate or reserved kind, which is a programming error.
 func Register(kind string, fn ResolverFunc) {
+	registry.Lock()
+	defer registry.Unlock()
 	if kind == "" || kind == KindLocal {
 		panic("secretsource: cannot register the local kind")
 	}
@@ -140,6 +147,8 @@ var minters = map[string]MintFunc{
 // RegisterDynamic adds a mint function for a dynamic source kind, so a new short-lived secrets engine
 // plugs in. It panics on a duplicate or reserved kind, which is a programming error.
 func RegisterDynamic(kind string, fn MintFunc) {
+	registry.Lock()
+	defer registry.Unlock()
 	if kind == "" || kind == KindLocal {
 		panic("secretsource: cannot register the local kind")
 	}
@@ -159,6 +168,8 @@ func Registered(kind string) bool {
 	if kind == "" || kind == KindLocal {
 		return true
 	}
+	registry.RLock()
+	defer registry.RUnlock()
 	if _, ok := resolvers[kind]; ok {
 		return true
 	}
@@ -181,6 +192,8 @@ func ValidKind(kind string) bool {
 	if k == KindLocal {
 		return true
 	}
+	registry.RLock()
+	defer registry.RUnlock()
 	if _, ok := resolvers[k]; ok {
 		return true
 	}
@@ -192,6 +205,8 @@ func ValidKind(kind string) bool {
 // engine. It is the exact set ValidKind accepts, so a user-facing hint built from it cannot drift
 // from the resolver and minter tables.
 func Kinds() []string {
+	registry.RLock()
+	defer registry.RUnlock()
 	out := make([]string, 0, len(resolvers)+len(minters)+1)
 	out = append(out, KindLocal)
 	for k := range resolvers {
@@ -221,7 +236,13 @@ func ResolveLeased(ctx context.Context, kind, config string) (string, *Lease, er
 	if k == KindLocal {
 		return config, nil, nil
 	}
-	if mint, ok := minters[k]; ok {
+	// The tables are read under the lock and the engine is called outside it, so a slow fetch never
+	// holds up a registration.
+	registry.RLock()
+	mint, minted := minters[k]
+	fn, resolved := resolvers[k]
+	registry.RUnlock()
+	if minted {
 		value, lease, err := mint(ctx, config)
 		if err == nil && value == "" {
 			// The engine minted something before answering blank, so the lease is revoked here rather
@@ -231,8 +252,7 @@ func ResolveLeased(ctx context.Context, kind, config string) (string, *Lease, er
 		}
 		return value, lease, err
 	}
-	fn, ok := resolvers[k]
-	if !ok {
+	if !resolved {
 		return "", nil, fmt.Errorf("%w: unknown source %q", ErrResolve, kind)
 	}
 	value, err := fn(ctx, config)
