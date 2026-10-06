@@ -586,8 +586,9 @@ const PUBLIC_DEMO_HOST = "demo.switchtender.com";
 // readOnlyBanner builds the notice a read-only demo leads every page with.
 //
 // The hosted demo resets every night on purpose, so its banner says so, and a visitor who finds
-// yesterday's runs gone reads the design rather than data loss. It starts them at the run a rule is
-// holding, which is the product, and names the way to watch the evidence catch that nightly rewrite.
+// yesterday's runs gone reads the design rather than data loss. It starts them at the runs an AI
+// agent asked for that the gate is holding, which is the product, and names the way to watch the
+// evidence catch that nightly rewrite.
 // Only the hosted demo is reset. A demo someone runs themselves is not, and without terraform on the
 // machine it seeds no held run, so its banner claimed a nightly reset that never happens and pointed
 // at a filter that showed no runs. It points at the runs page instead.
@@ -606,8 +607,8 @@ function readOnlyBanner() {
 		return banner;
 	}
 	const held = document.createElement("a");
-	held.href = "/ui/runs?status=pending_approval";
-	held.textContent = "the run a rule is holding";
+	held.href = AGENT_HELD_RUNS;
+	held.textContent = "the runs an AI agent asked for, waiting for a person";
 	const witness = document.createElement("a");
 	witness.href = "https://switchtender.com/#proof";
 	witness.textContent = "point a witness at it";
@@ -615,6 +616,11 @@ function readOnlyBanner() {
 		witness, " today and again tomorrow, and watch it catch the rewrite.");
 	return banner;
 }
+
+// AGENT_HELD_RUNS lists the runs the built-in agent hold is keeping waiting, by the name the server
+// records on each, the same search the policies page builds for a rule's held runs.
+const AGENT_HELD_RUNS = "/ui/runs?q=" +
+	encodeURIComponent('held_by:"requested by an agent, held by default" status:pending_approval');
 
 function applyReadOnly() {
 	const main = document.querySelector(".content");
