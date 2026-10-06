@@ -458,7 +458,8 @@ func TestSeedConfigKeepsTheChangeHistoryOlderThanTheRunWindow(t *testing.T) {
 	if len(chain) == 0 {
 		t.Fatal("no change history was seeded, so the audit page has nothing to verify")
 	}
-	windowOpens := before.Add(-seedRunWindow)
+	// The oldest runs are the nightly history, which the clock opens on before the run window.
+	windowOpens := before.Add(-seedRunWindow - seedHistorySpan)
 	for i, e := range chain {
 		if !e.At.Before(windowOpens) {
 			t.Errorf("history entry %d is stamped %v, which is inside the run window opening at %v",
@@ -496,8 +497,9 @@ func TestSeedConfigStoresHashedDemoPasswords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Users.List() error = %v", err)
 	}
-	if len(users) != 3 {
-		t.Fatalf("seeded %d accounts, want the three the demo shows", len(users))
+	if len(users) != 4 {
+		t.Fatalf("seeded %d accounts, want the four the demo shows, the agent's account among them",
+			len(users))
 	}
 	roles := make(map[user.Role]string, len(users))
 	for _, u := range users {

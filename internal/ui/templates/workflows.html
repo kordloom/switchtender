@@ -52,12 +52,14 @@
 				<dl class="wf-help-list">
 					<dt>Order</dt>
 					<dd>A step with a link into it waits for every step feeding it to succeed. Steps with no links run one at a time, in the order they were added.</dd>
+					<dt>Adding</dt>
+					<dd>Press Add step in the corner of the canvas. To add a step that runs after another, hover that step and press the + beside it, and the new step arrives already linked.</dd>
 					<dt>Linking</dt>
 					<dd>Drag from a step's right dot onto another step. Click a link to select it, then press Delete to remove it.</dd>
 					<dt>Arranging</dt>
 					<dd>Drag a step to move it. Scroll to pan, Ctrl or pinch to zoom, and press F to frame the whole graph.</dd>
 					<dt>Keyboard</dt>
-					<dd>Focus a step and press Enter to edit, L to start a link, Delete to remove. Cmd or Ctrl Z undoes.</dd>
+					<dd>Focus a step and press Enter to edit, A to add a step after it, L to start a link, Delete to remove. Cmd or Ctrl Z undoes.</dd>
 					<dt>Failure</dt>
 					<dd>A failed step stops everything downstream of it. Mark a step Continue on failure to let the rest proceed, or give it retries.</dd>
 					<dt>Approval</dt>
@@ -94,12 +96,13 @@
 		</div>
 
 		<div id="wf-step-modal" class="modal" hidden>
-			<div class="modal-card">
+			<div class="modal-card" aria-labelledby="wf-step-title">
 				<div class="modal-head">
-					<h2>Step</h2>
+					<h2 id="wf-step-title">Step</h2>
 					<button type="button" class="modal-close" id="wf-step-close" aria-label="Close">&times;</button>
 				</div>
 				<form id="wf-step-form" class="stack">
+					<p id="wf-step-after" class="wf-step-after" hidden></p>
 					<label class="field-label">Name
 						<input id="wf-step-name" class="input" placeholder="build" required>
 					</label>
@@ -169,12 +172,24 @@
 			</div>
 			<div class="wf-hint">
 				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="6" r="2.4"/><circle cx="12" cy="18" r="2.4"/><path d="M6.7 7.6 10.6 16M17.3 7.6 13.4 16"/></svg>
-				<p class="wf-hint-title">An empty canvas</p>
-				<p class="wf-hint-text">Start from a ready-made shape, or add a step and wire it up yourself.</p>
+				<p class="wf-hint-title">Nothing on the canvas yet</p>
+				<p class="wf-hint-text">Add a step and link the next ones from it, or lay out a ready-made shape to rename and point at your own playbooks.</p>
 				<div class="wf-hint-actions">
-					<button type="button" id="wf-hint-wizard" class="button primary">Start from a pattern</button>
-					<button type="button" id="wf-hint-add" class="button">Add a step</button>
+					<button type="button" id="wf-hint-add" class="button primary">
+						<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+						Add your first step
+					</button>
+					<button type="button" id="wf-hint-wizard" class="button wf-wizard-btn">
+						<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 4.6 4.6 1.9-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M18 15l.9 2.1 2.1.9-2.1.9L18 21l-.9-2.1-2.1-.9 2.1-.9z"/></svg>
+						Start from a pattern
+					</button>
 				</div>
+			</div>
+			<div class="wf-canvas-actions">
+				<button type="button" id="wf-canvas-add" class="button primary" data-tip="Click to add a step to the canvas">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+					Add step
+				</button>
 			</div>
 			<div class="wf-legend" id="wf-legend" hidden aria-label="Tool colors"></div>
 			<div class="wf-zoom" role="group" aria-label="Canvas zoom">

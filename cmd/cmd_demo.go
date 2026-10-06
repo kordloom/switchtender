@@ -204,13 +204,13 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 	if demoNoSeed {
 		log.Info("demo: serving the database as it stands, no seeding")
 	} else {
-		log.Info("demo: seeding sample data, this runs a few playbooks and takes a moment")
+		log.Info("demo: seeding sample data, this runs real playbooks and takes a couple of minutes")
 	}
 	seedDeps := demo.Deps{
 		Submitter: disp, Runs: store, Projects: bundle.Projects(),
 		Inventories: bundle.Inventories(), Templates: bundle.Templates(),
 		Credentials: bundle.Credentials(),
-		Policies:    bundle.Policies(), Users: bundle.Users(),
+		Policies:    bundle.Policies(), Users: bundle.Users(), Tokens: bundle.Tokens(),
 		Approver:   disp,
 		InvSources: bundle.InventorySources(),
 		Audit:      bundle.Audits(),

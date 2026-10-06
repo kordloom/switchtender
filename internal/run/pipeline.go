@@ -1,5 +1,7 @@
 package run
 
+import "slices"
+
 // StepApproval is the step type of an approval step: a point in a workflow where it waits for a
 // person to approve or deny before the steps after it run.
 const StepApproval = "approval"
@@ -76,6 +78,21 @@ func GraphSteps(steps []PipelineStep) []PipelineStep {
 	}
 	for i := 1; i < len(out); i++ {
 		out[i].DependsOn = []string{out[i-1].Name}
+	}
+	return out
+}
+
+// ClonePipelineSteps returns a copy of steps that shares no memory with them, so a change made to the
+// copy never reaches the caller's slice.
+func ClonePipelineSteps(steps []PipelineStep) []PipelineStep {
+	if steps == nil {
+		return nil
+	}
+	out := make([]PipelineStep, len(steps))
+	for i, s := range steps {
+		s.DependsOn = slices.Clone(s.DependsOn)
+		s.IfDenied = slices.Clone(s.IfDenied)
+		out[i] = s
 	}
 	return out
 }

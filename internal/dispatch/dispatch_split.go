@@ -305,6 +305,10 @@ func (d *Dispatcher) cancelChildren(ids []string) {
 // in order, or as a dependency graph when any step declares depends_on. A step that fails stops
 // what follows or depends on it unless the step is marked continue on failure.
 func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string, steps []run.PipelineStep, opts ...run.SubmitOption) (*run.Run, error) {
+	// The parent keeps a copy of the steps, never the caller's slice. Saving cleans each step's text
+	// in place, so a parent holding the caller's slice rewrote it under them: two submissions of one
+	// definition raced, and a definition held in memory changed as a side effect of being run.
+	steps = run.ClonePipelineSteps(steps)
 	if err := run.ValidatePipeline(steps); err != nil {
 		return nil, err
 	}

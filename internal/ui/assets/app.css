@@ -135,7 +135,11 @@ body[data-readonly] [data-mutates]::after { display: none; }
 .ro-note { font-size: 12px; color: var(--muted); font-style: italic; }
 
 /* Content fades in on load, and tables shimmer with skeletons while their data arrives. */
-.content { animation: contentIn 0.28s ease both; }
+/* The fill is backwards only. Filling forwards too left the finished animation's identity transform
+   on the content, which made the content the containing block of every fixed dialog inside it: a
+   dialog centered on the whole page rather than the screen, so on a page scrolled down to the
+   workflow canvas the step dialog opened with its title and close under the top bar. */
+.content { animation: contentIn 0.28s ease backwards; }
 @keyframes contentIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 .skeleton { display: block; height: 12px; width: 70%; border-radius: 4px;
 	background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 37%, var(--surface-2) 63%);
@@ -563,7 +567,10 @@ select.input[multiple] { padding: 4px; }
 .alt-auth summary { cursor: pointer; font-size: 13px; }
 .alt-auth .stack { margin-top: 10px; }
 
-.modal { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 12px; }
+/* A dialog stacks above the page chrome, as the drill, the tour, and the palette already do. At 50 it
+   sat under the top bar, which hid the title and close of any dialog tall enough to reach it, the
+   pattern chooser at 720 pixels high among them. */
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 80; padding: 12px; }
 .modal[hidden] { display: none; }
 /* A card taller than the screen scrolls inside itself. Without the cap a long form clipped at both
    viewport edges with no scrollbar anywhere, leaving the close above the screen and the submit
@@ -772,6 +779,10 @@ button.topbar-link { background: none; border: none; padding: 0; font: inherit; 
 .wf-zoom-fit svg { display: block; }
 .wf-zoom-level { min-width: 52px; height: 30px; border: none; background: none; border-radius: 999px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; cursor: pointer; }
 .wf-zoom-level:hover { background: var(--surface-2); color: var(--text); }
+/* The canvas carries its own Add step in its top corner, where the eye already is while it works the
+   graph, rather than only in the toolbar above. The wrapper is what is positioned, so the primary
+   button keeps the relative positioning its hover sweep depends on. */
+.wf-canvas-actions { position: absolute; top: 12px; right: 12px; display: flex; gap: 8px; }
 @media (pointer: coarse) {
 	.wf-zoom-btn { width: 40px; height: 40px; }
 	.wf-zoom-level { height: 40px; }
@@ -805,6 +816,19 @@ button.topbar-link { background: none; border: none; padding: 0; font: inherit; 
 .wf-out-deny { right: -7px; top: 48px; border-color: var(--failed); cursor: crosshair; }
 .wf-out-deny:hover { background: var(--failed); transform: translateY(-50%) scale(1.25); }
 .wf-edge-deny { stroke: var(--failed); stroke-dasharray: 6 4; }
+/* Each card's add control sits just past its out dot, joined to it by a short stub in the card's tool
+   color, and shows while the card is hovered or holds keyboard focus. The stub doubles as a bridge,
+   so the pointer travels from the card onto the control without the hover dropping on the way, and
+   it stops short of the dot so a press on the dot still starts a link. */
+.wf-node-add { position: absolute; top: 26px; left: calc(100% + 13px); display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 2px solid var(--tool-ink, var(--accent)); border-radius: 50%; background: var(--surface); color: var(--tool-ink, var(--accent)); cursor: pointer; opacity: 0; transform: translateY(-50%); transition: opacity 0.12s var(--ease), background 0.12s ease, color 0.12s ease; }
+.wf-node-add::before { content: ""; position: absolute; top: 50%; right: 100%; width: 8px; height: 22px; transform: translateY(-50%); background: linear-gradient(var(--tool-ink, var(--accent)), var(--tool-ink, var(--accent))) center / 100% 2px no-repeat; }
+.wf-node-add svg { display: block; width: 12px; height: 12px; }
+.wf-node:hover .wf-node-add, .wf-node:focus-within .wf-node-add { opacity: 1; }
+.wf-node-add:hover { background: var(--tool-ink, var(--accent)); color: var(--surface); }
+.wf-node-add:focus-visible { outline: 2px solid var(--tool-ink, var(--accent)); outline-offset: 2px; }
+/* Where a step being added will run, said at the top of the dialog in the accent the editor uses. */
+.wf-step-after { margin: 0; padding: 7px 11px; background: var(--accent-soft); border-left: 3px solid var(--accent); border-radius: var(--radius); font-size: 12.5px; color: var(--text); }
+.wf-sample-clear { margin-top: 10px; }
 .approval-steps .approval-step { padding: 12px 0; border-top: 1px solid var(--border); }
 .approval-steps .approval-step:first-of-type { border-top: 0; }
 .approval-step-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -812,8 +836,8 @@ button.topbar-link { background: none; border: none; padding: 0; font: inherit; 
 .approval-step-actions { display: flex; gap: 8px; margin-top: 8px; }
 
 /* The empty canvas offers the two ways in rather than only describing the gestures. */
-.wf-hint { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 340px; max-width: 86%; text-align: center; }
-.wf-hint svg { width: 34px; height: 34px; color: var(--accent); opacity: 0.7; }
+.wf-hint { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 400px; max-width: 86%; text-align: center; }
+.wf-hint > svg { width: 34px; height: 34px; color: var(--accent); opacity: 0.7; }
 .wf-hint-title { margin: 8px 0 2px; font-family: var(--display); font-size: 15px; font-weight: 700; color: var(--text); }
 .wf-hint-text { margin: 0 0 14px; font-size: 13px; color: var(--muted); line-height: 1.5; }
 .wf-hint-actions { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
@@ -863,6 +887,10 @@ button.topbar-link { background: none; border: none; padding: 0; font: inherit; 
 	.wf-out { right: -12px; }
 	.wf-out-deny { right: -12px; }
 	.wf-node-del { font-size: 22px; padding: 4px 8px; }
+	/* A touch screen has no hover to reveal a card's add control, so it is always shown, sized for
+	   a finger and set clear of the larger out dot. */
+	.wf-node-add { opacity: 1; width: 32px; height: 32px; left: calc(100% + 20px); }
+	.wf-node-add::before { width: 8px; height: 32px; }
 	.tour-start { min-height: 44px; }
 	.tour-btns .button { min-height: 40px; padding: 8px 14px; }
 	.tour-menu-item { min-height: 44px; justify-content: center; }

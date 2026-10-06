@@ -12,15 +12,20 @@ import (
 // Every seeded run is stamped from this clock, so a cursor that opened at or after the real present
 // would put run history in the future, and a ceiling that reached the present would put a seeded run
 // at the same instant a visitor loads the page. The window it opens is what makes the activity chart
-// and the runs list read like a fleet that has been working rather than one created a second ago.
+// and the runs list read like a fleet that has been working rather than one created a second ago,
+// and it opens on the nightly history, two weeks before the run window.
 func TestNewSeedClockOpensInThePastAndStaysThere(t *testing.T) {
 	t.Parallel()
 	before := time.Now()
 	c := NewSeedClock()
 	after := time.Now()
 
-	if c.cursor.Before(before.Add(-seedRunWindow)) || c.cursor.After(after.Add(-seedRunWindow)) {
-		t.Errorf("cursor = %v, want about %v ago", c.cursor, seedRunWindow)
+	opens := seedRunWindow + seedHistorySpan
+	if c.cursor.Before(before.Add(-opens)) || c.cursor.After(after.Add(-opens)) {
+		t.Errorf("cursor = %v, want about %v ago", c.cursor, opens)
+	}
+	if c.windowAt.Before(before.Add(-seedRunWindow)) || c.windowAt.After(after.Add(-seedRunWindow)) {
+		t.Errorf("run window opens at %v, want about %v ago", c.windowAt, seedRunWindow)
 	}
 	if c.ceiling.After(after.Add(-seedRunMargin)) {
 		t.Errorf("ceiling = %v, want no later than %v before now", c.ceiling, seedRunMargin)

@@ -398,6 +398,13 @@ host_build() {
 # the darwin one on macOS. The Linux build is the lint job itself, in the container.
 host_lint() {
   local lint=(golangci-lint)
+  # The linter caches results by package and file contents, not by checkout, so two checkouts with
+  # the same files shared them: a run here could be answered with issues recorded in another
+  # checkout, under that checkout's paths, which the path-based exclusions in .golangci.yml then
+  # failed to match. Each checkout gets a cache of its own unless the caller set one.
+  local key
+  key="$(pwd -P | cksum | cut -d' ' -f1)"
+  export GOLANGCI_LINT_CACHE="${GOLANGCI_LINT_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/switchtender-ci-local/golangci-lint/$key}"
   say "$HOST_NAME: golangci-lint $GOLANGCI_LINT_VERSION, the $(go env GOOS) build of each package"
   if ! golangci-lint version 2>/dev/null | grep -q "version ${GOLANGCI_LINT_VERSION#v} "; then
     note "golangci-lint $GOLANGCI_LINT_VERSION is not on PATH, so it is built with go run"

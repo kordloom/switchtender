@@ -22,18 +22,23 @@ function bannerOn(host, demo) {
 	return { text: banner.textContent, links };
 }
 
-test("the hosted demo says it resets every night and starts at the held run", () => {
+// agentHeld is where the hosted demo's banner starts: the runs the agent hold is keeping waiting.
+const agentHeld = "/ui/runs?q=" +
+	encodeURIComponent('held_by:"requested by an agent, held by default" status:pending_approval');
+
+test("the hosted demo says it resets every night and starts at the agent's held runs", () => {
 	const { text, links } = bannerOn("demo.switchtender.com", true);
 	assert.match(text, /reset every night/);
-	assert.ok(links.includes("/ui/runs?status=pending_approval"), "no link to the held run: " + links);
+	assert.match(text, /AI agent asked for/);
+	assert.ok(links.includes(agentHeld), "no link to the agent's held runs: " + links);
 });
 
 test("a demo on another host does not claim a nightly reset", () => {
 	for (const host of ["127.0.0.1", "localhost", "demo.example.com"]) {
 		const { text, links } = bannerOn(host, true);
 		assert.doesNotMatch(text, /every night|tomorrow/, host + " claims a nightly reset: " + text);
-		assert.ok(!links.includes("/ui/runs?status=pending_approval"),
-			host + " points at a held run that may not exist");
+		assert.ok(!links.includes(agentHeld),
+			host + " points at held runs that may not exist");
 		assert.ok(links.includes("/ui/runs"), host + " does not point at the runs it seeded");
 	}
 });

@@ -19,10 +19,14 @@ function mountWorkflow() {
 		hint: canvas.querySelector(".wf-hint"),
 		drag: null, link: null, linkFrom: null, selectedEdge: null,
 		past: [], future: [], lastSnapKey: null, lastSnapAt: 0,
-		opener: null, submitting: false,
+		opener: null, submitting: false, after: null,
 		scale: 1, panX: 40, panY: 40, pan: null, pointers: new Map(), pinch: null,
 	};
 	document.getElementById("wf-add").addEventListener("click", () => openStepModal(null));
+	// The toolbar sits above the canvas, out of the way of the eye working the graph, so the canvas
+	// carries its own Add step in its corner.
+	const canvasAdd = document.getElementById("wf-canvas-add");
+	if (canvasAdd) canvasAdd.addEventListener("click", () => openStepModal(null));
 	document.getElementById("wf-run").addEventListener("click", runWorkflow);
 	const wfJSON = document.getElementById("wf-export-json");
 	if (wfJSON) wfJSON.addEventListener("click", () => exportWorkflow("json"));
@@ -261,6 +265,11 @@ function saveViewSoon() {
 // database migration, both of which a smoke test waits on. It gives a first visit something to
 // drag, zoom, and read instead of an empty canvas, and it is replaced the moment the reader
 // changes anything, since the draft then saves over it.
+//
+// The ids are strings, like every other id on the canvas. The canvas reads an id back from a card's
+// data attribute, which is always a string, so the numbers these once were matched nothing: a link
+// dragged onto a sample step was dropped without a word, and deleting a sample link said it was
+// removed and left it drawn.
 function wfSeedExample() {
 	const step = (id, name, tool, x, y, extra) => Object.assign({
 		id, name, tool, x, y,
@@ -269,14 +278,14 @@ function wfSeedExample() {
 		inventory: "", dryRun: false, continueOnFailure: false, retries: 0,
 	}, extra || {});
 	wfState.nodes = [
-		step(1, "provision", "terraform", 60, 150, { command: "infra/network", dryRun: true }),
-		step(2, "configure", "ansible", 330, 60),
-		step(3, "migrate-db", "ansible", 330, 250, { playbook: "migrate.yml" }),
-		step(4, "smoke-test", "bash", 600, 150, { command: "curl -fsS https://example.internal/healthz", retries: 2 }),
+		step("1", "provision", "terraform", 60, 150, { command: "infra/network", dryRun: true }),
+		step("2", "configure", "ansible", 330, 60),
+		step("3", "migrate-db", "ansible", 330, 250, { playbook: "migrate.yml" }),
+		step("4", "smoke-test", "bash", 600, 150, { command: "curl -fsS https://example.internal/healthz", retries: 2 }),
 	];
 	wfState.edges = [
-		{ from: 1, to: 2 }, { from: 1, to: 3 },
-		{ from: 2, to: 4 }, { from: 3, to: 4 },
+		{ from: "1", to: "2" }, { from: "1", to: "3" },
+		{ from: "2", to: "4" }, { from: "3", to: "4" },
 	];
 	wfState.seq = 4;
 	const name = document.getElementById("wf-name");
@@ -534,6 +543,23 @@ function mountWizard() {
 	if (hintAdd) hintAdd.addEventListener("click", () => openStepModal(null));
 }
 
+// wfClearCanvas empties the canvas as one undo point, so the sample is put aside in one press and
+// Cmd or Ctrl Z brings it back. Focus moves to the empty canvas's first action, since the control
+// that was pressed leaves with the sample note it sat in.
+function wfClearCanvas() {
+	if (wfState.nodes.length === 0) return;
+	wfSnapshot();
+	wfState.nodes = [];
+	wfState.edges = [];
+	wfState.selectedEdge = null;
+	wfState.linkFrom = null;
+	renderWorkflow();
+	resetView();
+	wfSetStatus("Cleared the canvas. Cmd or Ctrl Z brings the steps back.", "");
+	const first = document.getElementById("wf-hint-add");
+	if (first) first.focus();
+}
+
 // wfNextSeq returns the counter the next node id is minted from: one past the highest id already in
 // the graph, and never below the draft's own counter.
 //
@@ -551,6 +577,17 @@ function wfNextSeq(nodes, seq) {
 	return next;
 }
 
+// wfStringIDs returns the graph with every node id and edge end as a string, the form the canvas
+// reads back from a card's data attribute. Every visit used to save the sample with number ids, so a
+// returning browser restores numbers, and the drafts are mended here rather than left to fail the
+// same way the old sample did.
+function wfStringIDs(nodes, edges) {
+	return {
+		nodes: nodes.map((n) => Object.assign({}, n, { id: String(n.id) })),
+		edges: edges.map((e) => Object.assign({}, e, { from: String(e.from), to: String(e.to) })),
+	};
+}
+
 // wfRestore loads the saved draft into the editor state, ignoring anything malformed. It reports
 // whether a saved viewport was restored, so the mount can fit the graph on a first visit instead.
 function wfRestore() {
@@ -561,8 +598,11 @@ function wfRestore() {
 		return false;
 	}
 	if (!draft || !Array.isArray(draft.nodes) || !Array.isArray(draft.edges)) return false;
-	wfState.nodes = draft.nodes;
-	wfState.edges = draft.edges;
+	if (!draft.nodes.every((n) => n && typeof n === "object")) return false;
+	if (!draft.edges.every((e) => e && typeof e === "object")) return false;
+	const graph = wfStringIDs(draft.nodes, draft.edges);
+	wfState.nodes = graph.nodes;
+	wfState.edges = graph.edges;
 	wfState.seq = wfNextSeq(draft.nodes, draft.seq);
 	document.getElementById("wf-name").value = draft.name || "";
 	document.getElementById("wf-inventory").value = draft.inventory || "";
@@ -692,10 +732,21 @@ async function draftStep() {
 	}
 }
 
-// openStepModal opens the step editor for a new step, or for the given node to edit it in place.
-function openStepModal(node) {
+// openStepModal opens the step editor for a new step, or for the given node to edit it in place. A
+// new step opened from another step's add control names that step as after: saving places the new
+// one beside it and links it from there.
+function openStepModal(node, after) {
 	wfState.opener = document.activeElement;
 	wfState.editing = node ? node.id : null;
+	wfState.after = !node && after ? after.id : null;
+	const title = document.getElementById("wf-step-title");
+	if (title) title.textContent = node ? "Edit step" : "Add a step";
+	const afterNote = document.getElementById("wf-step-after");
+	if (afterNote) {
+		afterNote.hidden = !wfState.after;
+		afterNote.textContent = wfState.after
+			? "Runs after " + after.name + ". Saving links it from there." : "";
+	}
 	document.getElementById("wf-step-status").textContent = "";
 	document.getElementById("wf-step-name").value = node ? node.name : "";
 	const kind = document.getElementById("wf-step-kind");
@@ -721,6 +772,7 @@ function openStepModal(node) {
 function closeStepModal() {
 	document.getElementById("wf-step-modal").hidden = true;
 	wfState.editing = null;
+	wfState.after = null;
 	if (wfState.opener && wfState.opener.focus) wfState.opener.focus();
 	wfState.opener = null;
 }
@@ -781,25 +833,55 @@ function saveApprovalStep(name) {
 
 // commitStep writes a saved step into the graph as one undo point, creating it or editing it in
 // place. A step that is no longer an approval step loses any deny path leaving it, since only an
-// approval step can be denied.
+// approval step can be denied. A new step added after another is placed beside it and linked from
+// it in the same undo point, so one Cmd-Z takes back both the step and its link.
 function commitStep(fields) {
 	wfSnapshot();
-	if (wfState.editing) {
-		const node = wfState.nodes.find((n) => n.id === wfState.editing);
-		Object.assign(node, fields);
-		if (!isApprovalNode(node)) {
-			wfState.edges = wfState.edges.filter((e) => !(e.deny && e.from === node.id));
-		}
+	const created = !wfState.editing;
+	let saved;
+	let source = null;
+	if (created) {
+		source = wfState.after ? wfState.nodes.find((n) => n.id === wfState.after) || null : null;
+		const at = source ? spawnAfter(source) : spawnPosition();
+		saved = Object.assign({ id: "n" + (wfState.seq++) }, at, fields);
+		wfState.nodes.push(saved);
+		if (source) wfState.edges.push({ from: source.id, to: saved.id });
 	} else {
-		wfState.nodes.push(Object.assign({ id: "n" + (wfState.seq++) }, spawnPosition(), fields));
+		saved = wfState.nodes.find((n) => n.id === wfState.editing);
+		Object.assign(saved, fields);
+		if (!isApprovalNode(saved)) {
+			wfState.edges = wfState.edges.filter((e) => !(e.deny && e.from === saved.id));
+		}
 	}
+	// A dialog opened from a card, or from a step's add control, hands focus back to an element the
+	// render below throws away, which leaves a keyboard user nowhere. Focus goes to the saved step.
+	const fromCanvas = !!wfState.opener && wfState.nodesLayer.contains(wfState.opener);
 	closeStepModal();
 	renderWorkflow();
+	if (created) revealNode(saved);
 	wfSave();
+	if (source) wfSetStatus(saved.name + " now waits for " + source.name + ".", "");
+	if (fromCanvas) {
+		const card = [...wfState.nodesLayer.children].find((el) => el.dataset.id === saved.id);
+		if (card) card.focus({ preventScroll: true });
+	}
+}
+
+// WF_GAP is the clear space kept around a card when a new step is placed, so cards never touch and
+// a link between neighbors stays visible.
+const WF_GAP = 20;
+
+// wfSpotTaken reports whether a card placed at x, y would overlap a card already on the canvas,
+// measured across the whole card rather than at its corner alone.
+function wfSpotTaken(x, y) {
+	return wfState.nodes.some((n) =>
+		Math.abs(n.x - x) < WF_CARD_W + WF_GAP && Math.abs(n.y - y) < WF_NODE_H + WF_GAP);
 }
 
 // spawnPosition picks a free grid slot for a new node inside the visible part of the canvas at the
-// current pan and zoom, skipping occupied spots so new steps never stack on existing ones.
+// current pan and zoom, skipping any slot whose card would overlap an existing one. It used to skip
+// only a slot within a few pixels of another card's corner, so a new step could land half on top of
+// one.
 function spawnPosition() {
 	const rect = wfState.canvas.getBoundingClientRect();
 	const viewW = rect.width / wfState.scale;
@@ -809,11 +891,43 @@ function spawnPosition() {
 	for (let i = 0; i < 1000; i++) {
 		const x = baseX + (i % cols) * 210;
 		const y = baseY + Math.floor(i / cols) * 130;
-		if (!wfState.nodes.some((n) => Math.abs(n.x - x) < 30 && Math.abs(n.y - y) < 30)) {
-			return { x, y };
-		}
+		if (!wfSpotTaken(x, y)) return { x, y };
 	}
 	return { x: baseX, y: baseY };
+}
+
+// spawnAfter places a step added after another one column to its right, the direction the graph
+// reads, on the same row when that is free and otherwise on the nearest free row below or above.
+function spawnAfter(source) {
+	const x = source.x + WF_PATTERN_COL;
+	for (let i = 0; i < 40; i++) {
+		// The rows tried are 0, +1, -1, +2, -2, and so on, around the source's own row.
+		const offset = i % 2 === 1 ? (i + 1) / 2 : -i / 2;
+		const y = source.y + offset * WF_PATTERN_ROW;
+		if (y >= 0 && !wfSpotTaken(x, y)) return { x, y };
+	}
+	return { x, y: source.y };
+}
+
+// revealNode pans the canvas just far enough to bring a node fully into view, keeping the zoom, so a
+// step added beside one near the edge does not land out of sight.
+function revealNode(node) {
+	const rect = wfState.canvas.getBoundingClientRect();
+	if (!rect.width || !rect.height) return;
+	const margin = 24;
+	const k = wfState.scale;
+	const left = wfState.panX + node.x * k;
+	const top = wfState.panY + node.y * k;
+	let dx = 0;
+	let dy = 0;
+	if (left + WF_CARD_W * k > rect.width - margin) dx = rect.width - margin - (left + WF_CARD_W * k);
+	if (left + dx < margin) dx = margin - left;
+	if (top + WF_NODE_H * k > rect.height - margin) dy = rect.height - margin - (top + WF_NODE_H * k);
+	if (top + dy < margin) dy = margin - top;
+	if (!dx && !dy) return;
+	wfState.panX += dx;
+	wfState.panY += dy;
+	applyViewport();
 }
 
 // deleteStepFromModal removes the node currently open in the editor along with its edges.
@@ -866,13 +980,24 @@ function renderSampleNote() {
 		"playbook or command, start from a pattern, or clear the canvas. Run workflow is held " +
 		"until then.";
 	host.appendChild(why);
+	// The note told the reader to clear the canvas and offered nothing that did, so clearing meant
+	// deleting the sample one step at a time.
+	const clear = document.createElement("button");
+	clear.type = "button";
+	clear.id = "wf-clear";
+	clear.className = "button wf-sample-clear";
+	clear.textContent = "Clear canvas";
+	clear.dataset.tip = "Click to remove the sample and start from an empty canvas";
+	clear.addEventListener("click", wfClearCanvas);
+	host.appendChild(clear);
 	host.hidden = false;
 }
 
 // renderNodes reconciles the node cards with the model, positioning each and wiring its handles.
-// Cards are focusable: Enter edits, arrows move, L starts a link, and Delete removes. Every card
-// carries its tool on a data attribute, which is what tints the card, its badge, and its handles, so
-// a graph reads as a set of distinct steps under the flat themes as much as the signature one.
+// Cards are focusable: Enter edits, A adds a step after the card, arrows move, L starts a link, and
+// Delete removes. Every card carries its tool on a data attribute, which is what tints the card, its
+// badge, its handles, and its add control, so a graph reads as a set of distinct steps under the
+// flat themes as much as the signature one.
 function renderNodes() {
 	const layer = wfState.nodesLayer;
 	layer.textContent = "";
@@ -887,10 +1012,11 @@ function renderNodes() {
 		el.setAttribute("role", "group");
 		const approval = isApprovalNode(node);
 		el.setAttribute("aria-label", approval
-			? node.name + ", approval step. Enter edits, arrow keys move, L links the approve path, " +
-				"D links the deny path, Delete removes."
+			? node.name + ", approval step. Enter edits, A adds a step after it, arrow keys move, " +
+				"L links the approve path, D links the deny path, Delete removes."
 			: node.name + ", " + node.tool +
-				" step. Enter edits, arrow keys move, L starts a link, Delete removes.");
+				" step. Enter edits, A adds a step after it, arrow keys move, L starts a link, " +
+				"Delete removes.");
 		const target = approval ? node.description : (node.tool === "ansible" ? node.playbook : node.command);
 		el.innerHTML =
 			'<div class="wf-node-head"><span class="wf-node-name"></span>' +
@@ -899,8 +1025,15 @@ function renderNodes() {
 			'<div class="wf-node-flags"></div>' +
 			'<span class="wf-handle wf-in" aria-hidden="true"></span>' +
 			'<span class="wf-handle wf-out" data-tip="Drag onto another step to make it wait for this one"></span>' +
-			(approval ? '<span class="wf-handle wf-out-deny" data-tip="Drag onto a step to run it when this approval is denied or times out"></span>' : "");
+			(approval ? '<span class="wf-handle wf-out-deny" data-tip="Drag onto a step to run it when this approval is denied or times out"></span>' : "") +
+			'<button type="button" class="wf-node-add" data-tip="Click to add a step that runs after this one">' +
+			'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
+			'stroke-linecap="round" aria-hidden="true">' +
+			'<line x1="12" y1="6" x2="12" y2="18"></line><line x1="6" y1="12" x2="18" y2="12"></line></svg></button>';
 		el.querySelector(".wf-node-name").textContent = node.name;
+		const add = el.querySelector(".wf-node-add");
+		add.setAttribute("aria-label", "Add a step after " + node.name);
+		add.addEventListener("click", () => openStepModal(null, node));
 		el.querySelector(".wf-tool").textContent = node.tool;
 		el.querySelector(".wf-node-target").textContent = target || "";
 		// The settings that change how a step behaves are marked on the card, so a dry run or a step
@@ -963,11 +1096,13 @@ function renderLegend() {
 	}
 }
 
-// nodeKey handles keyboard interaction on a focused node: edit, move, link, and delete. Completing
-// a pending link happens on Enter over the target node.
+// nodeKey handles keyboard interaction on a focused node: edit, add after, move, link, and delete.
+// Completing a pending link happens on Enter over the target node. Keys pressed on a button inside
+// the card belong to that button, so Enter on the add control adds a step rather than editing this
+// one.
 function nodeKey(e, id) {
 	const node = wfState.nodes.find((n) => n.id === id);
-	if (!node || e.target.closest(".wf-node-del")) return;
+	if (!node || e.target.closest(".wf-node-del") || e.target.closest(".wf-node-add")) return;
 	if (e.key === "Enter" || e.key === " ") {
 		e.preventDefault();
 		if (wfState.linkFrom && wfState.linkFrom !== id) {
@@ -981,6 +1116,9 @@ function nodeKey(e, id) {
 	} else if (e.key === "Delete" || e.key === "Backspace") {
 		e.preventDefault();
 		removeNode(id);
+	} else if (e.key.toLowerCase() === "a" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+		e.preventDefault();
+		openStepModal(null, node);
 	} else if (e.key.toLowerCase() === "l") {
 		e.preventDefault();
 		wfState.linkFrom = id;
@@ -1113,11 +1251,13 @@ function removeEdge(sel) {
 	wfSave();
 }
 
-// startDrag begins moving a node with the primary button, unless the press landed on a handle or
-// the delete control. The pre-drag graph is captured so a completed move becomes one undo step.
+// startDrag begins moving a node with the primary button, unless the press landed on a handle, the
+// delete control, or the add control. The pre-drag graph is captured so a completed move becomes one
+// undo step.
 function startDrag(e, id) {
 	if (e.button !== 0 || !e.isPrimary) return;
-	if (e.target.closest(".wf-handle") || e.target.closest(".wf-node-del")) return;
+	if (e.target.closest(".wf-handle") || e.target.closest(".wf-node-del") ||
+		e.target.closest(".wf-node-add")) return;
 	const node = wfState.nodes.find((n) => n.id === id);
 	const p = wfPoint(e);
 	wfState.drag = {
@@ -1137,7 +1277,9 @@ function startLink(e, id, deny) {
 }
 
 // wfPointerDown starts a canvas pan on empty space or a two-finger pinch, and clears any edge
-// selection. A press on a node or a handle is left to that element's own drag and link handlers.
+// selection. A press on a node, a handle, or any button on the canvas is left to that control's own
+// handlers. Capturing such a press for a pan sent its click to the canvas instead of the button, so
+// the empty canvas's own Add a step and Start from a pattern did nothing under a mouse.
 function wfPointerDown(e) {
 	wfState.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 	if (wfState.pointers.size === 2 && !wfState.drag && !wfState.link) {
@@ -1146,7 +1288,7 @@ function wfPointerDown(e) {
 		return;
 	}
 	const onControl = e.target.closest(".wf-node") || e.target.closest(".wf-edge-hit") ||
-		e.target.closest(".wf-zoom");
+		e.target.closest(".wf-zoom") || e.target.closest("button");
 	if (onControl || wfState.drag || wfState.link || e.button !== 0) return;
 	deselectEdge();
 	wfState.pan = { x: e.clientX, y: e.clientY, px: wfState.panX, py: wfState.panY };
