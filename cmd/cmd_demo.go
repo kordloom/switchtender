@@ -210,7 +210,7 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 		Submitter: disp, Runs: store, Projects: bundle.Projects(),
 		Inventories: bundle.Inventories(), Templates: bundle.Templates(),
 		Credentials: bundle.Credentials(),
-		Policies:    bundle.Policies(), Users: bundle.Users(),
+		Policies:    bundle.Policies(), Users: bundle.Users(), Tokens: bundle.Tokens(),
 		Approver:   disp,
 		InvSources: bundle.InventorySources(),
 		Audit:      bundle.Audits(),

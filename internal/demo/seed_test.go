@@ -497,8 +497,9 @@ func TestSeedConfigStoresHashedDemoPasswords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Users.List() error = %v", err)
 	}
-	if len(users) != 3 {
-		t.Fatalf("seeded %d accounts, want the three the demo shows", len(users))
+	if len(users) != 4 {
+		t.Fatalf("seeded %d accounts, want the four the demo shows, the agent's account among them",
+			len(users))
 	}
 	roles := make(map[user.Role]string, len(users))
 	for _, u := range users {

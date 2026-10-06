@@ -1,0 +1,15 @@
+---
+# The remediation agent asks for this when a web host's app stops answering its health check. It
+# restarts the app on the hosts its limit names. Like every playbook here it runs over a local
+# connection, so the restart is the line a real one would log.
+- name: Restart the app
+  hosts: web
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Restart the application service
+      debug:
+        msg: "restarting app on {{ inventory_hostname }}"
+    - name: Wait for the health check to pass
+      command: "sleep {{ work | default(1) }}"
+      changed_when: false

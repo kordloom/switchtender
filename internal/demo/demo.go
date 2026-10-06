@@ -60,6 +60,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
@@ -108,6 +109,10 @@ type Deps struct {
 	// Policies and Users hold sample governance rules and accounts, so those pages show real data.
 	Policies policy.Store
 	Users    user.Store
+	// Tokens holds the agent's token, minted the way the command line mints one, so the agent the
+	// demo shows asks for its runs through the real gate with a real credential. Nil skips the
+	// agent's runs, so a bare Deps still seeds.
+	Tokens auth.Store
 	// Approver decides on the held run the governance seed approves. Nil seeds the run the gate is
 	// still holding and skips the approved one, so a bare Deps still seeds.
 	Approver Approver
@@ -407,6 +412,11 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 	if have("terraform") {
 		seedHeldDestroy(ctx, d, legacyDir, log)
 	}
+
+	// A person's release waiting at its approval step, and then the agent, last, so what the agent
+	// asked for and what the gate did about it sit at the top of the runs list.
+	seedWaitingWorkflow(ctx, d, playbook, inv, log)
+	seedAgent(ctx, d, playbook, inv, tfDir, log)
 
 	normalizeClaimStamps(ctx, d, log)
 
@@ -1252,6 +1262,9 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) seededIDs {
 			{"admin", "Dana Okonkwo", "dana@example.com", "Platform lead", user.RoleAdmin},
 			{"deploy-bot", "", "platform@example.com", "Deployment service account", user.RoleOperator},
 			{"auditor", "Priya Raman", "priya@example.com", "Compliance", user.RoleViewer},
+			// The account the remediation agent's token is bound to and acts for. An agent token is
+			// capped at operator whatever its account holds, so the account is an operator too.
+			{agentAccount, "", "ops-lead@example.com", "Operations lead", user.RoleOperator},
 		}
 		// Backdated like every other seeded object. Left at the wall clock all three accounts read
 		// the same "15m ago", tracking container uptime, on an install whose runs, templates,
