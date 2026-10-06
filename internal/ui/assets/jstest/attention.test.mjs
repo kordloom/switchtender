@@ -116,6 +116,20 @@ test("the panel shows four counts and every item with its main blocker", async (
 		"the reclaim countdown is missing for a lost worker");
 });
 
+test("a run named by a playbook path shows the file, and its tooltip keeps the path", async () => {
+	const body = answer();
+	body.items[2].name = "/tmp/switchtender-demo-assets-1/restart-app.yml";
+	body.items[0].name = "deploy/web";
+	const { document } = await overviewWith(reply(body));
+	const held = document.querySelector('#attn-list .attn-item[data-key="run_held"] .attn-name');
+	assert.equal(held.textContent, "restart-app.yml");
+	assert.equal(held.title, "/tmp/switchtender-demo-assets-1/restart-app.yml");
+	// A workflow is named, not pathed, so a slash in its name is kept.
+	const wf = document.querySelector('#attn-list .attn-item[data-key="run_wf"] .attn-name');
+	assert.equal(wf.textContent, "deploy/web");
+	assert.equal(wf.title, "");
+});
+
 test("each item says who can act and what happens next", async () => {
 	const { document } = await overviewWith(reply(answer()));
 	const queued = document.querySelector('#attn-list .attn-item[data-key="run_q"]').textContent;
