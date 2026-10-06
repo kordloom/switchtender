@@ -38,6 +38,13 @@
 		#out pre { overflow-x: auto; background: rgba(127,127,127,.08); border-radius: 12px; padding: 16px; }
 		#out code { font-family: "JetBrains Mono", monospace; font-size: .85rem; white-space: pre; }
 		.note { color: var(--muted, #9aa3b2); font-size: .9rem; margin-top: 24px; }
+		/* The control that changes one digit of a verified file. It sits beside the verdict it is about,
+		   in the page's own quiet border, so it reads as an invitation and not as a second result. */
+		.tamper { margin: 18px 0; padding: 14px 18px; border: 1px dashed var(--border, #3a3f4b); border-radius: 12px; }
+		.tamper p { margin: 0 0 10px; }
+		.tamper-btn { font: inherit; font-weight: 600; padding: 9px 16px; border-radius: 10px; border: 1px solid var(--accent, #6ea8fe); background: transparent; color: var(--accent, #6ea8fe); cursor: pointer; }
+		.tamper-btn:hover, .tamper-btn:focus-visible { background: rgba(110,168,254,.12); }
+		.tampered { color: #e0a558; font-size: .95rem; margin: 22px 0 -10px; }
 	</style>
 	<noscript><style>.reveal{opacity:1 !important;transform:none !important}</style></noscript>
 </head>

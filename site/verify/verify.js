@@ -27,7 +27,7 @@
 
 	// render turns the verifier's report into the verdict block and a details table. The wording
 	// mirrors the command line so the two never drift in a reader's memory.
-	function render(report, name, pinned) {
+	function render(report, name, pinned, note) {
 		var ok = report.ok === true;
 		// A signature proves a bundle was signed. It does not prove who signed it, because any key
 		// signs its own bundle. Without a pin this page can say the chain is intact and cannot say
@@ -47,7 +47,8 @@
 		// The level names what a passing bundle achieved. On a failure it is "not verified", which
 		// only repeated the verdict beside it, so it is shown for a pass alone.
 		var level = ok && report.level ? "   " + esc(report.level) : "";
-		var html = '<div class="verdict ' + cls + '">' + word + level + "</div>";
+		var html = note ? '<p class="tampered">' + esc(note) + "</p>" : "";
+		html += '<div class="verdict ' + cls + '">' + word + level + "</div>";
 		if (riders) {
 			html += '<p class="unpinned">This receipt carries ' + (report.head_attestors || []).length +
 				' counter-signature(s). SwitchTender never adds them, so somebody attached these after ' +
@@ -121,21 +122,109 @@
 	function check(f) {
 		if (!ready) return;
 		var reader = new FileReader();
-		reader.onload = function () {
-			var bytes = new Uint8Array(reader.result);
-			var pin = fp.value.trim();
-			var raw = pin ? loomsealVerify(bytes, pin) : loomsealVerify(bytes);
-			var pinned = pin !== "";
-			try {
-				render(JSON.parse(raw), f.name, pinned);
-			} catch (e) {
-				out.innerHTML = '<div class="verdict no">NOT VERIFIED   report could not be read</div>';
-			}
-		};
+		reader.onload = function () { run(new Uint8Array(reader.result), f.name); };
 		reader.onerror = function () {
 			out.innerHTML = '<div class="verdict no">NOT VERIFIED   the file could not be read</div>';
 		};
 		reader.readAsArrayBuffer(f);
+	}
+
+	// verifyBytes runs the verifier on bytes and returns its report. It throws when the verifier's
+	// answer is not a report, which the callers show as an unreadable report.
+	function verifyBytes(bytes, pin) {
+		return JSON.parse(pin ? loomsealVerify(bytes, pin) : loomsealVerify(bytes));
+	}
+
+	// run verifies bytes, shows the verdict, and, when the bundle passes, offers to change one digit
+	// and check it again.
+	function run(bytes, name) {
+		var pin = fp.value.trim();
+		try {
+			var report = verifyBytes(bytes, pin);
+			render(report, name, pin !== "");
+			if (report.ok === true) offerTamper(bytes, name);
+		} catch (e) {
+			out.innerHTML = '<div class="verdict no">NOT VERIFIED   report could not be read</div>';
+		}
+	}
+
+	// button builds a plain button for the result area. Handlers are attached here, never inline,
+	// so the page's content security policy can stay strict.
+	function button(id, label, onclick) {
+		var b = document.createElement("button");
+		b.type = "button";
+		b.id = id;
+		b.className = "tamper-btn";
+		b.textContent = label;
+		b.addEventListener("click", onclick);
+		return b;
+	}
+
+	// offerTamper adds the control that makes the claim checkable in ten seconds: the visitor changes
+	// one digit of the file they just verified and watches the verdict fail.
+	function offerTamper(bytes, name) {
+		var box = document.createElement("div");
+		box.className = "tamper";
+		var text = document.createElement("p");
+		text.textContent = "Now try to cheat. Change one digit in this file and check it again.";
+		box.appendChild(text);
+		box.appendChild(button("tamper", "Change one digit and check again", function () {
+			tamper(bytes, name);
+		}));
+		out.appendChild(box);
+	}
+
+	// changeOneDigit returns a copy of bytes with one digit replaced by a different one, along with
+	// the report the verifier gives the copy. It starts in the middle of the file and works outward,
+	// and it keeps the first change the verifier rejects. A signed bundle rejects a change to anything
+	// it signed, so the first digit does it, and the search only matters for a digit that sits outside
+	// what the signature covers. The replacement is never zero, so a number never gains a leading
+	// zero. A file with no digit gets its middle byte changed instead.
+	function changeOneDigit(bytes, pin) {
+		var mid = bytes.length >> 1;
+		var first = null;
+		var tried = 0;
+		function attempt(at, to) {
+			var copy = bytes.slice();
+			var was = copy[at];
+			copy[at] = to;
+			var change = { bytes: copy, at: at, from: was, to: to, report: verifyBytes(copy, pin) };
+			if (!first) first = change;
+			return change.report.ok === false ? change : null;
+		}
+		for (var d = 0; d < bytes.length && tried < 64; d++) {
+			var spots = d === 0 ? [mid] : [mid + d, mid - d];
+			for (var i = 0; i < spots.length && tried < 64; i++) {
+				var at = spots[i];
+				if (at < 0 || at >= bytes.length || bytes[at] < 0x30 || bytes[at] > 0x39) continue;
+				tried++;
+				var rejected = attempt(at, 0x31 + ((bytes[at] - 0x30) % 9));
+				if (rejected) return rejected;
+			}
+		}
+		var flipped = bytes.length ? attempt(mid, bytes[mid] ^ 0x01) : null;
+		return flipped || first;
+	}
+
+	// tamper shows the verdict for the file with one digit changed, says exactly what changed, and
+	// offers the original back.
+	function tamper(bytes, name) {
+		var pin = fp.value.trim();
+		try {
+			var change = changeOneDigit(bytes, pin);
+			if (!change) return;
+			var shown = String.fromCharCode(change.from) + '" to "' + String.fromCharCode(change.to);
+			render(change.report, name, pin !== "",
+				'Changed byte ' + change.at + ' from "' + shown + '". Nothing else in the file was touched.');
+			var box = document.createElement("div");
+			box.className = "tamper";
+			box.appendChild(button("restore", "Check the original again", function () {
+				run(bytes, name);
+			}));
+			out.appendChild(box);
+		} catch (e) {
+			out.innerHTML = '<div class="verdict no">NOT VERIFIED   report could not be read</div>';
+		}
 	}
 
 	drop.addEventListener("click", function () { if (ready) file.click(); });
