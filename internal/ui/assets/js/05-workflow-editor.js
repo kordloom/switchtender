@@ -32,8 +32,8 @@ function mountWorkflow() {
 	if (wfJSON) wfJSON.addEventListener("click", () => exportWorkflow("json"));
 	const wfYAML = document.getElementById("wf-export-yaml");
 	if (wfYAML) wfYAML.addEventListener("click", () => exportWorkflow("yaml"));
-	const wfSave = document.getElementById("wf-save-template");
-	if (wfSave) wfSave.addEventListener("click", saveWorkflowTemplate);
+	const saveTemplateButton = document.getElementById("wf-save-template");
+	if (saveTemplateButton) saveTemplateButton.addEventListener("click", saveWorkflowTemplate);
 	document.getElementById("wf-step-tool").addEventListener("change", syncStepFields);
 	const kindSelect = document.getElementById("wf-step-kind");
 	if (kindSelect) kindSelect.addEventListener("change", syncStepFields);

@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 
 import { ALL_PARTS, sandboxOf } from "./loader.mjs";
 import { fire } from "./dom.mjs";
-import { reply } from "./net.mjs";
+import { failWith, reply, sequence } from "./net.mjs";
 import { loadPage } from "./pages.mjs";
 
 // mountEditor opens the workflow page with an empty graph.
@@ -209,4 +209,74 @@ test("a workflow's step list names its approval step by where it stands", () => 
 	const text = page.document.getElementById("steps").textContent;
 	assert.match(text, /2\. gate {2}· {2}approval, waiting for a decision/);
 	assert.match(text, /3\. late {2}· {2}approval, timed out/);
+});
+
+// REFRESH is the period the approvals panel polls on, in virtual milliseconds.
+const REFRESH = 15000;
+
+// pollingPanel loads the approvals panel on the runs page answering the queue with answers in order,
+// and starts the refresh the page starts when it mounts.
+async function pollingPanel(...answers) {
+	const page = loadPage("runs", {
+		parts: ALL_PARTS,
+		routes: [[/^\/v1\/approvals$/, sequence(...answers)]],
+	});
+	await page.app.loadApprovalSteps("");
+	page.app.wireApprovalsAutoRefresh("");
+	return { page, host: page.document.getElementById("approval-steps") };
+}
+
+test("a step that arrives while the page is open shows on the next refresh", async () => {
+	// The panel used to be read once, when the page loaded. A workflow that reached its approval step
+	// afterward never offered Approve until the approver reloaded.
+	const { page, host } = await pollingPanel(reply({ approvals: [] }),
+		reply({ approvals: [waitingStep()] }));
+	assert.equal(host.hidden, true, "an empty queue showed the panel");
+	await page.clock.tick(REFRESH);
+	assert.equal(host.hidden, false, "a step that arrived after the page loaded never appeared");
+	assert.match(host.textContent, /release, gate/);
+});
+
+test("a refresh that finds the same queue leaves the panel's controls alone", async () => {
+	// Redrawing every poll would drop keyboard focus from the Approve button the reader is on.
+	const same = reply({ approvals: [waitingStep()] });
+	const { page, host } = await pollingPanel(same, same, same);
+	const approve = [...host.querySelectorAll("button")].find((b) => b.textContent === "Approve");
+	await page.clock.tick(REFRESH);
+	await page.clock.tick(REFRESH);
+	const after = [...host.querySelectorAll("button")].find((b) => b.textContent === "Approve");
+	// Compared with ok rather than equal: a failing equal prints both nodes, and a node drags in the
+	// whole document with it.
+	assert.ok(after === approve, "an unchanged queue was redrawn, which discards the reader's focus");
+});
+
+test("a refresh that finds a changed queue redraws it", async () => {
+	const { page, host } = await pollingPanel(reply({ approvals: [waitingStep()] }),
+		reply({ approvals: [waitingStep(), waitingStep({ id: "run_gate2", run_id: "run_wf2",
+			workflow: "nightly", step: "gate" })] }));
+	assert.equal(host.querySelectorAll(".approval-step").length, 1);
+	await page.clock.tick(REFRESH);
+	assert.equal(host.querySelectorAll(".approval-step").length, 2, "a second waiting step was not added");
+});
+
+test("a failed refresh hides the panel and the next good one brings it back", async () => {
+	// The fetch that failed must not leave the queue it last drew looking current, or the same queue
+	// coming back would be skipped as unchanged and the panel would stay hidden.
+	const same = reply({ approvals: [waitingStep()] });
+	const { page, host } = await pollingPanel(same, failWith(new Error("server went away")), same);
+	assert.equal(host.hidden, false);
+	await page.clock.tick(REFRESH);
+	assert.equal(host.hidden, true, "a failed read left a stale panel on screen");
+	await page.clock.tick(REFRESH);
+	assert.equal(host.hidden, false, "the panel stayed hidden after the server answered again");
+	assert.match(host.textContent, /release, gate/);
+});
+
+test("a decision still redraws the panel when the queue it finds is unchanged", async () => {
+	const page = mountRuns([waitingStep()], "admin", "approver");
+	await page.app.loadApprovalSteps("");
+	const before = page.document.querySelector("#approval-steps .approval-step");
+	await page.app.loadApprovalSteps("");
+	assert.ok(page.document.querySelector("#approval-steps .approval-step") !== before,
+		"a non-quiet reload skipped the redraw, so a failed decision could not put its buttons back");
 });

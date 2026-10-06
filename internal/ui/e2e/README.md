@@ -21,6 +21,16 @@ breakage the simulated DOM cannot see.
   edits, links by dragging, deletes, clears to the empty canvas, starts from a pattern, and exports
   JSON. Against the demo it also checks Run workflow and Save as template send nothing, and against
   `serve` it runs the graph it built.
+- **workflow-integration** (`workflow-integration.spec.mjs`) runs against `serve` only and proves
+  what the editor draws is what the server does. It draws a release workflow from an empty canvas
+  and runs it through an approval, then denies one and checks the deny path ran and the deploy did
+  not. It checks that retries and continue on failure behave as set, that the name and inventory
+  survive a reload, that every refusal says why and changes nothing, and that undo and redo walk a
+  mixed sequence exactly. Two seeded random walks of 32 gestures each are checked after every gesture
+  against a model the test keeps on its own, and then the exported pipeline is run and every step
+  must start after the steps it depends on. A failing walk prints its gestures, and its seed replays
+  it. It also checks that a waiting approval appears on an open runs page and on a workflow's own
+  page, and that a phone can add and edit a step by touch.
 
 All but assess fail on any uncaught page error or console error, and assess on any page error.
 

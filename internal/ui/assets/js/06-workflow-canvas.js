@@ -417,9 +417,11 @@ document.addEventListener("DOMContentLoaded", () => {
 		wireRunsAutoRefresh();
 		loadRuns();
 		loadApprovalSteps("");
+		wireApprovalsAutoRefresh("");
 	} else if (page === "detail") {
 		loadDetail(document.body.dataset.runId);
 		loadApprovalSteps(document.body.dataset.runId);
+		wireApprovalsAutoRefresh(document.body.dataset.runId);
 		loadRunNotifications(document.body.dataset.runId);
 	} else if (page === "fleet") {
 		loadFleet();
