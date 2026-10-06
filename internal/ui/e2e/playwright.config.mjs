@@ -1,10 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// Three servers back three suites. The smoke suite drives the seeded, read-only demo, where the data
+// Three servers back four suites. The smoke suite drives the seeded, read-only demo, where the data
 // is rich and nothing can be changed, so it covers rendering and navigation of every main page. The
 // interactive suite drives a writable serve instance, where it exercises the mutating flows the demo
 // disables: launching a run and creating objects, then checking the change actually landed. The
-// assess suite drives the browser assessment, a static page, from the site directory itself.
+// assess suite drives the browser assessment, a static page, from the site directory itself. The
+// workflow suite drives the workflow editor against both the demo and the serve instance.
 const DEMO_PORT = 18777;
 const SERVE_PORT = 18778;
 const SITE_PORT = 18779;
@@ -55,6 +56,21 @@ export default defineConfig({
       name: "assess",
       testMatch: "assess.spec.mjs",
       use: { ...devices["Desktop Chrome"], ...channel, baseURL: SITE },
+    },
+    // The workflow editor runs once per server. Building a graph never leaves the browser, so the
+    // demo keeps every editing control live and refuses only Run workflow and Save as template, and
+    // the same spec proves both halves of that against the server each claim is about.
+    {
+      name: "workflow-demo",
+      testMatch: "workflow.spec.mjs",
+      metadata: { readOnly: true },
+      use: { ...devices["Desktop Chrome"], ...channel, baseURL: DEMO },
+    },
+    {
+      name: "workflow-serve",
+      testMatch: "workflow.spec.mjs",
+      metadata: { readOnly: false },
+      use: { ...devices["Desktop Chrome"], ...channel, baseURL: SERVE },
     },
   ],
   webServer: [

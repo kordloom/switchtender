@@ -1,6 +1,6 @@
 # UI real-browser tests
 
-Two Playwright suites drive the web UI in a real browser engine. They complement the dependency-free
+These Playwright suites drive the web UI in a real browser engine. They complement the dependency-free
 `node --test` suite in `../assets/jstest`, which drives the same production JavaScript against a
 simulated DOM: that suite proves the logic and the wiring, and these prove the pages render, click
 through, and mutate in a real browser, catching layout, CSS, real event, and browser-only script
@@ -16,8 +16,13 @@ breakage the simulated DOM cannot see.
   directory with the reader built into it: it drops an export named and filled beyond Latin, then
   the same export saved as UTF-16, and checks the page reads both in its worker, sets text from the
   file in fonts already on the machine, and requests nothing once it has loaded.
+- **workflow** (`workflow.spec.mjs`) drives the workflow editor twice, as the `workflow-demo` and
+  `workflow-serve` projects: it adds steps from the toolbar, the canvas corner, and a step's own +,
+  edits, links by dragging, deletes, clears to the empty canvas, starts from a pattern, and exports
+  JSON. Against the demo it also checks Run workflow and Save as template send nothing, and against
+  `serve` it runs the graph it built.
 
-The first two fail on any uncaught page error or console error, and the third on any page error.
+All but assess fail on any uncaught page error or console error, and assess on any page error.
 
 ## Run them
 
