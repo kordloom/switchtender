@@ -33,6 +33,7 @@ async function mount(report, opts = {}) {
 	document.setDocumentElement(html || nodes[0]);
 
 	const calls = [];
+	const seen = [];
 	const scope = {
 		document,
 		// The page fetches the wasm and instantiates it. Neither is what is under test here, so both
@@ -42,13 +43,18 @@ async function mount(report, opts = {}) {
 		Go: function () { this.importObject = {}; this.run = () => {}; },
 		loomsealVerify: (bytes, pin) => {
 			calls.push(pin);
+			seen.push(bytes.slice());
+			if (opts.verify) return JSON.stringify(opts.verify(bytes, pin));
 			// The real verifier compares a pin only once the signature holds, so a report for a bundle
 			// that failed earlier carries no comparison even when a pin was given.
 			if (pin === undefined || opts.stopsBeforeKey) return JSON.stringify(report);
 			return JSON.stringify({ ...report, fingerprint_match: pin === "sha256:good" });
 		},
 		FileReader: class {
-			readAsArrayBuffer() { this.result = new Uint8Array([1, 2, 3]); this.onload(); }
+			readAsArrayBuffer() {
+				this.result = opts.bytes ? opts.bytes.slice() : new Uint8Array([1, 2, 3]);
+				this.onload();
+			}
 		},
 		console,
 	};
@@ -64,6 +70,7 @@ async function mount(report, opts = {}) {
 	return {
 		document,
 		calls,
+		seen,
 		drop(pin) {
 			if (pin !== undefined) document.getElementById("fp").value = pin;
 			const file = document.getElementById("file");
@@ -240,4 +247,112 @@ test("every row label is set apart from its value", async () => {
 		assert.match(text, new RegExp("\\b" + label + " {2,}\\S"),
 			label + " is not followed by a gap before its value: " + text.slice(0, 400));
 	}
+});
+
+// BUNDLE stands in for a bundle: JSON with digits through the middle, the way a hex digest has them.
+const BUNDLE = new TextEncoder().encode(
+	'{"id":"lsb_6a3fb404f13c","chain":[{"seq":1,"hash":"4f1a9c3e07d2"},{"seq":2,"hash":"b81d6e5a2c90"}]}');
+
+// rejectsChange is a verifier stub that passes the original bytes and fails any other bytes, the way
+// a signed bundle does: the signature covers what the file says, so a changed file is not that file.
+function rejectsChange(original, report, except) {
+	return (bytes, pin) => {
+		let at = -1;
+		for (let i = 0; i < bytes.length; i++) if (bytes[i] !== original[i]) { at = i; break; }
+		const pass = at === -1 || at === except;
+		const answer = pass ? report : { ...report, ok: false, signature_ok: false, level: "not verified",
+			problems: ["signature does not verify over the canonical bundle"] };
+		return pin ? { ...answer, fingerprint_match: pin === "sha256:good" } : answer;
+	};
+}
+
+// differences lists every offset where two byte arrays disagree.
+function differences(a, b) {
+	const out = [];
+	for (let i = 0; i < Math.max(a.length, b.length); i++) if (a[i] !== b[i]) out.push(i);
+	return out;
+}
+
+test("a verified bundle offers to change one digit, and a failed one does not", async () => {
+	const good = await mount(SOUND, { bytes: BUNDLE, verify: rejectsChange(BUNDLE, SOUND) });
+	const text = good.drop("sha256:good").textContent;
+	assert.ok(good.document.getElementById("tamper"), "a verified bundle offers no way to change it");
+	assert.match(text, /Now try to cheat/, "the offer does not say what it is for: " + text.slice(-200));
+
+	const bad = { ...SOUND, ok: false, signature_ok: false, problems: ["signature does not verify"] };
+	const failed = await mount(bad, { bytes: BUNDLE });
+	failed.drop();
+	assert.equal(failed.document.getElementById("tamper"), null,
+		"a bundle that already failed was offered a change, which proves nothing");
+});
+
+test("changing one digit fails the verdict and says what changed", async () => {
+	const page = await mount(SOUND, { bytes: BUNDLE, verify: rejectsChange(BUNDLE, SOUND) });
+	page.drop("sha256:good");
+	fire(page.document.getElementById("tamper"), "click");
+	const text = page.document.getElementById("out").textContent;
+
+	assert.match(text, /NOT VERIFIED/, "a changed bundle did not read as failed: " + text.slice(0, 160));
+	assert.doesNotMatch(text, /^\s*VERIFIED/, "a changed bundle still reads as verified");
+	const said = text.match(/Changed byte (\d+) from "(\d)" to "(\d)"/);
+	assert.ok(said, "the page does not say which byte changed and to what: " + text.slice(0, 200));
+
+	// What the page says it did is exactly what it did: the verifier saw the original first and then
+	// a copy that differs in the one byte named, from the digit named to the digit named.
+	assert.deepEqual(differences(page.seen[0], BUNDLE), [], "the first check was not the original bytes");
+	const changed = page.seen[page.seen.length - 1];
+	assert.deepEqual(differences(changed, BUNDLE), [Number(said[1])],
+		"the copy differs from the original somewhere other than the byte the page named");
+	assert.equal(String.fromCharCode(BUNDLE[said[1]]), said[2], "the page named the wrong original digit");
+	assert.equal(String.fromCharCode(changed[said[1]]), said[3], "the page named the wrong new digit");
+});
+
+test("a changed digit is never zero, and never the digit it replaces", async () => {
+	for (const [digit, want] of [["0", "1"], ["1", "2"], ["8", "9"], ["9", "1"]]) {
+		const bytes = new TextEncoder().encode('{"a":"' + digit + '"}');
+		const page = await mount(SOUND, { bytes, verify: rejectsChange(bytes, SOUND) });
+		page.drop("sha256:good");
+		fire(page.document.getElementById("tamper"), "click");
+		const text = page.document.getElementById("out").textContent;
+		assert.ok(text.includes('from "' + digit + '" to "' + want + '"'),
+			digit + " should become " + want + ": " + text.slice(0, 160));
+	}
+});
+
+test("the search moves past a digit the verifier still accepts", async () => {
+	// A digit outside what the signature covers would pass unchanged, and a demonstration that
+	// changed only that digit would show nothing. The page moves to the next digit, and says which.
+	const bytes = new TextEncoder().encode("x".repeat(10) + "7" + "x".repeat(8) + "5" + "x".repeat(10));
+	const page = await mount(SOUND, { bytes, verify: rejectsChange(bytes, SOUND, 19) });
+	page.drop("sha256:good");
+	fire(page.document.getElementById("tamper"), "click");
+	const text = page.document.getElementById("out").textContent;
+
+	assert.match(text, /NOT VERIFIED/, "the page showed a pass for a changed file: " + text.slice(0, 160));
+	assert.match(text, /Changed byte 10 from "7"/,
+		"the page did not move past the digit the verifier accepted: " + text.slice(0, 200));
+});
+
+test("a file with no digit has its middle byte changed instead", async () => {
+	const bytes = new TextEncoder().encode("x".repeat(10));
+	const page = await mount(SOUND, { bytes, verify: rejectsChange(bytes, SOUND) });
+	page.drop("sha256:good");
+	fire(page.document.getElementById("tamper"), "click");
+	const text = page.document.getElementById("out").textContent;
+
+	assert.match(text, /Changed byte 5 from "x" to "y"/, "the middle byte was not the one changed: " + text.slice(0, 200));
+	assert.match(text, /NOT VERIFIED/);
+});
+
+test("the original can be checked again after the change", async () => {
+	const page = await mount(SOUND, { bytes: BUNDLE, verify: rejectsChange(BUNDLE, SOUND) });
+	page.drop("sha256:good");
+	fire(page.document.getElementById("tamper"), "click");
+	assert.ok(page.document.getElementById("restore"), "no way back to the original after the change");
+	fire(page.document.getElementById("restore"), "click");
+	const text = page.document.getElementById("out").textContent;
+
+	assert.match(text, /VERIFIED/, "the original did not verify again: " + text.slice(0, 160));
+	assert.doesNotMatch(text, /NOT VERIFIED|Changed byte/, "the change was still showing after going back");
+	assert.ok(page.document.getElementById("tamper"), "the offer did not come back with the original");
 });
