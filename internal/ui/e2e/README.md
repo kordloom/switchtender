@@ -35,9 +35,9 @@ npm test
 
 `npm test` builds the binary into `.bin/switchtender` and the page's reader into `site/assess`, and
 Playwright starts the servers for the run: a `demo` on `127.0.0.1:18777`, a `serve` on
-`127.0.0.1:18778`, and the site on `127.0.0.1:18779`. Seeding the demo runs a few real playbooks and
-takes a moment, so the readiness timeout is generous. Outside CI, a server already running on any of
-those ports is reused.
+`127.0.0.1:18778`, and the site on `127.0.0.1:18779`. Seeding the demo runs real playbooks, two
+weeks of nightly audits among them, and takes a couple of minutes, so its readiness timeout is five
+minutes. Outside CI, a server already running on any of those ports is reused.
 
 On a machine whose Playwright browser download is flaky but that already has Chrome, run with
 `ST_E2E_CHANNEL=chrome` to drive the system browser instead of the bundled one.
