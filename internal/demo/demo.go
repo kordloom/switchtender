@@ -148,6 +148,12 @@ const (
 	seedRunWindow = 16 * time.Hour
 	seedRunMargin = 15 * time.Minute
 	seedRunGap    = 40 * time.Minute
+	// seedHistoryDays is how many nights of scheduled audits precede the run window, so the runs
+	// list and the overview's two-week chart read like a fleet audited every night rather than one
+	// seeded in an afternoon. The clock opens this much earlier than the window, and the nightly
+	// runs are placed in that stretch at the times their schedule really fires.
+	seedHistoryDays = 14
+	seedHistorySpan = seedHistoryDays * 24 * time.Hour
 	// seedHistoryBackshiftHours pushes the seeded change history back so all of it predates the run
 	// window. The runs commit their outcomes to the same chain after this history is appended, so
 	// keeping the history older leaves the chain's times descending with its sequence, the way a live
@@ -155,7 +161,7 @@ const (
 	// Derived from the window rather than written beside it. The two were independent constants that
 	// had to satisfy backshift > window, which nothing enforced, so widening the window silently put
 	// the seeded history inside it and the chain's times stopped descending with its sequence.
-	seedHistoryBackshiftHours = int(seedRunWindow/time.Hour) + 1
+	seedHistoryBackshiftHours = int((seedHistorySpan+seedRunWindow)/time.Hour) + 1
 	// seedScheduleZone is the zone every seeded cron expression is read in, and the one the schedules
 	// page names beside each cadence. Without it a schedule is read in whatever zone the server
 	// happens to sit in and the page shows the expression alone, so "0 2 * * *" tells a visitor that
@@ -185,17 +191,21 @@ type SeedClock struct {
 	realAt time.Time
 	// ceiling is the latest time the clock will ever return, holding every stamp safely before now.
 	ceiling time.Time
+	// windowAt is where the run window opens, after the nightly history the clock opens on.
+	windowAt time.Time
 	// last is the previous value handed out, so saturation is detectable rather than silent.
 	last time.Time
 }
 
-// NewSeedClock returns a clock whose cursor opens seedRunWindow before now.
+// NewSeedClock returns a clock whose cursor opens seedHistorySpan before the run window, which
+// itself opens seedRunWindow before now.
 func NewSeedClock() *SeedClock {
 	now := time.Now()
 	return &SeedClock{
-		cursor:  now.Add(-seedRunWindow),
-		realAt:  now,
-		ceiling: now.Add(-seedRunMargin),
+		cursor:   now.Add(-seedRunWindow - seedHistorySpan),
+		realAt:   now,
+		ceiling:  now.Add(-seedRunMargin),
+		windowAt: now.Add(-seedRunWindow),
 	}
 }
 
@@ -216,6 +226,25 @@ func (c *SeedClock) Now() time.Time {
 	}
 	c.last = c.cursor
 	return c.cursor
+}
+
+// jumpTo moves the cursor forward to at, so the next seeded run lands then, without passing the
+// ceiling. It never moves the cursor backward, which keeps every stamp handed out in order.
+func (c *SeedClock) jumpTo(at time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if at.After(c.ceiling) {
+		at = c.ceiling
+	}
+	if at.After(c.cursor) {
+		c.cursor = at
+	}
+}
+
+// openRunWindow moves the cursor to where the run window opens, once the nightly history before it
+// is seeded. A seed that placed no history opens the window here all the same.
+func (c *SeedClock) openRunWindow() {
+	c.jumpTo(c.windowAt)
 }
 
 // advance steps the cursor forward by gap so the next seeded run lands that much later, without
@@ -251,6 +280,14 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 	legacyDir := filepath.Join(dir, "repos", "database-ops", "infra", "legacy-network")
 
 	ids := seedConfig(ctx, d, log)
+
+	// Two weeks of the nightly audit, fired the way its schedule fires it, before the run window.
+	if err := seedNightlyHistory(ctx, d, filepath.Join(dir, "audit.yml"), inv, ids, log); err != nil {
+		return err
+	}
+	if d.Clock != nil {
+		d.Clock.openRunWindow()
+	}
 
 	// Plain runs where db01 flaps between failing and passing, so fleet memory marks it flaky.
 	var replayed string
@@ -973,6 +1010,10 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) seededIDs {
 	ids := seededIDs{Templates: map[string]string{}, Schedules: map[string]string{}}
 	now := time.Now()
 	ago := func(h int) time.Time { return now.Add(-time.Duration(h) * time.Hour) }
+	// made dates a configuration object before the nightly history and the run window, so nothing
+	// seeded predates the record it names: a schedule created three days ago does not fire two
+	// weeks of audits, and a template does not have a history older than itself.
+	made := func(h int) time.Time { return ago(h + seedHistoryBackshiftHours) }
 
 	// The remotes name the demo fleet's own git host, on the reserved example.com domain the rest
 	// of this project's sample data uses, so the projects page reads as somebody's estate.
@@ -985,10 +1026,10 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) seededIDs {
 	projects := []*project.Project{
 		{ID: project.NewID(), Name: "web-platform",
 			RepoURL: "https://git.example.com/platform/web-platform.git",
-			Branch:  "main", CreatedAt: ago(72)},
+			Branch:  "main", CreatedAt: made(72)},
 		{ID: project.NewID(), Name: "database-ops",
 			RepoURL: "https://git.example.com/platform/database-ops.git",
-			Branch:  "main", CreatedAt: ago(48)},
+			Branch:  "main", CreatedAt: made(48)},
 	}
 	for _, p := range projects {
 		if err := d.Projects.Save(ctx, p); err != nil {
@@ -1005,7 +1046,7 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) seededIDs {
 	// two of them, so the row was removed rather than filled out.
 	invContent, _ := assets.ReadFile("assets/inv.ini")
 	inventories := []*inventory.Inventory{
-		{ID: inventory.NewID(), Name: "production", Content: string(invContent), CreatedAt: ago(72)},
+		{ID: inventory.NewID(), Name: "production", Content: string(invContent), CreatedAt: made(72)},
 	}
 	for _, inv := range inventories {
 		if err := d.Inventories.Save(ctx, inv); err != nil {
@@ -1029,7 +1070,7 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) seededIDs {
 			ID: inventory.NewID(), Name: "cloud-discovered",
 			Content: "# Refreshed from the cloud-hosts source.\n" +
 				"[web]\nweb01\nweb02\nweb03\n\n[edge]\nedge01\n",
-			CreatedAt: ago(20),
+			CreatedAt: made(20),
 		}
 		if err := d.Inventories.Save(ctx, dynamic); err != nil {
 			log.Warn("demo: seed dynamic inventory: " + err.Error())
@@ -1039,7 +1080,7 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) seededIDs {
 				ID: invsource.NewID(), Name: "cloud-hosts",
 				Source: "inventory/aws_ec2.yml", InventoryID: dynamic.ID,
 				UpdateOnLaunch: true, SyncIntervalSeconds: 3600,
-				SyncedAt: &synced, CreatedAt: ago(20),
+				SyncedAt: &synced, CreatedAt: made(20),
 			}
 			if err := d.InvSources.Save(ctx, src); err != nil {
 				log.Warn("demo: seed inventory source: " + err.Error())
@@ -1093,10 +1134,10 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) seededIDs {
 	// identifier, which every seed mints afresh, so a shared timestamp would make the page reorder
 	// between reseeds on a product whose pitch is that its records reproduce.
 	creds := []*credential.Credential{
-		{ID: credential.NewID(), Name: "prod-ssh", Kind: credential.KindSSHKey, Secret: "demo-placeholder", CreatedAt: ago(72)},
-		{ID: credential.NewID(), Name: "ansible-vault", Kind: credential.KindVaultPassword, VaultID: "prod", Secret: "demo-placeholder", CreatedAt: ago(60)},
-		{ID: credential.NewID(), Name: "dockerhub", Kind: credential.KindRegistry, Secret: "demo-placeholder", CreatedAt: ago(48)},
-		{ID: credential.NewID(), Name: "openstack-prod", Kind: credential.KindOpenStack, Secret: "demo-placeholder", CreatedAt: ago(36)},
+		{ID: credential.NewID(), Name: "prod-ssh", Kind: credential.KindSSHKey, Secret: "demo-placeholder", CreatedAt: made(72)},
+		{ID: credential.NewID(), Name: "ansible-vault", Kind: credential.KindVaultPassword, VaultID: "prod", Secret: "demo-placeholder", CreatedAt: made(60)},
+		{ID: credential.NewID(), Name: "dockerhub", Kind: credential.KindRegistry, Secret: "demo-placeholder", CreatedAt: made(48)},
+		{ID: credential.NewID(), Name: "openstack-prod", Kind: credential.KindOpenStack, Secret: "demo-placeholder", CreatedAt: made(36)},
 	}
 	for _, c := range creds {
 		if err := d.Credentials.Save(ctx, c); err != nil {
@@ -1105,13 +1146,13 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) seededIDs {
 	}
 
 	templates := []*template.Template{
-		{ID: template.NewID(), Name: "Deploy web", ProjectID: projects[0].ID, Playbook: "site.yml", InventoryID: inventories[0].ID, Shards: 3, CredentialIDs: []string{creds[0].ID}, CreatedAt: ago(72)},
-		{ID: template.NewID(), Name: "Migrate database", ProjectID: projects[1].ID, Playbook: "migrate.yml", InventoryID: inventories[0].ID, CredentialIDs: []string{creds[1].ID}, CreatedAt: ago(48)},
-		{ID: template.NewID(), Name: "Nightly audit", ProjectID: projects[0].ID, Playbook: "audit.yml", InventoryID: inventories[0].ID, CreatedAt: ago(24)},
-		{ID: template.NewID(), Name: "Rotate logs", ProjectID: projects[0].ID, Tool: run.ToolBash, Command: scriptLogRotate, CreatedAt: ago(36)},
-		{ID: template.NewID(), Name: "Provision network", ProjectID: projects[1].ID, Tool: run.ToolTerraform, Command: "infra/network", DryRun: true, CreatedAt: ago(30)},
-		{ID: template.NewID(), Name: "Reconcile inventory", ProjectID: projects[0].ID, Tool: run.ToolPython, Command: scriptReconcile, CreatedAt: ago(18)},
-		{ID: template.NewID(), Name: "Fleet capacity report", ProjectID: projects[0].ID, Tool: run.ToolGo, Command: scriptFleetGo, CreatedAt: ago(12)},
+		{ID: template.NewID(), Name: "Deploy web", ProjectID: projects[0].ID, Playbook: "site.yml", InventoryID: inventories[0].ID, Shards: 3, CredentialIDs: []string{creds[0].ID}, CreatedAt: made(72)},
+		{ID: template.NewID(), Name: "Migrate database", ProjectID: projects[1].ID, Playbook: "migrate.yml", InventoryID: inventories[0].ID, CredentialIDs: []string{creds[1].ID}, CreatedAt: made(48)},
+		{ID: template.NewID(), Name: "Nightly audit", ProjectID: projects[0].ID, Playbook: "audit.yml", InventoryID: inventories[0].ID, CreatedAt: made(24)},
+		{ID: template.NewID(), Name: "Rotate logs", ProjectID: projects[0].ID, Tool: run.ToolBash, Command: scriptLogRotate, CreatedAt: made(36)},
+		{ID: template.NewID(), Name: "Provision network", ProjectID: projects[1].ID, Tool: run.ToolTerraform, Command: "infra/network", DryRun: true, CreatedAt: made(30)},
+		{ID: template.NewID(), Name: "Reconcile inventory", ProjectID: projects[0].ID, Tool: run.ToolPython, Command: scriptReconcile, CreatedAt: made(18)},
+		{ID: template.NewID(), Name: "Fleet capacity report", ProjectID: projects[0].ID, Tool: run.ToolGo, Command: scriptFleetGo, CreatedAt: made(12)},
 	}
 	for _, t := range templates {
 		if err := d.Templates.Save(ctx, t); err != nil {
@@ -1131,17 +1172,17 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) seededIDs {
 			{
 				ID: schedule.NewID(), Name: "Nightly audit", Cron: "0 2 * * *",
 				Timezone: seedScheduleZone, TemplateID: templates[2].ID, Enabled: true,
-				CreatedAt: ago(70),
+				CreatedAt: made(70),
 			},
 			{
 				ID: schedule.NewID(), Name: "Weekday deploy window", Cron: "30 9 * * 1-5",
 				Timezone: seedScheduleZone, TemplateID: templates[0].ID, Enabled: true,
-				CreatedAt: ago(46),
+				CreatedAt: made(46),
 			},
 			{
 				ID: schedule.NewID(), Name: "Hourly drift check", Cron: "0 * * * *",
 				Timezone: seedScheduleZone, TemplateID: templates[1].ID, Enabled: false,
-				CreatedAt: ago(20),
+				CreatedAt: made(20),
 			},
 		}
 		for _, sc := range schedules {
@@ -1178,14 +1219,14 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) seededIDs {
 		// and it grades costly, so a floor of irreversible would fail every apply before the
 		// destroy limit was weighed and the rule could never hold one.
 		tfDestroy := policy.NewPolicy("terraform destroys need a second approver")
-		tfDestroy.Tool, tfDestroy.ExcludeDryRun, tfDestroy.CreatedAt = run.ToolTerraform, true, ago(40)
+		tfDestroy.Tool, tfDestroy.ExcludeDryRun, tfDestroy.CreatedAt = run.ToolTerraform, true, made(40)
 		// Zero holds a plan that would destroy anything at all. The default disables the check,
 		// which is safe for availability and not for change control, and leaving it disabled on
 		// the one policy demonstrating change control said the opposite of what was intended.
 		tfDestroy.MaxDestroy = 0
 		tfDestroy.RequireDistinctApprover = true
 		anyProd := policy.NewPolicy("any production run")
-		anyProd.InventoryID, anyProd.CreatedAt = inventories[0].ID, ago(22)
+		anyProd.InventoryID, anyProd.CreatedAt = inventories[0].ID, made(22)
 
 		policies := []*policy.Policy{tfDestroy, anyProd}
 		for _, p := range policies {
@@ -1225,7 +1266,7 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) seededIDs {
 			u.FullName = a.FullName
 			u.Email = a.Email
 			u.Title = a.Title
-			u.CreatedAt = ago(80 - i*6)
+			u.CreatedAt = made(80 - i*6)
 			if err := d.Users.Save(ctx, u); err != nil {
 				log.Warn("demo: seed user: " + err.Error())
 			}
