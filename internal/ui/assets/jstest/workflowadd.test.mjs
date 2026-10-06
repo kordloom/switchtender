@@ -307,3 +307,19 @@ test("the demo labels a form it disables, and not the step dialog that still sav
 	assert.ok(note, "a form the demo disables lost its note");
 	assert.equal(note.textContent, "Disabled in this read-only demo");
 });
+
+test("typing the workflow's name or inventory saves the draft with it", () => {
+	// The mount handed the name and inventory inputs a button as their input handler, because a local
+	// variable for the Save as template button shared its name with the function that saves the draft.
+	// A name typed over the sample, a reload, and the name was gone, since only a change to the graph
+	// saved it.
+	const { app, document } = mountEditor();
+	const saved = () => plain(JSON.parse(sandboxOf(app).localStorage.getItem("st_wf_draft")));
+	document.getElementById("wf-name").value = "Release 4.3";
+	fire(document.getElementById("wf-name"), "input");
+	assert.equal(saved().name, "Release 4.3", "typing the name did not save the draft");
+	document.getElementById("wf-inventory").value = "production";
+	fire(document.getElementById("wf-inventory"), "input");
+	assert.equal(saved().inventory, "production", "typing the inventory did not save the draft");
+	assert.equal(saved().name, "Release 4.3", "saving the inventory lost the name");
+});
