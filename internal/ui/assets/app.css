@@ -135,7 +135,11 @@ body[data-readonly] [data-mutates]::after { display: none; }
 .ro-note { font-size: 12px; color: var(--muted); font-style: italic; }
 
 /* Content fades in on load, and tables shimmer with skeletons while their data arrives. */
-.content { animation: contentIn 0.28s ease both; }
+/* The fill is backwards only. Filling forwards too left the finished animation's identity transform
+   on the content, which made the content the containing block of every fixed dialog inside it: a
+   dialog centered on the whole page rather than the screen, so on a page scrolled down to the
+   workflow canvas the step dialog opened with its title and close under the top bar. */
+.content { animation: contentIn 0.28s ease backwards; }
 @keyframes contentIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 .skeleton { display: block; height: 12px; width: 70%; border-radius: 4px;
 	background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 37%, var(--surface-2) 63%);
@@ -563,7 +567,10 @@ select.input[multiple] { padding: 4px; }
 .alt-auth summary { cursor: pointer; font-size: 13px; }
 .alt-auth .stack { margin-top: 10px; }
 
-.modal { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 12px; }
+/* A dialog stacks above the page chrome, as the drill, the tour, and the palette already do. At 50 it
+   sat under the top bar, which hid the title and close of any dialog tall enough to reach it, the
+   pattern chooser at 720 pixels high among them. */
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 80; padding: 12px; }
 .modal[hidden] { display: none; }
 /* A card taller than the screen scrolls inside itself. Without the cap a long form clipped at both
    viewport edges with no scrollbar anywhere, leaving the close above the screen and the submit
