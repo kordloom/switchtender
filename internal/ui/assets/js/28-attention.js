@@ -147,7 +147,13 @@ function attentionItem(it) {
 	head.appendChild(label);
 	const name = document.createElement("a");
 	name.className = "attn-name";
-	name.textContent = it.name || it.run_id || it.schedule_id || it.key;
+	// A run or a split is named by its playbook, which can be a whole path, one in a temporary
+	// directory among them. The panel shows the file, as the runs list and the run page do, and keeps
+	// the path in the tooltip. A workflow's or a schedule's name is a name, so it is shown whole.
+	const full = it.name || it.run_id || it.schedule_id || it.key;
+	const shown = it.kind === "run" || it.kind === "split" ? baseName(full) || full : full;
+	name.textContent = shown;
+	if (shown !== full) name.title = full;
 	name.href = it.kind === "schedule"
 		? "/ui/schedules"
 		: "/ui/runs/" + encodeURIComponent(it.run_id || "");
