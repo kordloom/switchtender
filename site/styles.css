@@ -185,8 +185,8 @@ h1 {
 .strip span { font-size: 13.5px; color: var(--muted); }
 /* The path strip is the pipeline every change walks, so it reads as a numbered sequence on a
    connecting line rather than five loose stats. */
-.strip.path { grid-template-columns: repeat(5, 1fr); gap: 16px; position: relative; }
-.strip.path::before { content: ""; position: absolute; top: 47px; left: 10%; right: 10%; height: 2px; background: var(--border-2); z-index: 1; }
+.strip.path { grid-template-columns: repeat(6, 1fr); gap: 16px; position: relative; }
+.strip.path::before { content: ""; position: absolute; top: 47px; left: calc(100% / 12); right: calc(100% / 12); height: 2px; background: var(--border-2); z-index: 1; }
 .strip.path div { position: relative; padding-top: 52px; }
 .strip.path i { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 34px; height: 34px; border-radius: 50%; border: 2px solid var(--accent); background: var(--bg); color: var(--accent); font-style: normal; font-weight: 700; font-size: 15px; font-family: "Space Grotesk", sans-serif; display: grid; place-items: center; z-index: 2; }
 .strip.path b { font-size: 19px; }
@@ -358,6 +358,10 @@ h1 {
 .gs-body .code pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .gs-callout { max-width: 780px; margin: 8px auto 0; padding: 18px 22px; border-radius: var(--radius); border: 1px solid rgba(52, 211, 153, 0.3); background: rgba(52, 211, 153, 0.07); display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .gs-callout p { margin: 0; color: var(--text); font-size: 15px; }
+/* A command inside a callout takes the callout's whole width and scrolls within it. As a flex item
+   it otherwise sized itself to its longest line and ran out past the callout's edge. */
+.gs-callout .code { flex: 1 1 100%; min-width: 0; }
+.gs-callout .code pre { margin: 0; overflow-x: auto; }
 .gs-next { max-width: 900px; padding: 44px 24px 20px; }
 .gs-next h2 { font-family: "Space Grotesk", sans-serif; font-size: 26px; font-weight: 600; text-align: center; }
 .gs-cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-top: 22px; }
@@ -415,6 +419,12 @@ h1 {
 	.strip { grid-template-columns: repeat(2, 1fr); gap: 26px; }
 	.cards .card { flex-basis: 100%; }
 	.section { padding: 68px 24px; }
+}
+/* Six steps do not fit one row on a narrow desktop or a tablet, so the path wraps into two rows of
+   three there, and the connecting line, which only spans a single row, is dropped. */
+@media (max-width: 1100px) and (min-width: 761px) {
+	.strip.path { grid-template-columns: repeat(3, 1fr); row-gap: 30px; }
+	.strip.path::before { display: none; }
 }
 /* Below tablet width the horizontal line does not fit, so the path stacks into a numbered vertical
    sequence: each step keeps its node above its label, and the connecting line is dropped. */

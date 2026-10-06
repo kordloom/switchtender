@@ -102,8 +102,8 @@
 	<main id="top">
 		<section class="hero wrap">
 			<div class="hero-copy reveal">
-				<span class="eyebrow">Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</span>
-				<h1><span class="h1-long">Approve <span class="grad">exactly what runs</span>. Prove it to anyone.</span><span class="h1-short">Approve <span class="grad">exactly what runs</span>.</span></h1>
+				<span class="eyebrow">For Ansible, Terraform, and OpenTofu, and the scripts around them</span>
+				<h1><span class="h1-long">Approve <span class="grad">exactly what runs</span>.<br>Prove it to anyone.</span><span class="h1-short">Approve <span class="grad">exactly what runs</span>.</span></h1>
 				<p class="lede">
 					An approval binds the run the approver saw: its inventory snapshot, its image digest,
 					its commit, and for a Terraform or OpenTofu apply, the saved plan. People, pipelines,
@@ -130,22 +130,23 @@
 		</section>
 
 		<section class="namebar wrap reveal">
-			<p><b>Why SwitchTender?</b> A switchtender is the person who throws the track switches in a rail yard, deciding which train goes where. Nothing moves without them. That's the job here too: one gate for every change, on every host.</p>
+			<p><b>Why SwitchTender?</b> A switchtender is the person who throws the track switches in a rail yard, deciding which train goes where. Nothing moves until they set the switch. That's the job here too: a change sent through SwitchTender moves only once it's cleared, and only on the track it was cleared for.</p>
 		</section>
 
-		<section class="strip path wrap reveal" aria-label="The path every change walks">
-			<div><i>1</i><b>Request</b><span>recorded before anything acts</span></div>
-			<div><i>2</i><b>Policy</b><span>sees who's asking, refuses on Team</span></div>
-			<div><i>3</i><b>Approval</b><span>binds to the exact change</span></div>
-			<div><i>4</i><b>Execution</b><span>gated wherever it runs</span></div>
-			<div><i>5</i><b>Evidence</b><span>a receipt verified offline</span></div>
+		<section class="strip path wrap reveal" aria-label="How a change goes through">
+			<div><i>1</i><b>Your automation</b><span>imported, or run as it is</span></div>
+			<div><i>2</i><b>Who can run it</b><span>people, pipelines, agents, by name</span></div>
+			<div><i>3</i><b>What it touches</b><span>hosts and plan, up front</span></div>
+			<div><i>4</i><b>What waits</b><span>your rules, and every agent run</span></div>
+			<div><i>5</i><b>What happened</b><span>live, host by task, kept</span></div>
+			<div><i>6</i><b>The proof</b><span>a receipt anyone checks offline</span></div>
 		</section>
 
 		<section class="strip wrap reveal">
 			<div><b>1</b><span>binary, zero Kubernetes</span></div>
 			<div><b>42ms</b><span><a href="/docs/benchmarks">cold boot on a laptop</a></span></div>
 			<div><b>~47MiB</b><span><a href="/docs/benchmarks">memory at idle on Linux</a></span></div>
-			<div><b>7</b><span>tools, one engine</span></div>
+			<div><b>0</b><span>telemetry or license checks</span></div>
 		</section>
 
 		<section class="section governance wrap" id="governance">
@@ -541,6 +542,14 @@ open http://localhost:8080/ui/</code></pre>
 				<div class="window-bar"><span></span><span></span><span></span><em>runs, with origin and labels</em></div>
 				<img src="/assets/screenshot-runs.png?v=2" alt="The runs list with status, type, origin, playbook, and label columns, all sortable" loading="lazy">
 			</a>
+		</section>
+
+		<section class="section wrap" id="behind">
+			<div class="section-head reveal">
+				<h2>Who stands behind it,<br>and <span class="grad">what if we stop</span></h2>
+				<p>KordLoom, a small company, builds and supports SwitchTender. Community support is the public issue tracker. Pro adds email support with an engineer's first response within two business days, and on Team a Severity 1 report gets one within one business day, on clocks <a href="/terms#support">the terms define</a>.</p>
+				<p>Nothing you run depends on us staying around. There is no license server and no phone-home, so an install keeps running as it is, a paid license keeps verifying offline through its term, and your data and receipts stay yours, checked by an open verifier that does not depend on us. Every release converts to Apache 2.0 two years after it ships, and at once if KordLoom ceases business, as <a href="/pricing">the pricing page</a> sets out.</p>
+			</div>
 		</section>
 
 <section class="cta wrap reveal">

@@ -59,7 +59,9 @@ is not a dry run, unless an exemption covers that step. The step is judged as th
 become, under the agent's label and account. The refusal names the step, is recorded on the chain
 under the name `an agent's workflow may not apply Terraform or OpenTofu`, and says what to do
 instead: ask for the apply as its own run, which plans first and waits for approval of the saved
-plan, or write an exemption that covers the step. This holds however the workflow arrives: submitted
+plan, or write an exemption that covers the step. An exemption that covers the step lifts the
+refusal and nothing more: the workflow is still held for a person as a whole, unless an exemption
+also covers the workflow run itself. This holds however the workflow arrives: submitted
 whole, launched from a saved workflow, or launched through an MCP tool. A finished workflow is never
 rerun as such, by anybody, only launched again from its saved workflow, which faces the same check.
 An agent's workflow whose infrastructure steps are all plans, or that has none, is held as a whole as

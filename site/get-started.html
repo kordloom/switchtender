@@ -96,7 +96,7 @@
 		<section class="wrap gs-hero reveal">
 			<span class="eyebrow">Get started</span>
 			<h1>Running in <span class="grad">about a minute.</span></h1>
-			<p class="lede">One binary, one SQLite file. No Kubernetes, no Postgres, no Redis to stand up first. The same binary grows with the team: on a Team license it runs active-active on PostgreSQL, and relay workers run inside networks the control node cannot reach. Here's every step, from download to a live run. Or skip the install and poke at the <a href="https://demo.switchtender.com/ui/runs?status=pending_approval">live demo</a> first.</p>
+			<p class="lede">One binary, one SQLite file. No Kubernetes, no Postgres, no Redis to stand up first. The same binary grows with the team: on a Team license it runs active-active on PostgreSQL, and relay workers run inside networks the control node cannot reach. On Kubernetes, a Helm chart runs the same binary with no operator. Here's every step, from download to a live run. Or skip the install and poke at the <a href="https://demo.switchtender.com/ui/runs?status=pending_approval">live demo</a> first.</p>
 		</section>
 
 		<section class="gs-steps wrap" id="steps">
@@ -166,6 +166,18 @@ switchtender token revoke &lt;initial-token-id&gt; --db switchtender.db</code></
 					</div>
 				</li>
 			</ol>
+			<div class="gs-callout reveal">
+				<p><strong>On Kubernetes?</strong> The Helm chart in the repository runs the same binary as an ordinary Deployment, with no operator: one server on SQLite with the whole install on a persistent volume, or on a Team license, active-active servers on PostgreSQL with dedicated workers. Write the keys to a file first and keep it, because every stored credential is sealed against them, and pass the same file to every upgrade:</p>
+				<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>git clone https://github.com/kordloom/switchtender
+cd switchtender
+printf 'encryptionKey: "%s"\nencryptionSalt: "%s"\nauditKey: "%s"\n' \
+  "$(openssl rand -hex 32)" "$(openssl rand -hex 16)" \
+  "$(openssl rand -hex 32)" &gt; switchtender-secrets.yaml
+chmod 600 switchtender-secrets.yaml
+helm install switchtender ./deploy/helm/switchtender \
+  -f switchtender-secrets.yaml --set fullnameOverride=switchtender</code></pre></div>
+				<a class="btn" href="/docs/quickstart#run-on-kubernetes">Kubernetes guide</a>
+			</div>
 			<div class="gs-callout reveal">
 				<p><strong>Moving from another controller?</strong> Start with <code>switchtender assess awx export.json</code>, which reads the estate and says what comes across, what does not, and which templates nobody currently has to approve, before anything is written. Then each source imports in one command. AWX and Semaphore bring projects, inventories, credential shells, templates, surveys, and schedules. Rundeck and Jenkins bring jobs as templates and their triggers as schedules. Chef and Puppet bring the node list as an inventory, and nothing else: a cookbook or a manifest is a program in another language, and a partial translation would look right and do something else. The command is the same shape for all of them: a preview that writes nothing, then the same command with <code>--apply</code>. Ansible Automation Platform, Tower, and Ascender share the AWX export format, and even a crontab imports into governed schedules.</p>
 				<a class="btn" href="/docs/switching-from-awx">Migration guide</a>
