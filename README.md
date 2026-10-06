@@ -134,8 +134,9 @@ operator makes into a statement a third party checks.
 Precision about the offline claim, because it is the claim that matters: verification reads one
 file and the key fingerprint you obtained out of band. Without the pinned fingerprint, verify
 proves the receipt is internally intact but not who signed it. A range receipt discloses the run's
-outcome, decisions, and redacted spec, and a sparse receipt proves the same chain facts while
-disclosing nothing about neighboring tenants' entries. A run that dies with the process that ran it
+outcome, decisions, and redacted spec. A sparse receipt proves the run's own entries belong to the
+chain and discloses nothing about neighboring tenants' entries, but it does not show the outcome or
+the decisions, and it is the form a non-admin receives. A run that dies with the process that ran it
 and never commits an outcome cannot be receipted, and the receipt command says so rather than
 producing something weaker.
 

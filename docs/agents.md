@@ -213,8 +213,9 @@ directly:
 - An argument the tool does not define is refused rather than dropped. A model writing `check_mode`
   instead of `dry_run` is told so, rather than having the flag silently ignored and a real change
   reported back as a preview.
-- An agent can read the evidence and the signed receipt for runs it proposed. Another actor's
-  evidence needs an admin.
+- An agent can read the evidence and the signed receipt for the runs of the account it is bound
+  to, the runs a person submitted under that account included. Another account's evidence needs an
+  admin, and a non-admin, an agent included, always receives the sparse receipt described below.
 
 ## Waiting for a decision
 
@@ -276,10 +277,11 @@ Every mutation response other than signing in or out carries an `Audit-Receipt: 
 The agent, or the system driving it, can retain receipts and later check each one against the chain,
 so the party an entry belongs to can detect an omission.
 
-Runs record their source, one of api, template, schedule, trigger, callback, rerun, relaunch,
-reconcile, propose, review, or review_apply, along with the actor. `actor:agent-bot` in run search
-pulls everything the agent ran, and `source:api` separates direct API submissions from scheduled or
-triggered work.
+Runs record their actor, and most record their source: api, template, schedule, trigger, callback,
+rerun, relaunch, reconcile, propose, review, or review_apply. A workflow and a retry of failed shards
+record no source. `actor:agent-bot` in run search pulls every run asked for under that token label,
+from any account, so give each agent a label of its own. `source:api` finds the single runs
+submitted directly through the API, apart from scheduled or triggered work.
 
 An approval is a chain entry of its own. When a person releases a held run, the chain gains a
 DECISION entry naming the approver and committing a digest of the exact spec released, and the
@@ -311,8 +313,11 @@ This is the golden path a governed agent change takes, with the commands to watc
 
    Verify reads one file, touches no database and no network, and prints who asked, who approved
    exactly what, and what happened, with every claim recomputed from the chain. `--sparse` produces
-   a receipt that proves the same chain facts while disclosing nothing about the entries around the
-   run, for handing to an outside auditor on a shared install.
+   a receipt that discloses only the run's own chain entries, each proved to belong to the chain,
+   and nothing about the entries around them, for handing to an outside auditor on a shared install.
+   It names the outcome entry and the digest it committed without reproducing the outcome, so it
+   does not show what the run did, the decisions, or the spec the approval bound. Only an admin
+   receives the full receipt from the API, and anyone else gets the sparse one.
 
 `switchtender audit bundle` exports the whole chain the same way, and a third party can verify
 either artifact with the open loomseal verifier, with no trust in the server that produced it. The
