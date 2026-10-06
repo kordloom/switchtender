@@ -2,12 +2,18 @@
 // decision reloads the same view it was made from.
 let approvalStepsRunID = "";
 
+// APPROVALS_REFRESH_MS is how often a page that lists waiting approval steps asks again, so a step
+// that arrives while an approver has the page open shows up without a reload.
+const APPROVALS_REFRESH_MS = 15000;
+
 // loadApprovalSteps fills the approval panel with the workflow approval steps waiting for a decision,
 // only those of one workflow when runID is set. A workflow paused at a step is still running while
 // another of its branches is, so the runs list held for approval cannot show it, and this panel is
 // where an approver finds it. A failure to read the queue leaves the panel hidden rather than
-// putting an error over the page it sits on.
-async function loadApprovalSteps(runID) {
+// putting an error over the page it sits on. A quiet call is a poll: when it finds the queue it
+// already drew, it leaves the panel alone, so a reader's focus on Approve is not thrown away on every
+// refresh. Every other call redraws, since a decision may have to put its buttons back.
+async function loadApprovalSteps(runID, quiet) {
 	approvalStepsRunID = runID || "";
 	const host = document.getElementById("approval-steps");
 	if (!host) return;
@@ -16,10 +22,25 @@ async function loadApprovalSteps(runID) {
 		data = await getJSON("/approvals");
 	} catch {
 		host.hidden = true;
+		delete host.dataset.queue;
 		return;
 	}
 	const steps = (data.approvals || []).filter((a) => !approvalStepsRunID || a.run_id === approvalStepsRunID);
+	const queue = JSON.stringify(steps);
+	if (quiet && host.dataset.queue === queue) return;
+	host.dataset.queue = queue;
 	renderApprovalSteps(host, steps);
+}
+
+// wireApprovalsAutoRefresh keeps the approval panel current while its page is open and visible. The
+// panel used to be read once when the page loaded, so a workflow that reached its approval step
+// after that never offered Approve until the approver reloaded, and an approver who left the runs
+// page open to wait for one waited for nothing.
+function wireApprovalsAutoRefresh(runID) {
+	window.setInterval(() => {
+		if (document.hidden) return;
+		loadApprovalSteps(runID, true);
+	}, APPROVALS_REFRESH_MS);
 }
 
 // renderApprovalSteps draws one entry per waiting step: what the workflow is, what already ran, what
