@@ -450,7 +450,8 @@ type landingQA struct {
 	Answer string
 }
 
-// landingFAQ answers the three capabilities that comparison summaries were handing to competitors.
+// landingFAQ answers the capabilities that comparison summaries were handing to competitors, and the
+// question every buyer of a young product asks about the company behind it.
 //
 // Each of these is a thing this product does, described on the page already, in prose inside a
 // table. A summarizer did not attribute them here and credited the incumbent instead. Stating them
@@ -472,11 +473,19 @@ var landingFAQ = []landingQA{{
 }, {
 	Question: "Can I run a Terraform plan, hold it for approval, then run Ansible?",
 	Answer: "Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency " +
-		"graph with parallel branches, built on a drag-and-drop canvas. A policy decides which " +
-		"runs are held, an agent's run is held unless a written policy exempts it, the core " +
-		"enforces the hold, and the approval binds to the exact plan reviewed, so a run cannot be " +
-		"approved as one thing and executed as another. By default an admin may approve a run " +
-		"they launched. Requiring a different person is a Team rule.",
+		"graph with parallel branches, built on a drag-and-drop canvas, and an approval step holds " +
+		"the pipeline for a person before the steps after it run. A policy decides which runs are " +
+		"held, and an agent's run is held unless a written policy exempts it. When the approval " +
+		"has to bind an exact Terraform plan, run the apply on its own: it plans first, and the " +
+		"approval binds the saved plan, so it cannot be approved as one thing and executed as " +
+		"another. By default an admin may approve a run they launched. Requiring a different " +
+		"person is a Team rule.",
+}, {
+	Question: "What happens if KordLoom stops?",
+	Answer: "An install keeps running as it is. There is no license server and no phone-home, a " +
+		"paid license keeps verifying offline through its term, and your data and receipts stay " +
+		"yours, checked by an open verifier that does not depend on us. Every release converts to " +
+		"Apache 2.0 two years after it ships, and at once if KordLoom ceases business.",
 }}
 
 // landingExtraFAQ holds page-specific questions appended after the shared ones, keyed by the

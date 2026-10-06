@@ -237,7 +237,7 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>Common questions</h2>
-				<p>The three asked most often when somebody is comparing this against what they already run.</p>
+				<p>The four asked most often when somebody is comparing this against what they already run.</p>
 			</div>
 			<div class="cards cards-3">
 				<article class="card reveal">
@@ -250,7 +250,11 @@
 				</article>
 				<article class="card reveal">
 					<h3>Can I run a Terraform plan, hold it for approval, then run Ansible?</h3>
-					<p>Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency graph with parallel branches, built on a drag-and-drop canvas. A policy decides which runs are held, an agent&#39;s run is held unless a written policy exempts it, the core enforces the hold, and the approval binds to the exact plan reviewed, so a run cannot be approved as one thing and executed as another. By default an admin may approve a run they launched. Requiring a different person is a Team rule.</p>
+					<p>Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency graph with parallel branches, built on a drag-and-drop canvas, and an approval step holds the pipeline for a person before the steps after it run. A policy decides which runs are held, and an agent&#39;s run is held unless a written policy exempts it. When the approval has to bind an exact Terraform plan, run the apply on its own: it plans first, and the approval binds the saved plan, so it cannot be approved as one thing and executed as another. By default an admin may approve a run they launched. Requiring a different person is a Team rule.</p>
+				</article>
+				<article class="card reveal">
+					<h3>What happens if KordLoom stops?</h3>
+					<p>An install keeps running as it is. There is no license server and no phone-home, a paid license keeps verifying offline through its term, and your data and receipts stay yours, checked by an open verifier that does not depend on us. Every release converts to Apache 2.0 two years after it ships, and at once if KordLoom ceases business.</p>
 				</article>
 			</div>
 			<script type="application/ld+json">
@@ -279,7 +283,15 @@
    "name": "Can I run a Terraform plan, hold it for approval, then run Ansible?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency graph with parallel branches, built on a drag-and-drop canvas. A policy decides which runs are held, an agent's run is held unless a written policy exempts it, the core enforces the hold, and the approval binds to the exact plan reviewed, so a run cannot be approved as one thing and executed as another. By default an admin may approve a run they launched. Requiring a different person is a Team rule."
+    "text": "Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency graph with parallel branches, built on a drag-and-drop canvas, and an approval step holds the pipeline for a person before the steps after it run. A policy decides which runs are held, and an agent's run is held unless a written policy exempts it. When the approval has to bind an exact Terraform plan, run the apply on its own: it plans first, and the approval binds the saved plan, so it cannot be approved as one thing and executed as another. By default an admin may approve a run they launched. Requiring a different person is a Team rule."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "What happens if KordLoom stops?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "An install keeps running as it is. There is no license server and no phone-home, a paid license keeps verifying offline through its term, and your data and receipts stay yours, checked by an open verifier that does not depend on us. Every release converts to Apache 2.0 two years after it ships, and at once if KordLoom ceases business."
    }
   }
  ]
