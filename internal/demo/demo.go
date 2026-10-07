@@ -1356,7 +1356,11 @@ func main() {
 	}
 	summary, _ := json.Marshal(map[string]int{"hosts": len(hosts), "hot": hot})
 	fmt.Println(string(summary))
-	fmt.Printf("%d host(s) above threshold\n", hot)
+	noun := "hosts"
+	if hot == 1 {
+		noun = "host"
+	}
+	fmt.Printf("%d %s above threshold\n", hot, noun)
 }
 `
 
