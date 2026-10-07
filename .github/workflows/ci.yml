@@ -392,8 +392,33 @@ jobs:
           out="$(mktemp -d)"
           GOOS=js GOARCH=wasm go build -ldflags="-s -w" -o "$out/loomseal.wasm" github.com/kordloom/loomseal/wasm
           cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" "$out/wasm_exec.js"
+          root="$PWD"
           cd "$MOD"
           node wasm/selftest.mjs "$out"
+
+          # The sample on the verify page must verify with the built verifier, pinned to the key the
+          # page names, so a verifier or format change that breaks the sample fails here.
+          node -e '
+            const fs = require("fs");
+            const [out, root] = process.argv.slice(1);
+            globalThis.crypto ??= require("node:crypto").webcrypto;
+            require(out + "/wasm_exec.js");
+            const page = fs.readFileSync(root + "/site/verify/verify.js", "utf8");
+            const m = page.match(/SAMPLE_PIN = "([^"]+)"/);
+            if (!m) { console.error("verify.js names no SAMPLE_PIN"); process.exit(1); }
+            const pin = m[1];
+            const go = new Go();
+            WebAssembly.instantiate(fs.readFileSync(out + "/loomseal.wasm"), go.importObject).then((r) => {
+              go.run(r.instance);
+              const bytes = new Uint8Array(fs.readFileSync(root + "/site/verify/sample-bundle.json"));
+              const rep = JSON.parse(loomsealVerify(bytes, pin));
+              if (rep.ok !== true || rep.fingerprint_match !== true) {
+                console.error("sample does not verify pinned to " + pin + ": " + JSON.stringify(rep));
+                process.exit(1);
+              }
+              console.log("sample verifies pinned to " + pin);
+            });
+          ' "$out" "$root"
 
   # The browser assessment, checked on every pull request rather than first at deploy. The deploy
   # builds and checks it again before it publishes; a change that breaks the page's reader, its
