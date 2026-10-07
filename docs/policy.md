@@ -457,7 +457,7 @@ an empty value when the run has none, so a module never meets a missing field.
 | `actor.name` | The token label or username that fired the run. For an agent, its token's label. |
 | `actor.type` | How it authenticated: `agent`, `session`, `token`, `cli`, `forge_comment` for a person commenting from the forge account linked to their SwitchTender account, `webhook`, or `host` for a provisioning callback. |
 | `actor.kind` | `agent`, `human` for a session, a person's token, the command line, or a forge comment, or `other` for a webhook, a schedule, a callback, or an unknown source. |
-| `actor.account` | The id of the account behind the credential. For an agent, the account it acts for. A YAML rule's `account` matches the account's username instead. |
+| `actor.account_id` | The id of the account behind the credential. For an agent, the account it acts for. A YAML rule's `account` matches the account's username instead. |
 | `plan.planned` | Whether a plan has been read for this apply. |
 | `plan.destroys` | How many resources the plan destroys, or null when nothing was planned. |
 | `risk.level` | `low`, `medium`, or `high`, the same grade `min_risk` reads. |
@@ -644,7 +644,7 @@ The input is plain JSON, so OPA's own tools test a module before it is merged. S
         "proposed_from": "", "intent": "", "image": "", "tags": [], "skip_tags": [],
         "labels": {"env": "prod"}, "extra_var_names": [], "credential_ids": []
       },
-      "actor": {"name": "deploy-bot", "type": "agent", "kind": "agent", "account": "usr_1"},
+      "actor": {"name": "deploy-bot", "type": "agent", "kind": "agent", "account_id": "usr_1"},
       "plan": {"planned": false, "destroys": null},
       "risk": {"level": "high", "reasons": []},
       "reversibility": {"class": "costly", "reasons": []},
