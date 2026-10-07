@@ -238,13 +238,19 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			return
 		}
 		if g.jwt != nil && looksLikeJWT(plain) {
-			u, err := g.jwt.Authenticate(r.Context(), plain)
+			u, agent, err := g.jwt.AuthenticateActor(r.Context(), plain)
 			if err != nil {
 				unauthorized(w)
 				return
 			}
-			actor := Actor{UserID: u.ID, Role: u.Role, Name: u.Username, Type: actorTypeSession}
-			who := recordedActor{Name: u.Username, Type: actorTypeSession}
+			// A token the issuer marks as an agent's gets the same ceiling as an agent's own token, so a
+			// federated agent cannot manage identity, access, or secrets, and cannot approve its own run.
+			actorType, role := actorTypeSession, u.Role
+			if agent {
+				actorType, role = actorTypeAgent, user.AgentRole(u.Role)
+			}
+			actor := Actor{UserID: u.ID, Role: role, Name: u.Username, Agent: agent, Type: actorType}
+			who := recordedActor{Name: u.Username, Type: actorType}
 			if !g.decide(w, r, actor, who) {
 				return
 			}

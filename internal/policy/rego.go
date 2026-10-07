@@ -664,10 +664,10 @@ func RegoInput(r *run.Run) map[string]any {
 			"credential_ids":   stringList(r.CredentialIDs),
 		},
 		"actor": map[string]any{
-			"name":    r.Actor,
-			"type":    r.ActorType,
-			"kind":    actorKindOf(r.ActorType),
-			"account": r.ActorUserID,
+			"name":       r.Actor,
+			"type":       r.ActorType,
+			"kind":       actorKindOf(r.ActorType),
+			"account_id": r.ActorUserID,
 		},
 		"plan": map[string]any{
 			"planned":  r.PlanDestroys != nil,
@@ -754,7 +754,7 @@ var regoInputSchema = map[string]any{
 		"labels":          regoAnyKeys,
 		"extra_var_names": nil, "credential_ids": nil,
 	},
-	"actor":         map[string]any{"name": nil, "type": nil, "kind": nil, "account": nil},
+	"actor":         map[string]any{"name": nil, "type": nil, "kind": nil, "account_id": nil},
 	"plan":          map[string]any{"planned": nil, "destroys": nil},
 	"risk":          map[string]any{"level": nil, "reasons": nil},
 	"reversibility": map[string]any{"class": nil, "reasons": nil},

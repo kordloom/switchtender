@@ -126,6 +126,7 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--jwt-audience` | none | Expected token audience. Left empty the audience is not checked, so every token the issuer signs is accepted, including one minted for a different application at the same issuer. Set it unless the issuer serves this install alone. |
 | `--jwt-username-claim` | `sub` | Claim naming the account. |
 | `--jwt-groups-claim` | none | Claim holding the user's groups, used with `--jwt-role-map`. |
+| `--jwt-agent-claim` | `st_actor_type` | Claim that marks a token as an AI agent's when it holds the value `agent`. A marked token gets the agent ceiling: it can launch and propose work, but cannot manage identity, access, or secrets, and cannot approve its own held run. |
 | `--jwt-role-map` | none | Map a token group to a role as `group=role`. Repeatable. |
 | `--jwt-default-role` | `viewer` | Role granted to an account created on first JWT sign-in. |
 | `--ai-provider` | none | Enable advisory AI features with a provider: `ollama`, `anthropic`, or `openai`. Empty leaves AI off. |

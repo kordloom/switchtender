@@ -640,7 +640,7 @@ an empty value when the run has none, so a module never meets a missing field.</
 <td><code>agent</code>, <code>human</code> for a session, a person's token, the command line, or a forge comment, or <code>other</code> for a webhook, a schedule, a callback, or an unknown source.</td>
 </tr>
 <tr>
-<td><code>actor.account</code></td>
+<td><code>actor.account_id</code></td>
 <td>The id of the account behind the credential. For an agent, the account it acts for. A YAML rule's <code>account</code> matches the account's username instead.</td>
 </tr>
 <tr>
@@ -854,7 +854,7 @@ common cases.</p>
     &quot;proposed_from&quot;: &quot;&quot;, &quot;intent&quot;: &quot;&quot;, &quot;image&quot;: &quot;&quot;, &quot;tags&quot;: [], &quot;skip_tags&quot;: [],
     &quot;labels&quot;: {&quot;env&quot;: &quot;prod&quot;}, &quot;extra_var_names&quot;: [], &quot;credential_ids&quot;: []
   },
-  &quot;actor&quot;: {&quot;name&quot;: &quot;deploy-bot&quot;, &quot;type&quot;: &quot;agent&quot;, &quot;kind&quot;: &quot;agent&quot;, &quot;account&quot;: &quot;usr_1&quot;},
+  &quot;actor&quot;: {&quot;name&quot;: &quot;deploy-bot&quot;, &quot;type&quot;: &quot;agent&quot;, &quot;kind&quot;: &quot;agent&quot;, &quot;account_id&quot;: &quot;usr_1&quot;},
   &quot;plan&quot;: {&quot;planned&quot;: false, &quot;destroys&quot;: null},
   &quot;risk&quot;: {&quot;level&quot;: &quot;high&quot;, &quot;reasons&quot;: []},
   &quot;reversibility&quot;: {&quot;class&quot;: &quot;costly&quot;, &quot;reasons&quot;: []},

@@ -31,9 +31,18 @@ type JWTAuth struct {
 	roleMap map[string]user.Role
 	// defaultRole is granted when no group maps to a role.
 	defaultRole user.Role
+	// agentClaim names the claim that marks a token as an AI agent's when it holds the value agent.
+	agentClaim string
 	// log records sign-in activity without token material.
 	log *zap.Logger
 }
+
+// DefaultJWTAgentClaim is the claim that marks a token as an agent's unless WithAgentClaim names
+// another.
+const DefaultJWTAgentClaim = "st_actor_type"
+
+// jwtAgentValue is the value of the agent claim that marks the token as an agent's.
+const jwtAgentValue = "agent"
 
 // NewJWTAuth builds a JWTAuth. It fetches the issuer's keys from jwksURL and verifies the issuer, and
 // the audience when one is given.
@@ -55,26 +64,47 @@ func NewJWTAuth(ctx context.Context, jwksURL, issuer, audience, usernameClaim, g
 		&oidc.Config{ClientID: audience, SkipClientIDCheck: audience == ""})
 	return &JWTAuth{
 		verifier: verifier, users: users, usernameClaim: usernameClaim, groupsClaim: groupsClaim,
-		roleMap: roleMap, defaultRole: defaultRole, log: log,
+		roleMap: roleMap, defaultRole: defaultRole, agentClaim: DefaultJWTAgentClaim, log: log,
 	}, nil
+}
+
+// WithAgentClaim sets the claim that marks a token as an agent's. An empty name keeps the default.
+func (j *JWTAuth) WithAgentClaim(name string) *JWTAuth {
+	if name != "" {
+		j.agentClaim = name
+	}
+	return j
 }
 
 // Authenticate verifies raw and provisions the account it names. A verification failure is an
 // authentication failure, not a server error, so a bad or expired token is simply refused.
 func (j *JWTAuth) Authenticate(ctx context.Context, raw string) (*user.User, error) {
+	u, _, err := j.AuthenticateActor(ctx, raw)
+	return u, err
+}
+
+// AuthenticateActor is Authenticate that also reports whether the signed token marks its holder as an
+// AI agent, by holding the agent claim set to agent. The issuer signs the claim, so a caller cannot
+// add it to a token it was not issued.
+func (j *JWTAuth) AuthenticateActor(ctx context.Context, raw string) (*user.User, bool, error) {
 	tok, err := j.verifier.Verify(ctx, raw)
 	if err != nil {
 		j.log.Warn("jwt: verify: " + err.Error())
-		return nil, ErrJWTAuth
+		return nil, false, ErrJWTAuth
 	}
 	var claims map[string]any
 	if err := tok.Claims(&claims); err != nil {
-		return nil, ErrJWTAuth
+		return nil, false, ErrJWTAuth
 	}
 	username, _ := claims[j.usernameClaim].(string)
 	if username == "" {
-		return nil, ErrJWTAuth
+		return nil, false, ErrJWTAuth
 	}
 	role := roleForGroups(claimGroups(claims[j.groupsClaim]), j.roleMap, j.defaultRole)
-	return provisionFromDirectory(ctx, j.users, j.log, username, role, len(j.roleMap) > 0, "jwt")
+	u, err := provisionFromDirectory(ctx, j.users, j.log, username, role, len(j.roleMap) > 0, "jwt")
+	if err != nil {
+		return nil, false, err
+	}
+	agent, _ := claims[j.agentClaim].(string)
+	return u, agent == jwtAgentValue, nil
 }

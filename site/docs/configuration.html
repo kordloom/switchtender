@@ -493,6 +493,11 @@ that variable is unset.</p>
 <td>Claim holding the user's groups, used with <code>--jwt-role-map</code>.</td>
 </tr>
 <tr>
+<td><code>--jwt-agent-claim</code></td>
+<td><code>st_actor_type</code></td>
+<td>Claim that marks a token as an AI agent's when it holds the value <code>agent</code>. A marked token gets the agent ceiling: it can launch and propose work, but cannot manage identity, access, or secrets, and cannot approve its own held run.</td>
+</tr>
+<tr>
 <td><code>--jwt-role-map</code></td>
 <td>none</td>
 <td>Map a token group to a role as <code>group=role</code>. Repeatable.</td>
