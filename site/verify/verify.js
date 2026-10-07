@@ -242,6 +242,27 @@
 		if (e.dataTransfer.files[0]) check(e.dataTransfer.files[0]);
 	});
 
+	// SAMPLE_PIN is the key id the public demo install publishes at /.well-known/loomseal.json, the
+	// key that signed sample-bundle.json. The sample is checked against it, so its verdict names the
+	// install that produced it. The pin must match the sample's signer, and a test holds them together.
+	var SAMPLE_PIN = "sha256:47a80df250cfc939fe3c405a5727242caae91b5c9786812afe569fafee4b5dca";
+	var sample = document.getElementById("sample");
+	sample.addEventListener("click", function () {
+		if (!ready) return;
+		fetch("/verify/sample-bundle.json")
+			.then(function (res) {
+				if (!res.ok) throw new Error("sample status " + res.status);
+				return res.arrayBuffer();
+			})
+			.then(function (buf) {
+				fp.value = SAMPLE_PIN;
+				run(new Uint8Array(buf), "the public demo's sample bundle");
+			})
+			.catch(function () {
+				out.innerHTML = '<div class="verdict no">NOT VERIFIED   the sample could not be loaded</div>';
+			});
+	});
+
 	if (!WebAssembly || !WebAssembly.instantiateStreaming) {
 		main.textContent = "This browser cannot run the verifier";
 		sub.textContent = "Use loomseal verify from the command line instead.";
@@ -252,6 +273,7 @@
 		.then(function (res) {
 			go.run(res.instance);
 			ready = true;
+			sample.disabled = false;
 			main.textContent = "Drop a bundle here, or click to choose one";
 		})
 		.catch(function () {

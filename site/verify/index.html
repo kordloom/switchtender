@@ -85,6 +85,11 @@
 				<input type="text" id="fp" placeholder="Paste the producer fingerprint (sha256:...) to check who signed it" spellcheck="false" autocomplete="off">
 			</div>
 
+			<div class="sample">
+				<p class="note">No bundle of your own to hand? Check a sample from the public demo install. It is a real signed chain from that install, pinned to the key the install publishes, and it is not your data.</p>
+				<button type="button" id="sample" class="tamper-btn" disabled>Try the sample bundle</button>
+			</div>
+
 			<div id="out" aria-live="polite"></div>
 
 			<p class="note" style="margin-top:10px">Leave it blank and this page still checks every link and the signature, and it cannot tell you whose install produced the file. The fingerprint is what turns "this was signed" into "this was signed by them". Every install publishes its own at <code>/.well-known/loomseal.json</code> on its own domain.</p>
