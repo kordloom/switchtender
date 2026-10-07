@@ -250,6 +250,7 @@ var (
 	serveJWTAudience      string
 	serveJWTUsernameClaim string
 	serveJWTGroupsClaim   string
+	serveJWTAgentClaim    string
 	serveJWTDefaultRole   string
 	serveJWTRoleMap       []string
 	serveAIProvider       string
@@ -754,6 +755,8 @@ func init() {
 		"Claim naming the account, for example sub or email.")
 	serveCmd.Flags().StringVar(&serveJWTGroupsClaim, "jwt-groups-claim", "",
 		"Claim holding the user's groups, used with --jwt-role-map.")
+	serveCmd.Flags().StringVar(&serveJWTAgentClaim, "jwt-agent-claim", server.DefaultJWTAgentClaim,
+		"Claim that marks a token as an AI agent's when it holds the value agent.")
 	serveCmd.Flags().StringVar(&serveJWTDefaultRole, "jwt-default-role", "viewer",
 		"Role granted to an account created on first JWT sign-in.")
 	serveCmd.Flags().StringVar(&serveAIProvider, "ai-provider", "",
@@ -1871,6 +1874,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			return err
 		}
+		jwtAuth = jwtAuth.WithAgentClaim(serveJWTAgentClaim)
 	}
 
 	aiProvider, err := ai.New(serveAIProvider, serveAIModel, serveAIURL, os.Getenv("SWITCHTENDER_AI_KEY"))
