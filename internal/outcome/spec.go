@@ -21,6 +21,9 @@ type SpecRecord struct {
 	Tool string `json:"tool,omitempty"`
 	// Playbook is the playbook path for an Ansible run.
 	Playbook string `json:"playbook,omitempty"`
+	// PinnedCommit is the git commit the run's project content was pinned to at launch, so an
+	// approval covers the exact tree that will run.
+	PinnedCommit string `json:"pinned_commit,omitempty"`
 	// Command is the tool's primary input for non-Ansible runs.
 	Command string `json:"command,omitempty"`
 	// Inventory is the inventory path the run targets.
@@ -139,7 +142,7 @@ func Spec(r *run.Run) ([]byte, error) {
 // exactly the same fields and cannot drift apart.
 func specRecordOf(r *run.Run) SpecRecord {
 	rec := SpecRecord{
-		Tool: r.Tool, Playbook: r.Playbook, Command: r.Command,
+		Tool: r.Tool, Playbook: r.Playbook, PinnedCommit: r.PinnedCommit, Command: r.Command,
 		Inventory: r.Inventory, InventoryID: r.InventoryID,
 		InventoryResolution: r.InventoryResolution, ProjectID: r.ProjectID,
 		Limit: r.Limit, Tags: r.Tags, SkipTags: r.SkipTags, ExtraVars: r.ExtraVars,
