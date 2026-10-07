@@ -185,12 +185,12 @@ const TOURS = [
 		steps: [
 			// Anchored on the hero tiles rather than centered: a centered first step dimmed the
 			// whole screen and sat exactly over the numbers a first visit should be looking at.
-			{ sel: "#ov-metrics", title: "Welcome to SwitchTender", body: "One binary runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, with no Kubernetes. Every change lands on the tamper-evident chain you can see verified right here." },
-			{ sel: ".page-head .button.primary", title: "Launch any tool", body: "Start a run with Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, or Go, each with a dry run, and mix them in a single pipeline." },
-			{ sel: ".panel-runs", title: "Watch every run", body: "Runs stream live here, with a host matrix, sharded splits, and multi-step pipelines all in one place." },
-			{ sel: "#tiles a[href='/ui/migrate']", title: "Bring your work with you", body: "Migrating from another tool? Import projects, inventories, templates, and schedules in a few clicks." },
-			{ sel: ".tile-search", title: "Find anything fast", body: "This search filters instantly, and every list in SwitchTender is searchable the same way." },
-			{ sel: ".side|.nav-toggle", title: "The rest of the yard", body: "Job templates, credentials with external secrets, schedules, and fleet analytics all live in the navigation." },
+			{ sel: "#ov-metrics", title: "Welcome to SwitchTender", body: "One binary runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go. Every run leaves a record you can verify." },
+			{ sel: "#attention-panel", title: "An agent can ask. It cannot release.", body: "When an AI agent requests a gated run, it waits under Approval needed until a person approves it." },
+			{ sel: "#attention-panel", title: "Separation of duties", body: "On Team, the person or agent that requested a run cannot approve it. Community installs get one approval policy." },
+			{ sel: "#attention-panel", title: "Approval is bound to the run", body: "An approval records a hash of the run's spec. If the spec changes after approval, the executor refuses the run." },
+			{ sel: ".side a[href='/ui/audit']|.side", title: "Verify the record yourself", body: "The verifier reads a receipt file and nothing else, with no database, no network, and no login." },
+			{ sel: "#tiles a[href='/ui/migrate']", title: "Bring your existing estate", body: "Import from AWX, Semaphore, Chef, Puppet, Rundeck, or Jenkins instead of rebuilding it by hand." },
 			{ title: "You are set", body: closingBody(
 				"Explore the demo freely. Nothing here can be broken. Replay this tour anytime from Tour in the top bar.",
 				"This install is yours, and the runs it starts are real. Replay this tour anytime from Tour in the top bar.") },
