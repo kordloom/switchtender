@@ -184,6 +184,99 @@ func TestExecutorRefusesASpecChangedAfterApproval(t *testing.T) {
 	}
 }
 
+// TestExecutorRefusesAPinnedCommitChangedAfterApproval proves the binding catches what the branch
+// freshness check cannot. checkPinnedCommit only compares a run's pinned commit against the commit
+// its own most recent project sync produced, so it sees no contradiction once the two agree, however
+// they came to agree. If something other than an honest resync moves a run's PinnedCommit after an
+// approval decided on the original one, and whatever moved it set CommitSHA to match, the run looks
+// internally consistent and checkPinnedCommit reports nothing wrong. Only the binding taken at
+// approval time still remembers which commit was actually released, which is why PinnedCommit has to
+// be part of it rather than left to the freshness check alone.
+func TestExecutorRefusesAPinnedCommitChangedAfterApproval(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// Name labels the case.
+		Name string
+		// MovedTo is the commit both PinnedCommit and CommitSHA are set to after the stamp, equal
+		// to the original aaa111 in the case that must still run.
+		MovedTo string
+		// WantRefused is whether execute() must fail the run.
+		WantRefused bool
+	}{{ // Test 0: An honest resync that found nothing new is not a tamper, and must still run.
+		Name: "resync confirms the same commit", MovedTo: "aaa111", WantRefused: false,
+	}, { // Test 1: Whatever moved the run set both fields to agree on a different commit, which
+		// checkPinnedCommit alone cannot distinguish from an honest resync.
+		Name: "pin and commit both moved together", MovedTo: "bbb222", WantRefused: true,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			store := run.NewMemStore()
+			d := New(store, okRunner(), nil, WithNoJanitor())
+			defer d.Close()
+
+			r := &run.Run{
+				ID: "run_pin_" + test.Name, Playbook: "site.yml", PinnedCommit: "aaa111",
+				Status: run.StatusRunning, CreatedAt: time.Now(),
+			}
+			if err := store.Save(ctx, r); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+
+			// The approval binds the spec as it stood, pinned to aaa111, the same stamp
+			// finishDecision writes when a real decision settles.
+			digest, err := outcome.SpecDigest(r)
+			if err != nil {
+				t.Fatalf("SpecDigest() error = %v", err)
+			}
+			binding, err := outcome.SpecBinding(r)
+			if err != nil {
+				t.Fatalf("SpecBinding() error = %v", err)
+			}
+			if err := store.StampApprovedSpec(ctx, r.ID, digest, binding); err != nil {
+				t.Fatalf("StampApprovedSpec() error = %v", err)
+			}
+
+			// Both fields move together, the way an honest resync leaves them, or stay as they
+			// were. Either way the two fields agree with each other, so the freshness check alone
+			// has nothing to report in either case.
+			stored, err := store.Get(ctx, r.ID)
+			if err != nil {
+				t.Fatalf("Get() error = %v", err)
+			}
+			stored.PinnedCommit, stored.CommitSHA = test.MovedTo, test.MovedTo
+			if err := checkPinnedCommit(stored); err != nil {
+				t.Fatalf("checkPinnedCommit() error = %v, want nil: the two fields agree, so this "+
+					"check alone cannot see what this test is about", err)
+			}
+			if err := store.Save(ctx, stored); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+
+			got := d.execute(ctx, stored)
+			if test.WantRefused {
+				if got != run.StatusFailed {
+					t.Fatalf("execute() = %q, want failed: the approval was for aaa111 and this run "+
+						"is now %s", got, test.MovedTo)
+				}
+				final, err := store.Get(ctx, stored.ID)
+				if err != nil {
+					t.Fatalf("Get() error = %v", err)
+				}
+				if !strings.Contains(final.Error, "changed after it was approved") {
+					t.Errorf("error = %q, want it to say the spec changed after approval", final.Error)
+				}
+				return
+			}
+			if got == run.StatusFailed {
+				t.Fatalf("execute() = failed, want the unmoved commit to run: the binding must not " +
+					"refuse a run that still matches what was approved")
+			}
+		})
+	}
+}
+
 // TestARefusedDecisionLeavesNoChainEntry proves a decision the dispatcher refuses is not recorded.
 //
 // The precondition used to be the compare-and-set at the end of Approve and Reject, which runs after
