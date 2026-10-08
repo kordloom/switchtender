@@ -481,6 +481,72 @@ func TestApprovalStepBindsTheStateItWasGivenFor(t *testing.T) {
 	}
 }
 
+// TestApprovalStepRefusesAParentPinChangedAfterApproval proves the composition that lets a step's
+// binding see a change to the parent workflow itself, not only to a sibling step's output.
+// StepState.Binding folds in outcome.SpecBinding(parent), so the pinned-commit protection
+// SpecBinding carries reaches every approval step a workflow pauses at, through the same binding
+// TestApprovalStepBindsTheStateItWasGivenFor proves for a tampered step output. As in the top-level
+// executor's case, the parent's PinnedCommit and CommitSHA are moved together, so checkPinnedCommit
+// alone sees no contradiction and the step binding is what catches it.
+func TestApprovalStepRefusesAParentPinChangedAfterApproval(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	runner := &commandRecorder{}
+	d1 := New(store, runner, nil, WithNoJanitor(), WithOwner("replica-one"))
+	parent, err := d1.SubmitPipeline(ctx, "release", "", gatedWorkflow(0, true),
+		run.WithPinnedCommit("aaa111"))
+	if err != nil {
+		t.Fatalf("SubmitPipeline() error = %v", err)
+	}
+	node := waitParked(t, store, parent.ID)
+	d1.Close()
+
+	stored, err := store.Get(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	state, err := outcome.StepStateOf(ctx, store, stored, node)
+	if err != nil {
+		t.Fatalf("StepStateOf() error = %v", err)
+	}
+	digest, _ := state.Digest()
+	binding, _ := state.Binding()
+	if err := store.StampApprovedSpec(ctx, node.ID, digest, binding); err != nil {
+		t.Fatalf("StampApprovedSpec() error = %v", err)
+	}
+	if ok, err := store.SettleHeld(ctx, node.ID, run.Finalization{
+		Status: run.StatusSucceeded, EndedAt: time.Now()}); err != nil || !ok {
+		t.Fatalf("SettleHeld() = (%v, %v)", ok, err)
+	}
+
+	// Whatever moved the parent's pin set CommitSHA to agree, the way an honest resync would.
+	stored.PinnedCommit, stored.CommitSHA = "bbb222", "bbb222"
+	if err := checkPinnedCommit(stored); err != nil {
+		t.Fatalf("checkPinnedCommit() error = %v, want nil: the two fields agree, so this check "+
+			"alone cannot see what this test is about", err)
+	}
+	if err := store.Save(ctx, stored); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	d2 := New(store, runner, nil, WithNoJanitor(), WithOwner("replica-two"))
+	defer d2.Close()
+	d2.sweepApprovalSteps()
+	got := waitTerminal(t, store, parent.ID)
+	if got.Status != run.StatusFailed {
+		t.Fatalf("workflow status = %q (%s), want failed: the approval was for aaa111 and the "+
+			"workflow is now pinned to bbb222", got.Status, got.Error)
+	}
+	if runner.count("deploy") != 0 || runner.count("notify") != 0 {
+		t.Errorf("deploy ran %d and notify %d times, want 0 and 0", runner.count("deploy"),
+			runner.count("notify"))
+	}
+	if !strings.Contains(got.Error, "changed after approval step") {
+		t.Errorf("refusal reason = %q, want it to say the workflow changed", got.Error)
+	}
+}
+
 // TestWholeRunDecisionRefusesAStartedWorkflow pins that a workflow paused at a step cannot be
 // approved or rejected as a whole run. Approving it as a run would walk the graph from the top and
 // run every finished step again.
