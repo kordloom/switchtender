@@ -59,12 +59,16 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>What governed agent changes look like</h2>
-				<p>Seven properties, each one testable against a running server. The first three keep an agent inside the gate. The rest make what it did evidence an auditor can rely on.</p>
+				<p>Eight properties, each one testable against a running server. The first four keep an agent inside the gate. The rest make what it did evidence an auditor can rely on.</p>
 			</div>
 			<div class="cards cards-3">
 				<article class="card reveal">
 					<h3>One credential per agent</h3>
 					<p>Secrets are sealed on the server and decrypt only at execution, so an agent holds exactly one credential: its SwitchTender token. It never sees an SSH key, a cloud login, or a vault password. Revoking that one token shuts the door.</p>
+				</article>
+				<article class="card reveal">
+					<h3>One gate, regardless of which tool</h3>
+					<p>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go all go through the same request, policy, approval, and chain. An agent that chains a Terraform change, an Ansible update, and a shell script inside one incident does not cross into a different approval model partway through: every one of those runs carries the same actor identity, the same policy evaluation, and lands in the same chain. Switching tools does not get an agent out from under the gate.</p>
 				</article>
 				<article class="card reveal">
 					<h3>A human approval gate, bound to content</h3>
