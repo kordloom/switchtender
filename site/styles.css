@@ -203,10 +203,12 @@ h1 {
 
 /* Feature cards */
 /* Laid out with flex rather than a fixed grid so a row that does not fill centers instead of
-   stranding its cards on the left. A four-column grid with seventeen cards left one alone. */
-.cards { display: flex; flex-wrap: wrap; justify-content: center; gap: 18px; }
+   stranding its cards on the left. A four-column grid with seventeen cards left one alone.
+   align-items: flex-start keeps each card at its own height: a collapsed card beside an open
+   one would otherwise stretch to match it, leaving an empty box around a one-line summary. */
+.cards { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: 18px; }
 .cards .card { flex: 0 1 calc(25% - 13.5px); }
-.cards-3 { display: flex; flex-wrap: wrap; justify-content: center; gap: 18px; }
+.cards-3 { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: 18px; }
 .cards-3 .card { flex: 0 1 calc(33.333% - 12px); }
 @media (max-width: 860px) {
 	.cards-3 .card { flex-basis: calc(50% - 9px); }
@@ -224,6 +226,23 @@ h1 {
 .card h3 { font-size: 17px; font-weight: 600; margin: 16px 0 8px; font-family: "Space Grotesk", sans-serif; }
 .card p { font-size: 14.5px; color: var(--muted); }
 .card code { color: var(--accent); background: rgba(52, 211, 153, 0.1); padding: 1px 6px; border-radius: 5px; font-size: 13px; }
+/* A card whose body collapses: summary stands in for h3 on a long list, so a reader sees every
+   heading at a glance and opens only the ones they want the paragraph for. */
+.card summary { font-size: 17px; font-weight: 600; margin: 16px 0 8px; font-family: "Space Grotesk", sans-serif; cursor: pointer; }
+.card summary::marker, .card summary::-webkit-details-marker { color: var(--accent); }
+details.card[open] summary { color: var(--accent); }
+
+/* The collapsible question list on /pricing, and any other page that wants the same disclosure
+   look: a bordered row per item, closed by default, with the accent color marking what is open. */
+.faq { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.faq details {
+	border: 1px solid var(--border); border-radius: var(--radius);
+	background: var(--surface); padding: 4px 20px;
+}
+.faq summary { cursor: pointer; padding: 16px 0; font-weight: 600; font-family: "Space Grotesk", sans-serif; font-size: 15.5px; }
+.faq summary::marker, .faq summary::-webkit-details-marker { color: var(--accent); }
+.faq details[open] summary { color: var(--accent); }
+.faq p { color: var(--muted); font-size: 14.5px; padding: 0 0 16px; }
 .ic {
 	width: 46px; height: 46px; border-radius: 12px;
 	background-color: rgba(52, 211, 153, 0.1); border: 1px solid rgba(52, 211, 153, 0.22);

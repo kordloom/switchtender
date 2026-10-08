@@ -64,7 +64,7 @@
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-	<link rel="stylesheet" href="/styles.css?v=37">
+	<link rel="stylesheet" href="/styles.css?v=38">
 	<noscript><style>.reveal{opacity:1 !important;transform:none !important}</style></noscript>
 </head>
 <body>
@@ -274,21 +274,18 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 					<h3>Provable audit</h3>
 					<p>Every change links into a tamper-evident SHA-256 hash chain, and a change that can't be recorded is refused rather than made quietly. Export the chain as a signed <a href="https://loomseal.com" rel="noopener">LoomSeal</a> bundle and verify it offline with an open, independent verifier, without trusting the server. From LoomSeal 1.7.0 on, the verifier also checks what a run's receipt discloses, its spec, its outcome, and each approval decision, against what the chain committed, so a receipt edited and signed again fails.</p>
 				</article>
-				<article class="card reveal">
-					<div class="ic ic-gate"></div>
-					<h3>Whether you get a second chance</h3>
+				<details class="card reveal">
+					<summary>Whether you get a second chance</summary>
 					<p>Risk says how bad a change is. It never says whether you can take it back, and the two come apart constantly: restarting a fleet is high risk and undoes itself, while deleting a backup set reads quietly and is permanent. Every run is graded reversible, costly, or irreversible, on every tier. A rule that holds a run on that grade is part of the full policy engine, which is Team. An Ansible run is graded from what it actually runs, every role and include read from the project at the commit that executes, not guessed from a file name.</p>
-				</article>
-				<article class="card reveal">
-					<div class="ic ic-memory"></div>
-					<h3>Your estate as it was</h3>
+				</details>
+				<details class="card reveal">
+					<summary>Your estate as it was</summary>
 					<p>One gather per host per day is kept rather than overwritten, about four hundred days deep by default, so you can ask what was running on the date of your last audit, and what has moved since: host by host, fact by fact, with the value at each end. Most tools answer only what is true now, because reconstructing the past needs an ordered history nobody can quietly edit.</p>
-				</article>
-				<article class="card reveal">
-					<div class="ic ic-lineage"></div>
-					<h3>The change, not just the run</h3>
+				</details>
+				<details class="card reveal">
+					<summary>The change, not just the run</summary>
 					<p>Nobody means a run. They mean "we rolled out the fix", which was four runs, a rollback and a fix-forward, across three days. Label them and read the whole arc as one thing, with its span, everyone who acted, and an outcome worked out from the runs rather than typed in by whoever closed it. Make the label a ServiceNow change number or a Jira issue key, and the official plugin, a separate binary, records each run on that ticket.</p>
-				</article>
+				</details>
 				<article class="card reveal">
 					<div class="ic ic-matrix"></div>
 					<h3>Live host-by-task matrix</h3>
@@ -299,26 +296,22 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 					<h3>Multi-tool engine</h3>
 					<p>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go. One engine, one UI, one audit trail, on the host or in a pinned container image. Ansible check mode and a Terraform or OpenTofu plan preview a change before it runs. Need an eighth? Write it in Go and plug it in.</p>
 				</article>
-				<article class="card reveal">
-					<div class="ic ic-shards"></div>
-					<h3>Balanced splits</h3>
+				<details class="card reveal">
+					<summary>Balanced splits</summary>
 					<p>Shard a big job across hosts, balanced by each host's measured duration. Retry only the shards that failed, not the whole run.</p>
-				</article>
-				<article class="card reveal">
-					<div class="ic ic-memory"></div>
-					<h3>Fleet memory</h3>
+				</details>
+				<details class="card reveal">
+					<summary>Fleet memory</summary>
 					<p>It flags flaky hosts, trends how long each task takes, and keeps every host's history across runs. Most controllers keep each run's history but never flag a flaky host or trend a task's duration.</p>
-				</article>
-				<article class="card reveal">
-					<div class="ic ic-editor"></div>
-					<h3>Visual workflow editor</h3>
+				</details>
+				<details class="card reveal">
+					<summary>Visual workflow editor</summary>
 					<p>Drag steps from all seven tools into one graph. Fan out, fan in, retry any step, run the whole pipeline. No YAML by hand.</p>
-				</article>
-				<article class="card reveal">
-					<div class="ic ic-schedule"></div>
-					<h3>Schedules you can trust before you save</h3>
+				</details>
+				<details class="card reveal">
+					<summary>Schedules you can trust before you save</summary>
 					<p>Type a cron expression, or an RFC 5545 recurrence rule for what cron cannot say, such as the last Friday of each quarter, and see its next firings before you save it. A scheduled launch carries its template's approvals, notifications, and timeout, and every run records which schedule started it. A server that stops mid-fire hands the occurrence back, and the occurrence's key keeps it from running twice. Where several servers share a PostgreSQL database, another takes it up, and creating that database is Team.</p>
-				</article>
+				</details>
 				<article class="card reveal">
 					<div class="ic ic-drift"></div>
 					<h3>Drift detection</h3>
@@ -329,81 +322,67 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 					<h3>Enforced approvals</h3>
 					<p>Hold risky runs for sign-off, gated by policy on tool, command, or target, and an agent token's runs are held with no policy written. Operators request, admins release. No skipping the gate. An approval binds what will run: a static, smart, or constructed inventory as snapshotted at submission, the container image by the digest its registry serves, or by its tag, said plainly, when the registry does not answer, and for a Terraform or OpenTofu apply the saved plan the apply carries out, however it came to be held. Community holds one plain rule, a require-approval policy or one exemption. The full engine, with deny rules, risk floors, actor scoping, and distinct-approver separation of duties, is Team.</p>
 				</article>
-				<article class="card reveal">
-					<div class="ic ic-roles"></div>
-					<h3>Roles, teams, and orgs</h3>
+				<details class="card reveal">
+					<summary>Roles, teams, and orgs</summary>
 					<p>Global roles, teams, organizations, and per-object read, use, and manage grants. Delegate view of one credential without a global viewer, or a whole org inherits a project at once. All of it ships in the core, not a paid tier.</p>
-				</article>
+				</details>
 				<article class="card reveal">
 					<div class="ic ic-shards"></div>
 					<h3>Reach isolated networks</h3>
 					<p>A worker dials out to the control node with a token and opens no inbound port, so it runs jobs inside an air-gapped segment, a DMZ, or a customer network the control node can't reach. One binary, one outbound connection. A pool that registers a delivery key receives each run's secrets sealed to that key, opened in memory and removed when the run ends, so the worker holds no database and no encryption key. Running any worker process needs Team.</p>
 				</article>
-				<article class="card reveal">
-					<div class="ic ic-ai"></div>
-					<h3>Optional advisory AI</h3>
+				<details class="card reveal">
+					<summary>Optional advisory AI</summary>
 					<p>Off by default. Switch it on to triage a failure, answer a fleet question, or draft a run from a sentence. It proposes, never executes. Bring your own model: local Ollama, Claude, or any OpenAI-compatible API.</p>
-				</article>
-				<article class="card reveal">
-					<div class="ic ic-doctor"></div>
-					<h3>A doctor for your control plane</h3>
+				</details>
+				<details class="card reveal">
+					<summary>A doctor for your control plane</summary>
 					<p>One click verifies every registered reference: templates to inventories, projects, and credentials, schedules to templates, every cron expression. Broken links surface with a fix button before they break a run.</p>
-				</article>
-				<article class="card reveal">
-					<div class="ic ic-relaunch"></div>
-					<h3>Run it again, your way</h3>
+				</details>
+				<details class="card reveal">
+					<summary>Run it again, your way</summary>
 					<p>Rerun any finished run with its exact spec, credentials included, one click. Or launch a template with overrides: host limit, inventory, credential picks, extra vars, dry run. Every override is authorized like a fresh launch.</p>
-				</article>
-				<article class="card reveal">
-					<div class="ic ic-export"></div>
-					<h3>Built for audits and sharing</h3>
+				</details>
+				<details class="card reveal">
+					<summary>Built for audits and sharing</summary>
 					<p>Every list exports to CSV or JSON, filtered exactly as you see it. Every run exports its events, log, and per-host results. Copy a link to any run, in any of the three themes.</p>
-				</article>
-				<article class="card reveal">
-					<div class="ic ic-lineage"></div>
-					<h3>Every run knows where it came from</h3>
+				</details>
+				<details class="card reveal">
+					<summary>Every run knows where it came from</summary>
 					<p>Each run records what fired it, the template, schedule, rerun, or drift fix behind it, and who asked. Add labels like env=prod, then search with fielded terms: status:failed host:web01 label:env=prod, resolved across your whole history.</p>
-				</article>
-				<article class="card reveal">
-					<div class="ic ic-bell"></div>
-					<h3>Notifications everywhere</h3>
+				</details>
+				<details class="card reveal">
+					<summary>Notifications everywhere</summary>
 					<p>A finished run, or one held for approval, reaches Slack, Teams, Discord, Mattermost, Rocket.Chat, ntfy, email, or a webhook. A failure pages PagerDuty or texts through Twilio, and every run lands on your Grafana dashboards as an annotation. Eleven channels, server-wide or per template, so each team pages its own people. A named target's deliveries are queued in the database in the same write as the event, sent in the run's order, retried, and made by the next server to start if one stops.</p>
-				</article>
-				<article class="card reveal">
-					<div class="ic ic-secret"></div>
-					<h3>Secrets kept out of the log</h3>
+				</details>
+				<details class="card reveal">
+					<summary>Secrets kept out of the log</summary>
 					<p>Sealed at rest, sourced live from Vault, AWS, Google, Azure, CyberArk, or 1Password, and kept off the command line so nothing shows in the process table. A tool that prints a secret shows <code>***</code>, even when it re-encodes it as base64, hex, or an escaped string. Typed cloud credentials inject the exact variables each tool expects.</p>
-				</article>
-				<article class="card reveal">
-					<div class="ic ic-matrix"></div>
-					<h3>Inventories read the way Ansible reads them</h3>
+				</details>
+				<details class="card reveal">
+					<summary>Inventories read the way Ansible reads them</summary>
 					<p>Static INI, YAML, and JSON inventories, and the smart inventories filtered over them, resolve inside the binary with Ansible's own quirks, from value typing to host ranges, so the server needs no Ansible to read them. CI holds that reading to every ansible-core minor from 2.16 to 2.21, and before an Ansible run the executor's own <code>ansible-inventory</code> reads the same inputs, so any difference refuses the run.</p>
-				</article>
-				<article class="card reveal">
-					<div class="ic ic-relaunch"></div>
-					<h3>Hosts that configure themselves</h3>
+				</details>
+				<details class="card reveal">
+					<summary>Hosts that configure themselves</summary>
 					<p>A new machine posts the template's callback key to its callback URL at boot, and the template runs against that host alone. It is AWX's provisioning callback, matched to the caller by AWX's rules and gated like any launch. A template imported from AWX answers at its old AWX address too, when the import knows its AWX id, so boot scripts keep working once the hostname points here.</p>
-				</article>
-				<article class="card reveal">
-					<div class="ic ic-secret"></div>
-					<h3>Cloud access with nothing stored</h3>
+				</details>
+				<details class="card reveal">
+					<summary>Cloud access with nothing stored</summary>
 					<p>A federated credential holds no secret. Each run that uses one gets a short-lived identity token, signed here and naming the run, its project, template, environment, and who launched it, which AWS, Google Cloud, or Azure exchanges for credentials that expire on their own. The signing key rotates on a fixed schedule that gives each cloud a day to fetch the new key, or at once in an emergency.</p>
-				</article>
-				<article class="card reveal">
-					<div class="ic ic-gate"></div>
-					<h3>Policies in Rego</h3>
+				</details>
+				<details class="card reveal">
+					<summary>Policies in Rego</summary>
 					<p>Write approval policy in the Open Policy Agent language, so an OPA or Conftest rule you already have ports without a rewrite. Evaluation never leaves the process: network, clock, and random builtins are removed, so a run gets the same answer on every server, and the decision records the digest of the exact bundle. Rego policies are Team.</p>
-				</article>
-				<article class="card reveal">
-					<div class="ic ic-drift"></div>
-					<h3>A dry run has to be dry</h3>
+				</details>
+				<details class="card reveal">
+					<summary>A dry run has to be dry</summary>
 					<p>A rule that lets dry runs through first reads each one for the known ways a check or a plan acts: tasks that set <code>check_mode: false</code>, <code>pipe</code> lookups that run a command on the controller, and the <code>external</code>, <code>aws_lambda_invocation</code>, and writing <code>http</code> data sources a plan would call, in the configuration and every module it calls. A dry run that could act for real is held like the real run, with a note naming what was found. The scan cannot prove a preview harmless, since lookups, plugins, and providers run code too, so the rule trusts the code it lets through, and an agent's dry run waits for a person either way, unless an exemption covers it.</p>
-				</article>
-				<article class="card reveal">
-					<div class="ic ic-lineage"></div>
-					<h3>Plans on pull requests</h3>
+				</details>
+				<details class="card reveal">
+					<summary>Plans on pull requests</summary>
 					<p>A review trigger plans a GitHub or GitLab pull request at its head commit in the tool's no-change mode and posts the result on the pull request as one comment per template, updated in place on every push, with a commit status beside it. A person whose GitHub or GitLab account is linked can comment <code>/switchtender apply</code> to approve and apply the reported plan, with the same role, grants, and separation of duties as the approval queue. <a href="/docs/pull-request-review">How it works</a>.</p>
-				</article>
+				</details>
 			</div>
 		</section>
 
