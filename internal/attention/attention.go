@@ -91,7 +91,8 @@ type Approvers struct {
 	// Role is the role a decider needs.
 	Role string `json:"role"`
 	// Excluded names the account that may not approve because it asked for the change, when the
-	// rule that held it requires a different approver. That account may still deny it.
+	// rule that held it requires a different approver. Whether it may deny the change depends on
+	// its role, since denying is admin work.
 	Excluded string `json:"excluded,omitempty"`
 	// Agent names the agent that asked on the excluded account's behalf, when an agent did. The
 	// account an agent is bound to counts as the requester.
@@ -731,7 +732,9 @@ func (e *eval) approvers(r *run.Run) Approvers {
 	return a
 }
 
-// approverSentence says who can decide, in a sentence.
+// approverSentence says who can decide, in a sentence. Denying is admin work the same as approving,
+// and a rule that requires a different approver restricts only the approval, so the sentence never
+// grants the excluded account a denial its role may not allow.
 func approverSentence(a Approvers) string {
 	if a.Excluded == "" {
 		return "An admin can approve or deny it. No agent can approve it."
@@ -741,8 +744,8 @@ func approverSentence(a Approvers) string {
 		asker = a.Excluded + ", the account agent " + a.Agent + " acts for,"
 	}
 	return "An admin other than " + asker + " can approve it, because the rule that held it " +
-		"requires a different person from the one who asked. " + a.Excluded +
-		" can still deny it. No agent can approve it."
+		"requires a different person from the one who asked. Any admin can deny it. " +
+		"No agent can approve it."
 }
 
 // anyFresh reports whether a connected worker serves queue.

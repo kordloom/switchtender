@@ -609,25 +609,34 @@ func TestHealth(t *testing.T) {
 	}
 }
 
-// TestTheDemoLandsOnTheGate pins where the read-only demo's bare address goes. Every link to the
-// demo that names only the host, a README badge or an address typed from a comment, opened on the
-// overview dashboard, which is the one page every automation tool has, while the product is the
-// change a rule is holding. An install that is not the demo keeps its overview.
+// TestTheDemoLandsOnTheGate pins where the bare address goes. A link to the demo that names only
+// the host, such as a README badge or an address typed from a comment, starts at the change the
+// gate is holding rather than at the overview dashboard every automation tool has. The read-only
+// demo starts at the runs an AI agent asked for, the list the hosted demo's banner and the
+// homepage's first button open. A read-only install that is not the demo may have no agent runs,
+// so it starts at every held run, and a writable install keeps its overview.
 func TestTheDemoLandsOnTheGate(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		ReadOnly     bool
 		WantLocation string
-	}{{ // Test 0: The read-only demo starts at the held runs.
-		ReadOnly: true, WantLocation: "/ui/runs?status=pending_approval",
-	}, { // Test 1: Any other install starts at its overview.
-		ReadOnly: false, WantLocation: "/ui/",
+		ReadOnly     bool
+		Demo         bool
+	}{{ // Test 0: The read-only demo starts at the agent's held runs, encoded as the browser does.
+		ReadOnly: true, Demo: true,
+		WantLocation: "/ui/runs?q=held_by%3A%22requested%20by%20an%20agent%2C%20" +
+			"held%20by%20default%22%20status%3Apending_approval",
+	}, { // Test 1: A read-only install that is not the demo starts at every held run.
+		ReadOnly: true, Demo: false, WantLocation: "/ui/runs?status=pending_approval",
+	}, { // Test 2: A writable install starts at its overview.
+		ReadOnly: false, Demo: false, WantLocation: "/ui/",
+	}, { // Test 3: A writable server marked as the demo keeps its overview too.
+		ReadOnly: false, Demo: true, WantLocation: "/ui/",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
-				WithReadOnly(test.ReadOnly)).Handler()
+				WithReadOnly(test.ReadOnly), WithDemo(test.Demo)).Handler()
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 			if rec.Code != http.StatusFound {

@@ -107,15 +107,29 @@ function approvalStepEntry(step) {
 		approve.className = "button primary";
 		approve.textContent = "Approve";
 		approve.hidden = ownRequest;
-		approve.addEventListener("click", () => decideApprovalStep(step, true, approve));
 		const deny = document.createElement("button");
 		deny.type = "button";
 		deny.className = "button danger";
 		deny.textContent = "Deny";
-		deny.addEventListener("click", () => decideApprovalStep(step, false, deny));
 		actions.appendChild(approve);
 		actions.appendChild(deny);
 		entry.appendChild(actions);
+		// A read-only server refuses every decision, so a live control would only open the reason
+		// dialog and then report the refusal as a failure. The controls are drawn disabled and say
+		// why, the way the launch dialog's Launch is, and no click handler is attached.
+		if (isReadOnly()) {
+			for (const btn of [approve, deny]) {
+				btn.disabled = true;
+				btn.title = readOnlyReason() + ".";
+			}
+			const why = document.createElement("p");
+			why.className = "muted";
+			why.textContent = readOnlyReason() + ". An admin decides this step here on a writable install.";
+			entry.appendChild(why);
+			return entry;
+		}
+		approve.addEventListener("click", () => decideApprovalStep(step, true, approve));
+		deny.addEventListener("click", () => decideApprovalStep(step, false, deny));
 		if (ownRequest) {
 			const why = document.createElement("p");
 			why.className = "muted";

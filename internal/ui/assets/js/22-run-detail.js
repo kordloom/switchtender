@@ -99,15 +99,28 @@ function updateActions(run) {
 	const approve = document.getElementById("approve-run");
 	const reject = document.getElementById("reject-run");
 	const explain = document.getElementById("explain-run");
+	const held = run.status === "pending_approval";
+	// A workflow that started and now waits at an approval step is decided step by step, in the
+	// approval panel on this page. The server refuses a decision on the workflow as a whole, since
+	// only a step's own decision may move it, so the run-wide buttons are not drawn for it.
+	const pausedWorkflow = held && run.kind === "pipeline" && !!run.started_at;
 	if (isReadOnly()) {
 		cancel.hidden = true;
 		retry.hidden = true;
-		if (approve) approve.hidden = true;
-		if (reject) reject.hidden = true;
 		if (explain) explain.hidden = true;
+		// The decision is what a held run's page exists to show, so Approve and Reject stay, drawn
+		// disabled with the reason the way the launch dialog's Launch is, and a note beside them
+		// says who decides it, so the page reads as a decision waiting rather than a dead end.
+		const decidable = held && !pausedWorkflow;
+		for (const btn of [approve, reject]) {
+			if (!btn) continue;
+			btn.hidden = !decidable;
+			btn.disabled = decidable;
+			btn.title = readOnlyReason() + ".";
+		}
+		readOnlyDecisionNote(decidable ? run : null);
 		return;
 	}
-	const held = run.status === "pending_approval";
 	// A held run is still cancelable, and the API has always allowed it: CancelPending accepts an
 	// unclaimed run in pending_approval. Hiding the button left the person who submitted the run with
 	// no way to stop it, because rejecting is an admin decision while canceling your own run is
@@ -117,19 +130,17 @@ function updateActions(run) {
 	cancel.hidden = isTerminal(run.status) || !roleAtLeast("operator");
 	// Separation of duties, shown rather than only enforced. When the rule that held this run requires
 	// a second person, the requester's Approve button has no future but a refusal, so it is not drawn
-	// and the reason is stated. Reject stays: withdrawing your own request needs nobody else, and
-	// removing it would leave the requester with no way out of a decision they no longer want.
+	// and the reason is stated. An admin requester keeps Reject, since withdrawing your own request
+	// needs nobody else. A requester below admin is refused a reject by the server, so the way out
+	// they are told about is the cancel they are drawn.
 	const ownRequest = held && run.require_distinct_approver && signedInAs(run.actor);
-	// A workflow that started and now waits at an approval step is decided step by step, in the
-	// approval panel on this page. The server refuses a decision on the workflow as a whole, since
-	// only a step's own decision may move it, so the run-wide buttons are not drawn for it.
-	const pausedWorkflow = held && run.kind === "pipeline" && !!run.started_at;
 	if (approve) approve.hidden = !held || pausedWorkflow || !roleAtLeast("admin") || ownRequest;
 	if (reject) reject.hidden = !held || pausedWorkflow || !roleAtLeast("admin");
 	if (ownRequest) {
 		setStatus("You asked for this run, and the rule that held it (" +
 			(run.held_by_policy || "an approval rule") + ") requires a different person to approve " +
-			"it. You can still reject it to withdraw the request.");
+			"it. You can still " + (roleAtLeast("admin") ? "reject" : "cancel") +
+			" it to withdraw the request.");
 	}
 	const splitParent = (run.kind === "split" || run.shard_count) && !run.parent_id;
 	retry.hidden = !(splitParent && isTerminal(run.status) && run.status !== "succeeded") ||
@@ -142,6 +153,42 @@ function updateActions(run) {
 		// from. What it is gated on is the run having something to explain.
 		explain.hidden = !(run.status === "failed" || run.status === "interrupted" || heldProposal);
 	}
+}
+
+// readOnlyDecisionNote says, beside a held run's disabled Approve and Reject, who decides it and why
+// nothing here can. It sits beside the buttons rather than in the status line, which the page
+// clears once the run is drawn. It is drawn once and kept current across header refreshes, and
+// removed for a run that is not waiting on a decision.
+function readOnlyDecisionNote(run) {
+	const actions = document.querySelector("main.content .actions");
+	if (!actions) return;
+	let note = document.getElementById("decide-note");
+	if (!run) {
+		if (note) note.remove();
+		return;
+	}
+	if (!note) {
+		note = document.createElement("span");
+		note.id = "decide-note";
+		note.className = "ro-note";
+		actions.appendChild(note);
+	}
+	note.textContent = decidersOf(run) + " " + readOnlyReason() + ".";
+}
+
+// decidersOf says who decides a held run, in the words the Needs attention panel uses. Rejecting is
+// open to any admin. A rule that requires a different approver restricts only the approval, and
+// excludes the account that asked, which for an agent is the account the agent acts for.
+function decidersOf(run) {
+	if (!run.require_distinct_approver) {
+		return "An admin decides this run here, with Approve or Reject.";
+	}
+	const account = run.account || run.actor;
+	let asker = account || "the account that asked";
+	if (account && run.actor_type === "agent" && run.actor && run.actor !== account) {
+		asker = account + ", the account agent " + run.actor + " acts for,";
+	}
+	return "An admin other than " + asker + " approves this run here, and any admin can reject it.";
 }
 
 // riskBadge renders a run's graded blast radius. The server computes the grade from the run's tool,
