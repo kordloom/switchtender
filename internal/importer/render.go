@@ -72,6 +72,14 @@ func Render(out io.Writer, format, source string, a Assessment) {
 		return
 	}
 	fmt.Fprintf(out, "  %-22s %6d\n", "templates graded", g.Templates)
+	// Said above the grades rather than only in the paragraph under them, because the grades of an
+	// AWX estate are zeros almost every time: a job template is a playbook path and variables, and
+	// the playbook is in a repository nothing has fetched. A reader who stops at the zeros has to
+	// see what they rest on.
+	if g.Unread > 0 {
+		fmt.Fprintf(out, "  %-22s %6d   graded from the launch alone, playbook not fetched yet\n",
+			"playbook unread", g.Unread)
+	}
 	fmt.Fprintf(out, "  %-22s %6d   cannot be undone from here\n", "irreversible", len(g.Irreversible))
 	for _, n := range capList(g.Irreversible, 6) {
 		fmt.Fprintf(out, "      - %s\n", n)
@@ -129,9 +137,18 @@ func Render(out io.Writer, format, source string, a Assessment) {
 		fmt.Fprintf(out, "  One approval policy holding on an irreversible grade would stop %d of\n"+
 			"  them until a second person agrees, and every run would leave a receipt that\n"+
 			"  verifies without us.\n", g.WouldGate)
+	case g.Templates == 1 && g.Unread > 0:
+		fmt.Fprintf(out, "  It does not grade irreversible from its launch alone, so an approval\n"+
+			"  policy holding on that grade would not stop it. Its playbook, once read, can only\n"+
+			"  raise that grade. Until then a policy on risk or on tool is the one to write here.\n")
 	case g.Templates == 1:
 		fmt.Fprintf(out, "  It does not grade irreversible, so an approval policy holding on that\n"+
 			"  grade would not stop it. A policy on risk or on tool is the one to write here.\n")
+	case g.Unread > 0:
+		fmt.Fprintf(out, "  None of them grades irreversible from the launch alone, so an approval\n"+
+			"  policy holding on that grade would stop none of them. A playbook, once read, can\n"+
+			"  only raise that grade. Until then a policy on risk or on tool is the one to write\n"+
+			"  here.\n")
 	default:
 		fmt.Fprintf(out, "  None of them grades irreversible, so an approval policy holding on that\n"+
 			"  grade would stop none of them. A policy on risk or on tool is the one to write here.\n")
@@ -194,7 +211,8 @@ func capList(items []string, max int) []string {
 
 // Headline is the one sentence the browser assessment leads with, and which kind of answer it is.
 type Headline struct {
-	// Kind is gap when something runs unasked or a gate is lost, and clear otherwise.
+	// Kind is gap when something runs unasked, a grade rests on a playbook nothing has read, or a
+	// gate is lost, and clear otherwise.
 	Kind string
 	// Text is the sentence.
 	Text string
@@ -207,6 +225,12 @@ type Headline struct {
 // disagreed with the first: one template read "None of your 1 templates", and an export whose
 // workflows lose their approval gates led with a sentence that never mentioned them. A gate the move
 // drops is said after what the templates show, never instead of it, and never left out.
+//
+// An estate whose grades rest on playbooks nothing has read is not called clear. An AWX job
+// template is a playbook path and variables, so its grade from the launch alone is a floor and
+// almost always zero, and a green sentence over two zeros would tell an AWX evaluator their estate
+// is safe when the reader has not seen the part that decides. The sentence says what it did count,
+// every template running whenever somebody presses the button, and what it has not read.
 func HeadlineOf(a Assessment) Headline {
 	g := a.Governance
 	gates := len(g.ApprovalGates)
@@ -238,6 +262,8 @@ func HeadlineOf(a Assessment) Headline {
 		h = Headline{Kind: "gap", Text: subject + " can do something nobody can undo, and today " +
 			runs + " whenever somebody presses the button. One approval policy holds " + them +
 			" until a second person agrees."}
+	case g.Unread > 0:
+		h = Headline{Kind: "gap", Text: unreadSentence(g.Templates, g.Unread)}
 	case g.Templates == 1:
 		h = Headline{Kind: "clear", Text: "Your one template does not grade irreversible. A policy " +
 			"on risk or on tool is the one to write here, not one on reversibility."}
@@ -254,6 +280,40 @@ func HeadlineOf(a Assessment) Headline {
 		h.Text += " " + carriedSentence(carried)
 	}
 	return h
+}
+
+// unreadSentence says what an assessment counted when nothing graded irreversible and some of the
+// grades rest on a playbook nothing has read: every template runs today whenever somebody presses
+// the button, and the grade of each template whose playbook is unread is a floor until it is read.
+// A grade from a playbook that was read is complete, so it is not called a floor.
+func unreadSentence(templates, unread int) string {
+	if templates == 1 {
+		return "Your one template runs today whenever somebody presses the button. Its playbook " +
+			"has not been read yet, so it does not grade irreversible from its launch alone, and " +
+			"that grade is a floor."
+	}
+	subject, every, none, noneOf := fmt.Sprintf("All %d of your templates", templates),
+		"Every one of them runs", "none grades", "None of them grades"
+	if templates == 2 {
+		subject, every, none, noneOf = "Both of your templates", "Both of them run",
+			"neither grades", "Neither of them grades"
+	}
+	opening := subject + " run today whenever somebody presses the button. "
+	switch unread {
+	case templates:
+		floors := "every grade here is a floor"
+		if templates == 2 {
+			floors = "both grades are floors"
+		}
+		return fmt.Sprintf("%s%s a playbook nothing has read yet, so %s irreversible from its "+
+			"launch alone, and %s.", opening, every, none, floors)
+	case 1:
+		return opening + noneOf + " irreversible. 1 of them runs a playbook nothing has read " +
+			"yet, so it is graded from its launch alone, and that grade is a floor."
+	}
+	return fmt.Sprintf("%s%s irreversible. %d of them run a playbook nothing has read yet, so "+
+		"they are graded from their launch alone, and those grades are floors.", opening, noneOf,
+		unread)
 }
 
 // carriedSentence says how many workflows wait on an approval node that the move keeps as an

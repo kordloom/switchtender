@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -232,6 +233,81 @@ func TestWorkflowCredentialsUnionIsDisclosed(t *testing.T) {
 	if !strings.Contains(strings.Join(plan.Warnings, "\n"), "could not before") {
 		t.Errorf("the widening was not disclosed: %v", plan.Warnings)
 	}
+}
+
+// TestWorkflowReadsCredentialsFromTheRelatedBlock pins the shape awxkit writes. A job template's
+// credentials and a node's own credentials are exportable relations, so a real export carries both
+// under related and never at the top level. A workflow carries the credentials of the templates it
+// runs and of its nodes from there, including one a node supplies because its template prompts.
+func TestWorkflowReadsCredentialsFromTheRelatedBlock(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// Name labels the subtest.
+		Name string
+		// A and B are the fields spliced into the two job templates.
+		A, B string
+		// Extra is spliced into the workflow, before its nodes.
+		Extra string
+		// Nodes replaces the workflow's nodes when set.
+		Nodes string
+		// WantCount is how many credentials the workflow template carries.
+		WantCount int
+	}{{ // Test 0: Both job templates carry their credential under related.
+		Name: "job templates under related",
+		A:    `, "related": {"credentials": [{"name": "vault"}]}`,
+		B:    `, "related": {"credentials": [{"name": "aws"}]}`, WantCount: 2,
+	}, { // Test 1: A node adds a credential under related, on a template that names none.
+		Name: "node under related",
+		Nodes: `[{"identifier": "first", "unified_job_template": {"name": "a"},
+		  "related": {"credentials": [{"name": "vault"}], "success_nodes": [{"identifier": "second"}]}},
+		 {"identifier": "second", "unified_job_template": {"name": "b"}}]`,
+		WantCount: 1,
+	}, { // Test 2: The top-level shape still reads, so a hand-written export is unchanged.
+		Name: "node at the top level",
+		Nodes: `[{"identifier": "first", "unified_job_template": {"name": "a"},
+		  "credentials": [{"name": "vault"}], "success_nodes": [{"identifier": "second"}]},
+		 {"identifier": "second", "unified_job_template": {"name": "b"}}]`,
+		WantCount: 1,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			export := `{
+			  "credentials": [
+			    {"name": "vault", "credential_type": "Vault", "inputs": {}},
+			    {"name": "aws", "credential_type": "Amazon Web Services", "inputs": {}}
+			  ],
+			  "projects": [{"name": "infra", "scm_type": "git", "scm_url": "https://e.com/i.git"}],
+			  "job_templates": [` + jobTemplate("a", test.A) + `,` + jobTemplate("b", test.B) + `],
+			  "workflow_job_templates": [{"name": "rollout", "related": {"workflow_nodes": ` +
+				nodesOrDefault(test.Nodes) + `}}]
+			}`
+			plan, err := FromAWX([]byte(export), time.Unix(0, 0).UTC())
+			if err != nil {
+				t.Fatalf("FromAWX() error = %v", err)
+			}
+			tpl := workflowTemplate(t, plan)
+			if got := len(tpl.CredentialIDs); got != test.WantCount {
+				t.Errorf("credentials = %d, want %d; a step with none cannot authenticate and "+
+					"nothing in the plan says why.\nwarnings: %v", got, test.WantCount, plan.Warnings)
+			}
+			if _, ok := warningContaining(t, plan.Warnings, "related.credentials"); ok {
+				t.Errorf("the credentials are still reported as a field this importer does not read: %v",
+					plan.Warnings)
+			}
+		})
+	}
+}
+
+// nodesOrDefault returns the workflow nodes a test gave, or two nodes wired first to second that
+// add no credential of their own.
+func nodesOrDefault(nodes string) string {
+	if nodes != "" {
+		return nodes
+	}
+	return `[{"identifier": "first", "unified_job_template": {"name": "a"},
+	  "related": {"success_nodes": [{"identifier": "second"}]}},
+	 {"identifier": "second", "unified_job_template": {"name": "b"}}]`
 }
 
 // TestWorkflowSharedCredentialIsNotAWidening checks the disclosure is not printed when every node

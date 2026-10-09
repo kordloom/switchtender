@@ -182,6 +182,45 @@ func TestHeadlineOf(t *testing.T) {
 		WantResult: "None of your 5 templates grades irreversible. A policy on risk or on tool is " +
 			"the one to write here, not one on reversibility. 1 workflow waits for a person at an " +
 			"approval node, and that gate comes across as an approval step.",
+	}, { // Test 11: Every grade rests on an unread playbook, which is an AWX estate. Not clear.
+		Name: "all unread", Governance: Governance{Templates: 5, Unread: 5}, WantKind: "gap",
+		WantResult: "All 5 of your templates run today whenever somebody presses the button. Every " +
+			"one of them runs a playbook nothing has read yet, so none grades irreversible from " +
+			"its launch alone, and every grade here is a floor.",
+	}, { // Test 12: One template, unread.
+		Name: "one unread", Governance: Governance{Templates: 1, Unread: 1}, WantKind: "gap",
+		WantResult: "Your one template runs today whenever somebody presses the button. Its " +
+			"playbook has not been read yet, so it does not grade irreversible from its launch " +
+			"alone, and that grade is a floor.",
+	}, { // Test 13: One of several unread.
+		Name: "one of three unread", Governance: Governance{Templates: 3, Unread: 1}, WantKind: "gap",
+		WantResult: "All 3 of your templates run today whenever somebody presses the button. None " +
+			"of them grades irreversible. 1 of them runs a playbook nothing has read yet, so it is " +
+			"graded from its launch alone, and that grade is a floor.",
+	}, { // Test 14: A found gap outranks the unread floor, since the gap is already known.
+		Name:       "irreversible and unread",
+		Governance: Governance{Templates: 5, WouldGate: 1, Unread: 4}, WantKind: "gap",
+		WantResult: "1 of your 5 templates can do something nobody can undo, and today it runs " +
+			"whenever somebody presses the button. One approval policy holds it until a second " +
+			"person agrees.",
+	}, { // Test 15: The unread floor still carries the kept gate after it.
+		Name:       "unread and a kept gate",
+		Governance: Governance{Templates: 2, Unread: 2, CarriedGates: []string{"Release"}},
+		WantKind:   "gap",
+		WantResult: "Both of your templates run today whenever somebody presses the button. Both " +
+			"of them run a playbook nothing has read yet, so neither grades irreversible from its " +
+			"launch alone, and both grades are floors. 1 workflow waits for a person at an " +
+			"approval node, and that gate comes across as an approval step.",
+	}, { // Test 16: Several of several unread, the rest read, and only the unread are floors.
+		Name: "two of five unread", Governance: Governance{Templates: 5, Unread: 2}, WantKind: "gap",
+		WantResult: "All 5 of your templates run today whenever somebody presses the button. None " +
+			"of them grades irreversible. 2 of them run a playbook nothing has read yet, so they " +
+			"are graded from their launch alone, and those grades are floors.",
+	}, { // Test 17: One of two unread.
+		Name: "one of two unread", Governance: Governance{Templates: 2, Unread: 1}, WantKind: "gap",
+		WantResult: "Both of your templates run today whenever somebody presses the button. " +
+			"Neither of them grades irreversible. 1 of them runs a playbook nothing has read yet, " +
+			"so it is graded from its launch alone, and that grade is a floor.",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {

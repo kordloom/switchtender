@@ -123,6 +123,14 @@ func TestAWXImportCarriesFactCacheAndCallbacks(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			// The key the export carried is either sealed or dropped, and a dropped one is said,
+			// because the plan's own line about the key reads as though it came across.
+			w, dropped := warningContaining(t, plan.Warnings, `template "Boot"`, "was dropped",
+				"no encryption key")
+			if dropped == test.WantKey {
+				t.Errorf("warned that the callback key was dropped = %v (%q), want %v.\nwarnings: %v",
+					dropped, w, !test.WantKey, plan.Warnings)
+			}
 			for _, tpl := range list {
 				switch {
 				case tpl.Name != "Boot":

@@ -102,6 +102,52 @@ func TestAnAssessmentSaysWhichGradesRestOnFilesItNeverRead(t *testing.T) {
 	}
 }
 
+// TestAnAWXEstateWithUnreadPlaybooksIsNotCalledClear holds the headline to what the reader saw. An
+// AWX job template is a playbook path and variables, so the grades from its launch alone are zeros
+// almost every time, and a green "None of your templates grades irreversible" over two zeros would
+// mislead exactly the estates the page is aimed at. The headline says what was counted, every
+// template running whenever somebody presses the button, and what has not been read.
+func TestAnAWXEstateWithUnreadPlaybooksIsNotCalledClear(t *testing.T) {
+	t.Parallel()
+	const export = `{
+	 "projects":[{"name":"infra","scm_type":"git","scm_url":"https://example.invalid/i.git"}],
+	 "inventories":[{"name":"prod","hosts":[{"name":"db01"}]}],
+	 "job_templates":[
+	  {"name":"Deploy web","playbook":"site.yml","project":"infra","inventory":"prod"},
+	  {"name":"Wipe cluster","playbook":"destroy.yml","project":"infra","inventory":"prod",
+	   "extra_vars":"force: true\nrm_rf_data: true"}
+	 ]
+	}`
+	plan, err := FromAWX([]byte(export), time.Now())
+	if err != nil {
+		t.Fatalf("FromAWX: %v", err)
+	}
+	a := plan.Assess()
+	if a.Governance.WouldGate != 0 || a.Governance.Unread != 2 {
+		t.Fatalf("governance = %+v, want nothing graded irreversible and both playbooks unread",
+			a.Governance)
+	}
+	h := HeadlineOf(a)
+	if h.Kind != "gap" {
+		t.Errorf("headline kind = %q, want gap: a floor of zeros is not a clear estate", h.Kind)
+	}
+	want := "Both of your templates run today whenever somebody presses the button. Both of them " +
+		"run a playbook nothing has read yet, so neither grades irreversible from its launch " +
+		"alone, and both grades are floors."
+	if diff := cmp.Diff(want, h.Text); diff != "" {
+		t.Errorf("headline mismatch (-want +got):\n%s", diff)
+	}
+	var doc strings.Builder
+	Render(&doc, "awx", "export.json", a)
+	text := strings.Join(strings.Fields(doc.String()), " ")
+	for _, want := range []string{"templates graded 2 playbook unread 2 graded from the launch alone",
+		"None of them grades irreversible from the launch alone"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the assessment does not say %q:\n%s", want, doc.String())
+		}
+	}
+}
+
 // TestAnAssessmentCarriesTheSameReportAnImportWould keeps the two from drifting. A document that
 // promised one thing and an import that did another is the failure the whole feature exists to
 // prevent somebody finding in production.
@@ -259,12 +305,19 @@ func TestTheClosingParagraphCountsItsTemplates(t *testing.T) {
 		Name:       "several templates, one unread",
 		Governance: Governance{Templates: 3, Unread: 1},
 		WantInDoc: []string{"and variables. 1 of them runs an Ansible playbook",
-			"Today any of these 3 templates runs", "None of them grades irreversible"},
+			"Today any of these 3 templates runs", "None of them grades irreversible",
+			"playbook unread 1 graded from the launch alone", "stop none of them. A playbook, once " +
+				"read, can only raise that grade."},
 	}, { // Test 3: Several templates, several unread, some irreversible.
 		Name:         "several templates, several unread",
 		Governance:   Governance{Templates: 4, Unread: 2, WouldGate: 2},
 		WantInDoc:    []string{"2 of them run an Ansible playbook", "would stop 2 of"},
 		WantNotInDoc: []string{"Today this template"},
+	}, { // Test 4: Nothing unread, so the count above the grades is not printed as a zero.
+		Name:         "nothing unread",
+		Governance:   Governance{Templates: 3},
+		WantInDoc:    []string{"None of them grades irreversible, so an approval policy"},
+		WantNotInDoc: []string{"playbook unread", "once read"},
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {

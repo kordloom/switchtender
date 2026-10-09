@@ -254,13 +254,17 @@ switchtender witness --server https://demo.switchtender.com --once</code></pre>
 				<pre><code><span class="c"># 1. preview: read the AWX export, print the plan, write nothing</span>
 switchtender import awx awx-export.json --db switchtender.db
 
-<span class="c"># 2. apply: create every project, inventory, template, survey, and schedule</span>
+<span class="c"># 2. set the encryption pair the server will run with, and keep both values:
+#    the server must start with this same pair</span>
+export SWITCHTENDER_ENCRYPTION_KEY=$(openssl rand -hex 32)
+export SWITCHTENDER_ENCRYPTION_SALT=$(openssl rand -hex 16)
+<span class="c">#    then apply: create every project, inventory, template, survey, and schedule</span>
 switchtender import awx awx-export.json --db switchtender.db --apply
 
 <span class="c"># on Semaphore instead? swap one word:</span>
 switchtender import semaphore export.json --db switchtender.db --apply</code></pre>
 			</div>
-			<p class="reveal" style="margin-top: 20px; text-align: center;">Credentials arrive as named shells, since these exports omit secret material by design. Re-enter each secret once and every template that references it works. The <a href="/docs/switching-from-awx">switching guide</a> maps every AWX concept to its SwitchTender equivalent, and the <a href="/awx-alternative">AWX alternative page</a> makes the full case.</p>
+			<p class="reveal" style="margin-top: 20px; text-align: center;">Credentials arrive as named shells, since these exports omit secret material by design. Re-enter each secret once and every template that references it works. A template that took provisioning callbacks keeps its old AWX address only when the import knows its AWX id, and <code>awx export</code> strips ids, so save <code>GET /api/v2/job_templates/</code> as JSON and pass it with <code>--awx-template-ids</code>. The <a href="/docs/switching-from-awx">switching guide</a> maps every AWX concept to its SwitchTender equivalent, and the <a href="/awx-alternative">AWX alternative page</a> makes the full case.</p>
 		</section>
 
 		<section class="section wrap" id="features">

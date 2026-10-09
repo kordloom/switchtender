@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -112,6 +113,9 @@ type Plan struct {
 	awxIDs *awxTemplateIDs
 	// awxConflicts names AWX ids the export gives to more than one template, which Apply refuses.
 	awxConflicts []string
+	// topSchedules holds the schedules an AWX export writes at its top level until the template or
+	// workflow each belongs to takes them. Nil for every other source.
+	topSchedules *awxTopSchedules
 }
 
 // objects counts everything the plan would create, which is what makes an import a success or a
@@ -228,6 +232,13 @@ func (p *Plan) addSchedule(sc *schedule.Schedule, source string, now time.Time) 
 // noteUnanswerableSchedule reports a schedule whose template's survey has a required question with no
 // default. Nobody answers a survey when a schedule fires, so every such fire stops with that reason,
 // and the report is where an operator migrating can see it before the first one comes due.
+//
+// A required secret question is the one case the schedule is switched off for. Its default cannot
+// have come across, since an export never carries a secret readably, so the schedule is certain to
+// stop at every fire until somebody sets one, and it arrives switched off the way a schedule whose
+// own secret answer did not come across already does. A required question of any other type keeps
+// the schedule as it was and is reported, since its default may be one nobody ever set at the
+// source and the fire there stopped the same way.
 func (p *Plan) noteUnanswerableSchedule(sc *schedule.Schedule, source string) {
 	if sc.TemplateID == "" {
 		return
@@ -247,6 +258,19 @@ func (p *Plan) noteUnanswerableSchedule(sc *schedule.Schedule, source string) {
 		return
 	}
 	vars := template.UnansweredVars(err)
+	if secret := secretQuestions(tpl.Survey, vars); len(secret) > 0 && sc.Enabled {
+		sc.Enabled = false
+		have := "has"
+		if len(secret) > 1 {
+			have = "have"
+		}
+		p.warn("schedule %q from %s arrives switched off: it fires template %q, whose required "+
+			"secret question%s %s %s no default here, because an export never carries a secret "+
+			"readably, so each fire would stop with that reason. Set the default on the template, "+
+			"then switch the schedule on", sc.Name, source, tpl.Name, plural(len(secret)),
+			strings.Join(secret, ", "), have)
+		return
+	}
 	quoted := make([]string, len(vars))
 	for i, v := range vars {
 		quoted[i] = strconv.Quote(v)
@@ -259,6 +283,19 @@ func (p *Plan) noteUnanswerableSchedule(sc *schedule.Schedule, source string) {
 		"required question%s %s, so each fire stops with that reason and starts no run. Give %s a "+
 		"default on the template", sc.Name, source, tpl.Name, plural(len(vars)),
 		strings.Join(quoted, ", "), which)
+}
+
+// secretQuestions returns, quoted, the named survey variables that are secret questions.
+func secretQuestions(survey []template.SurveyField, vars []string) []string {
+	var out []string
+	for _, v := range vars {
+		if slices.ContainsFunc(survey, func(f template.SurveyField) bool {
+			return f.Var == v && f.Secret()
+		}) {
+			out = append(out, strconv.Quote(v))
+		}
+	}
+	return out
 }
 
 // parseExtraVars decodes AWX or Semaphore extra vars, which arrive as a YAML or JSON string, into a

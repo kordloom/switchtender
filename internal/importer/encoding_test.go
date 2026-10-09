@@ -84,7 +84,10 @@ func TestEveryReaderReadsWhatThePageReads(t *testing.T) {
 				if err != nil {
 					t.Fatalf("the %s export was refused: %v", enc.Name, err)
 				}
-				if diff := cmp.Diff(want.Assess(), got.Assess(), cmpopts.EquateEmpty()); diff != "" {
+				// A shared credential is named by the id the read minted for it, which differs
+				// between two reads of the same export, so the ids are left out of the comparison.
+				if diff := cmp.Diff(want.Assess(), got.Assess(), cmpopts.EquateEmpty(),
+					cmpopts.IgnoreFields(CredentialUse{}, "ID")); diff != "" {
 					t.Errorf("the %s export reads differently (-plain +encoded):\n%s", enc.Name, diff)
 				}
 			})

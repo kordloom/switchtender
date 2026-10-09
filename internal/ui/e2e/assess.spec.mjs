@@ -65,6 +65,11 @@ test("reads a dropped export in a worker and fetches nothing once loaded", async
   expect(plain.report).toContain("Уничтожение данных");
   expect(plain.report).toContain("Usuń schemat");
   expect(await page.evaluate(() => typeof window.switchtenderAssess)).toBe("undefined");
+  // The figures carry the count the grades rest on: every template here runs a playbook nothing
+  // has fetched, and that number sits beside the grades rather than only in the report below.
+  const figures = await page.locator("#figures .figure").evaluateAll((els) =>
+    els.map((el) => el.textContent));
+  expect(figures).toContain("3playbooks not read yet");
 
   // Test 1: the same export saved as UTF-16 reads the same.
   const wide = await drop(page, utf16(EXPORT), "export-utf16.json");

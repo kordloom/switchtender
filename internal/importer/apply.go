@@ -12,6 +12,7 @@ import (
 	"github.com/kordloom/switchtender/internal/notification"
 	"github.com/kordloom/switchtender/internal/org"
 	"github.com/kordloom/switchtender/internal/project"
+	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/template"
 )
@@ -182,7 +183,14 @@ func (p *Plan) applyNotifications(ctx context.Context, s ApplyStores) (int, erro
 			}
 			switch err := seal(t, notifySealer(s.Sealer)); {
 			case errors.Is(err, notification.ErrSealing):
+				// Said in the report, because the export did carry this part and the import is
+				// dropping it. Stored silently, the target would read as one more secret the export
+				// never held, and the loss would show only when a failed run notified nobody.
 				n.NeedsSecret = true
+				p.warn("notification target %q arrives waiting for its %s: the export carried it, "+
+					"and this install has no encryption key to seal it with, so it was dropped. Set "+
+					"SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT before importing "+
+					"to keep it, or enter it on the target afterward", n.Name, notifyParts(t))
 			case err != nil:
 				return created, fmt.Errorf("seal notification target %q: %w", n.Name, err)
 			default:
@@ -217,6 +225,15 @@ func (p *Plan) sealCallbackKey(t *template.Template, sealer *credential.Sealer) 
 	}
 	delete(p.callbackKeys, t.ID)
 	if sealer == nil || !sealer.Enabled() {
+		// Said only for a template that takes callbacks, since the key is what its hosts present.
+		// Without this line, the plan's own line about the key reads as though it came across.
+		if t.AllowCallbacks {
+			p.warn("template %q accepts provisioning callbacks, and the key the export carried "+
+				"for it was dropped, because this install has no encryption key to seal it with, "+
+				"so it refuses every callback until a key is minted on its page. Set "+
+				"SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT before importing "+
+				"to keep the key the hosts hold", t.Name)
+		}
 		return nil
 	}
 	sealed, err := sealer.Seal(key)
@@ -241,6 +258,34 @@ func notifySealer(s *credential.Sealer) notification.Sealer {
 // which is deliberately expensive, only when it does.
 func (p *Plan) NeedsSealer() bool {
 	return len(p.Notifications) > 0 || len(p.callbackKeys) > 0
+}
+
+// Unsealed counts what the plan holds in the clear for Apply to seal: the notification targets
+// whose address or key the export carried, and the templates that accept provisioning callbacks
+// whose key it carried. Applied without an enabled sealer, each target arrives waiting for a secret
+// the export held and each key is dropped, so a caller that knows no key is set says so before
+// applying. A key held for a template that refuses callbacks is not counted, since no host presents
+// it and Apply says nothing when it drops one, so the count matches the lines Apply adds.
+func (p *Plan) Unsealed() (targets, keys int) {
+	for _, t := range p.Templates {
+		if _, ok := p.callbackKeys[t.ID]; ok && t.AllowCallbacks {
+			keys++
+		}
+	}
+	return len(p.notifySecrets), keys
+}
+
+// notifyParts names the parts of a target an install without a key cannot seal: its address, its
+// key, or both.
+func notifyParts(t run.NotifyTarget) string {
+	switch {
+	case t.URL != "" && t.Key != "":
+		return "address and key"
+	case t.Key != "":
+		return "key"
+	default:
+		return "address"
+	}
 }
 
 // resolveInventoryNames rewrites a template's inventory path into an inventory id when the path names

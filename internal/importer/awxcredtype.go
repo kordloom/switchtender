@@ -2,6 +2,7 @@ package importer
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -75,9 +76,13 @@ type awxCredTypeInjectors struct {
 
 // addCredentialTypes imports an export's custom credential types and returns them by AWX name, so
 // the credentials that name one become credentials of the imported type. A type that cannot come
-// across is reported and left out, and credentials of it fall back to the kind mapping.
-func (p *Plan) addCredentialTypes(types []awxCredentialType, now time.Time) map[string]*credential.CredentialType {
-	byName := map[string]*credential.CredentialType{}
+// across is reported and left out, and credentials of it fall back to the kind mapping. Those types
+// are returned too, by name, each with a summary of the injectors its credentials lose, so the
+// fallback can be said beside each credential rather than only beside the type.
+func (p *Plan) addCredentialTypes(types []awxCredentialType,
+	now time.Time) (byName map[string]*credential.CredentialType, refused map[string]string) {
+	byName = map[string]*credential.CredentialType{}
+	refused = map[string]string{}
 	for _, ct := range types {
 		if ct.Managed {
 			continue
@@ -87,6 +92,7 @@ func (p *Plan) addCredentialTypes(types []awxCredentialType, now time.Time) map[
 			p.warn("credential type %q was not imported: %v. Credentials of this type are mapped "+
 				"to a built-in kind by the type's name instead", ct.Name, err)
 			p.refused++
+			refused[ct.Name] = injectorSummary(ct.Injectors)
 			continue
 		}
 		if _, dup := byName[ct.Name]; dup {
@@ -101,7 +107,29 @@ func (p *Plan) addCredentialTypes(types []awxCredentialType, now time.Time) map[
 			p.warn("credential type %q: %s", ct.Name, n)
 		}
 	}
-	return byName
+	return byName, refused
+}
+
+// injectorSummary names what a type's injectors wrote in AWX, block by block, so a credential of a
+// type that did not come across can say what its runs do not receive here.
+func injectorSummary(in awxCredTypeInjectors) string {
+	var parts []string
+	for _, block := range []struct {
+		// name is the injector block, as AWX names it.
+		name string
+		// templates are the block's injectors, keyed by what each writes.
+		templates map[string]any
+	}{{"env", in.Env}, {"file", in.File}, {"extra_vars", in.ExtraVars}} {
+		if len(block.templates) == 0 {
+			continue
+		}
+		names := slices.Sorted(maps.Keys(block.templates))
+		parts = append(parts, block.name+" "+strings.Join(names, ", "))
+	}
+	if len(parts) == 0 {
+		return "none"
+	}
+	return strings.Join(parts, " and ")
 }
 
 // convertAWXCredType maps one AWX custom credential type onto a SwitchTender one, returning notes a

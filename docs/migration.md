@@ -117,11 +117,12 @@ so redirecting it to a file keeps a copy to review. Apply it when the report loo
 
     switchtender import awx awx-export.json --db switchtender.db --apply
 
-Apply an export once. A second apply is refused before it writes anything when the install already
+Apply an export once. A second apply is refused before it creates any object when the install already
 holds a project, inventory, credential, inventory source, template, or schedule of the same name, and
-the refusal names each one. Importing again would create a second copy of each object, and a second
-copy of a schedule fires as well. To import a revised export, delete what the first one created, or
-import into a fresh database.
+the refusal names each one. The attempt is still recorded in the audit chain, as every apply is, and
+a refused apply against a SQLite path that did not exist leaves the new file behind and says so.
+Importing again would create a second copy of each object, and a second copy of a schedule fires as
+well. To import a revised export, delete what the first one created, or import into a fresh database.
 
 Semaphore works the same way with `import semaphore`. The importer is proven against a real
 backup taken from a live current Semaphore release, unknown newer fields included, not only
@@ -201,8 +202,9 @@ often the slowest part of a move. So a template imported from an AWX job templat
 callbacks also answers at that address, once the AWX hostname resolves to this server.
 
 The import binds a template to its AWX id when it knows the id. An export that carries each job
-template's `id` binds it directly. When yours does not, save the job template list the AWX API
-serves at `/api/v2/job_templates/` as JSON and give it to the import:
+template's `id` binds it directly, and `awx export` strips ids, so a plain export carries none.
+When yours does not, save the job template list the AWX API serves at `/api/v2/job_templates/` as
+JSON and give it to the import:
 
     switchtender import awx awx-export.json --awx-template-ids job-templates.json --apply
 
@@ -444,14 +446,14 @@ archive over that size imports from the CLI alone.
 | Source | Becomes |
 |--------|---------|
 | AWX git project | Project, with its source control credential attached when that credential is an SSH key. A username and password credential is reported, since a project here syncs a private repository over SSH with a key.|
-| AWX inventory | Stored inventory, rendered as INI from its hosts and groups.|
+| AWX inventory | Stored inventory, rendered as INI from its hosts and groups. A host entry that does not read, such as one whose enabled field is a word, is skipped and named in the report, and the rest of the inventory imports. The host is left out of every group that lists it too, so no play reaches it.|
 | AWX inventory source | Dynamic inventory source, plus the stored inventory it maintains, named `<source> (dynamic)`. A file source keeps its path; a cloud plugin source imports carrying the plugin name and is reported, since it needs a config file before it can refresh.|
 | AWX job template | Template, with job slicing becoming shard count. Privilege escalation arrives as `ansible_become: true` in its extra vars, which the report notes, since an extra var also outranks a play that sets `become: false`.|
 | AWX survey | Template survey, field for field, with the field types translated. A password prompt becomes a secret field, sealed rather than downgraded to plain text. A survey switched off in AWX is not imported, since AWX never asks it.|
 | Semaphore survey | Template survey, field for field. A secret variable becomes a secret field, sealed rather than downgraded to plain text.|
 | AWX schedule that stops | Schedule carrying its recurrence rule, which stops after its `COUNT` or on its `UNTIL` the way AWX stops it. A rule that has already fired its last time is reported and not imported, since it would never run.|
 | AWX workflow job template | Workflow template carrying the graph, with each node's job template inlined as a step and the success and always edges becoming dependencies. Imported whole or reported and skipped, never partially.|
-| AWX job template schedule | Schedule, with its timezone kept. A rule that a cron expression says exactly, checked against the rule's own next fires, becomes cron. Every other rule, such as every third day, the last Friday of the quarter, more than one `RRULE`, or an `EXRULE` or `EXDATE` that takes a holiday out, comes across as the RFC 5545 recurrence it is. A schedule that answers its template's survey fires a copy of the template whose questions default to those answers. A secret answer does not come across, so a schedule that gave one arrives switched off and the report names the question to give a default.|
+| AWX job template schedule | Schedule, with its timezone kept. A rule that a cron expression says exactly, checked against the rule's own next fires, becomes cron. Every other rule, such as every third day, the last Friday of the quarter, more than one `RRULE`, or an `EXRULE` or `EXDATE` that takes a holiday out, comes across as the RFC 5545 recurrence it is. A schedule that answers its template's survey fires a copy of the template whose questions default to those answers. A secret answer does not come across, so a schedule that gave one arrives switched off and the report names the question to give a default. A schedule firing a template whose required secret question has no default arrives switched off the same way, since no export carries that default readably and every fire would stop until one is set.|
 | AWX workflow schedule | Schedule on the imported workflow template, read from whichever place the export carried it. A workflow that was refused has no template to fire, so its schedules are named in the report as not imported rather than dropped silently.|
 | AWX credential | Credential shell with its kind mapped from its type and its configured inputs, secret omitted. A become password beside the connection secret arrives as a second shell, attached wherever the first one is.|
 | AWX notification template | Notification target of the same channel, its address sealed at rest, and attached for the same events to the templates and workflows the export attaches it to. A secret AWX exports only as `$encrypted$`, a Slack bot token, a PagerDuty token, or a Grafana key, arrives waiting to be entered, and the report says which. A target waiting for its secret keeps every other part the export carried, a Grafana instance's address included, so finishing it asks for the secret alone. A Slack template arrives waiting for an incoming webhook address, since a Slack target here posts to one. A Twilio template that texts several numbers becomes a target per number. An IRC template has no equivalent and is reported.|
@@ -555,7 +557,9 @@ import has none to re-enter and none to attach.
   answer is sealed with the credential key and never stored on the run as text, so it is as
   protected as it was in the tool you left. A default for one does not come across, because an
   export carries it only as a placeholder or in the source tool's own encryption, and the report
-  names each field that had one so you can set it on the template.
+  names each field that had one so you can set it on the template. A schedule firing a template
+  whose required secret question has no default arrives switched off, since every fire would stop
+  until one is set, and the report names the question beside each such schedule.
 - Secrets are never in an export, so every credential is created as a shell and its secret has to be
   re-entered. The non-secret settings AWX did export, such as the user to connect as and how to
   become root, are stored on the credential itself and take effect at injection, so a machine

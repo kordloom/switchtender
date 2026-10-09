@@ -242,7 +242,10 @@ func applyStores(sealer *credential.Sealer) ApplyStores {
 
 // TestAWXNotificationApplySealsTargets pins the apply: with a key, each target is stored sealed and
 // opens to the address the export held, and every attachment is stored; without one, a target that
-// carries a secret is stored waiting for it rather than in the clear.
+// carries a secret is stored waiting for it rather than in the clear, and the apply says so for
+// each such target. Stored waiting in silence, the webhook address the export did carry would read
+// as one more secret the export never held, and the difference would show only when a failed run
+// notified nobody.
 func TestAWXNotificationApplySealsTargets(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -252,10 +255,12 @@ func TestAWXNotificationApplySealsTargets(t *testing.T) {
 		WantHookSecret  bool
 		WantHookOpened  string
 		WantAttachments int
+		// WantDropped is whether the apply must warn that the webhook address was dropped.
+		WantDropped bool
 	}{{ // Test 0: With a key the address is sealed and opens again.
 		Sealer: sealer, WantHookOpened: notifyHookSecret, WantAttachments: 14,
-	}, { // Test 1: Without one the target waits for its secret.
-		Sealer: nil, WantHookSecret: true, WantAttachments: 14,
+	}, { // Test 1: Without one the target waits for its secret, and the apply says which.
+		Sealer: nil, WantHookSecret: true, WantAttachments: 14, WantDropped: true,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -264,6 +269,15 @@ func TestAWXNotificationApplySealsTargets(t *testing.T) {
 			stores := applyStores(test.Sealer)
 			if _, err := plan.Apply(ctx, stores); err != nil {
 				t.Fatalf("Apply() error = %v", err)
+			}
+			w, dropped := warningContaining(t, plan.Warnings, `notification target "ops hook"`,
+				"waiting for its address", "no encryption key")
+			if dropped != test.WantDropped {
+				t.Errorf("warned that the address was dropped = %v (%q), want %v.\nwarnings: %v",
+					dropped, w, test.WantDropped, plan.Warnings)
+			}
+			if strings.Contains(strings.Join(plan.Warnings, "\n"), "NOTIFY_HOOK_SECRET") {
+				t.Errorf("a warning carries the address in the clear: %v", plan.Warnings)
 			}
 			stored, err := stores.Notifications.List(ctx)
 			if err != nil {

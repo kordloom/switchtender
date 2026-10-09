@@ -185,7 +185,7 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>Move in one command</h2>
-				<p>Automation Controller is AWX's data model, so its export imports into SwitchTender the same way AWX's does. Projects, inventories (smart and constructed included), templates, workflows with their approval steps, surveys, schedules, notification templates, and the organizations those belong to come across, with a dry run first so you see the plan before anything is written. A workflow the importer cannot carry over as it stands is named in the plan and left out: one with a node that runs another workflow or a sync, a path taken on failure, nodes from more than one project, or an always path and a success path on the same node. A template that took provisioning callbacks also answers a POST to <code>/api/v2/job_templates/{id}/callback/</code> once the import knows its id, so a boot script that calls that path keeps working when the hostname points here. A script that calls the controller at any other path needs its URL edited.</p>
+				<p>Automation Controller is AWX's data model, so its export imports into SwitchTender the same way AWX's does. Projects, inventories (smart and constructed included), templates, workflows with their approval steps, surveys, schedules, notification templates, and the organizations those belong to come across, with a dry run first so you see the plan before anything is written. A workflow the importer cannot carry over as it stands is named in the plan and left out: one with a node that runs another workflow or a sync, a path taken on failure, nodes from more than one project, or an always path and a success path on the same node. A template that took provisioning callbacks also answers a POST to <code>/api/v2/job_templates/{id}/callback/</code> once the import knows its id, so a boot script that calls that path keeps working when the hostname points here. <code>awx export</code> strips ids, so save <code>GET /api/v2/job_templates/</code> as JSON and pass it with <code>--awx-template-ids</code> to keep those addresses. A script that calls the controller at any other path needs its URL edited.</p>
 			</div>
 			<div class="gs-steps">
 				<ol>
@@ -200,7 +200,10 @@
 						<div class="gs-num">2</div>
 						<div class="gs-body">
 							<h3>Apply it</h3>
-							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>switchtender import awx controller-export.json --db switchtender.db --apply</code></pre></div>
+							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code># Keep both values: the server must start with this same pair.
+export SWITCHTENDER_ENCRYPTION_KEY=$(openssl rand -hex 32)
+export SWITCHTENDER_ENCRYPTION_SALT=$(openssl rand -hex 16)
+switchtender import awx controller-export.json --db switchtender.db --apply</code></pre></div>
 						</div>
 					</li>
 				</ol>

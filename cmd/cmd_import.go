@@ -247,10 +247,17 @@ func runImportData(cmd *cobra.Command, data []byte, mapper mapFunc) error {
 	before := len(plan.Warnings)
 	// Importing is how the AWX guide creates an install, so an import may start a new database. It
 	// says so, because one run from the wrong directory lands every object in a file the server never
-	// reads while reporting a clean import.
+	// reads while reporting a clean import. It says so on the error path too: an apply the plan
+	// refuses has already created the file, with the audit entry of the attempt in it, and a
+	// refusal that leaves a database behind in silence is the same wrong-directory trap.
 	fresh := !isPostgresDSN(importDB) && !fileExists(importDB)
-	created, err := applyPlan(cmd.Context(), plan)
+	created, err := applyPlan(cmd.Context(), cmd.ErrOrStderr(), plan)
 	if err != nil {
+		if fresh && fileExists(importDB) {
+			fmt.Fprintf(cmd.ErrOrStderr(), "This started a new database even though the apply did "+
+				"not finish. Delete the file if you did not mean to start one. A server reads it "+
+				"only when started with %s.\n", dbFlag(importDB))
+		}
 		return err
 	}
 	// Apply raises its own warnings, most importantly that a template names an inventory this install
@@ -490,8 +497,8 @@ func createdLine(created, needSecret int) string {
 }
 
 // applyPlan persists a plan through the stores in dependency order and returns how many objects were
-// created.
-func applyPlan(ctx context.Context, plan *importer.Plan) (int, error) {
+// created. What the operator should know before anything is written goes to errOut.
+func applyPlan(ctx context.Context, errOut io.Writer, plan *importer.Plan) (int, error) {
 	bundle, err := openBundle(importDB)
 	if err != nil {
 		return 0, fmt.Errorf("open store: %w", err)
@@ -514,12 +521,46 @@ func applyPlan(ctx context.Context, plan *importer.Plan) (int, error) {
 	// the install's key, the same one the server opens them with, as they are stored, and the
 	// notification store takes the plan's Attachments beside the targets. The key is derived only
 	// when there is something to seal, since the derivation is deliberately expensive.
+	//
+	// Without a key the apply still goes ahead, the way the server starts without one, but it says
+	// what that costs first. The sealer's own warning goes to a no-op logger, so without this line
+	// an apply with no key exported looks like a keyed one, and the webhook addresses and callback
+	// keys from the export are missed only when a run notifies nobody.
 	if plan.NeedsSealer() {
 		if sealer := newSealerFromEnv(zap.NewNop()); sealer.Enabled() {
 			stores.Sealer = sealer
+		} else if targets, keys := plan.Unsealed(); targets+keys > 0 {
+			fmt.Fprintln(errOut, unsealedLine(os.Getenv("SWITCHTENDER_ENCRYPTION_KEY") != "",
+				targets, keys))
 		}
 	}
 	return plan.Apply(ctx, stores)
+}
+
+// unsealedLine says what an apply with no encryption key does to the secrets the export carried:
+// targets wait for the address or key the export held, and callback keys are dropped. keySet says
+// whether the key was set without its salt, which the line names as what is missing. It is empty
+// when the export carried neither.
+func unsealedLine(keySet bool, targets, keys int) string {
+	var parts []string
+	if targets > 0 {
+		parts = append(parts, fmt.Sprintf("%d notification %s for the address or key the export "+
+			"carried", targets, util.Plural(targets, "target waits", "targets wait")))
+	}
+	if keys > 0 {
+		parts = append(parts, fmt.Sprintf("%d provisioning callback %s dropped", keys,
+			util.Plural(keys, "key is", "keys are")))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	missing := "No encryption key is set"
+	if keySet {
+		missing = "The encryption key is set without its salt"
+	}
+	return missing + ", so " + strings.Join(parts, " and ") + ". Set " +
+		"SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT first to keep them. The " +
+		"server needs the same pair."
 }
 
 // branchOrDefault names a branch for display, calling out the remote default when unset.
