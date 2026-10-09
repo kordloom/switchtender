@@ -15,7 +15,7 @@ require (
 	github.com/hashicorp/hcl/v2 v2.25.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/jimlambrt/gldap v0.1.14
-	github.com/kordloom/loomseal v1.7.0
+	github.com/kordloom/loomseal v1.8.0
 	github.com/open-policy-agent/opa v1.21.1
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.10.2

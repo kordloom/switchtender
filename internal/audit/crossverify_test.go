@@ -235,6 +235,7 @@ func TestMirrorAgreesWithTheReferenceCorpus(t *testing.T) {
 			File         string `json:"file"`
 			MustVerify   bool   `json:"must_verify"`
 			FailingCheck string `json:"failing_check"`
+			Evidence     bool   `json:"evidence"`
 		} `json:"vectors"`
 	}
 	if err := json.Unmarshal(raw, &man); err != nil {
@@ -244,6 +245,11 @@ func TestMirrorAgreesWithTheReferenceCorpus(t *testing.T) {
 		t.Fatal("the corpus manifest lists no vectors")
 	}
 	for _, v := range man.Vectors {
+		// The mirror never reads an evidence directory, so a vector judged against one has no
+		// counterpart here. The open verifier and the reference are held to it.
+		if v.Evidence {
+			continue
+		}
 		t.Run(v.Name, func(t *testing.T) {
 			signed, rerr := os.ReadFile(filepath.Join(dir, "testdata", "vectors", v.File))
 			if rerr != nil {
