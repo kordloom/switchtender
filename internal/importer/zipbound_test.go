@@ -3,6 +3,7 @@ package importer
 import (
 	"archive/zip"
 	"bytes"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -58,5 +59,13 @@ func TestJenkinsZipRefusesTooManyEntries(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "more than the") {
 		t.Errorf("error = %v, want it to say the archive holds more entries than are read", err)
+	}
+	// Build history lives inside the jobs directory, so telling a reader to zip only that
+	// directory does not get them under the cap. The refusal names the exclusions that do.
+	if !strings.Contains(err.Error(), "-x '*/builds/*' '*/workspace/*'") {
+		t.Errorf("error = %v, want it to give the zip command that leaves builds out", err)
+	}
+	if !errors.Is(err, ErrArchive) {
+		t.Errorf("error = %v, want it to match ErrArchive so the server passes it through", err)
 	}
 }

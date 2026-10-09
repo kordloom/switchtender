@@ -234,9 +234,11 @@ function wireMigrate() {
 			if (fileHelp) {
 				// A Rundeck project archive is a zip, so it uploads and cannot be pasted. Naming both
 				// artifacts keeps an operator holding an archive from looking for a paste that will
-				// not work.
+				// not work. The Jenkins line names the exclusions, because each job keeps its build
+				// history and workspace under its own directory, and those are what push a jobs zip
+				// past the upload's caps.
 				fileHelp.textContent = format.value === "jenkins"
-					? "Zip the jobs directory from your JENKINS_HOME and upload it, or paste one job's config.xml below."
+					? "Zip the jobs directory from your JENKINS_HOME without each job's builds and workspace directories (zip -r jobs.zip jobs -x '*/builds/*' '*/workspace/*') and upload it, or paste one job's config.xml below."
 					: format.value === "rundeck"
 						? "Upload a project archive as it is, or paste a job export below."
 						: "Or paste the export below.";
@@ -458,7 +460,8 @@ function migrateSummary(report) {
 	// A truncated report that looks complete is how somebody concludes an import was clean when it
 	// was only long.
 	if (report.suppressed) {
-		box.appendChild(migrateNote(report.suppressed + " further warning(s) are not listed below, " +
+		box.appendChild(migrateNote(report.suppressed + " further " +
+			plural(report.suppressed, "warning is", "warnings are") + " not listed below, " +
 			"because this export passed the report's cap."));
 	}
 	return box;

@@ -91,14 +91,15 @@ all. The table is in
 [what each source brings over](migration.md#what-each-source-brings-over).
 
 Jenkins has no single export file: point the importer at a `JENKINS_HOME`, at its `jobs` directory,
-at one job's `config.xml`, or at a zip of a `JENKINS_HOME` or a `jobs` directory. A job is named by
-the directory holding its `config.xml`, so a zip whose only entry is a bare `config.xml` is refused
-with the reason rather than imported under a name it does not have. Only freestyle jobs import,
-since a Pipeline job is a Groovy program with no honest mechanical translation. The
+at one job's directory, at one job's `config.xml`, or at a zip of the `jobs` directory made without
+each job's `builds` and `workspace` directories. A job is named by the directory holding its
+`config.xml`, so a zip made inside one job's directory, with that `config.xml` at its top, is
+refused with the reason rather than imported under a name it does not have. Only freestyle jobs
+import, since a Pipeline job is a Groovy program with no honest mechanical translation. The
 `/v1/import/{format}` endpoint and the Migrate page in the UI take awx, semaphore, chef, puppet,
-rundeck, and jenkins, and a crontab imports from the command line only. Both cap an upload at 25 MiB, so a Rundeck
-project archive from a busy project, which carries every execution log beside the definitions the
-importer reads, may need the command line.
+rundeck, and jenkins, and a crontab imports from the command line only. Both cap an upload at
+25 MiB, so a Rundeck project archive from a busy project, which carries every execution log beside
+the definitions the importer reads, may need the command line.
 
 ## How do I rerun the same job on a set of hosts without re-entering everything?
 

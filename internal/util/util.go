@@ -62,6 +62,17 @@ func FirstNonEmpty(values ...string) string {
 	return ""
 }
 
+// Plural returns one when n is 1 and many otherwise, so a count reads "1 entry" and "3 entries"
+// rather than hedging the noun with a bracketed s. The two forms are spelled out by the caller,
+// because English pluralizes "has" to "have" and "anchor fixes" to "anchors fix" as readily as it
+// adds an s.
+func Plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
 // Clip shortens s to at most limit bytes without splitting a UTF-8 rune, appending an ellipsis when
 // the value was cut. A negative limit clips to nothing rather than panicking: this is the one
 // implementation everybody shares, and the next caller to compute a budget as a cap minus a prefix

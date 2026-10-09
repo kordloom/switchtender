@@ -240,8 +240,16 @@ test("the summary figure for what does not come across can never exceed what the
 test("a report the export outgrew says so rather than reading as complete", async () => {
 	const document = await previewWith({ report: { ...REPORT, suppressed: 12 }, templates: ["build"] });
 	const page = document.getElementById("migrate-plan").textContent;
-	assert.ok(page.includes("12 further warning(s) are not listed"),
+	assert.ok(page.includes("12 further warnings are not listed"),
 		"a capped report presented itself as the whole answer");
+	assert.doesNotMatch(page, /\(s\)/, "the cap notice hedged its plural instead of writing it");
+});
+
+test("a report that dropped one warning counts it in the singular", async () => {
+	const document = await previewWith({ report: { ...REPORT, suppressed: 1 }, templates: ["build"] });
+	const page = document.getElementById("migrate-plan").textContent;
+	assert.ok(page.includes("1 further warning is not listed"),
+		"one dropped warning was counted as several");
 });
 
 test("a preview with no report still shows its warnings rather than none", async () => {

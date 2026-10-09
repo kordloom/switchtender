@@ -4,7 +4,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/xml"
-	"fmt"
 	"io/fs"
 	"path"
 	"sort"
@@ -184,11 +183,11 @@ func fromRundeckArchive(data []byte, inventoryName string, now time.Time) (*Plan
 func readRundeckArchive(data []byte) (*rundeckArchive, error) {
 	r, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
-		return nil, fmt.Errorf("read rundeck archive: %w", err)
+		return nil, refuseArchive("read rundeck archive: %w", err)
 	}
 	if len(r.File) > maxRundeckZipEntries {
-		return nil, fmt.Errorf("read rundeck archive: it holds %d entries, more than the %d this "+
-			"reads. Export one project at a time rather than a whole Rundeck",
+		return nil, refuseArchive("read rundeck archive: it holds %d entries, more than the %d "+
+			"this reads. Export one project at a time rather than a whole Rundeck",
 			len(r.File), maxRundeckZipEntries)
 	}
 	arc := &rundeckArchive{}
@@ -216,8 +215,8 @@ func readRundeckArchive(data []byte) (*rundeckArchive, error) {
 			continue
 		}
 		if f.UncompressedSize64 > maxRundeckEntrySize {
-			return nil, fmt.Errorf("read rundeck archive: %s is larger than a definition should be",
-				name)
+			return nil, refuseArchive("read rundeck archive: %s is larger than a definition "+
+				"should be", name)
 		}
 		body, err := readZipEntry(f, "rundeck", maxRundeckEntrySize)
 		if err != nil {
@@ -225,8 +224,8 @@ func readRundeckArchive(data []byte) (*rundeckArchive, error) {
 		}
 		total += len(body)
 		if total > maxRundeckTotalSize {
-			return nil, fmt.Errorf("read rundeck archive: the definitions in it exceed the %d MiB "+
-				"this reads", maxRundeckTotalSize>>20)
+			return nil, refuseArchive("read rundeck archive: the definitions in it exceed the "+
+				"%d MiB this reads", maxRundeckTotalSize>>20)
 		}
 		switch kind {
 		case rundeckEntryJob:
@@ -245,9 +244,9 @@ func readRundeckArchive(data []byte) (*rundeckArchive, error) {
 		}
 	}
 	if len(arc.Jobs) == 0 && !arc.HasConfig {
-		return nil, fmt.Errorf("read rundeck archive: it holds no job definitions and no project " +
-			"configuration, so it is not a Rundeck project archive. Export the project from " +
-			"Rundeck, or point this at a job export file instead")
+		return nil, refuseArchive("read rundeck archive: it holds no job definitions and no " +
+			"project configuration, so it is not a Rundeck project archive. Export the project " +
+			"from Rundeck, or point this at a job export file instead")
 	}
 	sort.Slice(arc.Jobs, func(i, j int) bool { return arc.Jobs[i].Path < arc.Jobs[j].Path })
 	sort.Slice(arc.SCM, func(i, j int) bool { return arc.SCM[i].Mode < arc.SCM[j].Mode })
@@ -266,21 +265,21 @@ func readRundeckArchive(data []byte) (*rundeckArchive, error) {
 func checkRundeckEntry(f *zip.File) error {
 	name := strings.ReplaceAll(f.Name, `\`, "/")
 	if strings.HasPrefix(name, "/") {
-		return fmt.Errorf("read rundeck archive: the member %q has an absolute path, which no "+
+		return refuseArchive("read rundeck archive: the member %q has an absolute path, which no "+
 			"Rundeck export writes", oneLine(f.Name))
 	}
 	if len(name) > 1 && name[1] == ':' {
-		return fmt.Errorf("read rundeck archive: the member %q names a drive, which no Rundeck "+
+		return refuseArchive("read rundeck archive: the member %q names a drive, which no Rundeck "+
 			"export writes", oneLine(f.Name))
 	}
 	for _, segment := range strings.Split(name, "/") {
 		if segment == ".." {
-			return fmt.Errorf("read rundeck archive: the member %q climbs out of the archive, "+
+			return refuseArchive("read rundeck archive: the member %q climbs out of the archive, "+
 				"which no Rundeck export writes", oneLine(f.Name))
 		}
 	}
 	if mode := f.Mode(); mode&fs.ModeSymlink != 0 {
-		return fmt.Errorf("read rundeck archive: the member %q is a symbolic link, which no "+
+		return refuseArchive("read rundeck archive: the member %q is a symbolic link, which no "+
 			"Rundeck export writes", oneLine(f.Name))
 	}
 	return nil

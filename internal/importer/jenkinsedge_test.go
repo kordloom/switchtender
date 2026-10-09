@@ -79,6 +79,8 @@ func TestJenkinsRefusesEveryJobTypeItCannotTranslateByName(t *testing.T) {
 			WantFragment: "an external job"}, // Test 5.
 		{Name: "unknown", Root: "com.example.SomethingElse",
 			WantFragment: "unrecognized type"}, // Test 6.
+		{Name: "organization folder", Root: "jenkins.branch.OrganizationFolder",
+			WantFragment: "an organization folder"}, // Test 7.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -168,6 +170,53 @@ func TestJenkinsUnnamedJobFallsBackToItsRootElement(t *testing.T) {
 	plan := jenkinsPlan(t, "prod", doc)
 	if len(plan.Templates) != 1 || plan.Templates[0].Name != "project" {
 		t.Fatalf("templates = %+v, want one named after its root element", plan.Templates)
+	}
+}
+
+// TestJenkinsUnnamedJobTakesItsDisplayName pins the name a bare config.xml imports under. It
+// carries no directory to name it, and a template named after its type reads as the importer not
+// knowing the job and hashes H notation against a name Jenkins never used. Its display name is the
+// next best thing it holds, and when it has none the report says the name was made up.
+func TestJenkinsUnnamedJobTakesItsDisplayName(t *testing.T) {
+	t.Parallel()
+	steps := `<builders><hudson.tasks.Shell><command>echo hi</command></hudson.tasks.Shell>` +
+		`</builders>`
+	tests := []struct {
+		Name       string
+		Doc        string
+		WantName   string
+		WantWarned bool
+	}{{ // Test 0: A display name names the template.
+		Name: "display name", WantName: "Nightly Build",
+		Doc: jenkinsFreestyle(`<displayName>Nightly Build</displayName>` + steps),
+	}, { // Test 1: Without one the root element stands in, and the report says so.
+		Name: "no display name", WantName: "project", WantWarned: true,
+		Doc: jenkinsFreestyle(steps),
+	}, { // Test 2: A display name that is only whitespace is no name.
+		Name: "blank display name", WantName: "project", WantWarned: true,
+		Doc: jenkinsFreestyle(`<displayName>   </displayName>` + steps),
+	}, { // Test 3: A job named by its directory keeps that name over its display name.
+		Name: "named by directory", WantName: "nightly",
+		Doc: `<jobs><job name="nightly">` +
+			jenkinsFreestyle(`<displayName>Nightly Build</displayName>`+steps) + `</job></jobs>`,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			plan := jenkinsPlan(t, "prod", test.Doc)
+			var names []string
+			for _, tmpl := range plan.Templates {
+				names = append(names, tmpl.Name)
+			}
+			if diff := cmp.Diff([]string{test.WantName}, names, cmpopts.EquateEmpty()); diff != "" {
+				t.Fatalf("template names mismatch (-want +got):\n%s", diff)
+			}
+			_, warned := warningContaining(t, plan.Warnings, "named after its root element")
+			if diff := cmp.Diff(test.WantWarned, warned); diff != "" {
+				t.Errorf("warned about the fallback name mismatch (-want +got):\n%s\nwarnings:\n%s",
+					diff, strings.Join(plan.Warnings, "\n"))
+			}
+		})
 	}
 }
 
@@ -682,9 +731,14 @@ func TestJenkinsSCMIsNamedRatherThanAttached(t *testing.T) {
 }
 
 // TestJenkinsFoundLineDescribesTheWalk pins the line printed before the plan, so an import that
-// skips most of a Jenkins says what it found first rather than only reporting a small plan.
+// skips most of a Jenkins says what it found first rather than only reporting a small plan. The
+// names are capped, so a Jenkins with thousands of jobs still opens with one readable line.
 func TestJenkinsFoundLineDescribesTheWalk(t *testing.T) {
 	t.Parallel()
+	many := make([]string, 25)
+	for i := range many {
+		many[i] = fmt.Sprintf("n%02d", i)
+	}
 	tests := []struct {
 		Name       string
 		Names      []string
@@ -693,9 +747,12 @@ func TestJenkinsFoundLineDescribesTheWalk(t *testing.T) {
 		{Name: "none", Names: nil, WantResult: ""},               // Test 0.
 		{Name: "empty slice", Names: []string{}, WantResult: ""}, // Test 1.
 		{Name: "one", Names: []string{"build"},
-			WantResult: "Found 1 job definition(s): build"}, // Test 2.
+			WantResult: "Found 1 job definition: build"}, // Test 2.
 		{Name: "several", Names: []string{"a", "ops/b"},
-			WantResult: "Found 2 job definition(s): a, ops/b"}, // Test 3.
+			WantResult: "Found 2 job definitions: a, ops/b"}, // Test 3.
+		{Name: "past the cap", Names: many,
+			WantResult: "Found 25 job definitions: " + strings.Join(many[:20], ", ") +
+				", and 5 more"}, // Test 4.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -841,9 +898,13 @@ func TestJenkinsBundleRefusesAPathWithNothingInIt(t *testing.T) {
 	})
 	t.Run("test 2 controller config is not a job", func(t *testing.T) {
 		t.Parallel()
+		// A home with no jobs directory holds only the controller's own configuration, which is
+		// what sits at the top of every JENKINS_HOME. A job's directory holds a job document and is
+		// read as one, which is pinned on its own.
 		dir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(dir, "config.xml"),
-			[]byte(jenkinsFreestyle("")), 0o600); err != nil {
+			[]byte("<?xml version='1.1' encoding='UTF-8'?>\n<hudson><mode>NORMAL</mode></hudson>"),
+			0o600); err != nil {
 			t.Fatalf("write fixture: %v", err)
 		}
 		if _, err := JenkinsBundle(dir); err == nil {

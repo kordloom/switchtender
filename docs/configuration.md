@@ -407,7 +407,7 @@ Migrates from AWX, Semaphore, Chef, Puppet, Rundeck, Jenkins, or cron. Which obj
   archive brings one project as well, but only when its source control configuration names a
   repository this can reach. Neither artifact carries a node definition, so no inventory is imported
   from either and `--inventory` names the hosts its jobs target.
-- `import jenkins <JENKINS_HOME|jobs-dir|config.xml> [--inventory <name>] [--apply]` brings
+- `import jenkins <JENKINS_HOME|jobs-dir|job-dir|config.xml> [--inventory <name>] [--apply]` brings
   templates, surveys, and schedules from freestyle jobs. Jenkins picks an agent by label, so
   `--inventory` names the machines.
 - `import cron <crontab-file> [--inventory <name>] [--system] [--apply]` brings schedules alone, one

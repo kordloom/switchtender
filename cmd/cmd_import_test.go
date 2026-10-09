@@ -111,3 +111,29 @@ func TestImportReportGoesToStdout(t *testing.T) {
 		})
 	}
 }
+
+// TestImportHelpKeepsEachParagraphFilled pins the layout of every import command's long help. A
+// paragraph reflowed by hand can leave one short line in the middle of a sentence, which --help
+// prints as a ragged break that reads like a lost line.
+func TestImportHelpKeepsEachParagraphFilled(t *testing.T) {
+	t.Parallel()
+	// minHelpLine is the shortest a line may run when another line of its paragraph follows it.
+	const minHelpLine = 60
+	for _, c := range importCmd.Commands() {
+		t.Run(c.Name(), func(t *testing.T) {
+			t.Parallel()
+			for _, para := range strings.Split(c.Long, "\n\n") {
+				lines := strings.Split(strings.TrimRight(para, "\n"), "\n")
+				for _, line := range lines[:len(lines)-1] {
+					if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
+						continue
+					}
+					if len(line) < minHelpLine {
+						t.Errorf("import %s --help breaks a paragraph after %q, %d characters in",
+							c.Name(), line, len(line))
+					}
+				}
+			}
+		})
+	}
+}

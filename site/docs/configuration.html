@@ -1190,7 +1190,7 @@ surveys, and schedules from either a job export or a project archive, told apart
 archive brings one project as well, but only when its source control configuration names a
 repository this can reach. Neither artifact carries a node definition, so no inventory is imported
 from either and <code>--inventory</code> names the hosts its jobs target.</li>
-<li><code>import jenkins &lt;JENKINS_HOME|jobs-dir|config.xml&gt; [--inventory &lt;name&gt;] [--apply]</code> brings
+<li><code>import jenkins &lt;JENKINS_HOME|jobs-dir|job-dir|config.xml&gt; [--inventory &lt;name&gt;] [--apply]</code> brings
 templates, surveys, and schedules from freestyle jobs. Jenkins picks an agent by label, so
 <code>--inventory</code> names the machines.</li>
 <li><code>import cron &lt;crontab-file&gt; [--inventory &lt;name&gt;] [--system] [--apply]</code> brings schedules alone, one

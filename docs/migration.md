@@ -24,7 +24,7 @@ attempt one. This is the summary a preview of a small AWX export prints:
           schedules            2
           projects             1
           templates            1
-      Needs a secret:     4 credential shell(s), because an export never carries secret values
+      Needs a secret:     4 credential shells, because an export never carries secret values
       Does not come across: 1
           - project "Manual" skipped: only git projects import (scm_type="")
       Worth reviewing:    7
@@ -325,13 +325,24 @@ single export file to fetch. Point the importer at the directory and it reads th
 
     switchtender import jenkins /var/jenkins_home --inventory prod --db switchtender.db
 
-A `JENKINS_HOME`, its `jobs` directory, one job's `config.xml`, or a zip of a `JENKINS_HOME` or a
-`jobs` directory all work. A job is named by the directory holding its `config.xml`, so a zip whose
-only entry is a bare `config.xml` is refused with the reason rather than imported unnamed.
+A `JENKINS_HOME`, its `jobs` directory, one job's directory, one job's `config.xml`, or a zip of
+the `jobs` directory all work. A job is named by the directory holding its `config.xml`, so a zip
+made inside one job's directory, with that `config.xml` at its top, is refused with the reason
+rather than imported unnamed.
 Folders are followed and each job keeps its full name, so a job in the `platform` folder imports as
-`platform/db-vacuum`. To import from the web page instead, zip the `jobs` directory and upload it;
-zip that directory rather than the whole `JENKINS_HOME`, which also holds every build log and
-workspace.
+`platform/db-vacuum`. To import from the web page instead, zip the `jobs` directory and upload it.
+Each job keeps its build history and workspace under its own directory, which is far more files
+than the definitions and is what pushes a zip past the 20,000 entries and 25 MiB an upload reads,
+so leave those out:
+
+    zip -r jobs.zip jobs -x '*/builds/*' '*/workspace/*'
+
+With 7-Zip on Windows, `7z a jobs.zip jobs -xr!builds -xr!workspace` does the same. Both also
+leave out a job that is itself named `builds` or `workspace`, so add that job's definition
+afterward by its own path, for example `zip jobs.zip jobs/builds/config.xml`. The zip reads a job's
+`config.xml` only where the directory walk would, so an archived artifact, a workspace file, a
+multibranch branch, or a promotion that happens to be named `config.xml` is passed over rather
+than reported as a job that does not come across.
 
 Each job's shell steps become one Bash template, in order, opening with `set -e` so it stops at the
 first failure the way the build did. Parameters become a survey. Every line of the build trigger

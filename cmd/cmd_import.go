@@ -15,6 +15,7 @@ import (
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/org"
 	"github.com/kordloom/switchtender/internal/template"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // importDB holds the value of the import --db flag.
@@ -163,14 +164,15 @@ Without --apply the import only reports what it would create.`,
 
 // importJenkinsCmd imports Jenkins freestyle jobs.
 var importJenkinsCmd = &cobra.Command{
-	Use:   "jenkins <JENKINS_HOME|jobs-dir|config.xml>",
+	Use:   "jenkins <JENKINS_HOME|jobs-dir|job-dir|config.xml>",
 	Short: "Import Jenkins freestyle jobs into SwitchTender.",
 	Long: `Import Jenkins freestyle jobs into SwitchTender.
 
-Point this at a JENKINS_HOME, at its jobs directory, or at a single job's config.xml. Folders are
-followed and each job keeps its full name. A job's build steps become one Bash template, its
-parameters become a survey, and every line of its build trigger becomes a schedule, with Jenkins H
-notation resolved to concrete times and the weekday renumbered where the two disagree.
+Point this at a JENKINS_HOME, at its jobs directory, at a single job's directory, or at a single
+job's config.xml. Folders are followed and each job keeps its full name. A job's build steps become
+one Bash template, its parameters become a survey, and every line of its build trigger becomes a
+schedule, with Jenkins H notation resolved to concrete times and the weekday renumbered where the
+two disagree.
 
 Only freestyle jobs are imported. A Pipeline job is a Groovy program with no honest mechanical
 translation into a template, so it is named and skipped rather than half-imported. A poll trigger is
@@ -408,7 +410,7 @@ func reportPlan(out io.Writer, plan *importer.Plan) {
 			state = ", needs its secret entered"
 		}
 		fmt.Fprintf(out, "    - %s (%s, %d %s%s)\n", n.Name, n.Kind, attached[n.ID],
-			plural(attached[n.ID], "attachment", "attachments"), state)
+			util.Plural(attached[n.ID], "attachment", "attachments"), state)
 	}
 	if len(plan.Orgs) > 0 {
 		fmt.Fprintf(out, "  Organizations: %d\n", len(plan.Orgs))
@@ -479,20 +481,12 @@ func templateScope(t *template.Template) string {
 // credential secrets, including a crontab or a Chef fleet that creates no credentials, and to say
 // "1 objects".
 func createdLine(created, needSecret int) string {
-	line := fmt.Sprintf("Created %d %s.", created, plural(created, "object", "objects"))
+	line := fmt.Sprintf("Created %d %s.", created, util.Plural(created, "object", "objects"))
 	if needSecret > 0 {
 		line += fmt.Sprintf(" %d %s no secret yet: enter it before running a template that needs it.",
-			needSecret, plural(needSecret, "credential has", "credentials have"))
+			needSecret, util.Plural(needSecret, "credential has", "credentials have"))
 	}
 	return line
-}
-
-// plural returns one when n is 1 and many otherwise.
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return one
-	}
-	return many
 }
 
 // applyPlan persists a plan through the stores in dependency order and returns how many objects were
@@ -547,15 +541,16 @@ func reportSummary(out io.Writer, plan *importer.Plan) {
 	r := plan.Report()
 	fmt.Fprintln(out, "Migration summary:")
 	fmt.Fprintf(out, "  Comes across:       %d %s\n", r.CreatedTotal,
-		plural(r.CreatedTotal, "object", "objects"))
+		util.Plural(r.CreatedTotal, "object", "objects"))
 	for _, c := range r.Created {
 		fmt.Fprintf(out, "      %-20s %d\n", c.Kind, c.N)
 	}
 	if r.NeedsSecret > 0 {
 		// Not a limitation of the importer, and worth saying so: an export never carries secret
 		// values, so this number would be the same whoever wrote the tool.
-		fmt.Fprintf(out, "  Needs a secret:     %d credential shell(s), because an export "+
-			"never carries secret values\n", r.NeedsSecret)
+		fmt.Fprintf(out, "  Needs a secret:     %d %s, because an export never carries secret "+
+			"values\n", r.NeedsSecret,
+			util.Plural(r.NeedsSecret, "credential shell", "credential shells"))
 	}
 	fmt.Fprintf(out, "  Does not come across: %d\n", len(r.LeftOut))
 	for _, w := range r.LeftOut {
@@ -568,8 +563,9 @@ func reportSummary(out io.Writer, plan *importer.Plan) {
 	if r.Suppressed > 0 {
 		// A truncated report that looks complete is how somebody concludes an import was clean
 		// when it was only long.
-		fmt.Fprintf(out, "  Not listed:         %d further warning(s) past the cap, so this "+
-			"summary is shorter than the export deserves\n", r.Suppressed)
+		fmt.Fprintf(out, "  Not listed:         %d further %s past the cap, so this summary is "+
+			"shorter than the export deserves\n", r.Suppressed,
+			util.Plural(r.Suppressed, "warning", "warnings"))
 	}
 	fmt.Fprintln(out)
 }
