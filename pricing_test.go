@@ -215,7 +215,7 @@ func TestProReadsTheSameEverywhere(t *testing.T) {
 	}, { // Test 1: The README.
 		File: "README.md", Pattern: `approval policies at \$(?P<price>[\d,]+) a year`,
 	}, { // Test 2: The comparison doc's sign-in row.
-		File: "docs/comparison.md", Pattern: `SwitchTender prices SSO at \$(?P<price>[\d,]+) a year`,
+		File: "docs/comparison.md", Pattern: `SwitchTender prices its Pro tier at \$(?P<price>[\d,]+) a year`,
 	}, { // Test 3: The comparison doc's tier row.
 		File: "docs/comparison.md", Pattern: `Pro \$(?P<price>[\d,]+) a year to (?P<hosts>[\d,]+) hosts`,
 	}, { // Test 4: The AAP comparison table.

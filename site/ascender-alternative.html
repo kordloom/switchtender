@@ -96,7 +96,7 @@
 		<section class="wrap gs-hero reveal">
 			<span class="eyebrow">Ascender alternative</span>
 			<h1>Ascender fixed AWX's freeze.<br><span class="grad">It kept AWX's footprint.</span></h1>
-			<p class="lede">Ascender is CIQ's commercially supported continuation of AWX, and it solves the one thing AWX broke: it ships releases and you can buy a support contract. But it keeps AWX's footprint. A Kubernetes-based install, Postgres, and a Receptor mesh stand up before the first playbook runs, and Ansible is still the only tool. SwitchTender is one Go binary. Download it, run it, and you have job templates, schedules, RBAC, surveys, workflows, and approvals, with directory sign-in on Pro, plus a live host-by-task matrix and seven tools instead of one. Your AWX-format export imports in one command.</p>
+			<p class="lede">Ascender is CIQ's commercially supported continuation of AWX, and it solves the one thing AWX broke: it ships releases and you can buy a support contract. But it keeps AWX's footprint. A Kubernetes-based install, Postgres, and a Receptor mesh stand up before the first playbook runs, and Ansible is still the only tool. SwitchTender is one Go binary. Download it, run it, and you have job templates, schedules, RBAC, surveys, workflows, and approvals, with directory sign-in on Pro, plus a live host-by-task matrix and seven tools instead of one. Ascender's export, made with its own ascender-kit client on the AWX data model, imports in one command.</p>
 			<div class="hero-cta">
 				<a class="btn big" href="/get-started">Get started</a>
 				<a class="ghost big" href="/docs/switching-from-awx">Read the migration guide</a>
@@ -105,22 +105,10 @@
 
 		<section class="section wrap">
 			<div class="section-head reveal">
-				<h2>Why teams look for something lighter</h2>
-				<p>Ascender answers AWX's maintenance problem. It doesn't answer the three that sent teams looking in the first place.</p>
-			</div>
-			<div class="cards cards-3">
-				<article class="card reveal">
-					<h3>The platform tax stays</h3>
-					<p>Ascender installs onto Kubernetes, k3s or a cluster you bring, with Postgres and a Receptor mesh underneath. That is a platform team standing it up and keeping it patched. SwitchTender is one process and one database. Upgrading is replacing a binary.</p>
-				</article>
-				<article class="card reveal">
-					<h3>Still Ansible-only</h3>
-					<p>Ascender runs Ansible, the same as AWX. Real fleets also run Terraform, scripts, and one-off tooling. SwitchTender runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go through one engine, one UI, and one audit trail. Ansible check mode and a Terraform or OpenTofu plan preview a change before it runs. A Bash, PowerShell, Python, or Go dry run only checks the script without running it, so it previews nothing.</p>
-				</article>
-				<article class="card reveal">
-					<h3>Still a summary, not a matrix</h3>
-					<p>Ascender inherits AWX's job view, a host status bar with per-event drill-down that summarizes the run. SwitchTender paints every run as a live host-by-task matrix, one cell per host and task, with the failed host highlighted and per-task drill-down. You read a run like a dashboard.</p>
-				</article>
+				<h2>What Ascender's approval does not hold</h2>
+				<p>Ascender's approval node is AWX's. The approver is any user who can launch the template, an org admin, or anyone granted Approve on that template, and a request that is not approved in time is marked timed out and takes the failure path. SwitchTender's approval commits a digest of the inventory snapshot, the resolved container image, the pinned commit, and the saved plan, and the executor refuses a run whose content moved after sign-off. An AI agent gets one credential and a ceiling below admin, so it proposes and never approves. The audit trail is a signed hash chain that an Apache-2.0 verifier checks offline, with no login to any server.</p>
+				<p>What Ascender runs, SwitchTender runs free in one binary with no Kubernetes, Postgres, or Receptor mesh under it. Directory sign-in is Pro at $500 a year; Ascender ships it free, so that row is theirs. Ascender's job templates run Ansible playbooks; any other tool runs as a task inside one, which the controller cannot see or approve on its own terms. SwitchTender runs seven tools through one gate.</p>
+				<p>Three gaps, in CIQ's own words. On approval, the vendor documents who may click and when the request times out, not what content the click covers. Ascender records the revision a job used; no page says it refuses a run whose content changed after approval. On evidence, Ledger "logs what the platform itself does," the auditor's answer is "a query against the trail the platform already built," the activity stream forwards to Logstash, Splunk, Loggly, Sumologic, and Elastic Stack, and no hashing or signing is documented. On agents, no AI, LLM, or agent feature appears on the product page, the compare page, the July 2026 press release, or the current release notes.</p>
 			</div>
 		</section>
 
@@ -142,9 +130,12 @@
 						<tr><th>Capability</th><th class="us">SwitchTender</th><th>Ascender</th></tr>
 					</thead>
 					<tbody>
+						<tr><td>Approval bound to the content that runs: inventory, image, commit, plan</td><td class="us"><i class="y"></i> <span class="muted">a digest recomputed before execution</span></td><td><span class="muted">Workflow node records a decision, not a digest; jobs record the revision used after the fact</span></td></tr>
+						<tr><td>Hard ceiling on AI agents: cannot approve its own run or touch identity or secrets</td><td class="us"><i class="y"></i> <span class="muted">agents are principals capped below admin</span></td><td><span class="muted">No AI feature documented</span></td></tr>
+						<tr><td>Evidence a third party verifies offline, without trusting the server</td><td class="us"><i class="y"></i> <span class="muted">signed hash chain, Apache-2.0 verifier</span></td><td><i class="n"></i></td></tr>
 						<tr><td>Deploy</td><td class="us">One binary, SQLite or Postgres <span class="muted">creating a new Postgres schema is Team, opening an existing one is never gated</span></td><td><span class="muted">Kubernetes or k3s + Postgres + Receptor</span></td></tr>
-						<tr><td>Model</td><td class="us">Source-available, self-host free</td><td><span class="muted">Open source under Apache 2.0, free to self-host, paid support from CIQ</span></td></tr>
-						<tr><td>Commercial support and SLA</td><td class="us"><span class="muted">Email support from Pro, SLA at Enterprise</span></td><td><i class="y"></i></td></tr>
+						<tr><td>Model</td><td class="us">Source-available, self-host free</td><td><span class="muted">Core, Ledger, and Galaxy Proxy are Apache 2.0; Reaqt and Registry ship only as subscription images; Ascender Pro lists at $100 or $150 per node per year</span></td></tr>
+						<tr><td>Commercial support and SLA</td><td class="us"><span class="muted">Email support from Pro, SLA at Enterprise</span></td><td><span class="muted">Standard is business hours, Premium is 24/7 with a 30-minute Severity 1 response; no self-support tier</span></td></tr>
 						<tr><td>Tools</td><td class="us">Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</td><td><span class="muted">Ansible only</span></td></tr>
 						<tr><td>Live host-by-task matrix</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Job templates, surveys, schedules</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
@@ -154,24 +145,24 @@
 						<tr><td>Execution environments</td><td class="us">All seven tools, Docker or Podman</td><td><span class="muted">Ansible only, run as pods on Kubernetes</span></td></tr>
 						<tr><td>Instance groups</td><td class="us"><i class="y"></i> <span class="muted">worker queues, Team</span></td><td><i class="y"></i></td></tr>
 						<tr><td>High availability</td><td class="us">Active-active on Postgres <span class="muted">creating the schema is Team, opening an existing one is never gated</span></td><td><span class="muted">Via Kubernetes</span></td></tr>
-						<tr><td>Duration-balanced job splitting</td><td class="us"><i class="y"></i></td><td><span class="muted">Round-robin slicing</span></td></tr>
+						<tr><td>Duration-balanced job splitting</td><td class="us"><i class="y"></i></td><td><span class="muted">Job slicing, each slice runs a portion of the inventory</span></td></tr>
 						<tr><td>Flaky-host detection and duration trends</td><td class="us"><i class="y"></i></td><td><span class="muted">Per-host job summaries, neither of these</span></td></tr>
-						<tr><td>Tamper-evident, signed audit</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Drift detection and reconcile, Ansible and Terraform</td><td class="us"><i class="y"></i> <span class="muted">detection free, one-click reconcile Team</span></td><td><span class="muted">Check-mode jobs, no drift report or reconcile</span></td></tr>
-						<tr><td>Notification channels</td><td class="us">Eleven, each with per-template targets</td><td><span class="muted">A similar set, attached to organizations, projects, inventory sources, and templates</span></td></tr>
-						<tr><td>Advisory AI triage and fleet answers</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Tamper-evident, signed audit</td><td class="us"><i class="y"></i></td><td><span class="muted">Activity stream forwarded to Logstash, Splunk, Loggly, Sumologic, or Elastic Stack; Ledger change diffs exported as CSV or PDF; no hashing or signing documented in either</span></td></tr>
+						<tr><td>Drift detection and reconcile, Ansible and Terraform</td><td class="us"><i class="y"></i> <span class="muted">detection free, one-click reconcile Team</span></td><td><span class="muted">Drift detection in Ascender Pro through Ledger, described as watching baselines between runs; no reconcile documented</span></td></tr>
+						<tr><td>Notification channels</td><td class="us">Eleven, each with per-template targets</td><td><span class="muted">Ten: AWS SNS, Email, Grafana, IRC, Mattermost, PagerDuty, Rocket.Chat, Slack, Twilio, Webhook, attached to organizations, projects, templates, workflows, inventory sources, and system jobs</span></td></tr>
+						<tr><td>Advisory AI triage and fleet answers</td><td class="us"><i class="y"></i></td><td><span class="muted">No AI, LLM, or agent feature documented</span></td></tr>
 						<tr><td>Drop-in Go plugins: tools, secrets, AI, notifiers</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Import from other tools</td><td class="us">One command</td><td><span class="muted">AWX format only, through awxkit</span></td></tr>
+						<tr><td>Import from other tools</td><td class="us">One command</td><td><span class="muted">Its own export through ascender-kit; in-place migration from AWX through the installer</span></td></tr>
 					</tbody>
 				</table>
 			</div>
-			<p class="gs-note reveal">Checked against Ascender's own documentation on 2026-08-10, for Ascender 25.4.0. Ascender was at 25.6.1 on 2026-09-07. A comparison decays the day it is written, so check a row against the current release before you rely on it. <a href="/docs/comparison">Full table and sources</a>.</p>
+			<p class="gs-note reveal">Checked against Ascender's own documentation on 2026-10-08, for Ascender 25.6.2, published 2026-09-09. A comparison decays the day it is written, so check a row against the current release before you rely on it. <a href="/docs/comparison">Full table and sources</a>.</p>
 		</section>
 
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>Where Ascender is still ahead</h2>
-				<p>Ascender is AWX's core with years of production use, a deep Ansible ecosystem of credential types, inventory plugins, and execution environments, and a Receptor mesh built for running across network boundaries at scale. Behind it is a company you can pay to answer the phone. SwitchTender closes the ecosystem gap differently. Any team can add a tool, a secret engine, an AI provider, or a notification channel as a drop-in Go plugin binary, no fork and no rebuild of the server. Pick Ascender when the deciding factor is staying on AWX. Pick SwitchTender when it is the product and the footprint.</p>
+				<p>Ascender is AWX's core with years of production use, a deep Ansible ecosystem of credential types, inventory plugins, and execution environments, and a Receptor mesh built for running across network boundaries at scale. Since July 2026 Ascender Pro also ships Reaqt, which listens for fleet events, matches rules, and launches job templates; Registry, a local hub for collections and execution environments; Federated Inventory, which fans one launch across regional inventories as child jobs; errata and CVE status by host; and an open source Galaxy Proxy. SwitchTender has none of those five. Behind it is a company you can pay to answer the phone. SwitchTender closes the ecosystem gap differently. Any team can add a tool, a secret engine, an AI provider, or a notification channel as a drop-in Go plugin binary, no fork and no rebuild of the server. Pick Ascender when the deciding factor is staying on AWX. Pick SwitchTender when it is the product and the footprint.</p>
 			</div>
 		</section>
 

@@ -96,7 +96,7 @@
 		<section class="wrap gs-hero reveal">
 			<span class="eyebrow">Ansible Semaphore alternative</span>
 			<h1>Semaphore's simplicity.<br><span class="grad">A control plane on top.</span></h1>
-			<p class="lede">Semaphore proved a one-binary Ansible UI is the right shape. SwitchTender keeps that shape and adds what teams go looking for next. Every run paints as a live host-by-task matrix instead of scrollback. Go joins the tool list, and Ansible check mode or a Terraform or OpenTofu plan previews a change before it runs, while a script's dry run only checks the script without running it. RBAC, teams, and enforced approvals are in the core. External secret managers plug in, from HashiCorp Vault to 1Password and CyberArk, where Semaphore reaches Vault, OpenBao, AWS, Azure, and Devolutions Server. And there's an audit trail you can prove offline. Your Semaphore backup imports in one command.</p>
+			<p class="lede">Semaphore proved a one-binary Ansible UI is the right shape. SwitchTender keeps that shape and adds what teams go looking for next. Every run paints as a live host-by-task matrix instead of scrollback. Go joins the tool list, and Ansible check mode or a Terraform or OpenTofu plan previews a change before it runs, while a script's dry run only checks the script without running it. RBAC, teams, and an approval bound to the content that runs are in the core. External secret managers plug in, from HashiCorp Vault to 1Password and CyberArk, where Semaphore reaches Vault, OpenBao, AWS, Azure, and Devolutions Server. And there's an audit trail you can prove offline. Your Semaphore backup imports in one command.</p>
 			<div class="hero-cta">
 				<a class="btn big" href="/get-started">Get started</a>
 				<a class="ghost big" href="/docs/migration">Read the migration guide</a>
@@ -105,21 +105,23 @@
 
 		<section class="section wrap">
 			<div class="section-head reveal">
-				<h2>Where Semaphore stops</h2>
-				<p>Semaphore is a fine task runner. These are the walls teams hit as the fleet grows.</p>
+				<h2>What Semaphore's approval does not hold</h2>
+				<p>Semaphore's workflow approval node pauses a run until a user with task-run access approves or rejects it. SwitchTender's approval commits a digest of the inventory snapshot, the resolved container image, the pinned commit, and for Terraform or OpenTofu the saved plan. The executor recomputes that digest before it runs and refuses anything that moved after sign-off. An AI agent here is a principal with a ceiling below admin: it proposes runs, never approves them, and every receipt names the human it acted for. The audit trail is a signed hash chain that an Apache-2.0 verifier checks offline, with no account on the server.</p>
+				<p>What Semaphore sells in paid tiers ships in SwitchTender's free build, in the same binary: container execution for every tool, external secret managers, and per-object grants, which Semaphore offers as custom roles in Enterprise. Workflows with a graphical editor are free here too; Semaphore's docs and roadmap list them as Pro while its pricing page checks them in every tier. Distributed workers and active-active HA are Team here. Semaphore's global runners are free, so that row is theirs.</p>
+				<p>Three gaps, in Semaphore's own words. Its approval node "pauses the run until a user with permission approves or rejects," and no page documents what content that approval covers. Its roadmap says "approval decisions are logged with the approver's identity and timestamp"; its workflow docs do not describe approval logging. Its audit events record the acting user, the affected object, the action, the client IP address, and the user agent, and ship by syslog, by webhook as JSON or Splunk HEC, or by API pull, with no hashing or signing documented. Its MCP server lets an AI assistant "inspect and update projects, templates, inventories, repositories, schedules, and task context," in every tier. Here, an agent gets one credential and a ceiling instead.</p>
 			</div>
 			<div class="cards cards-3">
 				<article class="card reveal">
 					<h3>Runs are scrollback</h3>
-					<p>A Semaphore run is a text stream. SwitchTender paints every host and task live as a matrix, with the failed host highlighted, per-task timing, and drill-down. Six hundred hosts stay readable.</p>
+					<p>A Semaphore run is a timestamped log stream with, for Ansible, a count of hosts that finished OK or failed and a table of failed tasks per server; the execution summary is Pro. SwitchTender paints every host and task live as a matrix, with the failed host highlighted, per-task timing, and drill-down. Six hundred hosts stay readable.</p>
 				</article>
 				<article class="card reveal">
 					<h3>Governance stops at the basics</h3>
-					<p>Both of us put single sign-on in Pro: Semaphore at $490 a year for up to 500 managed nodes, and SwitchTender at $500 a year for up to 500 hosts, with five approval policies included. The unit differs, and in their favor or ours depending on your shape: ours is flat per organization, while their pricing page lists Pro as a per-instance subscription with a multi-instance license at enterprise, so several instances means several subscriptions. That is a fair fight and we are not going to pretend otherwise. What is free here and not there: organizations, teams, per-object grants, a digest-bound approval gate, and a tamper-evident hash-chained audit trail with signed receipts that verify offline. Semaphore ships four fixed project roles in its free build, reserves custom per-template roles for its enterprise tier, and has no approval gates and no provable audit at any tier.</p>
+					<p>Pro pricing: Semaphore from $20 a month or $199 a year for 50 managed nodes and 500 managed resources, configurable by node count with an unlimited tier, and SwitchTender at $500 a year for up to 500 hosts, with five approval policies included. The unit differs, and in their favor or ours depending on your shape: ours is flat per organization, while one Semaphore Pro license covers up to three instances, and Enterprise is unlimited. That is a fair fight and we are not going to pretend otherwise. What is free here and not there: organizations, teams, per-object grants, a digest-bound approval gate, and a tamper-evident hash-chained audit trail with signed receipts that verify offline. Semaphore ships four fixed project roles in its free build, reserves custom per-template roles for its enterprise tier, pauses a workflow at an approval node for any user with task-run access, documents no binding of that approval to a commit, inventory, or plan, and documents no hashing or signing of its audit at any tier.</p>
 				</article>
 				<article class="card reveal">
 					<h3>The fleet has no memory</h3>
-					<p>Semaphore keeps each task's log, but no host's history across runs. SwitchTender tracks every host across runs: flaky hosts flagged, durations trended, drift detected from a dry run, and big jobs split across shards balanced by measured host cost.</p>
+					<p>Semaphore's task view shows per-task output, and inventory change history is on its roadmap for 2.22. SwitchTender tracks every host across runs: flaky hosts flagged, durations trended, drift detected from a dry run, and big jobs split across shards balanced by measured host cost.</p>
 				</article>
 			</div>
 		</section>
@@ -135,26 +137,29 @@
 						<tr><th>Capability</th><th class="us">SwitchTender</th><th>Semaphore</th></tr>
 					</thead>
 					<tbody>
+						<tr><td>Approval bound to the content that runs: inventory, image, commit, plan</td><td class="us"><i class="y"></i> <span class="muted">a digest recomputed before execution</span></td><td><span class="muted">Workflow approval node; docs say Pro, pricing lists it in every tier; binding not documented</span></td></tr>
+						<tr><td>Hard ceiling on AI agents: cannot approve its own run or touch identity or secrets</td><td class="us"><i class="y"></i> <span class="muted">agents are principals capped below admin</span></td><td><span class="muted">MCP server inspects and updates projects, templates, inventories, repositories, schedules; no ceiling documented</span></td></tr>
+						<tr><td>Evidence a third party verifies offline, without trusting the server</td><td class="us"><i class="y"></i> <span class="muted">signed hash chain, Apache-2.0 verifier</span></td><td><i class="n"></i></td></tr>
 						<tr><td>Deploy without Kubernetes</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
-						<tr><td>Live host-by-task matrix</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Tools</td><td class="us">Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</td><td><span class="muted">No Go</span></td></tr>
+						<tr><td>Live host-by-task matrix</td><td class="us"><i class="y"></i></td><td><span class="muted">Log stream; per-host OK and failed counts for Ansible, Pro</span></td></tr>
+						<tr><td>Tools</td><td class="us">Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</td><td><span class="muted">Ansible, Terraform, OpenTofu, Terragrunt, Bash, PowerShell, Python; any executable as a custom app</span></td></tr>
 						<tr><td>Per-object grants</td><td class="us"><i class="y"></i></td><td><span class="muted">Four fixed roles free, custom roles enterprise</span></td></tr>
 						<tr><td>External secret managers: Vault, AWS, Azure, GCP, CyberArk, 1Password</td><td class="us"><i class="y"></i></td><td><span class="muted">Vault, OpenBao, AWS, Azure, Devolutions Server</span></td></tr>
-						<tr><td>Enforced approval policies</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Tamper-evident, signed audit</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Enforced approval policies</td><td class="us"><i class="y"></i></td><td><span class="muted">Workflow approval node, manual, binding not documented; docs say Pro, pricing lists every tier</span></td></tr>
+						<tr><td>Tamper-evident, signed audit</td><td class="us"><i class="y"></i></td><td><span class="muted">Activity log of acting user, affected object, action, IP, and user agent; syslog over TLS and Splunk HEC webhook in paid tiers; no hashing or signing documented</span></td></tr>
 						<tr><td>Duration-balanced job splitting</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Fleet memory: flaky hosts, trends</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Drift detection from a dry run</td><td class="us"><i class="y"></i></td><td><span class="muted">Dry-run tasks, no drift report or reconcile</span></td></tr>
-						<tr><td>Drag-and-drop workflow editor</td><td class="us"><i class="y"></i></td><td><span class="muted">On the roadmap</span></td></tr>
+						<tr><td>Drag-and-drop workflow editor</td><td class="us"><i class="y"></i></td><td><span class="muted">Shipped in 2.19 as beta; docs say Pro, pricing lists every tier</span></td></tr>
 						<tr><td>Distributed workers in the core</td><td class="us"><i class="y"></i> <span class="muted">Team</span></td><td><span class="muted">global runners free, isolated runners and tag routing Pro</span></td></tr>
 						<tr><td>Active-active HA on PostgreSQL</td><td class="us"><i class="y"></i> <span class="muted">creating the schema is Team, opening an existing one is never gated</span></td><td><span class="muted">With Redis, per its documentation</span></td></tr>
-						<tr><td>Advisory AI triage and fleet answers</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Advisory AI triage and fleet answers</td><td class="us"><i class="y"></i></td><td><span class="muted">MCP server that inspects and updates projects, templates, inventories, repositories, and schedules</span></td></tr>
 						<tr><td>Drop-in Go plugins: tools, secrets, AI, notifiers</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Import from other tools</td><td class="us">One command</td><td><i class="n"></i></td></tr>
+						<tr><td>Import from other tools</td><td class="us">One command</td><td><span class="muted">Its own project export only</span></td></tr>
 					</tbody>
 				</table>
 			</div>
-			<p class="gs-note reveal">Checked against Semaphore's own documentation on 2026-08-10, for Semaphore 2.19.7. Semaphore was at 2.19.12 on 2026-09-07, whose releases since are bugfix-only and change no row. A comparison decays the day it is written, so check a row against the current release before you rely on it. <a href="/docs/comparison">Full table and sources</a>.</p>
+			<p class="gs-note reveal">Checked against Semaphore's own documentation on 2026-10-08, for Semaphore 2.19.16, with 2.20.0-alpha3 in prerelease. Semaphore 2.19 added workflows with approval nodes, a graphical editor, Docker and Kubernetes executors, and per-task JWT identity tokens. A comparison decays the day it is written, so check a row against the current release before you rely on it. <a href="/docs/comparison">Full table and sources</a>.</p>
 		</section>
 
 		<section class="section wrap">

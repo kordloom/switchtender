@@ -171,6 +171,9 @@
 						<tr><th>Capability</th><th class="us">SwitchTender</th><th>AWX</th></tr>
 					</thead>
 					<tbody>
+						<tr><td>Approval bound to the content that runs: inventory, image, commit, plan</td><td class="us"><i class="y"></i> <span class="muted">a digest recomputed before execution</span></td><td><span class="muted">Workflow node records a decision, not a digest</span></td></tr>
+						<tr><td>Hard ceiling on AI agents: cannot approve its own run or touch identity or secrets</td><td class="us"><i class="y"></i> <span class="muted">agents are principals capped below admin</span></td><td><span class="muted">No AI feature</span></td></tr>
+						<tr><td>Evidence a third party verifies offline, without trusting the server</td><td class="us"><i class="y"></i> <span class="muted">signed hash chain, Apache-2.0 verifier</span></td><td><i class="n"></i></td></tr>
 						<tr><td>Deploy</td><td class="us">One binary, SQLite or Postgres <span class="muted">creating a new Postgres schema is Team, opening an existing one is never gated</span></td><td><span class="muted">Kubernetes + operator + Postgres + Redis</span></td></tr>
 						<tr><td>Release cadence</td><td class="us">Actively released</td><td><span class="muted">Frozen since July 2024</span></td></tr>
 						<tr><td>Live host-by-task matrix</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>

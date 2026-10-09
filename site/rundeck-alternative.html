@@ -135,13 +135,15 @@
 						<tr><th>Capability</th><th class="us">SwitchTender</th><th>Rundeck</th></tr>
 					</thead>
 					<tbody>
+						<tr><td>Approval bound to the content that runs: inventory, image, commit, plan</td><td class="us"><i class="y"></i> <span class="muted">a digest recomputed before execution</span></td><td><span class="muted">No native approval step; ServiceNow steps can check a change request's state</span></td></tr>
+						<tr><td>Hard ceiling on AI agents: cannot approve its own run or touch identity or secrets</td><td class="us"><i class="y"></i> <span class="muted">agents are principals capped below admin</span></td><td><span class="muted">Ceiling set by the operator in an ACL policy on a dedicated user's token; docs recommend starting read-only with no job execution</span></td></tr>
+						<tr><td>Evidence a third party verifies offline, without trusting the server</td><td class="us"><i class="y"></i> <span class="muted">signed hash chain, Apache-2.0 verifier</span></td><td><i class="n"></i></td></tr>
 						<tr><td>Runs without a JVM</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Production datastore built in</td><td class="us">SQLite, Postgres optional</td><td><span class="muted">H2, not for production</span></td></tr>
 						<tr><td>Live per-host view</td><td class="us">Host-by-task matrix</td><td>Per-node, per-step monitor</td></tr>
 						<tr><td>Tools</td><td class="us">Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</td><td><span class="muted">Ansible and scripts, no Terraform step</span></td></tr>
 						<tr><td>Tamper-evident, signed audit</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Verifiable offline by a third party</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Enforced approval policies</td><td class="us"><i class="y"></i></td><td><span class="muted">Commercial Runbook Automation only</span></td></tr>
+						<tr><td>Enforced approval policies</td><td class="us"><i class="y"></i></td><td><span class="muted">No native step; ServiceNow change-state check</span></td></tr>
 						<tr><td>Visual workflow editor in the free tier</td><td class="us"><i class="y"></i></td><td><span class="muted">Engine free, visualization commercial</span></td></tr>
 						<tr><td>Fine-grained access control</td><td class="us">Per-object grants</td><td>ACL policy files; GUI editor commercial</td></tr>
 						<tr><td>Fleet memory: flaky hosts, trends</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
