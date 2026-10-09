@@ -3,4 +3,4 @@ name: switchtender
 description: Playbook execution and fleet orchestration, an alternative to AWX and Semaphore.
 type: application
 version: 0.9.1
-appVersion: "1.104.4"
+appVersion: "1.105.0"
