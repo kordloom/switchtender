@@ -31,8 +31,10 @@ What is signed differs by artifact, so here it is per download rather than as on
 The macOS app inside the `.dmg` is signed with a Developer ID certificate issued to KordLoom LLC
 (team KD99L7BFM2) and notarized by Apple, so Gatekeeper accepts it and it opens with no warning.
 `spctl -a -vvv /Applications/SwitchTender.app` reports `source=Notarized Developer ID`, and
-`codesign -dv` names the same authority. The `.dmg` wrapper itself carries no signature, which is
-not what Gatekeeper judges: it assesses the app it contains.
+`codesign -dv` names the same authority. The `.dmg` is signed with the same certificate, notarized,
+and stapled, and the app inside it is notarized and stapled on its own, so a copy dragged into
+`/Applications` carries its ticket and Gatekeeper can find it on a Mac that cannot reach Apple's
+notary service.
 
 The macOS binary in the `tar.gz`, which the Homebrew cask installs, is not signed or notarized yet.
 The install script and a `curl` download run it as is. A copy downloaded through a browser, or

@@ -58,6 +58,13 @@ DOCKER_SOCKET = "/var/run/docker.sock"
 MEMORY_EVENTS = "/sys/fs/cgroup/memory.events"
 # DOWNLOADS holds the files CI's steps download, indexed by the URL each step names.
 DOWNLOADS = "/opt/ci-local/downloads"
+# DOWNLOAD_SHA256 maps the step env variable that pins a download's SHA-256 to the file under
+# DOWNLOADS that serve_download answers that download with.
+DOWNLOAD_SHA256 = {
+    "HELM_SHA256": "helm.tar.gz",
+    "GITLEAKS_SHA256": "gitleaks.tar.gz",
+    "KIND_SHA256": "kind",
+}
 # REAL_CURL is the system curl, which serve_download hands every other request to.
 REAL_CURL = "/usr/bin/curl"
 # CURL_SHIM is the curl the steps find first on PATH.
@@ -605,6 +612,7 @@ def run_script(job, step, script, workdir, step_env):
     env.update({k: job.expand(str(v)) for k, v in (job.spec.get("env") or {}).items()})
     env.update(job.env)
     env.update({k: job.expand(str(v)) for k, v in step_env.items()})
+    env.update(served_download_hashes(step_env))
     env["PATH"] = os.pathsep.join(job.paths + [env["PATH"]])
     env.update({
         "GITHUB_ENV": files["env"],
@@ -632,6 +640,28 @@ def run_script(job, step, script, workdir, step_env):
     for directory in read_path_file(files["path"]):
         job.paths.insert(0, directory)
     return code
+
+
+def served_download_hashes(step_env):
+    """served_download_hashes returns the hash of each served download a step pins, on a machine
+    whose builds are not the ones CI pins.
+
+    A step pins the SHA-256 of the build GitHub's x86-64 runner downloads and refuses one that does
+    not match. On any other architecture the image serves this machine's build of the same tool,
+    so that pin cannot match it. The step's check then runs as written against the served file's
+    own hash, so a served file that arrives truncated still fails it, and the pin itself is checked
+    where the real download happens, in CI. On an x86-64 machine ci-local.Dockerfile keeps each
+    pinned download byte for byte, helm's archive included, so the pin stands and is checked here.
+    """
+    if runner_arch() == "X64":
+        return {}
+    out = {}
+    for name, file in DOWNLOAD_SHA256.items():
+        if name not in step_env:
+            continue
+        with open(os.path.join(DOWNLOADS, file), "rb") as f:
+            out[name] = hashlib.sha256(f.read()).hexdigest()
+    return out
 
 
 def start_services(job):

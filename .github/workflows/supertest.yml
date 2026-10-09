@@ -33,12 +33,22 @@ jobs:
           go-version-file: go.mod
 
       - name: Install kind and helm
+        env:
+          # The SHA-256 kind publishes beside the binary, in kind-linux-amd64.sha256sum. A download
+          # that does not match is not run.
+          KIND_SHA256: b89aada5a39d620da3fcd16435b7f28d858927dd53f92cbac77686b0588b600d
+          # The SHA-256 get.helm.sh publishes beside the archive, in
+          # helm-v3.16.3-linux-amd64.tar.gz.sha256sum. A download that does not match is not run.
+          HELM_SHA256: f5355c79190951eed23c5432a3b920e071f4c00a64f75e077de0dd4cb7b294ea
         run: |
           set -euo pipefail
-          curl -sSLo /tmp/kind \
+          curl -fsSLo /tmp/kind \
             https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64
+          echo "$KIND_SHA256  /tmp/kind" | sha256sum -c -
           sudo install -m 0755 /tmp/kind /usr/local/bin/kind
-          curl -sSL https://get.helm.sh/helm-v3.16.3-linux-amd64.tar.gz | tar -xz -C /tmp
+          curl -fsSL -o /tmp/helm.tar.gz https://get.helm.sh/helm-v3.16.3-linux-amd64.tar.gz
+          echo "$HELM_SHA256  /tmp/helm.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/helm.tar.gz -C /tmp
           sudo mv /tmp/linux-amd64/helm /usr/local/bin/helm
 
       # The same Node ci pins, not whatever the runner image ships this month: the screenshot

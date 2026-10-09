@@ -84,8 +84,10 @@ bundle and a <code>SwitchTender.dmg</code> are built by the release workflow and
 <p>The macOS app inside the <code>.dmg</code> is signed with a Developer ID certificate issued to KordLoom LLC
 (team KD99L7BFM2) and notarized by Apple, so Gatekeeper accepts it and it opens with no warning.
 <code>spctl -a -vvv /Applications/SwitchTender.app</code> reports <code>source=Notarized Developer ID</code>, and
-<code>codesign -dv</code> names the same authority. The <code>.dmg</code> wrapper itself carries no signature, which is
-not what Gatekeeper judges: it assesses the app it contains.</p>
+<code>codesign -dv</code> names the same authority. The <code>.dmg</code> is signed with the same certificate, notarized,
+and stapled, and the app inside it is notarized and stapled on its own, so a copy dragged into
+<code>/Applications</code> carries its ticket and Gatekeeper can find it on a Mac that cannot reach Apple's
+notary service.</p>
 <p>The macOS binary in the <code>tar.gz</code>, which the Homebrew cask installs, is not signed or notarized yet.
 The install script and a <code>curl</code> download run it as is. A copy downloaded through a browser, or
 installed by the cask, carries macOS's quarantine flag, and Gatekeeper can refuse to run it until the

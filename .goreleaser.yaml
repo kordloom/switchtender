@@ -1,7 +1,9 @@
 # GoReleaser configuration for SwitchTender.
-# Standard artifacts (binaries, archives, checksums, signatures, SBOMs, Homebrew, Linux packages)
-# are declared here. The bespoke macOS .app/.dmg desktop bundle, notarization, and Windows
-# Authenticode signing live in the release workflow because they need credentials, not tooling.
+# Standard artifacts (binaries, archives, checksums, SBOMs, Homebrew, Linux packages) are declared
+# here, with the Developer ID signing and notarization of the macOS command line binary. The
+# bespoke macOS .app/.dmg desktop bundle, with its own notarization and stapling, lives in the
+# release workflow because it needs macOS tooling. Windows binaries carry no code signature and
+# are covered by the signed SHA256SUMS alone.
 # Validate locally with `goreleaser check` and `goreleaser release --snapshot --clean`.
 version: 2
 
