@@ -431,7 +431,7 @@ func TestRegisterBannerFollowsTheChainVerdict(t *testing.T) {
 		},
 		{ // Test 3: Anchors holding is the verified case, and the count is the holding anchors.
 			Name: "verified", In: &RegisterInput{ChainOK: true, Anchored: 4},
-			WantStatus: "verified", WantText: "carries 4 anchor(s)",
+			WantStatus: "verified", WantText: "carries 4 anchors",
 		},
 	}
 	for testNum, test := range tests {

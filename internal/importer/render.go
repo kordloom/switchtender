@@ -3,6 +3,8 @@ package importer
 import (
 	"fmt"
 	"io"
+
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // Render writes the assessment as the document somebody forwards, rather than as a dump.
@@ -46,8 +48,9 @@ func Render(out io.Writer, format, source string, a Assessment) {
 		fmt.Fprintf(out, "      The import preview lists every one.\n")
 	}
 	if a.Report.Suppressed > 0 {
-		fmt.Fprintf(out, "  %d further warning(s) were not listed, because this export passed the "+
-			"report's cap.\n", a.Report.Suppressed)
+		fmt.Fprintf(out, "  %d further %s not listed, because this export passed the report's "+
+			"cap.\n", a.Report.Suppressed,
+			util.Plural(a.Report.Suppressed, "warning was", "warnings were"))
 	}
 	fmt.Fprintln(out)
 

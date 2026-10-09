@@ -154,7 +154,7 @@ func TestVerifyShowsTheReasonAndTheAgentBehindARun(t *testing.T) {
 		WantErr:   "a disclosed decision is not what the chain committed",
 	}, { // Test 3: A member nothing checks qualifies the verdict, which names it.
 		Name: "unknown", Unknown: true,
-		WantLines: []string{"INTACT, BUT UNIDENTIFIED, 1 disclosed record(s) unchecked: nothing it " +
+		WantLines: []string{"INTACT, BUT UNIDENTIFIED, 1 disclosed record unchecked: nothing it " +
 			"checked has been altered",
 			"  unchecked  claim 0 note: this product does not disclose \"note\""},
 		DenyLines: []string{"INTACT, BUT UNIDENTIFIED: nothing has been altered"},

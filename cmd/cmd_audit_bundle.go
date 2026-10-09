@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 var (
@@ -130,8 +131,8 @@ func runAuditBundle(cmd *cobra.Command, _ []string) error {
 			"Run switchtender audit anchor on a schedule.")
 	} else {
 		if n := doc.AttachAnchors(recorded); n > 0 {
-			fmt.Fprintf(os.Stderr, "Attached %d anchor(s), so a verifier can see this chain has "+
-				"not been shortened.\n", n)
+			fmt.Fprintf(os.Stderr, "Attached %d %s, so a verifier can see this chain has not "+
+				"been shortened.\n", n, util.Plural(n, "anchor", "anchors"))
 		}
 		// How far the newest anchor trails the newest entry is stated plainly, because that gap is
 		// the part of the record the producer key could still rewrite. A bundle assembled long

@@ -16,6 +16,7 @@ import (
 	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // verifyPubkey is the key fingerprint a relying party pins, so a receipt signed by any other key is
@@ -198,7 +199,8 @@ func uncheckedQualifier(rep *audit.BundleReport) string {
 	if rep.DisclosedUnchecked == 0 {
 		return ""
 	}
-	return fmt.Sprintf(", %d disclosed record(s) unchecked", rep.DisclosedUnchecked)
+	return fmt.Sprintf(", %d disclosed %s unchecked", rep.DisclosedUnchecked,
+		util.Plural(rep.DisclosedUnchecked, "record", "records"))
 }
 
 // checkedScope narrows what the verdict says was not altered to what was checked, when anything was

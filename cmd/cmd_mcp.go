@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/kordloom/switchtender/internal/mcp"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 var (
@@ -123,7 +124,8 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 	tools := mcp.Tools(client, mcp.Options{AllowAdhoc: mcpAllowAdhoc})
 	// Progress goes to standard error: standard output carries the protocol, so a stray line there
 	// would corrupt the stream the client is parsing.
-	fmt.Fprintf(os.Stderr, "mcp: serving %d tool(s) against %s\n", len(tools), mcpServer)
+	fmt.Fprintf(os.Stderr, "mcp: serving %d %s against %s\n", len(tools),
+		util.Plural(len(tools), "tool", "tools"), mcpServer)
 	srv := mcp.NewServer("switchtender", Version, tools)
 	return srv.Serve(ctx, os.Stdin, os.Stdout)
 }

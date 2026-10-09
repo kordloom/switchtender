@@ -179,13 +179,13 @@ func TestPlanGateHoldsImportPlan(t *testing.T) {
 		Summary:      "Plan: 2 to import, 3 to add, 1 to change, 5 to destroy.\n",
 		WantApproval: true,
 		WantHeld:     "tf-destroy-guard (plan destroys 5, limit 3)",
-		WantNote:     "plan would destroy 5 resource(s)",
+		WantNote:     "plan would destroy 5 resources",
 	}, { // Test 1: A plan with nothing to do queues without approval, as every drift check does.
 		Name:         "no changes",
 		Summary:      "No changes. Your infrastructure matches the configuration.\n",
 		WantApproval: false,
 		WantHeld:     "",
-		WantNote:     "plan would destroy 0 resource(s)",
+		WantNote:     "plan would destroy 0 resources",
 	}, { // Test 2: A summary that cannot be read was never weighed, so the apply waits.
 		Name:         "unreadable",
 		Summary:      "Terraform emitted something this parser does not know.\n",
@@ -198,7 +198,7 @@ func TestPlanGateHoldsImportPlan(t *testing.T) {
 		Summary:      "Plan: 1 to import, 0 to add, 0 to change, 2 to destroy.\n",
 		WantApproval: false,
 		WantHeld:     "",
-		WantNote:     "plan would destroy 2 resource(s)",
+		WantNote:     "plan would destroy 2 resources",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {

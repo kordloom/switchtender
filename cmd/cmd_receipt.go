@@ -10,6 +10,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/receipt"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 var (
@@ -102,7 +103,8 @@ func runReceipt(cmd *cobra.Command, args []string) error {
 			"anchor already fixed.")
 	}
 	if res.Anchors > 0 {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Attached %d anchor(s) covering the receipt.\n", res.Anchors)
+		fmt.Fprintf(cmd.ErrOrStderr(), "Attached %d %s covering the receipt.\n", res.Anchors,
+			util.Plural(res.Anchors, "anchor", "anchors"))
 	}
 	if receiptSparse && receiptFrom > 0 {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Proving the log only appended since size %d.\n", receiptFrom)

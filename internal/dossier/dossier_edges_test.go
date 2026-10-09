@@ -701,7 +701,7 @@ func TestDossierBannerFollowsTheEvidenceBelowIt(t *testing.T) {
 				in.Entries = []*audit.Entry{entry}
 			},
 			WantStatus: "broken", WantText: "does not fix the link recorded beside it",
-			WantAbsent: "1 anchor(s) fix history",
+			WantAbsent: "1 anchor fixes history",
 		},
 		{ // Test 6: Everything holding is the verified case, and it counts only the anchors that do.
 			Name: "verified",
@@ -709,7 +709,7 @@ func TestDossierBannerFollowsTheEvidenceBelowIt(t *testing.T) {
 				in.Covering = []*audit.Anchor{anchor}
 				in.Entries = []*audit.Entry{entry}
 			},
-			WantStatus: "verified", WantText: "1 anchor(s) fix history containing this run",
+			WantStatus: "verified", WantText: "1 anchor fixes history containing this run",
 		},
 	}
 	for testNum, test := range tests {
@@ -1221,7 +1221,7 @@ func TestCoverageReachesTheLaunchEntryEvenWhenItIsTheOnlyThingNamingTheRun(t *te
 	if err != nil {
 		t.Fatalf("Render() error = %v", err)
 	}
-	if !strings.Contains(string(doc), "fix history containing this run") {
+	if !strings.Contains(string(doc), "history containing this run") {
 		t.Errorf("an anchored run resolved by its receipt is reported as unanchored:\n%s",
 			bannerOf(string(doc)))
 	}
