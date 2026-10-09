@@ -1081,6 +1081,26 @@ func producerInstallID(id *audit.Identity) string {
 	return id.InstallID
 }
 
+// beatAnchorFunc returns the hook that fixes each span beat at the RFC 3161 authority at tsaURL and
+// saves the anchor in anchors, recorded under installID. It passes no client, so the request goes
+// through the timestamp package's guarded one, since the authority's address is operator
+// configuration the server follows on its own network.
+func beatAnchorFunc(tsaURL, installID string, anchors audit.AnchorStore) spanbeat.AnchorFunc {
+	return func(ctx context.Context, b spanbeat.AppendedBeat) error {
+		ctx, cancel := context.WithTimeout(ctx, anchorTimeout)
+		defer cancel()
+		a, err := audit.NewAnchor(ctx, nil, audit.AnchorRFC3161, tsaURL, audit.AnchorShapeLinear,
+			installID, b.Seq, b.Hash, time.Now())
+		if err != nil {
+			return err
+		}
+		if err := audit.CheckAnchorTime(a, b.At); err != nil {
+			return err
+		}
+		return anchors.SaveAnchor(ctx, a)
+	}
+}
+
 // identityDirEnv names the environment variable that places the producer signing identity
 // explicitly, for an install whose account has no home directory to derive one from.
 const identityDirEnv = "SWITCHTENDER_IDENTITY_DIR"
@@ -1690,21 +1710,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			if !ok {
 				return fmt.Errorf("--anchor-tsa-url is set but this store keeps no anchors")
 			}
-			client := &http.Client{Timeout: anchorTimeout}
 			beatOpts = append(beatOpts, spanbeat.WithAnchorFunc(
-				func(ctx context.Context, b spanbeat.AppendedBeat) error {
-					ctx, cancel := context.WithTimeout(ctx, anchorTimeout)
-					defer cancel()
-					a, err := audit.NewAnchor(ctx, client, audit.AnchorRFC3161, serveAnchorTSAURL,
-						audit.AnchorShapeLinear, producerInstallID(producer), b.Seq, b.Hash, time.Now())
-					if err != nil {
-						return err
-					}
-					if err := audit.CheckAnchorTime(a, b.At); err != nil {
-						return err
-					}
-					return anchors.SaveAnchor(ctx, a)
-				}))
+				beatAnchorFunc(serveAnchorTSAURL, producerInstallID(producer), anchors)))
 			log.Info("span beats will be anchored", zap.String("tsa", serveAnchorTSAURL))
 		}
 		beats := spanbeat.NewEmitter(auditBeatStore{store: bundle.Audits()}, spanCadence, log, beatOpts...)

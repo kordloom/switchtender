@@ -133,6 +133,11 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("init logger: %w", err)
 	}
 	defer func() { _ = log.Sync() }()
+	// The demo anchors its seeded chain through the guarded timestamp client, which never reads the
+	// ambient HTTPS_PROXY, so a proxied evaluator needs the same egress setting serve takes.
+	if err := applyEgressProxy(log); err != nil {
+		return err
+	}
 
 	db, keyDir, err := demoPaths()
 	if err != nil {
