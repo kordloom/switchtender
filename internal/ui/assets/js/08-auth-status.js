@@ -73,6 +73,9 @@ function consumeSSOFragment() {
 	const params = new URLSearchParams(raw);
 	const token = params.get("access_token");
 	if (!token) return;
+	// The last session's cached identity goes first, so nothing about the previous account
+	// survives into this one if the boot cannot reach the server to ask about it.
+	rememberIdentity(null);
 	localStorage.setItem("st_token", token);
 	if (params.get("role")) localStorage.setItem("st_role", params.get("role"));
 	if (params.get("user")) localStorage.setItem("st_user", params.get("user"));
@@ -103,6 +106,95 @@ function requireLogin() {
 // token both have no role, and both hold full authority, so an empty role gates nothing.
 function uiRole() {
 	return localStorage.getItem("st_role") || "";
+}
+
+// IDENTITY_KEYS are the storage keys that describe the stored session: the credential itself, the
+// role that gates controls, the audit name the chain records, and the account's current username.
+const IDENTITY_KEYS = ["st_token", "st_role", "st_user", "st_account"];
+
+// rememberIdentity caches what the server said this session is. A field the answer leaves out is
+// cleared rather than kept, so nothing cached can outlive the answer that replaced it. Null clears
+// everything but the credential, for an answer that named nobody.
+function rememberIdentity(me) {
+	const keep = (key, value) => {
+		if (value) localStorage.setItem(key, value);
+		else localStorage.removeItem(key);
+	};
+	keep("st_role", me && me.role);
+	keep("st_user", me && me.name);
+	keep("st_account", me && me.account);
+}
+
+// forgetSession drops the stored credential and everything cached about it.
+function forgetSession() {
+	for (const key of IDENTITY_KEYS) localStorage.removeItem(key);
+}
+
+// accountName returns the name the account badge shows: the account's current username when the
+// server has said it, else the audit name the session was minted with, empty for a token that has
+// neither.
+function accountName() {
+	return localStorage.getItem("st_account") || localStorage.getItem("st_user") || "";
+}
+
+// identityKey folds the cached identity into one string, so a caller can tell whether a refresh
+// moved it.
+function identityKey() {
+	return [uiRole(), localStorage.getItem("st_user") || "", accountName()].join("\n");
+}
+
+// refreshIdentity asks the server who the stored session is and caches the answer. It resolves to
+// "revoked" when the server no longer knows the session, which also forgets it here; "fresh" when
+// the server answered; "stale" when it could not be asked, which leaves the cache standing as the
+// best hint there is; and "none" when no session is stored.
+//
+// The server resolves the role afresh on every request, and another admin can change it, rename
+// the account, or delete it at any time. Every page gates its navigation, its badge, and its admin
+// controls on the cache, so the page boot calls this before drawing anything from it.
+async function refreshIdentity() {
+	if (!apiToken()) return "none";
+	let res;
+	try {
+		res = await fetch(API + "/auth/me", { headers: authHeaders() });
+	} catch (e) {
+		return "stale";
+	}
+	if (res.status === 401) {
+		forgetSession();
+		return "revoked";
+	}
+	if (!res.ok) return "stale";
+	const me = await res.json().catch(() => null);
+	if (!me || typeof me !== "object") return "stale";
+	// An open install has nobody to be, and a role cached from before it opened would gate
+	// controls the server no longer refuses.
+	rememberIdentity(me.open ? null : me);
+	return "fresh";
+}
+
+// recheckIdentity re-asks the server after an action on accounts and reloads the page when the
+// answer moved, so a session that changed its own role or name is redrawn from the server's
+// answer rather than from a cache written at sign-in. A session the server no longer knows walks
+// to sign in. It reports whether the page is leaving, so a caller can stop drawing.
+async function recheckIdentity() {
+	const before = identityKey();
+	const verdict = await refreshIdentity();
+	if (verdict === "revoked") {
+		requireLogin();
+		return true;
+	}
+	if (identityKey() === before) return false;
+	location.reload();
+	return true;
+}
+
+// featureOff reports whether the server said an optional feature is switched off on this install,
+// so a page does not ask for it. The answer would be a 404 the page already reads as "not
+// enabled", but the browser logs every 404 it sees, and nothing a script does can unlog it. A page
+// the server told nothing about asks for every feature.
+function featureOff(name) {
+	const off = document.body.dataset.featuresOff || "";
+	return off.split(" ").includes(name);
 }
 
 // roleAtLeast reports whether this session may act at the given level. The server enforces the

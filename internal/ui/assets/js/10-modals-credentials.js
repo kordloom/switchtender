@@ -1130,11 +1130,12 @@ function relabelTypedKinds() {
 
 // loadCredentialTypes fills the Credential types section and the custom options in the credential
 // dialog. Types are for admins and can be switched off, so a 403 or 404 hides the section without a
-// word: neither is something this page went wrong at.
+// word: neither is something this page went wrong at. An install the server said has them switched
+// off is not asked at all, since the browser logs the 404 the page would be quietly reading.
 async function loadCredentialTypes() {
 	const section = document.getElementById("ctype-section");
 	if (!section) return;
-	if (!roleAtLeast("admin")) {
+	if (!roleAtLeast("admin") || featureOff("credential-types")) {
 		section.hidden = true;
 		return;
 	}

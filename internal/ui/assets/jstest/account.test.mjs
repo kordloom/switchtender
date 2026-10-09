@@ -60,3 +60,34 @@ test("the sign-in page offers a way back when a session is already stored", () =
 	assert.equal(back.hidden, false, "the way back is hidden from a signed-in reader");
 	assert.match(back.textContent, /casey/, "the way back does not say whose session is stored");
 });
+
+test("a single sign-on fragment replaces every cached detail of the previous account", () => {
+	const tests = [
+		{ // Test 0: A fragment naming a role and a user leaves nothing of the previous account.
+			Fragment: "#access_token=tok_new&role=viewer&user=newperson",
+			WantRole: "viewer", WantUser: "newperson", WantAccount: null, WantName: "newperson",
+		},
+		{ // Test 1: A fragment carrying only a token leaves the role and the names unknown.
+			Fragment: "#access_token=tok_new",
+			WantRole: null, WantUser: null, WantAccount: null, WantName: "",
+		},
+	];
+	for (const [i, tc] of tests.entries()) {
+		const page = loadPage("overview");
+		const win = sandboxOf(page.app);
+		win.localStorage.setItem("st_token", "tok_old");
+		win.localStorage.setItem("st_role", "admin");
+		win.localStorage.setItem("st_user", "oldperson");
+		win.localStorage.setItem("st_account", "oldperson-renamed");
+		win.sessionStorage.setItem("st_sso_pending", String(Date.now()));
+		win.location.hash = tc.Fragment;
+		page.app.consumeSSOFragment();
+
+		assert.equal(win.localStorage.getItem("st_token"), "tok_new", "test " + i + ": token");
+		assert.equal(win.localStorage.getItem("st_role"), tc.WantRole, "test " + i + ": role");
+		assert.equal(win.localStorage.getItem("st_user"), tc.WantUser, "test " + i + ": user");
+		assert.equal(win.localStorage.getItem("st_account"), tc.WantAccount,
+			"test " + i + ": the previous account's name survived the new sign-in");
+		assert.equal(page.app.accountName(), tc.WantName, "test " + i + ": badge name");
+	}
+});

@@ -544,8 +544,25 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 	srv.web = ui.New(srv.log, srv.docs, srv.readOnly, srv.matrixCap, srv.oidc != nil, srv.saml != nil,
 		srv.ai != nil, oidcBrand, ui.WithAccountCheck(srv.anyAccount), ui.WithTokenCheck(srv.anyToken),
 		ui.WithSignInCheck(srv.signInRequired), ui.WithDemo(srv.demo),
-		ui.WithFactCacheAdminOnly(srv.factCacheAdminOnly))
+		ui.WithFactCacheAdminOnly(srv.factCacheAdminOnly), ui.WithFeaturesOff(srv.featuresOff()...))
 	return srv
+}
+
+// featuresOff names the optional features this install has switched off, so a page can skip asking
+// for them. Each answers 404 when off, which the page reads as "not enabled", but the browser logs
+// every 404 it sees, so a page that asked would open with errors in its console.
+func (s *Server) featuresOff() []string {
+	var off []string
+	if s.tokens == nil {
+		off = append(off, "tokens")
+	}
+	if s.credTypes == nil {
+		off = append(off, "credential-types")
+	}
+	if s.federation == nil {
+		off = append(off, "federation")
+	}
+	return off
 }
 
 // signInRequired reports whether the API refuses a request that carries no credential, so a page

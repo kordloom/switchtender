@@ -408,7 +408,7 @@ function accountGroup() {
 	who.className = "account-who";
 	g.appendChild(who);
 
-	const name = localStorage.getItem("st_user") || "";
+	const name = accountName();
 	if (!apiToken()) {
 		who.textContent = "Not signed in";
 		const link = document.createElement("a");
@@ -454,9 +454,7 @@ async function signOut() {
 	} catch (e) {
 		// An unreachable server does not keep a person signed in on this machine.
 	}
-	localStorage.removeItem("st_token");
-	localStorage.removeItem("st_role");
-	localStorage.removeItem("st_user");
+	forgetSession();
 	try {
 		sessionStorage.removeItem("st_return");
 	} catch (e) {

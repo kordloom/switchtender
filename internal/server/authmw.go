@@ -1227,13 +1227,19 @@ func authLogoutHandler(tokens auth.Store, log *zap.Logger) http.HandlerFunc {
 }
 
 // authMeHandler tells an authenticated caller who the server resolved it to be: the audit name,
-// the effective role after any agent cap, and how it authenticated. The UI gates its controls
-// with this instead of guessing, which used to make every token session look like an admin and
-// rendered buttons whose only future was a 403.
+// the effective role after any agent cap, how it authenticated, and the account it acts for. The
+// UI gates its controls with this instead of guessing, so a token session is not drawn as an admin
+// with buttons whose only future is a 403, and it asks on every page load so the page draws the
+// role and the username the account has now.
 func authMeHandler(log *zap.Logger) http.HandlerFunc {
 	type me struct {
-		// Name is the caller's audit name: the username or the token label.
+		// Name is the caller's audit name: the username or the token label. A session keeps the
+		// username it was minted with, since that is the name the chain records on everything it
+		// does, so this stays put when the account is renamed.
 		Name string `json:"name,omitempty"`
+		// Account is the current username of the account the credential is bound to, empty for a
+		// token bound to none. It follows a rename, where Name does not.
+		Account string `json:"account,omitempty"`
 		// Role is the effective role, after the agent cap.
 		Role string `json:"role,omitempty"`
 		// ActorType is how the caller authenticated, in the audit chain's vocabulary.
@@ -1245,6 +1251,7 @@ func authMeHandler(log *zap.Logger) http.HandlerFunc {
 		out := me{}
 		if a, ok := actorFrom(r.Context()); ok {
 			out.Name, out.Role, out.ActorType = a.Name, string(a.Role), a.Type
+			_, out.Account = run.AccountFrom(r.Context())
 		} else {
 			out.Open = true
 		}

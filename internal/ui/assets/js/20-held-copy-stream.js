@@ -751,7 +751,9 @@ async function loadAllEvents(runId) {
 // offerStoredSession shows the way back when this browser already holds a session, so arriving at
 // sign in is not a dead end. A reader who followed a link here, or whose one expired call sent them
 // here while the rest of the session still works, had no route back to the page they came from and no
-// indication which account the browser was holding.
+// indication which account the browser was holding. The boot has already asked the server about the
+// stored session by the time this runs, so a session the server has forgotten is gone from storage
+// and is not offered as a way back.
 function offerStoredSession() {
 	const back = document.getElementById("signed-in-return");
 	if (!back) return;
@@ -759,7 +761,7 @@ function offerStoredSession() {
 		back.hidden = true;
 		return;
 	}
-	const name = localStorage.getItem("st_user") || "";
+	const name = accountName();
 	const label = document.getElementById("signed-in-name");
 	if (label) label.textContent = name ? "as " + name : "with a token";
 	back.hidden = false;
@@ -798,8 +800,7 @@ function loadLogin() {
 			}
 			const session = await res.json();
 			localStorage.setItem("st_token", session.token);
-			localStorage.setItem("st_role", session.role);
-			localStorage.setItem("st_user", session.username);
+			rememberIdentity({ role: session.role, name: session.username, account: session.username });
 			location.href = sessionStorage.getItem("st_return") || "/ui/";
 		} catch (err) {
 			setStatus("Sign in failed: " + err.message);
@@ -813,22 +814,14 @@ function loadLogin() {
 			method: "POST", headers: { "Authorization": "Bearer " + token },
 		});
 		if (res.status === 204) {
+			// The last session's role and name are cleared before the server is asked about this
+			// token, so an older server without the identity endpoint leaves the role unknown
+			// rather than inheriting somebody else's. The server knows who this token is, so the
+			// page asks it rather than drawing a token session as an admin with buttons that could
+			// only 403.
+			rememberIdentity(null);
 			localStorage.setItem("st_token", token);
-			localStorage.removeItem("st_role");
-			localStorage.removeItem("st_user");
-			// The server knows who this token is; asking beats guessing. Without the answer every
-			// role-gated control treated a token session as admin and drew buttons that could only
-			// 403. An older server without the endpoint just leaves the role unknown, as before.
-			try {
-				const meRes = await fetch(API + "/auth/me", {
-					headers: { "Authorization": "Bearer " + token },
-				});
-				if (meRes.ok) {
-					const me = await meRes.json();
-					if (me && me.role) localStorage.setItem("st_role", me.role);
-					if (me && me.name) localStorage.setItem("st_user", me.name);
-				}
-			} catch (_) { /* the role stays unknown and the server still enforces */ }
+			await refreshIdentity();
 			location.href = sessionStorage.getItem("st_return") || "/ui/";
 			return;
 		}

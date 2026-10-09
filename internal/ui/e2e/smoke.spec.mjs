@@ -130,19 +130,15 @@ const PAGES = [
   ),
 ].map((m) => m[1]).sort();
 
-// The demo serves no token store, so the users page asks for /v1/tokens, is told no, and says so in
-// its own words. The browser still logs the 404 it saw, and no script can unlog it, so the guard
-// below allows that one line rather than pretending the page is broken.
-const ALLOWED_CONSOLE = [/Failed to load resource.*404/];
-
+// The demo serves no token store, no credential types, and no federation. The server names the
+// features it runs without and the users and credentials pages skip them, so any 404 logged here is
+// real.
 for (const path of PAGES) {
   test(`the page at ${path} renders without browser errors`, async ({ page }) => {
     const errors = [];
     page.on("pageerror", (err) => errors.push(`pageerror: ${err.message}`));
     page.on("console", (msg) => {
-      if (msg.type() !== "error") return;
-      if (ALLOWED_CONSOLE.some((re) => re.test(msg.text()))) return;
-      errors.push(`console.error: ${msg.text()}`);
+      if (msg.type() === "error") errors.push(`console.error: ${msg.text()}`);
     });
 
     const response = await page.goto(path, { waitUntil: "domcontentloaded" });
