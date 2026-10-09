@@ -40,21 +40,22 @@ A release built by this repository's `release.yml` workflow ships a `SHA256SUMS`
 identity. There is no long-lived key to steal, and the signature is recorded in the public Rekor
 transparency log.
 
-**A release built any other way is not signed, and its assets carry no `SHA256SUMS.sig` or
-`SHA256SUMS.pem`.** Check for those two files before relying on the command below: their absence
-means the release was assembled by hand and the signature chain described here does not apply to it.
-Verify such a release against the checksums alone, and treat the checksums as unattested. Every
-release published from this repository is signed. Releases before v1.101.0 were published from an
-earlier repository that is no longer public, and their assets went with it, so `switchtender version
---verify` on a build older than v1.101.0 cannot find its manifest. Upgrade to verify. This
-product's claim is that you can check what it tells you, so the honest form of that claim includes
-saying when a check is not available.
+**A release built any other way is not signed, and its assets carry no `SHA256SUMS.sigstore.json`,
+`SHA256SUMS.sig`, or `SHA256SUMS.pem`.** Check for those files before relying on the commands below:
+their absence means the release was assembled by hand and the signature chain described here does
+not apply to it. Verify such a release against the checksums alone, and treat the checksums as
+unattested. Every release published from this repository is signed. Releases before v1.101.0 were
+published from an earlier repository that is no longer public, and their assets went with it, so
+`switchtender version --verify` on a build older than v1.101.0 cannot find its manifest. Upgrade to
+verify. This product's claim is that you can check what it tells you, so the honest form of that
+claim includes saying when a check is not available.
 
-Verify the signature over the checksums, then the archive against them:
+Verify the signature over the checksums, then the archive against them. The sigstore bundle
+carries the signature, the signing certificate, and the transparency log entry in one file, and
+cosign v3 verifies it with no deprecation notice:
 
     cosign verify-blob SHA256SUMS \
-      --signature SHA256SUMS.sig \
-      --certificate SHA256SUMS.pem \
+      --bundle SHA256SUMS.sigstore.json \
       --certificate-identity-regexp '^https://github.com/kordloom/switchtender/\.github/workflows/release\.yml@refs/tags/v' \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
@@ -70,9 +71,36 @@ because `--verify` fetches it over HTTPS and compares the running executable aga
 that trusts whoever can write the release assets. Checking the signature once, out of band, is what
 turns it into a check on the build rather than a check on GitHub.
 
-With cosign v3, the `verify-blob` command above still verifies and also prints two notices that
-`--signature` and `--certificate` are deprecated in favor of a bundle. A release does not publish a
-bundle yet, so those two flags are the ones that apply to it.
+The install script at https://switchtender.com/install.sh runs this signature check itself when
+cosign is on PATH, and says plainly when it is not, so a one-line install on a machine with cosign
+gets the same assurance as the commands above.
+
+### With cosign v2, or for a release without a bundle
+
+Every release also publishes the detached signature and certificate, which every cosign v2 release
+verifies with the flags below. A release made before the bundle was added carries only this pair:
+
+    cosign verify-blob SHA256SUMS \
+      --signature SHA256SUMS.sig \
+      --certificate SHA256SUMS.pem \
+      --certificate-identity-regexp '^https://github.com/kordloom/switchtender/\.github/workflows/release\.yml@refs/tags/v' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+cosign v3 prints two notices that `--signature` and `--certificate` are deprecated in favor of the
+bundle, and verifies all the same.
+
+### Without a network
+
+The bundle holds the Rekor entry, so the check needs nothing from the network beyond a copy of the
+Sigstore trusted root. cosign v3 keeps that file at
+`~/.sigstore/root/tuf-repo-cdn.sigstore.dev/targets/trusted_root.json` on any machine where it has
+verified something online. Carry it across with the release assets and name it:
+
+    cosign verify-blob SHA256SUMS \
+      --bundle SHA256SUMS.sigstore.json \
+      --trusted-root trusted_root.json \
+      --certificate-identity-regexp '^https://github.com/kordloom/switchtender/\.github/workflows/release\.yml@refs/tags/v' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
 ### The Linux packages
 

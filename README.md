@@ -378,7 +378,7 @@ required.
 ## Roadmap
 
 - A hosted option.
-- Signed desktop packages for macOS and Windows.
+- Signed desktop packages for Windows, and a signed macOS tarball.
 - Group-driven roles for OIDC sign-in, which LDAP, SAML, and JWT already have.
 
 ## Status
@@ -407,8 +407,9 @@ directory sign-in (OIDC, SAML, LDAP, JWT) and five approval policies at $500 a y
 hosts. Team, from $9,900 a year by fleet band, adds the full policy engine, creating a new
 PostgreSQL schema (opening one that exists, and running active-active HA on it, is never gated),
 distributed workers, the change register, and one-click drift reconcile. Enterprise, from $75,000 a
-year, adds services that come from outside your install, such as the hosted witness and evidence
-custody. Every paid feature unlocks in the same binary with a signed license file: no license
+year, adds the services that come from outside your install: custody of your evidence, evidence
+work on your audit calendar, and the hosted witness, which Team can also buy as an add-on. Every
+paid feature unlocks in the same binary with a signed license file: no license
 server, no phone-home, flat per org. The one reserved right is offering SwitchTender to third
 parties as a hosted or managed service that provides its primary functionality. Each version
 converts to Apache-2.0 two years after its release.

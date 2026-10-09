@@ -1,7 +1,10 @@
 package util_test
 
 import (
+	"fmt"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/kordloom/switchtender/internal/util"
 )
@@ -21,6 +24,36 @@ func TestFirstNonEmpty(t *testing.T) {
 		if got := util.FirstNonEmpty(test.In...); got != test.Want {
 			t.Errorf("test %d: FirstNonEmpty(%v) = %q, want %q", i, test.In, got, test.Want)
 		}
+	}
+}
+
+// TestPlural pins the one pluralizer every count written beside a noun goes through.
+func TestPlural(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		One, Many  string
+		WantResult string
+		N          int
+	}{{ // Test 0: Zero takes the plural.
+		N: 0, One: "anchor", Many: "anchors", WantResult: "anchors",
+	}, { // Test 1: One alone takes the singular.
+		N: 1, One: "anchor", Many: "anchors", WantResult: "anchor",
+	}, { // Test 2: Two.
+		N: 2, One: "anchor", Many: "anchors", WantResult: "anchors",
+	}, { // Test 3: A verb changes form with the noun.
+		N: 1, One: "credential has", Many: "credentials have", WantResult: "credential has",
+	}, { // Test 4: A negative count is not one.
+		N: -1, One: "beat", Many: "beats", WantResult: "beats",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			got := util.Plural(test.N, test.One, test.Many)
+			if diff := cmp.Diff(test.WantResult, got); diff != "" {
+				t.Errorf("Plural(%d, %q, %q) mismatch (-want +got):\n%s",
+					test.N, test.One, test.Many, diff)
+			}
+		})
 	}
 }
 

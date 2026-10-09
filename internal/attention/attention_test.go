@@ -372,6 +372,38 @@ func TestEvaluateWording(t *testing.T) {
 	}
 }
 
+// TestApproverSentence pins who the sentence says can decide. Denying is admin work, so the
+// sentence gives the denial to any admin and never to the excluded account, whose role may not
+// allow it and which, for an agent's run, stands for an account the agent acts for.
+func TestApproverSentence(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		WantResult string
+		In         Approvers
+	}{{ // Test 0: No rule excludes anyone, so any admin decides.
+		In:         Approvers{Role: "admin"},
+		WantResult: "An admin can approve or deny it. No agent can approve it.",
+	}, { // Test 1: The account that asked may not approve, and is not told it may deny.
+		In: Approvers{Role: "admin", Excluded: "deploy-bot"},
+		WantResult: "An admin other than deploy-bot can approve it, because the rule that " +
+			"held it requires a different person from the one who asked. Any admin can deny " +
+			"it. No agent can approve it.",
+	}, { // Test 2: An agent's run excludes the account it acts for, and names the agent.
+		In: Approvers{Role: "admin", Excluded: "dev-lead", Agent: "deploy-bot"},
+		WantResult: "An admin other than dev-lead, the account agent deploy-bot acts for, can " +
+			"approve it, because the rule that held it requires a different person from the one " +
+			"who asked. Any admin can deny it. No agent can approve it.",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			if diff := cmp.Diff(test.WantResult, approverSentence(test.In)); diff != "" {
+				t.Errorf("approverSentence() mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 // approvalOf returns the approval detail of the condition on stepID, the main one or a badge.
 func approvalOf(it Item, stepID string) *Approval {
 	for _, c := range append([]Condition{it.Main}, it.Badges...) {

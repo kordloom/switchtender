@@ -12,6 +12,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/template"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // examplesDB is the database the starter templates are written into.
@@ -92,7 +93,8 @@ func runExamples(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintln(os.Stderr, "every starter template is already present; nothing added.")
 		return nil
 	}
-	fmt.Fprintf(os.Stderr, "added %d starter template(s). Launch one from the templates page or the API.\n", added)
+	fmt.Fprintf(os.Stderr, "added %d starter %s. Launch one from the templates page or the API.\n",
+		added, util.Plural(added, "template", "templates"))
 	if fresh {
 		fmt.Fprintf(os.Stderr,
 			"these went into a new database at %s, which was not there before. If your server runs "+

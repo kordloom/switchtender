@@ -168,7 +168,7 @@ export function rows(specs) {
 // view fills a register view with defaults, so a test states only what it cares about.
 export function view(overrides) {
 	return Object.assign({
-		Status: "verified", StatusText: "The chain verifies and carries 1 anchor(s).",
+		Status: "verified", StatusText: "The chain verifies and carries 1 anchor.",
 		From: "2026-07-01", To: "2026-07-08", Rows: [], Total: 0, Approved: 0, Rejected: 0,
 		Failed: 0, ChainCount: 3, Receipt: "3:abcdef", AnchorProblems: [],
 		// The register can be cut at the store boundary, so the document carries the fields that say

@@ -23,11 +23,24 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
+	"github.com/kordloom/switchtender/internal/safedial"
 	"github.com/kordloom/switchtender/internal/user"
 )
 
 // samlStateTTL bounds how long a sign-in may take from the redirect to the assertion post.
 const samlStateTTL = 10 * time.Minute
+
+// idpFetchTimeout bounds one request to an identity provider.
+const idpFetchTimeout = 30 * time.Second
+
+// idpClient returns the client every identity provider request goes through: the SAML metadata
+// document, OIDC discovery with its key set and code exchange, and a JWT issuer's key set. Each
+// address is operator configuration this server follows on its own network, so it dials through
+// the same guard every other configured address does. A redirect is still followed, since an
+// identity provider may answer one, and each hop meets the same dial check.
+func idpClient() *http.Client {
+	return &http.Client{Transport: safedial.Transport(), Timeout: idpFetchTimeout}
+}
 
 // samlCookie names the short-lived signed cookie that carries the request id across the redirect,
 // so the assertion's InResponseTo is checked against the request this browser actually started.
@@ -92,7 +105,7 @@ func NewSAMLAuth(ctx context.Context, idpMetadataURL, baseURL, certFile, keyFile
 	if err != nil {
 		return nil, fmt.Errorf("saml: idp metadata url: %w", err)
 	}
-	idpMetadata, err := samlsp.FetchMetadata(ctx, http.DefaultClient, *mdURL)
+	idpMetadata, err := samlsp.FetchMetadata(ctx, idpClient(), *mdURL)
 	if err != nil {
 		return nil, fmt.Errorf("saml: fetch idp metadata: %w", err)
 	}

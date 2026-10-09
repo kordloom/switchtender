@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -108,6 +109,127 @@ func TestABadTemplateCostsOnlyItselfInsideASemaphoreProject(t *testing.T) {
 	if _, ok := warningContaining(t, plan.Warnings, `projects entry "ops": templates entry "Broken"`,
 		"was skipped"); !ok {
 		t.Errorf("the skipped template was not named inside its project.\nwarnings: %v", plan.Warnings)
+	}
+}
+
+// TestABadHostCostsOnlyItselfInsideAnAWXInventory pins the container rule for the shape awxkit
+// writes. One malformed host costs that host alone, not the inventory it sits in with its other
+// hosts, groups, and variables, and not every template on that inventory. A host skipped from the
+// inventory is left out of every group that names it too, so no group brings it back.
+func TestABadHostCostsOnlyItselfInsideAnAWXInventory(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// Name labels the subtest.
+		Name string
+		// Key is the top-level key the inventory list is under, inventory when empty.
+		Key string
+		// Inventory is the inventory entry, holding one malformed host somewhere inside it.
+		Inventory string
+		// WantSkipped is the warning naming the host that was skipped.
+		WantSkipped string
+		// WantGone is a line the inventory content must not hold, 123 when empty.
+		WantGone string
+		// WantKept are lines the inventory content must hold beyond the ones every case keeps.
+		WantKept []string
+	}{{ // Test 0: The bad host sits under the inventory's related block, where awxkit writes hosts.
+		Name: "host under related",
+		Inventory: `{"name": "Production", "variables": {"env": "prod"}, "related": {
+		  "hosts": [{"name": "web01"}, {"name": 123}, {"name": "db01"}],
+		  "groups": [{"name": "web", "related": {"hosts": [{"name": "web01"}]}}]}}`,
+		WantSkipped: `inventory entry "Production": related.hosts entry #2 was skipped because its ` +
+			"name field is a number where text belongs",
+	}, { // Test 1: The bad host sits in a group's related block, two containers down.
+		Name: "host under a group",
+		Inventory: `{"name": "Production", "variables": {"env": "prod"}, "related": {
+		  "hosts": [{"name": "web01"}, {"name": "db01"}],
+		  "groups": [{"name": "web", "related": {"hosts": [{"name": "web01"}, {"name": 123}]}}]}}`,
+		WantSkipped: `inventory entry "Production": related.groups entry "web": related.hosts ` +
+			"entry #2 was skipped because its name field is a number where text belongs",
+	}, { // Test 2: The bad host sits at the inventory's top level, the hand-written shape.
+		Name: "host at the top level",
+		Inventory: `{"name": "Production", "variables": {"env": "prod"},
+		  "hosts": [{"name": "web01"}, {"name": 123}, {"name": "db01"}],
+		  "groups": [{"name": "web", "hosts": [{"name": "web01"}]}]}`,
+		WantSkipped: `inventory entry "Production": hosts entry #2 was skipped because its name ` +
+			"field is a number where text belongs",
+	}, { // Test 3: A named host with a bad field is left out of the group awxkit also lists it in.
+		Name: "skipped host a group names",
+		Inventory: `{"name": "Production", "variables": {"env": "prod"}, "related": {
+		  "hosts": [{"name": "web01"}, {"name": "web02", "enabled": "no",
+		    "variables": {"ansible_host": "10.0.0.2"}}, {"name": "db01"}],
+		  "groups": [{"name": "web", "related": {"hosts": [{"name": "web01"}, {"name": "web02"}]}},
+		    {"name": "edge", "related": {"hosts": [{"name": "web02"}]}}]}}`,
+		WantSkipped: `inventory entry "Production": related.hosts entry "web02" was skipped ` +
+			"because its enabled field is a string where true or false belongs, and the rest of " +
+			`the export imports without it. It is left out of groups "edge", "web" too, which ` +
+			"list it, so no play reaches it",
+		WantGone: "web02",
+	}, { // Test 4: The same under a nested child group and the inventories key.
+		Name: "skipped host a nested group names",
+		Key:  "inventories",
+		Inventory: `{"name": "Production", "variables": {"env": "prod"}, "related": {
+		  "hosts": [{"name": "web01"}, {"name": "web02", "enabled": "no"}, {"name": "db01"}],
+		  "groups": [{"name": "web", "related": {"hosts": [{"name": "web01"}],
+		    "children": [{"name": "canary", "related": {"hosts": [{"name": "web02"}]}}]}}]}}`,
+		WantSkipped: `inventories entry "Production": related.hosts entry "web02" was skipped ` +
+			"because its enabled field is a string where true or false belongs, and the rest of " +
+			`the export imports without it. It is left out of group "canary" too, which lists ` +
+			"it, so no play reaches it",
+		WantGone: "web02",
+		WantKept: []string{"[canary]"},
+	}, { // Test 5: A host listed twice, once readably, stays in the group that names it.
+		Name: "host listed twice",
+		Inventory: `{"name": "Production", "variables": {"env": "prod"}, "related": {
+		  "hosts": [{"name": "web01"}, {"name": "web02", "enabled": "no"}, {"name": "web02"},
+		    {"name": "db01"}],
+		  "groups": [{"name": "web", "related": {"hosts": [{"name": "web01"}, {"name": "web02"}]}}]}}`,
+		WantSkipped: `inventory entry "Production": related.hosts entry "web02" was skipped ` +
+			"because its enabled field is a string where true or false belongs, and the rest of " +
+			"the export imports without it",
+		WantKept: []string{"[web]\nweb01\nweb02"},
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			key := test.Key
+			if key == "" {
+				key = "inventory"
+			}
+			export := `{
+			  "projects": [{"name": "web", "scm_type": "git", "scm_url": "https://example.com/web.git"}],
+			  "` + key + `": [` + test.Inventory + `],
+			  "job_templates": [{"name": "Deploy", "playbook": "site.yml", "project": "web",
+			    "inventory": "Production"}]}`
+			plan, err := FromAWX([]byte(export), time.Now())
+			if err != nil {
+				t.Fatalf("FromAWX() error = %v", err)
+			}
+			if len(plan.Inventories) != 1 {
+				t.Fatalf("inventories = %d, want the inventory kept without its one bad host.\n"+
+					"warnings: %v", len(plan.Inventories), plan.Warnings)
+			}
+			content := plan.Inventories[0].Content
+			for _, want := range append([]string{"web01", "db01", "[web]", "env=prod"},
+				test.WantKept...) {
+				if !strings.Contains(content, want) {
+					t.Errorf("the kept inventory lost %q:\n%s", want, content)
+				}
+			}
+			gone := test.WantGone
+			if gone == "" {
+				gone = "123"
+			}
+			if strings.Contains(content, gone) {
+				t.Errorf("the skipped host %q is in the inventory anyway:\n%s", gone, content)
+			}
+			if _, ok := warningContaining(t, plan.Warnings, test.WantSkipped); !ok {
+				t.Errorf("the skipped host was not named inside its inventory.\nwarnings: %v",
+					plan.Warnings)
+			}
+			if _, ok := warningContaining(t, plan.Warnings, `template "Deploy" references unknown`); ok {
+				t.Errorf("the template lost its inventory to one bad host: %v", plan.Warnings)
+			}
+		})
 	}
 }
 

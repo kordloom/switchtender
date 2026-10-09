@@ -32,20 +32,20 @@ func TestGapFindingNamesTheMissingBeats(t *testing.T) {
 		WantResult string
 	}{{ // Test 0: One beat missing inside a long answer.
 		Beats: []int64{1, 2, 3, 5, 6, 7},
-		WantResult: "the feed skips 1 beat(s) across 1 gap(s), beat 4, so what the chain held " +
+		WantResult: "the feed skips 1 beat across 1 gap, beat 4, so what the chain held " +
 			"there is gone",
 	}, { // Test 1: A run of missing beats, named oldest first.
 		Beats: []int64{1, 2, 10},
-		WantResult: "the feed skips 7 beat(s) across 1 gap(s), beats 3 to 9, so what the chain " +
+		WantResult: "the feed skips 7 beats across 1 gap, beats 3 to 9, so what the chain " +
 			"held there is gone",
 	}, { // Test 2: Two gaps, each named.
 		Beats: []int64{1, 3, 4, 7},
-		WantResult: "the feed skips 3 beat(s) across 2 gap(s), beat 2 and beats 5 to 6, so what " +
+		WantResult: "the feed skips 3 beats across 2 gaps, beat 2 and beats 5 to 6, so what " +
 			"the chain held there is gone",
 	}, { // Test 3: Past the cap the first gaps are named and the rest counted.
 		Beats: []int64{1, 3, 5, 7, 9, 11, 13},
-		WantResult: "the feed skips 6 beat(s) across 6 gap(s), beat 2, beat 4, beat 6, beat 8, " +
-			"and 2 more gap(s), so what the chain held there is gone",
+		WantResult: "the feed skips 6 beats across 6 gaps, beat 2, beat 4, beat 6, beat 8, " +
+			"and 2 more gaps, so what the chain held there is gone",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

@@ -138,6 +138,8 @@ var jenkinsJobTypes = map[string]string{
 	"maven2-moduleset":         "a Maven job, which is a build rather than an operational task.",
 	"hudson.ivy.IvyModuleSet":  "an Ivy job, which is a build rather than an operational task.",
 	"hudson.model.ExternalJob": "an external job, which only records runs that happened elsewhere.",
+	"jenkins.branch.OrganizationFolder": "an organization folder, which scans a forge for " +
+		"repositories and builds each one's Jenkinsfile, and has no equivalent here.",
 }
 
 // jenkinsEnvVars are the variables Jenkins sets for every build. A script using one runs differently
@@ -242,15 +244,28 @@ func jenkinsRootElement(data []byte) (string, error) {
 
 // addJenkinsJob maps one job document into the plan, refusing any job type that has no faithful
 // equivalent rather than importing part of it.
+//
+// A job of a type refused by name counts as refused, the way the other importers count theirs, so
+// an export holding only Pipeline and multibranch jobs, which is most of them today, reports each
+// job and why it does not come across instead of being called unrecognized. A root element nothing
+// recognizes counts only when a directory or an archive named the job, which is what makes it a
+// job. A lone document with such a root is most likely the wrong file, such as the controller's
+// own configuration or another tool's export, and the plan left empty refuses it as unrecognized.
+// A named job that cannot be read counts for the same reason, so an export whose every job is
+// malformed reports each one and what is wrong with it.
 func (p *Plan) addJenkinsJob(job jenkinsBundledJob, inventoryName string, now time.Time) {
+	name := jenkinsCleanName(job.Name)
+	unnamed := name == ""
 	// The bundle wrapper strips the job's own root element from view, so it is read back here.
 	root, err := jenkinsRootElement(job.Inner)
 	if err != nil {
 		p.warn("job %q could not be read: %v", oneLine(job.Name), err)
+		if !unnamed {
+			p.refused++
+		}
 		return
 	}
-	name := jenkinsCleanName(job.Name)
-	if name == "" {
+	if unnamed {
 		name = root
 	}
 	if root == jenkinsFolderRoot {
@@ -260,17 +275,38 @@ func (p *Plan) addJenkinsJob(job jenkinsBundledJob, inventoryName string, now ti
 	}
 	if why, refused := jenkinsJobTypes[root]; refused {
 		p.warn("job %q is %s It was not imported.", name, why)
+		p.refused++
 		return
 	}
 	if root != "project" {
 		p.warn("job %q has the unrecognized type %q and was not imported", name, oneLine(root))
+		if !unnamed && root != jenkinsControllerRoot {
+			p.refused++
+		}
 		return
 	}
 
 	var proj jenkinsProject
 	if err := xml.Unmarshal(job.Inner, &proj); err != nil {
 		p.warn("job %q could not be read: %v", name, err)
+		if !unnamed {
+			p.refused++
+		}
 		return
+	}
+	// A bare config.xml handed over on its own carries no directory to name it, which is where
+	// Jenkins keeps a job's name. Its display name is the next best thing it holds; failing that
+	// the job type stands in, and the report says so, because a template named project reads as
+	// the importer not knowing the job, and Jenkins H notation hashes the name, so the name picks
+	// the minute a timer fires at.
+	if unnamed {
+		if display := jenkinsCleanName(proj.DisplayName); display != "" {
+			name = display
+		} else {
+			p.warn("job %q was named after its root element, because a bare config.xml carries no "+
+				"job name and this one has no display name. Rename the template after importing, "+
+				"or import the job's directory so it keeps its name.", name)
+		}
 	}
 	p.addJenkinsFreestyle(name, proj, inventoryName, now)
 }

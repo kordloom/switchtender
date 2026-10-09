@@ -12,6 +12,7 @@ import (
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/notification"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // healthDeliveries bounds how many of a target's recent deliveries its status is read from.
@@ -172,7 +173,7 @@ func targetFindings(ctx context.Context, store notification.Store, n *notificati
 	}
 	if h := view.Delivery; h.Failed > 0 && h.LastFailedAt != nil {
 		problem := fmt.Sprintf("Failed to deliver %d %s in the last seven days. The latest failed "+
-			"at %s: %s.", h.Failed, plural(h.Failed, "notification", "notifications"),
+			"at %s: %s.", h.Failed, util.Plural(h.Failed, "notification", "notifications"),
 			h.LastFailedAt.UTC().Format(time.RFC3339), h.LastError)
 		if h.State == notification.StateHealthy || h.State == notification.StateRetrying {
 			problem += " It has delivered since."
@@ -193,14 +194,6 @@ func missingWords(missing []string) string {
 		return "its key"
 	}
 	return "its secret"
-}
-
-// plural picks the singular or plural form for n.
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return one
-	}
-	return many
 }
 
 // orphanFinding reports an attachment whose target or object no longer exists, or nil when both

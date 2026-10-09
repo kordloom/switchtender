@@ -144,9 +144,10 @@ RUN set -eux; \
     golangci-lint version
 
 # The files CI's own steps download, kept under the exact URLs those steps name, for the runner's
-# curl to serve offline. The steps fetch the linux-amd64 builds by name, so on another architecture
-# each is this machine's build in the same layout: the step that unpacks helm still finds
-# linux-amd64/helm, and it runs here.
+# curl to serve offline. The steps fetch the linux-amd64 builds by name and check each against its
+# pinned SHA-256. On amd64 every file is that upstream download byte for byte, so the pins are
+# checked here as in CI. On another architecture each is this machine's build in the same layout:
+# the step that unpacks helm still finds linux-amd64/helm, and it runs here.
 ARG HELM_VERSION
 ARG GITLEAKS_VERSION
 ARG KIND_VERSION
@@ -160,13 +161,17 @@ RUN set -eux; \
       *) exit 1 ;; \
     esac; \
     d=/opt/ci-local/downloads; \
-    mkdir -p "$d/helm"; \
-    curl -fsSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-${TARGETARCH}.tar.gz" | tar -xz -C "$d/helm"; \
-    if [ "$TARGETARCH" != amd64 ]; then \
+    mkdir -p "$d"; \
+    helm_url="https://get.helm.sh/helm-v${HELM_VERSION}-linux-${TARGETARCH}.tar.gz"; \
+    if [ "$TARGETARCH" = amd64 ]; then \
+      curl -fsSL -o "$d/helm.tar.gz" "$helm_url"; \
+    else \
+      mkdir -p "$d/helm"; \
+      curl -fsSL "$helm_url" | tar -xz -C "$d/helm"; \
       mv "$d/helm/linux-${TARGETARCH}" "$d/helm/linux-amd64"; \
+      tar -czf "$d/helm.tar.gz" -C "$d/helm" linux-amd64; \
+      rm -rf "$d/helm"; \
     fi; \
-    tar -czf "$d/helm.tar.gz" -C "$d/helm" linux-amd64; \
-    rm -rf "$d/helm"; \
     gitleaks_url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"; \
     curl -fsSL -o "$d/gitleaks.tar.gz" \
       "$gitleaks_url/gitleaks_${GITLEAKS_VERSION}_linux_${gitleaks_arch}.tar.gz"; \

@@ -41,7 +41,7 @@ func TestCheckFindsAGapInTheFeed(t *testing.T) {
 	if len(findings) != 1 || findings[0].Kind != "missing_beat" {
 		t.Fatalf("findings = %v, want one missing_beat", findings)
 	}
-	if !strings.Contains(findings[0].Detail, "2 beat(s)") {
+	if !strings.Contains(findings[0].Detail, "2 beats") {
 		t.Errorf("detail = %q, want the count of missing beats", findings[0].Detail)
 	}
 }

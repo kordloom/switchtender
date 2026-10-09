@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/util"
 	"github.com/kordloom/switchtender/witness"
 )
 
@@ -119,7 +120,8 @@ func runWitness(cmd *cobra.Command, _ []string) error {
 				return err
 			}
 			if len(findings) > 0 {
-				return fmt.Errorf("the witness raised %d finding(s), each printed above", len(findings))
+				return fmt.Errorf("the witness raised %d %s, each printed above", len(findings),
+					util.Plural(len(findings), "finding", "findings"))
 			}
 			fmt.Fprintln(os.Stderr, witnessSummary(cp))
 			return nil
@@ -171,12 +173,13 @@ func deliverFindings(ctx context.Context, client *http.Client, server string,
 	}
 	for i, f := range queue {
 		if err := postWitnessFinding(ctx, client, witnessWebhook, server, f); err != nil {
-			fmt.Fprintf(os.Stderr, "witness: webhook: %v; %d finding(s) queued for redelivery\n",
-				err, len(queue)-i)
+			fmt.Fprintf(os.Stderr, "witness: webhook: %v; %d %s queued for redelivery\n",
+				err, len(queue)-i, util.Plural(len(queue)-i, "finding", "findings"))
 			rest := queue[i:]
 			if len(rest) > undeliveredCap {
-				fmt.Fprintf(os.Stderr, "witness: webhook: dropping %d oldest undelivered finding(s)\n",
-					len(rest)-undeliveredCap)
+				dropped := len(rest) - undeliveredCap
+				fmt.Fprintf(os.Stderr, "witness: webhook: dropping %d oldest undelivered %s\n",
+					dropped, util.Plural(dropped, "finding", "findings"))
 				rest = rest[len(rest)-undeliveredCap:]
 			}
 			return rest

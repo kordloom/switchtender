@@ -19,17 +19,19 @@ import (
 // would not read set to zero, because a zeroed limit or a missing credential changes what the asset
 // does, and a skipped asset is visible where a quietly altered one is not.
 //
-// Containers are element types whose entries hold lists of assets themselves, such as a Semaphore
-// project. An entry of one of those that does not decode has its own lists cleaned the same way,
-// rather than every asset in it being dropped for one bad template.
-func decodeLenient(data []byte, v any, containers ...reflect.Type) ([]string, error) {
+// Containers are types whose values hold lists of assets themselves, such as a Semaphore project or
+// an AWX inventory and the related block awxkit nests its hosts under. An entry of one of those
+// that does not decode has its own lists cleaned the same way, rather than every asset in it being
+// dropped for one bad template, and a container held in a field of another is cleaned in place, so
+// one host whose name is a number costs that host and not the inventory and every template on it.
+func decodeLenient(data []byte, v any, containers ...reflect.Type) ([]lenientSkip, error) {
 	err := decodeNumbers(data, v)
 	var typeErr *json.UnmarshalTypeError
 	if err == nil || !errors.As(err, &typeErr) {
 		return nil, err
 	}
 	target := reflect.ValueOf(v).Elem()
-	cleaned, skipped, ok := cleanObject(data, target.Type(), "", containers)
+	cleaned, skipped, ok := cleanObject(data, target.Type(), "", nil, containers)
 	if !ok || len(skipped) == 0 {
 		return nil, err
 	}
@@ -38,6 +40,35 @@ func decodeLenient(data []byte, v any, containers ...reflect.Type) ([]string, er
 		return nil, err
 	}
 	return skipped, nil
+}
+
+// lenientSkip is one list entry the lenient decoder left out.
+type lenientSkip struct {
+	// Text is the sentence the report carries for the entry.
+	Text string
+	// Name is the entry's name when it has one as text, and empty otherwise.
+	Name string
+	// Path locates the list the entry was in, from the document down: the key of each field on the
+	// way, with the position of the container entry the path passes through in a list.
+	Path []lenientStep
+}
+
+// lenientStep is one field on the path from a document to a list the lenient decoder cleaned.
+type lenientStep struct {
+	// Key is the field's JSON key.
+	Key string
+	// Index is the position, among the entries kept, of the container entry the path passes
+	// through in this field's list, or -1 for a field that is not a list or is the list itself.
+	Index int
+}
+
+// stepKeys returns the keys of the steps joined with dots, such as related.hosts.
+func stepKeys(steps []lenientStep) string {
+	out := make([]string, len(steps))
+	for i, s := range steps {
+		out[i] = s.Key
+	}
+	return strings.Join(out, ".")
 }
 
 // decodeNumbers decodes one JSON value into v, keeping numbers as json.Number so a large integer in
@@ -49,23 +80,35 @@ func decodeNumbers(data []byte, v any) error {
 }
 
 // cleanObject returns the JSON object data with every list field of t stripped of the entries that do
-// not decode into the list's element type, a sentence for each entry removed, and whether data was an
-// object of that shape at all.
-func cleanObject(data []byte, t reflect.Type, where string, containers []reflect.Type) (
-	[]byte, []string, bool) {
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
+// not decode into the list's element type, a record of each entry removed, and whether data was an
+// object of that shape at all. path is where data sits in the document.
+func cleanObject(data []byte, t reflect.Type, where string, path []lenientStep,
+	containers []reflect.Type) ([]byte, []lenientSkip, bool) {
+	t = elemType(t)
 	var obj map[string]json.RawMessage
 	if t.Kind() != reflect.Struct || json.Unmarshal(data, &obj) != nil || obj == nil {
 		return data, nil, false
 	}
-	var skipped []string
+	var skipped []lenientSkip
 	for i := range t.NumField() {
 		field := t.Field(i)
 		key := jsonName(field)
 		raw, present := obj[key]
-		if key == "" || !present || field.Type.Kind() != reflect.Slice {
+		if key == "" || !present {
+			continue
+		}
+		if field.Type.Kind() != reflect.Slice {
+			// A container held in a field, such as the related block an inventory's hosts sit
+			// under, is cleaned where it is. Only a value that lost an entry is written back, so a
+			// field that decodes as it stands is left exactly as the export wrote it.
+			if slices.Contains(containers, elemType(field.Type)) {
+				inner, why, ok := cleanObject(raw, field.Type, where+key+".",
+					stepInto(path, key, -1), containers)
+				if ok && len(why) > 0 {
+					obj[key] = inner
+					skipped = append(skipped, why...)
+				}
+			}
 			continue
 		}
 		var items []json.RawMessage
@@ -82,15 +125,19 @@ func cleanObject(data []byte, t reflect.Type, where string, containers []reflect
 			}
 			label := where + key + " entry " + assetLabel(item, idx)
 			if slices.Contains(containers, elem) {
-				inner, why, ok := cleanObject(item, elem, label+": ", containers)
+				inner, why, ok := cleanObject(item, elem, label+": ", stepInto(path, key, len(kept)),
+					containers)
 				if ok && len(why) > 0 && decodeNumbers(inner, reflect.New(elem).Interface()) == nil {
 					kept = append(kept, inner)
 					skipped = append(skipped, why...)
 					continue
 				}
 			}
-			skipped = append(skipped, fmt.Sprintf("%s was skipped because %s, and the rest of the "+
-				"export imports without it", label, decodeProblem(err)))
+			skipped = append(skipped, lenientSkip{
+				Text: fmt.Sprintf("%s was skipped because %s, and the rest of the export imports "+
+					"without it", label, decodeProblem(err)),
+				Name: entryName(item), Path: stepInto(path, key, -1),
+			})
 		}
 		cleaned, err := json.Marshal(kept)
 		if err != nil {
@@ -103,6 +150,20 @@ func cleanObject(data []byte, t reflect.Type, where string, containers []reflect
 		return data, nil, false
 	}
 	return out, skipped, true
+}
+
+// stepInto returns a copy of path with one more step, so sibling paths never share a backing array.
+func stepInto(path []lenientStep, key string, index int) []lenientStep {
+	return append(slices.Clone(path), lenientStep{Key: key, Index: index})
+}
+
+// elemType returns the type behind any pointers, which is how a container is named whether a field
+// holds it directly or through a pointer.
+func elemType(t reflect.Type) reflect.Type {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	return t
 }
 
 // jsonName returns the key a struct field decodes from, or empty for a field JSON never fills.
@@ -122,16 +183,24 @@ func jsonName(f reflect.StructField) string {
 
 // assetLabel names a list entry for a warning: its name when it has one, its position otherwise.
 func assetLabel(item json.RawMessage, idx int) string {
+	if name := entryName(item); name != "" {
+		return strconv.Quote(name)
+	}
+	return "#" + strconv.Itoa(idx+1)
+}
+
+// entryName returns a list entry's name when the entry carries one as text, and empty otherwise.
+func entryName(item json.RawMessage) string {
 	var named struct {
 		// Name is the entry's own name, when it has one.
 		Name any `json:"name"`
 	}
 	if json.Unmarshal(item, &named) == nil {
 		if s, ok := named.Name.(string); ok && strings.TrimSpace(s) != "" {
-			return strconv.Quote(s)
+			return s
 		}
 	}
-	return "#" + strconv.Itoa(idx+1)
+	return ""
 }
 
 // decodeProblem says why an entry did not decode in terms of the export rather than of this

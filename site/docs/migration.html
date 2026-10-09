@@ -79,7 +79,7 @@ attempt one. This is the summary a preview of a small AWX export prints:</p>
       schedules            2
       projects             1
       templates            1
-  Needs a secret:     4 credential shell(s), because an export never carries secret values
+  Needs a secret:     4 credential shells, because an export never carries secret values
   Does not come across: 1
       - project &quot;Manual&quot; skipped: only git projects import (scm_type=&quot;&quot;)
   Worth reviewing:    7
@@ -229,11 +229,12 @@ only its name, and calls out anything that could not be mapped cleanly. It goes 
 so redirecting it to a file keeps a copy to review. Apply it when the report looks right:</p>
 <pre><code>switchtender import awx awx-export.json --db switchtender.db --apply
 </code></pre>
-<p>Apply an export once. A second apply is refused before it writes anything when the install already
+<p>Apply an export once. A second apply is refused before it creates any object when the install already
 holds a project, inventory, credential, inventory source, template, or schedule of the same name, and
-the refusal names each one. Importing again would create a second copy of each object, and a second
-copy of a schedule fires as well. To import a revised export, delete what the first one created, or
-import into a fresh database.</p>
+the refusal names each one. The attempt is still recorded in the audit chain, as every apply is, and
+a refused apply against a SQLite path that did not exist leaves the new file behind and says so.
+Importing again would create a second copy of each object, and a second copy of a schedule fires as
+well. To import a revised export, delete what the first one created, or import into a fresh database.</p>
 <p>Semaphore works the same way with <code>import semaphore</code>. The importer is proven against a real
 backup taken from a live current Semaphore release, unknown newer fields included, not only
 against hand-built samples.</p>
@@ -299,8 +300,9 @@ address, <code>https://&lt;awx host&gt;/api/v2/job_templates/&lt;awx id&gt;/call
 often the slowest part of a move. So a template imported from an AWX job template that accepted
 callbacks also answers at that address, once the AWX hostname resolves to this server.</p>
 <p>The import binds a template to its AWX id when it knows the id. An export that carries each job
-template's <code>id</code> binds it directly. When yours does not, save the job template list the AWX API
-serves at <code>/api/v2/job_templates/</code> as JSON and give it to the import:</p>
+template's <code>id</code> binds it directly, and <code>awx export</code> strips ids, so a plain export carries none.
+When yours does not, save the job template list the AWX API serves at <code>/api/v2/job_templates/</code> as
+JSON and give it to the import:</p>
 <pre><code>switchtender import awx awx-export.json --awx-template-ids job-templates.json --apply
 </code></pre>
 <p>Give <code>--awx-template-ids</code> once per page when the list spans pages. An id is taken only for an exact
@@ -409,13 +411,23 @@ in Rundeck's key storage and does not come across, so the report names any optio
 single export file to fetch. Point the importer at the directory and it reads the tree.</p>
 <pre><code>switchtender import jenkins /var/jenkins_home --inventory prod --db switchtender.db
 </code></pre>
-<p>A <code>JENKINS_HOME</code>, its <code>jobs</code> directory, one job's <code>config.xml</code>, or a zip of a <code>JENKINS_HOME</code> or a
-<code>jobs</code> directory all work. A job is named by the directory holding its <code>config.xml</code>, so a zip whose
-only entry is a bare <code>config.xml</code> is refused with the reason rather than imported unnamed.
+<p>A <code>JENKINS_HOME</code>, its <code>jobs</code> directory, one job's directory, one job's <code>config.xml</code>, or a zip of
+the <code>jobs</code> directory all work. A job is named by the directory holding its <code>config.xml</code>, so a zip
+made inside one job's directory, with that <code>config.xml</code> at its top, is refused with the reason
+rather than imported unnamed.
 Folders are followed and each job keeps its full name, so a job in the <code>platform</code> folder imports as
-<code>platform/db-vacuum</code>. To import from the web page instead, zip the <code>jobs</code> directory and upload it;
-zip that directory rather than the whole <code>JENKINS_HOME</code>, which also holds every build log and
-workspace.</p>
+<code>platform/db-vacuum</code>. To import from the web page instead, zip the <code>jobs</code> directory and upload it.
+Each job keeps its build history and workspace under its own directory, which is far more files
+than the definitions and is what pushes a zip past the 20,000 entries and 25 MiB an upload reads,
+so leave those out:</p>
+<pre><code>zip -r jobs.zip jobs -x '*/builds/*' '*/workspace/*'
+</code></pre>
+<p>With 7-Zip on Windows, <code>7z a jobs.zip jobs -xr!builds -xr!workspace</code> does the same. Both also
+leave out a job that is itself named <code>builds</code> or <code>workspace</code>, so add that job's definition
+afterward by its own path, for example <code>zip jobs.zip jobs/builds/config.xml</code>. The zip reads a job's
+<code>config.xml</code> only where the directory walk would, so an archived artifact, a workspace file, a
+multibranch branch, or a promotion that happens to be named <code>config.xml</code> is passed over rather
+than reported as a job that does not come across.</p>
 <p>Each job's shell steps become one Bash template, in order, opening with <code>set -e</code> so it stops at the
 first failure the way the build did. Parameters become a survey. Every line of the build trigger
 becomes a schedule.</p>
@@ -508,7 +520,7 @@ archive over that size imports from the CLI alone.</p>
 </tr>
 <tr>
 <td>AWX inventory</td>
-<td>Stored inventory, rendered as INI from its hosts and groups.</td>
+<td>Stored inventory, rendered as INI from its hosts and groups. A host entry that does not read, such as one whose enabled field is a word, is skipped and named in the report, and the rest of the inventory imports. The host is left out of every group that lists it too, so no play reaches it.</td>
 </tr>
 <tr>
 <td>AWX inventory source</td>
@@ -536,7 +548,7 @@ archive over that size imports from the CLI alone.</p>
 </tr>
 <tr>
 <td>AWX job template schedule</td>
-<td>Schedule, with its timezone kept. A rule that a cron expression says exactly, checked against the rule's own next fires, becomes cron. Every other rule, such as every third day, the last Friday of the quarter, more than one <code>RRULE</code>, or an <code>EXRULE</code> or <code>EXDATE</code> that takes a holiday out, comes across as the RFC 5545 recurrence it is. A schedule that answers its template's survey fires a copy of the template whose questions default to those answers. A secret answer does not come across, so a schedule that gave one arrives switched off and the report names the question to give a default.</td>
+<td>Schedule, with its timezone kept. A rule that a cron expression says exactly, checked against the rule's own next fires, becomes cron. Every other rule, such as every third day, the last Friday of the quarter, more than one <code>RRULE</code>, or an <code>EXRULE</code> or <code>EXDATE</code> that takes a holiday out, comes across as the RFC 5545 recurrence it is. A schedule that answers its template's survey fires a copy of the template whose questions default to those answers. A secret answer does not come across, so a schedule that gave one arrives switched off and the report names the question to give a default. A schedule firing a template whose required secret question has no default arrives switched off the same way, since no export carries that default readably and every fire would stop until one is set.</td>
 </tr>
 <tr>
 <td>AWX workflow schedule</td>
@@ -742,7 +754,9 @@ Rundeck secure option, or a Jenkins password parameter, imports as a secret surv
 answer is sealed with the credential key and never stored on the run as text, so it is as
 protected as it was in the tool you left. A default for one does not come across, because an
 export carries it only as a placeholder or in the source tool's own encryption, and the report
-names each field that had one so you can set it on the template.</li>
+names each field that had one so you can set it on the template. A schedule firing a template
+whose required secret question has no default arrives switched off, since every fire would stop
+until one is set, and the report names the question beside each such schedule.</li>
 <li>Secrets are never in an export, so every credential is created as a shell and its secret has to be
 re-entered. The non-secret settings AWX did export, such as the user to connect as and how to
 become root, are stored on the credential itself and take effect at injection, so a machine

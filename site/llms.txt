@@ -28,7 +28,7 @@ beside the database. Try `switchtender demo` for a seeded read-only tour.
 - Live demo, read-only and seeded with real runs, nothing to install: https://demo.switchtender.com
 
 - [Homepage](https://switchtender.com/): what it is and the live matrix
-- [Pricing](https://switchtender.com/pricing): Community free forever with one plain rule, a require-approval policy or one exemption, Pro $500/year to 500 hosts for SSO and five approval policies, Team from $9,900/year flat per org by fleet band, Enterprise from $75,000/year for services outside your install, scoped on the order form
+- [Pricing](https://switchtender.com/pricing): Community free forever with one plain rule, a require-approval policy or one exemption, Pro $500/year to 500 hosts for SSO and five approval policies, Team from $9,900/year flat per org by fleet band with a KordLoom-hosted witness add-on at $3,000/year, Enterprise from $75,000/year for evidence custody and evidence work outside your install with the hosted witness included, scoped on the order form
 - [Get started](https://switchtender.com/get-started): install and first run
 - [AI agents](https://switchtender.com/agents): give an agent one operator-bound token, hold its runs for a person by default with no policy written, dry runs included, take two approvals for its Terraform or OpenTofu apply, and prove what it did
 - [Quickstart](https://switchtender.com/docs/quickstart): first job in minutes

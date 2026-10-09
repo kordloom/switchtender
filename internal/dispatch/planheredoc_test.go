@@ -46,7 +46,7 @@ func readHeredocPlan(t *testing.T) string {
 // The pattern accepted "^[ \t]*Plan:" and the parse took the leftmost match. A heredoc attribute
 // inside a resource diff prints an indented line of exactly that shape, so real OpenTofu output for a
 // plan destroying two resources parsed as destroys 0 with read true. The gate then weighed zero
-// against the limit, queued the apply with nobody asked, and wrote "plan would destroy 0 resource(s)"
+// against the limit, queued the apply with nobody asked, and wrote "plan would destroy 0 resources"
 // into the run's evidence.
 func TestParsePlanDestroysIgnoresIndentedSummary(t *testing.T) {
 	t.Parallel()
@@ -156,12 +156,12 @@ func TestPlanGateHoldsHeredocPlan(t *testing.T) {
 		t.Fatalf("Log(plan run) error = %v", err)
 	}
 	note := string(logged)
-	wantNote := fmt.Sprintf("switchtender: plan would destroy 2 resource(s); proposed apply %s "+
+	wantNote := fmt.Sprintf("switchtender: plan would destroy 2 resources; proposed apply %s "+
 		"held for approval.\n", proposal.ID)
 	if !strings.Contains(note, wantNote) {
 		t.Errorf("plan evidence missing %q\ngot tail:\n%s", wantNote, tailOf(note))
 	}
-	if strings.Contains(note, "plan would destroy 0 resource(s)") {
+	if strings.Contains(note, "plan would destroy 0 resources") {
 		t.Errorf("plan evidence understates the destroy count as zero:\n%s", tailOf(note))
 	}
 

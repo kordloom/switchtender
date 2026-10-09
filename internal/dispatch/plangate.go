@@ -15,6 +15,7 @@ import (
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // parsePlanDestroys returns the destroy count from a plan's change summary and whether that summary
@@ -175,7 +176,8 @@ func (d *Dispatcher) proposeApply(
 	if proposal.Status == run.StatusPendingApproval {
 		disposition = "held for approval"
 	}
-	effect := fmt.Sprintf("plan would destroy %d resource(s)", destroys)
+	effect := fmt.Sprintf("plan would destroy %d %s", destroys,
+		util.Plural(destroys, "resource", "resources"))
 	if !read {
 		effect = "plan summary could not be read"
 	}

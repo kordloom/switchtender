@@ -68,7 +68,8 @@ type awxWorkflowNode struct {
 	Related *awxWorkflowNodeRelated `json:"related"`
 	// ExtraData are the node's own extra vars, which AWX layers over its job template's.
 	ExtraData json.RawMessage `json:"extra_data"`
-	// Credentials are credentials the node adds on top of its job template's, by natural key.
+	// Credentials are credentials the node adds on top of its job template's, by natural key, when
+	// the export carries them at the top level.
 	Credentials []awxRef `json:"credentials"`
 	// SummaryFields is the REST API's summary of what the node references. A node wired by id says
 	// only there what kind of object its unified_job_template is.
@@ -76,6 +77,22 @@ type awxWorkflowNode struct {
 	// templateType is the kind of object the natural key in unified_job_template declares, such as
 	// job_template or workflow_job_template, or empty when the reference declared none.
 	templateType string
+}
+
+// credentials returns the credentials the node adds on top of its job template's, from whichever
+// place the export carried them.
+//
+// awxkit never writes them at the top level: a node's credentials are an exportable relation, so
+// they arrive under related as natural keys, the same shape awxJobTemplate.credentials reads. A
+// node that supplies the vault or cloud credential its job template prompts for carries it there.
+func (n awxWorkflowNode) credentials() []awxRef {
+	if len(n.Credentials) > 0 {
+		return n.Credentials
+	}
+	if n.Related != nil {
+		return n.Related.Credentials
+	}
+	return nil
 }
 
 // awxNodeSummary is the part of a node's REST summary fields the importer reads.
@@ -131,6 +148,9 @@ type awxWorkflowNodeRelated struct {
 	// CreateApprovalTemplate is where awxkit writes an approval node. AWX creates an approval
 	// through its own endpoint, so the node carries this in place of a template reference.
 	CreateApprovalTemplate *awxApprovalTemplate `json:"create_approval_template"`
+	// Credentials are the credentials the node adds on top of its job template's, which awxkit
+	// writes here as natural keys.
+	Credentials []awxRef `json:"credentials"`
 }
 
 // awxApprovalTemplate is an AWX approval node: the workflow stops there until a person approves or
@@ -356,7 +376,7 @@ func (p *Plan) addWorkflows(export awxExport, now time.Time,
 // be reported rather than left as a second silent loss on top of the first.
 func (p *Plan) addWorkflowSchedules(wf awxWorkflow, templateID string, inventoryIDs awxIDs,
 	now time.Time) {
-	scheds := wf.schedules()
+	scheds := p.topSchedules.take(awxTypeWorkflow, wf.Organization.Name, wf.Name, wf.schedules())
 	if len(scheds) == 0 {
 		return
 	}
@@ -804,8 +824,8 @@ func (p *Plan) workflowCredentials(name string, nodes []awxWorkflowNode,
 	seen := map[string]bool{}
 	perNode := 0
 	for _, n := range nodes {
-		refs := append(append([]awxRef(nil), jobs.of(n.UnifiedJobTemplate).Credentials...),
-			n.Credentials...)
+		refs := append(append([]awxRef(nil), jobs.of(n.UnifiedJobTemplate).credentials()...),
+			n.credentials()...)
 		count := 0
 		for _, ref := range refs {
 			if ref.Name == "" {

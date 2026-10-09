@@ -419,8 +419,8 @@ func RenderRegister(in *RegisterInput) ([]byte, error) {
 			"countersign what it saw."
 	default:
 		v.Status = "verified"
-		v.StatusText = fmt.Sprintf("The chain verifies and carries %d anchor(s) fixing it outside "+
-			"this install.", in.Anchored)
+		v.StatusText = fmt.Sprintf("The chain verifies and carries %d %s fixing it outside this "+
+			"install.", in.Anchored, util.Plural(in.Anchored, "anchor", "anchors"))
 	}
 	var buf bytes.Buffer
 	if err := registerTemplate.Execute(&buf, v); err != nil {

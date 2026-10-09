@@ -60,6 +60,9 @@ func NewJWTAuth(ctx context.Context, jwksURL, issuer, audience, usernameClaim, g
 	if usernameClaim == "" {
 		usernameClaim = "sub"
 	}
+	// The remote key set keeps the context it is built with for every later refresh, so the guarded
+	// client goes here and not on the context a verification arrives on.
+	ctx = oidc.ClientContext(ctx, idpClient())
 	verifier := oidc.NewVerifier(issuer, oidc.NewRemoteKeySet(ctx, jwksURL),
 		&oidc.Config{ClientID: audience, SkipClientIDCheck: audience == ""})
 	return &JWTAuth{

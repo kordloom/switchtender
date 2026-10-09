@@ -146,6 +146,9 @@
 						<tr><th>Capability</th><th class="us">SwitchTender</th><th>Ansible Automation Platform</th></tr>
 					</thead>
 					<tbody>
+						<tr><td>Approval bound to the content that runs: inventory, image, commit, plan</td><td class="us"><i class="y"></i> <span class="muted">a digest recomputed before execution</span></td><td><span class="muted">Workflow node and orchestrator step record a decision, not a digest; project signing and OPA policy check files, image, branch, and inventory at launch, separately from the approval</span></td></tr>
+						<tr><td>Hard ceiling on AI agents: cannot approve its own run or touch identity or secrets</td><td class="us"><i class="y"></i> <span class="muted">agents are principals capped below admin</span></td><td><span class="muted">Task agents with tool access set to All, Selected, or None, credentials by reference; approval step needs <code>approval:decide</code>; whether an agent can hold it is not documented</span></td></tr>
+						<tr><td>Evidence a third party verifies offline, without trusting the server</td><td class="us"><i class="y"></i> <span class="muted">signed hash chain, Apache-2.0 verifier</span></td><td><span class="muted">No; Red Hat directs user activity logs to external providers for non-repudiation</span></td></tr>
 						<tr><td>Deploy</td><td class="us">One binary, SQLite or Postgres <span class="muted">creating a new Postgres schema is Team, opening an existing one is never gated</span></td><td><span class="muted">OpenShift or RHEL + Postgres</span></td></tr>
 						<tr><td>Model</td><td class="us">Source-available, self-host free</td><td><span class="muted">Per managed-node subscription</span></td></tr>
 						<tr><td>Commercial support and SLA</td><td class="us"><span class="muted">Email support from Pro, SLA at Enterprise</span></td><td><i class="y"></i></td></tr>
@@ -182,7 +185,7 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>Move in one command</h2>
-				<p>Automation Controller is AWX's data model, so its export imports into SwitchTender the same way AWX's does. Projects, inventories (smart and constructed included), templates, workflows with their approval steps, surveys, schedules, notification templates, and the organizations those belong to come across, with a dry run first so you see the plan before anything is written. A workflow the importer cannot carry over as it stands is named in the plan and left out: one with a node that runs another workflow or a sync, a path taken on failure, nodes from more than one project, or an always path and a success path on the same node. A template that took provisioning callbacks also answers a POST to <code>/api/v2/job_templates/{id}/callback/</code> once the import knows its id, so a boot script that calls that path keeps working when the hostname points here. A script that calls the controller at any other path needs its URL edited.</p>
+				<p>Automation Controller is AWX's data model, so its export imports into SwitchTender the same way AWX's does. Projects, inventories (smart and constructed included), templates, workflows with their approval steps, surveys, schedules, notification templates, and the organizations those belong to come across, with a dry run first so you see the plan before anything is written. A workflow the importer cannot carry over as it stands is named in the plan and left out: one with a node that runs another workflow or a sync, a path taken on failure, nodes from more than one project, or an always path and a success path on the same node. A template that took provisioning callbacks also answers a POST to <code>/api/v2/job_templates/{id}/callback/</code> once the import knows its id, so a boot script that calls that path keeps working when the hostname points here. <code>awx export</code> strips ids, so save <code>GET /api/v2/job_templates/</code> as JSON and pass it with <code>--awx-template-ids</code> to keep those addresses. A script that calls the controller at any other path needs its URL edited.</p>
 			</div>
 			<div class="gs-steps">
 				<ol>
@@ -197,7 +200,10 @@
 						<div class="gs-num">2</div>
 						<div class="gs-body">
 							<h3>Apply it</h3>
-							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>switchtender import awx controller-export.json --db switchtender.db --apply</code></pre></div>
+							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code># Keep both values: the server must start with this same pair.
+export SWITCHTENDER_ENCRYPTION_KEY=$(openssl rand -hex 32)
+export SWITCHTENDER_ENCRYPTION_SALT=$(openssl rand -hex 16)
+switchtender import awx controller-export.json --db switchtender.db --apply</code></pre></div>
 						</div>
 					</li>
 				</ol>

@@ -1,0 +1,5 @@
+# The SSH host key of the demo droplet, which demo-refresh.yml checks the host against before it
+# pipes the upgrade script into a root shell there. It is not a secret: the host presents it to
+# every client. When the droplet is rebuilt, replace it from a session you trust:
+#   ssh-keyscan -t ed25519 167.99.157.117
+167.99.157.117,demo.switchtender.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICgyirWyRTT+nx7YgmzcDireP20m2A6B/+Rjf1hlKm1M

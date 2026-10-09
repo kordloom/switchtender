@@ -238,7 +238,7 @@ func FromSemaphore(data []byte, now time.Time) (*Plan, error) {
 	// A skipped entry counts as refused, so an export whose every entry was malformed reports each
 	// one and why, rather than claiming nothing in it was recognized.
 	for _, s := range skipped {
-		plan.warn("%s", s)
+		plan.warn("%s", s.Text)
 		plan.refused++
 	}
 	for _, proj := range export.projects() {

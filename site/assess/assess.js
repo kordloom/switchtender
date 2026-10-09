@@ -75,6 +75,10 @@
 		figures.appendChild(figure(r.objects, "objects come across"));
 		figures.appendChild(figure(r.leftOut, "do not come across"));
 		figures.appendChild(figure(r.templates, "templates graded"));
+		// Beside the grades, not under them: for an AWX estate the two grades below are zeros
+		// almost every time, because a job template's playbook lives in a repository nothing has
+		// fetched, and the reader has to see what those zeros rest on.
+		figures.appendChild(figure(r.unread, "playbooks not read yet"));
 		figures.appendChild(figure(r.irreversible, "cannot be undone"));
 		figures.appendChild(figure(r.highRisk, "carry a destructive signal"));
 		reportText.textContent = r.report;

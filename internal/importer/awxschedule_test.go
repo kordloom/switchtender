@@ -226,6 +226,105 @@ func TestAWXScheduleHeldHereIsNotCalledSwitchedOffAtTheSource(t *testing.T) {
 	}
 }
 
+// TestARequiredSecretQuestionSwitchesItsSchedulesOff pins the one case a schedule is switched off
+// for a survey question: a required secret question with no default. Its default cannot have come
+// across, so every fire would stop until somebody sets one. The schedule that answered the question
+// itself is switched off for that, and so are its siblings, so one root cause gets one policy in
+// the report rather than two. A required question of any other type keeps the schedule as it was
+// and is reported, which is the policy the shipped fixtures pin.
+func TestARequiredSecretQuestionSwitchesItsSchedulesOff(t *testing.T) {
+	t.Parallel()
+	const export = `{
+	  "projects": [{"name": "web", "scm_type": "git", "scm_url": "https://example.com/web.git"}],
+	  "inventory": [{"name": "prod", "hosts": [{"name": "web1"}]}],
+	  "job_templates": [
+	    {"name": "Deploy", "playbook": "site.yml", "project": "web", "inventory": "prod",
+	     "survey_spec": {"spec": [{"variable": "deploy_token", "type": "password",
+	       "required": true, "default": "$encrypted$"}]},
+	     "related": {"schedules": [
+	       {"name": "Nightly", "rrule": "DTSTART:20260101T030000Z RRULE:FREQ=DAILY;INTERVAL=1",
+	        "extra_data": {"deploy_token": "$encrypted$"}},
+	       {"name": "Every 3 days", "rrule": "DTSTART:20260101T030000Z RRULE:FREQ=DAILY;INTERVAL=3"},
+	       {"name": "Paused", "rrule": "DTSTART:20260101T040000Z RRULE:FREQ=DAILY;INTERVAL=1",
+	        "enabled": false},
+	       {"name": "Staging", "rrule": "DTSTART:20260101T060000Z RRULE:FREQ=DAILY;INTERVAL=1",
+	        "inventory": {"name": "staging"}}
+	     ]}},
+	    {"name": "Region", "playbook": "region.yml", "project": "web", "inventory": "prod",
+	     "survey_spec": {"spec": [{"variable": "region", "type": "multiplechoice",
+	       "required": true, "choices": ["us", "eu"]}]},
+	     "related": {"schedules": [
+	       {"name": "Daily", "rrule": "DTSTART:20260101T050000Z RRULE:FREQ=DAILY;INTERVAL=1"}
+	     ]}}
+	  ]}`
+	plan, err := FromAWX([]byte(export), importNow)
+	if err != nil {
+		t.Fatalf("FromAWX() error = %v", err)
+	}
+	enabled := map[string]bool{}
+	for _, s := range plan.Schedules {
+		enabled[s.Name] = s.Enabled
+	}
+	want := map[string]bool{
+		"Nightly": false, "Every 3 days": false, "Paused": false, "Daily": true, "Staging": false,
+	}
+	if diff := cmp.Diff(want, enabled); diff != "" {
+		t.Errorf("schedule state mismatch (-want +got):\n%s\nwarnings: %v", diff, plan.Warnings)
+	}
+	tests := []struct {
+		// Schedule is the name of the schedule whose warnings the case reads.
+		Schedule string
+		// WantOff is whether one warning, and only one, says the schedule arrives switched off.
+		WantOff bool
+		// WantIn are fragments the schedule's warnings must carry.
+		WantIn []string
+		// WantNotIn are fragments the schedule's warnings must not carry.
+		WantNotIn []string
+	}{{ // Test 0: The sibling that gave no answer is switched off for the dropped default.
+		Schedule: "Every 3 days", WantOff: true,
+		WantIn:    []string{`"deploy_token"`, "no default here", "then switch the schedule on"},
+		WantNotIn: []string{"each fire stops"},
+	}, { // Test 1: The schedule that answered the question is switched off once, not twice.
+		Schedule: "Nightly", WantOff: true, WantIn: []string{`"deploy_token"`},
+	}, { // Test 2: One switched off at the source is reported as that, and still told about the fire.
+		Schedule: "Paused", WantIn: []string{"switched off at the source", "each fire stops"},
+	}, { // Test 3: A required question of another type keeps the schedule armed and is reported.
+		Schedule: "Daily", WantIn: []string{`"region"`, "each fire stops"},
+		WantNotIn: []string{"arrives switched off"},
+	}, { // Test 4: One switched off for the secret question still says what else holds it.
+		Schedule: "Staging", WantOff: true,
+		WantIn: []string{"no default here", "also needs this before it is switched on",
+			"overrides an inventory that did not come across"},
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Schedule), func(t *testing.T) {
+			t.Parallel()
+			var mine []string
+			for _, w := range plan.Warnings {
+				if strings.Contains(w, `schedule "`+test.Schedule+`"`) {
+					mine = append(mine, w)
+				}
+			}
+			all := strings.Join(mine, "\n")
+			off := strings.Count(all, "arrives switched off")
+			if (off == 1) != test.WantOff {
+				t.Errorf("%d warnings say the schedule arrives switched off, want one = %v:\n%s",
+					off, test.WantOff, all)
+			}
+			for _, want := range test.WantIn {
+				if !strings.Contains(all, want) {
+					t.Errorf("the schedule's warnings do not say %q:\n%s", want, all)
+				}
+			}
+			for _, not := range test.WantNotIn {
+				if strings.Contains(all, not) {
+					t.Errorf("the schedule's warnings say %q:\n%s", not, all)
+				}
+			}
+		})
+	}
+}
+
 // TestAScheduleNobodyCanAnswerIsNamedInTheReport pins the note for every importer's schedules. A
 // schedule fires with each survey question's default and stops on a required question with none, so
 // a Rundeck job whose required option has no default, scheduled as it was in Rundeck, stops on

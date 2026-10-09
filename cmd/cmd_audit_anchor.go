@@ -124,6 +124,8 @@ func runAuditAnchor(cmd *cobra.Command, _ []string) error {
 	}
 	ctx, cancel := context.WithTimeout(cmd.Context(), anchorTimeout)
 	defer cancel()
+	// This command runs in the operator's own shell, so it keeps that shell's proxy settings and
+	// not the server's egress guard.
 	a, err := audit.NewAnchor(ctx, &http.Client{Timeout: anchorTimeout},
 		anchorType, ref, shape, id.InstallID, anchorSeq, anchorLink, time.Now())
 	if err != nil {

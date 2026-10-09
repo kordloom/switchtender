@@ -75,9 +75,13 @@ func resolveAzure(ctx context.Context, config string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	secretURL := fmt.Sprintf("%s/secrets/%s?api-version=%s", base, cfg.Secret, azureAPIVersion)
+	// The secret name and version are each one path segment, escaped so a value carrying a slash
+	// or a query mark cannot splice the request into a different resource on the vault.
+	secretURL := fmt.Sprintf("%s/secrets/%s?api-version=%s", base, url.PathEscape(cfg.Secret),
+		azureAPIVersion)
 	if cfg.Version != "" {
-		secretURL = fmt.Sprintf("%s/secrets/%s/%s?api-version=%s", base, cfg.Secret, cfg.Version, azureAPIVersion)
+		secretURL = fmt.Sprintf("%s/secrets/%s/%s?api-version=%s", base, url.PathEscape(cfg.Secret),
+			url.PathEscape(cfg.Version), azureAPIVersion)
 	}
 	if err := checkResolveURL(secretURL); err != nil {
 		return "", err

@@ -31,6 +31,16 @@ breakage the simulated DOM cannot see.
   must start after the steps it depends on. A failing walk prints its gestures, and its seed replays
   it. It also checks that a waiting approval appears on an open runs page and on a workflow's own
   page, and that a phone can add and edit a step by touch.
+- **identity** (`identity.spec.mjs`) drives a second `switchtender serve` instance of its own,
+  which it fills with accounts. It signs a browser in as one account and changes that account
+  through the real API as another administrator: demoted, the next load loses the admin navigation
+  and the Users page and reads the sentence written for an operator; promoted, the next load gains
+  them; renamed, the badge and the sign-in page carry the new name; deleted, the next page walks to
+  sign in with the dead session forgotten rather than offered. It also demotes an account through its
+  own Edit dialog, deletes an account from its own row, and checks the credentials page asks for
+  nothing the server said is off. The
+  instance is this suite's alone because the first account turns an open install into one that
+  authenticates, which would refuse the suites that drive the shared instance open.
 
 All but assess fail on any uncaught page error or console error, and assess on any page error.
 
@@ -45,7 +55,8 @@ npm test
 
 `npm test` builds the binary into `.bin/switchtender` and the page's reader into `site/assess`, and
 Playwright starts the servers for the run: a `demo` on `127.0.0.1:18777`, a `serve` on
-`127.0.0.1:18778`, and the site on `127.0.0.1:18779`. Seeding the demo runs real playbooks, two
+`127.0.0.1:18778`, the site on `127.0.0.1:18779`, and the identity suite's own `serve` on
+`127.0.0.1:18780`. Seeding the demo runs real playbooks, two
 weeks of nightly audits among them, and takes a couple of minutes, so its readiness timeout is five
 minutes. Outside CI, a server already running on any of those ports is reused.
 

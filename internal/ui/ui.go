@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/yuin/goldmark"
@@ -74,6 +75,9 @@ type UI struct {
 	// factCacheAdminOnly reports whether reading cached facts is restricted to admins, so the
 	// inventories page offers them only to who may read them.
 	factCacheAdminOnly bool
+	// featuresOff names the optional features the server has switched off, space separated, so a
+	// page does not ask for what it would only be told is not enabled.
+	featuresOff string
 }
 
 // New parses the embedded templates and returns a UI. It panics if the embedded templates fail to
@@ -173,6 +177,15 @@ func WithSignInCheck(f func() bool) Option {
 // on an install that runs open that is a loop between the page and the sign-in screen.
 func (u *UI) signInRequired() bool {
 	return u.signIn != nil && u.signIn()
+}
+
+// WithFeaturesOff tells every page which optional features the server has switched off, by name.
+//
+// Each optional feature answers 404 when it is off, which a page reads as "not enabled", but the
+// browser logs every 404 it sees. A page told what is off skips those requests, so its console
+// stays clean. A caller that names nothing leaves every page asking for every feature.
+func WithFeaturesOff(names ...string) Option {
+	return func(u *UI) { u.featuresOff = strings.Join(names, " ") }
 }
 
 // Handler returns the HTTP handler for the web interface, served under /ui/.
@@ -393,11 +406,12 @@ func (u *UI) workflows(w http.ResponseWriter, _ *http.Request) {
 // counting statuses ever saw a failure. Every page here is a single template with no partial-write
 // protection in front of it, so any fault past the first action landed that way.
 func (u *UI) render(w http.ResponseWriter, name string, data any) {
-	// Every page is told whether it is the demo, and whether a visitor must sign in first, so no
-	// handler can forget to say.
+	// Every page is told whether it is the demo, whether a visitor must sign in first, and which
+	// optional features are off, so no handler can forget to say.
 	if m, ok := data.(map[string]any); ok {
 		m["Demo"] = u.demo
 		m["SignIn"] = u.signInRequired()
+		m["FeaturesOff"] = u.featuresOff
 	}
 	var buf bytes.Buffer
 	if err := u.tmpl.ExecuteTemplate(&buf, name, data); err != nil {

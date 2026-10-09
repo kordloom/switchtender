@@ -4,16 +4,16 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>SwitchTender compared to the field | SwitchTender docs</title>
-	<meta name="description" content="This page is an honest side-by-side. It states where SwitchTender is ahead, where it is even, and where it is behind, because credibility comes from being straight about all three.">
+	<meta name="description" content="This page is an honest side-by-side. It states where SwitchTender is ahead, where it is even, and where it is behind.">
 	<link rel="canonical" href="https://switchtender.com/docs/comparison">
 	<meta property="og:title" content="SwitchTender compared to the field | SwitchTender docs">
-	<meta property="og:description" content="This page is an honest side-by-side. It states where SwitchTender is ahead, where it is even, and where it is behind, because credibility comes from being straight about all three.">
+	<meta property="og:description" content="This page is an honest side-by-side. It states where SwitchTender is ahead, where it is even, and where it is behind.">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/comparison">
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
 	<meta name="twitter:card" content="summary_large_image">
 	<meta name="twitter:title" content="SwitchTender compared to the field | SwitchTender docs">
-	<meta name="twitter:description" content="This page is an honest side-by-side. It states where SwitchTender is ahead, where it is even, and where it is behind, because credibility comes from being straight about all three.">
+	<meta name="twitter:description" content="This page is an honest side-by-side. It states where SwitchTender is ahead, where it is even, and where it is behind.">
 	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
 	<script type="application/ld+json">
 {
@@ -86,16 +86,18 @@
 		<main class="dcontent prose">
 			<h1 id="switchtender-compared-to-the-field">SwitchTender compared to the field</h1>
 <p>This page is an honest side-by-side. It states where SwitchTender is ahead, where it is even, and
-where it is behind, because credibility comes from being straight about all three.</p>
+where it is behind. The first three rows are the ones no other product in the table documents in
+full: an approval bound to the content that executes, a ceiling on AI agents that keeps them from
+approving their own runs, and evidence a third party verifies offline. Where a vendor documents a
+partial answer, the cell says so. Everything after those rows is controller work, where the field
+is often even.</p>
 <p>Every claim about another product was checked against that vendor's own documentation on
-2026-08-10, for AWX 24.6.1, Ansible Automation Platform 2.7, Semaphore 2.19.7, Ascender 25.4.0,
-and Rundeck 6.0.1. Versions re-checked 2026-09-07: AWX is unchanged at 24.6.1, Semaphore is
-at 2.19.12, whose releases since 2.19.7 are bugfix-only and change no row, Ascender is at
-25.6.1, and Rundeck is at 6.1.0. All of these ship, and a
-comparison decays the day it is written. Check a row
-against the current release before relying on it, and open an issue if one has gone stale.</p>
+2026-10-08, for AWX 24.6.1, Ansible Automation Platform 2.7-9 with automation orchestrator 2026.8,
+Semaphore 2.19.16, Ascender 25.6.2, and Rundeck 6.2.1. All of these ship, and a comparison decays
+the day it is written. Check a row against the current release before relying on it, and open an
+issue if one has gone stale.</p>
 <h2 id="the-field-side-by-side">The field, side by side</h2>
-<p>Six controllers, thirteen capabilities, every cell checked against that vendor's own documentation.
+<p>Six controllers, fourteen capabilities, every cell checked against that vendor's own documentation.
 Sources are numbered and listed at the bottom. A cell reading &quot;not documented&quot; means the vendor's
 documentation does not describe the capability, established by searching their whole documentation
 set rather than by not finding it.</p>
@@ -112,6 +114,33 @@ set rather than by not finding it.</p>
 </tr>
 </thead>
 <tbody>
+<tr>
+<td>Approval bound to the content that runs</td>
+<td>Yes: a digest of inventory snapshot, image, commit, and plan, recomputed before execution</td>
+<td>Node records a decision, not a digest [21]</td>
+<td>Node and orchestrator step record a decision, not a digest; the orchestrator step has a 1-day default window; project signing and OPA policy check content at launch, separately from the approval [22]</td>
+<td>Workflow approval node, binding not documented; docs say Pro, pricing lists every tier [23]</td>
+<td>Node records a decision, not a digest; jobs record the revision used after the fact [24]</td>
+<td>No native approval step in either edition; ServiceNow change steps can check a change request's state [25]</td>
+</tr>
+<tr>
+<td>Ceiling on AI agents</td>
+<td>Yes, capped below admin, cannot approve its own run</td>
+<td>No AI feature</td>
+<td>Task agents with tool access All, Selected, or None and credentials by reference; approval step needs <code>approval:decide</code>, agent eligibility not documented [43]</td>
+<td>MCP server with read and write, no ceiling documented [43]</td>
+<td>No AI feature documented [43]</td>
+<td>ACL policy on a dedicated user's token, set by the operator [43]</td>
+</tr>
+<tr>
+<td>Evidence a third party verifies offline, without trusting the server</td>
+<td>Yes, signed hash chain, Apache-2.0 verifier</td>
+<td>No [16]</td>
+<td>No; Red Hat directs user activity logs to external providers for non-repudiation [17]</td>
+<td>No [18]</td>
+<td>No [19]</td>
+<td>No [20]</td>
+</tr>
 <tr>
 <td>Runs without Kubernetes</td>
 <td>Yes, one binary</td>
@@ -143,8 +172,8 @@ set rather than by not finding it.</p>
 <td>Tools it executes</td>
 <td>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</td>
 <td>Ansible only [6]</td>
-<td>Ansible only [7]</td>
-<td>Ansible, Terraform, OpenTofu, PowerShell, Bash, Python [8]</td>
+<td>Ansible playbooks and rulebooks; REST and AI agent steps in automation orchestrator, a separately installed component [7]</td>
+<td>Ansible, Terraform, OpenTofu, Terragrunt, PowerShell, Bash, Python, plus any executable as a custom app [8]</td>
 <td>Ansible only [9]</td>
 <td>Ansible plus generic scripts, no Terraform step [10]</td>
 </tr>
@@ -153,7 +182,7 @@ set rather than by not finding it.</p>
 <td>Host-by-task matrix</td>
 <td>Host status bar, per-event drill-down [11]</td>
 <td>Host status bar, per-event drill-down [12]</td>
-<td>Status and a streamed log [13]</td>
+<td>Timestamped log; per-host OK and failed counts for Ansible; execution summary is Pro [13]</td>
 <td>Host status bar, per-event drill-down [14]</td>
 <td>Per-node, per-step monitor [15]</td>
 </tr>
@@ -161,28 +190,10 @@ set rather than by not finding it.</p>
 <td>Tamper-evident audit</td>
 <td>Hash-chained, signed, anchored</td>
 <td>No [16]</td>
-<td>No [17]</td>
-<td>No [18]</td>
-<td>No [19]</td>
-<td>No [20]</td>
-</tr>
-<tr>
-<td>Verifiable offline by a third party</td>
-<td>Yes, open format and verifier</td>
-<td>Not documented</td>
-<td>Not documented</td>
-<td>Not documented</td>
-<td>Not documented</td>
-<td>Not documented</td>
-</tr>
-<tr>
-<td>Approval gates</td>
-<td>Yes, by policy, on a run or at a step inside a workflow</td>
-<td>Yes [21]</td>
-<td>Yes [22]</td>
-<td>Not documented [23]</td>
-<td>Yes [24]</td>
-<td>Not in open-source Rundeck; the commercial Runbook Automation ships them [25]</td>
+<td>No; Red Hat directs user activity logs to external providers for non-repudiation [17]</td>
+<td>No; activity log with syslog and webhook export in paid tiers [18]</td>
+<td>No; activity stream forwarded to log aggregators, Ledger change diffs exported as CSV or PDF [19]</td>
+<td>No; activity log in all editions, audit trail commercial, nothing hashed or signed [20]</td>
 </tr>
 <tr>
 <td>RBAC in the free tier</td>
@@ -199,7 +210,7 @@ set rather than by not finding it.</p>
 <td>Not documented</td>
 <td>Not documented</td>
 <td>Not documented</td>
-<td>Not documented</td>
+<td>Ascender Pro through Ledger, described by the vendor as watching baselines between runs; no reconcile documented</td>
 <td>Not documented</td>
 </tr>
 <tr>
@@ -207,7 +218,7 @@ set rather than by not finding it.</p>
 <td>DAG with a drag-and-drop editor</td>
 <td>Visual editor [31]</td>
 <td>Visual editor [32]</td>
-<td>Basic build and deploy chaining [33]</td>
+<td>DAG with conditional edges, approval, delay, and note nodes, graphical editor, shipped in 2.19 as beta [33]</td>
 <td>Visual editor [34]</td>
 <td>Engine yes; visualization is commercial [35]</td>
 </tr>
@@ -215,9 +226,9 @@ set rather than by not finding it.</p>
 <td>Minimum published footprint</td>
 <td>One binary, one database</td>
 <td>Not published as a single figure</td>
-<td>16 GB RAM, 4 CPU, 60 GB [2]</td>
-<td>Not published [36]</td>
-<td>8 GB RAM, 2 CPU, 20 GB [37]</td>
+<td>16 GB RAM, 4 CPU, 60 GB, 3000 IOPS; automation orchestrator needs OpenShift 4.14 or later [2]</td>
+<td>512 MB RAM, 1 CPU core [36]</td>
+<td>2 CPU, 4 GB RAM without Pro, 8 GB with, 20 GB [37]</td>
 <td>8 GB RAM, 2 CPU [5]</td>
 </tr>
 <tr>
@@ -270,7 +281,7 @@ than &quot;structured versus scrollback&quot;.</p>
 <td>Run view</td>
 <td>A structured host-by-task matrix with per-task drill-down, painted live over Server-Sent Events.</td>
 <td>A host status bar with per-event drill-down, which is a summary rather than a matrix.</td>
-<td>A text log stream.</td>
+<td>A timestamped log with per-host OK and failed counts for Ansible.</td>
 </tr>
 <tr>
 <td>Job splitting</td>
@@ -282,19 +293,19 @@ than &quot;structured versus scrollback&quot;.</p>
 <td>Pipelines</td>
 <td>A dependency graph with parallel branches, per-step retries, and typed set_stats outputs passed to dependents.</td>
 <td>Visual workflows.</td>
-<td>Limited task chaining.</td>
+<td>A DAG of task templates with conditional edges.</td>
 </tr>
 <tr>
 <td>Visual workflow editor</td>
 <td>A drag-and-drop canvas at Workflows builds the dependency graph in the browser: draft persistence, undo, keyboard editing, cycle refusal, and a pan, zoom, and fit-to-view viewport, on the same DAG engine the API uses.</td>
 <td>A drag-and-drop editor.</td>
-<td>On the roadmap.</td>
+<td>A graphical editor, shipped in 2.19 as beta.</td>
 </tr>
 <tr>
 <td>Fleet memory</td>
 <td>Flaky-host detection, outcome sparklines, per-host history, and task duration trends across runs.</td>
 <td>Per-host job summaries, with no flaky-host detection or duration trends.</td>
-<td>Each task's log, with no host tracked across runs.</td>
+<td>Per-task output; inventory change history is on its roadmap for 2.22.</td>
 </tr>
 <tr>
 <td>Distributed workers</td>
@@ -318,7 +329,7 @@ than &quot;structured versus scrollback&quot;.</p>
 <td>Provable audit</td>
 <td>A tamper-evident SHA-256 hash chain, exported as a signed LoomSeal bundle and verified offline by an open verifier.</td>
 <td>An activity stream.</td>
-<td>An activity log.</td>
+<td>An activity log of acting user, affected object, action, IP, and user agent; syslog over TLS and Splunk HEC webhook in paid tiers; nothing hashed or signed.</td>
 </tr>
 <tr>
 <td>Migration in</td>
@@ -336,13 +347,13 @@ than &quot;structured versus scrollback&quot;.</p>
 <td>Directory-driven roles</td>
 <td>A directory or token group sets a user's role on every sign-in, over LDAP, SAML, or a bearer JWT, on Pro. OIDC provisions every account at one configurable default role instead.</td>
 <td>Organization mapping, complex.</td>
-<td>Identity group mapping in its Enterprise tier.</td>
+<td>Group mapping is listed as Enterprise on its pricing page and targeted at 2.20 on its roadmap; its team docs say it is not currently supported.</td>
 </tr>
 <tr>
 <td>Notification channels</td>
 <td>Eleven server-wide: webhook, email, Slack, Mattermost, Rocket.Chat, Discord, Teams, ntfy, PagerDuty, Grafana, and Twilio. All eleven take a per-template target, so a team pages its own channel; a Twilio or email target names only a recipient and sends through the server-held account, so the account secret never lives in a template. A named target is defined once and attached to templates, schedules, projects, and organizations, the way AWX attaches a notification template.</td>
 <td>A similar set plus IRC, without Discord or ntfy, attached to organizations, projects, job templates, workflows, and each inventory source.</td>
-<td>Fewer, some in a paid tier.</td>
+<td>Email, Slack, Teams, and others in Community.</td>
 </tr>
 </tbody>
 </table>
@@ -357,11 +368,11 @@ than &quot;structured versus scrollback&quot;.</p>
 <tbody>
 <tr>
 <td>Multiple runtimes</td>
-<td>SwitchTender runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go. Ansible check mode and a Terraform or OpenTofu plan preview a change, and a Bash, PowerShell, Python, or Go dry run only checks the script without running it, which previews nothing. AWX is Ansible-only. Semaphore runs Ansible, Terraform, OpenTofu, PowerShell, Bash, and Python, but not Go.</td>
+<td>SwitchTender runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go. Ansible check mode and a Terraform or OpenTofu plan preview a change, and a Bash, PowerShell, Python, or Go dry run only checks the script without running it, which previews nothing. AWX is Ansible-only. Semaphore runs Ansible, Terraform, OpenTofu, Terragrunt, PowerShell, Bash, and Python, and a custom app registers any executable, with no built-in Go app.</td>
 </tr>
 <tr>
 <td>Container execution environments</td>
-<td>SwitchTender pins an image on a template, a run, or a project, most specific wins, with private-registry pulls, opt-in behind a flag. AWX attaches execution environments to job templates. Semaphore favors native runtimes instead.</td>
+<td>SwitchTender pins an image on a template, a run, or a project, most specific wins, with private-registry pulls, opt-in behind a flag. AWX attaches execution environments to job templates. Semaphore can run each task in a Docker container on Pro and as a Kubernetes pod on Enterprise; Community runs tasks natively.</td>
 </tr>
 <tr>
 <td>Access control</td>
@@ -393,11 +404,11 @@ than &quot;structured versus scrollback&quot;.</p>
 </tr>
 <tr>
 <td>Directory sign-in</td>
-<td>SwitchTender, AWX, and Semaphore all sign in with LDAP and OpenID Connect. SwitchTender prices SSO at $500 a year and Semaphore at $490, and the unit differs: SwitchTender's Pro is flat per organization, while Semaphore's pricing page lists Pro as a per-instance subscription and reserves a multi-instance license for its enterprise tier, so an estate running several Semaphore instances pays per instance. SwitchTender's Pro tier adds five approval policies to it, and AWX ships it free inside a Kubernetes-sized install.</td>
+<td>SwitchTender, AWX, and Semaphore all sign in with LDAP and OpenID Connect. SwitchTender prices its Pro tier at $500 a year, flat per organization, with five approval policies and SSO. Semaphore Pro starts at $20 a month or $199 a year for 50 managed nodes and 500 managed resources, configurable by node count with an unlimited tier, and one license covers up to three instances. AWX ships SSO free inside a Kubernetes-sized install.</td>
 </tr>
 <tr>
 <td>Paid tiers</td>
-<td>SwitchTender: Community free with one plain rule, Pro $500 a year to 500 hosts (SSO, five approval policies, and email support), Team $9,900 to $54,000 by fleet band (full policy engine, PostgreSQL active-active HA, distributed workers, drift reconcile, change register), Enterprise from $75,000. AWX: free, no paid tier; the paid product is Ansible Automation Platform. Semaphore: Community free, Pro $490 a year to 500 managed nodes, Enterprise by contract.</td>
+<td>SwitchTender: Community free with one plain rule, Pro $500 a year to 500 hosts (SSO, five approval policies, and email support), Team $9,900 to $54,000 by fleet band (full policy engine, PostgreSQL active-active HA, distributed workers, drift reconcile, change register), Enterprise from $75,000. AWX: free, no paid tier; the paid product is Ansible Automation Platform. Semaphore: Community free, Pro from $199 a year at 50 managed nodes, Enterprise by contract. Ascender: core free; Ascender Pro $100 per node per year Standard or $150 Premium, with no node minimum on the pricing page and no minimum after an initial 100-node purchase on the compare page, as of 2026-10-08.</td>
 </tr>
 </tbody>
 </table>
@@ -425,25 +436,28 @@ than &quot;structured versus scrollback&quot;.</p>
 </tbody>
 </table>
 <h2 id="the-short-version">The short version</h2>
-<p>SwitchTender wins on the axes that make AWX painful and Semaphore ordinary: no heavy control plane to
-deploy, runs you can read as structure instead of scrollback, job splitting that actually balances,
-a memory of how every host behaves over time, a visual workflow editor on a provable DAG engine,
-and a one-command path off either incumbent. It is younger, and its integration catalog is smaller.
-Both gaps are being closed on purpose.</p>
+<p>SwitchTender is the only product in this table whose approval is bound to a digest of the content
+that runs and whose evidence a third party verifies offline. Its AI agents cannot approve their own
+runs, which no other product in the table documents. Outside the table, Spacelift's confirmation
+accepts the plan generated in the planning phase for infrastructure-as-code runs; it does not cover
+an inventory snapshot or a container image. The controller work underneath, one binary, a live
+matrix, balanced splits, fleet memory, a visual DAG editor, and a one-command import from six
+tools, ships in the same binary. It is younger, and its integration catalog is smaller. Both gaps
+are being closed on purpose.</p>
 <p>The <a href="/docs/reliability">reliability</a> page details how runs execute under load: bounded workers, splits
 balanced by measured duration, coordinated pipeline failure, crash recovery through leases, and a
 store that stays consistent while a fleet writes to it.</p>
 <h2 id="sources">Sources</h2>
-<p>Fetched and read on 2026-08-10.</p>
+<p>Fetched and read on 2026-10-08.</p>
 <ol>
 <li>AWX install and operator defaults: <a href="https://github.com/ansible/awx/blob/devel/INSTALL.md">https://github.com/ansible/awx/blob/devel/INSTALL.md</a>, <a href="https://raw.githubusercontent.com/ansible/awx-operator/devel/roles/installer/defaults/main.yml">https://raw.githubusercontent.com/ansible/awx-operator/devel/roles/installer/defaults/main.yml</a></li>
-<li>AAP deployment models and system requirements: <a href="https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7">https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7</a></li>
-<li>Semaphore admin introduction and config: <a href="https://semaphoreui.com/docs/admin-guide/introduction">https://semaphoreui.com/docs/admin-guide/introduction</a>, <a href="https://github.com/semaphoreui/semaphore/blob/develop/util/config.go">https://github.com/semaphoreui/semaphore/blob/develop/util/config.go</a></li>
-<li>Ascender installer and requirements: <a href="https://github.com/ctrliq/ascender-install">https://github.com/ctrliq/ascender-install</a>, <a href="https://raw.githubusercontent.com/ctrliq/ascender/main/requirements/requirements.txt">https://raw.githubusercontent.com/ctrliq/ascender/main/requirements/requirements.txt</a></li>
+<li>AAP deployment models and system requirements: <a href="https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7">https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7</a>, <a href="https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7/install-ref_cont_aap_system_requirements">https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7/install-ref_cont_aap_system_requirements</a>, <a href="https://docs.redhat.com/en/documentation/automation_orchestrator/2026.8/install-automation_orchestrator_system_requirements">https://docs.redhat.com/en/documentation/automation_orchestrator/2026.8/install-automation_orchestrator_system_requirements</a></li>
+<li>Semaphore introduction and config: <a href="https://semaphoreui.com/docs/introduction/what-is-semaphore">https://semaphoreui.com/docs/introduction/what-is-semaphore</a>, <a href="https://github.com/semaphoreui/semaphore/blob/develop/util/config.go">https://github.com/semaphoreui/semaphore/blob/develop/util/config.go</a></li>
+<li>Ascender installer and requirements: <a href="https://github.com/ctrliq/ascender-install">https://github.com/ctrliq/ascender-install</a>, <a href="https://raw.githubusercontent.com/ctrliq/ascender/main/requirements/requirements.txt">https://raw.githubusercontent.com/ctrliq/ascender/main/requirements/requirements.txt</a>, <a href="https://raw.githubusercontent.com/ctrliq/ascender-operator/devel/roles/installer/defaults/main.yml">https://raw.githubusercontent.com/ctrliq/ascender-operator/devel/roles/installer/defaults/main.yml</a></li>
 <li>Rundeck system requirements: <a href="https://docs.rundeck.com/docs/administration/install/system-requirements.html">https://docs.rundeck.com/docs/administration/install/system-requirements.html</a></li>
 <li>AWX job types: <a href="https://raw.githubusercontent.com/ansible/awx/devel/awx/main/models/base.py">https://raw.githubusercontent.com/ansible/awx/devel/awx/main/models/base.py</a></li>
-<li>AAP job template job types: <a href="https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7">https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7</a></li>
-<li>Semaphore supported tools: <a href="https://semaphoreui.com/docs/admin-guide/introduction">https://semaphoreui.com/docs/admin-guide/introduction</a></li>
+<li>AAP job template job types, and the REST and AI agent steps of automation orchestrator: <a href="https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7">https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7</a>, <a href="https://docs.redhat.com/en/documentation/automation_orchestrator/2026.8">https://docs.redhat.com/en/documentation/automation_orchestrator/2026.8</a></li>
+<li>Semaphore supported tools: <a href="https://semaphoreui.com/docs/user-guide/apps">https://semaphoreui.com/docs/user-guide/apps</a></li>
 <li>Ascender job templates: <a href="https://docs.ascender-automation.org/userguide/job_templates.html">https://docs.ascender-automation.org/userguide/job_templates.html</a></li>
 <li>Rundeck distributed plugins: <a href="https://docs.rundeck.com/docs/manual/plugins/full-list.html">https://docs.rundeck.com/docs/manual/plugins/full-list.html</a></li>
 <li>AWX job output and host status bar: <a href="https://raw.githubusercontent.com/ansible/awx/24.6.1/awx/ui/src/screens/Job/JobOutput/shared/HostStatusBar.js">https://raw.githubusercontent.com/ansible/awx/24.6.1/awx/ui/src/screens/Job/JobOutput/shared/HostStatusBar.js</a></li>
@@ -452,17 +466,16 @@ store that stays consistent while a fleet writes to it.</p>
 <li>Ascender jobs view: <a href="https://docs.ascender-automation.org/userguide/jobs.html">https://docs.ascender-automation.org/userguide/jobs.html</a></li>
 <li>Rundeck execution monitor: <a href="https://docs.rundeck.com/docs/manual/07-executions.html">https://docs.rundeck.com/docs/manual/07-executions.html</a></li>
 <li>AWX activity stream model, no hash or signature fields: <a href="https://raw.githubusercontent.com/ansible/awx/devel/awx/main/models/activity_stream.py">https://raw.githubusercontent.com/ansible/awx/devel/awx/main/models/activity_stream.py</a></li>
-<li>AAP activity stream, and Red Hat's guidance to use external log providers for non-repudiation: <a href="https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7">https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7</a></li>
+<li>AAP activity stream, and Red Hat's guidance to use external log providers for non-repudiation: <a href="https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7/observe-assembly_controller_activity_stream">https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7/observe-assembly_controller_activity_stream</a>, <a href="https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7/secure-con_logging_log_capture">https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7/secure-con_logging_log_capture</a></li>
 <li>Semaphore activity and audit logs: <a href="https://semaphoreui.com/docs/admin-guide/logs">https://semaphoreui.com/docs/admin-guide/logs</a></li>
 <li>Ascender activity stream and logging: <a href="https://docs.ascender-automation.org/administration/logging.html">https://docs.ascender-automation.org/administration/logging.html</a></li>
 <li>Rundeck audit trail, which delegates tamper resistance to an external system: <a href="https://docs.rundeck.com/docs/administration/security/audit-trail.html">https://docs.rundeck.com/docs/administration/security/audit-trail.html</a></li>
 <li>AWX workflow approval nodes: <a href="https://raw.githubusercontent.com/ansible/awx/devel/docs/workflow.md">https://raw.githubusercontent.com/ansible/awx/devel/docs/workflow.md</a></li>
-<li>AAP approval nodes: <a href="https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7">https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7</a></li>
-<li>Semaphore documentation set, searched in full for approval features</li>
+<li>AAP approval nodes, orchestrator approval steps, project signing, and policy as code: <a href="https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7/develop-ref_controller_approval_nodes">https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7/develop-ref_controller_approval_nodes</a>, <a href="https://docs.redhat.com/en/documentation/automation_orchestrator/2026.8/develop-understand_workflow_approvals">https://docs.redhat.com/en/documentation/automation_orchestrator/2026.8/develop-understand_workflow_approvals</a>, <a href="https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.5/html/using_automation_execution/assembly-controller-project-signing">https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.5/html/using_automation_execution/assembly-controller-project-signing</a>, <a href="https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7/integrate-assembly_controller_pac">https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7/integrate-assembly_controller_pac</a></li>
+<li>Semaphore workflow approval node, and the editions and pricing pages that disagree on its tier: <a href="https://semaphoreui.com/docs/user-guide/workflows">https://semaphoreui.com/docs/user-guide/workflows</a>, <a href="https://semaphoreui.com/docs/editions">https://semaphoreui.com/docs/editions</a>, <a href="https://semaphoreui.com/pricing">https://semaphoreui.com/pricing</a></li>
 <li>Ascender approval nodes: <a href="https://docs.ascender-automation.org/userguide/workflow_templates.html">https://docs.ascender-automation.org/userguide/workflow_templates.html</a></li>
-<li>Rundeck documentation set, searched in full for approval features. Approvals are a Runbook
-Automation feature, so the open-source column says no and the commercial product is named rather
-than left out</li>
+<li>Rundeck conditional logic, ServiceNow change steps, and the edition comparison, none of which
+documents a native approval step: <a href="https://docs.rundeck.com/docs/manual/jobs/conditional-logic.html">https://docs.rundeck.com/docs/manual/jobs/conditional-logic.html</a>, <a href="https://docs.rundeck.com/docs/manual/jobs/job-plugins/workflow-steps/servicenow.html">https://docs.rundeck.com/docs/manual/jobs/job-plugins/workflow-steps/servicenow.html</a>, <a href="https://www.rundeck.com/community-vs-enterprise">https://www.rundeck.com/community-vs-enterprise</a></li>
 <li>AWX licensing, which returns an open license for every AWX build: <a href="https://raw.githubusercontent.com/ansible/awx/devel/awx/main/utils/licensing.py">https://raw.githubusercontent.com/ansible/awx/devel/awx/main/utils/licensing.py</a></li>
 <li>AAP access management and subscription types: <a href="https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7">https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7</a></li>
 <li>Semaphore team roles and Extended RBAC: <a href="https://semaphoreui.com/docs/user-guide/team">https://semaphoreui.com/docs/user-guide/team</a>, <a href="https://semaphoreui.com/pricing">https://semaphoreui.com/pricing</a></li>
@@ -473,13 +486,14 @@ than left out</li>
 <li>Semaphore pipelines: <a href="https://semaphoreui.com/docs/admin-guide/cicd">https://semaphoreui.com/docs/admin-guide/cicd</a></li>
 <li>Ascender workflow visualizer: <a href="https://docs.ascender-automation.org/userguide/workflow_templates.html">https://docs.ascender-automation.org/userguide/workflow_templates.html</a></li>
 <li>Rundeck workflows and the commercial visualization feature: <a href="https://docs.rundeck.com/docs/manual/jobs/job-workflows.html">https://docs.rundeck.com/docs/manual/jobs/job-workflows.html</a>, <a href="https://www.rundeck.com/community-vs-enterprise">https://www.rundeck.com/community-vs-enterprise</a></li>
-<li>Semaphore publishes no numeric minimum</li>
+<li>Semaphore minimum footprint: <a href="https://semaphoreui.com/vs/awx">https://semaphoreui.com/vs/awx</a></li>
 <li>Ascender install requirements: <a href="https://docs.ciq.com/ascender/1/installation/install">https://docs.ciq.com/ascender/1/installation/install</a></li>
 <li>AWX license: <a href="https://github.com/ansible/awx/blob/devel/LICENSE.md">https://github.com/ansible/awx/blob/devel/LICENSE.md</a></li>
 <li>AAP licensing: <a href="https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7">https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7</a></li>
 <li>Semaphore license: <a href="https://github.com/semaphoreui/semaphore/blob/develop/LICENSE">https://github.com/semaphoreui/semaphore/blob/develop/LICENSE</a></li>
 <li>Ascender license: <a href="https://raw.githubusercontent.com/ctrliq/ascender/main/LICENSE">https://raw.githubusercontent.com/ctrliq/ascender/main/LICENSE</a></li>
 <li>Rundeck license: <a href="https://github.com/rundeck/rundeck">https://github.com/rundeck/rundeck</a></li>
+<li>AI agent features and the limits each vendor documents. AAP orchestrator agentic steps and approvals: <a href="https://docs.redhat.com/en/documentation/automation_orchestrator/2026.8/discover-agentic_steps_in_a_workflow">https://docs.redhat.com/en/documentation/automation_orchestrator/2026.8/discover-agentic_steps_in_a_workflow</a>, <a href="https://docs.redhat.com/en/documentation/automation_orchestrator/2026.8/develop-understand_workflow_approvals">https://docs.redhat.com/en/documentation/automation_orchestrator/2026.8/develop-understand_workflow_approvals</a>. Semaphore MCP server: <a href="https://semaphoreui.com/">https://semaphoreui.com/</a>, <a href="https://semaphoreui.com/pricing">https://semaphoreui.com/pricing</a>. Rundeck MCP best practices: <a href="https://docs.rundeck.com/docs/mcp/best-practices.html">https://docs.rundeck.com/docs/mcp/best-practices.html</a>. Ascender product and compare pages, which describe no AI feature: <a href="https://ciq.com/products/ascender">https://ciq.com/products/ascender</a>, <a href="https://ciq.com/compare/ascender-pro-vs-ansible">https://ciq.com/compare/ascender-pro-vs-ansible</a></li>
 </ol>
 <p>Every product here ships, so treat this as a snapshot taken on the date above rather than a standing
 claim. A row that has gone stale is a bug: open an issue and it gets corrected.</p>

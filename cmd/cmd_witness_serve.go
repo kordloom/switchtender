@@ -20,6 +20,7 @@ import (
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/jsonutil"
 	"github.com/kordloom/switchtender/internal/logutil"
+	"github.com/kordloom/switchtender/internal/util"
 	"github.com/kordloom/switchtender/witness"
 )
 
@@ -205,8 +206,8 @@ func runWitnessServe(cmd *cobra.Command, _ []string) error {
 	}
 	defer svc.Close()
 
-	fmt.Fprintf(os.Stderr, "witness: watching %d server(s), state %s, key %s\n",
-		len(witnessWatch), witnessStateDir, id.KeyID())
+	fmt.Fprintf(os.Stderr, "witness: watching %d %s, state %s, key %s\n", len(witnessWatch),
+		util.Plural(len(witnessWatch), "server", "servers"), witnessStateDir, id.KeyID())
 	access := "open"
 	if readToken != "" {
 		access = "token required"

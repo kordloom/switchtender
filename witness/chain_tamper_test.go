@@ -423,7 +423,7 @@ func TestManyRefusedBeatsStayOneFinding(t *testing.T) {
 	if diff := cmp.Diff([]string{"malformed_feed"}, kindsOf(findings)); diff != "" {
 		t.Errorf("findings mismatch (-want +got):\n%s", diff)
 	}
-	if !strings.Contains(findings[0].Detail, fmt.Sprintf("%d beat(s)", FeedLimit)) {
+	if !strings.Contains(findings[0].Detail, fmt.Sprintf("%d beats", FeedLimit)) {
 		t.Errorf("detail = %q, want the refused count named", findings[0].Detail)
 	}
 }

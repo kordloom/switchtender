@@ -93,6 +93,9 @@ function wireUserForm() {
 			} else {
 				await postAction("/users", payload);
 			}
+			// The account saved may be the one signed in here, with a new role or name, so the
+			// page asks the server who it is before drawing again.
+			if (await recheckIdentity()) return;
 			resetToCreate();
 			status.textContent = "Saved.";
 			closeModal("user");
@@ -126,8 +129,12 @@ async function userActivity(users) {
 		if (at && (!cur.last || Date.parse(at) > Date.parse(cur.last))) cur.last = at;
 		map.set(id, cur);
 	};
-	// Either list failing leaves its part of the columns at zero and never.
-	const [runs, tokens] = await Promise.allSettled([getJSON("/runs?limit=500"), getJSON("/tokens")]);
+	// Either list failing leaves its part of the columns at zero and never. An install with no token
+	// store is not asked for one.
+	const [runs, tokens] = await Promise.allSettled([
+		getJSON("/runs?limit=500"),
+		featureOff("tokens") ? Promise.resolve({ tokens: [] }) : getJSON("/tokens"),
+	]);
 	if (runs.status === "fulfilled") {
 		for (const r of runs.value.runs || []) {
 			note(r.actor_user_id || idByName.get(r.actor), r.created_at, true);
@@ -231,7 +238,11 @@ async function loadUsers() {
 			tr.appendChild(fired);
 			tr.appendChild(act.last ? tdTime(act.last) : td("never"));
 			tr.appendChild(tdTime(u.created_at));
-			const actions = deleteCell("/users/" + u.id, "user " + u.username, tr, "No users yet.");
+			// Deleting an account may delete the one signed in here, after which the server knows
+			// this session no more. Asking it sends the reader to sign in now rather than on their
+			// next click, with the dead session forgotten instead of offered as a way back.
+			const actions = deleteCell("/users/" + u.id, "user " + u.username, tr, "No users yet.",
+				recheckIdentity);
 			actions.insertBefore(editButton(() => openUserEdit(u), "Click to change this account's role or password"), actions.firstChild);
 			tr.appendChild(actions);
 			tbody.appendChild(tr);
@@ -291,12 +302,22 @@ const TOKEN_KINDS = {
 	"": { label: "token", tip: "A credential a person or an automation holds." },
 };
 
+// TOKENS_OFF is what the token panel says on an install that serves no token endpoint.
+const TOKENS_OFF = "Token management is not enabled on this instance.";
+
 // loadTokens fills the token table with every credential that reaches this install, and a way to
 // revoke each one. It shows no secret, because none is stored: only a hash of each token exists.
 async function loadTokens() {
 	const status = document.getElementById("token-list-status");
 	const table = document.getElementById("tokens-table");
 	if (!status || !table) return;
+	// An install the server said has no token store is told so without asking: the answer would
+	// be a 404, and the browser logs every one it sees.
+	if (featureOff("tokens")) {
+		status.textContent = TOKENS_OFF;
+		table.hidden = true;
+		return;
+	}
 	try {
 		const [data, users] = await Promise.all([getJSON("/tokens"), userNamesByID()]);
 		const tokens = data.tokens || [];
@@ -317,7 +338,7 @@ async function loadTokens() {
 		// error to put in front of a visitor, just a panel with nothing to manage. Only a genuine
 		// failure is surfaced.
 		if (String((err && err.message) || "").includes("404")) {
-			status.textContent = "Token management is not enabled on this instance.";
+			status.textContent = TOKENS_OFF;
 		} else {
 			status.textContent = "Could not read the tokens: " + err.message;
 		}

@@ -16,3 +16,18 @@ Sign in with it, create named accounts and tokens, then delete it.
 Keep the encryption key and salt this install was given. Every stored credential is sealed against
 them, and a new salt on an upgrade leaves those credentials unreadable. helm uninstall leaves the data
 volume and the Secret holding the keys in place.
+{{- if .Values.image.digest }}
+
+The pods run {{ include "switchtender.image" . }}, pinned by digest.
+{{- else }}
+
+The pods run {{ include "switchtender.image" . }}. The release workflow signs and attests each image
+by digest, and the chart can pin that digest so every pod runs exactly the image that was verified.
+Check the image, then set image.digest to the sha256 both commands report:
+
+  cosign verify {{ include "switchtender.image" . }} \
+    --certificate-identity-regexp '^https://github.com/kordloom/switchtender/\.github/workflows/release\.yml@refs/tags/v' \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com
+  gh attestation verify oci://{{ include "switchtender.image" . }} --repo kordloom/switchtender
+  helm upgrade {{ .Release.Name }} <chart> --reuse-values --set image.digest=sha256:<digest>
+{{- end }}

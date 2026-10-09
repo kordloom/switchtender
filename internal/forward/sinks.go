@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/safedial"
 	"github.com/kordloom/switchtender/internal/util"
 )
 
@@ -27,11 +28,15 @@ type HTTPSink struct {
 	client *http.Client
 }
 
-// NewHTTPSink returns a sink posting to url with the given headers. A nil client gets a 30
-// second timeout, since a forwarder wedged on one hung POST is a forwarder that stopped.
+// NewHTTPSink returns a sink posting to url with the given headers. A nil client gets one that
+// refuses an unsafe address at the dial, stops at a redirect, and gives up after 30 seconds, since
+// a forwarder wedged on one hung POST is a forwarder that stopped. The redirect rule matters here
+// because this sink carries the audit stream: following one turns the POST into a GET somewhere
+// else and reports the batch delivered on whatever answers, so the cursor would move past events
+// no collector stored. A redirect is a refused delivery instead, and the cursor holds.
 func NewHTTPSink(url string, headers map[string]string, client *http.Client) *HTTPSink {
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		client = safedial.Client(30 * time.Second)
 	}
 	return &HTTPSink{url: url, headers: headers, client: client}
 }

@@ -162,6 +162,17 @@ func importHandler(stores importStoresFunc, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
+		if errors.Is(err, importer.ErrArchive) || errors.Is(err, importer.ErrNotText) {
+			// An archive reader's refusal, or a body that is not whole text, is a sentence written
+			// for the person who sent it, and the command line prints it to them. It names nothing
+			// of the server: the archive's own member names, its counts, and its sizes. It goes
+			// back as written, because a line about the format would tell a reader whose zip holds
+			// too many entries that the export is the wrong kind. It is logged as a warning with no
+			// stack trace, because the input failed and the server did not.
+			log.Warn("server: import refused: " + err.Error())
+			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		}
 		if err != nil {
 			log.Error("server: map import export: " + err.Error())
 			respondError(w, log, http.StatusBadRequest, "could not read the export, check the format")

@@ -139,7 +139,8 @@ func plausibleBeats(beats []Beat) ([]Beat, []Finding) {
 		return kept, nil
 	}
 	return kept, []Finding{{Kind: "malformed_feed", Detail: fmt.Sprintf(
-		"the feed served %d beat(s) this witness refused to remember: %s", refused, why)}}
+		"the feed served %d %s this witness refused to remember: %s", refused,
+		plural(refused, "beat", "beats"), why)}}
 }
 
 // plausibleHead reports whether s could be a chain link: present, and no longer than one. The
@@ -147,6 +148,16 @@ func plausibleBeats(beats []Beat) ([]Beat, []Finding) {
 // it can remember and compare, and comparison is what catches a rewrite.
 func plausibleHead(s string) bool {
 	return s != "" && len(s) <= maxHeadLen
+}
+
+// plural returns one when n is 1 and many otherwise, so a finding reads "1 beat" and "3 beats". It
+// is a copy of the shared helper rather than an import of it, because an outside witness builds
+// this package on its own and it must stay free of the server's internal packages.
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 // Check holds a fresh read of the feed against the previous checkpoint. It returns the next
@@ -244,23 +255,26 @@ func Check(prev *Checkpoint, server string, beats []Beat, now time.Time) (*Check
 		// alerts a day, and a findings total that climbs by that much says the witness saw fourteen
 		// hundred separate events when it saw one.
 		if more := gaps - len(named); more > 0 {
-			named = append(named, fmt.Sprintf("%d more gap(s)", more))
+			named = append(named, fmt.Sprintf("%d more %s", more, plural(more, "gap", "gaps")))
 		}
+		beatWord := plural(int(missing), "beat", "beats")
+		gapWord := plural(gaps, "gap", "gaps")
 		findings = append(findings, Finding{Kind: "missing_beat", Detail: fmt.Sprintf(
-			"the feed skips %d beat(s) across %d gap(s), %s, so what the chain held there is gone",
-			missing, gaps, listed(named)),
-			Key: fmt.Sprintf("missing_beat: %d beat(s) gone across %d gap(s) after beat %d",
-				missing, gaps, firstGapAfter)})
+			"the feed skips %d %s across %d %s, %s, so what the chain held there is gone",
+			missing, beatWord, gaps, gapWord, listed(named)),
+			Key: fmt.Sprintf("missing_beat: %d %s gone across %d %s after beat %d",
+				missing, beatWord, gaps, gapWord, firstGapAfter)})
 	}
 
 	// A gap ACROSS polls was invisible: the walk above only compares beats inside one answer, so a
 	// feed that jumped from the witnessed beat to a much later one was adopted in silence. The
 	// witness remembers where it stopped, so it is the one party that can see that gap.
 	if prev != nil && prev.LastBeat > 0 && len(beats) > 0 && beats[0].Beat > prev.LastBeat+1 {
+		gone := beats[0].Beat - prev.LastBeat - 1
 		findings = append(findings, Finding{Kind: "missing_beat", Detail: fmt.Sprintf(
-			"the oldest beat served is %d and beat %d was already witnessed, so %d beat(s) between "+
-				"them never appeared in any answer", beats[0].Beat, prev.LastBeat,
-			beats[0].Beat-prev.LastBeat-1),
+			"the oldest beat served is %d and beat %d was already witnessed, so %d %s between "+
+				"them never appeared in any answer", beats[0].Beat, prev.LastBeat, gone,
+			plural(int(gone), "beat", "beats")),
 			Key: fmt.Sprintf("missing_beat after witnessed beat %d", prev.LastBeat)})
 	}
 

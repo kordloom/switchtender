@@ -16,6 +16,13 @@ image:
   # tag defaults to the chart appVersion when empty. With database.dsn set, a tag older than
   # 1.101.0 is refused: those releases do not read SWITCHTENDER_DB and would run on SQLite.
   tag: ""
+  # digest pins the image by content rather than by name, as sha256: followed by 64 hex characters.
+  # Set it to the digest the release workflow signed and attested, checked with cosign verify or
+  # gh attestation verify, and every pod runs exactly that image: a tag can be moved and a digest
+  # cannot. It renders as repository@digest, the tag is left out, and the version check above
+  # stands down, since whoever pinned the digest chose the release. Admission policies that admit
+  # digest-pinned images alone can take the chart as shipped with this set.
+  digest: ""
   pullPolicy: IfNotPresent
 
 server:

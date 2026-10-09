@@ -54,8 +54,15 @@ The fast path. It reads an AWX export and creates the equivalent SwitchTender ob
 
         switchtender import awx awx-export.json --db switchtender.db
 
-3. Apply it.
+3. Apply it, with the encryption key and salt set first. They seal each notification target's
+   address and each provisioning callback key the export carries as the import stores them. Keep
+   both: a server started with a different pair cannot open what the import sealed. Applied
+   without a key, the import says which targets will wait for an address the export did carry and
+   which callback keys it is dropping, then goes ahead.
 
+        # Keep both values: the server must start with this same pair.
+        export SWITCHTENDER_ENCRYPTION_KEY=$(openssl rand -hex 32)
+        export SWITCHTENDER_ENCRYPTION_SALT=$(openssl rand -hex 16)
         switchtender import awx awx-export.json --db switchtender.db --apply
 
 4. Re-enter secrets. Exports never contain secrets, so credentials arrive as named shells. The

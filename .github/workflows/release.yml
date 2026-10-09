@@ -285,6 +285,32 @@ jobs:
           hash="$(shasum -a 256 "$APP/Contents/MacOS/switchtender" | cut -d' ' -f1)"
           printf '%s  switchtender_%s_darwin_app\n' "$hash" "$VERSION" >> dist/BINARY_SHA256SUMS
 
+          # Notarization needs the full credential set; a partial one used to reach notarytool and
+          # fail there. The timeout keeps an Apple notary outage from holding the job to the
+          # six-hour limit.
+          notarize=false
+          if [ -n "${MACOS_SIGN_IDENTITY:-}" ] && [ -n "${NOTARY_KEY_P8:-}" ] \
+            && [ -n "${NOTARY_KEY_ID:-}" ] && [ -n "${NOTARY_ISSUER_ID:-}" ]; then
+            notarize=true
+            printf '%s' "$NOTARY_KEY_P8" | base64 --decode > dist/notary_key.p8
+          fi
+
+          # The app is notarized and stapled on its own before the image is built around it, so
+          # the copy a user drags into /Applications carries its ticket. A ticket stapled to the
+          # image alone stays with the image, and Gatekeeper would then need Apple's ticket service
+          # on the app's first launch, which a Mac with no network, or one whose network blocks
+          # that service, cannot reach. The ticket does not touch the executable, so the manifest
+          # line above still describes the file that ships.
+          if [ "$notarize" = true ]; then
+            ditto -c -k --keepParent "$APP" "$RUNNER_TEMP/SwitchTender.zip"
+            xcrun notarytool submit "$RUNNER_TEMP/SwitchTender.zip" \
+              --key dist/notary_key.p8 --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" \
+              --wait --timeout 30m
+            xcrun stapler staple "$APP"
+            xcrun stapler validate "$APP"
+            rm -f "$RUNNER_TEMP/SwitchTender.zip"
+          fi
+
           # The disk is not the constraint and never was: the run that failed this step had
           # 95 GiB free, and clearing the Go caches here only looked like a fix because the next
           # release happened to pass. hdiutil sizes an image from its source folder, under-sizes
@@ -311,12 +337,9 @@ jobs:
             codesign --verify --verbose=1 "dist/SwitchTender_${VERSION}.dmg"
           fi
 
-          # Notarization needs the full credential set; a partial one used to reach notarytool and
-          # fail there. The timeout keeps an Apple notary outage from holding the job to the
-          # six-hour limit.
-          if [ -n "${MACOS_SIGN_IDENTITY:-}" ] && [ -n "${NOTARY_KEY_P8:-}" ] \
-            && [ -n "${NOTARY_KEY_ID:-}" ] && [ -n "${NOTARY_ISSUER_ID:-}" ]; then
-            printf '%s' "$NOTARY_KEY_P8" | base64 --decode > dist/notary_key.p8
+          # The image is notarized and stapled as well, so the download itself carries a ticket
+          # before anyone opens it.
+          if [ "$notarize" = true ]; then
             xcrun notarytool submit "dist/SwitchTender_${VERSION}.dmg" \
               --key dist/notary_key.p8 --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" \
               --wait --timeout 30m
@@ -373,16 +396,40 @@ jobs:
             fi
           )
           grep -q '  BINARY_SHA256SUMS$' dist/SHA256SUMS
+          # The sigstore bundle holds the signature, the certificate, and the Rekor entry in one
+          # file: what cosign v3 verifies without a deprecation notice, and what a verifier with no
+          # network needs beside a trusted root. The detached .sig and .pem are published beside
+          # it for cosign v2 verifiers, the installer, and the demo upgrade, and only cosign v2
+          # writes them: cosign v3 writes the bundle alone and ignores --output-signature and
+          # --output-certificate. The checks after signing stop the release with the cosign
+          # version named when either file is missing. cosign v2 writes its older bundle shape
+          # unless passed --new-bundle-format, which cosign v3 hides because the new shape is its
+          # default, so the flag goes only where the installed cosign lists it.
+          bundle_format=()
+          if cosign sign-blob --help 2>&1 | grep -q -- '--new-bundle-format'; then
+            bundle_format=(--new-bundle-format)
+          fi
           for i in 1 2 3; do
             if cosign sign-blob --yes dist/SHA256SUMS \
                 --output-signature dist/SHA256SUMS.sig \
-                --output-certificate dist/SHA256SUMS.pem; then
+                --output-certificate dist/SHA256SUMS.pem \
+                --bundle dist/SHA256SUMS.sigstore.json \
+                ${bundle_format[@]+"${bundle_format[@]}"}; then
               break
             fi
             if [ "$i" = 3 ]; then exit 1; fi
             sleep 15
           done
-          assets="dist/SHA256SUMS dist/SHA256SUMS.sig dist/SHA256SUMS.pem dist/BINARY_SHA256SUMS"
+          test -s dist/SHA256SUMS.sigstore.json
+          if ! test -s dist/SHA256SUMS.sig || ! test -s dist/SHA256SUMS.pem; then
+            cosign_version=$(cosign version 2>&1 | awk '/GitVersion/ { print $2 }' || true)
+            echo "::error::cosign ${cosign_version:-of an unknown version} wrote no SHA256SUMS.sig or SHA256SUMS.pem." \
+              "cosign v3 writes only the bundle, and the installer, the demo upgrade, and cosign v2" \
+              "verifiers need the detached pair, so sign with cosign v2."
+            exit 1
+          fi
+          assets="dist/SHA256SUMS dist/SHA256SUMS.sig dist/SHA256SUMS.pem"
+          assets="$assets dist/SHA256SUMS.sigstore.json dist/BINARY_SHA256SUMS"
           if [ -f "dist/switchtender_${VERSION}_source.tar.gz" ]; then
             assets="$assets dist/switchtender_${VERSION}_source.tar.gz"
           fi

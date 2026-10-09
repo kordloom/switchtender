@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -45,6 +46,9 @@ type awxExport struct {
 	// NotificationTemplates are the named notification channels, imported as notification targets
 	// and attached wherever the export attaches them.
 	NotificationTemplates []awxNotificationTemplate `json:"notification_templates"`
+	// Schedules are the schedules awxkit also writes at the top level, each naming what it fires.
+	// One that belongs to a job template or a workflow imports with it, and the rest are reported.
+	Schedules []awxSchedule `json:"schedules"`
 }
 
 // awxProject is an AWX project.
@@ -290,6 +294,74 @@ func flattenGroups(groups []awxGroup) []awxGroup {
 	return out
 }
 
+// dropSkippedHosts takes each host the lenient decoder left out of an inventory's own host list out
+// of every group in that inventory too. It returns, by position in skipped, the names of the groups
+// each such host was taken out of.
+//
+// awxkit lists a host on its inventory and again, by name, under each group it belongs to. A group
+// that still named a host skipped for a malformed field would put it back in the inventory without
+// its variables and with its enabled field read as on, so a run against the group would reach a
+// host the report says was left out.
+func (e *awxExport) dropSkippedHosts(skipped []lenientSkip) map[int][]string {
+	out := map[int][]string{}
+	for i, s := range skipped {
+		if s.Name == "" || len(s.Path) < 2 {
+			continue
+		}
+		var inventories []awxInventory
+		switch s.Path[0].Key {
+		case "inventory":
+			inventories = e.Inventory
+		case "inventories":
+			inventories = e.Inventories
+		default:
+			continue
+		}
+		at := s.Path[0].Index
+		if rest := stepKeys(s.Path[1:]); at < 0 || at >= len(inventories) ||
+			(rest != "hosts" && rest != "related.hosts") {
+			continue
+		}
+		inv := &inventories[at]
+		// A host listed twice, once readably, is still a host of the inventory, so its groups keep it.
+		if slices.ContainsFunc(inv.hosts(), func(h awxHost) bool { return h.Name == s.Name }) {
+			continue
+		}
+		var from []string
+		dropMember(inv.Groups, s.Name, &from, 0)
+		if inv.Related != nil {
+			dropMember(inv.Related.Groups, s.Name, &from, 0)
+		}
+		if len(from) > 0 {
+			slices.Sort(from)
+			out[i] = slices.Compact(from)
+		}
+	}
+	return out
+}
+
+// dropMember takes the named host out of each group and every group nested under it, appending to
+// from the name of each group that listed it.
+func dropMember(groups []awxGroup, name string, from *[]string, depth int) {
+	if depth > maxGroupNesting {
+		return
+	}
+	named := func(h awxHost) bool { return h.Name == name }
+	for i := range groups {
+		g := &groups[i]
+		listed := slices.ContainsFunc(g.Hosts, named)
+		g.Hosts = slices.DeleteFunc(g.Hosts, named)
+		if g.Related != nil {
+			listed = listed || slices.ContainsFunc(g.Related.Hosts, named)
+			g.Related.Hosts = slices.DeleteFunc(g.Related.Hosts, named)
+			dropMember(g.Related.Children, name, from, depth+1)
+		}
+		if listed {
+			*from = append(*from, g.Name)
+		}
+	}
+}
+
 // awxJobTemplate is an AWX job template.
 type awxJobTemplate struct {
 	// Name is the template name.
@@ -402,6 +474,11 @@ type awxSurveyField struct {
 type awxSchedule struct {
 	// Name is the schedule name.
 	Name string `json:"name"`
+	// Description is the schedule's free text description. It has no effect on a fire.
+	Description string `json:"description"`
+	// UnifiedJobTemplate names what the schedule fires, by natural key with its kind, which awxkit
+	// writes on every schedule and which a schedule at the top level of the export is placed by.
+	UnifiedJobTemplate awxTypedRef `json:"unified_job_template"`
 	// RRule is the iCalendar recurrence rule.
 	RRule string `json:"rrule"`
 	// Enabled reports whether the schedule is active; absent means enabled.
@@ -520,7 +597,13 @@ func fromAWX(data []byte, now time.Time, ids *awxTemplateIDs) (*Plan, error) {
 	// Numbers stay json.Number rather than float64, so a host variable or survey choice that is a
 	// large integer survives to the inventory verbatim instead of being reformatted through float64,
 	// which loses precision past 2^53 and prints in scientific notation.
-	skipped, err := decodeLenient(data, &export)
+	//
+	// An inventory and a group are containers, with the related blocks awxkit nests their hosts
+	// under, so one malformed host costs that host alone and not the inventory and every template
+	// on it.
+	skipped, err := decodeLenient(data, &export, reflect.TypeFor[awxInventory](),
+		reflect.TypeFor[awxInventoryRelated](), reflect.TypeFor[awxGroup](),
+		reflect.TypeFor[awxGroupRelated]())
 	if err != nil {
 		return nil, fmt.Errorf("parse awx export: %w", err)
 	}
@@ -532,8 +615,22 @@ func fromAWX(data []byte, now time.Time, ids *awxTemplateIDs) (*Plan, error) {
 	plan := &Plan{awxIDs: ids}
 	// A skipped entry counts as refused, so an export whose every entry was malformed reports each
 	// one and why, rather than claiming nothing in it was recognized.
-	for _, s := range skipped {
-		plan.warn("%s", s)
+	ungrouped := export.dropSkippedHosts(skipped)
+	for i, s := range skipped {
+		text := s.Text
+		if groups := ungrouped[i]; len(groups) > 0 {
+			quoted := make([]string, len(groups))
+			for j, g := range groups {
+				quoted[j] = quoteName(g)
+			}
+			lists := "lists"
+			if len(groups) > 1 {
+				lists = "list"
+			}
+			text += fmt.Sprintf(". It is left out of group%s %s too, which %s it, so no play "+
+				"reaches it", plural(len(groups)), clipNames(quoted), lists)
+		}
+		plan.warn("%s", text)
 		plan.refused++
 	}
 
@@ -642,7 +739,7 @@ func fromAWX(data []byte, now time.Time, ids *awxTemplateIDs) (*Plan, error) {
 	credentialName := orgQualifier(awxOrgNames(export.Credentials, func(c awxCredential) (string, string) {
 		return c.Organization.Name, c.Name
 	})...)
-	customTypes := plan.addCredentialTypes(export.CredentialTypes, now)
+	customTypes, refusedTypes := plan.addCredentialTypes(export.CredentialTypes, now)
 	for _, c := range export.Credentials {
 		// A credential of a custom type the export also carries becomes a credential of the imported
 		// type. It arrives as an empty shell like every other credential, and its type decides how
@@ -662,7 +759,17 @@ func fromAWX(data []byte, now time.Time, ids *awxTemplateIDs) (*Plan, error) {
 			continue
 		}
 		kind, exact := mapCredentialKind(c.CredentialType.Name, c.Inputs)
-		if !exact {
+		// A credential of a custom type that did not come across is a guess whatever the name
+		// says. A type called Templated Token maps to the token kind as an exact match, yet a run
+		// that read API_TOKEN from the type's injector gets the token kind's own variable here, so
+		// the credential carries a line saying so.
+		switch injectors, refused := refusedTypes[c.CredentialType.Name]; {
+		case refused:
+			plan.warn("credential %q is of the custom type %q, which did not come across, so its "+
+				"kind %q is a guess from the type's name: verify it is correct. Its AWX injectors "+
+				"(%s) are replaced by what the %q kind injects here", c.Name, c.CredentialType.Name,
+				kind, injectors, kind)
+		case !exact:
 			plan.warn("credential %q type %q mapped to %q; verify it is correct",
 				c.Name, c.CredentialType.Name, kind)
 		}
@@ -773,6 +880,7 @@ func fromAWX(data []byte, now time.Time, ids *awxTemplateIDs) (*Plan, error) {
 	templateName := orgQualifier(awxOrgNames(export.JobTemplates, func(jt awxJobTemplate) (string, string) {
 		return jt.Organization.Name, jt.Name
 	})...)
+	plan.topSchedules = newAWXTopSchedules(export)
 	for _, jt := range export.JobTemplates {
 		plan.addTemplate(jt, templateName(jt.Organization.Name, jt.Name), now, projectIDs, inventoryIDs,
 			credentialIDs)
@@ -780,6 +888,7 @@ func fromAWX(data []byte, now time.Time, ids *awxTemplateIDs) (*Plan, error) {
 	// Workflows come after the job templates they run, since each node's step inlines the playbook
 	// of the template it points at.
 	plan.addWorkflows(export, now, projectIDs, inventoryIDs, credentialIDs)
+	plan.topSchedules.report(plan)
 	plan.attachAWXOrganizations(export.Organizations, now)
 	plan.reportAWXPlacement()
 	reportUnmapped(plan, export)
@@ -931,8 +1040,13 @@ func (p *Plan) addTemplate(jt awxJobTemplate, name string, now time.Time,
 
 	p.Templates = append(p.Templates, tpl)
 	p.awxNotify().templateOrg[tpl.ID] = jt.Organization.Name
+	var nested []awxSchedule
 	if jt.Related != nil {
-		p.addSchedules(fmt.Sprintf("template %q", name), jt.Related.Schedules, tpl.ID, inventoryIDs, now)
+		nested = jt.Related.Schedules
+	}
+	scheds := p.topSchedules.take(awxTypeJobTemplate, jt.Organization.Name, jt.Name, nested)
+	p.addSchedules(fmt.Sprintf("template %q", name), scheds, tpl.ID, inventoryIDs, now)
+	if jt.Related != nil {
 		// After the schedules, so an attachment also reaches the copy an overriding schedule fires.
 		p.attachAWXNotifications(fmt.Sprintf("template %q", name), &jt.Related.awxNotifyRelated,
 			tpl.ID, now)
@@ -1097,10 +1211,18 @@ func (p *Plan) addSchedules(owner string, schedules []awxSchedule, templateID st
 			SpringForward: awxSpringForward(cron),
 		}, "this AWX export", now)
 		// Switched off once it is added rather than before, so the report gives the reason it was
-		// held here instead of saying it was switched off at the source, which it was not.
-		if held != "" && enabled && len(p.Schedules) > added {
-			p.Schedules[len(p.Schedules)-1].Enabled = false
+		// held here instead of saying it was switched off at the source, which it was not. One
+		// switched off on the way in, for a required secret question with no default, keeps that
+		// line and gets this reason as a second thing to fix before it is switched on.
+		if held == "" || !enabled || len(p.Schedules) == added {
+			continue
+		}
+		if sc := p.Schedules[len(p.Schedules)-1]; sc.Enabled {
+			sc.Enabled = false
 			p.warn("schedule %q of %s arrives switched off. %s Then switch it on.", s.Name, owner, held)
+		} else {
+			p.warn("schedule %q of %s also needs this before it is switched on. %s", s.Name,
+				owner, held)
 		}
 	}
 }

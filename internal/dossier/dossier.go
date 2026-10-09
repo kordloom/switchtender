@@ -591,18 +591,21 @@ func Render(in *Input) ([]byte, error) {
 		// the surrounding history as it stood when the run ran. An evidence document that overstates
 		// what an anchor proves is the same defect as one that understates a tamper.
 		v.Status = "unanchored"
-		v.StatusText = fmt.Sprintf("The chain verifies and %d anchor(s) fix it outside this "+
-			"install, but it holds no entry naming this run, so they fix the history around it "+
-			"rather than a record of it.", holding)
+		v.StatusText = fmt.Sprintf("The chain verifies and %d %s it outside this install, but it "+
+			"holds no entry naming this run, so %s the history around it rather than a record "+
+			"of it.", holding, util.Plural(holding, "anchor fixes", "anchors fix"),
+			util.Plural(holding, "it fixes", "they fix"))
 	case refusedProofs > 0:
 		v.Status = "broken"
-		v.StatusText = fmt.Sprintf("%d anchor(s) covering this run carry a timestamp token that does "+
-			"not fix the link recorded beside it, so an anchor row does not say what it appears to "+
-			"say. Nothing here rests on an outside authority until that is explained.", refusedProofs)
+		v.StatusText = fmt.Sprintf("%d %s a timestamp token that does not fix the link recorded "+
+			"beside it, so an anchor row does not say what it appears to say. Nothing here rests "+
+			"on an outside authority until that is explained.", refusedProofs,
+			util.Plural(refusedProofs, "anchor covering this run carries",
+				"anchors covering this run carry"))
 	default:
 		v.Status = "verified"
-		v.StatusText = fmt.Sprintf("The chain verifies and %d anchor(s) fix history containing "+
-			"this run outside this install.", holding)
+		v.StatusText = fmt.Sprintf("The chain verifies and %d %s history containing this run "+
+			"outside this install.", holding, util.Plural(holding, "anchor fixes", "anchors fix"))
 	}
 
 	var buf bytes.Buffer
@@ -883,10 +886,13 @@ func snapshotText(snap *run.InventorySnapshot, composed bool) string {
 		return "a dynamic source: its hosts resolve at execution, so the definition is bound and the " +
 			"hosts it reached are recorded below"
 	case composed:
-		return fmt.Sprintf("the composed result, %d host(s) with their variables as resolved at "+
-			"submission: %s", len(snap.Hosts), strings.Join(snap.Hosts, ", "))
+		return fmt.Sprintf("the composed result, %d %s as resolved at submission: %s",
+			len(snap.Hosts),
+			util.Plural(len(snap.Hosts), "host with its variables", "hosts with their variables"),
+			strings.Join(snap.Hosts, ", "))
 	}
-	return fmt.Sprintf("%d host(s) as submitted: %s", len(snap.Hosts), strings.Join(snap.Hosts, ", "))
+	return fmt.Sprintf("%d %s as submitted: %s", len(snap.Hosts),
+		util.Plural(len(snap.Hosts), "host", "hosts"), strings.Join(snap.Hosts, ", "))
 }
 
 // ansibleFrom returns the words that say where an ansible-core came from, as a run's evidence

@@ -361,7 +361,7 @@ async function runWorkflow() {
 	}
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
 	// Any link that starts a sign-in marks this tab first, so the token that comes back can be
 	// answered to a request this browser made.
 	for (const el of document.querySelectorAll("[data-sso]")) {
@@ -374,6 +374,18 @@ document.addEventListener("DOMContentLoaded", () => {
 	if (document.body.dataset.signin === "required" && !apiToken()) {
 		requireLogin();
 		return;
+	}
+	// The cached role and name are what the last sign-in said. The server is asked who this
+	// session is before anything is drawn from them, so a role changed since then gates the page
+	// as it stands, and a session the server has forgotten is not drawn at all. The sign-in page
+	// is the one place a forgotten session stays put: it is where the reader is sent, and with the
+	// session gone from storage it offers no dead session as a way back.
+	if (apiToken()) {
+		const verdict = await refreshIdentity();
+		if (verdict === "revoked" && document.body.dataset.page !== "login") {
+			requireLogin();
+			return;
+		}
 	}
 	mountTopbar();
 	mountLiveRegions();
@@ -614,7 +626,10 @@ function readOnlyBanner() {
 	const witness = document.createElement("a");
 	witness.href = "https://switchtender.com/#proof";
 	witness.textContent = "point a witness at it";
-	banner.append("Read-only demo on a Team license, so every feature is on, and reset every night on purpose. Start with ", held, ". Then ",
+	banner.append("Read-only demo on a Team license, so every feature is on, and reset every night on purpose. " +
+		"It runs open on purpose, on made-up data: every page and every API read works without signing in, " +
+		"and every change is refused. An install you run never serves open on a network address. Start with ",
+		held, ". Then ",
 		witness, " today and again tomorrow, and watch it catch the rewrite.");
 	return banner;
 }

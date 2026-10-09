@@ -197,6 +197,34 @@ test("a receipt with no riders says nothing about them", async () => {
 	assert.match(text, /VERIFIED/, "a clean pinned receipt no longer reads as verified");
 });
 
+test("every count on the page takes the noun in the number it needs", async () => {
+	// The rider paragraph, the anchors row and the anchored row each hedged with "(s)", so one
+	// counter-signature, one proof or one claim read as though the page could not count it.
+	const cases = [
+		{ n: 1, rider: /carries 1 counter-signature\. .*attached this one .*Treat it as unverified/,
+			proof: /1 proof carried/, claim: /1 claim after it/ },
+		{ n: 2, rider: /carries 2 counter-signatures\. .*attached these .*Treat them as unverified/,
+			proof: /2 proofs carried/, claim: /2 claims after it/ },
+	];
+	for (const c of cases) {
+		const page = await mount({
+			...SOUND,
+			head_attestors: Array.from({ length: c.n }, (_, i) => "auditor-" + i + " (sha256:beef)"),
+			anchors_matched: 1,
+			anchor_proofs_carried: c.n,
+			anchor_proofs_verified: c.n,
+			anchored_through_seq: 7,
+			unanchored_claims: c.n,
+		});
+		const text = page.drop("sha256:good").textContent;
+
+		assert.match(text, c.rider, "the rider paragraph miscounts " + c.n + ": " + text.slice(0, 400));
+		assert.match(text, c.proof, "the anchors row miscounts " + c.n + ": " + text);
+		assert.match(text, c.claim, "the anchored row miscounts " + c.n + ": " + text);
+		assert.doesNotMatch(text, /\(s\)/, "a count still hedges its plural: " + text);
+	}
+});
+
 test("a pin that was given but never reached is not reported as no pin", async () => {
 	// The verifier stops at a failed signature before it compares the pin. The page rendered that
 	// as "pin NONE", which told a visitor who had pinned a fingerprint that they had not, and left

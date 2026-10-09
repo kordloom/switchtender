@@ -56,6 +56,9 @@ type OIDCAuth struct {
 	// brand names the identity provider for the sign-in button's label and mark, derived from the
 	// issuer host. Empty for a provider the button does not have a logo for.
 	brand string
+	// client reaches the provider: discovery, its key set, and the code exchange. It is idpClient's
+	// guarded client.
+	client *http.Client
 }
 
 // Brand returns the identity provider's short name for the sign-in button, one of "google",
@@ -101,7 +104,10 @@ func NewOIDCAuth(ctx context.Context, issuer, clientID, clientSecret, redirectUR
 	if !user.ValidRole(defaultRole) {
 		return nil, fmt.Errorf("oidc: invalid default role %q", defaultRole)
 	}
-	provider, err := oidc.NewProvider(ctx, issuer)
+	// The provider keeps this client for its key set, so discovery and every later key fetch both
+	// dial through the guard.
+	client := idpClient()
+	provider, err := oidc.NewProvider(oidc.ClientContext(ctx, client), issuer)
 	if err != nil {
 		return nil, fmt.Errorf("oidc: discover %q: %w", issuer, err)
 	}
@@ -122,6 +128,7 @@ func NewOIDCAuth(ctx context.Context, issuer, clientID, clientSecret, redirectUR
 		secureCookie: strings.HasPrefix(strings.ToLower(redirectURL), "https"),
 		log:          log,
 		brand:        oidcBrand(issuer),
+		client:       client,
 	}, nil
 }
 
@@ -160,7 +167,10 @@ func (o *OIDCAuth) callback(w http.ResponseWriter, r *http.Request) {
 		o.fail(w, r, "sign-in state mismatch")
 		return
 	}
-	token, err := o.oauth.Exchange(r.Context(), r.URL.Query().Get("code"),
+	// The exchange carries the client secret, so it goes through the same guarded client discovery
+	// used. The oauth2 package reads its client from the context and falls back to the default one.
+	exchangeCtx := context.WithValue(r.Context(), oauth2.HTTPClient, o.client)
+	token, err := o.oauth.Exchange(exchangeCtx, r.URL.Query().Get("code"),
 		oauth2.VerifierOption(hs.verifier))
 	if err != nil {
 		o.log.Warn("oidc: code exchange failed: " + err.Error())

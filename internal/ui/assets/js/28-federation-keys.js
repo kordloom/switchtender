@@ -22,10 +22,16 @@ function fedkeyShortID(id) {
 }
 
 // loadFederationKeys fills the signing key section. Federation is off on most installs, where the
-// listing answers 404, so the section stays hidden without a word, the way credential types do.
+// listing answers 404, so the section stays hidden without a word, the way credential types do. An
+// install the server said has it off is not asked, since the browser logs the 404 the page would be
+// quietly reading.
 async function loadFederationKeys() {
 	const section = document.getElementById("fedkey-section");
 	if (!section) return;
+	if (featureOff("federation")) {
+		section.hidden = true;
+		return;
+	}
 	let data;
 	try {
 		data = await getJSON("/federation/keys");

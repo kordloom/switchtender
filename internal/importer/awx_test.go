@@ -692,6 +692,12 @@ func TestAWXImportsAwxkitRelatedAttachments(t *testing.T) {
 	if len(release.Steps) != 2 {
 		t.Fatalf("Release has %d steps, want 2", len(release.Steps))
 	}
+	// The workflow runs Deploy Web, so it carries Deploy Web's credential, read from the same
+	// related block awxkit writes it under.
+	if len(release.CredentialIDs) != 1 {
+		t.Errorf("Release carries %d credentials, want the one Deploy Web's related block names",
+			len(release.CredentialIDs))
+	}
 	var smoke *run.PipelineStep
 	for i, s := range release.Steps {
 		if s.Name == "smoke" {

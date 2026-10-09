@@ -18,6 +18,9 @@
 	// longest label on the page, since a fixed one ran "timestamped" into its value.
 	function pad(s, width) { while (s.length < width) s += " "; return s; }
 
+	// plural returns the noun in the number a count needs, so a line never hedges with "(s)".
+	function plural(n, one, many) { return n === 1 ? one : many; }
+
 	// esc escapes text for safe insertion, since a bundle is untrusted input.
 	function esc(s) {
 		return String(s).replace(/[&<>"']/g, function (c) {
@@ -50,12 +53,15 @@
 		var html = note ? '<p class="tampered">' + esc(note) + "</p>" : "";
 		html += '<div class="verdict ' + cls + '">' + word + level + "</div>";
 		if (riders) {
-			html += '<p class="unpinned">This receipt carries ' + (report.head_attestors || []).length +
-				' counter-signature(s). SwitchTender never adds them, so somebody attached these after ' +
-				'the receipt was produced. This page cannot check who: it can pin the producing key and ' +
-				'has no way to pin a counter-signer, and any key signs under any role it chooses. ' +
-				'Treat them as unverified until you have checked them with <code>loomseal verify ' +
-				'--attestor</code> against a key you obtained yourself.</p>';
+			var count = report.head_attestors.length;
+			html += '<p class="unpinned">This receipt carries ' + count + " " +
+				plural(count, "counter-signature", "counter-signatures") + ". SwitchTender never adds " +
+				"them, so somebody attached " + plural(count, "this one", "these") + " after the " +
+				"receipt was produced. This page cannot check who: it can pin the producing key and " +
+				"has no way to pin a counter-signer, and any key signs under any role it chooses. " +
+				"Treat " + plural(count, "it", "them") + " as unverified until you have checked " +
+				plural(count, "it", "them") + " with <code>loomseal verify --attestor</code> against " +
+				"a key you obtained yourself.</p>";
 		}
 		if (unpinned) {
 			html += '<p class="unpinned">Nothing here was altered after it was signed. Who signed it is ' +
@@ -86,8 +92,9 @@
 				", " + (report.claims_checked || 0) + " claims, head matched " + !!report.head_matched]);
 		}
 		if (report.anchors_matched || report.anchor_proofs_carried) {
-			rows.push(["anchors", report.anchors_matched + " matched by coordinates, " +
-				(report.anchor_proofs_carried || 0) + " proof(s) carried, " +
+			var carried = report.anchor_proofs_carried || 0;
+			rows.push(["anchors", report.anchors_matched + " matched by coordinates, " + carried + " " +
+				plural(carried, "proof", "proofs") + " carried, " +
 				(report.anchor_proofs_verified || 0) + " verified"]);
 		}
 		(report.anchor_attestations || []).forEach(function (a) { rows.push(["timestamped", a]); });
@@ -100,7 +107,8 @@
 		if (report.anchored_through_seq) {
 			var line = "through seq " + report.anchored_through_seq;
 			if (report.unanchored_claims) {
-				line += ", " + report.unanchored_claims + " claim(s) after it";
+				line += ", " + report.unanchored_claims + " " +
+					plural(report.unanchored_claims, "claim", "claims") + " after it";
 				if (report.unanchored_window) line += " spanning " + report.unanchored_window;
 			}
 			rows.push(["anchored", line]);

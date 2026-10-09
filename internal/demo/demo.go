@@ -44,7 +44,6 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -456,13 +455,12 @@ func seedAnchors(ctx context.Context, d Deps, log *zap.Logger) {
 		log.Warn("demo: anchoring skipped: could not read the chain")
 		return
 	}
-	client := &http.Client{Timeout: 15 * time.Second}
 	newest := chain[len(chain)-1]
 
 	mint := func(shape string, seq int64, link string) {
 		actx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		defer cancel()
-		a, err := audit.NewAnchor(actx, client, audit.AnchorRFC3161, d.AnchorTSA, shape,
+		a, err := audit.NewAnchor(actx, nil, audit.AnchorRFC3161, d.AnchorTSA, shape,
 			d.InstallID, seq, link, time.Now())
 		if err == nil {
 			// Both shapes cover the newest entry, and an anchor a verifier would refuse fails every

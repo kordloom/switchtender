@@ -18,7 +18,7 @@ The instance below uses fictional accounts and playbook names and touches no rea
 nothing here is redacted; on your own instance the same report carries your real changes. The chain
 it was rendered from verifies and is anchored to a public timestamp authority, so the header reads:
 
-> The chain verifies and carries 1 anchor(s) fixing it outside this install.
+> The chain verifies and carries 1 anchor fixing it outside this install.
 
 ## The period at a glance
 

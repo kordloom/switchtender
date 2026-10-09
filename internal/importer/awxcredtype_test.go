@@ -172,6 +172,12 @@ func TestAWXCustomTypeCredentialsAndReport(t *testing.T) {
 		`credential "prod-kube" is of the custom type "Kubeconfig" and needs its field values`,
 		`field "verify" is a boolean in AWX`,
 		`field "verify" defaults to "true" in AWX`,
+		// The credential of the refused type is a guess whatever its type's name says. Its name
+		// holds the word token, so the kind mapping calls it exact, and this line is what says
+		// its injector contract changed.
+		`credential "api-token" is of the custom type "Templated Token", which did not come ` +
+			`across, so its kind "token" is a guess from the type's name: verify it is correct. ` +
+			`Its AWX injectors (env API_TOKEN) are replaced by what the "token" kind injects here`,
 	} {
 		if !strings.Contains(review, phrase) {
 			t.Errorf("review items do not say %q:\n%s", phrase, review)

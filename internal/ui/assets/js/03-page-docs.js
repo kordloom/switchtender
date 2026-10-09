@@ -187,7 +187,7 @@ const TOURS = [
 			// whole screen and sat exactly over the numbers a first visit should be looking at.
 			{ sel: "#ov-metrics", title: "Welcome to SwitchTender", body: "One binary runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go. Every run leaves a record you can verify." },
 			{ sel: "#attention-panel", title: "An agent can ask. It cannot release.", body: "When an AI agent requests a gated run, it waits under Approval needed until a person approves it." },
-			{ sel: "#attention-panel", title: "Separation of duties", body: "On Team, the person or agent that requested a run cannot approve it. Community installs get one approval policy." },
+			{ sel: "#attention-panel", title: "Separation of duties", body: "An agent can never approve, on any edition. On Team, a rule can also refuse the approval of the person who asked. Community holds the built-in agent hold and one rule of your own." },
 			{ sel: "#attention-panel", title: "Approval is bound to the run", body: "An approval records a hash of the run's spec. If the spec changes after approval, the executor refuses the run." },
 			{ sel: ".side a[href='/ui/audit']|.side", title: "Verify the record yourself", body: "The verifier reads a receipt file and nothing else, with no database, no network, and no login." },
 			{ sel: "#tiles a[href='/ui/migrate']", title: "Bring your existing estate", body: "Import from AWX, Semaphore, Chef, Puppet, Rundeck, or Jenkins instead of rebuilding it by hand." },

@@ -40,5 +40,11 @@ jobs:
           mkdir -p ~/.ssh
           printf '%s\n' "$DEMO_SSH_KEY" > ~/.ssh/demo_key
           chmod 600 ~/.ssh/demo_key
-          ssh -i ~/.ssh/demo_key -o StrictHostKeyChecking=accept-new "$DEMO_SSH_HOST" \
+          # The droplet's host key is committed, so the host about to receive a root script is
+          # checked against a key known before this run began. accept-new on a fresh runner has
+          # no earlier key to compare with, so it would trust any host at the address and report
+          # the upgrade done.
+          cp deploy/demo_known_hosts ~/.ssh/known_hosts
+          ssh -i ~/.ssh/demo_key -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" "$DEMO_SSH_HOST" \
             bash -s < deploy/demo-upgrade.sh

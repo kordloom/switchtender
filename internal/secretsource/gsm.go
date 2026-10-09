@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -56,9 +57,13 @@ func resolveGSM(ctx context.Context, config string) (string, error) {
 		}
 	}
 
-	url := fmt.Sprintf("%s/v1/projects/%s/secrets/%s/versions/%s:access",
-		strings.TrimRight(gsmEndpoint, "/"), cfg.Project, cfg.Secret, version)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	// Each piece is one path segment. Escaping keeps a project, secret, or version carrying a
+	// slash, a space, or a query mark inside its own segment, so the request names the resource
+	// the config names rather than whichever one the characters spliced together.
+	secretURL := fmt.Sprintf("%s/v1/projects/%s/secrets/%s/versions/%s:access",
+		strings.TrimRight(gsmEndpoint, "/"), url.PathEscape(cfg.Project),
+		url.PathEscape(cfg.Secret), url.PathEscape(version))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, secretURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrResolve, err)
 	}

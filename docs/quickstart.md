@@ -7,7 +7,7 @@
 
 # Quickstart
 
-No install needed to look around. The [live demo](https://demo.switchtender.com/ui/runs?status=pending_approval) is a seeded, read-only instance of exactly what you get.
+No install needed to look around. The [live demo](https://demo.switchtender.com/ui/runs?status=pending_approval) is a read-only instance of exactly what you get, seeded with made-up data. It runs open on purpose: every page and every API read works without signing in, and every change is refused. An install you run never serves open on a network address. Only loopback and `--read-only` may, and it warns when it does.
 
 ## Requirements
 

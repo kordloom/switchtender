@@ -179,8 +179,10 @@ async function openPromptLaunch(t) {
 	};
 }
 
-// deleteCell builds a table cell holding a delete button for a resource.
-function deleteCell(path, label, tr, emptyMsg) {
+// deleteCell builds a table cell holding a delete button for a resource. onDeleted, when given, runs
+// after a successful delete has taken the row out, for a list whose rows can change who is reading
+// it.
+function deleteCell(path, label, tr, emptyMsg, onDeleted) {
 	const cell = document.createElement("td");
 	const del = document.createElement("button");
 	del.className = "button danger";
@@ -194,6 +196,7 @@ function deleteCell(path, label, tr, emptyMsg) {
 		try {
 			await authedDelete(path);
 			removeRow(tr, emptyMsg);
+			if (onDeleted) await onDeleted();
 		} catch (err) {
 			setStatus("Delete failed: " + err.message);
 		}

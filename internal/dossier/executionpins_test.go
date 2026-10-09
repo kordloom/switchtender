@@ -32,7 +32,7 @@ func TestRunMetaStatesWhatTheApprovalBound(t *testing.T) {
 		Key: "Pulled image digest", WantRow: digest,
 	}, { // Test 3: A static snapshot names its hosts.
 		Run: &run.Run{InventorySnapshot: &run.InventorySnapshot{Hosts: []string{"web1", "web2"}}},
-		Key: "Inventory snapshot", WantRow: "2 host(s) as submitted: web1, web2",
+		Key: "Inventory snapshot", WantRow: "2 hosts as submitted: web1, web2",
 	}, { // Test 4: A dynamic source says its hosts resolve at execution.
 		Run: &run.Run{InventorySnapshot: &run.InventorySnapshot{Dynamic: true}},
 		Key: "Inventory snapshot", WantRow: "a dynamic source: its hosts resolve at execution",
@@ -49,7 +49,7 @@ func TestRunMetaStatesWhatTheApprovalBound(t *testing.T) {
 		Run: &run.Run{InventorySnapshot: &run.InventorySnapshot{Hosts: []string{"web1"}},
 			InventoryResolution: &run.InventoryResolution{Kind: "smart", Hosts: []string{"web1"}}},
 		Key:     "Inventory snapshot",
-		WantRow: "the composed result, 1 host(s) with their variables as resolved at submission: web1",
+		WantRow: "the composed result, 1 host with its variables as resolved at submission: web1",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Key), func(t *testing.T) {

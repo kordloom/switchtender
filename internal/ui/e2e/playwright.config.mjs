@@ -1,18 +1,23 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// Three servers back five suites. The smoke suite drives the seeded, read-only demo, where the data
+// Four servers back six suites. The smoke suite drives the seeded, read-only demo, where the data
 // is rich and nothing can be changed, so it covers rendering and navigation of every main page. The
 // interactive suite drives a writable serve instance, where it exercises the mutating flows the demo
 // disables: launching a run and creating objects, then checking the change actually landed. The
 // assess suite drives the browser assessment, a static page, from the site directory itself. The
 // workflow suite drives the workflow editor against both the demo and the serve instance, and the
-// workflow-integration suite runs what it builds against the serve instance.
+// workflow-integration suite runs what it builds against the serve instance. The identity suite
+// drives a second writable serve instance of its own, which it fills with accounts: the first
+// account turns an open install into one that authenticates, so it cannot share the one the other
+// suites drive open.
 const DEMO_PORT = 18777;
 const SERVE_PORT = 18778;
 const SITE_PORT = 18779;
+const IDENTITY_PORT = 18780;
 const DEMO = `http://127.0.0.1:${DEMO_PORT}`;
 const SERVE = `http://127.0.0.1:${SERVE_PORT}`;
 const SITE = `http://127.0.0.1:${SITE_PORT}`;
+const IDENTITY = `http://127.0.0.1:${IDENTITY_PORT}`;
 
 // ST_E2E_CHANNEL, when set (e.g. "chrome"), drives a system-installed browser instead of the one
 // Playwright downloads. It is a convenience for a machine that already has Chrome but not the headless
@@ -80,6 +85,13 @@ export default defineConfig({
       testMatch: "workflow-integration.spec.mjs",
       use: { ...devices["Desktop Chrome"], ...channel, baseURL: SERVE },
     },
+    // Accounts demoted, promoted, renamed, and deleted through the API while a browser is signed in
+    // as them, against an instance no other suite touches.
+    {
+      name: "identity",
+      testMatch: "identity.spec.mjs",
+      use: { ...devices["Desktop Chrome"], ...channel, baseURL: IDENTITY },
+    },
   ],
   webServer: [
     {
@@ -104,6 +116,18 @@ export default defineConfig({
         process.env.ST_E2E_SERVE_CMD ||
         `rm -f .bin/interactive.db && ./.bin/switchtender serve --addr 127.0.0.1:${SERVE_PORT} --db .bin/interactive.db`,
       url: `${SERVE}/healthz`,
+      timeout: 60_000,
+      reuseExistingServer: !process.env.CI,
+      env: serveEnv,
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+    {
+      // The identity suite's own instance, with a fresh database each run for the same reason.
+      command:
+        process.env.ST_E2E_IDENTITY_CMD ||
+        `rm -f .bin/identity.db && ./.bin/switchtender serve --addr 127.0.0.1:${IDENTITY_PORT} --db .bin/identity.db`,
+      url: `${IDENTITY}/healthz`,
       timeout: 60_000,
       reuseExistingServer: !process.env.CI,
       env: serveEnv,

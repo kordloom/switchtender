@@ -33,6 +33,16 @@ test("the hosted demo says it resets every night and starts at the agent's held 
 	assert.ok(links.includes(agentHeld), "no link to the agent's held runs: " + links);
 });
 
+// The hosted demo answers every read without a token, which an evaluator who curls it first would
+// otherwise read as the product's default, so its banner says that is deliberate and what a real
+// install does instead.
+test("the hosted demo says it runs open on purpose and a real install does not", () => {
+	const { text } = bannerOn("demo.switchtender.com", true);
+	assert.match(text, /runs open on purpose, on made-up data/);
+	assert.match(text, /every change is refused/);
+	assert.match(text, /An install you run never serves open on a network address/);
+});
+
 test("a demo on another host does not claim a nightly reset", () => {
 	for (const host of ["127.0.0.1", "localhost", "demo.example.com"]) {
 		const { text, links } = bannerOn(host, true);

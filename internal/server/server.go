@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -544,8 +545,25 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 	srv.web = ui.New(srv.log, srv.docs, srv.readOnly, srv.matrixCap, srv.oidc != nil, srv.saml != nil,
 		srv.ai != nil, oidcBrand, ui.WithAccountCheck(srv.anyAccount), ui.WithTokenCheck(srv.anyToken),
 		ui.WithSignInCheck(srv.signInRequired), ui.WithDemo(srv.demo),
-		ui.WithFactCacheAdminOnly(srv.factCacheAdminOnly))
+		ui.WithFactCacheAdminOnly(srv.factCacheAdminOnly), ui.WithFeaturesOff(srv.featuresOff()...))
 	return srv
+}
+
+// featuresOff names the optional features this install has switched off, so a page can skip asking
+// for them. Each answers 404 when off, which the page reads as "not enabled", but the browser logs
+// every 404 it sees, so a page that asked would open with errors in its console.
+func (s *Server) featuresOff() []string {
+	var off []string
+	if s.tokens == nil {
+		off = append(off, "tokens")
+	}
+	if s.credTypes == nil {
+		off = append(off, "credential-types")
+	}
+	if s.federation == nil {
+		off = append(off, "federation")
+	}
+	return off
 }
 
 // signInRequired reports whether the API refuses a request that carries no credential, so a page
@@ -589,18 +607,33 @@ func (s *Server) anyToken() bool {
 	return n > 0
 }
 
-// demoLanding is where the read-only demo's bare address lands: the runs a rule is holding. The
-// gate is the product, so a visitor who types the address, or follows a link naming only the host,
-// starts at a change the gate stopped rather than at a dashboard any automation tool could show.
-const demoLanding = "/ui/runs?status=pending_approval"
+// demoLanding is where the demo's bare address lands: the runs an AI agent asked for that the
+// built-in hold is keeping waiting, the list the hosted demo's banner and the homepage's first
+// button open. The gate is the product, so a visitor who types the address, or follows a link
+// naming only the host, starts at a change the gate stopped rather than at a dashboard any
+// automation tool could show. The demo seeds the agent's held restart whatever tools the machine
+// has, so the list has a run to show. The search is encoded the way the browser encodes it, so the
+// address is the one the hosted demo's banner links to.
+func demoLanding() string {
+	q := `held_by:"` + policy.AgentDefaultName + `" status:pending_approval`
+	return "/ui/runs?q=" + strings.ReplaceAll(url.QueryEscape(q), "+", "%20")
+}
 
-// landing returns where the bare address sends a visitor: the held runs on the read-only demo, and
-// the overview everywhere else.
+// heldLanding is where a read-only install that is not the demo lands: every run a rule is
+// holding, since an install may have no agent runs at all.
+const heldLanding = "/ui/runs?status=pending_approval"
+
+// landing returns where the bare address sends a visitor: the agent's held runs on the read-only
+// demo, every held run on any other read-only server, and the overview on a writable one.
 func (s *Server) landing() string {
-	if s.readOnly {
-		return demoLanding
+	switch {
+	case s.readOnly && s.demo:
+		return demoLanding()
+	case s.readOnly:
+		return heldLanding
+	default:
+		return "/ui/"
 	}
-	return "/ui/"
 }
 
 // checkouts returns the reader for project checkouts, nil when this server has none. The syncer is

@@ -16,6 +16,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/schedule"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // Contract runs the full schedule.Store contract against a fresh store from newStore.
@@ -499,7 +500,8 @@ func testMissingAndZero(t *testing.T, store schedule.Store) {
 		t.Fatalf("List() error = %v", err)
 	}
 	if len(left) != 0 {
-		t.Errorf("calls against missing rows left %d schedule(s) behind, want an empty store", len(left))
+		t.Errorf("calls against missing rows left %d %s behind, want an empty store", len(left),
+			util.Plural(len(left), "schedule", "schedules"))
 	}
 
 	// A zero-value schedule is storable and reads back as itself, including the zero created time.

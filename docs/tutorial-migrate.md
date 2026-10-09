@@ -27,6 +27,11 @@ and nothing else. The table is in
    schedules, and it imports as it is. Rundeck exports a project's jobs as YAML or JSON, or a whole
    project as an archive from Project Settings; either one uploads and the importer tells them apart
    by content. Jenkins has no export file at all, so zip its `jobs` directory and upload that.
+   Leave out each job's build history and workspace, which hold far more files than the
+   definitions and push the zip past what an upload reads:
+   `zip -r jobs.zip jobs -x '*/builds/*' '*/workspace/*'`. The
+   [Jenkins section of the migration guide](migration.md#import-jenkins-jobs) has the 7-Zip
+   command for Windows.
 2. Open Migrate from the sidebar, or go to `/ui/migrate`.
 3. Choose the format: AWX, Semaphore, Chef, Puppet, Rundeck, or Jenkins. Rundeck and Jenkins ask for the inventory
    their templates should target, since neither names hosts of its own.

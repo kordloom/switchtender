@@ -848,6 +848,19 @@ func TestJenkinsZipNamesJobsByTheirPlaceInTheTree(t *testing.T) {
 			"nodes/agent-1/config.xml":       "<slave><name>agent-1</name></slave>",
 		},
 		WantNames: []string{"alpha"},
+	}, { // Test 6: Written on Windows, where the archiver names its members with backslashes.
+		Files: map[string]string{
+			`jobs\simple\config.xml`:            job,
+			`jobs\folder\config.xml`:            folderDoc,
+			`jobs\folder\jobs\child\config.xml`: job,
+		},
+		WantNames: []string{"folder/child", "simple"},
+	}, { // Test 7: Both separators in one archive, which must not drop half the jobs.
+		Files: map[string]string{
+			"jobs/fwd/config.xml":  job,
+			`jobs\back\config.xml`: job,
+		},
+		WantNames: []string{"back", "fwd"},
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -887,6 +900,14 @@ func TestJenkinsZipOfAHomeImportsWhatTheWalkImports(t *testing.T) {
 			"<user>\n  <id>admin</id>\n</user>\n",
 		"nodes/agent-1/config.xml": "<?xml version='1.1' encoding='UTF-8'?>\n" +
 			"<slave>\n  <name>agent-1</name>\n</slave>\n",
+		// What a real jobs directory holds beside a job's definition and the walk never enters:
+		// archived artifacts, a workspace checkout, a promotion, and a multibranch project's
+		// branches, each carrying a file named config.xml.
+		"jobs/nightly/builds/1/archive/app/config.xml": "<config/>",
+		"jobs/nightly/workspace/config.xml":            "<config/>",
+		"jobs/nightly/promotions/release/config.xml":   promotionDoc,
+		"jobs/mb/config.xml":                           multibranchDoc,
+		"jobs/mb/branches/main/config.xml":             "<flow-definition/>",
 	}
 	dir := filepath.Join(t.TempDir(), "jenkins_home")
 	archive := map[string]string{}
@@ -912,7 +933,9 @@ func TestJenkinsZipOfAHomeImportsWhatTheWalkImports(t *testing.T) {
 	}
 
 	// The folder holds a job rather than being one, and the controller's configuration is no job.
-	want := []string{"nightly", "platform/vacuum"}
+	// The multibranch project is a job, refused by name, and its branches are not jobs of their
+	// own.
+	want := []string{"mb", "nightly", "platform/vacuum"}
 	if diff := cmp.Diff(want, importer.JenkinsJobNames(walked)); diff != "" {
 		t.Errorf("the walk found other jobs (-want +got):\n%s", diff)
 	}

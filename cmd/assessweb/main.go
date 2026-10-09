@@ -92,6 +92,7 @@ func assess(_ js.Value, args []js.Value) (result any) {
 		"templates":    a.Governance.Templates,
 		"irreversible": len(a.Governance.Irreversible),
 		"highRisk":     len(a.Governance.HighRisk),
+		"unread":       a.Governance.Unread,
 		"objects":      a.Report.CreatedTotal,
 		"leftOut":      len(a.Report.LeftOut),
 	})

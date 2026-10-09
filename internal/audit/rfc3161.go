@@ -17,11 +17,22 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/kordloom/switchtender/internal/safedial"
 )
 
 // timestampLimit caps how much of a timestamp authority's reply is read, so a hostile or broken
 // server cannot make an anchor consume memory without bound.
 const timestampLimit = 1 << 20
+
+// timestampTimeout bounds one exchange with a timestamp authority.
+const timestampTimeout = 30 * time.Second
+
+// timestampClient is the client a timestamp request uses when the caller supplies none. The
+// authority's address is operator configuration a server follows on its own network, so it dials
+// through the same guard every other configured address does. A redirect is still followed, with
+// each hop held to the same dial check.
+var timestampClient = &http.Client{Transport: safedial.Transport(), Timeout: timestampTimeout}
 
 // sha256OID identifies SHA-256 in the message imprint sent to a timestamp authority.
 var (
@@ -98,7 +109,7 @@ type tsaResponse struct {
 }
 
 // Timestamp asks an RFC 3161 timestamp authority to sign the time it saw link, and returns the
-// authority's token as base64.
+// authority's token as base64. A nil client uses timestampClient.
 //
 // This is the anchor type worth having. The others fix a link somewhere a relying party has to go
 // and fetch, and they prove only that something was published, by someone, at a place that can go
@@ -116,7 +127,7 @@ type tsaResponse struct {
 // the relying party reading the finished bundle.
 func Timestamp(ctx context.Context, client *http.Client, tsaURL, link string) (string, error) {
 	if client == nil {
-		client = http.DefaultClient
+		client = timestampClient
 	}
 	raw, err := hex.DecodeString(link)
 	if err != nil {
