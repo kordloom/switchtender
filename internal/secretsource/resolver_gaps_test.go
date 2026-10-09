@@ -226,9 +226,10 @@ func TestResolveAzureFailsClosedOnEveryTokenAndSecretFailure(t *testing.T) {
 	}
 }
 
-// TestAzureConfigCannotBuildAnUncheckableURL pins that the secret name and tenant id, both spliced
-// into a URL without escaping, are still caught by the address check when they make the URL
-// unparseable. Without the check the request would be built from a string nobody validated.
+// TestAzureConfigCannotBuildAnUncheckableURL pins that the tenant id, spliced into the token URL
+// without escaping, is still caught by the address check when it makes the URL unparseable.
+// Without the check the request would be built from a string nobody validated. The secret name
+// and version are escaped into their own path segments and never reach the parser raw.
 //
 // It redirects package-level endpoint vars, so it does not run in parallel.
 func TestAzureConfigCannotBuildAnUncheckableURL(t *testing.T) {
@@ -246,9 +247,7 @@ func TestAzureConfigCannotBuildAnUncheckableURL(t *testing.T) {
 		Config string
 		// Why explains the case.
 		Why string
-	}{{ // Test 0: A secret name with a bad percent escape makes the secret URL unparseable.
-		Config: `{"vault":"kv","secret":"ci%zz","token":"t"}`, Why: "a bad escape in the secret name",
-	}, { // Test 1: A tenant id with a bad percent escape makes the token URL unparseable.
+	}{{ // Test 0: A tenant id with a bad percent escape makes the token URL unparseable.
 		Config: `{"vault":"kv","secret":"ci","tenant_id":"t%zz","client_id":"c","client_secret":"s"}`,
 		Why:    "a bad escape in the tenant id",
 	}}
