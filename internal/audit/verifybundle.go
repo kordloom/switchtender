@@ -832,24 +832,23 @@ func verifyBundleSignature(signed []byte, pub ed25519.PublicKey, keyID string) (
 	if !ok || len(sigs) == 0 {
 		return false, nil
 	}
-	// The producer's own signature, not whichever was written first. A bundle may carry several, and
-	// taking the first lets anyone prepend one and decide which key gets checked.
-	var sigB64 string
+	// The producer's own signatures, not whichever was written first. A bundle may carry several,
+	// and taking the first lets anyone prepend one and decide which key gets checked. The format
+	// requires at least one entry naming the producer key to verify, in any position, so each such
+	// entry is tried in turn, the way the open verifier and the reference do.
+	var candidates []string
 	for _, raw := range sigs {
 		sigObj, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
 		if id, _ := sigObj["key_id"].(string); id == keyID {
-			sigB64, _ = sigObj["sig"].(string)
-			break
+			if s, _ := sigObj["sig"].(string); s != "" {
+				candidates = append(candidates, s)
+			}
 		}
 	}
-	if sigB64 == "" {
-		return false, nil
-	}
-	sig, err := base64.StdEncoding.DecodeString(sigB64)
-	if err != nil {
+	if len(candidates) == 0 {
 		return false, nil
 	}
 	m["signatures"] = []any{}
@@ -866,7 +865,16 @@ func verifyBundleSignature(signed []byte, pub ed25519.PublicKey, keyID string) (
 	if err != nil {
 		return false, fmt.Errorf("%w: canonicalize bundle: %w", ErrVerify, err)
 	}
-	return ed25519.Verify(pub, canonical, sig), nil
+	for _, s := range candidates {
+		sig, err := base64.StdEncoding.DecodeString(s)
+		if err != nil {
+			continue
+		}
+		if ed25519.Verify(pub, canonical, sig) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // verifyBundleTree checks a sparse receipt: every disclosed claim folds through its audit path to
