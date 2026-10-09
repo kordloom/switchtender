@@ -224,6 +224,12 @@ func verifyBundle(signed []byte, pinnedKeyID, acceptedInstall string) (*BundleRe
 	if err := checkExactMembers(signed); err != nil {
 		return nil, err
 	}
+	// Every time is read before any check compares two of them, so this verifier refuses exactly
+	// the times the reference refuses and every comparison below runs on the same parsed values.
+	claimAt, err := readBundleTimes(&b)
+	if err != nil {
+		return nil, err
+	}
 	rep := &BundleReport{
 		KeyID: b.Producer.KeyID, Subject: b.Subject,
 		ClaimCount: len(b.Claims), AnchorCount: len(b.Anchors),
@@ -327,9 +333,18 @@ func verifyBundle(signed []byte, pinnedKeyID, acceptedInstall string) (*BundleRe
 		return rep, fmt.Errorf("%w: chain profile %q: this product does not verify it; use the"+
 			" open loomseal verifier", ErrVerify, profile)
 	}
-	if profile == TreeProfile {
+	switch {
+	case b.Chain != nil && b.Chain.Keyed:
+		// Both profiles this product implements are unkeyed: every link is recomputed from the
+		// claims. A bundle declaring its chain keyed asks to be checked structurally instead, which
+		// would leave the producer free to choose each link, so the chain fails rather than being
+		// read on the bundle's word.
+		rep.ChainOK = false
+		rep.ChainProblem = fmt.Sprintf("the chain is declared keyed, but the %s profile is "+
+			"unkeyed and every link must be recomputed", profile)
+	case profile == TreeProfile:
 		rep.ChainOK, rep.BrokeAtSeq, rep.ChainProblem = verifyBundleTree(&b)
-	} else {
+	default:
 		// The linear chain is bound to its producer the same way the tree is. A link is a hash of the
 		// entry's own fields and says nothing about who produced it, so a second install could
 		// otherwise lift a published receipt whole, keep its claims and its genuine third-party
@@ -350,7 +365,7 @@ func verifyBundle(signed []byte, pinnedKeyID, acceptedInstall string) (*BundleRe
 	// A carried timestamp token is read, not taken on trust. A token that does not fix the link its
 	// anchor names is a failure of the anchor, not a note beside it: the anchor's whole purpose is to be
 	// the part of the record the producer cannot write.
-	rep.TimestampsVerified, rep.TimestampProblems = verifyBundleProofs(&b)
+	rep.TimestampsVerified, rep.TimestampProblems = verifyBundleProofs(&b, claimAt)
 	if len(rep.TimestampProblems) > 0 {
 		rep.AnchorsOK = false
 	}
@@ -359,7 +374,7 @@ func verifyBundle(signed []byte, pinnedKeyID, acceptedInstall string) (*BundleRe
 	verifyCorrectionDisclosures(b.Claims, rep)
 	verifySpecConsistency(b.Claims, rep)
 	verifySpanBinding(b.Claims, rep)
-	verifyTimeOrder(b.Claims, rep)
+	verifyTimeOrder(b.Claims, claimAt, rep)
 	classifyDisclosed(&b, rep)
 	return rep, nil
 }
@@ -376,12 +391,16 @@ func verifyBundle(signed []byte, pinnedKeyID, acceptedInstall string) (*BundleRe
 // receipt showing the gate being bypassed, and until this check existed the verifier printed
 // VERIFIED over exactly that. Digests agreeing is not enough, because the same spec can be approved
 // after the fact.
-func verifyTimeOrder(claims []BundleClaim, rep *BundleReport) {
+//
+// claimAt holds each claim's time as readBundleTimes read it, in claim order.
+func verifyTimeOrder(claims []BundleClaim, claimAt []time.Time, rep *BundleReport) {
 	rep.ApprovalPrecedesRun = true
-	ordered := make([]BundleClaim, len(claims))
-	copy(ordered, claims)
-	sort.Slice(ordered, func(i, j int) bool {
-		return ordered[i].Chain.Seq < ordered[j].Chain.Seq
+	order := make([]int, len(claims))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		return claims[order[i]].Chain.Seq < claims[order[j]].Chain.Seq
 	})
 
 	// Approvals and outcomes are matched by the run they name, not by their order in the chain.
@@ -399,13 +418,8 @@ func verifyTimeOrder(claims []BundleClaim, rep *BundleReport) {
 
 	var prevAt time.Time
 	var prevSeq int64
-	for _, c := range ordered {
-		at, err := time.Parse(time.RFC3339Nano, c.At)
-		if err != nil {
-			rep.TimeProblems = append(rep.TimeProblems,
-				fmt.Sprintf("claim %d carries an unreadable time %q", c.Chain.Seq, c.At))
-			continue
-		}
+	for _, i := range order {
+		c, at := claims[i], claimAt[i]
 		if !prevAt.IsZero() && at.Before(prevAt) {
 			rep.TimeProblems = append(rep.TimeProblems, fmt.Sprintf(
 				"claim %d is dated %s, before claim %d at %s",
@@ -1154,21 +1168,20 @@ func verifyBundleAnchors(b *Bundle) bool {
 }
 
 // verifyBundleProofs checks every embedded timestamp token against the link its anchor names, and
-// reports how many verified and what was wrong with the rest.
+// reports how many verified and what was wrong with the rest. claimAt holds each claim's time as
+// readBundleTimes read it, in claim order.
 //
 // A carried token used to be described rather than checked: an anchor reported as satisfied because the
 // chain reached its link, and a proof string reported as an offline proof because it was present. The
 // authority's own statement, which is the only part of an anchor that does not come from the producer,
 // went unread by every verifier.
-func verifyBundleProofs(b *Bundle) (int, []string) {
+func verifyBundleProofs(b *Bundle, claimAt []time.Time) (int, []string) {
 	var verified int
 	var problems []string
 	// Claim times by seq, for the backdate rule. See AnchorClockSkew.
-	claimAt := make(map[int64]time.Time, len(b.Claims))
+	atSeq := make(map[int64]time.Time, len(b.Claims))
 	for i := range b.Claims {
-		if at, err := time.Parse(time.RFC3339, b.Claims[i].At); err == nil {
-			claimAt[b.Claims[i].Chain.Seq] = at
-		}
+		atSeq[b.Claims[i].Chain.Seq] = claimAt[i]
 	}
 	for _, a := range b.Anchors {
 		if a.Type != AnchorRFC3161 || a.Proof == "" {
@@ -1179,7 +1192,7 @@ func verifyBundleProofs(b *Bundle) (int, []string) {
 			problems = append(problems, fmt.Sprintf("anchor at %d: %v", a.Seq, err))
 			continue
 		}
-		if at, ok := claimAt[a.Seq]; ok && !genTime.IsZero() &&
+		if at, ok := atSeq[a.Seq]; ok && !genTime.IsZero() &&
 			genTime.Before(at.Add(-AnchorClockSkew)) {
 			problems = append(problems, fmt.Sprintf(
 				"anchor at %d attests %s over an entry the bundle says happened at %s: a timestamp"+

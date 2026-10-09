@@ -3,6 +3,7 @@ package audit_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -119,6 +120,48 @@ func TestVerifyBundleCatchesATamperedClaim(t *testing.T) {
 	}
 	if rep.BrokeAtSeq != b.Claims[1].Chain.Seq {
 		t.Errorf("broke at seq %d, want %d", rep.BrokeAtSeq, b.Claims[1].Chain.Seq)
+	}
+}
+
+// TestVerifyBundleRefusesATimeOutsideTheOneForm checks every time a bundle carries is read in the
+// LoomSeal format's one form before any other check runs, so the refusal names the member that
+// carries it rather than surfacing later as a broken link or a time-order note.
+func TestVerifyBundleRefusesATimeOutsideTheOneForm(t *testing.T) {
+	tests := []struct {
+		Mutate    func(b *audit.Bundle)
+		WantWhere string
+	}{{ // Test 0: The bundle's created_at carries a numeric offset.
+		Mutate:    func(b *audit.Bundle) { b.CreatedAt = "2026-07-27T16:00:00+00:00" },
+		WantWhere: "created_at",
+	}, { // Test 1: A claim's time has a space in place of the T.
+		Mutate: func(b *audit.Bundle) {
+			b.Claims[1].At = strings.Replace(b.Claims[1].At, "T", " ", 1)
+		},
+		WantWhere: "claim 1 at",
+	}, { // Test 2: An anchor's time is in year 0000.
+		Mutate: func(b *audit.Bundle) {
+			b.Anchors = append(b.Anchors, audit.BundleAnchor{Type: audit.AnchorGit,
+				Seq: b.Claims[0].Chain.Seq, Link: b.Claims[0].Chain.Link,
+				At: "0000-07-27T16:00:00Z", Ref: "git:example"})
+		},
+		WantWhere: "anchor 0 at",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			_, id, b := signedBundle(t)
+			test.Mutate(b)
+			signed, err := audit.SignBundleDoc(b, id.Private())
+			if err != nil {
+				t.Fatalf("SignBundleDoc() error = %v", err)
+			}
+			_, err = audit.VerifyBundle(signed, "")
+			if !errors.Is(err, audit.ErrVerify) {
+				t.Fatalf("VerifyBundle() error = %v, want ErrVerify", err)
+			}
+			if !strings.Contains(err.Error(), test.WantWhere+": ") {
+				t.Errorf("VerifyBundle() error = %v, want it to name %q", err, test.WantWhere)
+			}
+		})
 	}
 }
 
