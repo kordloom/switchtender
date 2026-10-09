@@ -34,7 +34,7 @@ over the tools a fleet already runs.
 - SQLite to PostgreSQL full-history migration in one command, so a Community install moves to
   Team's Postgres and HA without leaving its run history behind.
 - Card checkout for Team, replacing the email-and-invoice path.
-- A hosted witness enrollment command, so an Enterprise install registers for countersigned
+- A hosted witness enrollment command, so a licensed install registers for countersigned
   attestations in one line.
 
 Dates are deliberately absent. Everything here ships when it holds up under the same gates as

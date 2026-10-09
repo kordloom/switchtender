@@ -50,8 +50,8 @@ lapsed license takes nothing: opening an existing PostgreSQL database is never g
 and every Community feature keeps working. Restoring a backup carries your approval policies back
 whatever tier the install runs, because an install that came back without the gates it had is a
 worse outcome than one holding a rule it is no longer licensed to create. Enterprise, from $75,000 a
-year, adds services that by definition come from outside your install, such as the hosted witness
-and evidence custody.
+year, adds the services that come from outside your install: custody of your evidence, evidence
+work on your audit calendar, and the hosted witness, which Team can also buy as an add-on.
 
 Seven commitments, held for every user from day one. What is free today stays free, and the
 Community tier never shrinks. A lapsed license takes nothing: data, evidence, receipts, and every
@@ -84,8 +84,9 @@ Reach out for a commercial license if you want to:
 
 Beside the tiers, KordLoom runs the Migration Program, a fixed-scope engagement under its own
 written agreement that moves an estate off AWX, Semaphore, or Rundeck and into production on
-SwitchTender. Enterprise adds the services that by definition come from outside your install, such
-as the hosted witness and evidence custody. None of these is required to use the software.
+SwitchTender. Enterprise adds the services that come from outside your install: custody of your
+evidence, evidence work on your audit calendar, and the hosted witness, which Team can also buy as
+an add-on. None of these is required to use the software.
 
 See [switchtender.com/pricing](https://switchtender.com/pricing) for what each tier and service
 includes.
