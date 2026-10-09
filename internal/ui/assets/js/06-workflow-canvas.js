@@ -614,7 +614,10 @@ function readOnlyBanner() {
 	const witness = document.createElement("a");
 	witness.href = "https://switchtender.com/#proof";
 	witness.textContent = "point a witness at it";
-	banner.append("Read-only demo on a Team license, so every feature is on, and reset every night on purpose. Start with ", held, ". Then ",
+	banner.append("Read-only demo on a Team license, so every feature is on, and reset every night on purpose. " +
+		"It runs open on purpose, on made-up data: every page and every API read works without signing in, " +
+		"and every change is refused. An install you run never serves open on a network address. Start with ",
+		held, ". Then ",
 		witness, " today and again tomorrow, and watch it catch the rewrite.");
 	return banner;
 }
