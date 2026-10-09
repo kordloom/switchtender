@@ -128,6 +128,10 @@ func TestBothVerifiersRejectTheSameTampering(t *testing.T) {
 			Name: "a claim's payload is edited after the fact",
 			Do:   func(b *audit.Bundle) { b.Claims[1].Payload["path"] = "/v1/runs/somewhere-else" },
 		},
+		{
+			Name: "the chain is declared keyed, so no link would be recomputed",
+			Do:   func(b *audit.Bundle) { b.Chain.Keyed = true },
+		},
 	}
 	for _, tc := range tamper {
 		t.Run(tc.Name, func(t *testing.T) {
@@ -190,6 +194,10 @@ func TestBothVerifiersRejectTreeTampering(t *testing.T) {
 		{
 			Name: "the anchored root is not the head the claims fold to",
 			Do:   func(b *audit.Bundle) { b.Chain.Head.Link = strings.Repeat("b", 64) },
+		},
+		{
+			Name: "the chain is declared keyed, so no leaf would be folded",
+			Do:   func(b *audit.Bundle) { b.Chain.Keyed = true },
 		},
 	}
 	for _, tc := range tamper {
