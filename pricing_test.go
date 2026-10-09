@@ -139,6 +139,15 @@ func TestRetiredPricingClaimsStayGone(t *testing.T) {
 	}, { // Test 13: The Migration Program's Team year without its band.
 		Pattern: `(?i)first year of Team included[^ a-z]`,
 		Why:     "The Migration Program includes Team at the 250-host band, so every mention names it.",
+	}, { // Test 14: A count of zero license checks.
+		Pattern: `(?i)telemetry or license checks`,
+		Why:     "The binary checks its license on every call. What it never has is a license server.",
+	}, { // Test 15: Support clocks placed on the order.
+		Pattern: `(?i)support response times are set on your order`,
+		Why:     "The terms set the Pro and Team clocks, and only Enterprise's live on the order form.",
+	}, { // Test 16: Signed macOS packages as future work.
+		Pattern: `(?i)signed desktop packages for macOS`,
+		Why:     "The macOS app in the .dmg is signed and notarized, so only the tarball is left.",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -147,6 +156,39 @@ func TestRetiredPricingClaimsStayGone(t *testing.T) {
 			for _, path := range files {
 				if found := re.FindString(readFlat(t, path)); found != "" {
 					t.Errorf("%s says %q. %s", path, found, test.Why)
+				}
+			}
+		})
+	}
+}
+
+// TestLapseCarveOutsReadTheSameEverywhere holds the terms and the pricing FAQ to the same list of
+// what keeps going after a license lapses. The terms govern the FAQ, so a carve-out the FAQ names
+// and the terms do not is a promise the contract never made. The binary keeps every one of them:
+// the policy file store keeps serving and reloading its rules on a lapsed term, and opening an
+// existing PostgreSQL schema is never gated.
+func TestLapseCarveOutsReadTheSameEverywhere(t *testing.T) {
+	t.Parallel()
+	pages := []string{"site/terms.html", "site/pricing.html"}
+	tests := []struct {
+		WantPhrase string
+	}{{ // Test 0: Approval policies keep enforcing.
+		WantPhrase: "Approval policies keep enforcing, advanced rules included",
+	}, { // Test 1: Directory sign-in stays on until a restart.
+		WantPhrase: "Directory sign-in stays on until the server next starts, then falls back " +
+			"to local accounts",
+	}, { // Test 2: The policy file still reloads.
+		WantPhrase: "The policy file still reloads, so rules the API would refuse on a lapsed " +
+			"license can still be added there",
+	}, { // Test 3: A shared PostgreSQL schema stays shared.
+		WantPhrase: "servers already sharing a PostgreSQL schema keep sharing it",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			for _, path := range pages {
+				if !strings.Contains(readFlat(t, path), test.WantPhrase) {
+					t.Errorf("%s does not say %q after a lapse", path, test.WantPhrase)
 				}
 			}
 		})

@@ -378,7 +378,7 @@ required.
 ## Roadmap
 
 - A hosted option.
-- Signed desktop packages for macOS and Windows.
+- Signed desktop packages for Windows, and a signed macOS tarball.
 - Group-driven roles for OIDC sign-in, which LDAP, SAML, and JWT already have.
 
 ## Status
