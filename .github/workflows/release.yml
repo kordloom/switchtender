@@ -253,6 +253,8 @@ jobs:
           mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
           cp dist/desktop_universal "$APP/Contents/MacOS/switchtender"
           cp dist/switchtender.icns "$APP/Contents/Resources/switchtender.icns"
+          # The launcher's $0 expands when the app starts, not here.
+          # shellcheck disable=SC2016
           printf '#!/bin/sh\nexec "$(dirname "$0")/switchtender" desktop\n' > "$APP/Contents/MacOS/launch"
           chmod +x "$APP/Contents/MacOS/launch" "$APP/Contents/MacOS/switchtender"
           cat > "$APP/Contents/Info.plist" <<PLIST
