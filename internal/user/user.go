@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -246,17 +247,57 @@ func (u *User) SetPassword(password string) error {
 	return nil
 }
 
+// Guard checks sign-ins against a store. An unknown username costs the same comparison a known one
+// does, so response time does not reveal which usernames exist.
+type Guard struct {
+	// dummy is the hash an unknown username is compared against, made at the guard's cost.
+	dummy []byte
+}
+
+// NewGuard returns a Guard whose stand-in comparison runs at the given bcrypt cost. The cost must
+// match the cost the install hashes passwords at, or the stand-in is distinguishable from the real
+// comparison.
+func NewGuard(cost int) (*Guard, error) {
+	dummy, err := bcrypt.GenerateFromPassword([]byte("unused"), cost)
+	if err != nil {
+		return nil, err
+	}
+	return &Guard{dummy: dummy}, nil
+}
+
+// Cost returns the bcrypt cost the guard's stand-in comparison runs at.
+func (g *Guard) Cost() int {
+	cost, err := bcrypt.Cost(g.dummy)
+	if err != nil {
+		return 0
+	}
+	return cost
+}
+
+// DefaultGuard returns the Guard for passwords hashed at the cost New and SetPassword use.
+var DefaultGuard = sync.OnceValue(func() *Guard {
+	g, err := NewGuard(bcrypt.DefaultCost)
+	if err != nil {
+		panic("user: default sign-in guard: " + err.Error())
+	}
+	return g
+})
+
 // Authenticate checks a username and password against the store and returns the user.
-func Authenticate(ctx context.Context, store Store, username, password string) (*User, error) {
+func (g *Guard) Authenticate(ctx context.Context, store Store, username, password string) (*User, error) {
 	u, err := store.FindByUsername(ctx, username)
 	if err != nil {
 		// Burn comparable time so a missing user is indistinguishable from a wrong password.
-		_ = bcrypt.CompareHashAndPassword(
-			[]byte("$2a$10$7EqJtq98hPqEX7fNZaFWoOhi5B0q0lyeUnlmDDXBGpZLU7wU8/CG6"), []byte(password))
+		_ = bcrypt.CompareHashAndPassword(g.dummy, []byte(password))
 		return nil, ErrBadCredentials
 	}
 	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)) != nil {
 		return nil, ErrBadCredentials
 	}
 	return u, nil
+}
+
+// Authenticate checks a username and password against the store with the default Guard.
+func Authenticate(ctx context.Context, store Store, username, password string) (*User, error) {
+	return DefaultGuard().Authenticate(ctx, store, username, password)
 }

@@ -384,9 +384,9 @@ func (b *loginBudgets) recordFailure(ctx context.Context, addr string) error {
 // loginHandler authenticates a username and password and mints a session token owned by the user.
 // Attempts are rate limited per client and username so stolen password lists cannot be replayed at
 // full speed, and are counted in store's shared budgets when it keeps them.
-func loginHandler(users user.Store, tokens auth.Store, ldap *LDAPAuth, store run.Store,
-	log *zap.Logger) http.HandlerFunc {
-	return budgetedLoginHandler(users, tokens, ldap, log, newLoginBudgets(store, nil))
+func loginHandler(users user.Store, guard *user.Guard, tokens auth.Store, ldap *LDAPAuth,
+	store run.Store, log *zap.Logger) http.HandlerFunc {
+	return budgetedLoginHandler(users, guard, tokens, ldap, log, newLoginBudgets(store, nil))
 }
 
 // loginHandlerWithClock is loginHandler with budgets this process keeps on a stated clock. A test
@@ -394,14 +394,14 @@ func loginHandler(users user.Store, tokens auth.Store, ldap *LDAPAuth, store run
 // machine was rather than for anything about the limiter. The clock is per handler rather than a
 // package variable, because a variable a test writes while a parallel handler reads it is a data
 // race, and the race detector finds it.
-func loginHandlerWithClock(users user.Store, tokens auth.Store, ldap *LDAPAuth, log *zap.Logger,
-	now func() time.Time) http.HandlerFunc {
-	return budgetedLoginHandler(users, tokens, ldap, log, newLoginBudgets(nil, now))
+func loginHandlerWithClock(users user.Store, guard *user.Guard, tokens auth.Store, ldap *LDAPAuth,
+	log *zap.Logger, now func() time.Time) http.HandlerFunc {
+	return budgetedLoginHandler(users, guard, tokens, ldap, log, newLoginBudgets(nil, now))
 }
 
 // budgetedLoginHandler is the sign-in handler, counting attempts in budgets.
-func budgetedLoginHandler(users user.Store, tokens auth.Store, ldap *LDAPAuth, log *zap.Logger,
-	budgets *loginBudgets) http.HandlerFunc {
+func budgetedLoginHandler(users user.Store, guard *user.Guard, tokens auth.Store, ldap *LDAPAuth,
+	log *zap.Logger, budgets *loginBudgets) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if users == nil || tokens == nil {
 			respondError(w, log, http.StatusNotFound, "accounts not enabled")
@@ -448,7 +448,7 @@ func budgetedLoginHandler(users user.Store, tokens auth.Store, ldap *LDAPAuth, l
 			respondError(w, log, http.StatusTooManyRequests, "too many sign-in attempts, wait a minute")
 			return
 		}
-		u, err := user.Authenticate(r.Context(), users, req.Username, req.Password)
+		u, err := guard.Authenticate(r.Context(), users, req.Username, req.Password)
 		if err != nil && ldap != nil {
 			u, err = ldap.Authenticate(r.Context(), req.Username, req.Password)
 		}

@@ -49,7 +49,7 @@ func floodUsers(t *testing.T) func(peer, forwarded, username, password string) i
 		t.Fatalf("Save user: %v", err)
 	}
 	frozen := time.Now()
-	handler := loginHandlerWithClock(users, auth.NewMemStore(), nil, zap.NewNop(),
+	handler := loginHandlerWithClock(users, cheapGuard(t), auth.NewMemStore(), nil, zap.NewNop(),
 		func() time.Time { return frozen })
 	return func(peer, forwarded, username, password string) int {
 		body := `{"username":"` + username + `","password":"` + password + `"}`

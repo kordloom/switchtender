@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"go.uber.org/zap"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/credential"
@@ -129,6 +130,18 @@ func openPostgresHarden(t *testing.T) (hardenDB, func() hardenDB) {
 	return open(), open
 }
 
+// cheapGuard returns a sign-in guard at the lowest bcrypt cost. A test that makes dozens of sign-in
+// attempts would otherwise spend most of its time hashing, and on a loaded machine that time is what
+// made it fail. The accounts such tests sign in to are hashed at the same low cost.
+func cheapGuard(t *testing.T) *user.Guard {
+	t.Helper()
+	g, err := user.NewGuard(bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("NewGuard() error = %v", err)
+	}
+	return g
+}
+
 // hardenServer serves db with every store a hardening test reaches, and returns the handler and an
 // unscoped admin token for it.
 func hardenServer(t *testing.T, db hardenDB) (http.Handler, string) {
@@ -152,7 +165,8 @@ func hardenServer(t *testing.T, db hardenDB) (http.Handler, string) {
 		WithInventories(db.inventories), WithTemplates(db.templates), WithTeams(db.teams),
 		WithOrgs(db.orgs), WithGrants(db.grants, false), WithProjects(db.projects),
 		WithCredentials(db.credentials, credential.NewSealer("harden-pass", "harden-salt")),
-		WithSchedules(db.schedules), WithAudit(&recordingAudits{})).Handler()
+		WithSchedules(db.schedules), WithAudit(&recordingAudits{}),
+		WithSignInGuard(cheapGuard(t))).Handler()
 	return h, plain
 }
 
