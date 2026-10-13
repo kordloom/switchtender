@@ -39,7 +39,7 @@ jobs:
       contents: read
       actions: read
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: The chart must name the version being released
@@ -121,11 +121,11 @@ jobs:
     if: github.ref_type == 'tag'
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
@@ -150,7 +150,7 @@ jobs:
       # working before notarization is set up and gain it automatically once the secret exists.
       - name: Import the Apple Developer ID certificate
         if: steps.apple.outputs.have == 'true'
-        uses: apple-actions/import-codesign-certs@63fff01cd422d4b7b855d40ca1e9d34d2de9427d # v3
+        uses: apple-actions/import-codesign-certs@77ba2a2a8f5cfc8c405ebf3159f767c323e238f9 # v7.1.0
         with:
           p12-file-base64: ${{ secrets.MACOS_CERTIFICATE }}
           p12-password: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -162,7 +162,7 @@ jobs:
       # but pushed after publication. The token env var must exist for the cask template to resolve;
       # it is deliberately empty.
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           distribution: goreleaser
           # Pinned exactly so a goreleaser release cannot change our pipeline under us. Bump
@@ -253,6 +253,8 @@ jobs:
           mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
           cp dist/desktop_universal "$APP/Contents/MacOS/switchtender"
           cp dist/switchtender.icns "$APP/Contents/Resources/switchtender.icns"
+          # The launcher's $0 expands when the app starts, not here.
+          # shellcheck disable=SC2016
           printf '#!/bin/sh\nexec "$(dirname "$0")/switchtender" desktop\n' > "$APP/Contents/MacOS/launch"
           chmod +x "$APP/Contents/MacOS/launch" "$APP/Contents/MacOS/switchtender"
           cat > "$APP/Contents/Info.plist" <<PLIST
@@ -447,7 +449,7 @@ jobs:
       # have taken the archives' provenance down with it.
       - name: Attest build provenance
         if: ${{ !cancelled() }}
-        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             dist/*.tar.gz
@@ -458,7 +460,7 @@ jobs:
 
       - name: Attest the desktop dmg
         if: ${{ !cancelled() && steps.dmg.outcome == 'success' }}
-        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/SwitchTender_*.dmg
 
@@ -537,13 +539,13 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Log in to ghcr.io
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -577,7 +579,7 @@ jobs:
 
       - name: Compute image tags
         id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ghcr.io/kordloom/switchtender
           # latest=false turns off the flavor's own automatic latest, which ignores the enable
@@ -594,7 +596,7 @@ jobs:
 
       - name: Build and push the images
         id: build
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -616,7 +618,7 @@ jobs:
 
       - name: Attest the image build provenance
         continue-on-error: true
-        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ghcr.io/kordloom/switchtender
           subject-digest: ${{ steps.build.outputs.digest }}
