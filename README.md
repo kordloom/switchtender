@@ -41,9 +41,13 @@ No Kubernetes operator, no Postgres, no Redis, no message bus. One process, one 
 
 ## Contents
 
-- [Why](#why)
 - [The path every change walks](#the-path-every-change-walks)
 - [AI agents as principals](#ai-agents-as-principals)
+- [Proven against a real cluster on every push](#proven-against-a-real-cluster-on-every-push)
+- [Why](#why)
+- [Already on AWX?](#already-on-awx)
+- [Free, with no caps](#free-with-no-caps)
+- [If KordLoom stops](#if-kordloom-stops)
 - [See it](#see-it)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
@@ -52,39 +56,8 @@ No Kubernetes operator, no Postgres, no Redis, no message bus. One process, one 
 - [The name](#the-name)
 - [Roadmap](#roadmap)
 - [Status](#status)
+- [History](#history)
 - [License](#license)
-
-## Why
-
-Automation controllers ask for a cluster before they run a playbook. A Kubernetes operator,
-Postgres, Redis, and a mesh to reach your hosts, all standing before the first task does. Then a run
-finishes and hands you a text log to scroll, and across runs nothing flags a flaky host or trends a
-task's duration.
-
-SwitchTender runs those same playbooks from one binary and treats every run as structured data you
-can read, split, and remember. One process, one database, and a live host-by-task matrix instead
-of scrollback.
-
-|                                      | SwitchTender                                                                        | AWX                                             | Semaphore                |
-|--------------------------------------|-----------------------------------------------------------------------------------|-------------------------------------------------|--------------------------|
-| Deploy                               | One binary and one SQLite file, running in seconds.                               | A Kubernetes operator, Postgres, Redis, and Receptor first. | One binary.              |
-| Every&nbsp;run                       | A live host-by-task matrix you read like a dashboard, with per-task drill-down.   | A host status bar over a streamed log, with per-event host drill-down. | A status and a streamed log. |
-| Big&nbsp;jobs                        | Sharded across hosts, balanced by their measured duration, only failed shards retried. | Sliced round-robin, with no balancing.     | No splitting at all.     |
-| Memory&nbsp;across&nbsp;runs         | Flaky hosts flagged, durations trended, every host's history kept.               | Job history and per-host summaries, no flaky-host flag or trend. | Each task's log, no host tracked across runs. |
-| Pipelines                            | A dependency graph with a drag-and-drop editor, passing Ansible `set_stats` outputs from one step to the next. | A visual workflow builder.       | Basic chaining.          |
-| Leaving&nbsp;your&nbsp;old&nbsp;tool | One command imports AWX, Semaphore, Chef, Puppet, Rundeck, Jenkins, or a crontab. AWX and Semaphore bring projects, inventories, credential shells, templates, surveys, and schedules; Rundeck and Jenkins bring templates, surveys, and schedules, against an inventory you name, and a Rundeck project archive brings one project as well when its source control configuration names a repository this can reach; a crontab brings schedules; Chef and Puppet are desired-state systems rather than control planes, so they bring the fleet as an inventory, grouped by environment and, for Chef, by run-list role. [What each source brings over](docs/migration.md#what-each-source-brings-over). | Not applicable.                     | Not applicable.          |
-
-The full head-to-head, including where SwitchTender is behind, is in the
-[comparison](docs/comparison.md).
-
-Checked against vendor documentation on 2026-08-10, for AWX 24.6.1 and Semaphore 2.19.7. Release
-state re-verified 2026-09-07 (AWX still 24.6.1, Semaphore at 2.19.12). These
-products ship, and a table like this decays. If a row is out of date, open an issue and it gets
-corrected.
-
-SwitchTender sits above or alongside whatever already runs your changes. It does not ask you to rip
-out Terraform, Jenkins, or GitHub Actions. It governs the changes that flow through it, and the
-one-command AWX import is the on-ramp.
 
 ## The path every change walks
 
@@ -215,6 +188,60 @@ anything:
 
 reads your existing estate and reports what comes across, what does not, and which of your
 templates nobody currently has to approve, without writing a thing.
+
+## Why
+
+Automation controllers ask for a cluster before they run a playbook. A Kubernetes operator,
+Postgres, Redis, and a mesh to reach your hosts, all standing before the first task does. Then a run
+finishes and hands you a text log to scroll, and across runs nothing flags a flaky host or trends a
+task's duration.
+
+SwitchTender runs those same playbooks from one binary and treats every run as structured data you
+can read, split, and remember. One process, one database, and a live host-by-task matrix instead
+of scrollback.
+
+|                                      | SwitchTender                                                                        | AWX                                             | Semaphore                |
+|--------------------------------------|-----------------------------------------------------------------------------------|-------------------------------------------------|--------------------------|
+| Deploy                               | One binary and one SQLite file, running in seconds.                               | A Kubernetes operator, Postgres, Redis, and Receptor first. | One binary.              |
+| Every&nbsp;run                       | A live host-by-task matrix you read like a dashboard, with per-task drill-down.   | A host status bar over a streamed log, with per-event host drill-down. | A status and a streamed log. |
+| Big&nbsp;jobs                        | Sharded across hosts, balanced by their measured duration, only failed shards retried. | Sliced round-robin, with no balancing.     | No splitting at all.     |
+| Memory&nbsp;across&nbsp;runs         | Flaky hosts flagged, durations trended, every host's history kept.               | Job history and per-host summaries, no flaky-host flag or trend. | Each task's log, no host tracked across runs. |
+| Pipelines                            | A dependency graph with a drag-and-drop editor, passing Ansible `set_stats` outputs from one step to the next. | A visual workflow builder.       | Basic chaining.          |
+| Leaving&nbsp;your&nbsp;old&nbsp;tool | One command imports AWX, Semaphore, Chef, Puppet, Rundeck, Jenkins, or a crontab. AWX and Semaphore bring projects, inventories, credential shells, templates, surveys, and schedules; Rundeck and Jenkins bring templates, surveys, and schedules, against an inventory you name, and a Rundeck project archive brings one project as well when its source control configuration names a repository this can reach; a crontab brings schedules; Chef and Puppet are desired-state systems rather than control planes, so they bring the fleet as an inventory, grouped by environment and, for Chef, by run-list role. [What each source brings over](docs/migration.md#what-each-source-brings-over). | Not applicable.                     | Not applicable.          |
+
+The full head-to-head, including where SwitchTender is behind, is in the
+[comparison](docs/comparison.md).
+
+Checked against vendor documentation on 2026-08-10, for AWX 24.6.1 and Semaphore 2.19.7. Release
+state re-verified 2026-09-07 (AWX still 24.6.1, Semaphore at 2.19.12). These
+products ship, and a table like this decays. If a row is out of date, open an issue and it gets
+corrected.
+
+SwitchTender sits above or alongside whatever already runs your changes. It does not ask you to rip
+out Terraform, Jenkins, or GitHub Actions. It governs the changes that flow through it, and the
+one-command AWX import is the on-ramp.
+
+## Already on AWX?
+
+Run `switchtender assess awx export.json` on an AWX export to see what moves, what does not, and how
+many of your templates run today with nobody required to approve them. The same report is on
+[switchtender.com/assess](https://switchtender.com/assess), read in your browser and never uploaded.
+`switchtender import awx` then brings the projects, inventories, credentials, templates, and
+schedules across. The [migration guide](docs/migration.md) says what an import moves and what takes a
+person.
+
+## Free, with no caps
+
+Community has no host or seat caps, and the signed receipts and offline verification stay free. What
+Pro, Team, and Enterprise add, and what they cost, is under [License](#license) and on
+[switchtender.com/pricing](https://switchtender.com/pricing).
+
+## If KordLoom stops
+
+An install keeps running as it is. There is no license server and no phone-home, a paid license keeps
+verifying offline through its term, and your data and receipts stay yours. Each release converts to
+Apache 2.0 two years after it ships. [Continuity](docs/continuity.md) is the whole answer in one
+place.
 
 ## See it
 
