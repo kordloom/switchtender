@@ -548,7 +548,7 @@ function parseInventory(content) {
 		}
 	}
 	if (/^\s*(---|all\s*:)/m.test(text)) return { format: "yaml", hosts: [], groups: [] };
-	const hosts = [];
+	const hosts = new Set();
 	const groups = [];
 	let skip = false;
 	for (const raw of text.split("\n")) {
@@ -563,9 +563,9 @@ function parseInventory(content) {
 		}
 		if (skip) continue;
 		const host = line.split(/\s+/)[0];
-		if (host && !hosts.includes(host)) hosts.push(host);
+		if (host) hosts.add(host);
 	}
-	return { format: "ini", hosts, groups };
+	return { format: "ini", hosts: [...hosts], groups };
 }
 
 // parseInventoryJSON reads the ansible-inventory --list shape: every host under _meta.hostvars,
