@@ -1,15 +1,42 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+
+	"github.com/kordloom/switchtender/internal/run"
 )
+
+// frozenClockStore is a run store whose clock never moves. It carries the wrapped store's shared
+// budgets through, because the server counts sign-ins in them only when its store has them.
+type frozenClockStore struct {
+	run.Store
+	run.Budgets
+	// at is the instant every Now call returns.
+	at time.Time
+}
+
+// Now returns the frozen instant.
+func (f frozenClockStore) Now(context.Context) (time.Time, error) { return f.at, nil }
+
+// frozenClock returns db with its run store's clock stopped, so a budget measured on the store's
+// clock cannot roll over while a test runs.
+func frozenClock(t *testing.T, db hardenDB) hardenDB {
+	t.Helper()
+	budgets, ok := db.runs.(run.Budgets)
+	if !ok {
+		t.Fatalf("%T keeps no shared budgets", db.runs)
+	}
+	db.runs = frozenClockStore{Store: db.runs, Budgets: budgets,
+		at: time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)}
+	return db
+}
 
 // TestSignInBudgetsHoldAcrossReplicas spends a sign-in budget on one server and signs in again
 // through a second server on the same database, on every backend.
@@ -49,39 +76,20 @@ func TestSignInBudgetsHoldAcrossReplicas(t *testing.T) {
 		for testNum, test := range tests {
 			t.Run(fmt.Sprintf("%s test %d %s", backend.Name, testNum, test.Name), func(t *testing.T) {
 				t.Parallel()
-				// The budgets count inside one sign-in window, so the attempts on A and the one on B
-				// must all land in it. Each attempt checks a bcrypt hash, and on a machine loaded
-				// enough to stretch them past the window the budget rolls over before B is asked,
-				// which says nothing about replicas. Such a try is run again on a fresh database,
-				// and three of them in a row fail the test by naming the load rather than a bug.
-				var rec *httptest.ResponseRecorder
-				for try := 1; ; try++ {
-					start := time.Now()
-					first, reopen := backend.Open(t)
-					a, _ := hardenServer(t, first)
-					b, _ := hardenServer(t, reopen())
-					for i := 0; i < test.Spend; i++ {
-						username := "target"
-						if test.Distinct {
-							username = fmt.Sprintf("sweep-%d", i)
-						}
-						if code := signIn(a, username); code != http.StatusUnauthorized {
-							t.Fatalf("attempt %d on replica A = %d, want 401 while under budget", i, code)
-						}
+				first, reopen := backend.Open(t)
+				a, _ := hardenServer(t, frozenClock(t, first))
+				b, _ := hardenServer(t, frozenClock(t, reopen()))
+				for i := 0; i < test.Spend; i++ {
+					username := "target"
+					if test.Distinct {
+						username = fmt.Sprintf("sweep-%d", i)
 					}
-					rec = hardenCall(b, "", http.MethodPost, "/v1/auth/login",
-						`{"username":"target","password":"wrong-password"}`, nil)
-					if time.Since(start) < loginWindowLength-5*time.Second {
-						break
+					if code := signIn(a, username); code != http.StatusUnauthorized {
+						t.Fatalf("attempt %d on replica A = %d, want 401 while under budget", i, code)
 					}
-					if try == 3 {
-						t.Fatalf("three tries each outran the %s sign-in window, so the budget rolled "+
-							"over before replica B was asked: the machine is too loaded for this test "+
-							"to say anything", loginWindowLength)
-					}
-					t.Logf("try %d outran the %s sign-in window, trying again on a fresh database", try,
-						loginWindowLength)
 				}
+				rec := hardenCall(b, "", http.MethodPost, "/v1/auth/login",
+					`{"username":"target","password":"wrong-password"}`, nil)
 				if diff := cmp.Diff(test.WantStatus, rec.Code); diff != "" {
 					t.Errorf("replica B status mismatch (-want +got):\n%s\nbody: %s", diff,
 						strings.TrimSpace(rec.Body.String()))

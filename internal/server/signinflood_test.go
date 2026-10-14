@@ -36,7 +36,7 @@ func TestSignInFloodIsBoundedPerAddress(t *testing.T) {
 	// window. On a slow runner the window rolled over, the budget reset, and the test failed for how
 	// fast the machine was rather than for anything about the limiter.
 	frozen := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
-	handler := loginHandlerWithClock(users, auth.NewMemStore(), nil, zap.NewNop(),
+	handler := loginHandlerWithClock(users, cheapGuard(t), auth.NewMemStore(), nil, zap.NewNop(),
 		func() time.Time { return frozen })
 
 	attempt := func(username string) int {

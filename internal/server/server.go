@@ -159,6 +159,13 @@ func WithUsers(users user.Store) Option {
 	return func(srv *Server) { srv.users = users }
 }
 
+// WithSignInGuard replaces the guard that checks sign-ins. A guard built at a lower bcrypt cost lets a
+// test make many sign-in attempts quickly. An install keeps the default, which matches the cost its
+// passwords are hashed at.
+func WithSignInGuard(guard *user.Guard) Option {
+	return func(srv *Server) { srv.guard = guard }
+}
+
 // WithAudit records authenticated mutations to the given store and serves the trail.
 func WithAudit(store audit.Store) Option {
 	return func(srv *Server) { srv.audits = store }
@@ -418,6 +425,8 @@ type Server struct {
 	templates template.Store
 	// users backs accounts when configured.
 	users user.Store
+	// guard checks sign-ins against users.
+	guard *user.Guard
 	// inventories backs the inventory endpoints when configured.
 	inventories inventory.Store
 	// policies backs the approval policy endpoints when configured.
@@ -524,7 +533,8 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 	if log == nil {
 		log = zap.NewNop()
 	}
-	srv := &Server{store: store, submitter: submitter, log: log, hooks: newHookFlights()}
+	srv := &Server{store: store, submitter: submitter, log: log, hooks: newHookFlights(),
+		guard: user.DefaultGuard()}
 	for _, opt := range opts {
 		opt(srv)
 	}
@@ -762,7 +772,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/tokens", listTokensHandler(s.tokens, s.log))
 	mux.Handle("POST /v1/tokens", createTokenHandler(s.tokens, s.users, s.log))
 	mux.Handle("DELETE /v1/tokens/{id}", deleteTokenHandler(s.tokens, s.log))
-	mux.Handle("POST /v1/auth/login", loginHandler(s.users, s.tokens, s.ldap, s.store, s.log))
+	mux.Handle("POST /v1/auth/login", loginHandler(s.users, s.guard, s.tokens, s.ldap, s.store, s.log))
 	if s.oidc != nil {
 		mux.HandleFunc("GET /auth/oidc/login", s.oidc.login)
 		mux.HandleFunc("GET /auth/oidc/callback", s.oidc.callback)

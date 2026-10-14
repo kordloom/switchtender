@@ -2526,7 +2526,8 @@ func TestSignInDoesNotAppendToTheAuditChain(t *testing.T) {
 		t.Fatalf("tokens.Save() error = %v", err)
 	}
 	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
-		WithTokens(tokens), WithUsers(users), WithAudit(audits)).Handler()
+		WithTokens(tokens), WithUsers(users), WithAudit(audits),
+		WithSignInGuard(cheapGuard(t))).Handler()
 
 	for i := 0; i < 25; i++ {
 		rec := httptest.NewRecorder()

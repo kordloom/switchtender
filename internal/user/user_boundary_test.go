@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/kordloom/switchtender/internal/user"
 )
@@ -449,6 +450,38 @@ func TestAuthenticateSpendsComparableTimeOnAMissingAccount(t *testing.T) {
 	if missing*10 < existing {
 		t.Errorf("a missing account answered in %s against %s for a real one, so a username can be "+
 			"enumerated by timing alone", missing, existing)
+	}
+}
+
+// TestAGuardSpendsTheTimeOfItsOwnCost shows the stand-in comparison runs at the cost the guard was
+// built with, so an install that hashes at a higher cost does not answer a missing account faster
+// than a real one.
+func TestAGuardSpendsTheTimeOfItsOwnCost(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tests := []struct {
+		// Cost is the bcrypt cost the guard is built at.
+		Cost int
+	}{{ // Test 0: The lowest cost.
+		Cost: bcrypt.MinCost,
+	}, { // Test 1: The default cost.
+		Cost: bcrypt.DefaultCost,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			guard, err := user.NewGuard(test.Cost)
+			if err != nil {
+				t.Fatalf("NewGuard() error = %v", err)
+			}
+			if _, err := guard.Authenticate(ctx, user.NewMemStore(), "ghost", "pw"); !errors.Is(
+				err, user.ErrBadCredentials) {
+				t.Fatalf("Authenticate() error = %v, want ErrBadCredentials", err)
+			}
+			if guard.Cost() != test.Cost {
+				t.Errorf("guard cost = %d, want %d", guard.Cost(), test.Cost)
+			}
+		})
 	}
 }
 
