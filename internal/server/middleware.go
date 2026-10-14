@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"path"
 	"strings"
@@ -8,11 +9,21 @@ import (
 
 // maxBodyBytes caps the request body every mutating endpoint accepts, so an oversized POST fails
 // with 413 instead of allocating without bound. Import and hook uploads carry whole exports, so
-// they get the larger cap that matches their handlers' own readers.
+// they get the larger cap that matches their handlers' own readers, and so does the write of an
+// inventory, which can hold what an import of one brought in.
 const (
 	maxBodyBytes       = 1 << 20
 	maxUploadBodyBytes = 26 << 20
 )
+
+// requestBodyLimit returns the most body bytes r may carry. Both the cap on reading the body and the
+// audit gate's digest of it use it, so the two cannot disagree about what a route accepts.
+func requestBodyLimit(r *http.Request) int64 {
+	if uploadPath(r.URL.Path) || planFilePath(r.URL.Path) || inventoryWrite(r) {
+		return maxUploadBodyBytes
+	}
+	return maxBodyBytes
+}
 
 // bodyLimit wraps mutating requests in a MaxBytesReader before any handler decodes them. The
 // login endpoint is reached unauthenticated, so this cap is the only thing between a crafted
@@ -26,14 +37,36 @@ func bodyLimit(next http.Handler) http.Handler {
 			// Every mutating method is capped, not only POST, PUT, and PATCH. A DELETE or any other
 			// method left uncapped is a body the audit gate then buffers whole to digest it, which
 			// an anonymous caller could turn into an out-of-memory crash.
-			limit := int64(maxBodyBytes)
-			if uploadPath(r.URL.Path) || planFilePath(r.URL.Path) {
-				limit = maxUploadBodyBytes
-			}
-			r.Body = http.MaxBytesReader(w, r.Body, limit)
+			r.Body = http.MaxBytesReader(w, r.Body, requestBodyLimit(r))
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// tooLargeMessage says which limit a refused body exceeded, so the answer to an oversized write
+// names the number to stay under instead of only saying the body could not be read.
+func tooLargeMessage(limit int64) string {
+	return fmt.Sprintf("the request body is larger than the %d MiB this route accepts, so the change was "+
+		"not recorded or made", limit>>20)
+}
+
+// inventoryWrite reports whether r creates or replaces a stored inventory. An imported inventory can
+// be larger than the ordinary cap, and it has to stay editable, so these two writes take the same
+// cap as an import. Preview, facts and delete keep the ordinary one.
+func inventoryWrite(r *http.Request) bool {
+	if r.Method != http.MethodPost && r.Method != http.MethodPut {
+		return false
+	}
+	clean := path.Clean("/" + strings.TrimPrefix(strings.ToLower(r.URL.Path), "/"))
+	rest, ok := strings.CutPrefix(clean, "/v1/inventories")
+	if !ok {
+		return false
+	}
+	if rest == "" {
+		return r.Method == http.MethodPost
+	}
+	id, ok := strings.CutPrefix(rest, "/")
+	return ok && r.Method == http.MethodPut && id != "" && !strings.Contains(id, "/")
 }
 
 // uploadPath reports whether p is one of the routes allowed a body past the ordinary cap: the import

@@ -783,7 +783,7 @@ either licensed or absent.</li>
 <tr>
 <td>POST</td>
 <td><code>/v1/inventories</code></td>
-<td>Store an inventory. Runs reference it by id anywhere.</td>
+<td>Store an inventory. Runs reference it by id anywhere. A body may be up to 26 MiB, the same as an import, so anything that imported can be edited; every other write is limited to 1 MiB, and a body over the limit answers 413 naming it.</td>
 </tr>
 <tr>
 <td>GET</td>
