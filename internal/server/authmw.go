@@ -409,7 +409,7 @@ const (
 // uploads are allowed a larger body and carry no secret by design, an export omits secret material
 // and a hook authenticates by the token in its path, so they pass through undigested rather than
 // buffered whole in the gate on top of the handler's own copy. Every other mutation, which is where
-// a secret can appear, is read up to one byte past maxBodyBytes and refused if it exceeds it, so a
+// a secret can appear, is read up to one byte past the route's limit and refused if it exceeds it, so a
 // DELETE with a multi-gigabyte body cannot exhaust memory.
 func (g *authGate) digestBody(w http.ResponseWriter, r *http.Request) (digest, nonce string, ok bool) {
 	if r.Body == nil || r.Body == http.NoBody {
@@ -418,16 +418,20 @@ func (g *authGate) digestBody(w http.ResponseWriter, r *http.Request) (digest, n
 	if uploadPath(r.URL.Path) {
 		return "", "", true
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes+1))
+	limit := requestBodyLimit(r)
+	body, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
 	_ = r.Body.Close()
-	if err != nil {
-		respondError(w, g.log, http.StatusRequestEntityTooLarge,
+	var tooLarge *http.MaxBytesError
+	switch {
+	case errors.As(err, &tooLarge):
+		respondError(w, g.log, http.StatusRequestEntityTooLarge, tooLargeMessage(tooLarge.Limit))
+		return "", "", false
+	case err != nil:
+		respondError(w, g.log, http.StatusBadRequest,
 			"the request body could not be read, so the change was not recorded or made")
 		return "", "", false
-	}
-	if len(body) > maxBodyBytes {
-		respondError(w, g.log, http.StatusRequestEntityTooLarge,
-			"the request body exceeds the limit, so the change was not recorded or made")
+	case int64(len(body)) > limit:
+		respondError(w, g.log, http.StatusRequestEntityTooLarge, tooLargeMessage(limit))
 		return "", "", false
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))

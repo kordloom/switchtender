@@ -177,7 +177,7 @@ Two more are enforced somewhere other than the request:
 | POST   | `/v1/inventory-sources/{id}/refresh` | Refresh a source into its inventory now.      |
 | PUT    | `/v1/inventory-sources/{id}` | Update an inventory source.                           |
 | DELETE | `/v1/inventory-sources/{id}` | Delete an inventory source.                           |
-| POST   | `/v1/inventories`          | Store an inventory. Runs reference it by id anywhere.   |
+| POST   | `/v1/inventories`          | Store an inventory. Runs reference it by id anywhere. A body may be up to 26 MiB, the same as an import, so anything that imported can be edited; every other write is limited to 1 MiB, and a body over the limit answers 413 naming it. |
 | GET    | `/v1/inventories`          | List stored inventories as summaries: name, kind, owner and size in bytes, never the content. |
 | GET    | `/v1/inventories/{id}`     | Read one stored inventory with its content, secret-looking values masked below admin. |
 | PUT    | `/v1/inventories/{id}`     | Update a stored inventory.                              |
