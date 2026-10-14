@@ -33,3 +33,30 @@ test("a source's JSON inventory is read for its hosts and groups", () => {
 		assert.deepEqual([...got.groups].sort(), tc.WantGroups, "test " + i + ": groups");
 	}
 });
+
+// An INI inventory is read in one pass: a host seen before is found in a set, not by rescanning
+// the hosts read so far. The rescan made reading a 100,000 host inventory take two minutes and one
+// of 250,000 take longer than a page can wait, and a duplicate line must still count once.
+test("an INI inventory is read without rescanning the hosts already read", () => {
+	const app = loadParts(ALL_PARTS);
+	// The page scripts run in their own context with their own Array, so that is the one to watch.
+	const proto = app.Array.prototype;
+	const original = proto.includes;
+	let scans = 0;
+	proto.includes = function (...args) {
+		scans++;
+		return original.apply(this, args);
+	};
+	try {
+		const lines = ["[web]"];
+		for (let i = 0; i < 2000; i++) lines.push("host" + i, "host" + i);
+		const got = app.parseInventory(lines.join("\n"));
+		assert.equal(got.format, "ini");
+		assert.equal(got.hosts.length, 2000, "a repeated host counts once");
+		assert.deepEqual([...got.hosts].slice(0, 3), ["host0", "host1", "host2"], "order is first seen");
+		assert.deepEqual([...got.groups], ["web"]);
+		assert.equal(scans, 0, "the parser rescanned an array " + scans + " times");
+	} finally {
+		proto.includes = original;
+	}
+});
