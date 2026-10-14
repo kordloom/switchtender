@@ -74,6 +74,46 @@ func (i *Inventory) Composed() bool {
 	return i != nil && (i.Kind == KindSmart || i.Kind == KindConstructed)
 }
 
+// Summary is an inventory without its content: what a list or a picker needs, and the size of the
+// content in bytes. Reading it never loads or masks the content.
+type Summary struct {
+	// ID identifies the inventory.
+	ID string `json:"id"`
+	// Name is the inventory's display name.
+	Name string `json:"name"`
+	// Size is the length of the inventory's content in bytes.
+	Size int `json:"size"`
+	// CredentialIDs names the credentials the inventory's runs may use.
+	CredentialIDs []string `json:"credential_ids,omitempty"`
+	// ContentSource names what maintains the content, when something other than a person does.
+	ContentSource string `json:"content_source,omitempty"`
+	// Queue names the queue the inventory's runs go to.
+	Queue string `json:"queue,omitempty"`
+	// OrgID is the organization that owns the inventory.
+	OrgID string `json:"org_id,omitempty"`
+	// Kind is the inventory's kind, empty for a static one.
+	Kind string `json:"kind,omitempty"`
+	// HostFilter is a smart inventory's filter over its inputs.
+	HostFilter string `json:"host_filter,omitempty"`
+	// InputIDs names the inventories a composed inventory draws on.
+	InputIDs []string `json:"input_inventory_ids,omitempty"`
+	// SourceVars is a constructed inventory's constructed-plugin settings.
+	SourceVars string `json:"source_vars,omitempty"`
+	// Limit is the host pattern applied to the inventory's runs.
+	Limit string `json:"limit,omitempty"`
+	// CreatedAt is when the inventory was created.
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Summary returns the inventory without its content.
+func (i *Inventory) Summary() Summary {
+	return Summary{ID: i.ID, Name: i.Name, Size: len(i.Content),
+		CredentialIDs: append([]string(nil), i.CredentialIDs...), ContentSource: i.ContentSource,
+		Queue: i.Queue, OrgID: i.OrgID, Kind: i.Kind, HostFilter: i.HostFilter,
+		InputIDs: append([]string(nil), i.InputIDs...), SourceVars: i.SourceVars, Limit: i.Limit,
+		CreatedAt: i.CreatedAt}
+}
+
 // Store persists inventories. Implementations must be safe for concurrent use.
 type Store interface {
 	// Save inserts or replaces the inventory identified by i.ID.
@@ -85,6 +125,8 @@ type Store interface {
 	Get(ctx context.Context, id string) (*Inventory, error)
 	// List returns all inventories ordered by creation time, oldest first.
 	List(ctx context.Context) ([]*Inventory, error)
+	// ListSummaries returns every inventory without its content, in the order List uses.
+	ListSummaries(ctx context.Context) ([]Summary, error)
 	// Delete removes the inventory with the given id, or returns ErrNotFound.
 	Delete(ctx context.Context, id string) error
 }

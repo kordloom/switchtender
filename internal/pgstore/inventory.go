@@ -14,6 +14,11 @@ import (
 const inventoryColumns = `id, name, content, credential_ids, content_source, content_config, queue,
 	org_id, created_at, kind, host_filter, input_ids, source_vars, limit_pattern`
 
+// inventorySummaryColumns is the select list for a summary: every column but the content, and the
+// content's size in bytes.
+const inventorySummaryColumns = `id, name, octet_length(content), credential_ids, content_source, queue,
+	org_id, created_at, kind, host_filter, input_ids, source_vars, limit_pattern`
+
 // inventoryStore is an inventory.Store backed by the shared SQLite database.
 type inventoryStore struct {
 	// db is the open database handle shared with the run store.
@@ -99,6 +104,29 @@ func (s *inventoryStore) List(ctx context.Context) ([]*inventory.Inventory, erro
 	return out, nil
 }
 
+// ListSummaries returns every inventory without its content, oldest first.
+func (s *inventoryStore) ListSummaries(ctx context.Context) ([]inventory.Summary, error) {
+	const q = "SELECT " + inventorySummaryColumns + " FROM inventories ORDER BY created_at, id"
+	rows, err := s.db.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("list inventory summaries: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []inventory.Summary
+	for rows.Next() {
+		sum, err := scanSummary(rows)
+		if err != nil {
+			return nil, fmt.Errorf("list inventory summaries: %w", err)
+		}
+		out = append(out, sum)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list inventory summaries: %w", err)
+	}
+	return out, nil
+}
+
 // Delete removes the inventory with the given id, or returns inventory.ErrNotFound.
 func (s *inventoryStore) Delete(ctx context.Context, id string) error {
 	// The inventory and the facts cached for its hosts go in one transaction. Facts left behind
@@ -151,4 +179,27 @@ func scanInventory(sc scanner) (*inventory.Inventory, error) {
 	}
 	i.CreatedAt = at
 	return &i, nil
+}
+
+// scanSummary reads one row selected with inventorySummaryColumns.
+func scanSummary(sc scanner) (inventory.Summary, error) {
+	var (
+		sum     inventory.Summary
+		creds   string
+		created string
+		inputs  string
+	)
+	if err := sc.Scan(&sum.ID, &sum.Name, &sum.Size, &creds, &sum.ContentSource, &sum.Queue,
+		&sum.OrgID, &created, &sum.Kind, &sum.HostFilter, &inputs, &sum.SourceVars,
+		&sum.Limit); err != nil {
+		return inventory.Summary{}, err
+	}
+	sum.CredentialIDs = sqlutil.SplitIDs(creds)
+	sum.InputIDs = sqlutil.SplitIDs(inputs)
+	at, err := sqlutil.ParseTime(created)
+	if err != nil {
+		return inventory.Summary{}, err
+	}
+	sum.CreatedAt = at
+	return sum, nil
 }
