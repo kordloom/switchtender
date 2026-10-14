@@ -788,7 +788,12 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/inventories</code></td>
-<td>List stored inventories.</td>
+<td>List stored inventories as summaries: name, kind, owner and size in bytes, never the content.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/inventories/{id}</code></td>
+<td>Read one stored inventory with its content, secret-looking values masked below admin.</td>
 </tr>
 <tr>
 <td>PUT</td>

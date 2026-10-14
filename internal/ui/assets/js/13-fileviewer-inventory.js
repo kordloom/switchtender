@@ -205,10 +205,17 @@ function deleteCell(path, label, tr, emptyMsg, onDeleted) {
 	return cell;
 }
 
-// openInventoryEdit fills the inventory dialog with an existing record and switches it to edit mode
-// so the next save issues a PUT rather than a create. The source config is never returned, so its
-// fields start blank and a blank keeps the stored config.
-function openInventoryEdit(inv) {
+// openInventoryEdit reads the inventory a list row summarizes, fills the inventory dialog with it, and
+// switches the dialog to edit mode so the next save issues a PUT rather than a create. The source
+// config is never returned, so its fields start blank and a blank keeps the stored config.
+async function openInventoryEdit(summary) {
+	let inv;
+	try {
+		inv = await getJSON("/inventories/" + encodeURIComponent(summary.id));
+	} catch (e) {
+		setStatus("Could not read the inventory: " + e.message);
+		return;
+	}
 	const form = document.getElementById("inventory-form");
 	form.dataset.editId = inv.id;
 	document.getElementById("inv-name").value = inv.name;

@@ -145,10 +145,11 @@ func denyNonAdminInventoryCommand(w http.ResponseWriter, r *http.Request, log *z
 	return denyNonAdminCommandSource(w, r, log, source, "an inventory")
 }
 
-// listInventoriesResponse wraps the inventory list.
+// listInventoriesResponse wraps the inventory list. Its entries carry no content, so reading the list
+// never reads, masks or sends an inventory's text.
 type listInventoriesResponse struct {
 	// Inventories is the ordered list.
-	Inventories []*inventory.Inventory `json:"inventories"`
+	Inventories []inventory.Summary `json:"inventories"`
 	// Count is the number returned.
 	Count int `json:"count"`
 }
@@ -325,31 +326,58 @@ func updateInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 	}
 }
 
-// listInventoriesHandler returns the inventories the actor may read. Under strict grants a non-admin
-// sees only inventories a grant lets them read; otherwise the global role governs and all are returned.
+// listInventoriesHandler returns a summary of each inventory the actor may read, without any content.
+// Under strict grants a non-admin sees only inventories a grant lets them read; otherwise the global
+// role governs and all are returned. An inventory's content is read one at a time, through
+// getInventoryHandler.
 func listInventoriesHandler(store inventory.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "inventories not enabled")
 			return
 		}
-		list, err := store.List(r.Context())
+		list, err := store.ListSummaries(r.Context())
 		if err != nil {
 			log.Error("server: list inventories: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not list inventories")
 			return
 		}
 		visible, err := filterReadable(r.Context(), authz, list,
-			func(i *inventory.Inventory) string { return i.ID },
-			func(i *inventory.Inventory) string { return i.OrgID })
+			func(i inventory.Summary) string { return i.ID },
+			func(i inventory.Summary) string { return i.OrgID })
 		if err != nil {
 			log.Error("server: list inventories: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not list inventories")
 			return
 		}
 		respondJSON(w, log, http.StatusOK,
-			listInventoriesResponse{Inventories: redactInventories(r.Context(), visible),
-				Count: len(visible)}, wantsPretty(r))
+			listInventoriesResponse{Inventories: visible, Count: len(visible)}, wantsPretty(r))
+	}
+}
+
+// getInventoryHandler returns one inventory with its content, masked for a caller who does not
+// administer the install. It is the one place an inventory's text leaves the server on a read.
+func getInventoryHandler(store inventory.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if store == nil {
+			respondError(w, log, http.StatusNotFound, "inventories not enabled")
+			return
+		}
+		id := r.PathValue("id")
+		if denyOnAuthzError(w, log, authz.authorize(r.Context(), id, grant.AccessRead)) {
+			return
+		}
+		inv, err := store.Get(r.Context(), id)
+		if errors.Is(err, inventory.ErrNotFound) {
+			respondError(w, log, http.StatusNotFound, "inventory not found")
+			return
+		}
+		if err != nil {
+			log.Error("server: read inventory: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read inventory")
+			return
+		}
+		respondJSON(w, log, http.StatusOK, redactInventory(r.Context(), inv), wantsPretty(r))
 	}
 }
 

@@ -87,6 +87,19 @@ func (m *memStore) List(_ context.Context) ([]*Inventory, error) {
 	return out, nil
 }
 
+// ListSummaries returns every inventory without its content, in the order List uses.
+func (m *memStore) ListSummaries(ctx context.Context) ([]Summary, error) {
+	all, err := m.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Summary, len(all))
+	for n, i := range all {
+		out[n] = i.Summary()
+	}
+	return out, nil
+}
+
 // Delete removes the inventory with the given id, or returns ErrNotFound.
 func (m *memStore) Delete(_ context.Context, id string) error {
 	m.mu.Lock()

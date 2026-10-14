@@ -19,6 +19,7 @@ func Contract(t *testing.T, newStore func() inventory.Store) {
 	t.Run("list ordered", func(t *testing.T) { testList(t, newStore()) })
 	t.Run("update", func(t *testing.T) { testUpdate(t, newStore()) })
 	t.Run("composition round trip", func(t *testing.T) { testComposition(t, newStore()) })
+	t.Run("summaries", func(t *testing.T) { testSummaries(t, newStore()) })
 }
 
 // testComposition verifies a smart and a constructed inventory keep their kind and definition
@@ -201,4 +202,50 @@ func testList(t *testing.T, store inventory.Store) {
 	if len(list) != 2 || list[0].ID != "inv_a" || list[1].ID != "inv_b" {
 		t.Errorf("List() order = %+v, want inv_a then inv_b", list)
 	}
+}
+
+// testSummaries verifies ListSummaries returns every field List does except the content, in List's
+// order, with the content's length in bytes, so a list can be served without reading or masking any
+// inventory's text.
+func testSummaries(t *testing.T, store inventory.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	saved := []*inventory.Inventory{
+		{ID: "inv_one", Name: "one", Content: "[web]\nweb1\n", CredentialIDs: []string{"cred_a", "cred_b"},
+			Queue: "east", OrgID: "org_1", ContentSource: "src", CreatedAt: base},
+		{ID: "inv_two", Name: "two", Content: "h\u00e9llo", CreatedAt: base.Add(time.Hour)},
+		{ID: "inv_smart", Name: "smart", Kind: inventory.KindSmart, HostFilter: "web*",
+			InputIDs: []string{"inv_one"}, Limit: "web1", CreatedAt: base.Add(2 * time.Hour)},
+	}
+	for _, inv := range saved {
+		if err := store.Save(ctx, inv); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+	got, err := store.ListSummaries(ctx)
+	if err != nil {
+		t.Fatalf("ListSummaries() error = %v", err)
+	}
+	if len(got) != len(saved) {
+		t.Fatalf("ListSummaries() returned %d summaries, want %d", len(got), len(saved))
+	}
+	for n, inv := range saved {
+		want := inv.Summary()
+		if !summariesEqual(got[n], want) {
+			t.Errorf("summary %d = %+v, want %+v", n, got[n], want)
+		}
+	}
+	if got[1].Size != len("h\u00e9llo") {
+		t.Errorf("size of a multi-byte content = %d, want its length in bytes, %d", got[1].Size,
+			len("h\u00e9llo"))
+	}
+}
+
+// summariesEqual reports whether two summaries hold the same values.
+func summariesEqual(a, b inventory.Summary) bool {
+	return a.ID == b.ID && a.Name == b.Name && a.Size == b.Size &&
+		slices.Equal(a.CredentialIDs, b.CredentialIDs) && a.ContentSource == b.ContentSource &&
+		a.Queue == b.Queue && a.OrgID == b.OrgID && a.Kind == b.Kind && a.HostFilter == b.HostFilter &&
+		slices.Equal(a.InputIDs, b.InputIDs) && a.SourceVars == b.SourceVars && a.Limit == b.Limit &&
+		a.CreatedAt.Equal(b.CreatedAt)
 }

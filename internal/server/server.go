@@ -818,6 +818,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/inventories", createInventoryHandler(s.inventories, authz, s.sealer, s.log))
 	mux.Handle("PUT /v1/inventories/{id}", updateInventoryHandler(s.inventories, authz, s.sealer, s.log))
 	mux.Handle("GET /v1/inventories", listInventoriesHandler(s.inventories, authz, s.log))
+	mux.Handle("GET /v1/inventories/{id}", getInventoryHandler(s.inventories, authz, s.log))
 	mux.Handle("DELETE /v1/inventories/{id}", deleteInventoryHandler(s.inventories, refs, s.log))
 	mux.Handle("POST /v1/inventories/preview",
 		previewInventoryHandler(s.inventories, s.previewer, authz, s.log))

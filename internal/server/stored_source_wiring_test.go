@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -168,14 +169,14 @@ func TestStoredSourceGuardAllowsTheGrantedCaller(t *testing.T) {
 	}
 }
 
-// TestInventoryListRedactionIsWired drives GET /v1/inventories and confirms inline secrets are
+// TestInventoryReadRedactionIsWired drives GET /v1/inventories/{id} and confirms inline secrets are
 // replaced before the response is written.
 //
 // inventory.Redact had unit tests; the call that puts it in the response path had none, so removing
 // it from the handler left the suite green while every viewer could read ansible_password out of an
 // inventory. The admin branch is covered too, because a bypass nothing executes is a bypass nobody
 // notices has stopped matching what the docs promise.
-func TestInventoryListRedactionIsWired(t *testing.T) {
+func TestInventoryReadRedactionIsWired(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	const content = "[web]\nweb01 ansible_password=hunter2 ansible_user=deploy\n"
@@ -201,24 +202,28 @@ func TestInventoryListRedactionIsWired(t *testing.T) {
 
 	get := func(actor *Actor) string {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodGet, "/v1/inventories", nil)
-		if actor != nil {
-			req = req.WithContext(context.WithValue(req.Context(), actorKey{}, *actor))
+		var body strings.Builder
+		for _, id := range []string{"inv_1", "inv_2"} {
+			req := httptest.NewRequest(http.MethodGet, "/v1/inventories/"+id, nil)
+			if actor != nil {
+				req = req.WithContext(context.WithValue(req.Context(), actorKey{}, *actor))
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+			}
+			body.WriteString(rec.Body.String())
 		}
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
-		}
-		return rec.Body.String()
+		return body.String()
 	}
 
 	body := get(&Actor{UserID: "user_1", Role: user.RoleViewer})
 	if strings.Contains(body, "hunter2") {
-		t.Error("the list response carried an inline ansible_password to a viewer")
+		t.Error("the read response carried an inline ansible_password to a viewer")
 	}
 	if strings.Contains(body, "swordfish") {
-		t.Error("the list response carried a JSON-encoded ansible_password to a viewer")
+		t.Error("the read response carried a JSON-encoded ansible_password to a viewer")
 	}
 	// Redaction must remove the value and nothing else, or an operator cannot read their inventory.
 	for _, keep := range []string{"web01", "web02", "ansible_password", "deploy"} {
@@ -244,5 +249,45 @@ func TestInventoryListRedactionIsWired(t *testing.T) {
 	}
 	if stored.Content != content {
 		t.Errorf("redaction mutated the stored inventory:\n got %q\nwant %q", stored.Content, content)
+	}
+}
+
+// TestInventoryListCarriesNoContent confirms the list names each inventory and its size and returns
+// none of its text, and that the list and the by-id read show an actor the same inventories. An
+// inventory's content reaches a caller only through the read that masks it.
+func TestInventoryListCarriesNoContent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	const content = "[web]\nweb01 ansible_password=hunter2\n"
+	store := inventory.NewMemStore()
+	if err := store.Save(ctx, &inventory.Inventory{ID: "inv_1", Name: "prod", Content: content}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), WithInventories(store)).Handler()
+	req := httptest.NewRequest(http.MethodGet, "/v1/inventories", nil)
+	req = req.WithContext(context.WithValue(req.Context(), actorKey{},
+		Actor{UserID: "user_1", Role: user.RoleViewer}))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Inventories []map[string]any `json:"inventories"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Inventories) != 1 {
+		t.Fatalf("the list returned %d inventories, want 1", len(got.Inventories))
+	}
+	if _, has := got.Inventories[0]["content"]; has {
+		t.Error("the list carried an inventory's content")
+	}
+	if strings.Contains(rec.Body.String(), "web01") || strings.Contains(rec.Body.String(), "hunter2") {
+		t.Error("the list carried text from an inventory's content")
+	}
+	if size, _ := got.Inventories[0]["size"].(float64); int(size) != len(content) {
+		t.Errorf("size = %v, want %d", got.Inventories[0]["size"], len(content))
 	}
 }

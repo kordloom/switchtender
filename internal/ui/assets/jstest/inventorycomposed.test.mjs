@@ -8,8 +8,9 @@ import { loadPage } from "./pages.mjs";
 import { reply } from "./net.mjs";
 import { fire } from "./dom.mjs";
 
-// INVENTORIES are the stored inventories the page lists: two with hosts of their own and one smart.
-const INVENTORIES = [
+// STORED are the stored inventories as a read of one returns them: two with hosts of their own and
+// one smart.
+const STORED = [
 	{ id: "inv_web", name: "web fleet", content: "[web]\nweb1\n", created_at: "2026-09-01T00:00:00Z" },
 	{ id: "inv_db", name: "db fleet", content: "[db]\ndb1\n", created_at: "2026-09-01T00:00:00Z" },
 	{
@@ -18,11 +19,16 @@ const INVENTORIES = [
 	},
 ];
 
+// INVENTORIES are what the list returns for them: the same inventories without their content, and
+// the size of it.
+const INVENTORIES = STORED.map(({ content, ...rest }) => ({ ...rest, size: (content || "").length }));
+
 // inventoryPage mounts the inventories page with the dialog wired, answering previews with preview.
 function inventoryPage(preview) {
 	return loadPage("inventories", {
 		routes: [
 			["/v1/inventories/preview", (req) => reply(preview(req))],
+			...STORED.map((inv) => ["/v1/inventories/" + inv.id, reply(inv)]),
 			["/v1/inventories", reply({ inventories: INVENTORIES })],
 			["/v1/credentials", reply({ credentials: [] })],
 		],
@@ -109,7 +115,7 @@ test("editing a smart inventory keeps its kind and filter", async () => {
 	page.app.wireInventoryForm();
 	await page.clock.flush();
 
-	page.app.openInventoryEdit(INVENTORIES[2]);
+	await page.app.openInventoryEdit(INVENTORIES[2]);
 	const doc = page.document;
 	assert.equal(doc.getElementById("inv-kind").value, "smart");
 	assert.equal(doc.getElementById("inv-host-filter").value, "groups__name=web");
@@ -135,6 +141,24 @@ test("the list says a composed inventory's hosts are resolved at launch", async 
 	for (const row of page.document.querySelectorAll("tbody tr")) {
 		rows[row.children[0].textContent] = [row.children[1].textContent, row.children[2].textContent];
 	}
-	assert.deepEqual(rows["all web"], ["smart", "at launch"]);
-	assert.deepEqual(rows["web fleet"], ["ini", "1"]);
+	assert.deepEqual(rows["all web"], ["smart", "\u2014"]);
+	assert.deepEqual(rows["web fleet"], ["static", "11 B"]);
+});
+
+test("the list reads no inventory's content until a row is opened", async () => {
+	const page = inventoryPage(() => ({}));
+	await page.app.loadInventories();
+	await page.clock.flush();
+
+	const reads = () => page.net.calls.filter((c) => c.method === "GET" && /^\/v1\/inventories\/inv_/.test(c.path));
+	assert.equal(reads().length, 0, "drawing the table read an inventory's content");
+
+	const row = [...page.document.querySelectorAll("tbody tr")]
+		.find((r) => r.children[0].textContent === "web fleet");
+	fire(row, "click");
+	await page.clock.flush();
+	assert.equal(reads().length, 1, "opening one row did not read exactly one inventory");
+	assert.equal(reads()[0].path, "/v1/inventories/inv_web");
+	assert.match(page.document.getElementById("drill").textContent, /web1/,
+		"the drawer did not show the hosts read from the inventory");
 });
