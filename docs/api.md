@@ -178,7 +178,8 @@ Two more are enforced somewhere other than the request:
 | PUT    | `/v1/inventory-sources/{id}` | Update an inventory source.                           |
 | DELETE | `/v1/inventory-sources/{id}` | Delete an inventory source.                           |
 | POST   | `/v1/inventories`          | Store an inventory. Runs reference it by id anywhere.   |
-| GET    | `/v1/inventories`          | List stored inventories.                                |
+| GET    | `/v1/inventories`          | List stored inventories as summaries: name, kind, owner and size in bytes, never the content. |
+| GET    | `/v1/inventories/{id}`     | Read one stored inventory with its content, secret-looking values masked below admin. |
 | PUT    | `/v1/inventories/{id}`     | Update a stored inventory.                              |
 | DELETE | `/v1/inventories/{id}`     | Delete a stored inventory, with every fact cached for its hosts. |
 | GET    | `/v1/inventories/{id}/facts` | List the inventory's hosts with cached facts: size, gathering run, and time. Operator role. |

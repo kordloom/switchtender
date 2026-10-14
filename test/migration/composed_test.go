@@ -173,32 +173,20 @@ func TestImportedComposedInventoriesRunOnTheHostsResolvedAtLaunch(t *testing.T) 
 // addHosts adds hosts to a stored inventory, each pair naming a host line and the group it joins.
 func (in *install) addHosts(s *server, invID string, pairs ...string) {
 	in.t.Helper()
-	var list struct {
-		// Inventories are the stored inventories.
-		Inventories []struct {
-			// ID is the inventory's id.
-			ID string `json:"id"`
-			// Name is its name.
-			Name string `json:"name"`
-			// Content is its INI text.
-			Content string `json:"content"`
-		} `json:"inventories"`
+	var inv struct {
+		// Name is the inventory's name.
+		Name string `json:"name"`
+		// Content is its INI text.
+		Content string `json:"content"`
 	}
-	in.must(s, "admin", "GET", "/v1/inventories", nil, 200).decode(in.t, &list)
-	for _, inv := range list.Inventories {
-		if inv.ID != invID {
-			continue
-		}
-		content := inv.Content
-		for i := 0; i+1 < len(pairs); i += 2 {
-			line, group := pairs[i], pairs[i+1]
-			host := strings.Fields(line)[0]
-			content = line + "\n" + content
-			content = strings.Replace(content, "["+group+"]\n", "["+group+"]\n"+host+"\n", 1)
-		}
-		in.must(s, "admin", "PUT", "/v1/inventories/"+invID,
-			map[string]any{"name": inv.Name, "content": content}, 200)
-		return
+	in.must(s, "admin", "GET", "/v1/inventories/"+invID, nil, 200).decode(in.t, &inv)
+	content := inv.Content
+	for i := 0; i+1 < len(pairs); i += 2 {
+		line, group := pairs[i], pairs[i+1]
+		host := strings.Fields(line)[0]
+		content = line + "\n" + content
+		content = strings.Replace(content, "["+group+"]\n", "["+group+"]\n"+host+"\n", 1)
 	}
-	in.t.Fatalf("no inventory %s", invID)
+	in.must(s, "admin", "PUT", "/v1/inventories/"+invID,
+		map[string]any{"name": inv.Name, "content": content}, 200)
 }

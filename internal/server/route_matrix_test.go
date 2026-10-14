@@ -80,6 +80,7 @@ var routeRoles = map[string]user.Role{
 	"GET /v1/hosts/{host}/facts":                             user.Role("viewer"),
 	"GET /v1/hosts/{host}/runs":                              user.Role("viewer"),
 	"GET /v1/inventories":                                    user.Role("viewer"),
+	"GET /v1/inventories/{id}":                               user.Role("viewer"),
 	"GET /v1/inventories/{id}/facts":                         user.Role("operator"),
 	"GET /v1/inventories/{id}/facts/{host}":                  user.Role("operator"),
 	"GET /v1/inventory-sources":                              user.Role("operator"),

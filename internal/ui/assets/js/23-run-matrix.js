@@ -839,15 +839,26 @@ function inspectDrawer(title, fields, actions) {
 	document.getElementById("drill-backdrop").hidden = false;
 }
 
-// inspectable marks a table row as clickable and opens the inspect drawer for it on click.
+// inspectable marks a table row as clickable and opens the inspect drawer for it on click. fields is
+// the list the drawer shows, or a function that reads it when the row is opened, for a row whose
+// details are too large to hold for every row of a table.
 function inspectable(tr, title, fields, actions) {
 	tr.classList.add("row-inspect");
 	tr.tabIndex = 0;
 	tr.setAttribute("role", "button");
-	const open = (e) => {
+	const open = async (e) => {
 		// A click on a row action such as Edit or Delete is not a request to inspect.
 		if (e && e.target && e.target.closest && e.target.closest("button, a")) return;
-		inspectDrawer(title, fields, actions);
+		let shown = fields;
+		if (typeof fields === "function") {
+			try {
+				shown = await fields();
+			} catch (err) {
+				setStatus("Could not read " + title + ": " + err.message);
+				return;
+			}
+		}
+		inspectDrawer(title, shown, actions);
 	};
 	tr.addEventListener("click", open);
 	tr.addEventListener("keydown", (e) => {

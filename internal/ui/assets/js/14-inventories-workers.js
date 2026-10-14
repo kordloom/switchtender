@@ -14,48 +14,50 @@ async function loadInventories() {
 			}
 			const tr = document.createElement("tr");
 			tr.appendChild(td(i.name));
-			const parsed = parseInventory(i.content);
-			const fmt = td("");
-			const fmtChip = document.createElement("span");
-			fmtChip.className = "tool-badge";
-			fmtChip.textContent = parsed.format;
-			fmtChip.dataset.tip = {
-				yaml: "YAML inventory, read by Ansible's YAML plugin",
-				json: "JSON inventory, the shape ansible-inventory prints and a source keeps",
-			}[parsed.format] || "INI inventory: groups in brackets, one host per line";
-			fmt.appendChild(fmtChip);
-			tr.appendChild(fmt);
-			const count = parsed.hosts.length;
-			const hostsCell = td(parsed.format === "yaml" ? "\u2014" : String(count));
-			hostsCell.dataset.tip = parsed.format === "yaml"
-				? "Host count is not estimated for YAML inventories"
-				: "Counted from the stored content";
-			tr.appendChild(hostsCell);
-			const groupsCell = td(parsed.format === "yaml" ? "\u2014" : String(parsed.groups.length));
-			groupsCell.dataset.tip = parsed.groups.length
-				? "Groups: " + parsed.groups.join(", ")
-				: "No groups declared, so every host is in the implicit all group";
-			tr.appendChild(groupsCell);
+			const kind = td("");
+			const kindChip = document.createElement("span");
+			kindChip.className = "tool-badge";
+			kindChip.textContent = i.content_source || "static";
+			kindChip.dataset.tip = i.content_source
+				? "Its content is kept current by a " + i.content_source + " source"
+				: "Hosts and groups written into the inventory itself";
+			kind.appendChild(kindChip);
+			tr.appendChild(kind);
+			const size = td(fmtBytes(i.size));
+			size.dataset.tip = "Open the inventory to see its format, hosts and groups";
+			tr.appendChild(size);
 			tr.appendChild(tdTime(i.created_at));
 			const actions = deleteCell("/inventories/" + i.id, "inventory " + i.name, tr, "No inventories yet.");
 			actions.insertBefore(editButton(() => openInventoryEdit(i), "Click to edit this inventory's hosts and groups"), actions.firstChild);
 			tr.appendChild(actions);
-			inspectable(tr, i.name, [
-				{ label: "Format", value: parsed.format.toUpperCase() },
-				{ label: "Hosts", value: parsed.format === "yaml" ? "not estimated for YAML" : parsed.hosts.join(", ") },
-				{ label: "Groups", value: parsed.groups.join(", ") },
-				{ label: "Size", value: (String(i.content || "").length) + " bytes" },
-				{ label: "Created", value: fmtTime(i.created_at) },
-				{ label: "ID", value: i.id, copy: true },
-				{ label: "Content", value: i.content, block: true },
-			], [
+			// The content is read when the row is opened, once, and shared by what the drawer offers.
+			let full = null;
+			const read = async () => {
+				full = full || await getJSON("/inventories/" + encodeURIComponent(i.id));
+				return full;
+			};
+			inspectable(tr, i.name, async () => {
+				const inv = await read();
+				const parsed = parseInventory(inv.content);
+				return [
+					{ label: "Format", value: parsed.format.toUpperCase() },
+					{ label: "Hosts", value: parsed.format === "yaml" ? "not estimated for YAML" : parsed.hosts.join(", ") },
+					{ label: "Groups", value: parsed.groups.join(", ") },
+					{ label: "Size", value: fmtBytes(i.size) },
+					{ label: "Created", value: fmtTime(i.created_at) },
+					{ label: "ID", value: i.id, copy: true },
+					{ label: "Content", value: inv.content, block: true },
+				];
+			}, [
 				{ label: "Edit", primary: true, mutates: true, tip: "Click to edit this inventory", onClick: () => { closeDrill(); openInventoryEdit(i); } },
 				{ label: "Copy content", tip: "Copy the inventory to the clipboard", onClick: async () => {
-					try { await navigator.clipboard.writeText(i.content || ""); } catch { /* denied */ }
+					try { await navigator.clipboard.writeText((await read()).content || ""); } catch { /* denied */ }
 				} },
-				{ label: "Download", tip: "Download the inventory as a file", onClick: () =>
-					downloadBlob(i.name.replace(/\s+/g, "-") + (parsed.format === "yaml" ? ".yml" : ".ini"),
-						"text/plain", i.content || "") },
+				{ label: "Download", tip: "Download the inventory as a file", onClick: async () => {
+					const inv = await read();
+					downloadBlob(i.name.replace(/\s+/g, "-") + (parseInventory(inv.content).format === "yaml" ? ".yml" : ".ini"),
+						"text/plain", inv.content || "");
+				} },
 			].concat(roleAtLeast(factCacheReaderRole()) ? [
 				{ label: "Cached facts", tip: "The facts a template with the fact cache on kept for these hosts",
 					onClick: () => { closeDrill(); openInventoryFacts(i); } },
@@ -86,10 +88,9 @@ function composedInventoryRow(i) {
 		: "Constructed inventory: the constructed plugin run over its input inventories";
 	fmt.appendChild(chip);
 	tr.appendChild(fmt);
-	const hostsCell = td("at launch");
-	hostsCell.dataset.tip = "Resolved when a run launches; the run records the hosts it reached";
-	tr.appendChild(hostsCell);
-	tr.appendChild(td("\u2014"));
+	const sizeCell = td("\u2014");
+	sizeCell.dataset.tip = "Its hosts are resolved when a run launches, and the run records the hosts it reached";
+	tr.appendChild(sizeCell);
 	tr.appendChild(tdTime(i.created_at));
 	const actions = deleteCell("/inventories/" + i.id, "inventory " + i.name, tr, "No inventories yet.");
 	actions.insertBefore(editButton(() => openInventoryEdit(i), "Click to edit this inventory's definition"), actions.firstChild);

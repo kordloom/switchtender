@@ -170,7 +170,10 @@ var parityRoutes = []parityRoute{{
 var parityExclusions = map[string]string{
 	"credential-types": "no credential-type fixture yet",
 	"notifications":    "no notification target fixture yet",
-	"changes":          "changes are derived from runs and are covered by derived_views_agree",
+	"inventories": "no inventory fixture yet; the list carries summaries and the by-id read carries the " +
+		"content, and internal/server holds both to one read rule in " +
+		"TestInventoryListCarriesNoContent and TestInventoryReadRedactionIsWired",
+	"changes": "changes are derived from runs and are covered by derived_views_agree",
 }
 
 // derivedViews are the paths built out of runs that carry a run's id in their rows, so a view
