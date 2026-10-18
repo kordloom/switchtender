@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/importer"
+	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/org"
 )
 
@@ -224,6 +225,11 @@ func importHandler(stores importStoresFunc, log *zap.Logger) http.HandlerFunc {
 			resp.TemplateOrganizations = plan.TemplateOrganizations()
 		}
 		placement()
+		// An inventory past the host bound refuses the apply, so a preview says so before anyone
+		// asks for one.
+		if err := plan.CheckHostBounds(); err != nil {
+			resp.Warnings = append(append([]string(nil), resp.Warnings...), err.Error())
+		}
 
 		if applyRequested(r) {
 			applyStores, ok := stores()
@@ -237,7 +243,7 @@ func importHandler(stores importStoresFunc, log *zap.Logger) http.HandlerFunc {
 				respondError(w, log, http.StatusConflict, err.Error())
 				return
 			}
-			if errors.Is(err, importer.ErrUnstorableText) {
+			if errors.Is(err, importer.ErrUnstorableText) || errors.Is(err, inventory.ErrTooManyHosts) {
 				respondError(w, log, http.StatusBadRequest, err.Error())
 				return
 			}

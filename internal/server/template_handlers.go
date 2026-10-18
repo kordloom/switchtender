@@ -856,7 +856,7 @@ func launchTemplateHandler(store template.Store, submitter Submitter, sealer *cr
 			errors.Is(err, inventory.ErrResolve), errors.Is(err, dispatch.ErrInventorySnapshot),
 			errors.Is(err, inventory.ErrNeedsAnsible), errors.Is(err, inventory.ErrInvalidInventory),
 			errors.Is(err, inventory.ErrComposition), errors.Is(err, inventory.ErrHostFilter),
-			errors.Is(err, inventory.ErrSourceVars),
+			errors.Is(err, inventory.ErrSourceVars), errors.Is(err, inventory.ErrTooManyHosts),
 			errors.Is(err, dispatch.ErrNoPlaybook), errors.Is(err, dispatch.ErrNoCommand),
 			errors.Is(err, dispatch.ErrUnknownTool), errors.Is(err, dispatch.ErrStepInput),
 			errors.Is(err, dispatch.ErrNoSteps), errors.Is(err, dispatch.ErrTooManySteps),

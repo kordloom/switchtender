@@ -2,6 +2,7 @@ package inventory
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 )
 
@@ -11,8 +12,11 @@ import (
 // would take.
 const MaxHosts = 100000
 
-// ErrTooManyHosts is returned when an inventory names more hosts than MaxHosts.
-var ErrTooManyHosts = errors.New("inventory names too many hosts")
+// ErrTooManyHosts is returned when an inventory names more hosts than MaxHosts. Its text names the
+// bound, since every caller that answers with it hands the sentence to the person who wrote the
+// inventory.
+var ErrTooManyHosts = fmt.Errorf("inventory names more than %d hosts, the most one inventory may "+
+	"name. Split it into several inventories", MaxHosts)
 
 // Host is one host an inventory names, with the variables set on the host itself.
 type Host struct {
@@ -41,4 +45,16 @@ func (h Host) Address() string {
 // plugin reads back as an inventory file.
 func Hosts(content string) ([]Host, error) {
 	return NativeHosts(content)
+}
+
+// CheckHostBound returns ErrTooManyHosts when content names more hosts than MaxHosts, and nil
+// otherwise. It reads content with the native engine a run resolves hosts with, so an inventory it
+// accepts is one a launch does not refuse for its size. Content only Ansible can resolve, and
+// content Ansible would not read, return nil: their hosts are not known until a run resolves them,
+// and saving them is not refused here.
+func CheckHostBound(content string) error {
+	if _, err := nativeData(content); errors.Is(err, ErrTooManyHosts) {
+		return err
+	}
+	return nil
 }
