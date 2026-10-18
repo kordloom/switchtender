@@ -73,7 +73,7 @@ func testDSN(t *testing.T) string {
 // truncateAll clears every table in the database, discovered from the catalog rather than kept as
 // a hand-maintained list. The list drifted: it named the run tables and stopped, while its own
 // comment claimed every table, so a test that trusted the name inherited another test's users and
-// failed on a count it had every right to rely on. Discovery cannot drift. Truncation leaves the
+// failed on a count it had every right to rely on. Discovery cannot drift. Clearing leaves the
 // tables themselves in place, which matters because schema initialization is detected by table
 // existence and is the licensed act.
 func truncateAll(t *testing.T, dsn string) {
@@ -100,12 +100,24 @@ func truncateAll(t *testing.T, dsn string) {
 	if err := rows.Err(); err != nil {
 		t.Fatalf("list tables: %v", err)
 	}
+	clearTables(t, db, tables...)
+}
+
+// clearTables deletes every row of the named tables in one transaction sent as one statement. It
+// deletes rather than truncates: TRUNCATE writes new files for each table and index, about 190 ms
+// for the whole schema under the race detector against 2 ms for the deletes, and a contract resets
+// before every subtest. The replica role skips foreign keys and user triggers for the clear, as
+// TRUNCATE skips row triggers, and needs a superuser, which CI's database user is.
+func clearTables(t *testing.T, db *sql.DB, tables ...string) {
+	t.Helper()
 	if len(tables) == 0 {
 		return
 	}
-	// One statement, CASCADE for the foreign keys between them.
-	if _, err := db.Exec("TRUNCATE " + strings.Join(tables, ", ") + " CASCADE"); err != nil {
-		t.Fatalf("truncate: %v", err)
+	stmt := "BEGIN; SET LOCAL session_replication_role = replica; DELETE FROM " +
+		strings.Join(tables, "; DELETE FROM ") + "; COMMIT"
+	if _, err := db.Exec(stmt); err != nil {
+		t.Fatalf("clear %s (the test database user must be a superuser): %v",
+			strings.Join(tables, ", "), err)
 	}
 }
 
@@ -214,9 +226,7 @@ func truncateTable(t *testing.T, dsn, table string) {
 		t.Fatalf("open postgres: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	if _, err := db.Exec("TRUNCATE " + table); err != nil {
-		t.Fatalf("truncate %s: %v", table, err)
-	}
+	clearTables(t, db, table)
 }
 
 func TestProjectStoreContract(t *testing.T) {
