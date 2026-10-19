@@ -213,6 +213,23 @@ that has no secret yet, which every imported credential is until someone sets on
 whose sealed secret does not open under this server's encryption key and salt. The error names the
 credential and the fix: set its secret, or restore the key and salt it was sealed with.
 
+### When a launch cannot start for its configuration
+
+Every path that launches work sorts its errors the same way and answers each kind to suit who sent
+it. A configuration error is one someone must fix before the launch can succeed: an inventory that
+is not a valid inventory, names more hosts than one inventory may, or needs Ansible this server
+lacks, or a project, inventory, or credential that no longer exists. A run submission, a template
+launch, a pipeline, a drift reconcile, and an AI proposal answer it `400` with the whole reason,
+and a rerun answers it `409`.
+
+A webhook trigger, a pull request plan, and a provisioning callback answer it `409` and name the
+error, as in `this template cannot launch: invalid inventory document`, and no more. The detail
+can quote what the inventory holds, and the sender is not its owner. The server log keeps the
+detail, and launching the template by hand shows it. A webhook's refusal is also its trigger's
+`last_error`, and a pull request plan's is a comment on the pull request. An inventory that could
+not be resolved, which can be a store that did not answer, is still answered `502` on those paths,
+so a sender that retries a failure on the server's side retries it.
+
 ### How long a submission can take
 
 A submission answers once the approval gate has judged the run, and for a Terraform or OpenTofu
@@ -523,7 +540,7 @@ A form body, `host_config_key=hck_...`, is accepted too. The answers are:
 | 201 | The run was created. `Location` names it, and an approval policy may have held it. |
 | 400 | No host, or more than one, matched the caller's address, the template's survey has a required question with no default (see [launches nobody answers](#launches-nobody-answers)), or the body carried `extra_vars`. |
 | 403 | The key is wrong, the template does not accept callbacks, a deny rule refused the run, or the calling host is outside a limit the template keeps. An unknown AWX id, and a template with its AWX-compatible address off, answer the same as a wrong key. |
-| 409 | A callback run for this host is still pending or running, or the template cannot launch from a callback, which includes a template whose inventory is resolved when a run starts: one read from a secret source or a command, and a smart or constructed inventory. It is also the answer when the template keeps its limit and this server cannot run `ansible-inventory` to check it. |
+| 409 | A callback run for this host is still pending or running, or the template cannot launch from a callback, which includes a template whose inventory is resolved when a run starts: one read from a secret source or a command, and a smart or constructed inventory. It is also the answer when the template keeps its limit and this server cannot run `ansible-inventory` to check it, and when its inventory cannot be used, or a credential or project it names cannot, which the body names and does not quote, as [when a launch cannot start for its configuration](#when-a-launch-cannot-start-for-its-configuration) describes. |
 | 410 | On the AWX-compatible address only: the template that address reached was deleted. |
 | 429 | Too many callbacks or wrong keys from this address in the last minute. The body names the limit and the flag that sets it, and `Retry-After` says when to try again. |
 | 503 | The callback could not be recorded in the audit trail, or the template's limit could not be evaluated, so nothing was launched. |

@@ -218,6 +218,8 @@ type reviewSetup struct {
 	Playbook string
 	// SubmitErr, when set, is what every plan submission answers instead of launching.
 	SubmitErr error
+	// ApplyErr, when set, is what a comment's apply submission answers, while plans launch.
+	ApplyErr error
 	// Audits replaces the audit store.
 	Audits audit.Store
 	// AnswerWithin bounds how long a delivery waits for its work. Zero waits a minute, so a test
@@ -242,6 +244,25 @@ type refusingSubmitter struct {
 func (s refusingSubmitter) Submit(context.Context, string, string, ...run.SubmitOption) (*run.Run,
 	error) {
 	return nil, s.err
+}
+
+// applyRefusingSubmitter answers a comment's apply submission with err and passes every other
+// submission, and everything else, to the dispatcher it wraps.
+type applyRefusingSubmitter struct {
+	*dispatch.Dispatcher
+	// err is what an apply's Submit answers.
+	err error
+}
+
+// Submit answers err for an apply proposed from a pull request's plan and launches anything else.
+func (s applyRefusingSubmitter) Submit(ctx context.Context, playbook, inventory string,
+	opts ...run.SubmitOption) (*run.Run, error) {
+	probe := &run.Run{}
+	run.ApplyOptions(probe, opts)
+	if probe.Source == review.ApplySource {
+		return nil, s.err
+	}
+	return s.Dispatcher.Submit(ctx, playbook, inventory, opts...)
 }
 
 // newReviewServer builds the whole path a pull request travels: a git origin with a pull request
@@ -331,6 +352,9 @@ func newReviewServer(t *testing.T, setup reviewSetup) *reviewServer {
 	var submitter Submitter = disp
 	if setup.SubmitErr != nil {
 		submitter = refusingSubmitter{Dispatcher: disp, err: setup.SubmitErr}
+	}
+	if setup.ApplyErr != nil {
+		submitter = applyRefusingSubmitter{Dispatcher: disp, err: setup.ApplyErr}
 	}
 	within := setup.AnswerWithin
 	if within == 0 {

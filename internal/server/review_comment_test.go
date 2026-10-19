@@ -102,13 +102,24 @@ type commentServer struct {
 // published on the fake forge. extra adds server options.
 func newCommentServer(t *testing.T, provider string, extra ...Option) *commentServer {
 	t.Helper()
+	return newCommentServerFrom(t, reviewSetup{Provider: provider}, extra...)
+}
+
+// newCommentServerFrom builds a comment server the way newCommentServer does, from setup, whose
+// approvals, runner, and options it sets.
+func newCommentServerFrom(t *testing.T, setup reviewSetup, extra ...Option) *commentServer {
+	t.Helper()
 	ctx := context.Background()
+	if setup.Provider == "" {
+		setup.Provider = trigger.ProviderGitHub
+	}
+	provider := setup.Provider
 	users := user.NewMemStore()
 	links := forgelink.NewMemStore()
 	log := &applyLog{}
-	opts := append([]Option{WithUsers(users), WithForgeLinks(links)}, extra...)
-	rs := newReviewServer(t, reviewSetup{Provider: provider, Approvals: true,
-		Runner: savedPlanRunner(log), Options: opts})
+	setup.Approvals, setup.Runner = true, savedPlanRunner(log)
+	setup.Options = append([]Option{WithUsers(users), WithForgeLinks(links)}, extra...)
+	rs := newReviewServer(t, setup)
 	cs := &commentServer{reviewServer: rs, users: users, links: links, applies: log,
 		accounts: map[int64]string{}}
 	apiURL := forgelink.CanonicalAPIURL(provider, rs.forge.APIURL())

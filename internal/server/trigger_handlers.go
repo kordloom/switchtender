@@ -13,7 +13,6 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/credential"
-	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/review"
@@ -580,19 +579,24 @@ func fireTemplate(ctx context.Context, triggers trigger.Store, submitter Submitt
 	if errors.Is(err, inventory.ErrNoHosts) {
 		return hookSkipAnswer(ctx, log, audits, tg, t)
 	}
-	if errors.Is(err, dispatch.ErrPolicyDenied) ||
-		errors.Is(err, dispatch.ErrQueueUnlicensed) {
-		return refuse(http.StatusForbidden, err.Error())
-	}
-	// The sender cannot fix a credential, but whoever reads its delivery log can, and "could not
-	// launch the template" sent them to the server log to find out which one and why.
-	if errors.Is(err, credential.ErrNoSecret) || errors.Is(err, credential.ErrUnreadable) {
-		log.Warn("server: fire trigger: " + err.Error())
-		return refuse(http.StatusConflict, err.Error())
-	}
 	if err != nil {
-		log.Error("server: fire trigger: " + err.Error())
-		return refuse(http.StatusBadGateway, "could not launch the template")
+		switch class, _ := classifySubmit(err); class {
+		case submitPolicy:
+			return refuse(http.StatusForbidden, err.Error())
+		// The sender cannot fix a credential or an inventory, but whoever reads its delivery log
+		// can, and "could not launch the template" sent them to the server log to find out which
+		// one and why. A configuration error is named and no more, since its detail can quote the
+		// inventory, and a 409 is not retried the way a 5xx is.
+		case submitSecret:
+			log.Warn("server: fire trigger: " + err.Error())
+			return refuse(http.StatusConflict, err.Error())
+		case submitInput:
+			log.Warn("server: fire trigger: " + err.Error())
+			return refuse(http.StatusConflict, templateRefusal(err))
+		default:
+			log.Error("server: fire trigger: " + err.Error())
+			return refuse(http.StatusBadGateway, "could not launch the template")
+		}
 	}
 	// The stamp is an update by id, never a whole-row save. This handler holds a snapshot
 	// loaded before the launch, and writing it back resurrected triggers deleted mid-flight

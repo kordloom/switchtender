@@ -175,6 +175,13 @@ configuration unread, so the plan is refused and the comment says why. A plan th
 records the download, its exit status, and the digest of the modules it read in the plan run's
 `dry_run_scans`, and the plan executes exactly those modules.
 
+A template that cannot launch for something its owner must fix, such as an inventory that is not a
+valid inventory or a project that no longer exists, is not planned either. The forge is answered
+`409`, and the pull request gets a comment naming the error and an `error` status. The comment names
+the error and quotes nothing, since anybody who can read the pull request reads it, and the server
+log keeps the detail. An inventory that could not be resolved, which can be a store that did not
+answer, is answered `502` as a failure on SwitchTender's side.
+
 A `.terraform` directory committed to the repository is never read. A pull request could commit one
 whose manifest points a registry module at a harmless copy beside it while the plan's own `init`
 installs the real module, so the review copies the configuration without it and reads only what its
@@ -411,6 +418,7 @@ author from approving their own change, whoever asked for the apply first.
 | The plan's apply was already decided, or was decided while the comment was on its way | One reply naming the apply's run. |
 | A rule refuses the apply, or routes it to a queue this install's license does not cover | One reply. Nothing is applied. |
 | The template cannot be planned for a pull request, such as a workflow template | One reply saying why. |
+| The apply cannot run for something its owner must fix, such as an inventory that is not a valid inventory or a credential with no secret | One reply naming the error and quoting nothing. Nothing is applied. |
 | Something failed on SwitchTender's side, such as a call to the forge | One reply saying the command did nothing. Comment again to retry. |
 
 ### What a comment costs

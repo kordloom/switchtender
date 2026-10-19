@@ -1,7 +1,6 @@
 package server
 
 import (
-	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -9,7 +8,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/ai"
-	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/util"
 )
@@ -108,14 +106,9 @@ func proposeRunHandler(submitter Submitter, provider ai.Provider, log *zap.Logge
 			run.WithActorAccount(actorAccount(r)),
 		}
 		created, err := submitter.Submit(r.Context(), proposal.Playbook, "", opts...)
-		switch {
-		case errors.Is(err, dispatch.ErrPolicyDenied) ||
-			errors.Is(err, dispatch.ErrQueueUnlicensed):
-			respondError(w, log, http.StatusForbidden, err.Error())
-			return
-		case err != nil:
-			log.Error("server: propose run submit: " + err.Error())
-			respondError(w, log, http.StatusInternalServerError, "could not create the proposal")
+		failure := personSubmit{http.StatusBadRequest, "propose run submit",
+			"could not create the proposal"}
+		if failure.respond(w, log, err) {
 			return
 		}
 		respondRun(w, r, log, http.StatusAccepted, created)

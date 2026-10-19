@@ -906,6 +906,20 @@ mistaken for a whole one.</p>
 that has no secret yet, which every imported credential is until someone sets one, or a credential
 whose sealed secret does not open under this server's encryption key and salt. The error names the
 credential and the fix: set its secret, or restore the key and salt it was sealed with.</p>
+<h3 id="when-a-launch-cannot-start-for-its-configuration">When a launch cannot start for its configuration</h3>
+<p>Every path that launches work sorts its errors the same way and answers each kind to suit who sent
+it. A configuration error is one someone must fix before the launch can succeed: an inventory that
+is not a valid inventory, names more hosts than one inventory may, or needs Ansible this server
+lacks, or a project, inventory, or credential that no longer exists. A run submission, a template
+launch, a pipeline, a drift reconcile, and an AI proposal answer it <code>400</code> with the whole reason,
+and a rerun answers it <code>409</code>.</p>
+<p>A webhook trigger, a pull request plan, and a provisioning callback answer it <code>409</code> and name the
+error, as in <code>this template cannot launch: invalid inventory document</code>, and no more. The detail
+can quote what the inventory holds, and the sender is not its owner. The server log keeps the
+detail, and launching the template by hand shows it. A webhook's refusal is also its trigger's
+<code>last_error</code>, and a pull request plan's is a comment on the pull request. An inventory that could
+not be resolved, which can be a store that did not answer, is still answered <code>502</code> on those paths,
+so a sender that retries a failure on the server's side retries it.</p>
 <h3 id="how-long-a-submission-can-take">How long a submission can take</h3>
 <p>A submission answers once the approval gate has judged the run, and for a Terraform or OpenTofu
 dry run whose configuration calls registry or remote modules, the gate downloads those modules
@@ -1218,7 +1232,7 @@ approval policies like any other.</p>
 </tr>
 <tr>
 <td>409</td>
-<td>A callback run for this host is still pending or running, or the template cannot launch from a callback, which includes a template whose inventory is resolved when a run starts: one read from a secret source or a command, and a smart or constructed inventory. It is also the answer when the template keeps its limit and this server cannot run <code>ansible-inventory</code> to check it.</td>
+<td>A callback run for this host is still pending or running, or the template cannot launch from a callback, which includes a template whose inventory is resolved when a run starts: one read from a secret source or a command, and a smart or constructed inventory. It is also the answer when the template keeps its limit and this server cannot run <code>ansible-inventory</code> to check it, and when its inventory cannot be used, or a credential or project it names cannot, which the body names and does not quote, as <a href="#when-a-launch-cannot-start-for-its-configuration">when a launch cannot start for its configuration</a> describes.</td>
 </tr>
 <tr>
 <td>410</td>

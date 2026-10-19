@@ -268,21 +268,28 @@ func planReview(ctx context.Context, d reviewHookDeps, tg *trigger.Trigger, ev *
 	if errors.Is(err, inventory.ErrNoHosts) {
 		return reviewSkipAnswer(ctx, d, tg, ev, t, hookPath)
 	}
-	if errors.Is(err, dispatch.ErrPolicyDenied) {
-		d.reviews.Refuse(tg, ev, "A rule refuses this plan: "+err.Error(), receipt)
-		return hookAnswer{status: http.StatusForbidden, message: err.Error(), receipt: receipt}
-	}
-	if errors.Is(err, dispatch.ErrQueueUnlicensed) {
-		return hookAnswer{status: http.StatusForbidden, message: err.Error(), receipt: receipt}
-	}
-	if errors.Is(err, credential.ErrNoSecret) || errors.Is(err, credential.ErrUnreadable) {
-		d.log.Warn("server: plan pull request: " + err.Error())
-		return hookAnswer{status: http.StatusConflict, message: err.Error(), receipt: receipt}
-	}
 	if err != nil {
-		d.log.Error("server: plan pull request: " + err.Error())
-		return hookAnswer{status: http.StatusBadGateway, message: "could not plan the pull request",
-			receipt: receipt}
+		switch class, _ := classifySubmit(err); class {
+		case submitPolicy:
+			if errors.Is(err, dispatch.ErrPolicyDenied) {
+				d.reviews.Refuse(tg, ev, "A rule refuses this plan: "+err.Error(), receipt)
+			}
+			return hookAnswer{status: http.StatusForbidden, message: err.Error(), receipt: receipt}
+		case submitSecret:
+			d.log.Warn("server: plan pull request: " + err.Error())
+			return hookAnswer{status: http.StatusConflict, message: err.Error(), receipt: receipt}
+		// The pull request is told what its template's owner must fix, by name alone: anybody who
+		// can read the pull request reads the comment, and the detail can quote the inventory.
+		case submitInput:
+			d.log.Warn("server: plan pull request: " + err.Error())
+			d.reviews.Refuse(tg, ev, "This plan cannot run: "+senderReason(err)+".", receipt)
+			return hookAnswer{status: http.StatusConflict, message: templateRefusal(err),
+				receipt: receipt}
+		default:
+			d.log.Error("server: plan pull request: " + err.Error())
+			return hookAnswer{status: http.StatusBadGateway, message: "could not plan the pull request",
+				receipt: receipt}
+		}
 	}
 	if err := d.triggers.TouchFired(ctx, tg.ID, time.Now()); err != nil {
 		d.log.Error("server: stamp trigger: " + err.Error())
