@@ -823,7 +823,7 @@ either licensed or absent.</li>
 <tr>
 <td>POST</td>
 <td><code>/v1/inventories/preview</code></td>
-<td>Resolve an unsaved smart or constructed inventory and list the hosts it reaches for the caller, with the <code>engine</code> that resolved it and the <code>ansible_core</code> version when Ansible did.</td>
+<td>Resolve an unsaved smart or constructed inventory and list the hosts it reaches for the caller, with the <code>engine</code> that resolved it and the <code>ansible_core</code> version when Ansible did. It answers <code>422</code> with the reason for a definition that cannot resolve or content that could not be read, and <code>500</code> for a failure of the server's stores.</td>
 </tr>
 <tr>
 <td>POST</td>
@@ -917,9 +917,25 @@ and a rerun answers it <code>409</code>.</p>
 error, as in <code>this template cannot launch: invalid inventory document</code>, and no more. The detail
 can quote what the inventory holds, and the sender is not its owner. The server log keeps the
 detail, and launching the template by hand shows it. A webhook's refusal is also its trigger's
-<code>last_error</code>, and a pull request plan's is a comment on the pull request. An inventory that could
-not be resolved, which can be a store that did not answer, is still answered <code>502</code> on those paths,
-so a sender that retries a failure on the server's side retries it.</p>
+<code>last_error</code>, and a pull request plan's is a comment on the pull request. A constructed inventory
+that names an input that no longer exists, and an input of a composed inventory that does not parse,
+are configuration errors too. Those three paths answer them <code>409</code> and name the error, as in
+<code>inventory not found</code> or <code>composed inventory could not be resolved</code>.</p>
+<p>Content that could not be read is an inventory whose content was fetched from its content source
+(a command, Vault, or a secret manager) or read by ansible-inventory, and the read failed. A
+person's launch answers it <code>400</code> with the whole reason, and a rerun <code>409</code>, so the person can see
+whether the source refused or was down. A webhook trigger, a pull request plan, and a provisioning
+callback answer <code>502</code> with <code>this template cannot launch: inventory content could not be read</code>, and
+no more. The same read fails for a refused request and for an outage, and a sender that retries a
+<code>502</code> gets past an outage. A webhook's answer is also its trigger's <code>last_error</code>, and a pull request
+plan gets no comment for it. A <code>/switchtender apply</code> comment gets one reply, <code>This apply could not start: inventory content could not be read. Nothing was applied.</code>, which tells the commenter to
+comment again once the content can be read.</p>
+<p>A failure of the server or its stores while composing an inventory, such as a store that did not
+answer, is the server's failure, and so is a snapshot the server could not seal or reopen when the
+run was submitted. A person gets <code>500</code> with the detail kept to the server log, a rerun included,
+which answered a snapshot it could not seal <code>409</code>. The webhook trigger and the provisioning
+callback answer <code>502</code> with <code>could not launch the template</code>, and a pull request plan <code>502</code> with
+<code>could not plan the pull request</code>.</p>
 <h3 id="how-long-a-submission-can-take">How long a submission can take</h3>
 <p>A submission answers once the approval gate has judged the run, and for a Terraform or OpenTofu
 dry run whose configuration calls registry or remote modules, the gate downloads those modules

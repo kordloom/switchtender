@@ -593,6 +593,11 @@ func fireTemplate(ctx context.Context, triggers trigger.Store, submitter Submitt
 		case submitInput:
 			log.Warn("server: fire trigger: " + err.Error())
 			return refuse(http.StatusConflict, templateRefusal(err))
+		// The same read fails for an outage, so it stays a 502 the sender retries, and is named so
+		// the delivery log and the trigger's last error say where to look.
+		case submitContent:
+			log.Warn("server: fire trigger: " + err.Error())
+			return refuse(http.StatusBadGateway, templateRefusal(err))
 		default:
 			log.Error("server: fire trigger: " + err.Error())
 			return refuse(http.StatusBadGateway, "could not launch the template")

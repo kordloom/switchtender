@@ -29,15 +29,18 @@ const (
 	submitSecret
 	// submitPolicy is a submission a deny rule or the license refused.
 	submitPolicy
-	// submitUnresolved is an inventory that could not be resolved or sealed. Its errors also wrap
-	// store faults, so a sender that retries a fault, or gives up on a refusal, must not be told the
-	// error is its own.
-	submitUnresolved
+	// submitContent is an inventory whose content could not be read from where it lives, its
+	// content source or ansible-inventory. The same read fails alike for a refusal and for an
+	// outage, so a sender is told where to look and not that the error is its own, since one that
+	// gives up on a refusal would stop retrying an outage.
+	submitContent
 )
 
-// submitClasses lists each class's errors in the order they are matched. The unresolved class is
-// matched last because its errors wrap others: the composer wraps ErrNeedsAnsible, and an input's
-// ErrNotFound, in ErrResolve, and a known error anywhere in the chain says better what went wrong.
+// submitClasses lists each class's errors in the order they are matched, so the most specific known
+// error in the chain decides. ErrComposition and ErrResolve are a definition's errors, but the
+// composer wraps others in them, an input's ErrNotFound and ErrNeedsAnsible, so they are matched
+// last, the narrower ErrComposition first. ErrContentRead is matched after the other classes,
+// since a content source that cannot open for want of a key is the owner's to fix.
 var submitClasses = []struct {
 	class submitClass
 	errs  []error
@@ -53,9 +56,8 @@ var submitClasses = []struct {
 	}},
 	{class: submitSecret, errs: []error{credential.ErrNoSecret, credential.ErrUnreadable}},
 	{class: submitPolicy, errs: []error{dispatch.ErrPolicyDenied, dispatch.ErrQueueUnlicensed}},
-	{class: submitUnresolved, errs: []error{
-		inventory.ErrResolve, dispatch.ErrInventorySnapshot, inventory.ErrComposition,
-	}},
+	{class: submitContent, errs: []error{inventory.ErrContentRead}},
+	{class: submitInput, errs: []error{inventory.ErrComposition, inventory.ErrResolve}},
 }
 
 // classifySubmit returns the class of a submission's error and the known error that placed it
@@ -90,7 +92,8 @@ func templateRefusal(err error) string {
 // personSubmit answers a submission made by the person sending the request. Each error that person
 // can act on is answered with its full reason, since they are the one who must fix it.
 type personSubmit struct {
-	// input is the status an error in the request, or an unresolved inventory, is answered with.
+	// input is the status an error in the request, or an inventory whose content could not be
+	// read, is answered with.
 	input int
 	// op names the submission in the server log, such as "submit run".
 	op string
@@ -104,7 +107,7 @@ func (p personSubmit) respond(w http.ResponseWriter, log *zap.Logger, err error)
 		return false
 	}
 	switch class, _ := classifySubmit(err); class {
-	case submitInput, submitUnresolved:
+	case submitInput, submitContent:
 		respondError(w, log, p.input, err.Error())
 	case submitSecret:
 		respondError(w, log, http.StatusConflict, err.Error())

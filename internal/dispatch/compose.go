@@ -158,20 +158,20 @@ func (d *Dispatcher) compose(ctx context.Context, inv *inventory.Inventory, acce
 	}
 	dir, err := os.MkdirTemp("", "switchtender-compose-*")
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", inventory.ErrResolve, err)
+		return nil, fmt.Errorf("compose %s: %w", inv.Name, err)
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
 	var secrets []string
 	for n, in := range inputs {
 		content, err := d.inventoryContent(ctx, in.inv)
 		if err != nil {
-			return nil, fmt.Errorf("%w: input %s: %w", inventory.ErrResolve, in.inv.Name, err)
+			return nil, fmt.Errorf("%w: input %s: %w", inventory.ErrContentRead, in.inv.Name, err)
 		}
 		secrets = append(secrets, inventory.Secrets(content)...)
 		in.content = content
 		in.path = filepath.Join(dir, fmt.Sprintf("input-%03d", n))
 		if err := os.WriteFile(in.path, []byte(content), 0o600); err != nil {
-			return nil, fmt.Errorf("%w: %w", inventory.ErrResolve, err)
+			return nil, fmt.Errorf("compose %s: write input %s: %w", inv.Name, in.inv.Name, err)
 		}
 	}
 	var (
@@ -185,7 +185,7 @@ func (d *Dispatcher) compose(ctx context.Context, inv *inventory.Inventory, acce
 	case inventory.KindConstructed:
 		listing, drawn, ansibleCore, err = d.composeConstructed(ctx, inv, inputs, dir)
 	default:
-		err = fmt.Errorf("%w: %s is not a composed inventory", inventory.ErrComposition, inv.Name)
+		err = fmt.Errorf("%s is not a composed inventory", inv.Name)
 	}
 	if err != nil {
 		return nil, maskComposeError(err, secrets)
@@ -199,11 +199,11 @@ func (d *Dispatcher) compose(ctx context.Context, inv *inventory.Inventory, acce
 	}
 	content, err := listing.Static()
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", inventory.ErrResolve, err)
+		return nil, fmt.Errorf("compose %s: render: %w", inv.Name, err)
 	}
 	resolved, err := listing.Digest()
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", inventory.ErrResolve, err)
+		return nil, fmt.Errorf("compose %s: digest: %w", inv.Name, err)
 	}
 	res := &run.InventoryResolution{
 		Kind: inv.Kind, Inputs: drawn, Hosts: listing.Hosts(), Engine: inventory.EngineNative,
@@ -255,14 +255,14 @@ func (d *Dispatcher) composeInputs(ctx context.Context, inv *inventory.Inventory
 				continue
 			}
 			if err != nil {
-				return nil, fmt.Errorf("%w: input %s: %w", inventory.ErrResolve, id, err)
+				return nil, fmt.Errorf("compose %s: input %s: %w", inv.Name, id, err)
 			}
 			candidates = append(candidates, in)
 		}
 	case inv.Kind == inventory.KindSmart:
 		all, err := d.inventories.List(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("%w: list inventories: %w", inventory.ErrResolve, err)
+			return nil, fmt.Errorf("compose %s: list inventories: %w", inv.Name, err)
 		}
 		for _, in := range all {
 			if in.ID == inv.ID || in.Composed() || (inv.OrgID != "" && in.OrgID != inv.OrgID) {
@@ -273,8 +273,11 @@ func (d *Dispatcher) composeInputs(ctx context.Context, inv *inventory.Inventory
 	default:
 		for _, id := range inv.InputIDs {
 			in, err := d.inventories.Get(ctx, id)
-			if err != nil {
+			if errors.Is(err, inventory.ErrNotFound) {
 				return nil, fmt.Errorf("%w: input %s: %w", inventory.ErrComposition, id, err)
+			}
+			if err != nil {
+				return nil, fmt.Errorf("compose %s: input %s: %w", inv.Name, id, err)
 			}
 			if in.Composed() {
 				return nil, fmt.Errorf("%w: input %s is itself a %s inventory", inventory.ErrComposition,
@@ -288,7 +291,7 @@ func (d *Dispatcher) composeInputs(ctx context.Context, inv *inventory.Inventory
 		if pinned == nil && access != nil {
 			ok, err := access(ctx, in.ID)
 			if err != nil {
-				return nil, fmt.Errorf("%w: check access to %s: %w", inventory.ErrResolve, in.ID, err)
+				return nil, fmt.Errorf("compose %s: check access to %s: %w", inv.Name, in.ID, err)
 			}
 			if !ok {
 				continue
@@ -357,7 +360,7 @@ func (d *Dispatcher) ansibleCore(ctx context.Context, what, why string) (string,
 		return "", d.needsAnsibleError(what, why)
 	}
 	if err != nil {
-		return "", fmt.Errorf("%w: %w", inventory.ErrResolve, err)
+		return "", fmt.Errorf("read the ansible-core version for %s: %w", what, err)
 	}
 	return v, nil
 }
@@ -417,7 +420,7 @@ func (d *Dispatcher) readInputs(ctx context.Context, inputs []*composeInput) (st
 			defer func() { <-sem }()
 			out, err := d.invLister.ListInventory(ctx, []string{in.path}, "")
 			if err != nil {
-				errs[n] = fmt.Errorf("%w: input %s: %w", inventory.ErrResolve, in.inv.Name, err)
+				errs[n] = fmt.Errorf("%w: input %s: %w", inventory.ErrContentRead, in.inv.Name, err)
 				return
 			}
 			in.listing, errs[n] = inventory.ParseListing(out)
@@ -509,7 +512,7 @@ func (d *Dispatcher) composeConstructed(ctx context.Context, inv *inventory.Inve
 	// YAML and read last, after every input it builds groups from.
 	path := filepath.Join(dir, "constructed.yml")
 	if err := os.WriteFile(path, config, 0o600); err != nil {
-		return nil, nil, "", fmt.Errorf("%w: %w", inventory.ErrResolve, err)
+		return nil, nil, "", fmt.Errorf("compose %s: write the constructed options: %w", inv.Name, err)
 	}
 	sources := make([]string, 0, len(inputs)+1)
 	drawn := make([]string, 0, len(inputs))
@@ -520,11 +523,11 @@ func (d *Dispatcher) composeConstructed(ctx context.Context, inv *inventory.Inve
 	sources = append(sources, path)
 	out, err := d.invLister.ListInventory(ctx, sources, inv.Limit)
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("%w: %s: %w", inventory.ErrResolve, inv.Name, err)
+		return nil, nil, "", fmt.Errorf("%w: %s: %w", inventory.ErrContentRead, inv.Name, err)
 	}
 	listing, err := inventory.ParseListing(out)
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("%w: %s: %w", inventory.ErrResolve, inv.Name, err)
+		return nil, nil, "", fmt.Errorf("compose %s: %w", inv.Name, err)
 	}
 	return listing, drawn, version, nil
 }
@@ -533,7 +536,7 @@ func (d *Dispatcher) composeConstructed(ctx context.Context, inv *inventory.Inve
 func (d *Dispatcher) estateFacts(ctx context.Context) (map[string]map[string]string, error) {
 	estate, err := d.store.EstateAt(ctx, d.now(), 0)
 	if err != nil {
-		return nil, fmt.Errorf("%w: read gathered facts: %w", inventory.ErrResolve, err)
+		return nil, fmt.Errorf("read gathered facts: %w", err)
 	}
 	out := make(map[string]map[string]string, len(estate))
 	for _, f := range estate {

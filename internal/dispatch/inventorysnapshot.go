@@ -127,8 +127,7 @@ func (d *Dispatcher) snapshotInventory(ctx context.Context, r *run.Run) error {
 	}
 	content, err := d.inventoryContent(ctx, inv)
 	if err != nil {
-		return fmt.Errorf("%w: inventory %s could not be read when the run was submitted: %w",
-			ErrInventorySnapshot, inv.Name, err)
+		return fmt.Errorf("%w: inventory %s: %w", inventory.ErrContentRead, inv.Name, err)
 	}
 	snap, err := snapshotOf(content)
 	if err != nil {

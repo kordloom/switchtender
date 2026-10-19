@@ -185,7 +185,7 @@ Two more are enforced somewhere other than the request:
 | GET    | `/v1/inventories/{id}/facts` | List the inventory's hosts with cached facts: size, gathering run, and time. Operator role. |
 | GET    | `/v1/inventories/{id}/facts/{host}` | Read one host's cached facts. Secret-looking values are masked below admin. Operator role. |
 | DELETE | `/v1/inventories/{id}/facts/{host}` | Clear one host's cached facts, so the next run gathers them afresh. |
-| POST   | `/v1/inventories/preview`  | Resolve an unsaved smart or constructed inventory and list the hosts it reaches for the caller, with the `engine` that resolved it and the `ansible_core` version when Ansible did. |
+| POST   | `/v1/inventories/preview`  | Resolve an unsaved smart or constructed inventory and list the hosts it reaches for the caller, with the `engine` that resolved it and the `ansible_core` version when Ansible did. It answers `422` with the reason for a definition that cannot resolve or content that could not be read, and `500` for a failure of the server's stores. |
 | POST   | `/v1/inventories/{id}/preview` | Resolve a stored smart or constructed inventory and list the hosts a launch by the caller would reach, with the same `engine` and `ansible_core`. |
 | POST   | `/v1/policies`             | Create a policy that holds, denies, or exempts matching runs. `effect` is `require_approval`, the default, `deny`, or `exempt`. `account` matches the username of the account the requesting credential is bound to. An exempt policy lets the agent runs it matches go ahead without the built-in agent hold, takes only `tool`, `command_contains`, `inventory_id`, `queue`, `actor`, `account`, and `actor_kind: agent`, and is Community. An exempt policy that names `actor` without `account` is refused with 400, since a token label is not unique across accounts. See [Agent runs are held by default](policy.md#agent-runs-are-held-by-default). |
 | GET    | `/v1/policies`             | List approval policies. A Rego policy from the policy file carries a `rego` object with its `package`, `syntax`, bundle `sha256`, `modules`, `warn` (`hold` or `note`), and `timeout`. See [Approval policies](policy.md). |
@@ -226,9 +226,28 @@ A webhook trigger, a pull request plan, and a provisioning callback answer it `4
 error, as in `this template cannot launch: invalid inventory document`, and no more. The detail
 can quote what the inventory holds, and the sender is not its owner. The server log keeps the
 detail, and launching the template by hand shows it. A webhook's refusal is also its trigger's
-`last_error`, and a pull request plan's is a comment on the pull request. An inventory that could
-not be resolved, which can be a store that did not answer, is still answered `502` on those paths,
-so a sender that retries a failure on the server's side retries it.
+`last_error`, and a pull request plan's is a comment on the pull request. A constructed inventory
+that names an input that no longer exists, and an input of a composed inventory that does not parse,
+are configuration errors too. Those three paths answer them `409` and name the error, as in
+`inventory not found` or `composed inventory could not be resolved`.
+
+Content that could not be read is an inventory whose content was fetched from its content source
+(a command, Vault, or a secret manager) or read by ansible-inventory, and the read failed. A
+person's launch answers it `400` with the whole reason, and a rerun `409`, so the person can see
+whether the source refused or was down. A webhook trigger, a pull request plan, and a provisioning
+callback answer `502` with `this template cannot launch: inventory content could not be read`, and
+no more. The same read fails for a refused request and for an outage, and a sender that retries a
+`502` gets past an outage. A webhook's answer is also its trigger's `last_error`, and a pull request
+plan gets no comment for it. A `/switchtender apply` comment gets one reply, `This apply could not
+start: inventory content could not be read. Nothing was applied.`, which tells the commenter to
+comment again once the content can be read.
+
+A failure of the server or its stores while composing an inventory, such as a store that did not
+answer, is the server's failure, and so is a snapshot the server could not seal or reopen when the
+run was submitted. A person gets `500` with the detail kept to the server log, a rerun included,
+which answered a snapshot it could not seal `409`. The webhook trigger and the provisioning
+callback answer `502` with `could not launch the template`, and a pull request plan `502` with
+`could not plan the pull request`.
 
 ### How long a submission can take
 

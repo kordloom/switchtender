@@ -15,9 +15,16 @@ var (
 	// ErrNoHosts is returned when a composed inventory resolves to no host at launch, which would
 	// otherwise start a run that reaches nothing and reports that it ran.
 	ErrNoHosts = errors.New("composed inventory resolved to no hosts")
-	// ErrResolve is returned when a composed inventory cannot be resolved, such as when Ansible
-	// cannot read an input or evaluate the constructed options.
+	// ErrResolve is returned when a composed inventory cannot be resolved as it is defined, such as
+	// when an input is a document the native engine cannot parse or needs an Ansible this server
+	// does not have. A failed read of an inventory's content is ErrContentRead, and a failure of
+	// this server or its stores carries neither.
 	ErrResolve = errors.New("composed inventory could not be resolved")
+	// ErrContentRead is returned when an inventory's content cannot be read from where it lives: its
+	// content source, such as Vault, Google Secret Manager, or a command, or ansible-inventory
+	// reading it. The same read fails alike for a refusal and for an outage, so the error says where
+	// to look without saying whose fault it is.
+	ErrContentRead = errors.New("inventory content could not be read")
 	// ErrListing is returned when an ansible-inventory listing cannot be read.
 	ErrListing = errors.New("invalid inventory listing")
 	// ErrNeedsAnsible is returned when an inventory's definition can only be resolved by Ansible,

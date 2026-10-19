@@ -179,8 +179,10 @@ A template that cannot launch for something its owner must fix, such as an inven
 valid inventory or a project that no longer exists, is not planned either. The forge is answered
 `409`, and the pull request gets a comment naming the error and an `error` status. The comment names
 the error and quotes nothing, since anybody who can read the pull request reads it, and the server
-log keeps the detail. An inventory that could not be resolved, which can be a store that did not
-answer, is answered `502` as a failure on SwitchTender's side.
+log keeps the detail. A store that did not answer while composing the inventory is answered `502` as
+a failure on SwitchTender's side. Inventory content that could not be read is answered `502` with
+`this template cannot launch: inventory content could not be read`, so a forge that retries gets
+past an outage. Neither is commented on the pull request.
 
 A `.terraform` directory committed to the repository is never read. A pull request could commit one
 whose manifest points a registry module at a harmless copy beside it while the plan's own `init`
@@ -419,6 +421,7 @@ author from approving their own change, whoever asked for the apply first.
 | A rule refuses the apply, or routes it to a queue this install's license does not cover | One reply. Nothing is applied. |
 | The template cannot be planned for a pull request, such as a workflow template | One reply saying why. |
 | The apply cannot run for something its owner must fix, such as an inventory that is not a valid inventory or a credential with no secret | One reply naming the error and quoting nothing. Nothing is applied. |
+| The inventory's content could not be read | One reply, `This apply could not start: inventory content could not be read. Nothing was applied.` Comment again once the content can be read. |
 | Something failed on SwitchTender's side, such as a call to the forge | One reply saying the command did nothing. Comment again to retry. |
 
 ### What a comment costs

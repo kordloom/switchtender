@@ -211,7 +211,8 @@ the server's key while the run waits and wiped when the run ends. A run whose sn
 does not open, or no longer matches what was bound is refused rather than run against whatever the
 inventory holds now. A source that refreshes on launch refreshes at submission, so the snapshot
 holds the refreshed hosts. Content fetched from a command, Vault, or a secret manager is fetched at
-submission too.
+submission too. A fetch that fails then refuses the launch, as [When a launch cannot start for its
+configuration](api.md#when-a-launch-cannot-start-for-its-configuration) describes.
 
 A dynamic source is different by nature: its definition, such as an inventory plugin configuration,
 names no hosts until Ansible asks the live system it describes. The approval binds the definition,
@@ -269,7 +270,9 @@ schedule surfaces.
 The Inventories page previews the hosts a smart or constructed inventory resolves to before it is
 saved, and a saved one can be previewed from its row. A preview resolves exactly as a launch by the
 same person would, and lists host names and inputs without any host variables. It also names the
-engine that resolved it, and the ansible-core version when Ansible did.
+engine that resolved it, and the ansible-core version when Ansible did. A definition that cannot
+resolve, or content that could not be read, is answered `422` with the reason, and a failure of the
+server's stores is answered `500` with `could not resolve inventory`.
 
     POST /v1/inventories/preview          {"kind": "smart", "host_filter": "groups__name=web"}
     POST /v1/inventories/{id}/preview

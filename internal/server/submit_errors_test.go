@@ -29,9 +29,13 @@ const leakMarker = "zz-inventory-value-9f3c"
 var errLeakyInventory = fmt.Errorf("%w: %q is not a YAML boolean", inventory.ErrInvalidInventory,
 	leakMarker)
 
-// errStoreOutage is a store fault the composer wrapped while resolving an inventory.
-var errStoreOutage = fmt.Errorf("%w: list inventories: %w", inventory.ErrResolve,
+// errStoreOutage is a store fault met while composing an inventory, which carries no sentinel.
+var errStoreOutage = fmt.Errorf("compose fleet: list inventories: %w",
 	errors.New("connection refused"))
+
+// errContentOutage is an outage of an inventory's content source, which reads the same as a
+// refusal by it.
+var errContentOutage = fmt.Errorf("%w: vault request failed: timeout", inventory.ErrContentRead)
 
 // TestClassifySubmitNamesEveryKnownError pins the class of each error a submission can end in,
 // alone, wrapped with detail, and wrapped in ErrResolve the way the composer wraps what it meets.
@@ -50,25 +54,20 @@ func TestClassifySubmitNamesEveryKnownError(t *testing.T) {
 			dispatch.ErrNoCommand, dispatch.ErrUnknownTool, dispatch.ErrToolCredential,
 			dispatch.ErrNoSteps, dispatch.ErrTooManySteps, dispatch.ErrStepInput,
 			dispatch.ErrUnnamedStep, dispatch.ErrDuplicateStep, dispatch.ErrUnknownDependency,
-			dispatch.ErrDependencyCycle, run.ErrApprovalStep, run.ErrDenyPath,
+			dispatch.ErrDependencyCycle, run.ErrApprovalStep, run.ErrDenyPath, inventory.ErrResolve,
+			inventory.ErrComposition,
 		},
 	}, { // Test 1: A credential this server cannot open.
 		WantClass: submitSecret, Errs: []error{credential.ErrNoSecret, credential.ErrUnreadable},
 	}, { // Test 2: A deny rule or the license.
 		WantClass: submitPolicy, Errs: []error{dispatch.ErrPolicyDenied, dispatch.ErrQueueUnlicensed},
-	}, { // Test 3: An inventory that could not be resolved or sealed.
-		WantClass: submitUnresolved, Errs: []error{
-			inventory.ErrResolve, dispatch.ErrInventorySnapshot, inventory.ErrComposition,
-		},
+	}, { // Test 3: An inventory whose content could not be read from where it lives.
+		WantClass: submitContent, Errs: []error{inventory.ErrContentRead},
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			for _, known := range test.Errs {
-				inResolve := known
-				if test.WantClass == submitUnresolved {
-					inResolve = inventory.ErrResolve
-				}
 				for _, c := range []struct {
 					Err       error
 					WantKnown error
@@ -76,7 +75,7 @@ func TestClassifySubmitNamesEveryKnownError(t *testing.T) {
 					{Err: known, WantKnown: known},
 					{Err: fmt.Errorf("%w: %q", known, leakMarker), WantKnown: known},
 					{Err: fmt.Errorf("%w: input web: %w", inventory.ErrResolve, known),
-						WantKnown: inResolve},
+						WantKnown: known},
 				} {
 					class, got := classifySubmit(c.Err)
 					if class != test.WantClass || got != c.WantKnown {
@@ -106,6 +105,8 @@ func TestClassifySubmitLeavesTheRestToTheServer(t *testing.T) {
 		Err: run.ErrCallbackPending,
 	}, { // Test 4: A canceled request.
 		Err: context.Canceled,
+	}, { // Test 5: A snapshot this server could not take or reopen when the run was submitted.
+		Err: dispatch.ErrInventorySnapshot,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -131,10 +132,13 @@ func TestAPersonIsToldTheWholeReason(t *testing.T) {
 	})
 	const pipeline = `{"name":"p","steps":[{"name":"a","tool":"bash","command":"true"}]}`
 	noSecret := fmt.Errorf("%w: %q", credential.ErrNoSecret, "deploy-key")
+	sealFault := fmt.Errorf("%w: seal the snapshot of inventory web: %w",
+		dispatch.ErrInventorySnapshot, errors.New("cipher: message authentication failed"))
 	tests := []struct {
 		Err        error
 		WantStatus int
 		WantText   string
+		WantHidden string
 		Path       string
 		Body       string
 	}{{ // Test 0: Run submit.
@@ -165,12 +169,27 @@ func TestAPersonIsToldTheWholeReason(t *testing.T) {
 		Err:        fmt.Errorf("%w: step a needs itself", dispatch.ErrDependencyCycle),
 		WantStatus: http.StatusBadRequest, WantText: "step a needs itself", Path: "/v1/pipelines",
 		Body: pipeline,
-	}, { // Test 9: A store fault behind an unresolved inventory, still the person's 400 until U6d.
-		Err: errStoreOutage, WantStatus: http.StatusBadRequest, WantText: "connection refused",
+	}, { // Test 9: A store fault while composing an inventory is the server's, which it was not.
+		Err: errStoreOutage, WantStatus: http.StatusInternalServerError,
+		WantText: "could not launch template", WantHidden: "connection refused",
 		Path: "/v1/templates/tpl_1/launch", Body: `{}`,
 	}, { // Test 10: A fault of the server's own is a 500 that keeps its detail to the log.
 		Err: errors.New("disk full"), WantStatus: http.StatusInternalServerError,
-		WantText: "could not create the proposal", Path: "/v1/drift/reconcile", Body: `{"host":"web01"}`,
+		WantText: "could not create the proposal", WantHidden: "disk full",
+		Path: "/v1/drift/reconcile", Body: `{"host":"web01"}`,
+	}, { // Test 11: Content that could not be read is told whole to the person launching.
+		Err: errContentOutage, WantStatus: http.StatusBadRequest, WantText: "vault request failed",
+		Path: "/v1/templates/tpl_1/launch", Body: `{}`,
+	}, { // Test 12: A snapshot this server could not seal is its own failure, which was a 400.
+		Err: sealFault, WantStatus: http.StatusInternalServerError, WantText: "could not submit run",
+		WantHidden: "cipher", Path: "/v1/runs", Body: `{"playbook":"hello.yml"}`,
+	}, { // Test 13: And on a template launch.
+		Err: sealFault, WantStatus: http.StatusInternalServerError,
+		WantText: "could not launch template", WantHidden: "cipher",
+		Path: "/v1/templates/tpl_1/launch", Body: `{}`,
+	}, { // Test 14: And on a rerun, which was a 409, though a rerun pins no snapshot to conflict with.
+		Err: sealFault, WantStatus: http.StatusInternalServerError, WantText: "could not rerun",
+		WantHidden: "cipher", Path: "/v1/runs/run_done/rerun",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -201,8 +220,7 @@ func TestAPersonIsToldTheWholeReason(t *testing.T) {
 				t.Errorf("POST %s answered %s, want it to contain %q", test.Path, rec.Body.String(),
 					test.WantText)
 			}
-			if test.WantStatus == http.StatusInternalServerError &&
-				strings.Contains(rec.Body.String(), "disk full") {
+			if test.WantHidden != "" && strings.Contains(rec.Body.String(), test.WantHidden) {
 				t.Errorf("POST %s answered %s, want the fault's detail kept to the log", test.Path,
 					rec.Body.String())
 			}
@@ -213,8 +231,8 @@ func TestAPersonIsToldTheWholeReason(t *testing.T) {
 // TestAWebhookIsToldTheErrorByName pins the webhook trigger's answer to an error the template's
 // owner must fix: a 409 naming the error, on the answer and on the trigger's last error, and nothing
 // the error wraps, since the inventory's values are not the sender's to read. It was a 502, which a
-// sender retries and which said nothing about why. An inventory that could not be resolved stays a
-// 502, since its error can wrap a store fault a retry gets past.
+// sender retries and which said nothing about why. A store fault stays a 502 the sender retries,
+// and so does content that could not be read, named, since the same read fails for an outage.
 func TestAWebhookIsToldTheErrorByName(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -231,9 +249,21 @@ func TestAWebhookIsToldTheErrorByName(t *testing.T) {
 		Err: fmt.Errorf("%w: %w: input %s", inventory.ErrResolve, inventory.ErrNeedsAnsible,
 			leakMarker), WantStatus: http.StatusConflict,
 		WantText: "this template cannot launch: this inventory needs Ansible",
-	}, { // Test 3: A store outage while the inventory was resolved.
-		Err:        fmt.Errorf("%w: input %s: %w", inventory.ErrResolve, leakMarker, errStoreOutage),
+	}, { // Test 3: A store outage while the inventory was composed.
+		Err:        fmt.Errorf("compose %s: %w", leakMarker, errStoreOutage),
 		WantStatus: http.StatusBadGateway, WantText: "could not launch the template",
+	}, { // Test 4: Content that could not be read, which was the same 502 with no name.
+		Err:        fmt.Errorf("%w: input %s", errContentOutage, leakMarker),
+		WantStatus: http.StatusBadGateway,
+		WantText:   "this template cannot launch: inventory content could not be read",
+	}, { // Test 5: A constructed inventory naming an input that is gone, which was a 502.
+		Err: fmt.Errorf("%w: input %s: %w", inventory.ErrComposition, leakMarker,
+			inventory.ErrNotFound), WantStatus: http.StatusConflict,
+		WantText: "this template cannot launch: inventory not found",
+	}, { // Test 6: An input the composer cannot parse, which was a 502.
+		Err: fmt.Errorf("%w: input %s: %w", inventory.ErrResolve, leakMarker,
+			errors.New("yaml: line 3: did not find expected key")), WantStatus: http.StatusConflict,
+		WantText: "this template cannot launch: composed inventory could not be resolved",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -258,8 +288,9 @@ func TestAWebhookIsToldTheErrorByName(t *testing.T) {
 }
 
 // TestACallbackIsToldTheErrorByName pins the provisioning callback's answer to the same errors. The
-// host holds the key and nothing more, so it is told the error's name, and an unresolved inventory
-// stays a 502, which curl --retry, the client AWX's callback examples use, retries.
+// host holds the key and nothing more, so it is told the error's name. A store fault stays a 502,
+// which curl --retry, the client AWX's callback examples use, retries, and so does content that
+// could not be read, named.
 func TestACallbackIsToldTheErrorByName(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -272,9 +303,13 @@ func TestACallbackIsToldTheErrorByName(t *testing.T) {
 	}, { // Test 1: No encryption key for the template's credentials.
 		Err: fmt.Errorf("%w: %s", credential.ErrNoKey, leakMarker), WantStatus: http.StatusConflict,
 		WantText: "this template cannot launch: no encryption key",
-	}, { // Test 2: A store outage while the inventory was resolved.
-		Err:        fmt.Errorf("%w: input %s: %w", inventory.ErrResolve, leakMarker, errStoreOutage),
+	}, { // Test 2: A store outage while the inventory was composed.
+		Err:        fmt.Errorf("compose %s: %w", leakMarker, errStoreOutage),
 		WantStatus: http.StatusBadGateway, WantText: "could not launch the template",
+	}, { // Test 3: Content that could not be read.
+		Err:        fmt.Errorf("%w: input %s", errContentOutage, leakMarker),
+		WantStatus: http.StatusBadGateway,
+		WantText:   "this template cannot launch: inventory content could not be read",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -327,8 +362,9 @@ func TestACallbackIsNotShownTheInventoryItCannotRead(t *testing.T) {
 
 // TestAPullRequestPlanIsToldTheErrorByName pins the pull request plan's answer to an error the
 // template's owner must fix: a 409 to the forge and a refusal on the pull request, each naming the
-// error and nothing it wraps, since anybody who can read the pull request reads the comment. An
-// unresolved inventory stays a 502 and is not told to the pull request.
+// error and nothing it wraps, since anybody who can read the pull request reads the comment. A
+// store fault stays a 502, and so does content that could not be read, named to the forge, and
+// neither is told to the pull request.
 func TestAPullRequestPlanIsToldTheErrorByName(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -340,9 +376,13 @@ func TestAPullRequestPlanIsToldTheErrorByName(t *testing.T) {
 		Err: errLeakyInventory, WantStatus: http.StatusConflict,
 		WantText:    "this template cannot launch: invalid inventory document",
 		WantComment: "This plan cannot run: invalid inventory document.",
-	}, { // Test 1: A store outage while the inventory was resolved.
-		Err:        fmt.Errorf("%w: input %s: %w", inventory.ErrResolve, leakMarker, errStoreOutage),
+	}, { // Test 1: A store outage while the inventory was composed.
+		Err:        fmt.Errorf("compose %s: %w", leakMarker, errStoreOutage),
 		WantStatus: http.StatusBadGateway, WantText: "could not plan the pull request",
+	}, { // Test 2: Content that could not be read.
+		Err:        fmt.Errorf("%w: input %s", errContentOutage, leakMarker),
+		WantStatus: http.StatusBadGateway,
+		WantText:   "this template cannot launch: inventory content could not be read",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -379,7 +419,8 @@ func TestAPullRequestPlanIsToldTheErrorByName(t *testing.T) {
 // TestACommentApplyIsToldTheErrorByName pins a comment apply's answer to an error the plan's owner
 // must fix: a refusal, answered 202 so the forge does not redeliver it, with a reply naming the error
 // and nothing it wraps. It was a failure telling the commenter to comment again, which cannot fix a
-// configuration error. An unresolved inventory stays a failure on the server's side.
+// configuration error. A store fault stays a failure on the server's side, and so does content that
+// could not be read, with a reply that names it.
 func TestACommentApplyIsToldTheErrorByName(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -394,9 +435,14 @@ func TestACommentApplyIsToldTheErrorByName(t *testing.T) {
 		Err:        fmt.Errorf("%w: %q", credential.ErrNoSecret, leakMarker),
 		WantStatus: http.StatusAccepted, WantResult: "refused/configuration",
 		WantReply: "This apply cannot run: credential has no secret yet. Nothing was applied.",
-	}, { // Test 2: A store outage while the inventory was resolved.
-		Err:        fmt.Errorf("%w: input %s: %w", inventory.ErrResolve, leakMarker, errStoreOutage),
+	}, { // Test 2: A store outage while the inventory was composed.
+		Err:        fmt.Errorf("compose %s: %w", leakMarker, errStoreOutage),
 		WantStatus: http.StatusBadGateway, WantResult: "failed/propose", WantReply: failedReply,
+	}, { // Test 3: Content that could not be read, which got the same reply as a store outage.
+		Err:        fmt.Errorf("%w: input %s", errContentOutage, leakMarker),
+		WantStatus: http.StatusBadGateway, WantResult: "failed/propose",
+		WantReply: "This apply could not start: inventory content could not be read. Nothing was " +
+			"applied.",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -417,6 +463,48 @@ func TestACommentApplyIsToldTheErrorByName(t *testing.T) {
 			}
 			if applies := cs.applyRuns(t); len(applies) != 0 {
 				t.Errorf("a refused apply created %d runs", len(applies))
+			}
+		})
+	}
+}
+
+// TestAPreviewTellsAFaultFromTheInventory pins the inventory preview's answers: a 422 with the
+// reason for a definition that cannot resolve or content that could not be read, which the person
+// previewing must look into, and a 500 with the detail kept to the log for a failure of this
+// server's stores, which was a 422 quoting the store's error.
+func TestAPreviewTellsAFaultFromTheInventory(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Err        error
+		WantStatus int
+		WantText   string
+		WantHidden string
+	}{{ // Test 0: A store outage while the inventory was composed.
+		Err: errStoreOutage, WantStatus: http.StatusInternalServerError,
+		WantText: "could not resolve inventory", WantHidden: "connection refused",
+	}, { // Test 1: Content that could not be read.
+		Err: errContentOutage, WantStatus: http.StatusUnprocessableEntity,
+		WantText: "inventory content could not be read: vault request failed",
+	}, { // Test 2: A constructed inventory naming an input that is gone.
+		Err: fmt.Errorf("%w: input inv_gone: %w", inventory.ErrComposition,
+			inventory.ErrNotFound), WantStatus: http.StatusUnprocessableEntity,
+		WantText: "input inv_gone",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
+				WithInventories(inventory.NewMemStore()),
+				WithInventoryPreviewer(boundPreviewer{err: test.Err})).Handler()
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/inventories/preview",
+				strings.NewReader(`{"name":"web","kind":"smart","host_filter":"name__icontains=web"}`)))
+			if rec.Code != test.WantStatus || !strings.Contains(rec.Body.String(), test.WantText) {
+				t.Fatalf("preview = %d %s, want %d %q", rec.Code, rec.Body.String(), test.WantStatus,
+					test.WantText)
+			}
+			if test.WantHidden != "" && strings.Contains(rec.Body.String(), test.WantHidden) {
+				t.Errorf("preview answered %s, want the fault's detail kept to the log", rec.Body.String())
 			}
 		})
 	}
