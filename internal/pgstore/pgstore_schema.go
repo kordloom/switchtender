@@ -136,7 +136,10 @@ CREATE TABLE IF NOT EXISTS runs (
 	-- When the run came to owe its outcome to the audit chain, in Unix milliseconds by the
 	-- database's clock, and zero while it owes nothing. The runs_outcome_owed trigger sets it, and
 	-- the commit that puts the outcome on the chain clears it.
-	outcome_owed_ms BIGINT NOT NULL DEFAULT 0
+	outcome_owed_ms BIGINT NOT NULL DEFAULT 0,
+	-- The bytes of output the run has captured, kept by the run_logs_count trigger so the capture
+	-- limit is checked against one number instead of a sum over every chunk.
+	log_bytes BIGINT NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
@@ -224,6 +227,26 @@ CREATE TABLE IF NOT EXISTS run_logs (
 	chunk  BYTEA NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_run_logs_run ON run_logs(run_id, seq);
+-- Every insert into run_logs adds its bytes to the run's count, whichever release or replica makes
+-- it, so an earlier release appending during a rolling update or after a rollback leaves the count
+-- right. The trigger is created once and never replaced, because dropping it would leave a moment in
+-- which another process's insert went uncounted, so a change to it takes a new name. migrate counts
+-- the logs of runs in flight when it creates the trigger.
+CREATE OR REPLACE FUNCTION run_logs_count() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+	UPDATE runs SET log_bytes = log_bytes + octet_length(NEW.chunk) WHERE id = NEW.run_id;
+	RETURN NULL;
+END
+$$;
+DO $trg$
+BEGIN
+	IF NOT EXISTS (SELECT 1 FROM pg_trigger
+			WHERE tgname = 'run_logs_count' AND tgrelid = to_regclass('run_logs')) THEN
+		CREATE TRIGGER run_logs_count AFTER INSERT ON run_logs
+			FOR EACH ROW EXECUTE FUNCTION run_logs_count();
+	END IF;
+END
+$trg$;
 -- Stream tickets live here so a ticket minted on one replica redeems on any other. Only the
 -- ticket's hash is stored: a leaked table holds no live credentials.
 CREATE TABLE IF NOT EXISTS stream_tickets (
@@ -1079,12 +1102,13 @@ func schemaIsCurrent(db *sql.DB) (bool, error) {
 	// runs_owe_hold, and runs_owe_hold_new mark its start and its hold owed to them.
 	var triggers int
 	if err := db.QueryRow(`SELECT COUNT(DISTINCT tgname) FROM pg_trigger
-WHERE tgname IN ('runs_outcome_owed', 'runs_owe_end', 'runs_owe_start', 'runs_owe_hold',
-	'runs_owe_hold_new') AND tgrelid = to_regclass('runs')`).
+WHERE (tgname IN ('runs_outcome_owed', 'runs_owe_end', 'runs_owe_start', 'runs_owe_hold',
+	'runs_owe_hold_new') AND tgrelid = to_regclass('runs'))
+	OR (tgname = 'run_logs_count' AND tgrelid = to_regclass('run_logs'))`).
 		Scan(&triggers); err != nil {
 		return false, fmt.Errorf("read the live triggers: %w", err)
 	}
-	return triggers == 5, nil
+	return triggers == 6, nil
 }
 
 // liveColumns returns the columns this database actually has, by table.
@@ -1209,8 +1233,30 @@ func migrate(db *sql.DB) error {
 			}
 		}
 	}
+	// A database gaining the log count trigger counts the logs of runs still in flight and no others,
+	// since a finished run never appends again and counting every stored log would make the upgrade
+	// cost the whole history. Inserts into run_logs are held back from before the trigger exists
+	// until the count is written, so none is counted twice or missed in between.
+	var logsHeld bool
+	if err := tx.QueryRow(`SELECT to_regclass('run_logs') IS NOT NULL AND NOT EXISTS (
+	SELECT 1 FROM pg_trigger WHERE tgname = 'run_logs_count' AND tgrelid = to_regclass('run_logs'))`).
+		Scan(&logsHeld); err != nil {
+		return fmt.Errorf("look up the log count trigger: %w", err)
+	}
+	if logsHeld {
+		if _, err := tx.Exec("LOCK TABLE run_logs IN SHARE MODE"); err != nil {
+			return fmt.Errorf("hold the logs for the count: %w", err)
+		}
+	}
 	if _, err := tx.Exec(schema); err != nil {
 		return fmt.Errorf("migrate schema: %w", err)
+	}
+	if logsHeld {
+		if _, err := tx.Exec(`UPDATE runs SET log_bytes =
+	COALESCE((SELECT SUM(octet_length(chunk)) FROM run_logs WHERE run_logs.run_id = runs.id), 0)
+WHERE ` + nonTerminalRun); err != nil {
+			return fmt.Errorf("count the logs of runs in flight: %w", err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("migrate schema: %w", err)

@@ -137,7 +137,10 @@ CREATE TABLE IF NOT EXISTS runs (
 	-- When the run came to owe its outcome to the audit chain, in Unix milliseconds by the store's
 	-- clock, and zero while it owes nothing. The runs_outcome_owed trigger sets it, and the commit
 	-- that puts the outcome on the chain clears it.
-	outcome_owed_ms INTEGER NOT NULL DEFAULT 0
+	outcome_owed_ms INTEGER NOT NULL DEFAULT 0,
+	-- The bytes of output the run has captured, kept by the run_logs_count trigger so the capture
+	-- limit is checked against one number instead of a sum over every chunk.
+	log_bytes INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 -- Every run listing selects top-level runs and pages them by creation time, and that pair has to sit
@@ -844,6 +847,10 @@ func Open(path string) (*DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := migrateLogBytes(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := upgradeIdempotencyKeys(db); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -1148,6 +1155,50 @@ func migrateRuns(db *sql.DB) error {
 		"ALTER TABLE audit_entries ADD COLUMN install_id TEXT NOT NULL DEFAULT ''"); err != nil &&
 		!strings.Contains(err.Error(), "duplicate column name") {
 		return fmt.Errorf("add entry install_id column: %w", err)
+	}
+	return nil
+}
+
+// migrateLogBytes gives runs the byte count of their captured output and the trigger that keeps it.
+// The trigger counts every insert into run_logs, whichever release makes it, so an earlier release
+// appending during a rolling update or after a rollback leaves the count right. The trigger is
+// created once and never replaced, so a change to it takes a new name. A database gaining the
+// trigger counts the logs of runs still in flight and no others: a finished run never appends
+// again, and counting every stored log would make the upgrade cost the whole history. The backfill
+// shares a transaction with the trigger, so no insert is counted twice or missed between them.
+func migrateLogBytes(db *sql.DB) error {
+	if _, err := db.Exec("ALTER TABLE runs ADD COLUMN log_bytes INTEGER NOT NULL DEFAULT 0"); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("add log_bytes column: %w", err)
+	}
+	var present int
+	if err := db.QueryRow(
+		"SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name='run_logs_count'").
+		Scan(&present); err != nil {
+		return fmt.Errorf("look up the log count trigger: %w", err)
+	}
+	if present > 0 {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin the log count migration: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`CREATE TRIGGER IF NOT EXISTS run_logs_count AFTER INSERT ON run_logs
+FOR EACH ROW
+BEGIN
+	UPDATE runs SET log_bytes = log_bytes + LENGTH(NEW.chunk) WHERE id = NEW.run_id;
+END`); err != nil {
+		return fmt.Errorf("create the log count trigger: %w", err)
+	}
+	if _, err := tx.Exec(`UPDATE runs SET log_bytes =
+	COALESCE((SELECT SUM(LENGTH(chunk)) FROM run_logs WHERE run_logs.run_id = runs.id), 0)
+WHERE ` + nonTerminalRun); err != nil {
+		return fmt.Errorf("count the logs of runs in flight: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit the log count migration: %w", err)
 	}
 	return nil
 }

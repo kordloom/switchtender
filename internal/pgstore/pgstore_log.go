@@ -16,10 +16,13 @@ import (
 // statement instead of two.
 func (s *store) AppendLog(ctx context.Context, id string, p []byte) error {
 	// The accumulated size is fenced in the same statement as the terminal check, so two writers
-	// racing cannot both read a size under the cap and both append past it.
+	// racing cannot both read a size under the cap and both append past it. The size is the run's
+	// own count, kept by the run_logs_count trigger, so the fence reads one row however long the log
+	// is. FOR UPDATE takes the run row and, under READ COMMITTED, re-reads the count once a racing
+	// writer on another replica has committed, so the writers serialize on the count.
 	res, err := s.db.ExecContext(ctx,
-		"INSERT INTO run_logs (run_id, chunk) SELECT $1, $2 WHERE EXISTS (SELECT 1 FROM runs WHERE id=$1 AND "+
-			nonTerminalRun+") AND COALESCE((SELECT SUM(LENGTH(chunk)) FROM run_logs WHERE run_id=$1), 0) < $3",
+		"INSERT INTO run_logs (run_id, chunk) SELECT $1, $2 FROM runs WHERE id=$1 AND "+
+			nonTerminalRun+" AND log_bytes < $3 FOR UPDATE",
 		id, p, run.MaxLogBytes)
 	if err != nil {
 		return fmt.Errorf("append log: %w", err)
