@@ -71,7 +71,10 @@ OpenTofu working directory. For Ansible, SwitchTender shells out to <code>ansibl
 PATH or from the pinned ansible-core <a href="/docs/ansible-runtime"><code>switchtender ansible install</code></a> sets up,
 and captures both a human log and a structured event stream through an embedded callback plugin, so
 a run is queryable data, not just scrollback. Every run records its status, timing, exit code, the
-extra vars going in, and the <code>set_stats</code> outputs coming out.</p>
+extra vars going in, and the <code>set_stats</code> outputs coming out. A clean exit is not on its own a
+success: a playbook whose recap names no host, or a run whose captured output could not be stored
+in full, is recorded as failed, with the reason on the run and in its signed outcome, because the
+record could not otherwise show what ran.</p>
 <h2 id="splits">Splits</h2>
 <p>A split shards one inventory across parallel slices that run the same playbook, each limited to its
 hosts, with the parent rolling up the result into one merged host matrix. Hosts are packed into

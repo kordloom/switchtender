@@ -125,6 +125,8 @@ func TestATailThatNeverLandsIsDeclared(t *testing.T) {
 
 	ended := time.Now()
 	r.Status, r.ExitCode, r.EndedAt = run.StatusFailed, ptr(2), &ended
+	// The run is already degraded once, and the second note must not erase the first.
+	r.Warning = "this run recorded no per-host result"
 	_ = c.Save(ctx, r)
 
 	// The run still reaches its end: an undeliverable log must not leave the status unknown.
@@ -135,10 +137,13 @@ func TestATailThatNeverLandsIsDeclared(t *testing.T) {
 	if !stored.Status.Terminal() {
 		t.Fatalf("an undeliverable tail left the run %q, so its status is never reported", stored.Status)
 	}
-	// And it says the log is short.
-	if stored.Warning == "" {
+	// And it says the log is short, beside what it already said.
+	if !strings.Contains(stored.Warning, "could not be delivered") {
 		t.Error("the run's log is missing its end and the record says nothing about it, so the outcome " +
 			"digest attests a truncated log as complete")
+	}
+	if !strings.Contains(stored.Warning, "no per-host result") {
+		t.Error("the lost tail's warning replaced the one the run already carried")
 	}
 }
 

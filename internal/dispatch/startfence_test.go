@@ -67,7 +67,7 @@ func TestAStalledClaimantCannotStartARunItNoLongerHolds(t *testing.T) {
 
 			var finished atomic.Int32
 			d.streamSpec(ctx, stale, false, nil,
-				func(roundhouse.Result, error, *masker, *run.SummaryFold) run.Status {
+				func(roundhouse.Result, error, *masker, *run.SummaryFold, int64) run.Status {
 					finished.Add(1)
 					return run.StatusSucceeded
 				})

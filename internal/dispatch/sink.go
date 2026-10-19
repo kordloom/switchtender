@@ -39,12 +39,15 @@ type logSink struct {
 	stream *streamMasker
 	// hold releases withheld output once a run goes quiet, so a slow run's log is not blank.
 	hold *time.Timer
+	// lost counts the bytes of output the store did not confirm it kept, so the run's outcome can
+	// say its log is incomplete instead of passing over the gap.
+	lost int64
 }
 
 // Write appends p to the run's log and publishes it, redacting any known secret first so a value a
 // tool echoes never reaches the stored log or a live viewer. A store failure is retried briefly,
-// since a busy single writer under load must not silently drop stored output, then logged and
-// reported as a successful write so a persistent logging fault does not tear down the running
+// since a busy single writer under load must not silently drop stored output, then logged, counted,
+// and reported as a successful write so a persistent logging fault does not tear down the running
 // process. The original length is returned because the whole chunk was consumed.
 //
 // The producing step and the emit are both done under s.mu so this write, the hold timer's release,
@@ -100,10 +103,19 @@ func (s *logSink) flush() {
 	}
 }
 
+// lostBytes reports how many bytes of output the store did not confirm it kept.
+func (s *logSink) lostBytes() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lost
+}
+
 // emit stores and publishes a redacted chunk. The caller holds s.mu, so emits happen in the stream's
 // production order. A store failure is retried briefly, since a busy single writer under load must
-// not silently drop stored output, then logged rather than surfaced, so a persistent logging fault
-// does not tear down the running process.
+// not silently drop stored output, then logged and counted rather than surfaced, so a persistent
+// logging fault does not tear down the running process but does stop the run finishing succeeded.
+// A chunk that landed in part is counted whole, so the count can overstate the gap and never hides
+// one.
 func (s *logSink) emit(out []byte) {
 	if len(out) == 0 {
 		return
@@ -112,6 +124,7 @@ func (s *logSink) emit(out []byte) {
 		return s.store.AppendLog(context.Background(), s.id, out)
 	}); err != nil {
 		s.log.Error("dispatch: append log: "+err.Error(), zap.String("run_id", s.id))
+		s.lost += int64(len(out))
 	}
 	s.publisher.PublishLog(s.id, out)
 }

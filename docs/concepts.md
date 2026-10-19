@@ -14,7 +14,10 @@ OpenTofu working directory. For Ansible, SwitchTender shells out to `ansible-pla
 PATH or from the pinned ansible-core [`switchtender ansible install`](ansible-runtime.md) sets up,
 and captures both a human log and a structured event stream through an embedded callback plugin, so
 a run is queryable data, not just scrollback. Every run records its status, timing, exit code, the
-extra vars going in, and the `set_stats` outputs coming out.
+extra vars going in, and the `set_stats` outputs coming out. A clean exit is not on its own a
+success: a playbook whose recap names no host, or a run whose captured output could not be stored
+in full, is recorded as failed, with the reason on the run and in its signed outcome, because the
+record could not otherwise show what ran.
 
 ## Splits
 

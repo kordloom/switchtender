@@ -65,6 +65,12 @@ func (c *Client) AppendLog(ctx context.Context, id string, p []byte) error {
 	return c.t.AppendLog(ctx, id, p)
 }
 
+// SettleLog delivers the output the transport still holds for a run and reports the bytes the control
+// node did not keep, so the dispatcher decides the run's outcome knowing what its log is missing.
+func (c *Client) SettleLog(ctx context.Context, id string) int64 {
+	return c.t.SettleLog(ctx, id)
+}
+
 // AppendEvents streams structured events to the control node.
 func (c *Client) AppendEvents(ctx context.Context, id string, events []event.Event) error {
 	return c.t.AppendEvents(ctx, id, events)

@@ -330,8 +330,9 @@ caller wants. `inventory` is a path to an inventory file already on the server, 
 inventory is managed outside this product.
 
 Sending a stored inventory's name in `inventory` is read as a path. Ansible exits zero when a
-host pattern matches nothing, so a run aimed at a path that does not exist is recorded as
-succeeded having touched no host at all.
+host pattern matches nothing, so a run aimed at a path that does not exist touches no host at all.
+Its recap names no host, and the run is recorded as failed with the reason on its `error`, since a
+clean exit over nothing is not a success.
 
 ## Ansible run controls
 
