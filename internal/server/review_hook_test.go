@@ -268,7 +268,7 @@ func newReviewServer(t *testing.T, setup reviewSetup) *reviewServer {
 	}
 	origin, head := newPROrigin(t, ref, map[string]string{"infra/plan.txt": "main\n"}, prFiles)
 
-	sealer := credential.NewSealer("pass", "salt")
+	sealer := sharedSealer("pass", "salt")
 	creds := credential.NewMemStore()
 	for id, v := range map[string]struct {
 		Kind  credential.Kind

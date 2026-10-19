@@ -164,7 +164,7 @@ func hardenServer(t *testing.T, db hardenDB) (http.Handler, string) {
 	h := New(db.runs, d, zap.NewNop(), WithUsers(db.users), WithTokens(db.tokens),
 		WithInventories(db.inventories), WithTemplates(db.templates), WithTeams(db.teams),
 		WithOrgs(db.orgs), WithGrants(db.grants, false), WithProjects(db.projects),
-		WithCredentials(db.credentials, credential.NewSealer("harden-pass", "harden-salt")),
+		WithCredentials(db.credentials, sharedSealer("harden-pass", "harden-salt")),
 		WithSchedules(db.schedules), WithAudit(&recordingAudits{}),
 		WithSignInGuard(cheapGuard(t))).Handler()
 	return h, plain

@@ -19,7 +19,6 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
-	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/forgelink"
 	"github.com/kordloom/switchtender/internal/inventory"
@@ -173,7 +172,7 @@ func newAgentHoldServer(t *testing.T, db agentHoldDB, policyStore bool) *agentHo
 	serverOpts := []Option{WithTokens(db.tokens), WithUsers(db.users),
 		WithAudit(audit.NewMemStore()), WithApprover(d), WithRetrier(d),
 		WithTemplates(db.templates), WithSchedules(db.schedules),
-		WithTriggers(db.triggers, credential.NewSealer("agent-hold-pass", "agent-hold-salt")),
+		WithTriggers(db.triggers, sharedSealer("agent-hold-pass", "agent-hold-salt")),
 		WithInventories(db.inventories), WithProjects(db.projects),
 		WithForgeLinks(forgelink.NewMemStore(), forgelink.App{Provider: "github",
 			WebURL: "https://github.example.com", APIURL: "https://github.example.com/api/v3",

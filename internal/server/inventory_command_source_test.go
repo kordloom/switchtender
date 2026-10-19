@@ -29,7 +29,7 @@ import (
 // manage grant is for and it rewrites no payload. Only setting or rewriting the command is reserved.
 func TestInventoryCommandSourceAdminOnly(t *testing.T) {
 	t.Parallel()
-	sealer := credential.NewSealer("pass", "salt")
+	sealer := sharedSealer("pass", "salt")
 
 	// An inventory an admin already pointed at a command, so a rename can be told apart from a
 	// rewrite.

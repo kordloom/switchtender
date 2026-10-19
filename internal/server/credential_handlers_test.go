@@ -25,7 +25,7 @@ import (
 // repoints a credential to command and gains code execution on the run host.
 func TestUpdateCredentialCommandSourceAdminOnly(t *testing.T) {
 	t.Parallel()
-	sealer := credential.NewSealer("pass", "salt")
+	sealer := sharedSealer("pass", "salt")
 	newStore := func() credential.Store {
 		store := credential.NewMemStore()
 		sealed, err := sealer.Seal("original")
@@ -71,7 +71,7 @@ func TestUpdateCredentialCommandSourceAdminOnly(t *testing.T) {
 // is rejected on any other kind or an external source, and is never echoed in the response.
 func TestCreateCredentialPassphrase(t *testing.T) {
 	t.Parallel()
-	sealer := credential.NewSealer("pass", "salt")
+	sealer := sharedSealer("pass", "salt")
 	tests := []struct {
 		Name     string
 		Body     string
@@ -138,7 +138,7 @@ func TestListCredentialsNeedsSecret(t *testing.T) {
 	}
 
 	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
-		WithCredentials(store, credential.NewSealer("pass", "salt"))).Handler()
+		WithCredentials(store, sharedSealer("pass", "salt"))).Handler()
 	req := httptest.NewRequest(http.MethodGet, "/v1/credentials", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -173,7 +173,7 @@ func TestListCredentialsNeedsSecret(t *testing.T) {
 
 func TestCreateCredentialVaultID(t *testing.T) {
 	t.Parallel()
-	sealer := credential.NewSealer("pass", "salt")
+	sealer := sharedSealer("pass", "salt")
 	tests := []struct {
 		// Name says what the case proves.
 		Name string
@@ -230,7 +230,7 @@ func TestCreateCredentialVaultID(t *testing.T) {
 // refused on a typed credential, whose type declares its own non-secret fields.
 func TestCreateCredentialSettings(t *testing.T) {
 	t.Parallel()
-	sealer := credential.NewSealer("pass", "salt")
+	sealer := sharedSealer("pass", "salt")
 	tests := []struct {
 		// Name says what the case proves.
 		Name string
@@ -297,7 +297,7 @@ func TestCreateCredentialSettings(t *testing.T) {
 // refused.
 func TestUpdateCredentialSettings(t *testing.T) {
 	t.Parallel()
-	sealer := credential.NewSealer("pass", "salt")
+	sealer := sharedSealer("pass", "salt")
 	tests := []struct {
 		// Name says what the case proves.
 		Name string
@@ -359,7 +359,7 @@ func TestUpdateCredentialSettings(t *testing.T) {
 // become user after the credential is re-sealed as the become kind.
 func TestUpdateCredentialKindChangeClearsSettings(t *testing.T) {
 	t.Parallel()
-	sealer := credential.NewSealer("pass", "salt")
+	sealer := sharedSealer("pass", "salt")
 	store := credential.NewMemStore()
 	sealed, err := sealer.Seal("user=deploy\npassword=pw")
 	if err != nil {
@@ -413,7 +413,7 @@ func sealedVaultCred(t *testing.T, sealer *credential.Sealer, label string) cred
 
 func TestUpdateCredentialVaultID(t *testing.T) {
 	t.Parallel()
-	sealer := credential.NewSealer("pass", "salt")
+	sealer := sharedSealer("pass", "salt")
 
 	tests := []struct {
 		// Name says what the case proves.
@@ -491,7 +491,7 @@ func TestUpdateCredentialVaultID(t *testing.T) {
 
 func TestCreateAndUpdateAgreeOnVaultID(t *testing.T) {
 	t.Parallel()
-	sealer := credential.NewSealer("pass", "salt")
+	sealer := sharedSealer("pass", "salt")
 
 	// A vault_id with surrounding whitespace: create and update must reach the same verdict and,
 	// on acceptance, store the same trimmed label. Divergence is what the review caught.
@@ -533,7 +533,7 @@ func TestCreateAndUpdateAgreeOnVaultID(t *testing.T) {
 // moment its output exists.
 func TestAnEnvSecretIsCheckedWhenItIsSaved(t *testing.T) {
 	t.Parallel()
-	sealer := credential.NewSealer("pass", "salt")
+	sealer := sharedSealer("pass", "salt")
 	tests := []struct {
 		Name     string
 		Method   string
