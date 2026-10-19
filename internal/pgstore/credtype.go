@@ -55,7 +55,7 @@ func (s *credTypeStore) Get(ctx context.Context, id string) (*credential.Credent
 
 // List returns every credential type ordered by id, oldest first.
 func (s *credTypeStore) List(ctx context.Context) ([]*credential.CredentialType, error) {
-	const q = "SELECT " + credTypeColumns + " FROM credential_types ORDER BY created_at, id"
+	const q = "SELECT " + credTypeColumns + " FROM credential_types ORDER BY created_at, id COLLATE \"C\""
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("list credential types: %w", err)

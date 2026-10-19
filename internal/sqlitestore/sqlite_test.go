@@ -505,7 +505,8 @@ func TestStoreMigratesProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open raw db: %v", err)
 	}
-	for _, index := range []string{"idx_runs_actor", "idx_runs_source", "idx_runs_callback_live"} {
+	for _, index := range []string{"idx_runs_actor", "idx_runs_source", "idx_runs_callback_live",
+		"idx_runs_actor_key", "idx_runs_source_key"} {
 		if _, err := raw.Exec("DROP INDEX IF EXISTS " + index); err != nil {
 			t.Fatalf("simulate old schema, drop %s: %v", index, err)
 		}

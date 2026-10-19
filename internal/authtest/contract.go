@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+
 	"github.com/kordloom/switchtender/internal/auth"
 )
 
@@ -19,6 +21,9 @@ func Contract(t *testing.T, newStore func() auth.Store) {
 	t.Run("count", func(t *testing.T) { testCount(t, newStore()) })
 	t.Run("touch never resurrects a revoked token", func(t *testing.T) { testTouch(t, newStore()) })
 	t.Run("issuer round trips", func(t *testing.T) { testIssuer(t, newStore()) })
+	t.Run("list is in time order below the second", func(t *testing.T) {
+		testListTimeOrder(t, newStore())
+	})
 }
 
 // testIssuer verifies who minted a token survives the round trip, both for a token minted over the
@@ -177,5 +182,41 @@ func testTouch(t *testing.T, store auth.Store) {
 	}
 	if _, err := store.FindByHash(ctx, "TOUCHHASH"); !errors.Is(err, auth.ErrNotFound) {
 		t.Error("a revoked token came back to life, so revoking it did not take effect")
+	}
+}
+
+// testListTimeOrder pins that List orders tokens by creation time below the second. Two times in the
+// same second differ only in the fraction, which the stored text trims, so a store that sorted the
+// raw text would put 10:00:00 after 10:00:00.5. The ids sort differently from the times so an id
+// tiebreak cannot pass this by accident.
+func testListTimeOrder(t *testing.T, store auth.Store) {
+	ctx := context.Background()
+	day := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		ID string
+		At time.Duration
+	}{
+		{"tok_e", 500 * time.Millisecond},
+		{"tok_a", time.Second},
+		{"tok_d", 0},
+		{"tok_b", 100 * time.Millisecond},
+		{"tok_c", time.Microsecond},
+	} {
+		id, at := c.ID, day.Add(c.At)
+		if err := store.Save(ctx, &auth.Token{ID: id, Name: id, Hash: id + "h", CreatedAt: at}); err != nil {
+			t.Fatalf("Save(%s) error = %v", id, err)
+		}
+	}
+	list, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	ids := make([]string, 0, len(list))
+	for _, v := range list {
+		ids = append(ids, v.ID)
+	}
+	want := []string{"tok_d", "tok_c", "tok_b", "tok_e", "tok_a"}
+	if diff := cmp.Diff(want, ids); diff != "" {
+		t.Errorf("List() order mismatch (-want +got):\n%s", diff)
 	}
 }

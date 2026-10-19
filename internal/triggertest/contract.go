@@ -23,6 +23,9 @@ func Contract(t *testing.T, newStore func() trigger.Store) {
 	t.Run("review configuration", func(t *testing.T) { testReview(t, newStore()) })
 	t.Run("refusal record", func(t *testing.T) { testRefusal(t, newStore()) })
 	t.Run("unstorable refusal text", func(t *testing.T) { testUnstorableRefusal(t, newStore()) })
+	t.Run("list is in time order below the second", func(t *testing.T) {
+		testListTimeOrder(t, newStore())
+	})
 }
 
 // testRefusal verifies the record of why a delivery started no run: RecordRefusal sets the reason and
@@ -253,5 +256,41 @@ func testReview(t *testing.T, store trigger.Store) {
 	}
 	if push.Review != nil {
 		t.Errorf("Get(push) review = %+v, want nil", push.Review)
+	}
+}
+
+// testListTimeOrder pins that List orders triggers by creation time below the second. Two times in the
+// same second differ only in the fraction, which the stored text trims, so a store that sorted the
+// raw text would put 10:00:00 after 10:00:00.5. The ids sort differently from the times so an id
+// tiebreak cannot pass this by accident.
+func testListTimeOrder(t *testing.T, store trigger.Store) {
+	ctx := context.Background()
+	day := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		ID string
+		At time.Duration
+	}{
+		{"trg_e", 500 * time.Millisecond},
+		{"trg_a", time.Second},
+		{"trg_d", 0},
+		{"trg_b", 100 * time.Millisecond},
+		{"trg_c", time.Microsecond},
+	} {
+		id, at := c.ID, day.Add(c.At)
+		if err := store.Save(ctx, &trigger.Trigger{ID: id, Name: id, TemplateID: "tpl", TokenHash: id + "h", CreatedAt: at}); err != nil {
+			t.Fatalf("Save(%s) error = %v", id, err)
+		}
+	}
+	list, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	ids := make([]string, 0, len(list))
+	for _, v := range list {
+		ids = append(ids, v.ID)
+	}
+	want := []string{"trg_d", "trg_c", "trg_b", "trg_e", "trg_a"}
+	if diff := cmp.Diff(want, ids); diff != "" {
+		t.Errorf("List() order mismatch (-want +got):\n%s", diff)
 	}
 }

@@ -84,7 +84,8 @@ func TestOpenHealsEveryMissingColumn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open old raw: %v", err)
 	}
-	for _, index := range []string{"idx_runs_actor", "idx_runs_source", "idx_runs_pending_claim"} {
+	for _, index := range []string{"idx_runs_actor", "idx_runs_source", "idx_runs_pending_claim",
+		"idx_runs_actor_key", "idx_runs_source_key", "idx_runs_pending_claim_key"} {
 		if _, err := raw.Exec("DROP INDEX IF EXISTS " + index); err != nil {
 			t.Fatalf("drop %s: %v", index, err)
 		}

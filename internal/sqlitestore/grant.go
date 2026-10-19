@@ -50,7 +50,7 @@ func (s *grantStore) Get(ctx context.Context, id string) (*grant.Grant, error) {
 
 // List returns all grants ordered by creation time, oldest first.
 func (s *grantStore) List(ctx context.Context) ([]*grant.Grant, error) {
-	const q = "SELECT " + grantColumns + " FROM grants ORDER BY created_at, id"
+	const q = "SELECT " + grantColumns + " FROM grants ORDER BY rtrim(created_at, 'Z'), id"
 	return s.query(ctx, q)
 }
 
@@ -72,7 +72,7 @@ func (s *grantStore) Delete(ctx context.Context, id string) error {
 
 // ForObject returns every grant on the given object, oldest first.
 func (s *grantStore) ForObject(ctx context.Context, object string) ([]*grant.Grant, error) {
-	const q = "SELECT " + grantColumns + " FROM grants WHERE object=? ORDER BY created_at, id"
+	const q = "SELECT " + grantColumns + " FROM grants WHERE object=? ORDER BY rtrim(created_at, 'Z'), id"
 	return s.query(ctx, q, object)
 }
 

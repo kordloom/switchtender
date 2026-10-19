@@ -75,7 +75,7 @@ func (s *projectStore) Get(ctx context.Context, id string) (*project.Project, er
 
 // List returns all projects ordered by creation time, oldest first.
 func (s *projectStore) List(ctx context.Context) ([]*project.Project, error) {
-	const q = "SELECT " + projectColumns + " FROM projects ORDER BY created_at, id"
+	const q = "SELECT " + projectColumns + " FROM projects ORDER BY rtrim(created_at, 'Z') COLLATE \"C\", id COLLATE \"C\""
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("list projects: %w", err)

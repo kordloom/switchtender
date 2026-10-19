@@ -43,7 +43,7 @@ ON CONFLICT(id) DO UPDATE SET
 
 // List returns all tokens ordered by creation time, oldest first.
 func (s *tokenStore) List(ctx context.Context) ([]*auth.Token, error) {
-	const q = "SELECT " + tokenColumns + " FROM tokens ORDER BY created_at, id"
+	const q = "SELECT " + tokenColumns + " FROM tokens ORDER BY rtrim(created_at, 'Z'), id"
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("list tokens: %w", err)

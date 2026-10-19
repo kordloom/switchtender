@@ -17,21 +17,21 @@ import (
 // point is that neither one caller nor everyone together can grow the table without limit.
 func (s *store) SaveStreamTicket(ctx context.Context, t run.StreamTicket,
 	perActorCap, totalCap int) error {
-	now := sqlutil.FormatTime(time.Now())
+	now := sqlutil.OrderBind(time.Now())
 	if _, err := s.db.ExecContext(ctx,
-		"DELETE FROM stream_tickets WHERE expires_at < ?", now); err != nil {
+		"DELETE FROM stream_tickets WHERE rtrim(expires_at, 'Z') < ?", now); err != nil {
 		return fmt.Errorf("sweep stream tickets: %w", err)
 	}
 	if perActorCap > 0 {
 		if _, err := s.db.ExecContext(ctx, `DELETE FROM stream_tickets WHERE secret_hash IN (
-SELECT secret_hash FROM stream_tickets WHERE actor_key=? ORDER BY expires_at DESC
+SELECT secret_hash FROM stream_tickets WHERE actor_key=? ORDER BY rtrim(expires_at, 'Z') DESC
 LIMIT -1 OFFSET ?)`, t.ActorKey, perActorCap-1); err != nil {
 			return fmt.Errorf("bound caller tickets: %w", err)
 		}
 	}
 	if totalCap > 0 {
 		if _, err := s.db.ExecContext(ctx, `DELETE FROM stream_tickets WHERE secret_hash IN (
-SELECT secret_hash FROM stream_tickets ORDER BY expires_at DESC LIMIT -1 OFFSET ?)`,
+SELECT secret_hash FROM stream_tickets ORDER BY rtrim(expires_at, 'Z') DESC LIMIT -1 OFFSET ?)`,
 			totalCap-1); err != nil {
 			return fmt.Errorf("bound stream tickets: %w", err)
 		}

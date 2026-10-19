@@ -79,21 +79,23 @@ func TestHotQueryPlans(t *testing.T) {
 		Query string
 		// WantIndex is the index the plan must name.
 		WantIndex string
+		// Sorts reports that the plan may sort, for a grouped read no index can hand over in order.
+		Sorts bool
 	}{{ // Test 0: The runs view's page, the read every dashboard load makes.
 		Name: "run list page",
 		Query: "SELECT id FROM runs WHERE parent_id IS NULL " +
-			"ORDER BY created_at DESC, id DESC LIMIT 50",
-		WantIndex: "idx_runs_toplevel_created",
+			"ORDER BY rtrim(created_at, 'Z') DESC, id DESC LIMIT 50",
+		WantIndex: "idx_runs_toplevel_key",
 	}, { // Test 1: The same page filtered by the status chips beside it.
 		Name: "run list page by status",
 		Query: "SELECT id FROM runs WHERE parent_id IS NULL AND status = 'succeeded' " +
-			"ORDER BY created_at DESC, id DESC LIMIT 50",
-		WantIndex: "idx_runs_toplevel_status",
+			"ORDER BY rtrim(created_at, 'Z') DESC, id DESC LIMIT 50",
+		WantIndex: "idx_runs_toplevel_status_key",
 	}, { // Test 2: The oldest-first page, which reads the same index backwards.
 		Name: "run list page oldest first",
 		Query: "SELECT id FROM runs WHERE parent_id IS NULL " +
-			"ORDER BY created_at ASC, id ASC LIMIT 50",
-		WantIndex: "idx_runs_toplevel_created",
+			"ORDER BY rtrim(created_at, 'Z') ASC, id ASC LIMIT 50",
+		WantIndex: "idx_runs_toplevel_key",
 	}, { // Test 3: The status chip counts, answered from an index without reading a run row. The
 		// narrow (status, parent_id) index wins here over the wider top-level one, which is right:
 		// both cover the count and the narrow one reads fewer pages to do it.
@@ -109,6 +111,38 @@ func TestHotQueryPlans(t *testing.T) {
 		Name:      "shards of a parent",
 		Query:     "SELECT id FROM runs WHERE parent_id = 'run-00010'",
 		WantIndex: "idx_runs_child_parent",
+	}, { // Test 6: The page between two times, which must range over the key, not filter every run.
+		Name: "run list page between two times",
+		Query: "SELECT id FROM runs WHERE parent_id IS NULL " +
+			"AND rtrim(created_at, 'Z') >= '2026-01-01T00:01:00' " +
+			"AND rtrim(created_at, 'Z') < '2026-01-01T00:02:00' " +
+			"ORDER BY rtrim(created_at, 'Z') DESC, id DESC LIMIT 50",
+		WantIndex: "idx_runs_toplevel_key (<expr>>? AND <expr><?)",
+	}, { // Test 7: The runs view's search by who started a run.
+		Name: "run list page by actor",
+		Query: "SELECT id FROM runs WHERE parent_id IS NULL AND actor = 'user-1' " +
+			"ORDER BY rtrim(created_at, 'Z') DESC, id DESC LIMIT 50",
+		WantIndex: "idx_runs_actor_key",
+	}, { // Test 8: The runs view's search by what started a run.
+		Name: "run list page by source",
+		Query: "SELECT id FROM runs WHERE parent_id IS NULL AND source = 'webhook' AND source_id = 'x' " +
+			"ORDER BY rtrim(created_at, 'Z') DESC, id DESC LIMIT 50",
+		WantIndex: "idx_runs_source_key",
+	}, { // Test 9: The executor's claim, oldest pending run first within its queue.
+		Name: "claim",
+		Query: "SELECT id FROM runs WHERE status='pending' AND claimed_by='' AND kind='' " +
+			"AND cancel_requested=0 AND queue IN ('default') AND (COALESCE(parent_id,'')='' " +
+			"OR parent_id IN (SELECT id FROM runs WHERE status='running' AND cancel_requested=0)) " +
+			"ORDER BY rtrim(created_at, 'Z'), id LIMIT 1",
+		WantIndex: "idx_runs_pending_claim_key",
+	}, { // Test 10: The workers page, which must range over recent leases and not every lease ever held.
+		Name: "workers seen recently",
+		Query: "SELECT claimed_by, MAX(rtrim(claimed_at, 'Z')) FROM runs WHERE claimed_by != '' " +
+			"AND claimed_at IS NOT NULL AND rtrim(claimed_at, 'Z') >= '2026-01-01T00:01:00' " +
+			"AND parent_id IS NULL GROUP BY claimed_by " +
+			"ORDER BY MAX(rtrim(claimed_at, 'Z')) DESC, claimed_by",
+		WantIndex: "idx_runs_leased_key (<expr>>?)",
+		Sorts:     true,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -120,7 +154,7 @@ func TestHotQueryPlans(t *testing.T) {
 			if !strings.Contains(plan, test.WantIndex) {
 				t.Errorf("%s plan = %q, want it to use %s", test.Name, plan, test.WantIndex)
 			}
-			if strings.Contains(plan, "TEMP B-TREE") {
+			if !test.Sorts && strings.Contains(plan, "TEMP B-TREE") {
 				t.Errorf("%s plan = %q, want no sort: the index must supply the order", test.Name, plan)
 			}
 		})

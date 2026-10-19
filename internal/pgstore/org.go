@@ -43,7 +43,7 @@ func (s *orgStore) Get(ctx context.Context, id string) (*org.Org, error) {
 
 // List returns all organizations ordered by creation time, oldest first.
 func (s *orgStore) List(ctx context.Context) ([]*org.Org, error) {
-	const q = "SELECT id, name, created_at FROM orgs ORDER BY created_at, id"
+	const q = "SELECT id, name, created_at FROM orgs ORDER BY rtrim(created_at, 'Z') COLLATE \"C\", id COLLATE \"C\""
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("list orgs: %w", err)

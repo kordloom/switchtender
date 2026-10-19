@@ -890,6 +890,22 @@ CREATE INDEX IF NOT EXISTS idx_runs_leased ON runs(claimed_at) WHERE claimed_by<
 -- since a database created before those columns cannot be indexed on them.
 CREATE INDEX IF NOT EXISTS idx_runs_actor ON runs(actor, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_source ON runs(source, source_id, created_at DESC, id DESC);
+-- The _key indexes order on the sqlutil.OrderPG key rather than the raw column, because that is what
+-- the queries order and compare by, and PostgreSQL serves an expression only from an index on the
+-- same expression and collation. Without them every run page, search page, and claim sorted every
+-- matching row. The raw-column indexes beside them stay so a release that predates the key keeps
+-- its plans.
+CREATE INDEX IF NOT EXISTS idx_runs_created_key
+	ON runs((rtrim(created_at, 'Z') COLLATE "C") DESC, (id COLLATE "C") DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_actor_key
+	ON runs(actor, (rtrim(created_at, 'Z') COLLATE "C") DESC, (id COLLATE "C") DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_source_key
+	ON runs(source, source_id, (rtrim(created_at, 'Z') COLLATE "C") DESC, (id COLLATE "C") DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_pending_claim_key
+	ON runs(queue, (rtrim(created_at, 'Z') COLLATE "C"), (id COLLATE "C"))
+	WHERE status='pending' AND claimed_by='' AND kind='';
+CREATE INDEX IF NOT EXISTS idx_runs_leased_key
+	ON runs((rtrim(claimed_at, 'Z') COLLATE "C")) WHERE claimed_by<>'';
 -- One row per approval or denial a person made, and per correction appended to one. The reason is
 -- the masked text and the random value its chain commitment hides it under, stored together and
 -- removed together by a redaction, which keeps the commitment and records why in the redaction

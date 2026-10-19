@@ -52,7 +52,7 @@ ON CONFLICT(id) DO UPDATE SET
 
 // List returns every policy, oldest first.
 func (s *policyStore) List(ctx context.Context) ([]*policy.Policy, error) {
-	const q = "SELECT " + policyColumns + " FROM policies ORDER BY created_at, id"
+	const q = "SELECT " + policyColumns + " FROM policies ORDER BY rtrim(created_at, 'Z'), id"
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("list policies: %w", err)

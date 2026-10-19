@@ -627,18 +627,18 @@ SELECT claimed_by,
 	SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS active,
 	SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS completed,
 	SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
-	MAX(claimed_at) AS last_seen
+	MAX(rtrim(claimed_at, 'Z')) || 'Z' AS last_seen
 FROM runs
 -- Children are excluded. A worker really does execute shard and step runs, so counting them is
 -- truthful in the abstract, but the count is a link: clicking it opens the runs list, which shows
 -- top level runs only. Counting what the link cannot show made the Workers page disagree with
 -- itself, 20 against a list of 12. The shards are still reachable through their parent.
-WHERE claimed_by != '' AND claimed_at IS NOT NULL AND claimed_at >= ?
+WHERE claimed_by != '' AND claimed_at IS NOT NULL AND rtrim(claimed_at, 'Z') >= ?
 	AND parent_id IS NULL
 GROUP BY claimed_by
-ORDER BY last_seen DESC, claimed_by`
+ORDER BY MAX(rtrim(claimed_at, 'Z')) DESC, claimed_by`
 
-	rows, err := s.db.QueryContext(ctx, q, sqlutil.FormatTime(time.Now().Add(-run.WorkerWindow)))
+	rows, err := s.db.QueryContext(ctx, q, sqlutil.OrderBind(time.Now().Add(-run.WorkerWindow)))
 	if err != nil {
 		return nil, fmt.Errorf("list workers: %w", err)
 	}

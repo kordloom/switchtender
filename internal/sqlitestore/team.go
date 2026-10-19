@@ -43,7 +43,7 @@ func (s *teamStore) Get(ctx context.Context, id string) (*team.Team, error) {
 
 // List returns all teams ordered by creation time, oldest first.
 func (s *teamStore) List(ctx context.Context) ([]*team.Team, error) {
-	const q = "SELECT id, name, created_at FROM teams ORDER BY created_at, id"
+	const q = "SELECT id, name, created_at FROM teams ORDER BY rtrim(created_at, 'Z'), id"
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("list teams: %w", err)

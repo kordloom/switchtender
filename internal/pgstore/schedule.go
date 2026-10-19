@@ -73,7 +73,7 @@ func (s *scheduleStore) Get(ctx context.Context, id string) (*schedule.Schedule,
 
 // List returns all schedules ordered by creation time, oldest first.
 func (s *scheduleStore) List(ctx context.Context) ([]*schedule.Schedule, error) {
-	const q = "SELECT " + scheduleColumns + " FROM schedules ORDER BY created_at, id"
+	const q = "SELECT " + scheduleColumns + " FROM schedules ORDER BY rtrim(created_at, 'Z') COLLATE \"C\", id COLLATE \"C\""
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("list schedules: %w", err)

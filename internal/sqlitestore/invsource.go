@@ -79,7 +79,7 @@ func (s *invSourceStore) Get(ctx context.Context, id string) (*invsource.Source,
 
 // List returns all sources ordered by creation time, oldest first.
 func (s *invSourceStore) List(ctx context.Context) ([]*invsource.Source, error) {
-	const q = "SELECT " + invSourceColumns + " FROM inventory_sources ORDER BY created_at, id"
+	const q = "SELECT " + invSourceColumns + " FROM inventory_sources ORDER BY rtrim(created_at, 'Z'), id"
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("list inventory sources: %w", err)

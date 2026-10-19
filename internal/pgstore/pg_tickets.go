@@ -18,19 +18,19 @@ import (
 func (s *store) SaveStreamTicket(ctx context.Context, t run.StreamTicket,
 	perActorCap, totalCap int) error {
 	if _, err := s.db.ExecContext(ctx,
-		"DELETE FROM stream_tickets WHERE expires_at < "+pgNowText); err != nil {
+		"DELETE FROM stream_tickets WHERE "+sqlutil.OrderPG("expires_at")+" < "+pgNowKey); err != nil {
 		return fmt.Errorf("sweep stream tickets: %w", err)
 	}
 	if perActorCap > 0 {
 		if _, err := s.db.ExecContext(ctx, `DELETE FROM stream_tickets WHERE secret_hash IN (
-SELECT secret_hash FROM stream_tickets WHERE actor_key=$1 ORDER BY expires_at DESC
+SELECT secret_hash FROM stream_tickets WHERE actor_key=$1 ORDER BY rtrim(expires_at, 'Z') COLLATE "C" DESC
 OFFSET $2)`, t.ActorKey, perActorCap-1); err != nil {
 			return fmt.Errorf("bound caller tickets: %w", err)
 		}
 	}
 	if totalCap > 0 {
 		if _, err := s.db.ExecContext(ctx, `DELETE FROM stream_tickets WHERE secret_hash IN (
-SELECT secret_hash FROM stream_tickets ORDER BY expires_at DESC OFFSET $1)`,
+SELECT secret_hash FROM stream_tickets ORDER BY rtrim(expires_at, 'Z') COLLATE "C" DESC OFFSET $1)`,
 			totalCap-1); err != nil {
 			return fmt.Errorf("bound stream tickets: %w", err)
 		}
