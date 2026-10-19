@@ -85,6 +85,17 @@ func applyComposition(ctx context.Context, store inventory.Store, req createInve
 	return "", 0
 }
 
+// refuseOverBound answers 400 and reports true when content names more hosts than
+// inventory.MaxHosts. Every run against such an inventory is refused, so it is refused where it is
+// saved instead, with the bound named.
+func refuseOverBound(w http.ResponseWriter, log *zap.Logger, content string) bool {
+	if err := inventory.CheckHostBound(content); err != nil {
+		respondError(w, log, http.StatusBadRequest, err.Error())
+		return true
+	}
+	return false
+}
+
 // denyInputs refuses a constructed inventory naming an input the caller may not use, reporting
 // whether it answered the request. Naming an inventory as an input reaches its hosts at every
 // launch, the same reach a run naming it directly has, so it asks the same question.
@@ -197,6 +208,9 @@ func createInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 		if authz.denyForeignOrg(w, r, log, orgForCreate(req.OrgID)) {
 			return
 		}
+		if source == credential.SourceLocal && !req.composed() && refuseOverBound(w, log, req.Content) {
+			return
+		}
 		i := &inventory.Inventory{
 			ID: inventory.NewID(), Name: req.Name, Content: req.Content,
 			CredentialIDs: req.CredentialIDs, Queue: req.Queue, OrgID: orgForCreate(req.OrgID), CreatedAt: time.Now(),
@@ -291,6 +305,9 @@ func updateInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 				return
 			}
 			content = restored
+			if refuseOverBound(w, log, content) {
+				return
+			}
 		}
 		inv := &inventory.Inventory{
 			ID: id, Name: req.Name, Content: content, CredentialIDs: req.CredentialIDs,
@@ -575,7 +592,8 @@ func respondPreview(w http.ResponseWriter, r *http.Request, store inventory.Stor
 	switch {
 	case errors.Is(err, inventory.ErrHostFilter), errors.Is(err, inventory.ErrSourceVars),
 		errors.Is(err, inventory.ErrComposition), errors.Is(err, inventory.ErrResolve),
-		errors.Is(err, inventory.ErrNeedsAnsible), errors.Is(err, inventory.ErrInvalidInventory):
+		errors.Is(err, inventory.ErrNeedsAnsible), errors.Is(err, inventory.ErrInvalidInventory),
+		errors.Is(err, inventory.ErrTooManyHosts):
 		respondError(w, log, http.StatusUnprocessableEntity, err.Error())
 		return
 	case err != nil:

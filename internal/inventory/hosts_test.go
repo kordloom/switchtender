@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -102,6 +103,43 @@ func TestHostsPort(t *testing.T) {
 			}
 			if diff := cmp.Diff(test.WantVars, got[0].Vars, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("vars mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// TestCheckHostBound pins the save-time bound: content the native engine reads as naming more hosts
+// than MaxHosts is refused with the bound named, content at the bound is accepted, and content whose
+// hosts are not known until Ansible resolves them, or that Ansible would not read, is not refused.
+func TestCheckHostBound(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Content string
+		Want    error
+	}{{ // Test 0: A small static inventory.
+		Content: "[web]\nweb01\nweb02\n",
+	}, { // Test 1: A range naming exactly the bound.
+		Content: "[web]\nh[1:100000]\n",
+	}, { // Test 2: A range naming one host past the bound.
+		Content: "[web]\nh[0:100000]\n", Want: ErrTooManyHosts,
+	}, { // Test 3: Hosts at the bound plus one more on its own line.
+		Content: "[web]\nh[1:100000]\n[db]\ndb01\n", Want: ErrTooManyHosts,
+	}, { // Test 4: The YAML form past the bound.
+		Content: "all:\n  hosts:\n    h[0:100000]:\n", Want: ErrTooManyHosts,
+	}, { // Test 5: A plugin configuration names no host until Ansible resolves it.
+		Content: "plugin: amazon.aws.aws_ec2\nregions:\n  - us-east-1\n",
+	}, { // Test 6: Content Ansible would not read is not this check's to refuse.
+		Content: `{"all":{"children":["web"]},"_meta":{"hostvars":{}}}`,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			err := CheckHostBound(test.Content)
+			if !errors.Is(err, test.Want) {
+				t.Fatalf("CheckHostBound() error = %v, want %v", err, test.Want)
+			}
+			if err != nil && !strings.Contains(err.Error(), "100000") {
+				t.Errorf("CheckHostBound() error = %q, want it to name the bound", err)
 			}
 		})
 	}

@@ -274,6 +274,14 @@ engine that resolved it, and the ansible-core version when Ansible did.
     POST /v1/inventories/preview          {"kind": "smart", "host_filter": "groups__name=web"}
     POST /v1/inventories/{id}/preview
 
+## How many hosts one may name
+
+A static inventory names at most 100,000 hosts, counting every host a range such as `web[0000:9999]`
+expands to. Creating or replacing one past that is refused with the limit named, and so is applying
+an import that would bring one in, before anything from the export is stored. Content fetched at
+launch from a command or a secret store is counted when a run launches, and a launch past the limit
+is refused with the same reason.
+
 ## Creating one through the API
 
     POST /v1/inventories

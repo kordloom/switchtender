@@ -214,7 +214,7 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 			errors.Is(err, inventory.ErrResolve), errors.Is(err, dispatch.ErrInventorySnapshot),
 			errors.Is(err, inventory.ErrNeedsAnsible), errors.Is(err, inventory.ErrInvalidInventory),
 			errors.Is(err, inventory.ErrComposition), errors.Is(err, inventory.ErrHostFilter),
-			errors.Is(err, inventory.ErrSourceVars),
+			errors.Is(err, inventory.ErrSourceVars), errors.Is(err, inventory.ErrTooManyHosts),
 			errors.Is(err, dispatch.ErrNoPlaybook), errors.Is(err, dispatch.ErrNoCommand),
 			errors.Is(err, dispatch.ErrUnknownTool), errors.Is(err, dispatch.ErrToolCredential):
 			respondError(w, log, http.StatusBadRequest, err.Error())
@@ -703,7 +703,8 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 			respondError(w, log, http.StatusConflict, err.Error())
 			return
 		}
-		if errors.Is(err, dispatch.ErrInventorySnapshot) || errors.Is(err, inventory.ErrInvalidInventory) {
+		if errors.Is(err, dispatch.ErrInventorySnapshot) || errors.Is(err, inventory.ErrInvalidInventory) ||
+			errors.Is(err, inventory.ErrTooManyHosts) {
 			respondError(w, log, http.StatusConflict, err.Error())
 			return
 		}

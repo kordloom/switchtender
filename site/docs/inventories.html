@@ -355,6 +355,12 @@ engine that resolved it, and the ansible-core version when Ansible did.</p>
 <pre><code>POST /v1/inventories/preview          {&quot;kind&quot;: &quot;smart&quot;, &quot;host_filter&quot;: &quot;groups__name=web&quot;}
 POST /v1/inventories/{id}/preview
 </code></pre>
+<h2 id="how-many-hosts-one-may-name">How many hosts one may name</h2>
+<p>A static inventory names at most 100,000 hosts, counting every host a range such as <code>web[0000:9999]</code>
+expands to. Creating or replacing one past that is refused with the limit named, and so is applying
+an import that would bring one in, before anything from the export is stored. Content fetched at
+launch from a command or a secret store is counted when a run launches, and a launch past the limit
+is refused with the same reason.</p>
 <h2 id="creating-one-through-the-api">Creating one through the API</h2>
 <pre><code>POST /v1/inventories
 {&quot;name&quot;: &quot;web everywhere&quot;, &quot;kind&quot;: &quot;smart&quot;, &quot;host_filter&quot;: &quot;groups__name=web&quot;}
