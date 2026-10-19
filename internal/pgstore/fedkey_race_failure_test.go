@@ -177,6 +177,7 @@ func fedRaceForgeVerifies(t *testing.T, iss *federation.Issuer, priv *rsa.Privat
 // half back in the table, the key is published again for two days, and a token forged with the
 // leaked key verifies against the key set the install serves.
 func TestFederationEmergencyRotationHoldsAgainstARacingReplicaOnPostgres(t *testing.T) {
+	t.Parallel()
 	shared := os.Getenv("SWITCHTENDER_TEST_POSTGRES_DSN")
 	if shared == "" {
 		skipOrFail(t, "SWITCHTENDER_TEST_POSTGRES_DSN not set")

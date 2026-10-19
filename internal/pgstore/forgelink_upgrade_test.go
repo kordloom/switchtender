@@ -18,6 +18,7 @@ import (
 // both: a decision made from a comment keeps its comment, and a link can be made and found. It runs
 // against a database of its own, because it damages the schema.
 func TestUpgradeAddsCommentDecisionsAndForgeLinks(t *testing.T) {
+	t.Parallel()
 	shared := os.Getenv("SWITCHTENDER_TEST_POSTGRES_DSN")
 	if shared == "" {
 		skipOrFail(t, "SWITCHTENDER_TEST_POSTGRES_DSN not set")

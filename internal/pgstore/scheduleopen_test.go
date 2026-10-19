@@ -22,6 +22,7 @@ import (
 // onto every such row, and leaves alone a schedule that names its zone in any of the three places
 // one can.
 func TestOpenPinsTheZoneOfAScheduleThatNamesNone(t *testing.T) {
+	t.Parallel()
 	shared := os.Getenv("SWITCHTENDER_TEST_POSTGRES_DSN")
 	if shared == "" {
 		skipOrFail(t, "SWITCHTENDER_TEST_POSTGRES_DSN not set")
