@@ -110,6 +110,9 @@ type logBatch struct {
 	doneAt time.Time
 	// fails counts consecutive failed posts, which sets how long nextRetry waits.
 	fails int
+	// dropped counts the bytes capBuffer removed, which the control node will never receive, so the
+	// run's outcome can say its log is short by that much.
+	dropped int64
 }
 
 // capBuffer holds the batch to logBatchLimit by dropping the oldest output, so what survives a
@@ -128,6 +131,7 @@ func (b *logBatch) capBuffer() {
 	kept := make([]byte, logBatchLimit)
 	copy(kept, b.buf[excess:])
 	b.buf = kept
+	b.dropped += int64(excess)
 }
 
 // compile-time proof that httpTransport is a Transport.
@@ -392,8 +396,31 @@ const terminalFlushInterval = 500 * time.Millisecond
 
 // flushTailBeforeClosing retries the run's buffered output until it lands or the window closes. When it
 // cannot be delivered, the run is marked with a warning saying so, because the outcome the control node
-// commits will digest a log missing its end and the record must not read as complete.
+// commits will digest a log missing its end and the record must not read as complete. The run's output
+// was settled before its outcome was decided, so what is still held here is what was appended after
+// that, such as the note a plan gate writes beneath the plan.
 func (t *httpTransport) flushTailBeforeClosing(ctx context.Context, r *run.Run) error {
+	err := t.flushWithinWindow(ctx, r.ID)
+	if err == nil {
+		return nil
+	}
+	// The bytes are still buffered and the record is about to close over a log without them. Saying so
+	// on the run is the difference between evidence that is incomplete and evidence that lies. A
+	// warning already there is kept: the run can be degraded more than once.
+	warning := "the end of this run's output could not be delivered to the control node, so the " +
+		"stored log is incomplete and the digest recorded for it covers only what arrived: " +
+		err.Error()
+	if r.Warning == "" {
+		r.Warning = warning
+	} else {
+		r.Warning += "; " + warning
+	}
+	return err
+}
+
+// flushWithinWindow retries a run's buffered output every terminalFlushInterval until it lands or
+// terminalFlushWindow passes, and returns the last post's error when it did not.
+func (t *httpTransport) flushWithinWindow(ctx context.Context, id string) error {
 	deadline := time.Now().Add(terminalFlushWindow)
 	var err error
 	for time.Now().Before(deadline) {
@@ -402,18 +429,33 @@ func (t *httpTransport) flushTailBeforeClosing(ctx context.Context, r *run.Run) 
 			return ctx.Err()
 		case <-time.After(terminalFlushInterval):
 		}
-		if err = t.flushLog(ctx, r.ID); err == nil {
+		if err = t.flushLog(ctx, id); err == nil {
 			return nil
 		}
 	}
-	// The bytes are still buffered and the record is about to close over a log without them. Saying so
-	// on the run is the difference between evidence that is incomplete and evidence that lies.
-	if r.Warning == "" {
-		r.Warning = "the end of this run's output could not be delivered to the control node, so the " +
-			"stored log is incomplete and the digest recorded for it covers only what arrived: " +
-			err.Error()
-	}
 	return err
+}
+
+// SettleLog delivers the output still held for a run and reports the bytes of its output the control
+// node did not keep: what the cap dropped while posts were failing, and what is still undelivered
+// once the terminal flush window closes. The undelivered part is abandoned, so the count is final and
+// a later flush cannot deliver bytes the run's record says were lost. It is called once the run's
+// process can write no more and before its outcome is decided, which is what lets the dispatcher
+// refuse to record a success over a log the control node never received: every append answered the
+// sink before it landed, so until now nothing on the worker knew what was missing.
+func (t *httpTransport) SettleLog(ctx context.Context, id string) int64 {
+	if err := t.flushLog(ctx, id); err != nil {
+		_ = t.flushWithinWindow(ctx, id)
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	b := t.batches[id]
+	if b == nil {
+		return 0
+	}
+	lost := b.dropped + int64(len(b.buf))
+	b.buf = nil
+	return lost
 }
 
 // AppendLog buffers captured output and posts it once it reaches logBatchBytes or has waited

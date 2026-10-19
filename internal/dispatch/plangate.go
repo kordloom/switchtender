@@ -70,15 +70,19 @@ func (d *Dispatcher) planGatePolicies(ctx context.Context, r *run.Run) ([]*polic
 // applying something nobody weighed or approved.
 //
 // The proposed apply carries r's id in ProposedFrom so it never re-gates. This run finalizes as
-// succeeded because it ran a plan; a plan that cannot run, or saved no plan file, finalizes as failed
-// or canceled and proposes nothing.
+// succeeded because it ran a plan; a plan that cannot run, saved no plan file, or whose output the
+// store did not keep in full, finalizes as failed or canceled and proposes nothing. An approver weighs
+// the plan's output, so an apply is never proposed from output nobody can read whole.
 func (d *Dispatcher) executePlanGate(ctx context.Context, r *run.Run, policies []*policy.Policy) run.Status {
 	return d.streamSpec(ctx, r, true, nil,
-		func(res roundhouse.Result, runErr error, mask *masker, _ *run.SummaryFold) run.Status {
+		func(res roundhouse.Result, runErr error, mask *masker, _ *run.SummaryFold, lost int64) run.Status {
 			// The plan file and its rendering hold the plan's values in the clear, so they are dropped
 			// here whatever happens: the sealed copy on the proposed apply is the only one kept.
 			defer clear(res.PlanFile)
 			defer clear(res.PlanJSON)
+			if runErr != nil || res.ExitCode != 0 || len(res.PlanFile) == 0 {
+				noteLostOutput(r, lost)
+			}
 			switch {
 			case runErr != nil && ctx.Err() != nil:
 				d.finalize(r, run.StatusCanceled, nil, "")
@@ -96,6 +100,9 @@ func (d *Dispatcher) executePlanGate(ctx context.Context, r *run.Run, policies [
 				// nothing an approver could release.
 				d.finalize(r, run.StatusFailed, nil, "the plan saved no plan file, so there is no "+
 					"plan for an apply to carry out")
+				return run.StatusFailed
+			case lost > 0:
+				d.finalize(r, run.StatusFailed, &res.ExitCode, logIncomplete(lost))
 				return run.StatusFailed
 			}
 			// A rendering that would not read, or was too large to hold, was never weighed, so it is
@@ -185,6 +192,7 @@ func (d *Dispatcher) proposeApply(
 		effect, proposal.ID, disposition)
 	if err := d.store.AppendLog(ctx, r.ID, []byte(note)); err != nil {
 		d.log.Error("dispatch: plan gate note: "+err.Error(), zap.String("run_id", r.ID))
+		addWarning(r, "the note naming proposed apply "+proposal.ID+" could not be stored in this log")
 	}
 	code := 0
 	d.finalize(r, run.StatusSucceeded, &code, "")

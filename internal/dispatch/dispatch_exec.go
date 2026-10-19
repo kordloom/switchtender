@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"sync"
@@ -16,6 +17,7 @@ import (
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/runfiles"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // Close stops accepting new work, cancels in-flight runs, and waits for workers to drain. The
@@ -132,7 +134,7 @@ func (d *Dispatcher) executeRun(ctx context.Context, r *run.Run) run.Status {
 		tee = stale
 	}
 	return d.streamSpec(ctx, r, r.DryRun, tee,
-		func(res roundhouse.Result, runErr error, mask *masker, fold *run.SummaryFold) run.Status {
+		func(res roundhouse.Result, runErr error, mask *masker, fold *run.SummaryFold, lost int64) run.Status {
 			// A drift check's plan file and its rendering hold the plan's values in the clear, so they
 			// are dropped here: the sealed copy kept for a reconcile is the only one left.
 			defer clear(res.PlanFile)
@@ -145,10 +147,11 @@ func (d *Dispatcher) executeRun(ctx context.Context, r *run.Run) run.Status {
 			d.recordPlanCheck(r, res, runErr)
 			d.keepDriftPlan(r, res, runErr, mask)
 			if stale.refused(res, runErr) {
+				noteLostOutput(r, lost)
 				d.finalize(r, run.StatusFailed, &res.ExitCode, staleRefusal(r))
 				return run.StatusFailed
 			}
-			return d.outcome(ctx, r, res, runErr, mask, fold)
+			return d.outcome(ctx, r, res, runErr, mask, fold, lost)
 		})
 }
 
@@ -161,9 +164,10 @@ func (d *Dispatcher) executeRun(ctx context.Context, r *run.Run) run.Status {
 // returns finish's status on success or StatusFailed on a setup failure.
 //
 // finish also receives the summary fold the tailer filled from the run's events. The tailer has
-// stopped by the time finish is called, so the fold is complete and safe to read.
+// stopped by the time finish is called, so the fold is complete and safe to read. lost is how many
+// bytes of output the store did not confirm it kept, and finish must not record a success over it.
 func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, tee io.Writer,
-	finish func(res roundhouse.Result, runErr error, mask *masker, fold *run.SummaryFold) run.Status,
+	finish func(res roundhouse.Result, runErr error, mask *masker, fold *run.SummaryFold, lost int64) run.Status,
 ) run.Status {
 	// The move from pending to running is the store's fenced transition, never a whole-row save.
 	// A claimant that stalled past its lease wakes up holding a run the janitor requeued and
@@ -464,6 +468,15 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	// before either half is emitted. The process can write no more, so the withheld tail is released
 	// now, while the run is still live: an append to a finalized run is fenced and would be dropped.
 	logs.flush()
+	// A store that answers an append before it lands, which is what a relay client does, is asked now
+	// to deliver what it still holds and say what it could not, so the outcome below is decided over
+	// the log the control node actually has. The sink's own count covers a store that answered with
+	// its failure. Context.Background, as for the appends themselves: a canceled run's output is still
+	// its evidence, and the settle is bounded by the transport's own window.
+	lost := logs.lostBytes()
+	if settler, ok := d.store.(logSettler); ok {
+		lost += settler.SettleLog(context.Background(), r.ID)
+	}
 
 	close(stop)
 	<-tailed
@@ -472,7 +485,7 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	d.collectFactCache(r, facts, spec.Inventory, fold)
 	staged.removeAll()
 
-	status := finish(res, runErr, mask, fold)
+	status := finish(res, runErr, mask, fold, lost)
 	d.publisher.CloseRun(r.ID)
 	return status
 }
@@ -621,10 +634,15 @@ func addWarning(r *run.Run, warning string) {
 //
 // A clean exit is not on its own a success. An Ansible run whose recap named no host touched
 // nothing, and fold carries that answer, so the zero-host check sits ahead of the clean-exit case.
+// Nor is a clean exit whose output the store did not keep in full, since the record can no longer
+// show what the run did. lost is that byte count, and a run that ends otherwise says it in a warning.
 func (d *Dispatcher) outcome(
 	ctx context.Context, r *run.Run, res roundhouse.Result, err error, mask *masker,
-	fold *run.SummaryFold,
+	fold *run.SummaryFold, lost int64,
 ) run.Status {
+	if err != nil || res.ExitCode != 0 || noHostFailure(r, res, err, fold) {
+		noteLostOutput(r, lost)
+	}
 	switch {
 	case err != nil && errors.Is(context.Cause(ctx), errRunTimeout):
 		d.finalize(r, run.StatusFailed, nil, "run canceled: exceeded its timeout")
@@ -652,6 +670,11 @@ func (d *Dispatcher) outcome(
 		// reported and why it was not believed.
 		d.finalize(r, run.StatusFailed, &res.ExitCode, errNoHostTouched)
 		return run.StatusFailed
+	case lost > 0 && res.ExitCode == 0:
+		// The tool's clean exit is kept beside the failure, as for the zero-host case, so the record
+		// shows both what the tool reported and why it was not believed.
+		d.finalize(r, run.StatusFailed, &res.ExitCode, logIncomplete(lost))
+		return run.StatusFailed
 	case res.ExitCode == 0:
 		d.finalize(r, run.StatusSucceeded, &res.ExitCode, "")
 		return run.StatusSucceeded
@@ -673,6 +696,32 @@ func (d *Dispatcher) outcome(
 const errNoHostTouched = "no host was touched: the playbook recap named no host, so nothing ran. " +
 	"The inventory may be empty or missing, the play's host pattern may match none of it, or a " +
 	"tag filter may have left no task."
+
+// logSettler is a store that holds a run's output before it reaches where it is kept. A relay client
+// buffers appends and answers them before they land, so what it could not deliver is known only once
+// the run has stopped writing and the client has been asked to deliver the rest.
+type logSettler interface {
+	// SettleLog delivers what is still held for the run's log and reports the bytes of it that were
+	// not kept.
+	SettleLog(ctx context.Context, id string) int64
+}
+
+// logIncomplete is the failure recorded on a run that would have succeeded but whose output the store
+// did not keep in full. Like errNoHostTouched it reaches the signed outcome and stays under the
+// 200-character cut notifications apply.
+func logIncomplete(lost int64) string {
+	return fmt.Sprintf("the run's output was not stored in full: %d %s could not be saved, so its log "+
+		"cannot show everything the run did", lost, util.Plural(int(lost), "byte", "bytes"))
+}
+
+// noteLostOutput warns on a run that ends for its own reason that its log is incomplete, keeping the
+// status that reason earned. It does nothing when no output was lost.
+func noteLostOutput(r *run.Run, lost int64) {
+	if lost > 0 {
+		addWarning(r, fmt.Sprintf("%d %s of output could not be stored, so this run's log is incomplete",
+			lost, util.Plural(int(lost), "byte", "bytes")))
+	}
+}
 
 // noHostFailure reports whether this result becomes the zero-host failure: the tool finished on its
 // own, exited clean, and its recap named no host. It is the single condition under which a run's

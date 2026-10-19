@@ -52,6 +52,12 @@ type Transport interface {
 	Save(ctx context.Context, r *run.Run) error
 	// AppendLog streams captured output to the control node.
 	AppendLog(ctx context.Context, id string, p []byte) error
+	// SettleLog delivers whatever output the transport still holds for a run, once the run can write
+	// no more, and reports the bytes of its output the control node did not keep. A transport that
+	// answers an append before it lands is the only one with anything to report, and the dispatcher
+	// reads the answer before it decides the run's outcome, so a run is never recorded succeeded over
+	// a log the control node never received.
+	SettleLog(ctx context.Context, id string) int64
 	// AppendEvents streams structured events to the control node.
 	AppendEvents(ctx context.Context, id string, events []event.Event) error
 	// ProposeApply asks the control node to create the apply the named plan run gated, reporting what
@@ -136,6 +142,12 @@ func (l loopback) Save(ctx context.Context, r *run.Run) error {
 // AppendLog delegates to the backing store.
 func (l loopback) AppendLog(ctx context.Context, id string, p []byte) error {
 	return l.store.AppendLog(ctx, id, p)
+}
+
+// SettleLog reports nothing lost: a loopback append answers with the store's own result, so the
+// dispatcher already counted whatever the store refused.
+func (l loopback) SettleLog(context.Context, string) int64 {
+	return 0
 }
 
 // AppendEvents delegates to the backing store.

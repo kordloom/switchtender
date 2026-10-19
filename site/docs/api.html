@@ -1015,8 +1015,9 @@ and finalized as failed. A launch cannot raise the cap. The template's value is 
 caller wants. <code>inventory</code> is a path to an inventory file already on the server, for a run whose
 inventory is managed outside this product.</p>
 <p>Sending a stored inventory's name in <code>inventory</code> is read as a path. Ansible exits zero when a
-host pattern matches nothing, so a run aimed at a path that does not exist is recorded as
-succeeded having touched no host at all.</p>
+host pattern matches nothing, so a run aimed at a path that does not exist touches no host at all.
+Its recap names no host, and the run is recorded as failed with the reason on its <code>error</code>, since a
+clean exit over nothing is not a success.</p>
 <h2 id="ansible-run-controls">Ansible run controls</h2>
 <p>A run submission and a template both accept the Ansible controls that used to require a hand-built
 command. They ride onto a run the same way from the API, a schedule, or a webhook trigger, and a
