@@ -491,13 +491,13 @@ function scheduleLastCell(s) {
 async function loadSchedules() {
 	try {
 		const tplByID = await fillTemplateSelect(null);
-		const data = await getJSON("/schedules");
-		const schedules = data.schedules || [];
+		const { rows: schedules, total } = await getAllPages("/schedules", "schedules");
 		if (schedules.length === 0) {
 			showEmpty("No schedules yet. Add one to fire a template on a cadence.");
 			return;
 		}
 		const tbody = document.getElementById("schedules");
+		noteListTotal(tbody.closest("table"), schedules.length, total);
 		for (const s of schedules) {
 			const tr = document.createElement("tr");
 			tr.appendChild(scheduleNameCell(s));
@@ -589,8 +589,8 @@ async function loadSchedules() {
 async function fillTemplateSelect(select) {
 	const byID = {};
 	try {
-		const data = await getJSON("/templates");
-		for (const t of data.templates || []) {
+		const { rows } = await getAllPages("/templates", "templates");
+		for (const t of rows) {
 			byID[t.id] = t.name;
 			if (select) {
 				const opt = document.createElement("option");

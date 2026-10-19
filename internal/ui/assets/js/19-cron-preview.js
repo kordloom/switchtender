@@ -324,7 +324,7 @@ async function scheduleInventoryPreview(templateID) {
 	out.className = "field-hint";
 	if (!templateID) return;
 	try {
-		const tpls = await getJSON("/templates");
+		const tpls = await getJSON("/templates?id=" + encodeURIComponent(templateID));
 		const tpl = (tpls.templates || []).find((t) => t.id === templateID);
 		if (!tpl || !tpl.inventory_id) return;
 		const invs = await getJSON("/inventories");

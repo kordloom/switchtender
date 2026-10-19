@@ -301,13 +301,13 @@ function wireTemplateForm() {
 // loadTemplates populates the template table with launch and delete actions.
 async function loadTemplates() {
 	try {
-		const data = await getJSON("/templates");
-		const templates = data.templates || [];
+		const { rows: templates, total } = await getAllPages("/templates", "templates");
 		if (templates.length === 0) {
 			showEmpty("No templates yet.");
 			return;
 		}
 		const tbody = document.getElementById("templates");
+		noteListTotal(tbody.closest("table"), templates.length, total);
 		for (const t of templates) {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(t.name));

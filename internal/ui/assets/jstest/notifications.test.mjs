@@ -180,7 +180,7 @@ function mountTargets(targets, options) {
 			writes.push({ method: req.method, path: req.path, body: req.body ? JSON.parse(req.body) : null });
 			return reply({ id: "ntf_new" });
 		}],
-		[/^\/v1\/notifications$/, reply({ notifications: targets, count: targets.length,
+		[/^\/v1\/notifications(\?|$)/, reply({ notifications: targets, count: targets.length,
 			total: targets.length, sealing: opts.sealing !== false })],
 	].concat(opts.routes || []);
 	const page = loadPage("notifications", { parts: ALL_PARTS, routes, quiet: true });
@@ -295,8 +295,8 @@ test("the detail panel lists attachments and deliveries, a failed delivery stand
 				{ notification_id: "ntf_chat", run_id: "run_b", seq: 1, event: "started", status: "failed",
 					attempts: 5, last_error: "the target answered 503", created_at: "2026-09-30T12:00:00Z" },
 			], count: 2 })],
-			[/^\/v1\/templates$/, reply({ templates: [{ id: "tpl_deploy", name: "deploy" }] })],
-			[/^\/v1\/schedules$/, reply({ schedules: [] })],
+			[/^\/v1\/templates(\?|$)/, reply({ templates: [{ id: "tpl_deploy", name: "deploy" }] })],
+			[/^\/v1\/schedules(\?|$)/, reply({ schedules: [] })],
 		],
 	});
 	page.app.wireNotifyDetail();

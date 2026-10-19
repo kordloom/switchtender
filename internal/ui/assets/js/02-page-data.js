@@ -239,6 +239,8 @@ function mountExportsForTable(page, table, index) {
 		if (page === "runs" && index === 0 && typeof runsExportPrepare === "function") {
 			return (await runsExportPrepare()) || "";
 		}
+		// A list longer than the client reads names the file for what it holds.
+		if (table.dataset.listTotal) return "-first-" + countLoaded(table.tBodies[0]);
 		return "";
 	};
 	const make = (label, tip, fn) => {
@@ -569,6 +571,15 @@ function mountFacet(wrap, table, tbody, name, index, onChange) {
 }
 
 // mountTablePager caps how many rows a list shows at once, with a footer for paging: a count, a
+// countLoaded counts the rows the table holds, filtered or not, which is how many the client read.
+function countLoaded(tbody) {
+	let n = 0;
+	for (const row of tbody.rows) {
+		if (!row.classList.contains("skeleton-row")) n++;
+	}
+	return n;
+}
+
 // countMatched counts the rows neither filter has hidden, which is what a page size applies to.
 function countMatched(tbody) {
 	let n = 0;
@@ -642,8 +653,14 @@ function mountTablePager() {
 			applyRowVisibility(row);
 			if (!row.hidden) shown++;
 		}
-		foot.hidden = matched <= 25 && size >= 25;
+		// A list longer than the client reads says so here, so the count is never read as the whole.
+		const listTotal = Number(table.dataset.listTotal || 0);
+		foot.hidden = !listTotal && matched <= 25 && size >= 25;
 		count.textContent = "Showing " + shown + " of " + matched;
+		if (listTotal) {
+			count.textContent += ". Only the first " + countLoaded(tbody).toLocaleString() + " of " +
+				listTotal.toLocaleString() + " were read";
+		}
 		all.hidden = shown >= matched || matched > maxShowAll;
 	};
 	// A request for every row is honored while it can be drawn, and refused with a reason when it

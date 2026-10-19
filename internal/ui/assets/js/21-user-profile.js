@@ -133,7 +133,7 @@ async function userActivity(users) {
 	// store is not asked for one.
 	const [runs, tokens] = await Promise.allSettled([
 		getJSON("/runs?limit=500"),
-		featureOff("tokens") ? Promise.resolve({ tokens: [] }) : getJSON("/tokens"),
+		featureOff("tokens") ? Promise.resolve({ rows: [] }) : getAllPages("/tokens", "tokens"),
 	]);
 	if (runs.status === "fulfilled") {
 		for (const r of runs.value.runs || []) {
@@ -141,7 +141,7 @@ async function userActivity(users) {
 		}
 	}
 	if (tokens.status === "fulfilled") {
-		for (const tk of tokens.value.tokens || []) note(tk.user_id, tk.last_used_at, false);
+		for (const tk of tokens.value.rows) note(tk.user_id, tk.last_used_at, false);
 	}
 	return map;
 }
@@ -149,8 +149,7 @@ async function userActivity(users) {
 // loadUsers populates the user table with delete actions.
 async function loadUsers() {
 	try {
-		const data = await getJSON("/users");
-		const users = data.users || [];
+		const { rows: users, total } = await getAllPages("/users", "users");
 		if (users.length === 0) {
 			// An install with a token and no accounts is not open: it authenticates every request by
 			// token. Telling that install it ran open sent an operator to add an account to fix a
@@ -168,6 +167,7 @@ async function loadUsers() {
 		}
 		const activity = await userActivity(users);
 		const tbody = document.getElementById("users");
+		noteListTotal(tbody.closest("table"), users.length, total);
 		for (const u of users) {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(u.username));
@@ -319,8 +319,8 @@ async function loadTokens() {
 		return;
 	}
 	try {
-		const [data, users] = await Promise.all([getJSON("/tokens"), userNamesByID()]);
-		const tokens = data.tokens || [];
+		const { rows: tokens, total } = await getAllPages("/tokens", "tokens");
+		const users = await userNamesByID(tokens.map((tk) => tk.user_id));
 		if (tokens.length === 0) {
 			status.textContent = "No API tokens. Issue one to give an automation or an agent access.";
 			table.hidden = true;
@@ -331,7 +331,14 @@ async function loadTokens() {
 		for (const tk of tokens) {
 			tbody.appendChild(tokenRow(tk, users));
 		}
-		status.hidden = true;
+		// Past the ceiling the panel says how many it left unread rather than passing the part off
+		// as the whole.
+		const partial = total > tokens.length;
+		status.textContent = partial
+			? "Showing the first " + tokens.length.toLocaleString() + " of " + total.toLocaleString() +
+				" tokens."
+			: "";
+		status.hidden = !partial;
 		table.hidden = false;
 	} catch (err) {
 		// A read-only or SSO-only install serves no token endpoint at all, and a 404 there is not an
@@ -392,13 +399,23 @@ function relCell(iso, absent) {
 	return cell;
 }
 
-// userNamesByID maps account ids to usernames so a token says who it acts as rather than showing an
-// opaque id. It is best effort: without it the ids still render.
-async function userNamesByID() {
+// USER_IDS_PER_REQUEST bounds how many id parameters one name lookup carries, so its URL stays
+// short enough for the proxies an install sits behind.
+const USER_IDS_PER_REQUEST = 100;
+
+// userNamesByID maps the given account ids to usernames so a token says who it acts as rather than
+// showing an opaque id. It asks for those accounts by id, so an account past the first page of the
+// list is named too. It is best effort: without it the ids still render.
+async function userNamesByID(ids) {
 	const byID = {};
+	const want = Array.from(new Set((ids || []).filter(Boolean)));
 	try {
-		const data = await getJSON("/users");
-		for (const u of data.users || []) byID[u.id] = u.username;
+		for (let i = 0; i < want.length; i += USER_IDS_PER_REQUEST) {
+			const query = want.slice(i, i + USER_IDS_PER_REQUEST)
+				.map((id) => "id=" + encodeURIComponent(id)).join("&");
+			const data = await getJSON("/users?" + query);
+			for (const u of data.users || []) byID[u.id] = u.username;
+		}
 	} catch (_) { /* the ids stand in for the names */ }
 	return byID;
 }
@@ -515,8 +532,7 @@ function parseHours(text) {
 async function fillUserSelect(select) {
 	if (!select) return null;
 	try {
-		const data = await getJSON("/users");
-		const users = data.users || [];
+		const { rows: users } = await getAllPages("/users", "users");
 		for (const u of users) {
 			const opt = document.createElement("option");
 			opt.value = u.username;

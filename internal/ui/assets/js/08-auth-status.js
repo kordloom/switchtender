@@ -246,6 +246,49 @@ async function getJSON(url) {
 	return res.json();
 }
 
+// LIST_PAGE_ROWS is the most rows one page of a configuration list carries, and LIST_CEILING is how
+// many rows getAllPages reads before it stops and leaves the rest to the count line.
+const LIST_PAGE_ROWS = 1000;
+const LIST_CEILING = 20000;
+
+// getAllPages reads every page of a configuration list and resolves to { rows, total, first }, where
+// first is the first page's whole answer, for the fields a list carries beside its rows.
+//
+// The configuration lists page at 1000 rows. Reading only the first page drew a prefix as the whole
+// set, so the table, its filter, its facets and Export never saw row 1001 and nothing said so. This
+// follows next_offset until the server says nothing follows. It stops at LIST_CEILING, so one page
+// load stays bounded on a very large install, and total then says how many exist. Any page failing
+// rejects the whole call, so a partial set is never drawn as the whole. A server too old to page
+// answers without next_offset, and its one page is the answer, with its total.
+async function getAllPages(path, key) {
+	const join = path.includes("?") ? "&" : "?";
+	const rows = [];
+	let offset = 0;
+	let total = 0;
+	let first = null;
+	for (;;) {
+		const data = await getJSON(path + join + "limit=" + LIST_PAGE_ROWS + "&offset=" + offset);
+		if (!first) first = data;
+		const page = Array.isArray(data[key]) ? data[key] : [];
+		for (const row of page) rows.push(row);
+		total = typeof data.total === "number" ? data.total : rows.length;
+		const next = data.next_offset;
+		if (!data.has_more || typeof next !== "number" || next <= offset) break;
+		if (rows.length >= LIST_CEILING) break;
+		offset = next;
+	}
+	const kept = rows.slice(0, LIST_CEILING);
+	return { rows: kept, total: Math.max(total, kept.length), first: first || {} };
+}
+
+// noteListTotal marks a table that holds only the first part of its list, so the pager's count
+// line and the export's file name say so rather than passing the part off as the whole.
+function noteListTotal(table, loaded, total) {
+	if (!table) return;
+	if (total > loaded) table.dataset.listTotal = String(total);
+	else delete table.dataset.listTotal;
+}
+
 // explains reports whether a server error is worth showing a reader instead of the phrasing this
 // client would write itself.
 //

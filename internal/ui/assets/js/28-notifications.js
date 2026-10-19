@@ -390,9 +390,8 @@ async function loadNotifications() {
 	}
 	const table = document.getElementById("notify-table");
 	try {
-		const data = await getJSON("/notifications");
-		const targets = Array.isArray(data.notifications) ? data.notifications : [];
-		notifySealing = data.sealing !== false;
+		const { rows: targets, total, first } = await getAllPages("/notifications", "notifications");
+		notifySealing = first.sealing !== false;
 		if (!notifySealing) renderNotifySealingNotice();
 		notifyTargets = new Map(targets.map((t) => [t.id, t]));
 		renderNotifyNeeds(targets);
@@ -405,7 +404,10 @@ async function loadNotifications() {
 		const tbody = document.getElementById("notifications");
 		tbody.textContent = "";
 		for (const target of targets) tbody.appendChild(notifyRow(target));
-		setStatus("");
+		setStatus(total > targets.length
+			? "Showing the first " + targets.length.toLocaleString() + " of " + total.toLocaleString() +
+				" notification targets."
+			: "");
 		if (table) table.hidden = false;
 		showListControls();
 		if (notifyDetailID && notifyTargets.has(notifyDetailID)) {
@@ -656,9 +658,8 @@ async function notifyObjects(kind) {
 	let byID = null;
 	if (spec) {
 		try {
-			const data = await getJSON(spec.path);
-			const list = Array.isArray(data[spec.key]) ? data[spec.key] : [];
-			byID = new Map(list.map((o) => [o.id, o.name || o.id]));
+			const { rows } = await getAllPages(spec.path, spec.key);
+			byID = new Map(rows.map((o) => [o.id, o.name || o.id]));
 		} catch {
 			byID = null;
 		}
