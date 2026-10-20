@@ -39,6 +39,10 @@ type logSink struct {
 	stream *streamMasker
 	// hold releases withheld output once a run goes quiet, so a slow run's log is not blank.
 	hold *time.Timer
+	// health is stamped when an append fails after its retries, nil in tests that build a sink alone.
+	health *writeHealth
+	// now is the clock the stamp reads.
+	now func() time.Time
 	// lost counts the bytes of output the store did not confirm it kept, so the run's outcome can
 	// say its log is incomplete instead of passing over the gap.
 	lost int64
@@ -125,6 +129,9 @@ func (s *logSink) emit(out []byte) {
 	}); err != nil {
 		s.log.Error("dispatch: append log: "+err.Error(), zap.String("run_id", s.id))
 		s.lost += int64(len(out))
+		if s.health != nil {
+			s.health.noteFailure(s.now(), err)
+		}
 	}
 	s.publisher.PublishLog(s.id, out)
 }

@@ -667,7 +667,7 @@ func (s *Server) Handler() http.Handler {
 		orgOwners: s.orgResolver(), strict: s.strictGrants,
 	}
 	mux.Handle("GET /healthz", healthHandler())
-	mux.Handle("GET /readyz", readyHandler(s.store))
+	mux.Handle("GET /readyz", readyHandler(s.store, s.submitter))
 	// The producer identity binds the tree profile's leaves, so every anchor check that may meet a
 	// tree anchor carries it. The key travels with the name, so an anchor taken under this
 	// install's earlier name recomputes rather than refusing. Without a producer it stays zero and

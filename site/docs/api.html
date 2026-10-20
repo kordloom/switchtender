@@ -893,7 +893,7 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/readyz</code></td>
-<td>Readiness: 200 once the store answers, 503 while it does not.</td>
+<td>Readiness: 200 once the store answers, 503 while it does not. A 200 carries <code>&quot;degraded&quot;: true</code> with <code>reasons</code>, <code>last_write_failure</code> and <code>owed_ends</code> for five minutes after this process failed to write to the store, and while it holds run ends the store refused, which read as running until they land.</td>
 </tr>
 </tbody>
 </table>

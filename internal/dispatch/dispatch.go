@@ -247,6 +247,8 @@ type Dispatcher struct {
 	// now reads the wall clock for a run's record and outcome timestamps. It is time.Now outside the
 	// demo, which parks it in the past to seed runs with a believable, self-consistent history.
 	now func() time.Time
+	// health records failed writes on the run path and the run ends the store refused, for readiness.
+	health writeHealth
 	// parkHook runs between a workflow's walk stopping at an approval step and its park, nil
 	// outside tests.
 	parkHook func(workflowID string)

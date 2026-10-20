@@ -21,3 +21,15 @@ func (d *Dispatcher) MaterializeCredentials(ctx context.Context, r *run.Run,
 	cleanup, _, err := d.materializeCredentials(ctx, r, spec)
 	return cleanup, err
 }
+
+// LandOwedEnds retries the run ends the store refused, for the tests outside this package that hold
+// the stores this package's own tests cannot import.
+func (d *Dispatcher) LandOwedEnds() {
+	d.landOwedEnds()
+}
+
+// FinalizeForTest finalizes r with status the way an executor does, for the tests outside this
+// package.
+func (d *Dispatcher) FinalizeForTest(r *run.Run, status run.Status) {
+	d.finalize(r, status, nil, "")
+}
