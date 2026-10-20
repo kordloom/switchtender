@@ -435,7 +435,12 @@ Audit trail tools.
 
 Flags on the subcommands:
 
-- `audit bundle --limit <n>` carries only the newest N entries. The default carries the whole chain.
+- `audit bundle --limit <n>` carries only the newest N entries. The default carries the whole chain,
+  and a chain past 25,000 entries, the most one bundle carries, is refused with the flags that would
+  serve it.
+- `audit bundle --from-seq <seq> --to-seq <seq>` carries the entries from one sequence through
+  another, both included, at most 25,000 of them. It is how an older slice of a long chain is
+  bundled. Either way the whole chain is verified first, and only the slice is held in memory.
 - `audit anchor --type <kind>` picks the anchor: `rfc3161` for a signed timestamp, or `git` or
   `https` for one checked by fetching it. `--ref` is the authority URL for `rfc3161`, otherwise the
   URL a verifier fetches. `--tree` anchors the Merkle root over the whole chain, which is the

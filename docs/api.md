@@ -295,6 +295,13 @@ runs one walk at a time and the others wait their turn, so however many arrive t
 one database read connection between them and every other read stays answered. A bundle `limit`
 that is not a count from 1 to the ceiling is refused with a `400` before anything is walked.
 
+A bundle carries at most 25,000 entries. `limit=<n>` carries the newest N, and `from_seq` and
+`to_seq` together carry an older slice, both ends included, such as
+`/v1/audit/bundle?from_seq=1&to_seq=10000`. A window by sequence names an exact slice, so one that
+runs past the chain's newest entry is a `400` rather than a shorter bundle. The whole chain is still
+verified first, and the slice's first entry carries the link to the one before it, so an offline
+verifier sees that the slice belongs to the chain.
+
 The chain gauges walk again at most every 15 seconds, or every ten times the last walk's duration
 when that is longer, so a long chain never keeps a read connection busy more than a tenth of the
 time. That interval is also how long an entry rewritten in place can go unreported. A scrape that

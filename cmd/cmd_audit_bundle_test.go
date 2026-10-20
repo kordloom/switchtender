@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -291,6 +292,8 @@ func TestAuditBundleHoldsTheWholeChainBeforeWindowing(t *testing.T) {
 		Edit string
 		// Limit is --limit, the window cut from the newest entries.
 		Limit int
+		// From and To are --from-seq and --to-seq, the window by sequence.
+		From, To int64
 		// WantReason is the reason code the refusal must open with, empty when the bundle must be
 		// written.
 		WantReason string
@@ -298,6 +301,8 @@ func TestAuditBundleHoldsTheWholeChainBeforeWindowing(t *testing.T) {
 		WantHas []string
 		// WantClaims is how many claims the written bundle must carry, read only when it is written.
 		WantClaims int
+		// WantFirst is the sequence of the first claim, read only when it is set.
+		WantFirst int64
 	}{{ // Test 0: The control. An intact chain still bundles, windowed, and the bundle verifies.
 		Name: "intact and windowed", Limit: 2, WantClaims: 2,
 	}, { // Test 1: The defect. The break is at entry 1 and the window is the last two entries, so
@@ -317,6 +322,13 @@ func TestAuditBundleHoldsTheWholeChainBeforeWindowing(t *testing.T) {
 		Edit:       "DELETE FROM audit_entries WHERE seq = 2",
 		WantReason: reasonChainBreak,
 		WantHas:    []string{"entry 2 of 4", "sequence 3"},
+	}, { // Test 4: A window by sequence from the middle carries exactly that slice and verifies.
+		Name: "intact and windowed by sequence", From: 2, To: 4, WantClaims: 3, WantFirst: 2,
+	}, { // Test 5: A break below a window by sequence is refused, as it is below a --limit window.
+		Name: "a break older than the sequence window", From: 3, To: 5,
+		Edit:       "UPDATE audit_entries SET actor = 'mallory' WHERE seq = 1",
+		WantReason: reasonChainBreak,
+		WantHas:    []string{"entry 1 of 5", "sequence 1"},
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -326,8 +338,10 @@ func TestAuditBundleHoldsTheWholeChainBeforeWindowing(t *testing.T) {
 			}
 			out := filepath.Join(filepath.Dir(seed.DB), "bundle.json")
 			bundleDB, bundleOut, bundleLimit = seed.DB, out, test.Limit
+			bundleFromSeq, bundleToSeq = test.From, test.To
 			t.Cleanup(func() {
 				bundleDB, bundleOut, bundleLimit, bundleKeyDir = defaultDBPath, "", 0, ""
+				bundleFromSeq, bundleToSeq = 0, 0
 			})
 
 			err := runAuditBundle(testCommand(), nil)
@@ -370,6 +384,87 @@ func TestAuditBundleHoldsTheWholeChainBeforeWindowing(t *testing.T) {
 			}
 			if diff := cmp.Diff(test.WantClaims, report.ClaimCount); diff != "" {
 				t.Errorf("claim count mismatch (-want +got):\n%s", diff)
+			}
+			if test.WantFirst != 0 {
+				var b audit.Bundle
+				if err := json.Unmarshal(signed, &b); err != nil {
+					t.Fatalf("Unmarshal() error = %v", err)
+				}
+				if diff := cmp.Diff(test.WantFirst, b.Claims[0].Chain.Seq); diff != "" {
+					t.Errorf("first claim sequence mismatch (-want +got):\n%s", diff)
+				}
+			}
+		})
+	}
+}
+
+// TestABundleWindowIsBoundedBeforeTheChainIsRead pins the command to the endpoint's ceiling. The
+// command had none: it read the whole chain to cut a window from it, and held about 1.7 GB to bundle
+// 100,000 entries, so the tool an operator reaches for on the server's own box could take it down.
+// A window that could never be served is refused before the store is opened, and an unwindowed
+// export past the ceiling is refused with the flags that would serve it.
+func TestABundleWindowIsBoundedBeforeTheChainIsRead(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// Limit, From, and To are the flags as passed.
+		Limit    int
+		From, To int64
+		// Count and Highest describe the walked chain.
+		Count   int
+		Highest int64
+		// WantAfter and WantLast are the slice served, as the sequence before it and its last.
+		WantAfter, WantLast int64
+		// WantMsg is a distinctive part of the refusal, empty when the slice is served.
+		WantMsg string
+	}{{ // Test 0: No window on a chain under the ceiling carries the whole chain.
+		Count: 10, Highest: 10, WantAfter: 0, WantLast: 10,
+	}, { // Test 1: A limit carries the newest entries.
+		Limit: 4, Count: 10, Highest: 10, WantAfter: 6, WantLast: 10,
+	}, { // Test 2: A limit wider than the chain carries the chain.
+		Limit: 50, Count: 10, Highest: 10, WantAfter: 0, WantLast: 10,
+	}, { // Test 3: A window by sequence carries exactly its slice.
+		From: 20, To: 40, Count: 60, Highest: 60, WantAfter: 19, WantLast: 40,
+	}, { // Test 4: A window past the head is refused rather than cut short.
+		From: 50, To: 61, Count: 60, Highest: 60, WantMsg: "past the newest entry",
+	}, { // Test 5: The defect. An unwindowed export past the ceiling names the flags.
+		Count: maxBundleEntries + 1, Highest: maxBundleEntries + 1, WantMsg: "--from-seq and --to-seq",
+	}, { // Test 6: A window into the same chain is served.
+		From: 1, To: 10_000, Count: maxBundleEntries + 1, Highest: maxBundleEntries + 1,
+		WantAfter: 0, WantLast: 10_000,
+	}, { // Test 7: A limit past the ceiling.
+		Limit: maxBundleEntries + 1, WantMsg: "at most",
+	}, { // Test 8: A negative limit.
+		Limit: -1, WantMsg: "a count",
+	}, { // Test 9: Both kinds of window.
+		Limit: 5, From: 1, To: 5, WantMsg: "not both",
+	}, { // Test 10: One end alone.
+		From: 3, WantMsg: "go together",
+	}, { // Test 11: The other end alone.
+		To: 3, WantMsg: "go together",
+	}, { // Test 12: Ends reversed.
+		From: 9, To: 3, WantMsg: "is past --to-seq",
+	}, { // Test 13: One past the ceiling.
+		From: 1, To: maxBundleEntries + 1, WantMsg: "more than the 25000",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			err := checkBundleWindow(test.Limit, test.From, test.To)
+			var after, last int64
+			if err == nil {
+				after, last, err = bundleSlice(test.Count, test.Highest, test.Limit, test.From, test.To)
+			}
+			if test.WantMsg != "" {
+				if err == nil || !strings.Contains(err.Error(), test.WantMsg) {
+					t.Fatalf("error = %v, want one saying %q", err, test.WantMsg)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("error = %v, want the slice served", err)
+			}
+			if diff := cmp.Diff([]int64{test.WantAfter, test.WantLast}, []int64{after, last}); diff != "" {
+				t.Errorf("after, last mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}

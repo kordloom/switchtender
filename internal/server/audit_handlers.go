@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -267,7 +268,8 @@ func bundleWindow(count int, limit string) (int, string) {
 			// following the advice cannot land on the same refusal from the other side.
 			return 0, fmt.Sprintf("this chain holds %d entries, more than the %d one bundle "+
 				"assembles at once. Ask for a window with limit=<count>, such as limit=%d, which "+
-				"bundles that many of the newest entries", count, maxBundleEntries, suggestedBundleWindow)
+				"bundles that many of the newest entries, or with from_seq and to_seq for an older "+
+				"slice", count, maxBundleEntries, suggestedBundleWindow)
 		}
 		return count, ""
 	}
@@ -276,6 +278,50 @@ func bundleWindow(count int, limit string) (int, string) {
 	}
 	return n, ""
 }
+
+// bundleSeqs is a bundle request's window by sequence: the first and last entry to carry, inclusive.
+// Both are zero when the request names no such window.
+type bundleSeqs struct {
+	// From is the sequence of the first entry the bundle carries.
+	From int64
+	// To is the sequence of the last entry the bundle carries.
+	To int64
+}
+
+// parseBundleSeqs reads from_seq and to_seq without reading the chain, so a window that could never
+// be served is refused before a walk is paid for. It returns the message to answer with when the pair
+// does not name a slice within the ceiling. A time can repeat across entries, so a window names its
+// slice by sequence, which cannot.
+func parseBundleSeqs(q url.Values) (bundleSeqs, string) {
+	from, to := q.Get("from_seq"), q.Get("to_seq")
+	if from == "" && to == "" {
+		return bundleSeqs{}, ""
+	}
+	if from == "" || to == "" {
+		return bundleSeqs{}, "from_seq and to_seq go together: name the first and the last entry " +
+			"to bundle, such as from_seq=1&to_seq=10000"
+	}
+	if q.Get("limit") != "" {
+		return bundleSeqs{}, "ask for limit or for from_seq and to_seq, not both"
+	}
+	f, ferr := strconv.ParseInt(from, 10, 64)
+	t, terr := strconv.ParseInt(to, 10, 64)
+	if ferr != nil || terr != nil || f < 1 || t < 1 {
+		return bundleSeqs{}, "from_seq and to_seq must be entry sequence numbers from 1, such as " +
+			"from_seq=1&to_seq=10000"
+	}
+	if f > t {
+		return bundleSeqs{}, fmt.Sprintf("from_seq %d is past to_seq %d", f, t)
+	}
+	if t-f+1 > maxBundleEntries {
+		return bundleSeqs{}, fmt.Sprintf("from_seq %d to to_seq %d is %d entries, more than the %d "+
+			"one bundle assembles at once", f, t, t-f+1, maxBundleEntries)
+	}
+	return bundleSeqs{From: f, To: t}, ""
+}
+
+// errWindowFull stops the window pass once it holds the last entry the walk verified.
+var errWindowFull = errors.New("server: the bundle window is full")
 
 // The reasons a bundle download refuses. Each names a state of the stored chain, never a fault in
 // this server, so a caller branches on the code without reading the message.
@@ -452,6 +498,11 @@ func auditBundleHandler(store audit.Store, producer *audit.Identity, problem, ve
 			respondError(w, log, http.StatusBadRequest, msg)
 			return
 		}
+		seqs, msg := parseBundleSeqs(r.URL.Query())
+		if msg != "" {
+			respondError(w, log, http.StatusBadRequest, msg)
+			return
+		}
 		recorded, aerr := anchorsFor(r.Context(), store)
 		if aerr != nil {
 			log.Error("server: read anchors: " + aerr.Error())
@@ -498,16 +549,37 @@ func auditBundleHandler(store audit.Store, producer *audit.Identity, problem, ve
 			}, wantsPretty(r))
 			return
 		}
-		window, msg := bundleWindow(count, r.URL.Query().Get("limit"))
-		if msg != "" {
-			respondError(w, log, http.StatusBadRequest, msg)
-			return
+		after, last := int64(0), highest
+		if seqs.From != 0 {
+			// A window past the head is refused rather than cut short, because a bundle that
+			// silently carries less than was named is a different slice from the one asked for.
+			if seqs.To > highest {
+				respondError(w, log, http.StatusBadRequest, fmt.Sprintf("to_seq %d is past the "+
+					"newest entry in the chain, sequence %d", seqs.To, highest))
+				return
+			}
+			after, last = seqs.From-1, seqs.To
+		} else {
+			window, msg := bundleWindow(count, r.URL.Query().Get("limit"))
+			if msg != "" {
+				respondError(w, log, http.StatusBadRequest, msg)
+				return
+			}
+			after = highest - int64(window)
 		}
-		entries := make([]*audit.Entry, 0, window)
-		err = store.ChainScan(r.Context(), highest-int64(window), func(e *audit.Entry) error {
+		// The pass stops at the last entry the walk verified. Entries appended since the walk are
+		// left out, so nothing in the bundle was signed without being checked first.
+		entries := make([]*audit.Entry, 0, last-after)
+		err = store.ChainScan(r.Context(), after, func(e *audit.Entry) error {
+			if e != nil && e.Seq > last {
+				return errWindowFull
+			}
 			entries = append(entries, e)
 			return nil
 		})
+		if errors.Is(err, errWindowFull) {
+			err = nil
+		}
 		if err != nil {
 			log.Error("server: chain audit entries: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not read the audit trail")
