@@ -167,10 +167,13 @@ func TestAnApprovedParentThatCannotStartClosesItsStream(t *testing.T) {
 				func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
 					return roundhouse.Result{}, nil
 				})
-			d := New(store, idle, nil, WithPublisher(pub))
+			// No janitor: its first sweep runs at start and could settle the parent as abandoned
+			// before startSplit reads it, which is the sweep's own test, not this one.
+			d := New(store, idle, nil, WithPublisher(pub), WithNoJanitor())
 			defer d.Close()
 			parent := test.Parent.Clone()
 			parent.ID, parent.Playbook, parent.Status = "run_parent", "site.yml", run.StatusPending
+			parent.CreatedAt = time.Now()
 			if err := store.Save(ctx, parent); err != nil {
 				t.Fatalf("Save(parent) error = %v", err)
 			}
