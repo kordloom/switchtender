@@ -150,8 +150,12 @@ the password on the command line. Give them all the same `SWITCHTENDER_ENCRYPTIO
 `SWITCHTENDER_AUDIT_KEY`, since replicas sharing a database sign as one install and none of them
 mints the key. Health-check `/readyz` at the balancer: it reads the store and fails when the
 database is out of reach, while `/healthz` answers as long as the process is up and would keep a
-replica that cannot reach the database in rotation. SQLite has no server to share, so it stays a
-single-node deployment by design, and PostgreSQL is the HA backend.
+replica that cannot reach the database in rotation. A replica whose writes the store refused, such
+as at a full disk, stays ready and reports `"degraded": true` with the reason for five minutes, and
+for as long as it holds a run's end the store would not take. It retries those ends every ten
+seconds and renews their leases meanwhile, so the run reads as running until its true end lands. A
+replica that restarts first loses them, and those runs end interrupted. SQLite has no server to
+share, so it stays a single-node deployment by design, and PostgreSQL is the HA backend.
 
 ## Splits balance real work
 

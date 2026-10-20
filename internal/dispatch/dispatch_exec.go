@@ -282,7 +282,8 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 		return run.StatusCanceled
 	}
 
-	logs := &logSink{store: d.store, id: r.ID, log: d.log, publisher: d.publisher, mask: mask}
+	logs := &logSink{store: d.store, id: r.ID, log: d.log, publisher: d.publisher, mask: mask,
+		health: &d.health, now: d.now}
 	var sink io.Writer = logs
 	if tee != nil {
 		sink = io.MultiWriter(sink, tee)
@@ -534,6 +535,7 @@ func (d *Dispatcher) watch(ctx context.Context, id string) {
 			d.cancelWithCause(id, errLeaseLost)
 			return
 		default:
+			d.health.noteFailure(d.now(), err)
 			if expired := time.Since(lastRenewed); expired < leaseTTL {
 				d.log.Warn("dispatch: heartbeat failed, lease still valid: "+err.Error(),
 					zap.String("run_id", id), zap.Duration("unrenewed_for", expired))
@@ -853,11 +855,26 @@ func (d *Dispatcher) finalize(r *run.Run, status run.Status, exitCode *int, fail
 		Outputs: r.Outputs, Warning: r.Warning, InventoryCheck: r.InventoryCheck,
 		ImageDigest: r.ImageDigest, ResolvedHosts: r.ResolvedHosts, EndedAt: d.now(),
 	}
-	stored, recorded := d.recordTerminal(r, fin)
+	stored, recorded, err := d.recordTerminal(r, fin)
+	if err != nil {
+		// The store refused the write, which a fence never does. The end is held and retried by the
+		// janitor, so the run reads as running only until the store takes writes again, and readiness
+		// says so meanwhile.
+		d.health.noteFailure(d.now(), err)
+		if dropped := d.health.owe(r, fin, err); dropped != "" {
+			d.log.Error("dispatch: too many run ends owed to the store, dropping the oldest",
+				zap.String("run_id", dropped))
+		}
+	}
 	if !recorded {
 		r.Status = stored
 		return
 	}
+	d.afterTerminal(r)
+}
+
+// afterTerminal wipes, commits and announces a run whose terminal record the store has accepted.
+func (d *Dispatcher) afterTerminal(r *run.Run) {
 	// The run's sealed material is needed only while it waits and executes. The terminal write wipes
 	// it when it moved the run from running, and this covers the ends that reach the store another
 	// way, such as a rejection.
@@ -868,8 +885,9 @@ func (d *Dispatcher) finalize(r *run.Run, status run.Status, exitCode *int, fail
 	d.notify(r)
 }
 
-// recordTerminal writes r's terminal record to the store and reports the run's stored status and
-// whether the write landed. It applies fin to r only once the store has accepted it, so an in-memory
+// recordTerminal writes r's terminal record to the store and reports the run's stored status,
+// whether the write landed, and the store's error when the store itself refused, as opposed to a
+// fence deciding the write was not this caller's to make. It applies fin to r only once the store has accepted it, so an in-memory
 // run that says succeeded is a run the database says succeeded too.
 //
 // The first attempt is one conditional update from running, the state every executing run finalizes
@@ -884,7 +902,7 @@ func (d *Dispatcher) finalize(r *run.Run, status run.Status, exitCode *int, fail
 // state, nothing is written: skipping the write risks a janitor interrupt on a healthy run, but
 // writing blind risks resurrecting a run another actor already terminalized, which is the failure the
 // fence exists to stop.
-func (d *Dispatcher) recordTerminal(r *run.Run, fin run.Finalization) (run.Status, bool) {
+func (d *Dispatcher) recordTerminal(r *run.Run, fin run.Finalization) (run.Status, bool, error) {
 	ctx := context.Background()
 	// This dispatcher is finalizing a run it executed, so the write is fenced on the lease it thinks
 	// it holds as well as on the status. If the janitor requeued the run and another worker claimed
@@ -894,13 +912,13 @@ func (d *Dispatcher) recordTerminal(r *run.Run, fin run.Finalization) (run.Statu
 	fin.Owner = r.ClaimedBy
 	if moved, err := d.store.FinalizeRunning(ctx, r.ID, fin); err == nil && moved {
 		applyFinalization(r, fin)
-		return fin.Status, true
+		return fin.Status, true, nil
 	}
 	cur, err := d.storeGetWithRetries(ctx, r.ID)
 	if err != nil {
 		d.log.Warn("dispatch: cannot verify run state, skipping finalize: "+err.Error(),
 			zap.String("run_id", r.ID))
-		return r.Status, false
+		return r.Status, false, err
 	}
 	if cur.Status.Terminal() && (cur.Status != fin.Status || cur.EndedAt != nil) {
 		// A terminal state refuses, including an equal one that is already complete. The old
@@ -913,7 +931,7 @@ func (d *Dispatcher) recordTerminal(r *run.Run, fin run.Finalization) (run.Statu
 		d.log.Warn("dispatch: run already finalized, not overwriting",
 			zap.String("run_id", r.ID), zap.String("stored", string(cur.Status)),
 			zap.String("attempted", string(fin.Status)))
-		return cur.Status, false
+		return cur.Status, false, nil
 	}
 	// The stored run may be live under somebody else. The guard above only refused terminal
 	// states, so a run the janitor requeued and another worker re-claimed, which reads as running
@@ -926,7 +944,7 @@ func (d *Dispatcher) recordTerminal(r *run.Run, fin run.Finalization) (run.Statu
 		d.log.Warn("dispatch: run is held by another owner, not overwriting",
 			zap.String("run_id", r.ID), zap.String("holder", cur.ClaimedBy),
 			zap.String("this", fin.Owner), zap.String("attempted", string(fin.Status)))
-		return cur.Status, false
+		return cur.Status, false, nil
 	}
 	// A requeued run belongs to nobody, and nobody's runs are not this worker's to finalize. The
 	// owner guard above cannot catch this shape because the janitor cleared the claim: a worker
@@ -936,17 +954,17 @@ func (d *Dispatcher) recordTerminal(r *run.Run, fin run.Finalization) (run.Statu
 		d.log.Warn("dispatch: run was requeued and is unclaimed, not overwriting",
 			zap.String("run_id", r.ID), zap.String("this", fin.Owner),
 			zap.String("attempted", string(fin.Status)))
-		return cur.Status, false
+		return cur.Status, false, nil
 	}
 	// Save writes the whole run, so the terminal fields go on a copy: a save that fails must leave
 	// the caller's run reading the way the store still does.
 	next := *r
 	applyFinalization(&next, fin)
 	if err := d.save(&next); err != nil {
-		return cur.Status, false
+		return cur.Status, false, err
 	}
 	*r = next
-	return fin.Status, true
+	return fin.Status, true, nil
 }
 
 // wipeSealed removes r's sealed inventory snapshot and plan file from the store and from r, leaving

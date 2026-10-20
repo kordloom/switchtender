@@ -397,6 +397,8 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 	d.startOutbox()
 	d.wg.Add(1)
 	go d.claimLoop()
+	d.wg.Add(1)
+	go d.landOwed()
 	if !cfg.noJanitor {
 		d.wg.Add(1)
 		go d.janitor()
