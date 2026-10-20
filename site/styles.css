@@ -96,10 +96,14 @@ code, pre { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, 
 .big { padding: 14px 28px; font-size: 16px; border-radius: 12px; }
 
 /* Hero */
+/* The eyebrow takes its own row so the screenshot, in the second row beside the copy, starts level
+   with the headline instead of being centered against the whole text column. */
 .hero {
-	display: grid; grid-template-columns: 1.05fr 1fr; gap: 56px; align-items: center;
+	display: grid; grid-template-columns: 1.05fr 1fr; column-gap: 56px; row-gap: 0; align-items: start;
 	padding: 92px 24px 72px;
 }
+.hero > .eyebrow { grid-column: 1; grid-row: 1; justify-self: start; }
+.hero-copy { grid-column: 1; grid-row: 2; }
 .eyebrow {
 	display: inline-block; font-size: 13px; font-weight: 600; letter-spacing: 0.04em;
 	text-transform: uppercase; color: var(--accent);
@@ -129,8 +133,8 @@ h1 {
 	font-size: 16.5px; line-height: 1.65; color: var(--muted); max-width: 560px;
 	margin: -14px 0 30px; padding-left: 16px; border-left: 2px solid var(--line);
 }
-.hero-copy .eyebrow { font-size: 12.5px; letter-spacing: 0.035em; text-wrap: balance; }
-@media (min-width: 1150px) { .hero-copy .eyebrow { white-space: nowrap; } }
+.hero > .eyebrow { font-size: 12.5px; letter-spacing: 0.035em; text-wrap: balance; }
+@media (min-width: 1150px) { .hero > .eyebrow { white-space: nowrap; } }
 .hero-cta { display: flex; gap: 14px; flex-wrap: wrap; }
 .hero-cta.center { justify-content: center; }
 .hero-note { margin-top: 22px; font-size: 13.5px; color: var(--muted); }
@@ -142,7 +146,7 @@ h1 {
 .namebar p { max-width: 720px; margin: 0 auto; color: var(--muted); font-size: 15.5px; }
 .namebar b { color: var(--text); font-weight: 600; }
 
-.hero-shot { position: relative; }
+.hero-shot { position: relative; grid-column: 2; grid-row: 2; }
 .glow {
 	position: absolute; inset: 0; z-index: 0; pointer-events: none;
 	background: radial-gradient(50% 50% at 50% 40%, rgba(52, 211, 153, 0.35), transparent 70%);
@@ -168,6 +172,9 @@ h1 {
 .window-bar span:nth-child(3) { background: #28c840; }
 .window-bar em { margin-left: 10px; font-style: normal; font-size: 12.5px; color: var(--muted); font-family: "JetBrains Mono", monospace; }
 .window img, .window video { display: block; width: 100%; }
+/* An img with width and height attributes keeps their aspect for its reserved box, so it scales with
+   the column instead of rendering at the attribute height. */
+.window img { height: auto; }
 .demo-frame { max-width: 920px; margin: 0 auto; transform: none; box-shadow: 0 30px 90px rgba(0, 0, 0, 0.6), 0 0 70px rgba(52, 211, 153, 0.14); }
 .demo-frame:hover { transform: none; }
 
@@ -427,8 +434,9 @@ details.card[open] summary { color: var(--accent); }
 	.nav.open .nav-cta .btn, .nav.open .nav-cta .ghost { text-align: center; }
 }
 @media (max-width: 900px) {
-	.hero { grid-template-columns: 1fr; padding-top: 56px; gap: 44px; }
-	.hero-shot { order: 2; }
+	.hero { grid-template-columns: 1fr; padding-top: 56px; }
+	.hero > .eyebrow, .hero-copy, .hero-shot { grid-column: 1; grid-row: auto; }
+	.hero-shot { margin-top: 44px; }
 	.window { transform: none; }
 	.governance { grid-template-columns: 1fr; }
 	.cards .card { flex-basis: calc(50% - 9px); }
