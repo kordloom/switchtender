@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -234,4 +235,166 @@ func TestChainHealthCatchesAnOldEntryRewrittenInPlace(t *testing.T) {
 	if got.Verified || got.BrokeAt != 1_000 {
 		t.Errorf("snapshot one interval after the rewrite = %+v, want the break at 1000", got)
 	}
+}
+
+// stalledWriter is a ResponseWriter whose first body write blocks until the test resumes it,
+// standing in for a client that stops reading a large download partway through.
+type stalledWriter struct {
+	// header is the response header the handler sets.
+	header http.Header
+	// code is the status the handler wrote, or zero when it wrote none.
+	code atomic.Int32
+	// writing is closed when the first body write starts.
+	writing chan struct{}
+	// resume is closed to let the blocked write finish.
+	resume chan struct{}
+	// started guards the close of writing.
+	started sync.Once
+}
+
+// newStalledWriter returns a writer that has not yet been written to.
+func newStalledWriter() *stalledWriter {
+	return &stalledWriter{header: http.Header{}, writing: make(chan struct{}),
+		resume: make(chan struct{})}
+}
+
+// Header returns the response header.
+func (s *stalledWriter) Header() http.Header {
+	return s.header
+}
+
+// WriteHeader records the status.
+func (s *stalledWriter) WriteHeader(code int) {
+	s.code.CompareAndSwap(0, int32(code))
+}
+
+// Write signals that the body write started and blocks until the test resumes it.
+func (s *stalledWriter) Write(p []byte) (int, error) {
+	s.code.CompareAndSwap(0, http.StatusOK)
+	s.started.Do(func() { close(s.writing) })
+	<-s.resume
+	return len(p), nil
+}
+
+// TestASlowBundleReaderDoesNotHoldTheWalkSlot pins that the walk slot covers the scans and not the
+// download. serve sets no write timeout, so a client reading a bundle slowly once held the slot for
+// the whole transfer and every verify, receipt, evidence, and register request queued behind it.
+// While a bundle's write is stalled, a verify on the same server answers.
+func TestASlowBundleReaderDoesNotHoldTheWalkSlot(t *testing.T) {
+	t.Parallel()
+	id, err := audit.LoadIdentity(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadIdentity() error = %v", err)
+	}
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), WithAudit(seedChain(t, 20)),
+		WithProducerIdentity(&id, "v-test")).Handler()
+
+	stalled := newStalledWriter()
+	bundled := make(chan struct{})
+	go func() {
+		defer close(bundled)
+		handler.ServeHTTP(stalled, httptest.NewRequest(http.MethodGet, "/v1/audit/bundle", nil))
+	}()
+	defer func() {
+		close(stalled.resume)
+		<-bundled
+		if got := stalled.code.Load(); got != http.StatusOK {
+			t.Errorf("bundle status = %d, want 200", got)
+		}
+	}()
+	select {
+	case <-stalled.writing:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the bundle never began writing its response")
+	}
+
+	verified := make(chan int, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/audit/verify", nil))
+		verified <- rec.Code
+	}()
+	select {
+	case code := <-verified:
+		if code != http.StatusOK {
+			t.Errorf("verify status = %d, want 200", code)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("verify waited on the walk slot while a bundle's reader stalled the write")
+	}
+}
+
+// TestAnEarlyWalkReleaseFreesTheSlotOnce pins that releaseWalk and hold's own release free the slot
+// exactly once between them, on every path. A second receive on the empty slot would block forever,
+// so a double release shows here as a handler that never returns.
+func TestAnEarlyWalkReleaseFreesTheSlotOnce(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Handler      func(*http.Request)
+		WantReleased bool
+	}{{ // Test 0: Released early twice, then the handler returns.
+		Handler: func(r *http.Request) {
+			releaseWalk(r.Context())
+			releaseWalk(r.Context())
+		},
+		WantReleased: true,
+	}, { // Test 1: Released early, then the handler panics.
+		Handler: func(r *http.Request) {
+			releaseWalk(r.Context())
+			panic("handler fault")
+		},
+		WantReleased: true,
+	}, { // Test 2: Never released early, so hold frees the slot on return.
+		Handler:      func(*http.Request) {},
+		WantReleased: false,
+	}, { // Test 3: Never released early, and the handler panics.
+		Handler:      func(*http.Request) { panic("handler fault") },
+		WantReleased: false,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			walks := newChainWalks()
+			var freedInside atomic.Bool
+			h := walks.hold(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				defer func() {
+					if release, ok := walks.tryAcquire(); ok {
+						freedInside.Store(true)
+						release()
+					}
+				}()
+				test.Handler(r)
+			}))
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				defer func() { _ = recover() }()
+				h.ServeHTTP(httptest.NewRecorder(),
+					httptest.NewRequest(http.MethodGet, "/v1/audit/verify", nil))
+			}()
+			select {
+			case <-done:
+			case <-time.After(3 * time.Second):
+				t.Fatal("the request never returned: the walk slot was released twice")
+			}
+			if got := freedInside.Load(); got != test.WantReleased {
+				t.Errorf("slot free inside the handler = %v, want %v", got, test.WantReleased)
+			}
+			release, ok := walks.tryAcquire()
+			if !ok {
+				t.Fatal("the walk slot is still held after the request returned")
+			}
+			if _, again := walks.tryAcquire(); again {
+				t.Error("the walk slot was acquired twice at once")
+			}
+			release()
+		})
+	}
+}
+
+// TestReleaseWalkOutsideHoldDoesNothing pins that a handler called without hold, as handler unit
+// tests do, can call releaseWalk safely.
+func TestReleaseWalkOutsideHoldDoesNothing(t *testing.T) {
+	t.Parallel()
+	releaseWalk(context.Background())
 }

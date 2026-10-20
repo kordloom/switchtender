@@ -74,6 +74,8 @@ func runEvidenceHandler(store run.Store, audits audit.Store, producer audit.Iden
 		// The dossier is an HTML page for a person. A caller that asks for JSON gets the same collected
 		// record as data, which is what a program, and an AI agent above all, can actually read: the
 		// tool that reads a run's evidence used to hand a model a page of markup.
+		// The one chain scan is behind it, so the slot is freed before either shape is written.
+		releaseWalk(r.Context())
 		if r.URL.Query().Get("format") == "json" {
 			respondJSON(w, log, http.StatusOK, in, wantsPretty(r))
 			return
@@ -147,6 +149,7 @@ func auditRegisterHandler(store run.Store, audits audit.Store, producer audit.Id
 			respondError(w, log, http.StatusInternalServerError, "could not render the register")
 			return
 		}
+		releaseWalk(r.Context())
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(doc)
 	}

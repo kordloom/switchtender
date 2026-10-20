@@ -223,6 +223,7 @@ func auditVerifyHandler(store audit.Store, producer audit.Identity, log *zap.Log
 				resp.Level, resp.LevelName = 3, "anchored"
 			}
 		}
+		releaseWalk(r.Context())
 		respondJSON(w, log, http.StatusOK, resp, wantsPretty(r))
 	}
 }
@@ -610,6 +611,9 @@ func auditBundleHandler(store audit.Store, producer *audit.Identity, problem, ve
 			respondError(w, log, http.StatusInternalServerError, "could not sign the bundle")
 			return
 		}
+		// Both scans are behind it, so the slot is freed before the write. A client reading the
+		// bundle slowly then holds only its own connection, not every other chain walk.
+		releaseWalk(r.Context())
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Content-Disposition", `attachment; filename="switchtender-audit.loomseal.json"`)
 		_, _ = w.Write(signed)

@@ -125,6 +125,9 @@ func runReceiptHandler(store run.Store, audits audit.Store, producer *audit.Iden
 			respondError(w, log, http.StatusConflict, err.Error())
 			return
 		}
+		// Both walks are behind it, the check above and the builder's, so the slot is freed before
+		// the signed receipt is written.
+		releaseWalk(r.Context())
 		// The fingerprint travels in a header so a caller scripting this has the value to pin
 		// without parsing the body, and the notes travel there too rather than being lost.
 		w.Header().Set("Switchtender-Key-Id", res.KeyID)

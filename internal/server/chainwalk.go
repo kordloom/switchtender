@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"sync"
 )
 
 // chainWalks admits one full audit chain walk at a time across a server. A walk streams every entry
@@ -52,13 +53,32 @@ func (c *chainWalks) release() {
 // bundle scans it twice, and a request that let another walker in between its scans would wait for
 // the slot a second time with nothing gained. A caller that goes away while waiting is answered
 // nothing, since nobody is left to read it.
+//
+// The slot is held through the scans and not through the response. A handler whose scans are done
+// frees it with releaseWalk before writing its body, because serve sets no write timeout and a
+// client reading a 20 MB bundle slowly would otherwise hold every other walker for the whole
+// download. The release is made idempotent here, since a second receive on the empty slot would
+// block forever, and it still runs on return for every path that never reached its write.
 func (c *chainWalks) hold(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		release, err := c.acquire(r.Context())
+		acquired, err := c.acquire(r.Context())
 		if err != nil {
 			return
 		}
+		release := sync.OnceFunc(acquired)
 		defer release()
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), walkReleaseKey{}, release)))
 	})
+}
+
+// walkReleaseKey is the request context key under which hold stores the walk slot's release.
+type walkReleaseKey struct{}
+
+// releaseWalk frees the walk slot the request holds, so a handler whose last scan has returned can
+// write its response without keeping other walkers waiting on its reader. It does nothing on a
+// request hold did not admit, and nothing when called again.
+func releaseWalk(ctx context.Context) {
+	if release, ok := ctx.Value(walkReleaseKey{}).(func()); ok {
+		release()
+	}
 }
