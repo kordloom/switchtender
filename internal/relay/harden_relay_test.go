@@ -2,6 +2,7 @@ package relay_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http/httptest"
@@ -29,6 +30,9 @@ func TestDecodeCappedStopsDuringDecode(t *testing.T) {
 		Body      string
 		WantCount int
 		Want      error
+		// WantSyntax accepts a *json.SyntaxError in place of Want, for input Go 1.27 reports as a
+		// syntax error where earlier releases reported io.EOF.
+		WantSyntax bool
 	}{
 		{Name: "under cap", Body: "[{},{}]", WantCount: 2, Want: nil},
 		{Name: "at cap", Body: "[" + strings.Repeat("{},", n-1) + "{}]", WantCount: n, Want: nil},
@@ -38,7 +42,7 @@ func TestDecodeCappedStopsDuringDecode(t *testing.T) {
 			Want: relay.ErrTooManyElements,
 		},
 		{Name: "not an array", Body: `{"nope":1}`, Want: nil, WantCount: 0},
-		{Name: "truncated array", Body: "[", Want: io.EOF},
+		{Name: "truncated array", Body: "[", Want: io.EOF, WantSyntax: true},
 	}
 	for testNum, test := range tests {
 		t.Run(test.Name, func(t *testing.T) {
@@ -51,7 +55,8 @@ func TestDecodeCappedStopsDuringDecode(t *testing.T) {
 				}
 				return
 			}
-			if !errors.Is(err, test.Want) {
+			var syntaxErr *json.SyntaxError
+			if !errors.Is(err, test.Want) && (!test.WantSyntax || !errors.As(err, &syntaxErr)) {
 				t.Errorf("test %d: err = %v, want %v", testNum, err, test.Want)
 			}
 			if diff := cmp.Diff(test.WantCount, len(got), cmpopts.EquateEmpty()); diff != "" {

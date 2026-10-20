@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -292,6 +293,12 @@ func reconcileDriftHandler(store run.Store, submitter Submitter, authz *authoriz
 			}
 		}
 		proposal, err := submitter.Submit(r.Context(), check.Playbook, check.Inventory, opts...)
+		// A check over a composed inventory can resolve to no hosts by the time it is reconciled,
+		// which is the operator's to see in the preview, not a server failure.
+		if errors.Is(err, inventory.ErrNoHosts) {
+			respondNoHosts(w, log, check.InventoryID, err)
+			return
+		}
 		// A refusal is the operator's answer, not the server's failure. Policy refusals and
 		// configuration errors were logged and returned as a 500 saying the proposal could not be
 		// created, so the one person who needed to know what stopped them had to be handed a server

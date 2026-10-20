@@ -44,8 +44,10 @@ func TestAMalformedAWXTemplateIsSkippedNotFatal(t *testing.T) {
 	if shards["Quoted"] != 2 {
 		t.Errorf("a quoted job_slice_count read as %d shards, want 2", shards["Quoted"])
 	}
+	// Go 1.27 no longer names the field on a type error raised by a custom unmarshaler, so the reason
+	// reads either "its forks field is" or "a value is". Both state the same string-for-number cause.
 	w, ok := warningContaining(t, plan.Warnings, `job_templates entry "Broken" was skipped`,
-		"forks field is a string where a whole number belongs")
+		"is a string where a whole number belongs")
 	if !ok {
 		t.Fatalf("the skipped template was not named with its reason.\nwarnings: %v", plan.Warnings)
 	}

@@ -141,16 +141,18 @@ func (d *Dispatcher) approveRun(ctx context.Context, id string, dec RunDecision)
 // startSplit begins coordinating an approved split. Its shards were stored held alongside it, so
 // they are released to pending here and the coordinator rolls them up. A parent whose shards are
 // gone cannot run, so it fails with a stated reason rather than sitting pending forever with no
-// explanation.
+// explanation, and its stream is closed so a live viewer sees it end.
 func (d *Dispatcher) startSplit(ctx context.Context, parent *run.Run) {
 	shards, err := d.store.Shards(ctx, parent.ID)
 	if err != nil {
 		d.log.Error("dispatch: list shards of an approved split: " + err.Error())
 		d.finalize(parent, run.StatusFailed, nil, "could not read the shards to start")
+		d.publisher.CloseRun(parent.ID)
 		return
 	}
 	if len(shards) == 0 {
 		d.finalize(parent, run.StatusFailed, nil, "split has no stored shards to run")
+		d.publisher.CloseRun(parent.ID)
 		return
 	}
 	// A split whose fan-out could not be settled when it was stored holds fewer shards than it
@@ -165,6 +167,7 @@ func (d *Dispatcher) startSplit(ctx context.Context, parent *run.Run) {
 		d.finalize(parent, run.StatusFailed, nil, fmt.Sprintf("only %d of %d shards were stored, so "+
 			"running it would change part of what was approved: submit it again",
 			len(shards), *parent.ShardCount))
+		d.publisher.CloseRun(parent.ID)
 		return
 	}
 	// A shard that fails to release is logged and the rest proceed.
@@ -203,6 +206,7 @@ func (d *Dispatcher) startSplit(ctx context.Context, parent *run.Run) {
 func (d *Dispatcher) startPipeline(parent *run.Run) {
 	if len(parent.Steps) == 0 {
 		d.finalize(parent, run.StatusFailed, nil, "pipeline has no stored steps to run")
+		d.publisher.CloseRun(parent.ID)
 		return
 	}
 	d.wg.Add(1)
