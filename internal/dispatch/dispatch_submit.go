@@ -539,6 +539,11 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string, opt
 	if existing != nil {
 		return existing, nil
 	}
+	// A retry stores a new split and a run per shard, each writing logs, so it faces the floor the
+	// other submit paths face. A retry already made is returned above, since it stores nothing.
+	if err := d.admit(); err != nil {
+		return nil, err
+	}
 	parent, err := d.store.Get(ctx, parentID)
 	if err != nil {
 		return nil, err

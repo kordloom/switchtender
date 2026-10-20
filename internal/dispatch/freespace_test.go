@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/run"
@@ -135,6 +136,92 @@ func TestFloorReturnsAnAdmittedRunOnRetry(t *testing.T) {
 		t.Errorf("Submit(new key) under the floor error = %v, want ErrLowSpace", err)
 	}
 	waitTerminal(t, store, first.ID)
+}
+
+// TestFloorRefusesShardRetry pins the floor on a retry of failed shards: under it the retry is
+// refused with ErrLowSpace and stores nothing, at it the retry runs, and a retry already made is
+// returned under the floor, since it stores nothing new.
+func TestFloorRefusesShardRetry(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Free        uint64
+		Repeat      bool
+		Want        error
+		WantNewRuns int
+	}{{ // Test 0: A retry one byte under the floor.
+		Free: testFloor - 1, Want: ErrLowSpace,
+	}, { // Test 1: A retry at the floor stores a split and its one shard.
+		Free: testFloor, WantNewRuns: 2,
+	}, { // Test 2: A retry already made is returned under the floor.
+		Free: 0, Repeat: true,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			f := &testFree{}
+			f.free.Store(testFloor)
+			store := run.NewMemStore()
+			runner := &flakyRunnerLister{hosts: []string{"a", "b", "c", "d"}, failHost: "b"}
+			d := New(store, runner, zap.NewNop(), WithNoJanitor(),
+				WithFreeSpaceFloor(testFloor, "/data"), func(c *config) { c.freeBytes = f.read })
+			t.Cleanup(d.Close)
+			parent, err := d.SubmitSplit(ctx, "play.yml", "inv", 2)
+			if err != nil {
+				t.Fatalf("SubmitSplit() error = %v", err)
+			}
+			if got := waitTerminal(t, store, parent.ID); got.Status != run.StatusFailed {
+				t.Fatalf("parent status = %q, want failed", got.Status)
+			}
+			runner.fixed.Store(true)
+			var first *run.Run
+			if test.Repeat {
+				if first, err = d.RetryFailedShards(ctx, parent.ID); err != nil {
+					t.Fatalf("RetryFailedShards(first) error = %v", err)
+				}
+				waitTerminal(t, store, first.ID)
+			}
+			before := storedRuns(t, store)
+			f.free.Store(test.Free)
+			retry, err := d.RetryFailedShards(ctx, parent.ID)
+			if !errors.Is(err, test.Want) {
+				t.Fatalf("RetryFailedShards() error = %v, want %v", err, test.Want)
+			}
+			if first != nil {
+				if diff := cmp.Diff(first.ID, retry.ID); diff != "" {
+					t.Errorf("repeated retry id mismatch (-want +got):\n%s", diff)
+				}
+			}
+			if retry != nil && first == nil {
+				if got := waitTerminal(t, store, retry.ID); got.Status != run.StatusSucceeded {
+					t.Errorf("retry status = %q, want succeeded", got.Status)
+				}
+			}
+			if diff := cmp.Diff(test.WantNewRuns, storedRuns(t, store)-before); diff != "" {
+				t.Errorf("new runs stored mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// storedRuns counts every run in store, the shards of each top-level run included, since List
+// leaves shards out.
+func storedRuns(t *testing.T, store run.Store) int {
+	t.Helper()
+	ctx := context.Background()
+	runs, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	n := len(runs)
+	for _, r := range runs {
+		shards, err := store.Shards(ctx, r.ID)
+		if err != nil {
+			t.Fatalf("Shards(%s) error = %v", r.ID, err)
+		}
+		n += len(shards)
+	}
+	return n
 }
 
 // TestFloorAdmitsWhenSpaceCannotBeRead pins that a failed read admits: a transient error reading
