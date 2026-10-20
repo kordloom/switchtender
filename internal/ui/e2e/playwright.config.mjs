@@ -1,15 +1,16 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// Four servers back six suites. The smoke suite drives the seeded, read-only demo, where the data
-// is rich and nothing can be changed, so it covers rendering and navigation of every main page. The
-// interactive suite drives a writable serve instance, where it exercises the mutating flows the demo
-// disables: launching a run and creating objects, then checking the change actually landed. The
-// assess suite drives the browser assessment, a static page, from the site directory itself. The
-// workflow suite drives the workflow editor against both the demo and the serve instance, and the
-// workflow-integration suite runs what it builds against the serve instance. The identity suite
-// drives a second writable serve instance of its own, which it fills with accounts: the first
-// account turns an open install into one that authenticates, so it cannot share the one the other
-// suites drive open.
+// Four servers back seven suites. The smoke suite drives the seeded, read-only demo, where the
+// data is rich and nothing can be changed, so it covers rendering and navigation of every main
+// page. The interactive suite drives a writable serve instance, where it exercises the mutating
+// flows the demo disables: launching a run and creating objects, then checking the change
+// actually landed. The assess suite drives the browser assessment, a static page, from the site
+// directory itself, and the site suite measures the home page's layout from the same directory.
+// The workflow suite drives the workflow editor against both the demo and the serve instance, and
+// the workflow- integration suite runs what it builds against the serve instance. The identity
+// suite drives a second writable serve instance of its own, which it fills with accounts: the
+// first account turns an open install into one that authenticates, so it cannot share the one the
+// other suites drive open.
 const DEMO_PORT = 18777;
 const SERVE_PORT = 18778;
 const SITE_PORT = 18779;
@@ -61,6 +62,12 @@ export default defineConfig({
     {
       name: "assess",
       testMatch: "assess.spec.mjs",
+      use: { ...devices["Desktop Chrome"], ...channel, baseURL: SITE },
+    },
+    // The marketing site's own layout, measured at desktop and phone widths on the same static server.
+    {
+      name: "site",
+      testMatch: "site.spec.mjs",
       use: { ...devices["Desktop Chrome"], ...channel, baseURL: SITE },
     },
     // The workflow editor runs once per server. Building a graph never leaves the browser, so the
