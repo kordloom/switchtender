@@ -235,19 +235,12 @@ const maxBundleEntries = audit.MaxAssembledClaims
 // who pastes it succeeds rather than meeting the limit from the other direction.
 const suggestedBundleWindow = 10_000
 
-// bundleWindow decides how many of the chain's newest entries a bundle may assemble, from the chain's
-// size rather than a materialized slice, and reports the message to answer with when the request
-// cannot be served as asked. An empty limit means the whole chain, up to the ceiling.
-func bundleWindow(count int, limit string) (int, string) {
+// bundleLimit parses a bundle's limit parameter without reading the chain, so a limit that could
+// never be served is refused before a walk is paid for. It returns zero for an empty limit, meaning
+// the whole chain, and the message to answer with when the limit is not a count within the ceiling.
+func bundleLimit(limit string) (int, string) {
 	if limit == "" {
-		if count > maxBundleEntries {
-			// The suggestion names a window comfortably under the ceiling rather than at it, so
-			// following the advice cannot land on the same refusal from the other side.
-			return 0, fmt.Sprintf("this chain holds %d entries, more than the %d one bundle "+
-				"assembles at once. Ask for a window with limit=<count>, such as limit=%d, which "+
-				"bundles that many of the newest entries", count, maxBundleEntries, suggestedBundleWindow)
-		}
-		return count, ""
+		return 0, ""
 	}
 	n, err := strconv.Atoi(limit)
 	if err != nil || n < 1 {
@@ -256,6 +249,27 @@ func bundleWindow(count int, limit string) (int, string) {
 	if n > maxBundleEntries {
 		return 0, fmt.Sprintf("limit must be at most %d, the number of entries one bundle "+
 			"assembles at once", maxBundleEntries)
+	}
+	return n, ""
+}
+
+// bundleWindow decides how many of the chain's newest entries a bundle may assemble, from the chain's
+// size rather than a materialized slice, and reports the message to answer with when the request
+// cannot be served as asked. An empty limit means the whole chain, up to the ceiling.
+func bundleWindow(count int, limit string) (int, string) {
+	n, msg := bundleLimit(limit)
+	if msg != "" {
+		return 0, msg
+	}
+	if n == 0 {
+		if count > maxBundleEntries {
+			// The suggestion names a window comfortably under the ceiling rather than at it, so
+			// following the advice cannot land on the same refusal from the other side.
+			return 0, fmt.Sprintf("this chain holds %d entries, more than the %d one bundle "+
+				"assembles at once. Ask for a window with limit=<count>, such as limit=%d, which "+
+				"bundles that many of the newest entries", count, maxBundleEntries, suggestedBundleWindow)
+		}
+		return count, ""
 	}
 	if n >= count {
 		return count, ""
@@ -434,6 +448,10 @@ func auditBundleHandler(store audit.Store, producer *audit.Identity, problem, ve
 		// against every anchor in full, before any window is applied, the same way the command does
 		// it, and only the second pass assembles the window the response actually carries. Loading
 		// the whole history to then slice its tail was the cap defeating its own purpose.
+		if _, msg := bundleLimit(r.URL.Query().Get("limit")); msg != "" {
+			respondError(w, log, http.StatusBadRequest, msg)
+			return
+		}
 		recorded, aerr := anchorsFor(r.Context(), store)
 		if aerr != nil {
 			log.Error("server: read anchors: " + aerr.Error())

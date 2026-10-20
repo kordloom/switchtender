@@ -676,9 +676,13 @@ func (s *Server) Handler() http.Handler {
 	if s.producer != nil {
 		producer = *s.producer
 	}
+	// Every full chain walk shares one gate, so concurrent verifies, bundles, receipts, evidence,
+	// and chain health take one store read connection between them rather than one each.
+	walks := newChainWalks()
 	var health *chainHealth
 	if s.audits != nil {
 		health = newChainHealth(s.audits, producer)
+		health.walks = walks
 	}
 	mux.Handle("GET /metrics", metricsHandler(s.store, health, authz, s.log))
 	mux.Handle("GET /v1/fleet", fleetHandler(s.store, authz, s.log))
@@ -693,10 +697,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/tasks", taskTrendsHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/workers", workersHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/audit", auditHandler(s.audits, s.log))
-	mux.Handle("GET /v1/audit/verify", auditVerifyHandler(s.audits, producer, s.log))
-	mux.Handle("GET /v1/audit/bundle", auditBundleHandler(s.audits, s.producer, s.producerProblem,
-		s.productVersion, s.log))
-	mux.Handle("GET /v1/audit/register", auditRegisterHandler(s.store, s.audits, producer, s.log))
+	mux.Handle("GET /v1/audit/verify", walks.hold(auditVerifyHandler(s.audits, producer, s.log)))
+	mux.Handle("GET /v1/audit/bundle", walks.hold(auditBundleHandler(s.audits, s.producer,
+		s.producerProblem, s.productVersion, s.log)))
+	mux.Handle("GET /v1/audit/register",
+		walks.hold(auditRegisterHandler(s.store, s.audits, producer, s.log)))
 	// Served unauthenticated: the beat feed exists so an outside watcher can see the chain is
 	// alive and whole, and that watcher has no account here.
 	mux.Handle("GET "+beatfeed.APIPath, auditBeatsHandler(s.audits, s.log))
@@ -737,9 +742,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/runs/{id}/notifications",
 		runNotificationsHandler(s.store, s.notifications, authz, s.log))
 	mux.Handle("GET /v1/runs/{id}/evidence",
-		runEvidenceHandler(s.store, s.audits, producer, s.decisions, authz, s.log))
-	mux.Handle("GET /v1/runs/{id}/receipt",
-		runReceiptHandler(s.store, s.audits, s.producer, s.productVersion, s.decisions, authz, s.log))
+		walks.hold(runEvidenceHandler(s.store, s.audits, producer, s.decisions, authz, s.log)))
+	mux.Handle("GET /v1/runs/{id}/receipt", walks.hold(runReceiptHandler(s.store, s.audits,
+		s.producer, s.productVersion, s.decisions, authz, s.log)))
 	mux.Handle("POST /v1/runs/{id}/explain", explainRunHandler(s.store, s.ai, authz, s.log))
 	mux.Handle("POST /v1/ai/draft", draftStepHandler(s.ai, s.log))
 	mux.Handle("POST /v1/ai/ask", askFleetHandler(s.store, s.ai, authz, s.log))

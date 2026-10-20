@@ -17,6 +17,9 @@ import (
 type chainHealth struct {
 	// audits is the chain being verified.
 	audits audit.Store
+	// walks is the server's one-walk-at-a-time gate. A refresh that finds another walk running
+	// serves its last reading marked stale rather than queuing a scrape behind a verify.
+	walks *chainWalks
 	// producer is the install identity the tree profile's leaves bind to, needed to check a tree
 	// anchor under the name it was taken with. Zero when the producer identity is unavailable,
 	// which leaves tree anchors uncheckable and reported as problems rather than silently passed.
@@ -25,8 +28,11 @@ type chainHealth struct {
 	mu sync.Mutex
 	// clock reads the time, replaced in tests.
 	clock func() time.Time
-	// minInterval is the shortest gap between full walks; scrapes inside it serve the cache.
+	// minInterval is the shortest gap between full walks; scrapes inside it serve the cache. Zero
+	// walks on every refresh, which tests use to read fresh state.
 	minInterval time.Duration
+	// lastTook is how long the last full walk ran, which stretches the gap on a long chain.
+	lastTook time.Duration
 	// lastWalk is when the last full walk ran, and everWalked whether one ever succeeded or failed.
 	lastWalk   time.Time
 	everWalked bool
@@ -49,6 +55,11 @@ type chainHealth struct {
 // bounds both the cost of a scrape storm and how long a tamper can sit unreported.
 const chainHealthInterval = 15 * time.Second
 
+// chainHealthDuty is how many times its own duration a walk waits before the next one, so chain
+// health holds a read connection at most a tenth of the time however long the chain grows. At
+// 201,000 entries a walk took 1.53 s, so the 15 s floor still applies there.
+const chainHealthDuty = 10
+
 // newChainHealth returns a tracker over the given chain. producer is the install identity the tree
 // profile's leaves bind to. It panics on a nil store, a programming error: the caller decides
 // whether the audit trail is configured, not this.
@@ -57,22 +68,39 @@ func newChainHealth(audits audit.Store, producer audit.Identity) *chainHealth {
 		panic("server: newChainHealth: audit store required")
 	}
 	return &chainHealth{
-		audits: audits, producer: producer, clock: time.Now, minInterval: chainHealthInterval,
+		audits: audits, walks: newChainWalks(), producer: producer, clock: time.Now,
+		minInterval: chainHealthInterval,
 	}
 }
 
-// refresh re-verifies the chain unless a walk ran within minInterval. A walk feeds a fresh scanner
-// over every entry, so an entry rewritten in place since the last walk is caught. On a read failure
-// the previous values stand and the view is marked stale, because a read failure is not a broken
-// chain and reporting it as one would page the wrong alarm.
+// interval returns the gap the next walk waits for: the larger of minInterval and chainHealthDuty
+// times the last walk's duration, or zero when minInterval is zero.
+func (h *chainHealth) interval() time.Duration {
+	if h.minInterval == 0 {
+		return 0
+	}
+	return max(h.minInterval, chainHealthDuty*h.lastTook)
+}
+
+// refresh re-verifies the chain unless a walk ran within the interval. A walk feeds a fresh scanner
+// over every entry, so an entry rewritten in place since the last walk is caught. On a read failure,
+// or when another walk holds the gate, the previous values stand and the view is marked stale,
+// because neither is a broken chain and reporting one as such would page the wrong alarm. The next
+// scrape tries again.
 func (h *chainHealth) refresh(ctx context.Context) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	now := h.clock()
-	if h.everWalked && now.Sub(h.lastWalk) < h.minInterval {
+	if h.everWalked && now.Sub(h.lastWalk) < h.interval() {
 		return
 	}
+	release, ok := h.walks.tryAcquire()
+	if !ok {
+		h.stale = true
+		return
+	}
+	defer release()
 
 	anchors, err := h.anchorsNow(ctx)
 	if err != nil {
@@ -107,6 +135,7 @@ func (h *chainHealth) refresh(ctx context.Context) {
 			h.lastAnchorAt = a.At
 		}
 	}
+	h.lastTook = h.clock().Sub(now)
 	h.lastWalk = now
 	h.everWalked = true
 	h.stale = false
