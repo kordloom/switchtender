@@ -664,7 +664,7 @@ func (s *Server) Handler() http.Handler {
 	tickets := newStreamTickets(s.store)
 	authz := &authorizer{
 		grants: s.grants, teams: s.teams, orgs: s.orgs,
-		orgOwners: s.orgResolver(), strict: s.strictGrants,
+		orgOwners: s.orgResolver(), templateOwners: s.templateOwners, strict: s.strictGrants,
 	}
 	mux.Handle("GET /healthz", healthHandler())
 	mux.Handle("GET /readyz", readyHandler(s.store, s.submitter))
@@ -964,6 +964,24 @@ func (s *Server) orgResolver() OrgResolver {
 		}
 		return orgID, found
 	})
+}
+
+// templateOwners reads every template's owning organization in one store read, keyed by template
+// id, with an unowned template mapped to empty. It returns an empty map when templates are not
+// configured, which is what resolving any one of them answers then.
+func (s *Server) templateOwners(ctx context.Context) (map[string]string, error) {
+	owners := map[string]string{}
+	if s.templates == nil {
+		return owners, nil
+	}
+	list, err := s.templates.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range list {
+		owners[t.ID] = t.OrgID
+	}
+	return owners, nil
 }
 
 // resolveObjectOrg looks up the owning organization of a grantable object, dispatching on its id
