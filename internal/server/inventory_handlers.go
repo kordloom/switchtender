@@ -592,7 +592,8 @@ func respondPreview(w http.ResponseWriter, r *http.Request, store inventory.Stor
 	switch {
 	case errors.Is(err, inventory.ErrHostFilter), errors.Is(err, inventory.ErrSourceVars),
 		errors.Is(err, inventory.ErrComposition), errors.Is(err, inventory.ErrResolve),
-		errors.Is(err, inventory.ErrNeedsAnsible), errors.Is(err, inventory.ErrInvalidInventory),
+		errors.Is(err, inventory.ErrContentRead), errors.Is(err, inventory.ErrNeedsAnsible),
+		errors.Is(err, inventory.ErrInvalidInventory),
 		errors.Is(err, inventory.ErrTooManyHosts):
 		respondError(w, log, http.StatusUnprocessableEntity, err.Error())
 		return

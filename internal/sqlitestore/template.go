@@ -143,7 +143,7 @@ func (s *templateStore) Get(ctx context.Context, id string) (*template.Template,
 
 // List returns all templates ordered by creation time, oldest first.
 func (s *templateStore) List(ctx context.Context) ([]*template.Template, error) {
-	const q = "SELECT " + templateColumns + " FROM templates ORDER BY created_at, id"
+	const q = "SELECT " + templateColumns + " FROM templates ORDER BY rtrim(created_at, 'Z'), id"
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("list templates: %w", err)

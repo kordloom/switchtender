@@ -47,13 +47,13 @@ ON CONFLICT(id) DO NOTHING`
 	return n > 0, nil
 }
 
-// PruneComments removes the command marks and done replies made before before. The stored times
-// compare as text, which orders them correctly to the second, and the cutoff is days old.
+// PruneComments removes the command marks and done replies made before before, comparing the
+// stored time's order key so the cutoff is exact below the second.
 func (s *reviewStore) PruneComments(ctx context.Context, before time.Time) (int, error) {
 	res, err := s.db.ExecContext(ctx, `
 DELETE FROM review_reports
-WHERE (kind='command' OR (kind='reply' AND done<>0)) AND created_at<>'' AND created_at<?`,
-		sqlutil.FormatTime(before))
+WHERE (kind='command' OR (kind='reply' AND done<>0)) AND created_at<>'' AND rtrim(created_at, 'Z')<?`,
+		sqlutil.OrderBind(before))
 	if err != nil {
 		return 0, fmt.Errorf("prune comment records: %w", err)
 	}

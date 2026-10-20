@@ -288,7 +288,7 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/schedules</code></td>
-<td>List schedules.</td>
+<td>List schedules, paged with <code>limit</code> and <code>offset</code>, or only the <code>id</code> values named.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -393,7 +393,7 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/templates</code></td>
-<td>List templates.</td>
+<td>List templates, paged with <code>limit</code> and <code>offset</code>, or only the <code>id</code> values named.</td>
 </tr>
 <tr>
 <td>POST</td>
@@ -448,7 +448,7 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/triggers</code></td>
-<td>List webhook triggers, each with <code>last_error</code> saying why its last delivery started no run.</td>
+<td>List webhook triggers, each with <code>last_error</code> saying why its last delivery started no run. Paged with <code>limit</code> and <code>offset</code>, or only the <code>id</code> values named.</td>
 </tr>
 <tr>
 <td>DELETE</td>
@@ -468,7 +468,7 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/notifications</code></td>
-<td>List notification targets, secrets never included. Operator role.</td>
+<td>List notification targets, secrets never included, paged with <code>limit</code> and <code>offset</code>, or only the <code>id</code> values named. Operator role.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -603,7 +603,7 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/tokens</code></td>
-<td>List tokens without secrets, each with <code>created_by</code> and <code>created_by_type</code>. Admin only.</td>
+<td>List tokens without secrets, each with <code>created_by</code> and <code>created_by_type</code>. Paged with <code>limit</code> and <code>offset</code>, or only the <code>id</code> values named. Admin only.</td>
 </tr>
 <tr>
 <td>DELETE</td>
@@ -663,7 +663,7 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/users</code></td>
-<td>List accounts with their profiles, admin only.</td>
+<td>List accounts with their profiles, paged with <code>limit</code> and <code>offset</code>, or only the <code>id</code> values named. Admin only.</td>
 </tr>
 <tr>
 <td>PUT</td>
@@ -713,7 +713,7 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/orgs</code></td>
-<td>List organizations.</td>
+<td>List organizations, paged with <code>limit</code> and <code>offset</code>, or only the <code>id</code> values named.</td>
 </tr>
 <tr>
 <td>DELETE</td>
@@ -728,7 +728,7 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/orgs/{id}/members</code></td>
-<td>List an organization's members and their roles.</td>
+<td>List an organization's members and their roles, paged with <code>limit</code> and <code>offset</code>, or only the <code>id</code> values named.</td>
 </tr>
 <tr>
 <td>DELETE</td>
@@ -823,7 +823,7 @@ either licensed or absent.</li>
 <tr>
 <td>POST</td>
 <td><code>/v1/inventories/preview</code></td>
-<td>Resolve an unsaved smart or constructed inventory and list the hosts it reaches for the caller, with the <code>engine</code> that resolved it and the <code>ansible_core</code> version when Ansible did.</td>
+<td>Resolve an unsaved smart or constructed inventory and list the hosts it reaches for the caller, with the <code>engine</code> that resolved it and the <code>ansible_core</code> version when Ansible did. It answers <code>422</code> with the reason for a definition that cannot resolve or content that could not be read, and <code>500</code> for a failure of the server's stores.</td>
 </tr>
 <tr>
 <td>POST</td>
@@ -917,9 +917,25 @@ and a rerun answers it <code>409</code>.</p>
 error, as in <code>this template cannot launch: invalid inventory document</code>, and no more. The detail
 can quote what the inventory holds, and the sender is not its owner. The server log keeps the
 detail, and launching the template by hand shows it. A webhook's refusal is also its trigger's
-<code>last_error</code>, and a pull request plan's is a comment on the pull request. An inventory that could
-not be resolved, which can be a store that did not answer, is still answered <code>502</code> on those paths,
-so a sender that retries a failure on the server's side retries it.</p>
+<code>last_error</code>, and a pull request plan's is a comment on the pull request. A constructed inventory
+that names an input that no longer exists, and an input of a composed inventory that does not parse,
+are configuration errors too. Those three paths answer them <code>409</code> and name the error, as in
+<code>inventory not found</code> or <code>composed inventory could not be resolved</code>.</p>
+<p>Content that could not be read is an inventory whose content was fetched from its content source
+(a command, Vault, or a secret manager) or read by ansible-inventory, and the read failed. A
+person's launch answers it <code>400</code> with the whole reason, and a rerun <code>409</code>, so the person can see
+whether the source refused or was down. A webhook trigger, a pull request plan, and a provisioning
+callback answer <code>502</code> with <code>this template cannot launch: inventory content could not be read</code>, and
+no more. The same read fails for a refused request and for an outage, and a sender that retries a
+<code>502</code> gets past an outage. A webhook's answer is also its trigger's <code>last_error</code>, and a pull request
+plan gets no comment for it. A <code>/switchtender apply</code> comment gets one reply, <code>This apply could not start: inventory content could not be read. Nothing was applied.</code>, which tells the commenter to
+comment again once the content can be read.</p>
+<p>A failure of the server or its stores while composing an inventory, such as a store that did not
+answer, is the server's failure, and so is a snapshot the server could not seal or reopen when the
+run was submitted. A person gets <code>500</code> with the detail kept to the server log, a rerun included,
+which answered a snapshot it could not seal <code>409</code>. The webhook trigger and the provisioning
+callback answer <code>502</code> with <code>could not launch the template</code>, and a pull request plan <code>502</code> with
+<code>could not plan the pull request</code>.</p>
 <h3 id="how-long-a-submission-can-take">How long a submission can take</h3>
 <p>A submission answers once the approval gate has judged the run, and for a Terraform or OpenTofu
 dry run whose configuration calls registry or remote modules, the gate downloads those modules
@@ -1301,10 +1317,11 @@ stating the bound.</p>
 <p>Every list response is an envelope: the rows under a name, <code>count</code> for how many were returned, and
 <code>total</code> for how many exist. They agree on any ordinary install.</p>
 <p>The run list pages, because run history grows without bound: <code>limit</code> (default 200, maximum 1000) and
-<code>offset</code>, with <code>has_more</code> and <code>next_offset</code> to continue. The configuration lists, users, tokens,
-templates, schedules, triggers and organizations, return at most 1000 rows in one response. Past
-that, <code>total</code> exceeds <code>count</code> and the response is the first 1000. An install with more configuration
-than that should read it through the object endpoints rather than the list.</p>
+<code>offset</code>, with <code>has_more</code> and <code>next_offset</code> to continue.</p>
+<p>The configuration lists page the same way: users, tokens, templates, schedules, triggers,
+notification targets, organizations and organization members take <code>limit</code> (default and maximum 1000)
+and <code>offset</code>, and carry <code>has_more</code> and <code>next_offset</code>. They also take <code>id</code>, repeatable, to read only
+the named objects. <code>total</code> counts the objects this caller may read.</p>
 <h2 id="survey-field-constraints">Survey field constraints</h2>
 <p>A template survey field accepts bounds beyond its type, checked at launch before any answer becomes
 an extra var. A field also takes an optional <code>help</code> string shown beneath its prompt, and a

@@ -97,7 +97,7 @@ func (s *userStore) FindByUsername(ctx context.Context, username string) (*user.
 
 // List returns all users ordered by creation time, oldest first.
 func (s *userStore) List(ctx context.Context) ([]*user.User, error) {
-	const q = "SELECT " + userColumns + " FROM users ORDER BY created_at, id"
+	const q = "SELECT " + userColumns + " FROM users ORDER BY rtrim(created_at, 'Z') COLLATE \"C\", id COLLATE \"C\""
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)

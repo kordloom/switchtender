@@ -83,7 +83,7 @@ func (s *inventoryStore) Get(ctx context.Context, id string) (*inventory.Invento
 
 // List returns all inventories ordered by creation time, oldest first.
 func (s *inventoryStore) List(ctx context.Context) ([]*inventory.Inventory, error) {
-	const q = "SELECT " + inventoryColumns + " FROM inventories ORDER BY created_at, id"
+	const q = "SELECT " + inventoryColumns + " FROM inventories ORDER BY rtrim(created_at, 'Z'), id"
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("list inventories: %w", err)
@@ -106,7 +106,7 @@ func (s *inventoryStore) List(ctx context.Context) ([]*inventory.Inventory, erro
 
 // ListSummaries returns every inventory without its content, oldest first.
 func (s *inventoryStore) ListSummaries(ctx context.Context) ([]inventory.Summary, error) {
-	const q = "SELECT " + inventorySummaryColumns + " FROM inventories ORDER BY created_at, id"
+	const q = "SELECT " + inventorySummaryColumns + " FROM inventories ORDER BY rtrim(created_at, 'Z'), id"
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("list inventory summaries: %w", err)

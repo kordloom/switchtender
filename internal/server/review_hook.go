@@ -285,6 +285,12 @@ func planReview(ctx context.Context, d reviewHookDeps, tg *trigger.Trigger, ev *
 			d.reviews.Refuse(tg, ev, "This plan cannot run: "+senderReason(err)+".", receipt)
 			return hookAnswer{status: http.StatusConflict, message: templateRefusal(err),
 				receipt: receipt}
+		// A content read that failed is named to the forge and not told to the pull request, since
+		// the same read fails for an outage and the next push can plan.
+		case submitContent:
+			d.log.Warn("server: plan pull request: " + err.Error())
+			return hookAnswer{status: http.StatusBadGateway, message: templateRefusal(err),
+				receipt: receipt}
 		default:
 			d.log.Error("server: plan pull request: " + err.Error())
 			return hookAnswer{status: http.StatusBadGateway, message: "could not plan the pull request",

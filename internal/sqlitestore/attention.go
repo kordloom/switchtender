@@ -62,8 +62,8 @@ func (s *attentionStore) NoteWorker(ctx context.Context, owner string, queues []
 		return fmt.Errorf("note worker: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, "DELETE FROM worker_presence WHERE last_seen < ?",
-		sqlutil.FormatTime(now.Add(-attention.WorkerRetention))); err != nil {
+	if _, err := tx.ExecContext(ctx, "DELETE FROM worker_presence WHERE rtrim(last_seen, 'Z') < ?",
+		sqlutil.OrderBind(now.Add(-attention.WorkerRetention))); err != nil {
 		return fmt.Errorf("note worker: %w", err)
 	}
 	stamp := sqlutil.FormatTime(now)
@@ -93,7 +93,7 @@ func (s *attentionStore) TouchWorker(ctx context.Context, owner string) error {
 func (s *attentionStore) Workers(ctx context.Context, since time.Time) ([]attention.Worker, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT owner, queues, slots, first_seen, last_seen FROM worker_presence
-WHERE last_seen >= ? ORDER BY owner`, sqlutil.FormatTime(since))
+WHERE rtrim(last_seen, 'Z') >= ? ORDER BY owner`, sqlutil.OrderBind(since))
 	if err != nil {
 		return nil, fmt.Errorf("list workers: %w", err)
 	}
@@ -124,8 +124,8 @@ func (s *attentionStore) ClaimAlert(ctx context.Context, key string) (bool, erro
 		return false, fmt.Errorf("claim alert: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, "DELETE FROM attention_alerts WHERE raised_at < ?",
-		sqlutil.FormatTime(now.Add(-attention.AlertRetention))); err != nil {
+	if _, err := tx.ExecContext(ctx, "DELETE FROM attention_alerts WHERE rtrim(raised_at, 'Z') < ?",
+		sqlutil.OrderBind(now.Add(-attention.AlertRetention))); err != nil {
 		return false, fmt.Errorf("claim alert: %w", err)
 	}
 	res, err := tx.ExecContext(ctx, `

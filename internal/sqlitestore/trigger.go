@@ -69,7 +69,7 @@ func (s *triggerStore) Get(ctx context.Context, id string) (*trigger.Trigger, er
 
 // List returns all triggers ordered by creation time, oldest first.
 func (s *triggerStore) List(ctx context.Context) ([]*trigger.Trigger, error) {
-	const q = "SELECT " + triggerColumns + " FROM triggers ORDER BY created_at, id"
+	const q = "SELECT " + triggerColumns + " FROM triggers ORDER BY rtrim(created_at, 'Z'), id"
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("list triggers: %w", err)

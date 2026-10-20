@@ -3,6 +3,11 @@ package sqlutil_test
 import (
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -154,4 +159,217 @@ func TestParseStringsRefusesNonJSON(t *testing.T) {
 	if _, err := sqlutil.ParseStrings("not json"); err == nil {
 		t.Error("ParseStrings() accepted a column that is not JSON")
 	}
+}
+
+func TestOrderConstants(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Col  string
+		Want string
+	}{
+		{Col: "ran_at", Want: sqlutil.TimeOrder},          // Test 0: Run time.
+		{Col: "gathered_at", Want: sqlutil.GatheredOrder}, // Test 1: Gather time.
+	}
+	for i, test := range tests {
+		t.Run(fmt.Sprintf("test %d", i), func(t *testing.T) {
+			t.Parallel()
+			if got := sqlutil.Order(test.Col); got != test.Want {
+				t.Errorf("Order(%q) = %q, want %q", test.Col, got, test.Want)
+			}
+		})
+	}
+	if got, want := sqlutil.OrderPG("ran_at"), `rtrim(ran_at, 'Z') COLLATE "C"`; got != want {
+		t.Errorf("OrderPG() = %q, want %q", got, want)
+	}
+}
+
+func TestOrderKeySortsChronologically(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)
+	offsets := []time.Duration{
+		0,
+		100 * time.Millisecond,
+		100001 * time.Microsecond,
+		500 * time.Millisecond,
+		500001 * time.Microsecond,
+		510 * time.Millisecond,
+		750 * time.Millisecond,
+		900 * time.Millisecond,
+		999999 * time.Microsecond,
+		999999999 * time.Nanosecond,
+	}
+	type stamp struct {
+		Text string
+		At   time.Time
+	}
+	var stamps []stamp
+	for i, off := range offsets {
+		at := base.Add(off)
+		text := sqlutil.FormatTime(at)
+		if i%2 == 1 && off%time.Microsecond == 0 {
+			// Six-digit form as PostgreSQL's own clock writes it.
+			text = at.Format("2006-01-02T15:04:05.000000Z")
+		}
+		stamps = append(stamps, stamp{Text: text, At: at})
+	}
+	key := func(s string) string { return strings.TrimSuffix(s, "Z") }
+
+	tests := []struct {
+		Name string
+		Less func(a, b stamp) bool
+	}{
+		{Name: "key", Less: func(a, b stamp) bool { return key(a.Text) < key(b.Text) }},
+	}
+	for i, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", i, test.Name), func(t *testing.T) {
+			t.Parallel()
+			sorted := make([]stamp, 0, len(stamps))
+			for k := len(stamps) - 1; k >= 0; k-- {
+				sorted = append(sorted, stamps[k])
+			}
+			sort.SliceStable(sorted, func(x, y int) bool { return test.Less(sorted[x], sorted[y]) })
+			for j := 1; j < len(sorted); j++ {
+				if sorted[j].At.Before(sorted[j-1].At) {
+					t.Errorf("%q sorted after %q but is earlier", sorted[j].Text, sorted[j-1].Text)
+				}
+			}
+		})
+	}
+
+	for i, a := range stamps {
+		for j, b := range stamps {
+			want := a.At.Compare(b.At)
+			got := strings.Compare(sqlutil.OrderBind(a.At), key(b.Text))
+			if want == 0 {
+				// A padded stored form is its own trimmed bind plus zeros, so it never sorts below it.
+				if got > 0 {
+					t.Errorf("OrderBind(%d) vs key(%d) = %d, want <= 0", i, j, got)
+				}
+				continue
+			}
+			if got != want {
+				t.Errorf("OrderBind(%d) vs key(%d) = %d, want %d", i, j, got, want)
+			}
+		}
+	}
+}
+
+// storeTimeColumn matches a bare stored time column, optionally table-qualified.
+var storeTimeColumn = regexp.MustCompile(`^(\w+\.)?(\w+_at|last_seen|first_seen)$`)
+
+// storeOrderBy finds the start of each ORDER BY clause.
+var storeOrderBy = regexp.MustCompile(`(?i)ORDER BY\s+`)
+
+// storeClauseEnd matches what follows the last ORDER BY term in a clause.
+var storeClauseEnd = regexp.MustCompile(`(?is)\s+(LIMIT|OFFSET|FOR)\b.*$`)
+
+// storeRawCompare matches a stored time column compared with a bind value or spliced text without
+// the order key.
+var storeRawCompare = regexp.MustCompile("(^|[^\\w(.'])((\\w+\\.)?(\\w+_at|last_seen|first_seen))\\s*(<=|>=|<|>)" +
+	"\\s*(\\?|\\$\\d|\\$%d|\"\\s*\\+|`\\s*\\+)")
+
+// storeOrderSuffix matches the direction and collation that may follow an ORDER BY term.
+var storeOrderSuffix = regexp.MustCompile(`(?i)(\s+COLLATE\s+\\?"C\\?")?(\s+(ASC|DESC))?(\s+NULLS\s+(FIRST|LAST))?$`)
+
+// TestStoresUseOrderKey reads each SQL store's query text and fails on any ORDER BY term or range
+// comparison on a stored time that does not go through the order key. The raw text sorts a whole
+// second after its own fractions, so one such query puts rows out of time order without failing.
+func TestStoresUseOrderKey(t *testing.T) {
+	t.Parallel()
+	// exempt names query text whose time column is not stored text. PostgreSQL keeps a credential
+	// type's created_at as UnixNano in a BIGINT, which already sorts in time order and has no Z.
+	exempt := map[string][]string{
+		"pgstore": {"FROM credential_types ORDER BY created_at, id"},
+	}
+	for _, dir := range []string{"sqlitestore", "pgstore"} {
+		t.Run(dir, func(t *testing.T) {
+			t.Parallel()
+			files, err := filepath.Glob(filepath.Join("..", dir, "*.go"))
+			if err != nil {
+				t.Fatalf("glob %s: %v", dir, err)
+			}
+			if len(files) == 0 {
+				t.Fatalf("no Go files in %s", dir)
+			}
+			for _, file := range files {
+				if strings.HasSuffix(file, "_test.go") {
+					continue
+				}
+				src, err := os.ReadFile(file)
+				if err != nil {
+					t.Fatalf("read %s: %v", file, err)
+				}
+				text := string(src)
+				for _, ok := range exempt[dir] {
+					text = strings.ReplaceAll(text, ok, "")
+				}
+				for _, bad := range rawTimeUses(text) {
+					t.Errorf("%s: %q does not use the order key, see sqlutil.Order", file, bad)
+				}
+			}
+		})
+	}
+}
+
+// rawTimeUses returns each ORDER BY term and range comparison in src that uses a stored time
+// column bare. Comment lines are skipped, since they quote SQL to explain it.
+func rawTimeUses(src string) []string {
+	var code []string
+	for _, line := range strings.Split(src, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "//") {
+			continue
+		}
+		code = append(code, line)
+	}
+	text := strings.Join(code, "\n")
+	var bad []string
+	for _, loc := range storeOrderBy.FindAllStringIndex(text, -1) {
+		for _, term := range orderTerms(text[loc[1]:]) {
+			term = storeOrderSuffix.ReplaceAllString(strings.TrimSpace(term), "")
+			if storeTimeColumn.MatchString(term) {
+				bad = append(bad, "ORDER BY "+term)
+			}
+		}
+	}
+	for _, m := range storeRawCompare.FindAllStringSubmatch(text, -1) {
+		bad = append(bad, strings.TrimSpace(m[0]))
+	}
+	return bad
+}
+
+// orderTerms splits the ORDER BY clause at the start of text into its terms. The clause ends at the
+// end of its line or its query text, or at a parenthesis it did not open, and commas inside a
+// term's own parentheses do not split it.
+func orderTerms(text string) []string {
+	var terms []string
+	depth, start := 0, 0
+	end := len(text)
+scan:
+	for i, r := range text {
+		switch r {
+		case '(':
+			depth++
+		case ')':
+			if depth == 0 {
+				end = i
+				break scan
+			}
+			depth--
+		case ',':
+			if depth == 0 {
+				terms = append(terms, text[start:i])
+				start = i + 1
+			}
+		case '\n', '`', '"':
+			end = i
+			break scan
+		}
+	}
+	if start < end {
+		terms = append(terms, text[start:end])
+	}
+	if n := len(terms); n > 0 {
+		terms[n-1] = storeClauseEnd.ReplaceAllString(terms[n-1], "")
+	}
+	return terms
 }

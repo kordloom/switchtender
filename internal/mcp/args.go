@@ -111,7 +111,9 @@ func checkLimit(ctx context.Context, c *Client, templateID, limit string) error 
 	// Read from the listing rather than a per-id GET. There is no GET on a single template: the
 	// path has PUT and DELETE registered, so the mux answers 405 and every attempt to narrow a
 	// launch failed with a method error that named nothing an agent could act on. The listing is a
-	// route the agent is already entitled to and carries each template's pinned limit.
+	// route the agent is already entitled to and carries each template's pinned limit. The id
+	// parameter narrows it to the one template before paging, so the answer does not depend on
+	// where the template sits among the rest.
 	var listing struct {
 		Templates []struct {
 			ID    string `json:"id"`
@@ -120,7 +122,8 @@ func checkLimit(ctx context.Context, c *Client, templateID, limit string) error 
 		Count int `json:"count"`
 		Total int `json:"total"`
 	}
-	if err := c.do(ctx, "GET", "/v1/templates", nil, &listing); err != nil {
+	path := "/v1/templates?id=" + url.QueryEscape(templateID)
+	if err := c.do(ctx, "GET", path, nil, &listing); err != nil {
 		return err
 	}
 	var found bool
@@ -131,11 +134,9 @@ func checkLimit(ctx context.Context, c *Client, templateID, limit string) error 
 			break
 		}
 	}
-	// Not finding the template refuses the launch rather than allowing it. The listing is capped,
-	// so on an install holding more templates than one page carries this is the ordinary case, not
-	// an exotic one, and treating a pin it could not read as no pin at all let an agent aim a
-	// template pinned to one canary host at whatever it liked. A guard that cannot see the answer
-	// has to say so.
+	// Not finding the template refuses the launch rather than allowing it. Treating a pin it could
+	// not read as no pin at all would let an agent aim a template pinned to one canary host at
+	// whatever it liked. A guard that cannot see the answer has to say so.
 	if !found {
 		return fmt.Errorf("this template's own target could not be read, so narrowing it to %q is "+
 			"refused: launch it as defined, or ask an operator to confirm what it targets", limit)

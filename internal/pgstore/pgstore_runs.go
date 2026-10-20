@@ -174,7 +174,7 @@ func (s *store) ByIdempotencyKey(ctx context.Context, key string) (*run.Run, err
 // List returns top-level runs, excluding shard runs, ordered by creation time, newest first.
 func (s *store) List(ctx context.Context) ([]*run.Run, error) {
 	const q = "SELECT " + runColumns +
-		" FROM runs WHERE parent_id IS NULL ORDER BY created_at DESC, id DESC"
+		" FROM runs WHERE parent_id IS NULL ORDER BY rtrim(created_at, 'Z') COLLATE \"C\" DESC, id COLLATE \"C\" DESC"
 	return s.queryRuns(ctx, "list runs", q)
 }
 
@@ -198,14 +198,15 @@ func (s *store) ListPage(ctx context.Context, filter run.ListFilter, limit, offs
 		args = append(args, filter.Tool)
 		q += fmt.Sprintf(" AND COALESCE(NULLIF(tool, ''), 'ansible') = $%d", len(args))
 	}
-	// Stored times are RFC 3339 UTC strings, so lexicographic comparison is chronological.
+	// Raw stored text is not chronological below the second, so both bounds compare the order key.
+	// See sqlutil.Order.
 	if !filter.After.IsZero() {
-		args = append(args, sqlutil.FormatTime(filter.After))
-		q += fmt.Sprintf(" AND created_at >= $%d", len(args))
+		args = append(args, sqlutil.OrderBind(filter.After))
+		q += fmt.Sprintf(" AND %s >= $%d", sqlutil.OrderPG("created_at"), len(args))
 	}
 	if !filter.Before.IsZero() {
-		args = append(args, sqlutil.FormatTime(filter.Before))
-		q += fmt.Sprintf(" AND created_at < $%d", len(args))
+		args = append(args, sqlutil.OrderBind(filter.Before))
+		q += fmt.Sprintf(" AND %s < $%d", sqlutil.OrderPG("created_at"), len(args))
 	}
 	if filter.Source != "" {
 		args = append(args, filter.Source)
@@ -257,7 +258,7 @@ func (s *store) ListPage(ctx context.Context, filter run.ListFilter, limit, offs
 	if filter.OldestFirst {
 		order = "ASC"
 	}
-	q += " ORDER BY created_at " + order + ", id " + order
+	q += " ORDER BY " + sqlutil.OrderPG("created_at") + " " + order + `, id COLLATE "C" ` + order
 	if limit > 0 {
 		args = append(args, limit)
 		q += fmt.Sprintf(" LIMIT $%d", len(args))
@@ -403,6 +404,10 @@ func queryRunsOn(ctx context.Context, q runsQuerier, label, query string, args .
 // text to a real timestamp before comparing it, so the width of the fractional part does not have to
 // match what the Go side writes.
 const pgNowText = `to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`
+
+// pgNowKey is the database clock as a sqlutil.OrderPG key, with the fraction trimmed the way
+// sqlutil.FormatTime trims it, so a stored time equal to now compares equal and not below.
+const pgNowKey = `rtrim(rtrim(rtrim(` + pgNowText + `, 'Z'), '0'), '.') COLLATE "C"`
 
 // terminalRun is the SQL predicate for a run that has finished and may be purged. It mirrors
 // run.Status.Terminal(). It is stated as the set of terminal statuses rather than as "not pending or
@@ -741,7 +746,7 @@ WHERE id = (
 		AND queue IN (` + placeholders + `)
 		AND (COALESCE(parent_id,'')='' OR parent_id IN (
 			SELECT id FROM runs WHERE status='running' AND cancel_requested=0))
-	ORDER BY created_at, id LIMIT 1
+	ORDER BY rtrim(created_at, 'Z') COLLATE "C", id COLLATE "C" LIMIT 1
 	FOR UPDATE SKIP LOCKED
 )
 RETURNING ` + runColumns
@@ -1285,7 +1290,7 @@ func (s *store) RunTimings(ctx context.Context, limit int) ([]run.RunTiming, err
 	const q = `
 SELECT id, status, kind, queue, claimed_by, created_at, started_at, ended_at
 FROM runs WHERE parent_id IS NULL
-ORDER BY created_at DESC, id DESC LIMIT $1`
+ORDER BY rtrim(created_at, 'Z') COLLATE "C" DESC, id COLLATE "C" DESC LIMIT $1`
 	rows, err := s.db.QueryContext(ctx, q, limit)
 	if err != nil {
 		return nil, fmt.Errorf("run timings: %w", err)

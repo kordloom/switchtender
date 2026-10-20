@@ -97,9 +97,12 @@ type schedulesResponse struct {
 	Schedules []*schedule.Schedule `json:"schedules"`
 	// Count is the number of schedules returned.
 	Count int `json:"count"`
-	// Total is how many rows exist before the response cap, so a caller shown a prefix knows it is
-	// one. Equal to Count for every ordinary install.
+	// Total is how many rows this caller may read across every page, after any id filter.
 	Total int `json:"total"`
+	// HasMore reports whether another page follows this one.
+	HasMore bool `json:"has_more"`
+	// NextOffset is where the next page starts. Passing it as offset reads that page.
+	NextOffset int `json:"next_offset"`
 }
 
 // createScheduleHandler creates a recurring schedule.
@@ -322,10 +325,11 @@ func listSchedulesHandler(store schedule.Store, authz *authorizer, log *zap.Logg
 			}
 			list = kept
 		}
-		capped, total := cappedList(list)
+		page, total, hasMore, next := pageList(r, list,
+			func(sc *schedule.Schedule) string { return sc.ID })
 		respondJSON(w, log, http.StatusOK,
-			schedulesResponse{Schedules: scrubbedSchedules(r.Context(), capped), Count: len(capped),
-				Total: total}, wantsPretty(r))
+			schedulesResponse{Schedules: scrubbedSchedules(r.Context(), page), Count: len(page),
+				Total: total, HasMore: hasMore, NextOffset: next}, wantsPretty(r))
 	}
 }
 

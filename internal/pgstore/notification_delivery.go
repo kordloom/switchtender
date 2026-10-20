@@ -19,7 +19,7 @@ const deliveryColumns = `d.notification_id, d.run_id, d.seq, d.event, d.branch, 
 // ListAttachments returns every attachment, oldest first.
 func (s *notificationStore) ListAttachments(ctx context.Context) ([]*notification.Attachment, error) {
 	const q = "SELECT " + attachmentColumns +
-		" FROM notification_attachments ORDER BY created_at, id"
+		" FROM notification_attachments ORDER BY rtrim(created_at, 'Z') COLLATE \"C\", id COLLATE \"C\""
 	return s.attachments(ctx, q)
 }
 
@@ -381,7 +381,7 @@ func msTime(ms int64) *time.Time {
 func (s *store) purgeNotifications(ctx context.Context, cut string) error {
 	for _, table := range []string{"notification_deliveries", "notification_events"} {
 		if _, err := s.db.ExecContext(ctx, `DELETE FROM `+table+` WHERE run_id IN (
-	SELECT id FROM runs WHERE `+purgeableRun+` AND created_at < $1)`, cut); err != nil {
+	SELECT id FROM runs WHERE `+purgeableRun+` AND rtrim(created_at, 'Z') COLLATE "C" < $1)`, cut); err != nil {
 			return fmt.Errorf("purge %s: %w", table, err)
 		}
 	}

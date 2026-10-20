@@ -179,9 +179,12 @@ type listTemplatesResponse struct {
 	Templates []*template.Template `json:"templates"`
 	// Count is the number returned.
 	Count int `json:"count"`
-	// Total is how many rows exist before the response cap, so a caller shown a prefix knows it is
-	// one. Equal to Count for every ordinary install.
+	// Total is how many rows this caller may read across every page, after any id filter.
 	Total int `json:"total"`
+	// HasMore reports whether another page follows this one.
+	HasMore bool `json:"has_more"`
+	// NextOffset is where the next page starts. Passing it as offset reads that page.
+	NextOffset int `json:"next_offset"`
 }
 
 // templateToolError returns a client message when a template request lacks the input its tool
@@ -532,10 +535,12 @@ func listTemplatesHandler(store template.Store, authz *authorizer, log *zap.Logg
 			respondError(w, log, http.StatusInternalServerError, "could not list templates")
 			return
 		}
-		served := withAWXBindings(r.Context(), store, maskTemplates(visible), log)
-		capped, total := cappedList(scrubbedTemplates(r.Context(), served))
-		respondJSON(w, log, http.StatusOK,
-			listTemplatesResponse{Templates: capped, Count: len(capped), Total: total}, wantsPretty(r))
+		page, total, hasMore, next := pageList(r, visible,
+			func(t *template.Template) string { return t.ID })
+		served := withAWXBindings(r.Context(), store, maskTemplates(page), log)
+		served = scrubbedTemplates(r.Context(), served)
+		respondJSON(w, log, http.StatusOK, listTemplatesResponse{Templates: served,
+			Count: len(served), Total: total, HasMore: hasMore, NextOffset: next}, wantsPretty(r))
 	}
 }
 

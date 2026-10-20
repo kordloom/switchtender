@@ -82,7 +82,7 @@ func (s *credentialStore) Get(ctx context.Context, id string) (*credential.Crede
 
 // List returns all credentials ordered by creation time, oldest first.
 func (s *credentialStore) List(ctx context.Context) ([]*credential.Credential, error) {
-	const q = "SELECT " + credentialColumns + " FROM credentials ORDER BY created_at, id"
+	const q = "SELECT " + credentialColumns + " FROM credentials ORDER BY rtrim(created_at, 'Z') COLLATE \"C\", id COLLATE \"C\""
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("list credentials: %w", err)

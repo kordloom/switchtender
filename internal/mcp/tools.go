@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 )
@@ -42,11 +43,34 @@ func Tools(c *Client, opts Options) []Tool {
 		{
 			Name: "list_templates",
 			Description: "List the job templates this token may see. A template is a run an operator " +
-				"has already defined and vetted. Start here to find what can be proposed.",
-			InputSchema: object(nil, nil),
-			Run: func(ctx context.Context, _ json.RawMessage) (string, error) {
+				"has already defined and vetted. Start here to find what can be proposed. The answer " +
+				"carries total and next_offset, and a later page is read by passing next_offset as " +
+				"offset.",
+			InputSchema: object(map[string]any{
+				"limit":  prop("integer", "How many templates to return. Optional."),
+				"offset": prop("integer", "How many templates to skip, for a later page. Optional."),
+			}, nil),
+			Run: func(ctx context.Context, args json.RawMessage) (string, error) {
+				var in struct {
+					Limit  int `json:"limit,omitempty"`
+					Offset int `json:"offset,omitempty"`
+				}
+				if err := decode(args, &in); err != nil {
+					return "", err
+				}
+				v := url.Values{}
+				if in.Limit > 0 {
+					v.Set("limit", strconv.Itoa(in.Limit))
+				}
+				if in.Offset > 0 {
+					v.Set("offset", strconv.Itoa(in.Offset))
+				}
+				path := "/v1/templates"
+				if q := v.Encode(); q != "" {
+					path += "?" + q
+				}
 				var out any
-				if err := c.do(ctx, "GET", "/v1/templates", nil, &out); err != nil {
+				if err := c.do(ctx, "GET", path, nil, &out); err != nil {
 					return "", err
 				}
 				return render(out)

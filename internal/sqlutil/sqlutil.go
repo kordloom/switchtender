@@ -121,8 +121,9 @@ func FormatTime(t time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
 }
 
-// TimeOrder is the SQL expression that sorts a stored ran_at column in true chronological order,
-// for the SQLite and PostgreSQL stores alike.
+// Order returns the SQL expression that orders or compares the stored time column col in true
+// chronological order, for the SQLite and PostgreSQL stores alike. It is the one way to order or
+// compare a stored time.
 //
 // Sorting the raw column is wrong below the second. FormatTime trims the fractional second, so an
 // instant on a whole second has no fraction at all, and the trailing "Z" then outranks the "." of a
@@ -137,12 +138,36 @@ func FormatTime(t time.Time) string {
 // rewriting a single stored row, which matters because the stored format is load bearing: ClaimDue
 // compares next_run_at for exact text equality, and a past attempt to change the format silently
 // stopped every existing schedule from firing.
+//
+// The fixed six-digit stamps that PostgreSQL's own clock writes sort correctly under the same key,
+// since a zero-padded fraction compares as its trimmed form plus zeros.
+//
+// The col argument is spliced into SQL and must be a trusted column name, never user input.
+func Order(col string) string {
+	return "rtrim(" + col + ", 'Z')"
+}
+
+// OrderPG is [Order] for PostgreSQL, where the key is also forced to the byte-wise "C" collation so
+// the comparison does not depend on the database locale. It is the one way to order or compare a
+// stored time there.
+func OrderPG(col string) string {
+	return Order(col) + ` COLLATE "C"`
+}
+
+// OrderBind returns the bind value to compare against an [Order] key. It is FormatTime without the
+// trailing "Z", and it is the one way to turn an instant into a comparable stored time.
+func OrderBind(t time.Time) string {
+	return strings.TrimSuffix(FormatTime(t), "Z")
+}
+
+// TimeOrder is [Order] for a ran_at column, kept as a constant for use in constant query strings.
+// See [Order] for why the raw column must not be sorted.
 const TimeOrder = `rtrim(ran_at, 'Z')`
 
-// GatheredOrder is [TimeOrder] for a gathered_at column, and it exists for the same reason: the
-// host state history is ordered on it to decide which snapshots survive a depth cap, and sorting
-// the raw text puts a later instant ahead of an earlier one inside the same second. Trimming a
-// snapshot that is actually the newest is not recoverable, so this ordering is load-bearing.
+// GatheredOrder is [Order] for a gathered_at column, kept as a constant for use in constant query
+// strings. The host state history is ordered on it to decide which snapshots survive a depth cap,
+// and trimming a snapshot that is actually the newest is not recoverable, so this ordering is
+// load-bearing.
 const GatheredOrder = `rtrim(gathered_at, 'Z')`
 
 // ParseTime parses a stored time string.

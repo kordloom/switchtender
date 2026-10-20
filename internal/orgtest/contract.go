@@ -19,6 +19,9 @@ func Contract(t *testing.T, newStore func() org.Store) {
 	t.Run("lifecycle", func(t *testing.T) { testLifecycle(t, newStore()) })
 	t.Run("membership", func(t *testing.T) { testMembership(t, newStore()) })
 	t.Run("list and missing parent", func(t *testing.T) { testListAndMissingParent(t, newStore()) })
+	t.Run("list is in time order below the second", func(t *testing.T) {
+		testListTimeOrder(t, newStore())
+	})
 }
 
 // testListAndMissingParent covers the two answers the backends disagreed about: what List returns,
@@ -118,5 +121,41 @@ func testMembership(t *testing.T, store org.Store) {
 	}
 	if diff := cmp.Diff([]org.Member{{UserID: "user_b", Role: org.RoleAdmin}}, members); diff != "" {
 		t.Errorf("Members() after remove mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// testListTimeOrder pins that List orders organizations by creation time below the second. Two times in the
+// same second differ only in the fraction, which the stored text trims, so a store that sorted the
+// raw text would put 10:00:00 after 10:00:00.5. The ids sort differently from the times so an id
+// tiebreak cannot pass this by accident.
+func testListTimeOrder(t *testing.T, store org.Store) {
+	ctx := context.Background()
+	day := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		ID string
+		At time.Duration
+	}{
+		{"org_e", 500 * time.Millisecond},
+		{"org_a", time.Second},
+		{"org_d", 0},
+		{"org_b", 100 * time.Millisecond},
+		{"org_c", time.Microsecond},
+	} {
+		id, at := c.ID, day.Add(c.At)
+		if err := store.Save(ctx, &org.Org{ID: id, Name: id, CreatedAt: at}); err != nil {
+			t.Fatalf("Save(%s) error = %v", id, err)
+		}
+	}
+	list, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	ids := make([]string, 0, len(list))
+	for _, v := range list {
+		ids = append(ids, v.ID)
+	}
+	want := []string{"org_d", "org_c", "org_b", "org_e", "org_a"}
+	if diff := cmp.Diff(want, ids); diff != "" {
+		t.Errorf("List() order mismatch (-want +got):\n%s", diff)
 	}
 }

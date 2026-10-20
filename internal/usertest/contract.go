@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+
 	"github.com/kordloom/switchtender/internal/user"
 )
 
@@ -25,6 +27,9 @@ func Contract(t *testing.T, newStore func() user.Store) {
 	})
 	t.Run("last admin guard holds under concurrency", func(t *testing.T) {
 		testLastAdminGuardUnderConcurrency(t, newStore())
+	})
+	t.Run("list is in time order below the second", func(t *testing.T) {
+		testListTimeOrder(t, newStore())
 	})
 }
 
@@ -308,5 +313,41 @@ func testList(t *testing.T, store user.Store) {
 	}
 	if len(list) != 2 || list[0].ID != "user_a" || list[1].ID != "user_b" {
 		t.Errorf("List() order = %+v, want user_a then user_b", list)
+	}
+}
+
+// testListTimeOrder pins that List orders users by creation time below the second. Two times in the
+// same second differ only in the fraction, which the stored text trims, so a store that sorted the
+// raw text would put 10:00:00 after 10:00:00.5. The ids sort differently from the times so an id
+// tiebreak cannot pass this by accident.
+func testListTimeOrder(t *testing.T, store user.Store) {
+	ctx := context.Background()
+	day := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		ID string
+		At time.Duration
+	}{
+		{"user_e", 500 * time.Millisecond},
+		{"user_a", time.Second},
+		{"user_d", 0},
+		{"user_b", 100 * time.Millisecond},
+		{"user_c", time.Microsecond},
+	} {
+		id, at := c.ID, day.Add(c.At)
+		if err := store.Save(ctx, &user.User{ID: id, Username: id, PasswordHash: "h", Role: user.RoleViewer, CreatedAt: at}); err != nil {
+			t.Fatalf("Save(%s) error = %v", id, err)
+		}
+	}
+	list, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	ids := make([]string, 0, len(list))
+	for _, v := range list {
+		ids = append(ids, v.ID)
+	}
+	want := []string{"user_d", "user_c", "user_b", "user_e", "user_a"}
+	if diff := cmp.Diff(want, ids); diff != "" {
+		t.Errorf("List() order mismatch (-want +got):\n%s", diff)
 	}
 }

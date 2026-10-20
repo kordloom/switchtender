@@ -653,3 +653,34 @@ func TestAHostileIdentifierStaysInsideItsOwnEndpoint(t *testing.T) {
 		})
 	}
 }
+
+// TestListTemplatesPassesLimitAndOffset pins that a later page is read by sending the offset on.
+func TestListTemplatesPassesLimitAndOffset(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	var queries []string
+	ts := pagedTemplateServer(t, 1500, func(r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		queries = append(queries, r.URL.RawQuery)
+	})
+	c, err := NewClient(ts.URL, "st_test_token", 5*time.Second)
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	tool := findTool(t, Tools(c, Options{}), "list_templates")
+	out, err := tool.Run(context.Background(), json.RawMessage(`{"offset":1000}`))
+	if err != nil {
+		t.Fatalf("list_templates error = %v", err)
+	}
+	if !strings.Contains(out, "tpl_1001") || strings.Contains(out, "tpl_1000\"") {
+		t.Errorf("list_templates offset 1000 = %q, want the second page", out)
+	}
+	if _, err := tool.Run(context.Background(), json.RawMessage(`{"limit":5,"offset":10}`)); err != nil {
+		t.Fatalf("list_templates error = %v", err)
+	}
+	want := []string{"offset=1000", "limit=5&offset=10"}
+	if diff := cmp.Diff(want, queries); diff != "" {
+		t.Errorf("queries mismatch (-want +got):\n%s", diff)
+	}
+}

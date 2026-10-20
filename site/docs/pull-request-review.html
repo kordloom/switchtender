@@ -248,8 +248,10 @@ records the download, its exit status, and the digest of the modules it read in 
 valid inventory or a project that no longer exists, is not planned either. The forge is answered
 <code>409</code>, and the pull request gets a comment naming the error and an <code>error</code> status. The comment names
 the error and quotes nothing, since anybody who can read the pull request reads it, and the server
-log keeps the detail. An inventory that could not be resolved, which can be a store that did not
-answer, is answered <code>502</code> as a failure on SwitchTender's side.</p>
+log keeps the detail. A store that did not answer while composing the inventory is answered <code>502</code> as
+a failure on SwitchTender's side. Inventory content that could not be read is answered <code>502</code> with
+<code>this template cannot launch: inventory content could not be read</code>, so a forge that retries gets
+past an outage. Neither is commented on the pull request.</p>
 <p>A <code>.terraform</code> directory committed to the repository is never read. A pull request could commit one
 whose manifest points a registry module at a harmless copy beside it while the plan's own <code>init</code>
 installs the real module, so the review copies the configuration without it and reads only what its
@@ -559,6 +561,10 @@ author from approving their own change, whoever asked for the apply first.</p>
 <tr>
 <td>The apply cannot run for something its owner must fix, such as an inventory that is not a valid inventory or a credential with no secret</td>
 <td>One reply naming the error and quoting nothing. Nothing is applied.</td>
+</tr>
+<tr>
+<td>The inventory's content could not be read</td>
+<td>One reply, <code>This apply could not start: inventory content could not be read. Nothing was applied.</code> Comment again once the content can be read.</td>
 </tr>
 <tr>
 <td>Something failed on SwitchTender's side, such as a call to the forge</td>

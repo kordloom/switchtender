@@ -57,9 +57,12 @@ type listTriggersResponse struct {
 	Triggers []*trigger.Trigger `json:"triggers"`
 	// Count is the number returned.
 	Count int `json:"count"`
-	// Total is how many rows exist before the response cap, so a caller shown a prefix knows it is
-	// one. Equal to Count for every ordinary install.
+	// Total is how many rows this caller may read across every page, after any id filter.
 	Total int `json:"total"`
+	// HasMore reports whether another page follows this one.
+	HasMore bool `json:"has_more"`
+	// NextOffset is where the next page starts. Passing it as offset reads that page.
+	NextOffset int `json:"next_offset"`
 }
 
 // createTriggerHandler mints a trigger and returns its webhook path once. When the server has an
@@ -342,9 +345,10 @@ func listTriggersHandler(triggers trigger.Store, authz *authorizer, log *zap.Log
 			}
 			list = kept
 		}
-		capped, total := cappedList(list)
-		respondJSON(w, log, http.StatusOK,
-			listTriggersResponse{Triggers: capped, Count: len(capped), Total: total}, wantsPretty(r))
+		page, total, hasMore, next := pageList(r, list,
+			func(tg *trigger.Trigger) string { return tg.ID })
+		respondJSON(w, log, http.StatusOK, listTriggersResponse{Triggers: page, Count: len(page),
+			Total: total, HasMore: hasMore, NextOffset: next}, wantsPretty(r))
 	}
 }
 
@@ -593,6 +597,11 @@ func fireTemplate(ctx context.Context, triggers trigger.Store, submitter Submitt
 		case submitInput:
 			log.Warn("server: fire trigger: " + err.Error())
 			return refuse(http.StatusConflict, templateRefusal(err))
+		// The same read fails for an outage, so it stays a 502 the sender retries, and is named so
+		// the delivery log and the trigger's last error say where to look.
+		case submitContent:
+			log.Warn("server: fire trigger: " + err.Error())
+			return refuse(http.StatusBadGateway, templateRefusal(err))
 		default:
 			log.Error("server: fire trigger: " + err.Error())
 			return refuse(http.StatusBadGateway, "could not launch the template")

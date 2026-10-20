@@ -58,6 +58,9 @@ func Contract(t *testing.T, newStore func() notification.Store) {
 	t.Run("a release counts no attempt and a skip holds nothing back", func(t *testing.T) {
 		testReleaseAndSkip(t, newStore())
 	})
+	t.Run("list is in time order below the second", func(t *testing.T) {
+		testListTimeOrder(t, newStore())
+	})
 }
 
 // target returns a webhook target with sealed values standing in for real ciphertext.
@@ -262,5 +265,40 @@ func testDeleteCascades(t *testing.T, store notification.Store) {
 	}
 	if len(left) != 1 || left[0].NotificationID != "ntf_keep" {
 		t.Errorf("attachments after delete = %+v, want only ntf_keep's", left)
+	}
+}
+
+// testListTimeOrder pins that List orders targets by creation time below the second. Two times in
+// the same second differ only in the fraction, which the stored text trims, so a store that sorted
+// the raw text would put 10:00:00 after 10:00:00.5. The ids sort differently from the times so an
+// id tiebreak cannot pass this by accident.
+func testListTimeOrder(t *testing.T, store notification.Store) {
+	ctx := context.Background()
+	day := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		ID string
+		At time.Duration
+	}{
+		{"ntf_e", 500 * time.Millisecond},
+		{"ntf_a", time.Second},
+		{"ntf_d", 0},
+		{"ntf_b", 100 * time.Millisecond},
+		{"ntf_c", time.Microsecond},
+	} {
+		if err := store.Save(ctx, target(c.ID, day.Add(c.At))); err != nil {
+			t.Fatalf("Save(%s) error = %v", c.ID, err)
+		}
+	}
+	list, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	ids := make([]string, 0, len(list))
+	for _, n := range list {
+		ids = append(ids, n.ID)
+	}
+	want := []string{"ntf_d", "ntf_c", "ntf_b", "ntf_e", "ntf_a"}
+	if diff := cmp.Diff(want, ids); diff != "" {
+		t.Errorf("List() order mismatch (-want +got):\n%s", diff)
 	}
 }

@@ -27,6 +27,10 @@ func Contract(t *testing.T, newStore func() template.Store) {
 	t.Run("awx unbind gives back only its own claim", func(t *testing.T) {
 		testAWXUnbind(t, newStore())
 	})
+	t.Run("list is in time order below the second", func(t *testing.T) {
+		testListTimeOrder(t, newStore())
+	})
+	t.Run("list breaks a time tie by id bytes", func(t *testing.T) { testListIDTiebreak(t, newStore()) })
 }
 
 // testHostConfigKey verifies the sealed callback key round trips through Save, is replaced only by
@@ -195,5 +199,65 @@ func testList(t *testing.T, store template.Store) {
 	}
 	if len(list) != 2 || list[0].ID != "tpl_a" || list[1].ID != "tpl_b" {
 		t.Errorf("List() order = %+v, want tpl_a then tpl_b", list)
+	}
+}
+
+// testListTimeOrder pins that List orders templates by creation time below the second. Two times in
+// the same second differ only in the fraction, which the stored text trims, so a store that sorted
+// the raw text would put 10:00:00 after 10:00:00.5. The ids sort differently from the times so an
+// id tiebreak cannot pass this by accident.
+func testListTimeOrder(t *testing.T, store template.Store) {
+	ctx := context.Background()
+	day := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		ID string
+		At time.Duration
+	}{
+		{"tpl_e", 500 * time.Millisecond},
+		{"tpl_a", time.Second},
+		{"tpl_d", 0},
+		{"tpl_b", 100 * time.Millisecond},
+		{"tpl_c", time.Microsecond},
+	} {
+		id, at := c.ID, day.Add(c.At)
+		if err := store.Save(ctx, &template.Template{ID: id, Name: id, Playbook: "p.yml", CreatedAt: at}); err != nil {
+			t.Fatalf("Save(%s) error = %v", id, err)
+		}
+	}
+	list, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	ids := make([]string, 0, len(list))
+	for _, v := range list {
+		ids = append(ids, v.ID)
+	}
+	want := []string{"tpl_d", "tpl_c", "tpl_b", "tpl_e", "tpl_a"}
+	if diff := cmp.Diff(want, ids); diff != "" {
+		t.Errorf("List() order mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// testListIDTiebreak pins that templates made at one instant list in the byte order of their ids,
+// the order SQLite and the memory store give. A PostgreSQL database with a linguistic collation
+// ignores case and punctuation on the first pass and lists these three in another order.
+func testListIDTiebreak(t *testing.T, store template.Store) {
+	ctx := context.Background()
+	at := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
+	for _, id := range []string{"web1", "web-10", "Web2"} {
+		if err := store.Save(ctx, &template.Template{ID: id, Name: id, Playbook: "p.yml", CreatedAt: at}); err != nil {
+			t.Fatalf("Save(%s) error = %v", id, err)
+		}
+	}
+	list, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	ids := make([]string, 0, len(list))
+	for _, v := range list {
+		ids = append(ids, v.ID)
+	}
+	if diff := cmp.Diff([]string{"Web2", "web-10", "web1"}, ids); diff != "" {
+		t.Errorf("List() order mismatch (-want +got):\n%s", diff)
 	}
 }

@@ -904,6 +904,12 @@ func (c *commentCall) propose(ctx context.Context, requester *user.User, plan *r
 		c.d.log.Warn("server: comment apply: " + err.Error())
 		a = refused("configuration", "This apply cannot run: "+senderReason(err)+". Nothing was "+
 			"applied. Fix it in SwitchTender, then comment again.")
+	// A content read that failed stays a failure, since the same read fails for an outage a second
+	// comment gets past, and the reply names it so the commenter knows where to look.
+	case submitContent:
+		a = failed("propose", http.StatusBadGateway, err)
+		a.reply = "This apply could not start: " + senderReason(err) + ". Nothing was applied. " +
+			"Comment again to retry once the inventory's content can be read."
 	default:
 		a = failed("propose", http.StatusBadGateway, err)
 	}

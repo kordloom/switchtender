@@ -31,10 +31,11 @@ const purgeableRun = terminalRun + " AND NOT " + owedOutcomeHold
 // the rows are gone, and each EXISTS rides the run_id index so it stays a single cheap query. A run
 // an owed outcome is built from keeps them. See owedOutcomeHold.
 func (s *store) PurgeEventsBefore(ctx context.Context, cutoff time.Time) (int, error) {
-	cut := sqlutil.FormatTime(cutoff)
+	// The cutoff binds the order key, so the purge is exact below the second. See sqlutil.Order.
+	cut := sqlutil.OrderBind(cutoff)
 	var trimmed int
 	err := s.db.QueryRowContext(ctx, `
-SELECT COUNT(*) FROM runs WHERE `+purgeableRun+` AND created_at < ?
+SELECT COUNT(*) FROM runs WHERE `+purgeableRun+` AND rtrim(created_at, 'Z') < ?
 	AND (EXISTS (SELECT 1 FROM run_events WHERE run_events.run_id = runs.id)
 	     OR EXISTS (SELECT 1 FROM run_logs WHERE run_logs.run_id = runs.id))`, cut).
 		Scan(&trimmed)
@@ -54,7 +55,8 @@ SELECT COUNT(*) FROM runs WHERE `+purgeableRun+` AND created_at < ?
 // keeping the per host and per task summaries. It returns how many runs were deleted. A run an
 // owed outcome is built from stays, with everything it holds. See owedOutcomeHold.
 func (s *store) PurgeRunsBefore(ctx context.Context, cutoff time.Time) (int, error) {
-	cut := sqlutil.FormatTime(cutoff)
+	// The cutoff binds the order key, so the purge is exact below the second. See sqlutil.Order.
+	cut := sqlutil.OrderBind(cutoff)
 	if err := s.deleteBatched(ctx, "run_events", cut); err != nil {
 		return 0, fmt.Errorf("purge run events: %w", err)
 	}
@@ -69,7 +71,7 @@ func (s *store) PurgeRunsBefore(ctx context.Context, cutoff time.Time) (int, err
 	// gone it can never be opened again, the same as a redaction.
 	if _, err := s.db.ExecContext(ctx, `
 DELETE FROM run_decisions WHERE run_id IN (
-	SELECT id FROM runs WHERE `+purgeableRun+` AND created_at < ?
+	SELECT id FROM runs WHERE `+purgeableRun+` AND rtrim(created_at, 'Z') < ?
 )`, cut); err != nil {
 		return 0, fmt.Errorf("purge decision records: %w", err)
 	}
@@ -80,7 +82,7 @@ DELETE FROM run_decisions WHERE run_id IN (
 	if _, err := s.db.ExecContext(ctx, `
 INSERT OR IGNORE INTO run_auth (run_id, org_id, project_id, inventory_id, pull_credential_id, credential_ids)
 SELECT id, org_id, project_id, inventory_id, pull_credential_id, credential_ids
-FROM runs WHERE `+purgeableRun+` AND created_at < ?`, cut); err != nil {
+FROM runs WHERE `+purgeableRun+` AND rtrim(created_at, 'Z') < ?`, cut); err != nil {
 		return 0, fmt.Errorf("retain run authorization: %w", err)
 	}
 	if err := s.purgeReviewReports(ctx, cut); err != nil {
@@ -90,7 +92,7 @@ FROM runs WHERE `+purgeableRun+` AND created_at < ?`, cut); err != nil {
 	for {
 		res, err := s.db.ExecContext(ctx, `
 DELETE FROM runs WHERE id IN (
-	SELECT id FROM runs WHERE `+purgeableRun+` AND created_at < ? LIMIT ?
+	SELECT id FROM runs WHERE `+purgeableRun+` AND rtrim(created_at, 'Z') < ? LIMIT ?
 )`, cut, purgeBatch)
 		if err != nil {
 			return deleted, fmt.Errorf("purge runs: %w", err)
@@ -128,7 +130,7 @@ type runOwned struct {
 // and logs, which every release deletes before the run itself. Each one is also swept for the rows
 // of runs that no longer exist. See purgeOrphans.
 var runOwnedTables = []runOwned{
-	{table: "run_decisions", older: "recorded_at < ?"},
+	{table: "run_decisions", older: "rtrim(recorded_at, 'Z') < ?"},
 	{table: "notification_events", older: "created_ms < ?", millis: true},
 	{table: "notification_deliveries", older: "created_ms < ?", millis: true},
 	// An end still owed for a run retention removed has nothing left to announce.
@@ -136,7 +138,7 @@ var runOwnedTables = []runOwned{
 	// So does a start or hold still owed.
 	{table: "run_events_owed", older: "owed_ms < ?", millis: true},
 	// A refusal's record names no run and is bounded by its own rule in purgeReviewReports.
-	{table: "review_reports", older: "run_id <> '' AND created_at < ?"},
+	{table: "review_reports", older: "run_id <> '' AND rtrim(created_at, 'Z') < ?"},
 }
 
 // purgeOrphans removes, from every table in runOwnedTables, the rows of runs that no longer exist,
@@ -152,7 +154,7 @@ var runOwnedTables = []runOwned{
 // in and a row older than the retention window cannot.
 func (s *store) purgeOrphans(ctx context.Context, cutoff time.Time) error {
 	for _, owned := range runOwnedTables {
-		arg := any(sqlutil.FormatTime(cutoff))
+		arg := any(sqlutil.OrderBind(cutoff))
 		if owned.millis {
 			arg = cutoff.UnixMilli()
 		}
@@ -172,8 +174,8 @@ func (s *store) purgeOrphans(ctx context.Context, cutoff time.Time) error {
 func (s *store) purgeReviewReports(ctx context.Context, cut string) error {
 	if _, err := s.db.ExecContext(ctx, `
 DELETE FROM review_reports WHERE run_id IN (
-	SELECT id FROM runs WHERE `+purgeableRun+` AND created_at < ?
-) OR (run_id = '' AND done = 1 AND created_at < ?)`, cut, cut); err != nil {
+	SELECT id FROM runs WHERE `+purgeableRun+` AND rtrim(created_at, 'Z') < ?
+) OR (run_id = '' AND done = 1 AND rtrim(created_at, 'Z') < ?)`, cut, cut); err != nil {
 		return fmt.Errorf("purge review reports: %w", err)
 	}
 	return nil
@@ -186,7 +188,7 @@ func (s *store) deleteBatched(ctx context.Context, table, cut string) error {
 	q := fmt.Sprintf(`
 DELETE FROM %s WHERE seq IN (
 	SELECT seq FROM %s WHERE run_id IN (
-		SELECT id FROM runs WHERE `+purgeableRun+` AND created_at < ?
+		SELECT id FROM runs WHERE `+purgeableRun+` AND rtrim(created_at, 'Z') < ?
 	) LIMIT ?
 )`, table, table)
 	for {

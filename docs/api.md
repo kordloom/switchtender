@@ -78,7 +78,7 @@ Two more are enforced somewhere other than the request:
 | POST   | `/v1/drift/reconcile`      | Build a reconcile proposal for a drifted host, held for approval. A Terraform or OpenTofu proposal carries the plan the check saved, and a check that kept none answers `409`. Operator role. |
 | POST   | `/v1/pipelines`            | Submit ordered playbook steps as one pipeline.          |
 | POST   | `/v1/schedules`            | Cron or RFC 5545 recurrence schedule for a run, split, pipeline, or template. The response records `created_by`. |
-| GET    | `/v1/schedules`            | List schedules.                                         |
+| GET    | `/v1/schedules`            | List schedules, paged with `limit` and `offset`, or only the `id` values named. |
 | GET    | `/v1/schedules/preview`    | Next fire times for a cron expression or a recurrence rule and timezone, without saving anything. |
 | GET    | `/v1/schedules/{id}`       | One schedule.                                           |
 | PUT    | `/v1/schedules/{id}`       | Update a schedule.                                      |
@@ -99,7 +99,7 @@ Two more are enforced somewhere other than the request:
 | GET    | `/v1/projects/{id}/files`  | Browse the project checkout's tree.                     |
 | GET    | `/v1/projects/{id}/file`   | Read one file from the project checkout. `?path=` within the repo. |
 | POST   | `/v1/templates`            | Save a launch preset.                                   |
-| GET    | `/v1/templates`            | List templates.                                         |
+| GET    | `/v1/templates`            | List templates, paged with `limit` and `offset`, or only the `id` values named. |
 | POST   | `/v1/templates/{id}/launch`| Launch a template, answering its survey and choosing selectable credentials if it has them. |
 | PUT    | `/v1/templates/{id}`       | Update a template.                                      |
 | DELETE | `/v1/templates/{id}`       | Delete a template.                                      |
@@ -110,11 +110,11 @@ Two more are enforced somewhere other than the request:
 | POST   | `/v1/triggers`             | Create a webhook trigger, or with `review` a [pull request review](pull-request-review.md) trigger, returns a signing secret once.|
 | PUT    | `/v1/triggers/{id}`        | Rename a trigger, toggle signature enforcement, or replace a review trigger's `review` settings.|
 | POST   | `/v1/triggers/{id}/rotate-secret` | Rotate the signing secret, shown once.           |
-| GET    | `/v1/triggers`             | List webhook triggers, each with `last_error` saying why its last delivery started no run. |
+| GET    | `/v1/triggers`             | List webhook triggers, each with `last_error` saying why its last delivery started no run. Paged with `limit` and `offset`, or only the `id` values named. |
 | DELETE | `/v1/triggers/{id}`        | Delete a trigger, revoking its webhook.                 |
 | POST   | `/hooks/{token}`        | Fire a trigger from a git push, or, for a review trigger, plan a pull request and act on a `/switchtender plan` or `/switchtender apply` comment, as [planning and applying from a comment](pull-request-review.md#planning-and-applying-from-a-comment) describes. A required HMAC signature, or GitLab's token, is checked first. A fire whose inventory matches no hosts is skipped and answered `200` with `skipped`. Answers within five seconds, with `accepted` when the launch is still going.|
 | POST   | `/v1/notifications`        | Create a named notification target. Its address and key are sealed at rest and never returned. Admin. |
-| GET    | `/v1/notifications`        | List notification targets, secrets never included. Operator role. |
+| GET    | `/v1/notifications`        | List notification targets, secrets never included, paged with `limit` and `offset`, or only the `id` values named. Operator role. |
 | GET    | `/v1/notifications/{id}`   | One notification target. Operator role. |
 | PUT    | `/v1/notifications/{id}`   | Update a target. A blank or masked address or key keeps the stored one. Admin, or a manage grant on it. |
 | DELETE | `/v1/notifications/{id}`   | Delete a target and every attachment it has. Admin, or a manage grant on it. |
@@ -141,7 +141,7 @@ Two more are enforced somewhere other than the request:
 | GET    | `/v1/auth/me`              | Who the server resolved the caller to be.               |
 | POST   | `/v1/auth/logout`          | End the caller's own session, revoking its token.       |
 | POST   | `/v1/tokens`               | Mint a token bound to an account. Returns it once, with `created_by` naming who minted it. |
-| GET    | `/v1/tokens`               | List tokens without secrets, each with `created_by` and `created_by_type`. Admin only. |
+| GET    | `/v1/tokens`               | List tokens without secrets, each with `created_by` and `created_by_type`. Paged with `limit` and `offset`, or only the `id` values named. Admin only. |
 | DELETE | `/v1/tokens/{id}`          | Revoke a token everywhere at once. Admin only.          |
 | GET    | `/auth/oidc/login`      | Start the OpenID Connect sign-in handshake.             |
 | GET    | `/auth/oidc/callback`   | Complete the OIDC handshake and issue a token.          |
@@ -153,7 +153,7 @@ Two more are enforced somewhere other than the request:
 | POST   | `/auth/saml/acs`        | Consume the IdP assertion and issue a token.            |
 | GET    | `/auth/saml/metadata`   | Service provider metadata for IdP registration.         |
 | POST   | `/v1/users`                | Create an account with a role and an optional profile.  |
-| GET    | `/v1/users`                | List accounts with their profiles, admin only.          |
+| GET    | `/v1/users`                | List accounts with their profiles, paged with `limit` and `offset`, or only the `id` values named. Admin only. |
 | PUT    | `/v1/users/{id}`           | Update an account's role, password, or profile.         |
 | DELETE | `/v1/users/{id}`           | Delete an account. Its tokens stop working.             |
 | POST   | `/v1/teams`                | Create a team of users.                                 |
@@ -163,10 +163,10 @@ Two more are enforced somewhere other than the request:
 | GET    | `/v1/teams/{id}/members`   | List a team's members.                                  |
 | DELETE | `/v1/teams/{id}/members/{userID}` | Remove a user from a team.                       |
 | POST   | `/v1/orgs`                 | Create an organization.                                 |
-| GET    | `/v1/orgs`                 | List organizations.                                     |
+| GET    | `/v1/orgs`                 | List organizations, paged with `limit` and `offset`, or only the `id` values named. |
 | DELETE | `/v1/orgs/{id}`            | Delete an organization and its memberships.             |
 | POST   | `/v1/orgs/{id}/members`    | Add a user to an organization with an organization role. Organization admin grants manage over that organization's projects, templates, inventories and credentials, bounded by the account's global role: on a viewer account it confers use, not manage. See [concepts](concepts.md). |
-| GET    | `/v1/orgs/{id}/members`    | List an organization's members and their roles.         |
+| GET    | `/v1/orgs/{id}/members`    | List an organization's members and their roles, paged with `limit` and `offset`, or only the `id` values named. |
 | DELETE | `/v1/orgs/{id}/members/{userID}` | Remove a user from an organization.               |
 | POST   | `/v1/grants`               | Grant a user or team read, use, or manage on an object: a project, template, inventory, or credential id, or a worker queue as `queue:<name>`. |
 | GET    | `/v1/grants`               | List access grants.                                     |
@@ -185,7 +185,7 @@ Two more are enforced somewhere other than the request:
 | GET    | `/v1/inventories/{id}/facts` | List the inventory's hosts with cached facts: size, gathering run, and time. Operator role. |
 | GET    | `/v1/inventories/{id}/facts/{host}` | Read one host's cached facts. Secret-looking values are masked below admin. Operator role. |
 | DELETE | `/v1/inventories/{id}/facts/{host}` | Clear one host's cached facts, so the next run gathers them afresh. |
-| POST   | `/v1/inventories/preview`  | Resolve an unsaved smart or constructed inventory and list the hosts it reaches for the caller, with the `engine` that resolved it and the `ansible_core` version when Ansible did. |
+| POST   | `/v1/inventories/preview`  | Resolve an unsaved smart or constructed inventory and list the hosts it reaches for the caller, with the `engine` that resolved it and the `ansible_core` version when Ansible did. It answers `422` with the reason for a definition that cannot resolve or content that could not be read, and `500` for a failure of the server's stores. |
 | POST   | `/v1/inventories/{id}/preview` | Resolve a stored smart or constructed inventory and list the hosts a launch by the caller would reach, with the same `engine` and `ansible_core`. |
 | POST   | `/v1/policies`             | Create a policy that holds, denies, or exempts matching runs. `effect` is `require_approval`, the default, `deny`, or `exempt`. `account` matches the username of the account the requesting credential is bound to. An exempt policy lets the agent runs it matches go ahead without the built-in agent hold, takes only `tool`, `command_contains`, `inventory_id`, `queue`, `actor`, `account`, and `actor_kind: agent`, and is Community. An exempt policy that names `actor` without `account` is refused with 400, since a token label is not unique across accounts. See [Agent runs are held by default](policy.md#agent-runs-are-held-by-default). |
 | GET    | `/v1/policies`             | List approval policies. A Rego policy from the policy file carries a `rego` object with its `package`, `syntax`, bundle `sha256`, `modules`, `warn` (`hold` or `note`), and `timeout`. See [Approval policies](policy.md). |
@@ -226,9 +226,28 @@ A webhook trigger, a pull request plan, and a provisioning callback answer it `4
 error, as in `this template cannot launch: invalid inventory document`, and no more. The detail
 can quote what the inventory holds, and the sender is not its owner. The server log keeps the
 detail, and launching the template by hand shows it. A webhook's refusal is also its trigger's
-`last_error`, and a pull request plan's is a comment on the pull request. An inventory that could
-not be resolved, which can be a store that did not answer, is still answered `502` on those paths,
-so a sender that retries a failure on the server's side retries it.
+`last_error`, and a pull request plan's is a comment on the pull request. A constructed inventory
+that names an input that no longer exists, and an input of a composed inventory that does not parse,
+are configuration errors too. Those three paths answer them `409` and name the error, as in
+`inventory not found` or `composed inventory could not be resolved`.
+
+Content that could not be read is an inventory whose content was fetched from its content source
+(a command, Vault, or a secret manager) or read by ansible-inventory, and the read failed. A
+person's launch answers it `400` with the whole reason, and a rerun `409`, so the person can see
+whether the source refused or was down. A webhook trigger, a pull request plan, and a provisioning
+callback answer `502` with `this template cannot launch: inventory content could not be read`, and
+no more. The same read fails for a refused request and for an outage, and a sender that retries a
+`502` gets past an outage. A webhook's answer is also its trigger's `last_error`, and a pull request
+plan gets no comment for it. A `/switchtender apply` comment gets one reply, `This apply could not
+start: inventory content could not be read. Nothing was applied.`, which tells the commenter to
+comment again once the content can be read.
+
+A failure of the server or its stores while composing an inventory, such as a store that did not
+answer, is the server's failure, and so is a snapshot the server could not seal or reopen when the
+run was submitted. A person gets `500` with the detail kept to the server log, a rerun included,
+which answered a snapshot it could not seal `409`. The webhook trigger and the provisioning
+callback answer `502` with `could not launch the template`, and a pull request plan `502` with
+`could not plan the pull request`.
 
 ### How long a submission can take
 
@@ -583,10 +602,12 @@ Every list response is an envelope: the rows under a name, `count` for how many 
 `total` for how many exist. They agree on any ordinary install.
 
 The run list pages, because run history grows without bound: `limit` (default 200, maximum 1000) and
-`offset`, with `has_more` and `next_offset` to continue. The configuration lists, users, tokens,
-templates, schedules, triggers and organizations, return at most 1000 rows in one response. Past
-that, `total` exceeds `count` and the response is the first 1000. An install with more configuration
-than that should read it through the object endpoints rather than the list.
+`offset`, with `has_more` and `next_offset` to continue.
+
+The configuration lists page the same way: users, tokens, templates, schedules, triggers,
+notification targets, organizations and organization members take `limit` (default and maximum 1000)
+and `offset`, and carry `has_more` and `next_offset`. They also take `id`, repeatable, to read only
+the named objects. `total` counts the objects this caller may read.
 
 ## Survey field constraints
 

@@ -48,8 +48,12 @@ type notificationsResponse struct {
 	Notifications []notificationView `json:"notifications"`
 	// Count is the number returned.
 	Count int `json:"count"`
-	// Total is how many exist before the response cap.
+	// Total is how many rows this caller may read across every page, after any id filter.
 	Total int `json:"total"`
+	// HasMore reports whether another page follows this one.
+	HasMore bool `json:"has_more"`
+	// NextOffset is where the next page starts. Passing it as offset reads that page.
+	NextOffset int `json:"next_offset"`
 	// Sealing reports whether this install can store a target's secret, which needs the encryption
 	// key and salt, so a form can say so before anybody pastes a webhook address into it.
 	Sealing bool `json:"sealing"`
@@ -307,13 +311,15 @@ func listNotificationsHandler(store notification.Store, sealer *credential.Seale
 			respondError(w, log, http.StatusInternalServerError, "could not list notification targets")
 			return
 		}
-		capped, total := cappedList(visible)
-		views := make([]notificationView, 0, len(capped))
-		for _, n := range capped {
+		page, total, hasMore, next := pageList(r, visible,
+			func(n *notification.Notification) string { return n.ID })
+		views := make([]notificationView, 0, len(page))
+		for _, n := range page {
 			views = append(views, viewNotification(r.Context(), store, n, log))
 		}
 		respondJSON(w, log, http.StatusOK, notificationsResponse{
 			Notifications: views, Count: len(views), Total: total,
+			HasMore: hasMore, NextOffset: next,
 			Sealing: sealer != nil && sealer.Enabled(),
 		}, wantsPretty(r))
 	}

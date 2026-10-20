@@ -1417,6 +1417,11 @@ func migrateHostSummary(db *sql.DB) error {
 // worker listing as history grows. The actor and source indexes back the runs view's fielded
 // search, whose equality filters otherwise walked the whole table; each carries the page ordering
 // behind its filtered columns so the search pages without a sort.
+//
+// The indexes named with _key order on sqlutil.Order's key rather than the raw column, because that
+// is what the queries order and compare by, and SQLite serves an expression only from an index on
+// the same expression. Without them every run page, search page, and claim sorted every matching
+// row. The raw-column indexes beside them stay so a release that predates the key keeps its plans.
 func ensureRunIndexes(db *sql.DB) error {
 	for _, stmt := range []string{
 		`CREATE INDEX IF NOT EXISTS idx_runs_pending_claim ON runs(queue, created_at, id)
@@ -1426,6 +1431,16 @@ func ensureRunIndexes(db *sql.DB) error {
 		"CREATE INDEX IF NOT EXISTS idx_runs_actor ON runs(actor, created_at DESC, id DESC)",
 		"CREATE INDEX IF NOT EXISTS idx_runs_source ON runs(source, source_id, created_at DESC, id DESC)",
 		callbackLiveIndex,
+		`CREATE INDEX IF NOT EXISTS idx_runs_toplevel_key
+			ON runs(rtrim(created_at, 'Z') DESC, id DESC) WHERE parent_id IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_runs_toplevel_status_key
+			ON runs(status, rtrim(created_at, 'Z') DESC, id DESC) WHERE parent_id IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_runs_actor_key ON runs(actor, rtrim(created_at, 'Z') DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_runs_source_key
+			ON runs(source, source_id, rtrim(created_at, 'Z') DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_runs_pending_claim_key ON runs(queue, rtrim(created_at, 'Z'), id)
+			WHERE status='pending' AND claimed_by='' AND kind=''`,
+		"CREATE INDEX IF NOT EXISTS idx_runs_leased_key ON runs(rtrim(claimed_at, 'Z')) WHERE claimed_by<>''",
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			return fmt.Errorf("create run index: %w", err)

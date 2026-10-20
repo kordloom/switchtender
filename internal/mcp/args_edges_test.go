@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -658,5 +660,69 @@ func TestCheckLimitRefusesWhenItCannotReadThePin(t *testing.T) {
 					"canary host wherever it likes", testNum)
 			}
 		})
+	}
+}
+
+// pagedTemplateServer answers the template listing 1000 rows per page and honors the id filter,
+// the way the real server does. The listing holds count templates named tpl_1 and up.
+func pagedTemplateServer(t *testing.T, count int, onRequest func(*http.Request)) *httptest.Server {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if onRequest != nil {
+			onRequest(r)
+		}
+		type row struct {
+			ID    string `json:"id"`
+			Limit string `json:"limit"`
+		}
+		var all []row
+		for i := 1; i <= count; i++ {
+			pinned := ""
+			if i == 1001 {
+				pinned = "canary-1"
+			}
+			all = append(all, row{ID: "tpl_" + strconv.Itoa(i), Limit: pinned})
+		}
+		if ids := r.URL.Query()["id"]; len(ids) > 0 {
+			var kept []row
+			for _, x := range all {
+				if slices.Contains(ids, x.ID) {
+					kept = append(kept, x)
+				}
+			}
+			all = kept
+		}
+		offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+		total := len(all)
+		if offset > total {
+			offset = total
+		}
+		page := all[offset:min(offset+1000, total)]
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"templates": page, "count": len(page), "total": total,
+			"has_more": offset+len(page) < total, "next_offset": offset + len(page),
+		})
+	}))
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+// TestCheckLimitReadsATemplatePastTheFirstPage pins that the pinned-limit lookup asks for the one
+// template by id, so a template at position 1001 is still read and its pin still holds.
+func TestCheckLimitReadsATemplatePastTheFirstPage(t *testing.T) {
+	t.Parallel()
+	ts := pagedTemplateServer(t, 1500, nil)
+	c, err := NewClient(ts.URL, "st_test_token", 5*time.Second)
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	if err := checkLimit(context.Background(), c, "tpl_1001", "canary-1"); err != nil {
+		t.Errorf("checkLimit(same as the pin) error = %v, want it allowed", err)
+	}
+	if err := checkLimit(context.Background(), c, "tpl_1001", "web01"); err == nil {
+		t.Error("checkLimit(different from the pin) allowed a launch the pin forbids")
+	}
+	if err := checkLimit(context.Background(), c, "tpl_9999", "web01"); err == nil {
+		t.Error("checkLimit allowed a narrowing launch of a template that does not exist")
 	}
 }

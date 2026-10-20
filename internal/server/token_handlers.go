@@ -54,13 +54,16 @@ type createTokenResponse struct {
 // listTokensResponse wraps the token list. The tokens carry no secret: auth.Token keeps its hash out
 // of JSON, and the plaintext was never stored to begin with.
 type listTokensResponse struct {
-	// Tokens is every stored token, oldest first.
+	// Tokens is this page of stored tokens, oldest first.
 	Tokens []*auth.Token `json:"tokens"`
 	// Count is the number returned.
 	Count int `json:"count"`
-	// Total is how many rows exist before the response cap, so a caller shown a prefix knows it is
-	// one. Equal to Count for every ordinary install.
+	// Total is how many rows this caller may read across every page, after any id filter.
 	Total int `json:"total"`
+	// HasMore reports whether another page follows this one.
+	HasMore bool `json:"has_more"`
+	// NextOffset is where the next page starts. Passing it as offset reads that page.
+	NextOffset int `json:"next_offset"`
 }
 
 // listTokensHandler returns every token, without secrets, so an admin can see what holds access to
@@ -78,9 +81,9 @@ func listTokensHandler(tokens auth.Store, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusInternalServerError, "could not list tokens")
 			return
 		}
-		capped, total := cappedList(list)
-		respondJSON(w, log, http.StatusOK,
-			listTokensResponse{Tokens: capped, Count: len(capped), Total: total}, wantsPretty(r))
+		page, total, hasMore, next := pageList(r, list, func(t *auth.Token) string { return t.ID })
+		respondJSON(w, log, http.StatusOK, listTokensResponse{Tokens: page, Count: len(page),
+			Total: total, HasMore: hasMore, NextOffset: next}, wantsPretty(r))
 	}
 }
 

@@ -63,6 +63,9 @@ func Contract(t *testing.T, newStore func() schedule.Store) {
 			t.Error("List() on an empty store = nil, want a non-nil empty slice")
 		}
 	})
+	t.Run("list is in time order below the second", func(t *testing.T) {
+		testListTimeOrder(t, newStore())
+	})
 }
 
 // testSaveGet verifies a schedule round trips including steps and returns independent copies.
@@ -809,5 +812,41 @@ func testSpringForwardRoundTrip(t *testing.T, store schedule.Store) {
 			t.Errorf("test %d: List() after Update = %+v, want spring_forward %q", testNum, list,
 				test.WantList)
 		}
+	}
+}
+
+// testListTimeOrder pins that List orders schedules by creation time below the second. Two times in the
+// same second differ only in the fraction, which the stored text trims, so a store that sorted the
+// raw text would put 10:00:00 after 10:00:00.5. The ids sort differently from the times so an id
+// tiebreak cannot pass this by accident.
+func testListTimeOrder(t *testing.T, store schedule.Store) {
+	ctx := context.Background()
+	day := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		ID string
+		At time.Duration
+	}{
+		{"sch_e", 500 * time.Millisecond},
+		{"sch_a", time.Second},
+		{"sch_d", 0},
+		{"sch_b", 100 * time.Millisecond},
+		{"sch_c", time.Microsecond},
+	} {
+		id, at := c.ID, day.Add(c.At)
+		if err := store.Save(ctx, &schedule.Schedule{ID: id, Cron: "* * * * *", Playbook: "p", CreatedAt: at}); err != nil {
+			t.Fatalf("Save(%s) error = %v", id, err)
+		}
+	}
+	list, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	ids := make([]string, 0, len(list))
+	for _, v := range list {
+		ids = append(ids, v.ID)
+	}
+	want := []string{"sch_d", "sch_c", "sch_b", "sch_e", "sch_a"}
+	if diff := cmp.Diff(want, ids); diff != "" {
+		t.Errorf("List() order mismatch (-want +got):\n%s", diff)
 	}
 }

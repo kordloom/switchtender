@@ -586,6 +586,11 @@ func (c *callbacks) launch(w http.ResponseWriter, r *http.Request, t *template.T
 		case submitInput:
 			c.log.Warn("server: provisioning callback: " + err.Error())
 			respondError(w, c.log, http.StatusConflict, templateRefusal(err))
+		// A content read that failed is named and stays a 502, which curl --retry retries, since the
+		// same read fails for an outage.
+		case submitContent:
+			c.log.Warn("server: provisioning callback: " + err.Error())
+			respondError(w, c.log, http.StatusBadGateway, templateRefusal(err))
 		default:
 			c.log.Error("server: provisioning callback: " + err.Error())
 			respondError(w, c.log, http.StatusBadGateway, "could not launch the template")

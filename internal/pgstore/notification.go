@@ -79,7 +79,7 @@ func (s *notificationStore) Get(ctx context.Context, id string) (*notification.N
 
 // List returns every target ordered by creation time, oldest first.
 func (s *notificationStore) List(ctx context.Context) ([]*notification.Notification, error) {
-	const q = "SELECT " + notificationColumns + " FROM notification_targets ORDER BY created_at, id"
+	const q = "SELECT " + notificationColumns + " FROM notification_targets ORDER BY rtrim(created_at, 'Z') COLLATE \"C\", id COLLATE \"C\""
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("list notification targets: %w", err)
@@ -162,7 +162,7 @@ func (s *notificationStore) Detach(ctx context.Context, id string) error {
 func (s *notificationStore) Attachments(ctx context.Context,
 	notificationID string) ([]*notification.Attachment, error) {
 	const q = "SELECT " + attachmentColumns + ` FROM notification_attachments
-WHERE notification_id=$1 ORDER BY created_at, id`
+WHERE notification_id=$1 ORDER BY rtrim(created_at, 'Z') COLLATE "C", id COLLATE "C"`
 	return s.attachments(ctx, q, notificationID)
 }
 
@@ -170,7 +170,7 @@ WHERE notification_id=$1 ORDER BY created_at, id`
 func (s *notificationStore) AttachedTo(ctx context.Context, kind,
 	objectID string) ([]*notification.Attachment, error) {
 	const q = "SELECT " + attachmentColumns + ` FROM notification_attachments
-WHERE object_kind=$1 AND object_id=$2 ORDER BY created_at, id`
+WHERE object_kind=$1 AND object_id=$2 ORDER BY rtrim(created_at, 'Z') COLLATE "C", id COLLATE "C"`
 	return s.attachments(ctx, q, kind, objectID)
 }
 

@@ -170,7 +170,7 @@ func (s *store) ByIdempotencyKey(ctx context.Context, key string) (*run.Run, err
 // List returns top-level runs, excluding shard runs, ordered by creation time, newest first.
 func (s *store) List(ctx context.Context) ([]*run.Run, error) {
 	const q = "SELECT " + runColumns +
-		" FROM runs WHERE parent_id IS NULL ORDER BY created_at DESC, id DESC"
+		" FROM runs WHERE parent_id IS NULL ORDER BY rtrim(created_at, 'Z') DESC, id DESC"
 	return s.queryRuns(ctx, "list runs", q)
 }
 
@@ -193,14 +193,15 @@ func (s *store) ListPage(ctx context.Context, filter run.ListFilter, limit, offs
 		q += " AND COALESCE(NULLIF(tool, ''), 'ansible') = ?"
 		args = append(args, filter.Tool)
 	}
-	// Stored times are RFC 3339 UTC strings, so lexicographic comparison is chronological.
+	// Raw stored text is not chronological below the second, so both bounds compare the order key.
+	// See sqlutil.Order.
 	if !filter.After.IsZero() {
-		q += " AND created_at >= ?"
-		args = append(args, sqlutil.FormatTime(filter.After))
+		q += " AND " + sqlutil.Order("created_at") + " >= ?"
+		args = append(args, sqlutil.OrderBind(filter.After))
 	}
 	if !filter.Before.IsZero() {
-		q += " AND created_at < ?"
-		args = append(args, sqlutil.FormatTime(filter.Before))
+		q += " AND " + sqlutil.Order("created_at") + " < ?"
+		args = append(args, sqlutil.OrderBind(filter.Before))
 	}
 	if filter.Source != "" {
 		q += " AND source = ?"
@@ -254,7 +255,7 @@ func (s *store) ListPage(ctx context.Context, filter run.ListFilter, limit, offs
 	if filter.OldestFirst {
 		order = "ASC"
 	}
-	q += " ORDER BY created_at " + order + ", id " + order
+	q += " ORDER BY " + sqlutil.Order("created_at") + " " + order + ", id " + order
 	if limit > 0 {
 		q += " LIMIT ? OFFSET ?"
 		args = append(args, limit, offset)
@@ -748,7 +749,7 @@ WHERE id = (
 		AND queue IN (` + placeholders + `)
 		AND (COALESCE(parent_id,'')='' OR parent_id IN (
 			SELECT id FROM runs WHERE status='running' AND cancel_requested=0))
-	ORDER BY created_at, id LIMIT 1
+	ORDER BY rtrim(created_at, 'Z'), id LIMIT 1
 )
 RETURNING ` + runColumns
 	// The capability is minted here, when the claim is won, and returned to the worker in the run row.
@@ -835,19 +836,16 @@ func (s *store) reclaimStale(ctx context.Context, ttl time.Duration) (int, []str
 	// A SQLite deployment is one node: the process that stamps a lease is the process that sweeps it,
 	// so the local clock is the authoritative one and there is no skew to reconcile.
 	//
-	// The comparison is on text, and that is not exactly chronological. Stored times keep RFC 3339's
-	// trimming rather than being padded to a fixed width, so within one second a value with no
-	// fractional part sorts after one that has one: "12:00:00Z" is lexicographically greater than
-	// "12:00:00.5Z" because 'Z' is greater than '.', although it happened first. The disagreement is
-	// bounded by one second and cannot compound, since it only ever involves two values in the same
-	// second, and a lease is measured in tens of seconds.
+	// The comparison is on text through the order key, which is chronological to the stored
+	// precision. The raw text is not: within one second "12:00:00Z" sorts after "12:00:00.5Z",
+	// although it happened first. See sqlutil.Order.
 	//
-	// It is left as text deliberately. SQLite's julianday resolves to about 86 microseconds, which
-	// is coarser than the times stored here, so routing the comparison through it collapses values
-	// that differ and makes the sweep miss leases entirely. Padding the stored format would fix the
-	// ordering for new rows and break it for every row already written, because a padded value
-	// sorts below an unpadded one from the same instant.
-	cut := sqlutil.FormatTime(time.Now().Add(-ttl))
+	// It stays on text deliberately. SQLite's julianday resolves to about 86 microseconds, which is
+	// coarser than the times stored here, so routing the comparison through it collapses values that
+	// differ and makes the sweep miss leases entirely. Padding the stored format would fix the
+	// ordering for new rows and break it for every row already written, because a padded value sorts
+	// below an unpadded one from the same instant.
+	cut := sqlutil.OrderBind(time.Now().Add(-ttl))
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, nil, fmt.Errorf("reclaim stale: %w", err)
@@ -862,7 +860,7 @@ func (s *store) reclaimStale(ctx context.Context, ttl time.Duration) (int, []str
 	// so it ends canceled. This runs before the requeue so the requeue cannot pick the row up first.
 	canceled, settledCanceled, err := updateReturningTopLevel(ctx, tx, `
 UPDATE runs SET status='canceled', claimed_by='', claimed_at=NULL, claim_secret='', ended_at=?
-WHERE status='pending' AND claimed_by!='' AND claimed_at < ? AND cancel_requested=1
+WHERE status='pending' AND claimed_by!='' AND rtrim(claimed_at, 'Z') < ? AND cancel_requested=1
 RETURNING id, parent_id`, sqlutil.FormatTime(time.Now()), cut)
 	if err != nil {
 		return 0, nil, fmt.Errorf("reclaim stale: %w", err)
@@ -870,7 +868,7 @@ RETURNING id, parent_id`, sqlutil.FormatTime(time.Now()), cut)
 
 	res, err := tx.ExecContext(ctx, `
 UPDATE runs SET claimed_by='', claimed_at=NULL, claim_secret='', queued_at=?
-WHERE status='pending' AND claimed_by!='' AND claimed_at < ? AND cancel_requested=0`,
+WHERE status='pending' AND claimed_by!='' AND rtrim(claimed_at, 'Z') < ? AND cancel_requested=0`,
 		sqlutil.FormatTime(time.Now()), cut)
 	if err != nil {
 		return 0, nil, fmt.Errorf("reclaim stale: %w", err)
@@ -891,7 +889,7 @@ WHERE status='pending' AND claimed_by!='' AND claimed_at < ? AND cancel_requeste
 	interrupted, settledStale, err := updateReturningTopLevel(ctx, tx, `
 UPDATE runs SET status='interrupted', claimed_by='', claimed_at=NULL, claim_secret='',
 ended_at=?, error='interrupted: executor lease expired'
-WHERE status='running' AND claimed_by!='' AND claimed_at < ?
+WHERE status='running' AND claimed_by!='' AND rtrim(claimed_at, 'Z') < ?
 RETURNING id, parent_id`, sqlutil.FormatTime(time.Now()), cut)
 	if err != nil {
 		return 0, nil, fmt.Errorf("reclaim stale: %w", err)
@@ -906,7 +904,7 @@ RETURNING id, parent_id`, sqlutil.FormatTime(time.Now()), cut)
 	abandoned, settledAbandoned, err := updateReturningTopLevel(ctx, tx, `
 UPDATE runs SET status='interrupted', ended_at=?,
 error=CASE WHEN error='' THEN '`+run.AbandonedParentError()+`' ELSE error END
-WHERE status IN ('pending','running') AND claimed_by='' AND kind IN ('split','pipeline') AND created_at < ?
+WHERE status IN ('pending','running') AND claimed_by='' AND kind IN ('split','pipeline') AND rtrim(created_at, 'Z') < ?
 RETURNING id, parent_id`,
 		sqlutil.FormatTime(time.Now()), cut)
 	if err != nil {
@@ -956,7 +954,7 @@ WHERE status='running' AND cancel_requested=0 AND parent_id IS NOT NULL
 // ParkForApproval makes for a live coordinator, and returns how many it parked.
 func parkStalled(ctx context.Context, tx *sql.Tx, cut string) (int64, error) {
 	parents, err := queryRunsOn(ctx, tx, "list stale workflows", "SELECT "+runColumns+` FROM runs
-WHERE status='running' AND kind='pipeline' AND claimed_by!='' AND claimed_at < ?
+WHERE status='running' AND kind='pipeline' AND claimed_by!='' AND rtrim(claimed_at, 'Z') < ?
 	AND cancel_requested=0`, cut)
 	if err != nil {
 		return 0, err
@@ -973,7 +971,7 @@ WHERE status='running' AND kind='pipeline' AND claimed_by!='' AND claimed_at < ?
 		}
 		res, err := tx.ExecContext(ctx, `
 UPDATE runs SET status=?, claimed_by='', claimed_at=NULL, claim_secret=''
-WHERE id=? AND status='running' AND claimed_by!='' AND claimed_at < ? AND cancel_requested=0`,
+WHERE id=? AND status='running' AND claimed_by!='' AND rtrim(claimed_at, 'Z') < ? AND cancel_requested=0`,
 			run.StoredParked, p.ID, cut)
 		if err != nil {
 			return parked, err
@@ -1288,7 +1286,7 @@ func (s *store) RunTimings(ctx context.Context, limit int) ([]run.RunTiming, err
 	const q = `
 SELECT id, status, kind, queue, claimed_by, created_at, started_at, ended_at
 FROM runs WHERE parent_id IS NULL
-ORDER BY created_at DESC, id DESC LIMIT ?`
+ORDER BY rtrim(created_at, 'Z') DESC, id DESC LIMIT ?`
 	rows, err := s.db.QueryContext(ctx, q, limit)
 	if err != nil {
 		return nil, fmt.Errorf("run timings: %w", err)
