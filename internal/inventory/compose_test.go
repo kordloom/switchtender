@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -37,14 +38,56 @@ func TestListingReadsWhatAnsiblePrints(t *testing.T) {
 	if diff := cmp.Diff([]string{"lb1", "web1", "web2"}, l.Hosts()); diff != "" {
 		t.Errorf("Hosts() mismatch (-want +got):\n%s", diff)
 	}
-	if diff := cmp.Diff([]string{"web"}, l.Groups("web1")); diff != "" {
-		t.Errorf("Groups(web1) mismatch (-want +got):\n%s", diff)
+	if diff := cmp.Diff([]string{"web"}, l.HostGroups()["web1"]); diff != "" {
+		t.Errorf("HostGroups()[web1] mismatch (-want +got):\n%s", diff)
 	}
 	if got := l.Vars("web1")["big"]; got != json.Number("9007199254740993") {
 		t.Errorf("Vars(web1)[big] = %v, want the integer as written", got)
 	}
 	if _, err := ParseListing([]byte("not json")); !errors.Is(err, ErrListing) {
 		t.Errorf("ParseListing(not json) error = %v, want ErrListing", err)
+	}
+}
+
+// TestHostGroupsMatchesAScanPerHost pins HostGroups to what reading each host's groups by scanning
+// every group gives: direct groups only, sorted, ungrouped left out, a host listed twice in one group
+// counted once, and nothing for a host in hostvars alone.
+func TestHostGroupsMatchesAScanPerHost(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Doc string
+	}{{ // Test 0: Nested children, ungrouped, and a host in hostvars only.
+		Doc: listingDoc,
+	}, { // Test 1: A host listed twice in one group and in several groups out of name order.
+		Doc: `{"_meta": {"hostvars": {}},
+			"zeta": {"hosts": ["a", "b", "a"]},
+			"alpha": {"hosts": ["b", "a"]},
+			"mid": {"hosts": ["c"], "children": ["alpha"]},
+			"ungrouped": {"hosts": ["d"]}}`,
+	}, { // Test 2: No groups at all.
+		Doc: `{"_meta": {"hostvars": {"solo": {"x": 1}}}}`,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			l, err := ParseListing([]byte(test.Doc))
+			if err != nil {
+				t.Fatalf("ParseListing() error = %v", err)
+			}
+			got := l.HostGroups()
+			for _, h := range l.Hosts() {
+				var want []string
+				for name, g := range l.groups {
+					if name != "ungrouped" && slices.Contains(g.Hosts, h) {
+						want = append(want, name)
+					}
+				}
+				slices.Sort(want)
+				if diff := cmp.Diff(want, got[h], cmpopts.EquateEmpty()); diff != "" {
+					t.Errorf("HostGroups()[%s] mismatch (-want +got):\n%s", h, diff)
+				}
+			}
+		})
 	}
 }
 

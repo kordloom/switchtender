@@ -86,19 +86,23 @@ func (l *Listing) Hosts() []string {
 	return slices.Sorted(maps.Keys(seen))
 }
 
-// Groups returns the groups host is a direct member of, sorted, leaving out ungrouped, which is
-// where Ansible files a host that belongs to nothing.
-func (l *Listing) Groups(host string) []string {
-	var out []string
-	for name, g := range l.groups {
+// HostGroups returns, for every host in a group, the groups it is a direct member of, sorted,
+// leaving out ungrouped, which is where Ansible files a host that belongs to nothing. It walks every
+// group once, so a caller reading the groups of each host in turn costs time linear in the listing
+// rather than a scan of every group per host. A host listed twice in one group is counted once.
+func (l *Listing) HostGroups() map[string][]string {
+	out := map[string][]string{}
+	for _, name := range slices.Sorted(maps.Keys(l.groups)) {
 		if name == "ungrouped" {
 			continue
 		}
-		if slices.Contains(g.Hosts, host) {
-			out = append(out, name)
+		for _, h := range l.groups[name].Hosts {
+			if have := out[h]; len(have) > 0 && have[len(have)-1] == name {
+				continue
+			}
+			out[h] = append(out[h], name)
 		}
 	}
-	sort.Strings(out)
 	return out
 }
 
