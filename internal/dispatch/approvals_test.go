@@ -3,7 +3,9 @@ package dispatch
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -130,5 +132,74 @@ func TestApproveRejectRequireHeld(t *testing.T) {
 	if _, err := d.Reject(context.Background(), created.ID, "",
 		decider("approver-pat", "session")); !errors.Is(err, ErrNotPendingApproval) {
 		t.Errorf("Reject on a non-held run: err = %v, want ErrNotPendingApproval", err)
+	}
+}
+
+// TestAnApprovedParentThatCannotStartClosesItsStream pins that a split or pipeline that fails as it
+// starts after approval tells its live viewers the run ended. Every other path that settles a parent
+// closes its stream; these three did not, so a browser watching the parent waited on a stream for a
+// run that was already failed.
+func TestAnApprovedParentThatCannotStartClosesItsStream(t *testing.T) {
+	t.Parallel()
+	two := 2
+	tests := []struct {
+		Parent     *run.Run
+		Shards     int
+		Split      bool
+		WantReason string
+	}{{ // Test 0: A split whose shards are gone.
+		Parent: &run.Run{Kind: run.KindSplit, ShardCount: &two}, Split: true,
+		WantReason: "split has no stored shards to run",
+	}, { // Test 1: A split holding fewer shards than it counts.
+		Parent: &run.Run{Kind: run.KindSplit, ShardCount: &two}, Shards: 1, Split: true,
+		WantReason: "only 1 of 2 shards were stored",
+	}, { // Test 2: A pipeline whose steps were never stored.
+		Parent:     &run.Run{Kind: run.KindPipeline},
+		WantReason: "pipeline has no stored steps to run",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			store := run.NewMemStore()
+			pub := newRecordingPublisher()
+			idle := roundhouse.RunnerFunc(
+				func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
+					return roundhouse.Result{}, nil
+				})
+			d := New(store, idle, nil, WithPublisher(pub))
+			defer d.Close()
+			parent := test.Parent.Clone()
+			parent.ID, parent.Playbook, parent.Status = "run_parent", "site.yml", run.StatusPending
+			if err := store.Save(ctx, parent); err != nil {
+				t.Fatalf("Save(parent) error = %v", err)
+			}
+			for i := range test.Shards {
+				idx, pid := i, parent.ID
+				if err := store.Save(ctx, &run.Run{
+					ID: fmt.Sprintf("run_shard_%d", i), Playbook: "site.yml", ParentID: &pid,
+					ShardIndex: &idx, ShardCount: parent.ShardCount, Status: run.StatusPendingApproval,
+				}); err != nil {
+					t.Fatalf("Save(shard) error = %v", err)
+				}
+			}
+			if test.Split {
+				d.startSplit(ctx, parent)
+			} else {
+				d.startPipeline(parent)
+			}
+			got, err := store.Get(ctx, parent.ID)
+			if err != nil {
+				t.Fatalf("Get(parent) error = %v", err)
+			}
+			if got.Status != run.StatusFailed || !strings.Contains(got.Error, test.WantReason) {
+				t.Errorf("parent = %s %q, want failed with %q", got.Status, got.Error, test.WantReason)
+			}
+			pub.mu.Lock()
+			defer pub.mu.Unlock()
+			if n := pub.closed[parent.ID]; n != 1 {
+				t.Errorf("CloseRun(parent) called %d time(s), want exactly 1", n)
+			}
+		})
 	}
 }
