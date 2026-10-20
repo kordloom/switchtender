@@ -299,6 +299,12 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 		}
 		created, err := submitter.SubmitPipeline(r.Context(), req.Name, req.Inventory, req.Steps,
 			popts...)
+		// The classifier leaves no hosts to each path, so a path that skips this answers it as the
+		// server's own failure.
+		if errors.Is(err, inventory.ErrNoHosts) {
+			respondNoHosts(w, log, "", err)
+			return
+		}
 		failure := personSubmit{http.StatusBadRequest, "submit pipeline", "could not submit pipeline"}
 		if failure.respond(w, log, err) {
 			return

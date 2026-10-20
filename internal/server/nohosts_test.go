@@ -65,7 +65,15 @@ func TestManualLaunchMatchingNoHostsLinksToThePreview(t *testing.T) {
 	}, { // Test 2: A rerun, which resolves the inventory again.
 		Method: http.MethodPost, Path: "/v1/runs/run_done/rerun", SubmitErr: errNoHostsMatched,
 		WantStatus: http.StatusBadRequest, WantPreview: wantURL,
-	}, { // Test 3: Any other refusal carries no preview link.
+	}, { // Test 3: A pipeline, which answered 500 and names no stored inventory to preview.
+		Method: http.MethodPost, Path: "/v1/pipelines", SubmitErr: errNoHostsMatched,
+		Body:       `{"name":"p","steps":[{"name":"a","tool":"bash","command":"true"}]}`,
+		WantStatus: http.StatusBadRequest,
+	}, { // Test 4: A drift reconcile of a check over a composed inventory, which answered 500.
+		Method: http.MethodPost, Path: "/v1/drift/reconcile", SubmitErr: errNoHostsMatched,
+		Body:       `{"host":"web01"}`,
+		WantStatus: http.StatusBadRequest, WantPreview: "/ui/inventories?preview=inv1",
+	}, { // Test 5: Any other refusal carries no preview link.
 		Method: http.MethodPost, Path: "/v1/templates/tpl_patch/launch",
 		SubmitErr:  fmt.Errorf("%w: input inv_x", inventory.ErrResolve),
 		WantStatus: http.StatusBadRequest,
@@ -80,6 +88,7 @@ func TestManualLaunchMatchingNoHostsLinksToThePreview(t *testing.T) {
 			}); err != nil {
 				t.Fatalf("Save(run) error = %v", err)
 			}
+			seedDrift(t, runs, "chk_web", "", "web01", 3)
 			handler := New(runs, &fakeSubmitter{err: test.SubmitErr}, zap.NewNop(),
 				WithTemplates(noHostsTemplates(t))).Handler()
 			rec := httptest.NewRecorder()
