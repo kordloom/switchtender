@@ -15,4 +15,6 @@ var (
 	// ErrLockProbe is returned when the startup probe shows the root's filesystem does not keep a
 	// second handle out of a held lock, which is the only thing that tells a live run from a dead one.
 	ErrLockProbe = errors.New("run directory lock probe")
+	// ErrFreeSpace is returned when the free space of a filesystem could not be read.
+	ErrFreeSpace = errors.New("free space could not be read")
 )

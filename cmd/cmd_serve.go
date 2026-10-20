@@ -56,6 +56,7 @@ import (
 	"github.com/kordloom/switchtender/internal/review"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/runfiles"
 	"github.com/kordloom/switchtender/internal/safedial"
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/server"
@@ -693,6 +694,9 @@ func init() {
 			"Also SWITCHTENDER_WORKER_TOKEN. Keep it secret.")
 	serveCmd.Flags().IntVar(&serveWorkers, "workers", dispatch.DefaultWorkers,
 		"Concurrent runs this process executes at once.")
+	serveCmd.Flags().IntVar(&serveMinFreeMiB, "min-free-mib", defaultMinFreeMiB,
+		"Free space, in MiB, on a SQLite database's disk below which new runs are refused. 0 turns "+
+			"it off.")
 	serveCmd.Flags().IntVar(&serveMatrixCap, "matrix-cap", server.DefaultMatrixCap,
 		"Largest host matrix, in cells, the UI draws before showing a notice. 0 means no limit.")
 	serveCmd.Flags().IntVar(&serveMaxShards, "max-shards", dispatch.DefaultMaxShards,
@@ -1415,6 +1419,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err := checkWorkers(serveWorkers, serveWorkersHint); err != nil {
 		return err
 	}
+	minFree, freePaths, err := freeSpaceFloor(serveDB, serveMinFreeMiB, runfiles.FreeBytes, log)
+	if err != nil {
+		return err
+	}
 	var proxies []*net.IPNet
 	for _, c := range serveTrustedProxy {
 		_, n, perr := net.ParseCIDR(strings.TrimSpace(c))
@@ -1622,6 +1630,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	disp := dispatch.New(store, runner, log, dispatch.WithPublisher(hub),
 		dispatch.WithRunFilesRoot(runFilesReport.Root),
+		dispatch.WithFreeSpaceFloor(minFree, freePaths...),
 		dispatch.WithAudits(bundle.Audits()),
 		dispatch.WithWorkers(serveWorkers),
 		dispatch.WithMaxShards(serveMaxShards),

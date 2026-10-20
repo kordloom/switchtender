@@ -199,7 +199,7 @@ Two more are enforced somewhere other than the request:
 | GET    | `/v1/audit/bundle`         | The audit chain as a signed LoomSeal bundle, verifiable offline or on the /verify page. |
 | GET    | `/metrics`              | Prometheus series: run, fleet, queue-depth, and worker gauges, plus a run-duration histogram. |
 | GET    | `/healthz`              | Liveness.                                               |
-| GET    | `/readyz`               | Readiness: 200 once the store answers, 503 while it does not. A 200 carries `"degraded": true` with `reasons`, `last_write_failure` and `owed_ends` for five minutes after this process failed to write to the store, and while it holds run ends the store refused, which read as running until they land. |
+| GET    | `/readyz`               | Readiness: 200 once the store answers, 503 while it does not. A 200 carries `"degraded": true` with `reasons`, `last_write_failure` and `owed_ends` for five minutes after this process failed to write to the store, and while it holds run ends the store refused, which read as running until they land, and while a SQLite database's disk is under the `--min-free-mib` floor. |
 
 A streamed export whose status line has already been sent cannot report a later failure with a
 status code. The run event NDJSON download and the run log download therefore end with a

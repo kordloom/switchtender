@@ -13,11 +13,15 @@ import (
 	"github.com/kordloom/switchtender/internal/run"
 )
 
-// validateRun checks a run's credential and project references before it is accepted. The run's own
-// credentials are held to the tool-compatibility gate; credentials inherited from the target
-// inventory are checked for existence and decryptability but not tool fit, since materializeCredentials
-// resolves the inherited set too and an undecryptable one there would otherwise fail only at execution.
+// validateRun checks that there is room to record a new run, then its credential and project
+// references, before it is accepted. The run's own credentials are held to the tool-compatibility
+// gate; credentials inherited from the target inventory are checked for existence and
+// decryptability but not tool fit, since materializeCredentials resolves the inherited set too and
+// an undecryptable one there would otherwise fail only at execution.
 func (d *Dispatcher) validateRun(ctx context.Context, r *run.Run) error {
+	if err := d.admit(); err != nil {
+		return err
+	}
 	if err := d.validateCredentials(ctx, r.Tool, r.CredentialIDs, true); err != nil {
 		return err
 	}
