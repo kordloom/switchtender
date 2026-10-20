@@ -20,7 +20,7 @@ import (
 
 // testSealer returns an enabled Sealer for trigger signing tests.
 func testSealer() *credential.Sealer {
-	return credential.NewSealer("test-pass", "test-salt")
+	return sharedSealer("test-pass", "test-salt")
 }
 
 // newTriggerServer builds a server handler with triggers, one template, and the given sealer.

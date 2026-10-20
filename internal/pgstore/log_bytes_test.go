@@ -26,6 +26,7 @@ func logBytesOf(t *testing.T, raw *sql.DB, id string) int64 {
 // A chunk inserted the way a release that predates the count inserts it, plainly into run_logs,
 // is counted too, since a rolling update and a rollback both leave such a release appending.
 func TestAppendLogKeepsARunningByteCount(t *testing.T) {
+	t.Parallel()
 	shared := os.Getenv("SWITCHTENDER_TEST_POSTGRES_DSN")
 	if shared == "" {
 		skipOrFail(t, "SWITCHTENDER_TEST_POSTGRES_DSN not set")
@@ -66,6 +67,7 @@ func TestAppendLogKeepsARunningByteCount(t *testing.T) {
 // the run's count: with the run one byte under the cap, exactly one of many concurrent appends is
 // stored, where a fence that read the count without taking the row would let several through.
 func TestRacingAppendersCannotBothCrossTheCap(t *testing.T) {
+	t.Parallel()
 	shared := os.Getenv("SWITCHTENDER_TEST_POSTGRES_DSN")
 	if shared == "" {
 		skipOrFail(t, "SWITCHTENDER_TEST_POSTGRES_DSN not set")
@@ -120,6 +122,7 @@ func TestRacingAppendersCannotBothCrossTheCap(t *testing.T) {
 // log bytes. A run in flight gets its count from the chunks it holds, a finished run is left
 // alone, and a second open recounts nothing.
 func TestUpgradeBackfillsTheByteCountOfRunsInFlight(t *testing.T) {
+	t.Parallel()
 	shared := os.Getenv("SWITCHTENDER_TEST_POSTGRES_DSN")
 	if shared == "" {
 		skipOrFail(t, "SWITCHTENDER_TEST_POSTGRES_DSN not set")

@@ -2389,7 +2389,7 @@ func TestRecordedEntryCarriesActorTypeAndContentDigest(t *testing.T) {
 	}
 	// A second operator token must exist so the operator has grant to create a credential, which the
 	// role gate allows for an operator only via a manage grant; simplest is an admin token minting.
-	sealer := credential.NewSealer("k", "s")
+	sealer := sharedSealer("k", "s")
 	handler := New(run.NewMemStore(), &fakeSubmitter{run: &run.Run{ID: "r"}}, zap.NewNop(),
 		WithTokens(tokens), WithUsers(users), WithAudit(audits),
 		WithCredentials(creds, sealer)).Handler()

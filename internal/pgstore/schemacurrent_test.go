@@ -29,6 +29,7 @@ import (
 // It runs against a database of its own, created and dropped here, because it damages the schema and
 // the rest of the suite shares one.
 func TestOpenStillRepairsWhatItSkips(t *testing.T) {
+	t.Parallel()
 	dsn := os.Getenv("SWITCHTENDER_TEST_POSTGRES_DSN")
 	if dsn == "" {
 		// The same ratchet the rest of this package uses: a release gate that demanded the full

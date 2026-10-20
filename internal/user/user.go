@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -220,7 +221,7 @@ func New(username, password string, role Role) (*User, error) {
 	if err := CheckUsername(username); err != nil {
 		return nil, err
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), passwordCost())
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +240,7 @@ func New(username, password string, role Role) (*User, error) {
 
 // SetPassword replaces the user's password with a freshly hashed one.
 func (u *User) SetPassword(password string) error {
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), passwordCost())
 	if err != nil {
 		return err
 	}
@@ -274,9 +275,50 @@ func (g *Guard) Cost() int {
 	return cost
 }
 
+var (
+	// costMu guards hashCost and guardBuilt.
+	costMu sync.Mutex
+	// hashCost is the bcrypt cost New and SetPassword hash at and DefaultGuard compares at.
+	hashCost = bcrypt.DefaultCost
+	// guardBuilt records that DefaultGuard has read hashCost, after which it never changes.
+	guardBuilt bool
+)
+
+// passwordCost returns the bcrypt cost New and SetPassword hash at.
+func passwordCost() int {
+	costMu.Lock()
+	defer costMu.Unlock()
+	return hashCost
+}
+
+// UseMinCostForTests lowers the cost New and SetPassword hash at, and DefaultGuard compares at, to
+// bcrypt.MinCost. At the default cost one hash takes most of a second under the race detector, and a
+// test package that builds accounts by the hundred spends most of its time there. Such a package
+// calls it from TestMain before m.Run.
+//
+// It panics outside a test binary, so no production binary can lower the cost. It also panics once
+// DefaultGuard is built, because a stand-in comparison at the default cost over accounts hashed at
+// the minimum would tell a missing username from a real one by time. Both checks run before
+// anything is written.
+func UseMinCostForTests() {
+	if !testing.Testing() {
+		panic("user: UseMinCostForTests called outside a test binary")
+	}
+	costMu.Lock()
+	defer costMu.Unlock()
+	if guardBuilt {
+		panic("user: UseMinCostForTests called after DefaultGuard was built")
+	}
+	hashCost = bcrypt.MinCost
+}
+
 // DefaultGuard returns the Guard for passwords hashed at the cost New and SetPassword use.
 var DefaultGuard = sync.OnceValue(func() *Guard {
-	g, err := NewGuard(bcrypt.DefaultCost)
+	costMu.Lock()
+	guardBuilt = true
+	cost := hashCost
+	costMu.Unlock()
+	g, err := NewGuard(cost)
 	if err != nil {
 		panic("user: default sign-in guard: " + err.Error())
 	}

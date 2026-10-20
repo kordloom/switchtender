@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/kordloom/switchtender/internal/user"
 	"github.com/kordloom/switchtender/internal/usertest"
@@ -156,5 +159,56 @@ func TestAgentRoleLowersOnlyAdmin(t *testing.T) {
 				t.Errorf("%s: mismatch (-want +got):\n%s", test.Name, diff)
 			}
 		})
+	}
+}
+
+// TestUseMinCostForTestsPanicsOutsideATestBinary builds an ordinary program that asks for the lower
+// cost and runs it. A re-run of this test binary cannot stand in, because the linker marks every go
+// test binary and testing.Testing reports true in all of them. The program has to die on the panic,
+// or a production binary could store every new password at the cheapest hash bcrypt has.
+func TestUseMinCostForTestsPanicsOutsideATestBinary(t *testing.T) {
+	t.Parallel()
+	bin := filepath.Join(t.TempDir(), "mincost")
+	build := exec.Command("go", "build", "-o", bin, "./testdata/mincost")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build mincost: %v\n%s", err, out)
+	}
+	out, err := exec.Command(bin).CombinedOutput()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("mincost error = %v, want the exit of a panic\n%s", err, out)
+	}
+	if want := "panic: user: UseMinCostForTests called outside a test binary"; !strings.Contains(
+		string(out), want) {
+		t.Errorf("mincost output = %q, want it to contain %q", out, want)
+	}
+}
+
+// TestUseMinCostForTestsRefusesOnceTheGuardIsBuilt builds the default guard and then asks for the
+// lower cost, which must panic before it changes anything. A guard whose stand-in hash was made at
+// the default cost, comparing for a missing username while real accounts verify at the minimum,
+// would let timing alone tell the two apart.
+func TestUseMinCostForTestsRefusesOnceTheGuardIsBuilt(t *testing.T) {
+	t.Parallel()
+	guardCost := user.DefaultGuard().Cost()
+	var recovered any
+	func() {
+		defer func() { recovered = recover() }()
+		user.UseMinCostForTests()
+	}()
+	if want := "user: UseMinCostForTests called after DefaultGuard was built"; recovered != want {
+		t.Fatalf("UseMinCostForTests() recovered %v, want the panic %q", recovered, want)
+	}
+	u, err := user.New("cost-probe", "pw", user.RoleViewer)
+	if err != nil {
+		t.Fatalf("user.New() error = %v", err)
+	}
+	cost, err := bcrypt.Cost([]byte(u.PasswordHash))
+	if err != nil {
+		t.Fatalf("bcrypt.Cost() error = %v", err)
+	}
+	if cost != guardCost {
+		t.Errorf("user.New hashed at cost %d after the refusal, want the guard's cost %d", cost,
+			guardCost)
 	}
 }

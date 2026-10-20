@@ -154,7 +154,7 @@ func newRegistryReviewServer(t *testing.T, reg *reviewRegistry, module string,
 		},
 		Audits: audits,
 	})
-	sealed, err := credential.NewSealer("pass", "salt").Seal("CLOUD_SECRET=" + reviewCloudSecret +
+	sealed, err := sharedSealer("pass", "salt").Seal("CLOUD_SECRET=" + reviewCloudSecret +
 		"\nTF_CLI_CONFIG_FILE=" + cli)
 	if err != nil {
 		t.Fatalf("Seal() error = %v", err)

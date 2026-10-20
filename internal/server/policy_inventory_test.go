@@ -127,7 +127,7 @@ func TestInventoryContentSources(t *testing.T) {
 			opts := []Option{WithInventories(store)}
 			if test.Sealed {
 				opts = append(opts, WithCredentials(credential.NewMemStore(),
-					credential.NewSealer("test-key-material", "test-salt-material")))
+					sharedSealer("test-key-material", "test-salt-material")))
 			}
 			handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), opts...).Handler()
 			rec := httptest.NewRecorder()

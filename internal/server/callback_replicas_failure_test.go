@@ -196,7 +196,7 @@ func cbkNewReplica(t *testing.T, s cbkStores) *cbkReplica {
 	gate := &cbkGate{next: d, entered: make(chan struct{}), release: make(chan struct{})}
 	h := New(s.runs, gate, zap.NewNop(), WithTemplates(s.templates),
 		WithInventories(s.inventories), WithAudit(&recordingAudits{}),
-		WithCredentials(credential.NewMemStore(), credential.NewSealer("pass", "salt")),
+		WithCredentials(credential.NewMemStore(), sharedSealer("pass", "salt")),
 		func(srv *Server) { srv.callbackResolver = fakeResolver{} },
 		WithCallbackLimitMatcher(webLimit())).Handler()
 	return &cbkReplica{handler: h, gate: gate}

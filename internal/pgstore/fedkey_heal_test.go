@@ -18,6 +18,7 @@ import (
 //
 // It runs against a database of its own, because it damages a table the rest of the suite shares.
 func TestFederationKeysGainTheirLifecycleColumns(t *testing.T) {
+	t.Parallel()
 	shared := os.Getenv("SWITCHTENDER_TEST_POSTGRES_DSN")
 	if shared == "" {
 		skipOrFail(t, "SWITCHTENDER_TEST_POSTGRES_DSN not set")

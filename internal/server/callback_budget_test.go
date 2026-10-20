@@ -29,7 +29,7 @@ func budgetReplica(t *testing.T, s cbkStores, perMinute int) http.Handler {
 	t.Cleanup(d.Close)
 	return New(s.runs, d, zap.NewNop(), WithTemplates(s.templates),
 		WithInventories(s.inventories), WithAudit(&recordingAudits{}),
-		WithCredentials(credential.NewMemStore(), credential.NewSealer("pass", "salt")),
+		WithCredentials(credential.NewMemStore(), sharedSealer("pass", "salt")),
 		func(srv *Server) { srv.callbackResolver = fakeResolver{} },
 		WithCallbackLimitMatcher(webLimit()), WithCallbackRateLimits(perMinute, 0)).Handler()
 }

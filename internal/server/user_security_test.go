@@ -13,7 +13,6 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"go.uber.org/zap"
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/run"
@@ -36,25 +35,18 @@ func newAccountServer(t *testing.T, accounts ...*user.User) (http.Handler, user.
 	return handler, users, tokens
 }
 
-// newAccount builds a stored account whose password verifies at the cheapest bcrypt cost.
+// newAccount builds a stored account the way the server builds one.
 //
-// The account is a real one, built the way the server builds it, with only the stored hash swapped.
-// The cost user.New picks is deliberately slow and is pinned by the user package's own tests; here
-// it is pure delay, and delay is what made the sign-in tests below unreliable. Each attempt in the
-// throttle tests costs one comparison against this hash, and at the default cost eleven of them
-// under the race detector on a loaded machine can run long enough for the limiter's one minute
-// window to roll over mid-test. A cheap hash verifies exactly like a slow one.
+// TestMain lowers the cost user.New hashes at to bcrypt.MinCost, so each attempt in the throttle
+// tests below costs one cheap comparison. At the default cost, eleven of them under the race
+// detector on a loaded machine could run long enough for the limiter's one minute window to roll
+// over mid-test. A cheap hash verifies exactly like a slow one.
 func newAccount(t *testing.T, username, password string, role user.Role) *user.User {
 	t.Helper()
 	u, err := user.New(username, password, role)
 	if err != nil {
 		t.Fatalf("user.New() error = %v", err)
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
-	if err != nil {
-		t.Fatalf("GenerateFromPassword() error = %v", err)
-	}
-	u.PasswordHash = string(hash)
 	return u
 }
 

@@ -16,7 +16,7 @@ import (
 // typedServer stands up a server with credentials and custom types enabled.
 func typedServer(t *testing.T) (http.Handler, credential.TypeStore) {
 	t.Helper()
-	sealer := credential.NewSealer("pass", "salt")
+	sealer := sharedSealer("pass", "salt")
 	types := credential.NewMemTypeStore()
 	h := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
 		WithCredentials(credential.NewMemStore(), sealer), WithCredentialTypes(types)).Handler()

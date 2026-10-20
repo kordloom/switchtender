@@ -53,6 +53,7 @@ AND query LIKE 'UPDATE schedules SET next_run_at=%'`).Scan(&n); err != nil {
 // this release's scheduler, which can match the canonical stamp, fires it a second time. A
 // compare-and-set on the stamp it read would have left the claim alone.
 func TestScheduleNormalizeOnOpenRevertsAClaimMadeDuringARollingUpgrade(t *testing.T) {
+	t.Parallel()
 	shared := os.Getenv("SWITCHTENDER_TEST_POSTGRES_DSN")
 	if shared == "" {
 		skipOrFail(t, "SWITCHTENDER_TEST_POSTGRES_DSN not set")

@@ -48,7 +48,7 @@ func TestAManageGrantCanEditWhatItCanDelete(t *testing.T) {
 		creds := credential.NewMemStore()
 		projects := project.NewMemStore()
 		inventories := inventory.NewMemStore()
-		sealer := credential.NewSealer("pass", "salt")
+		sealer := sharedSealer("pass", "salt")
 
 		if err := orgs.Save(ctx, &org.Org{ID: "org_owner", Name: "owner"}); err != nil {
 			t.Fatalf("Save() org error = %v", err)

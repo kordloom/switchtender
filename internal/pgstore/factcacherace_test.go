@@ -23,6 +23,7 @@ import (
 // inventory's facts were back with nothing left to delete them through. The save reads the
 // inventory under a key share lock, so it waits for the delete and then finds the inventory gone.
 func TestFactSaveRacingAnInventoryDeleteLeavesNoFacts(t *testing.T) {
+	t.Parallel()
 	shared := os.Getenv("SWITCHTENDER_TEST_POSTGRES_DSN")
 	if shared == "" {
 		skipOrFail(t, "SWITCHTENDER_TEST_POSTGRES_DSN not set")

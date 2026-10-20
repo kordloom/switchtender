@@ -90,7 +90,7 @@ func newCallbackFixture(t *testing.T, sub Submitter, res callbackResolver, tpl *
 	audits := &recordingAudits{}
 	all := append([]Option{
 		WithTemplates(templates), WithInventories(inventories), WithAudit(audits),
-		WithCredentials(credential.NewMemStore(), credential.NewSealer("pass", "salt")),
+		WithCredentials(credential.NewMemStore(), sharedSealer("pass", "salt")),
 		func(s *Server) { s.callbackResolver = res },
 		WithCallbackLimitMatcher(webLimit()),
 	}, opts...)
@@ -503,7 +503,7 @@ func TestCallbackGoesThroughTheGate(t *testing.T) {
 	}
 	handler := New(store, d, zap.NewNop(), WithTemplates(templates), WithInventories(inventories),
 		WithAudit(&recordingAudits{}),
-		WithCredentials(credential.NewMemStore(), credential.NewSealer("pass", "salt")),
+		WithCredentials(credential.NewMemStore(), sharedSealer("pass", "salt")),
 		func(s *Server) { s.callbackResolver = fakeResolver{} }).Handler()
 	f := &callbackFixture{handler: handler, templates: templates, store: store}
 	key := f.mintKey(t, "tpl_cb", nil)

@@ -38,7 +38,7 @@ func newObservedCallbackFixture(t *testing.T, opts ...Option) (*callbackFixture,
 	sub := &fakeSubmitter{run: &run.Run{ID: "run_cb", Status: run.StatusPending}}
 	all := append([]Option{
 		WithTemplates(templates), WithInventories(inventories), WithAudit(audits),
-		WithCredentials(credential.NewMemStore(), credential.NewSealer("pass", "salt")),
+		WithCredentials(credential.NewMemStore(), sharedSealer("pass", "salt")),
 		func(s *Server) { s.callbackResolver = fakeResolver{} },
 	}, opts...)
 	return &callbackFixture{handler: New(store, sub, zap.New(core), all...).Handler(),

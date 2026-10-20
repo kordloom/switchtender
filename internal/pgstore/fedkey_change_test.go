@@ -19,9 +19,7 @@ import (
 var fedChangeSealer = credential.NewSealer("fed-change-passphrase", "fed-change-salt")
 
 // fedChangeReplicas opens two handles, each with its own connection pool, on a database of the
-// test's own, standing for two replicas of the documented high availability shape. The tests that
-// use it run one at a time, because freshDatabase names each database by the clock and two created
-// in the same instant collide.
+// test's own, standing for two replicas of the documented high availability shape.
 func fedChangeReplicas(t *testing.T) (federation.KeyStore, federation.KeyStore) {
 	t.Helper()
 	shared := os.Getenv("SWITCHTENDER_TEST_POSTGRES_DSN")
@@ -44,6 +42,7 @@ func fedChangeReplicas(t *testing.T) (federation.KeyStore, federation.KeyStore) 
 // TestFederationIssuerContractOnPostgres runs the issuer's cross-process promises on two replicas,
 // each with its own connection pool, sharing one PostgreSQL database.
 func TestFederationIssuerContractOnPostgres(t *testing.T) {
+	t.Parallel()
 	federationtest.IssuerContract(t, fedChangeReplicas)
 }
 
@@ -81,6 +80,7 @@ func fedChangeKID(t *testing.T, iss *federation.Issuer) string {
 // upgraded install keeps signing with the key every cloud already fetched, generates no key of its
 // own, and erases the private half of the retired key, whose removal has long come.
 func TestFederationKeysKeepTheirMeaningAcrossTheLifecycleColumnHealOnPostgres(t *testing.T) {
+	t.Parallel()
 	shared := os.Getenv("SWITCHTENDER_TEST_POSTGRES_DSN")
 	if shared == "" {
 		skipOrFail(t, "SWITCHTENDER_TEST_POSTGRES_DSN not set")

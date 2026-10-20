@@ -84,7 +84,7 @@ func TestCredentialTypeFileInjectorsThroughTheAPI(t *testing.T) {
 // fieldsServer stands up a server whose credential and type stores the test can read directly.
 func fieldsServer(t *testing.T) (http.Handler, credential.Store, *credential.Sealer, string) {
 	t.Helper()
-	sealer := credential.NewSealer("pass", "salt")
+	sealer := sharedSealer("pass", "salt")
 	types := credential.NewMemTypeStore()
 	creds := credential.NewMemStore()
 	var typ credential.CredentialType

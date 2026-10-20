@@ -66,7 +66,7 @@ func TestCallbackForAHostNamedWithANulByteOnPostgreSQL(t *testing.T) {
 	t.Cleanup(d.Close)
 	h := New(db.Runs(), d, zap.NewNop(), WithTemplates(db.Templates()),
 		WithInventories(db.Inventories()), WithAudit(db.Audits()),
-		WithCredentials(credential.NewMemStore(), credential.NewSealer("pass", "salt")),
+		WithCredentials(credential.NewMemStore(), sharedSealer("pass", "salt")),
 		func(srv *Server) { srv.callbackResolver = fakeResolver{} }).Handler()
 	key := (&cbkReplica{handler: h}).mint(t)
 	call := func() *httptest.ResponseRecorder {

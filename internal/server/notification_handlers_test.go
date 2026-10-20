@@ -54,7 +54,7 @@ func newNotifyFixture(t *testing.T, sealing bool) *notifyFixture {
 	f := &notifyFixture{store: notification.NewMemStore(), grants: grant.NewMemStore(),
 		sealer: credential.NewSealer("", ""), runs: run.NewMemStore()}
 	if sealing {
-		f.sealer = credential.NewSealer("notify-test-passphrase", "notify-test-salt")
+		f.sealer = sharedSealer("notify-test-passphrase", "notify-test-salt")
 	}
 	bearer := func(name string, role user.Role) (string, string) {
 		u, err := user.New(name, "pw-"+name, role)

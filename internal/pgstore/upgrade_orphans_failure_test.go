@@ -49,6 +49,7 @@ ON CONFLICT (run_id) DO NOTHING`,
 // also keep the run's id referenced, so its retained readability decision is never dropped either.
 // One retention sweep of this release has to leave nothing of a run that no longer exists.
 func TestUpgradePurgeTakesTheRowsAnEarlierReleasesPurgeLeft(t *testing.T) {
+	t.Parallel()
 	shared := os.Getenv("SWITCHTENDER_TEST_POSTGRES_DSN")
 	if shared == "" {
 		skipOrFail(t, "SWITCHTENDER_TEST_POSTGRES_DSN not set")
