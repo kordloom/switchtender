@@ -9,8 +9,10 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
@@ -49,6 +51,12 @@ type UI struct {
 	readOnly bool
 	// demo marks the public demo, the one read-only server whose pages speak as a showcase.
 	demo bool
+	// release is the product version. It stamps the workflow editor's draft, so a draft an older
+	// release's editor saved is dropped rather than restored into a newer one.
+	release string
+	// started is when this UI was built. The demo adds it to the draft stamp, since every reseed
+	// restarts the demo, so a reseed also drops the drafts visitors left on the old data.
+	started time.Time
 	// matrixCap is the largest host matrix, in cells, the detail page draws before showing a
 	// notice instead. Zero or less means no limit.
 	matrixCap int
@@ -89,9 +97,10 @@ func New(log *zap.Logger, docs fs.FS, readOnly bool, matrixCap int, oidcEnabled,
 		log = zap.NewNop()
 	}
 	u := &UI{
-		tmpl: template.Must(template.ParseFS(templateFS, "templates/*.html")),
-		log:  log,
-		docs: docs,
+		tmpl:    template.Must(template.ParseFS(templateFS, "templates/*.html")),
+		log:     log,
+		docs:    docs,
+		started: time.Now(),
 		// Heading ids, the same option cmd/sitegen renders the published docs with. Without them
 		// every in-page anchor in the in-app docs was inert: a visible "download" link moved
 		// nothing but the address bar, and each cross-guide link landed at the top of the right
@@ -141,6 +150,20 @@ func (u *UI) accountsExist() bool {
 // in for.
 func WithDemo(demo bool) Option {
 	return func(u *UI) { u.demo = demo }
+}
+
+// WithRelease names the product version the pages are served by.
+func WithRelease(version string) Option {
+	return func(u *UI) { u.release = version }
+}
+
+// draftStamp returns what the workflow editor stamps its draft with and checks a restored draft
+// against: the release, and on the demo also when it started.
+func (u *UI) draftStamp() string {
+	if u.demo {
+		return u.release + "+" + strconv.FormatInt(u.started.Unix(), 10)
+	}
+	return u.release
 }
 
 // WithTokenCheck tells the sign-in page whether this install holds any API token.
@@ -395,7 +418,8 @@ func (u *UI) activity(w http.ResponseWriter, _ *http.Request) {
 // workflows renders the visual workflow editor, where steps are wired into a graph and run as a
 // pipeline.
 func (u *UI) workflows(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "workflows.html", map[string]any{"ReadOnly": u.readOnly, "AIOff": !u.aiEnabled, "ExtraTools": run.ExtraToolNames()})
+	u.render(w, "workflows.html", map[string]any{"ReadOnly": u.readOnly, "AIOff": !u.aiEnabled,
+		"ExtraTools": run.ExtraToolNames(), "DraftStamp": u.draftStamp()})
 }
 
 // render executes the named template with data.

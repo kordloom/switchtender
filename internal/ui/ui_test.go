@@ -2,8 +2,10 @@ package ui_test
 
 import (
 	"fmt"
+	"html"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -237,5 +239,40 @@ func TestAReadOnlyInstallIsNotCalledTheDemo(t *testing.T) {
 		if path == "/ui/runs" && !strings.Contains(body, `data-readonly="true"`) {
 			t.Errorf("%s lost its read-only flag", path)
 		}
+	}
+}
+
+// TestWorkflowDraftStamp pins what the workflow editor's draft is stamped with: the release on an
+// install, and the release plus when the server started on the demo, so a demo reseed drops the
+// drafts visitors left as well as a new release does.
+func TestWorkflowDraftStamp(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Opts      []ui.Option
+		WantStamp *regexp.Regexp
+	}{{ // Test 0: An install stamps its release.
+		Opts: []ui.Option{ui.WithRelease("1.105.20")}, WantStamp: regexp.MustCompile(`^1\.105\.20$`),
+	}, { // Test 1: The demo adds when it started.
+		Opts:      []ui.Option{ui.WithRelease("1.105.20"), ui.WithDemo(true)},
+		WantStamp: regexp.MustCompile(`^1\.105\.20\+[0-9]{10,}$`),
+	}, { // Test 2: No release named stamps nothing.
+		WantStamp: regexp.MustCompile(`^$`),
+	}}
+	stamp := regexp.MustCompile(`data-draft-stamp="([^"]*)"`)
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			handler := ui.New(zap.NewNop(), nil, false, 0, false, false, false, "", test.Opts...).Handler()
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ui/workflows", nil))
+			m := stamp.FindStringSubmatch(rec.Body.String())
+			if m == nil {
+				t.Fatal("the workflow page carries no draft stamp")
+			}
+			// The attribute is HTML-escaped, so the + reads &#43; until the browser decodes it.
+			if got := html.UnescapeString(m[1]); !test.WantStamp.MatchString(got) {
+				t.Errorf("draft stamp = %q, want a match for %s", got, test.WantStamp)
+			}
+		})
 	}
 }

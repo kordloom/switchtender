@@ -2,6 +2,20 @@
 // navigation, or a sign-in round trip does not lose the work.
 const wfDraftKey = "st_wf_draft";
 
+// wfDraftStamp returns the stamp the server gave this page: its release, and on the demo when it
+// started. A draft carries the stamp it was saved under and is restored only under the same one, so
+// a new release or a demo reseed drops drafts instead of bringing a deleted step back forever.
+function wfDraftStamp() {
+	return document.body.dataset.draftStamp || "";
+}
+
+// wfDropDraft removes the saved draft. Storage failures are ignored, as in wfSave.
+function wfDropDraft() {
+	try {
+		localStorage.removeItem(wfDraftKey);
+	} catch { /* storage blocked */ }
+}
+
 // wfHistoryCap bounds the undo stack.
 const wfHistoryCap = 50;
 
@@ -32,6 +46,7 @@ function mountWorkflow() {
 	if (wfJSON) wfJSON.addEventListener("click", () => exportWorkflow("json"));
 	const wfYAML = document.getElementById("wf-export-yaml");
 	if (wfYAML) wfYAML.addEventListener("click", () => exportWorkflow("yaml"));
+	document.getElementById("wf-start-over").addEventListener("click", () => wfStartOver(true));
 	const saveTemplateButton = document.getElementById("wf-save-template");
 	if (saveTemplateButton) saveTemplateButton.addEventListener("click", saveWorkflowTemplate);
 	document.getElementById("wf-step-tool").addEventListener("change", syncStepFields);
@@ -139,10 +154,12 @@ function mountWorkflow() {
 	window.addEventListener("resize", renderEdges);
 	mountWizard();
 	let hadViewport = wfRestore();
+	const restored = wfState.nodes.length > 0;
 	if (!wfState.nodes.length) {
 		wfSeedExample();
 		hadViewport = false;
 	}
+	renderRestoredNote(restored && !wfIsUntouchedSample());
 	renderWorkflow();
 	if (hadViewport) {
 		applyViewport();
@@ -243,6 +260,7 @@ function fitView() {
 function wfSave() {
 	try {
 		localStorage.setItem(wfDraftKey, JSON.stringify({
+			stamp: wfDraftStamp(),
 			nodes: wfState.nodes, edges: wfState.edges, seq: wfState.seq,
 			name: document.getElementById("wf-name").value,
 			inventory: document.getElementById("wf-inventory").value,
@@ -560,6 +578,63 @@ function wfClearCanvas() {
 	if (first) first.focus();
 }
 
+// wfStartOver discards the unsent changes and puts back the starting example, as one undo point so
+// Cmd or Ctrl Z brings the steps back. ask confirms first, naming what is lost, unless the canvas
+// already holds the untouched example and there is nothing to lose.
+function wfStartOver(ask) {
+	if (ask && !wfIsUntouchedSample()) {
+		const steps = wfState.nodes.length;
+		const links = wfState.edges.length;
+		const lost = steps + (steps === 1 ? " step" : " steps") + ", " + links +
+			(links === 1 ? " link" : " links");
+		if (!window.confirm("Start over? This discards your unsent changes (" + lost + ") and puts " +
+			"back the starting example. Saved templates are not touched.")) return;
+	}
+	wfSnapshot();
+	wfDropDraft();
+	wfState.nodes = [];
+	wfState.edges = [];
+	wfState.selectedEdge = null;
+	wfState.linkFrom = null;
+	document.getElementById("wf-name").value = "";
+	document.getElementById("wf-inventory").value = "";
+	wfSeedExample();
+	renderRestoredNote(false);
+	renderWorkflow();
+	fitView();
+	wfSetStatus("Started over from the example. Cmd or Ctrl Z brings your steps back.", "");
+}
+
+// renderRestoredNote says, when show is set, that the canvas holds changes kept from an earlier
+// visit, with a Discard that starts over. Without it a deleted step came back on every visit with
+// nothing saying the page was replaying an old draft.
+function renderRestoredNote(show) {
+	const host = document.getElementById("wf-restored-note");
+	if (!host) return;
+	host.textContent = "";
+	host.hidden = !show;
+	if (!show) return;
+	const head = document.createElement("div");
+	head.className = "risk-callout-head";
+	const label = document.createElement("strong");
+	label.textContent = "Restored your unsent changes";
+	head.appendChild(label);
+	host.appendChild(head);
+	const why = document.createElement("div");
+	why.className = "muted";
+	why.textContent = "This browser kept the graph from your last visit. Discard puts back the " +
+		"starting example.";
+	host.appendChild(why);
+	const discard = document.createElement("button");
+	discard.type = "button";
+	discard.id = "wf-restored-discard";
+	discard.className = "button wf-sample-clear";
+	discard.textContent = "Discard";
+	discard.dataset.tip = "Click to drop the kept changes and start over from the example";
+	discard.addEventListener("click", () => wfStartOver(false));
+	host.appendChild(discard);
+}
+
 // wfNextSeq returns the counter the next node id is minted from: one past the highest id already in
 // the graph, and never below the draft's own counter.
 //
@@ -588,8 +663,9 @@ function wfStringIDs(nodes, edges) {
 	};
 }
 
-// wfRestore loads the saved draft into the editor state, ignoring anything malformed. It reports
-// whether a saved viewport was restored, so the mount can fit the graph on a first visit instead.
+// wfRestore loads the saved draft into the editor state, ignoring anything malformed, and drops a
+// draft saved under another stamp. It reports whether a saved viewport was restored, so the mount
+// can fit the graph on a first visit instead.
 function wfRestore() {
 	let draft = null;
 	try {
@@ -597,7 +673,12 @@ function wfRestore() {
 	} catch {
 		return false;
 	}
-	if (!draft || !Array.isArray(draft.nodes) || !Array.isArray(draft.edges)) return false;
+	if (!draft) return false;
+	if ((draft.stamp || "") !== wfDraftStamp()) {
+		wfDropDraft();
+		return false;
+	}
+	if (!Array.isArray(draft.nodes) || !Array.isArray(draft.edges)) return false;
 	if (!draft.nodes.every((n) => n && typeof n === "object")) return false;
 	if (!draft.edges.every((e) => e && typeof e === "object")) return false;
 	const graph = wfStringIDs(draft.nodes, draft.edges);
