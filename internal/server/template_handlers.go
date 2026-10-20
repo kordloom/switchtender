@@ -11,10 +11,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/credential"
-	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/inventory"
-	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/scrub"
 	"github.com/kordloom/switchtender/internal/template"
@@ -847,33 +845,12 @@ func launchTemplateHandler(store template.Store, submitter Submitter, sealer *cr
 		default:
 			created, err = submitter.Submit(r.Context(), t.Playbook, t.Inventory, opts...)
 		}
-		switch {
-		case errors.Is(err, inventory.ErrNoHosts):
+		if errors.Is(err, inventory.ErrNoHosts) {
 			respondNoHosts(w, log, inventoryID, err)
 			return
-		case errors.Is(err, credential.ErrNotFound), errors.Is(err, credential.ErrNoKey),
-			errors.Is(err, project.ErrNotFound), errors.Is(err, inventory.ErrNotFound),
-			errors.Is(err, inventory.ErrResolve), errors.Is(err, dispatch.ErrInventorySnapshot),
-			errors.Is(err, inventory.ErrNeedsAnsible), errors.Is(err, inventory.ErrInvalidInventory),
-			errors.Is(err, inventory.ErrComposition), errors.Is(err, inventory.ErrHostFilter),
-			errors.Is(err, inventory.ErrSourceVars), errors.Is(err, inventory.ErrTooManyHosts),
-			errors.Is(err, dispatch.ErrNoPlaybook), errors.Is(err, dispatch.ErrNoCommand),
-			errors.Is(err, dispatch.ErrUnknownTool), errors.Is(err, dispatch.ErrStepInput),
-			errors.Is(err, dispatch.ErrNoSteps), errors.Is(err, dispatch.ErrTooManySteps),
-			errors.Is(err, dispatch.ErrUnnamedStep), errors.Is(err, dispatch.ErrDuplicateStep),
-			errors.Is(err, dispatch.ErrUnknownDependency), errors.Is(err, dispatch.ErrDependencyCycle):
-			respondError(w, log, http.StatusBadRequest, err.Error())
-			return
-		case errors.Is(err, credential.ErrNoSecret), errors.Is(err, credential.ErrUnreadable):
-			respondError(w, log, http.StatusConflict, err.Error())
-			return
-		case errors.Is(err, dispatch.ErrPolicyDenied) ||
-			errors.Is(err, dispatch.ErrQueueUnlicensed):
-			respondError(w, log, http.StatusForbidden, err.Error())
-			return
-		case err != nil:
-			log.Error("server: launch template: " + err.Error())
-			respondError(w, log, http.StatusInternalServerError, "could not launch template")
+		}
+		failure := personSubmit{http.StatusBadRequest, "launch template", "could not launch template"}
+		if failure.respond(w, log, err) {
 			return
 		}
 		w.Header().Set("Location", "/v1/runs/"+created.ID)

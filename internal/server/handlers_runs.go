@@ -14,7 +14,6 @@ import (
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/inventory"
-	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -205,30 +204,12 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 		} else {
 			created, err = submitter.Submit(r.Context(), req.Playbook, req.Inventory, opts...)
 		}
-		switch {
-		case errors.Is(err, inventory.ErrNoHosts):
+		if errors.Is(err, inventory.ErrNoHosts) {
 			respondNoHosts(w, log, req.InventoryID, err)
 			return
-		case errors.Is(err, credential.ErrNotFound), errors.Is(err, credential.ErrNoKey),
-			errors.Is(err, project.ErrNotFound), errors.Is(err, inventory.ErrNotFound),
-			errors.Is(err, inventory.ErrResolve), errors.Is(err, dispatch.ErrInventorySnapshot),
-			errors.Is(err, inventory.ErrNeedsAnsible), errors.Is(err, inventory.ErrInvalidInventory),
-			errors.Is(err, inventory.ErrComposition), errors.Is(err, inventory.ErrHostFilter),
-			errors.Is(err, inventory.ErrSourceVars), errors.Is(err, inventory.ErrTooManyHosts),
-			errors.Is(err, dispatch.ErrNoPlaybook), errors.Is(err, dispatch.ErrNoCommand),
-			errors.Is(err, dispatch.ErrUnknownTool), errors.Is(err, dispatch.ErrToolCredential):
-			respondError(w, log, http.StatusBadRequest, err.Error())
-			return
-		case errors.Is(err, credential.ErrNoSecret), errors.Is(err, credential.ErrUnreadable):
-			respondError(w, log, http.StatusConflict, err.Error())
-			return
-		case errors.Is(err, dispatch.ErrPolicyDenied) ||
-			errors.Is(err, dispatch.ErrQueueUnlicensed):
-			respondError(w, log, http.StatusForbidden, err.Error())
-			return
-		case err != nil:
-			log.Error("server: submit run: " + err.Error())
-			respondError(w, log, http.StatusInternalServerError, "could not submit run")
+		}
+		failure := personSubmit{http.StatusBadRequest, "submit run", "could not submit run"}
+		if failure.respond(w, log, err) {
 			return
 		}
 
@@ -318,31 +299,8 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 		}
 		created, err := submitter.SubmitPipeline(r.Context(), req.Name, req.Inventory, req.Steps,
 			popts...)
-		switch {
-		case errors.Is(err, credential.ErrNotFound), errors.Is(err, credential.ErrNoKey),
-			errors.Is(err, project.ErrNotFound):
-			respondError(w, log, http.StatusBadRequest, err.Error())
-			return
-		case errors.Is(err, run.ErrApprovalStep), errors.Is(err, run.ErrDenyPath):
-			respondError(w, log, http.StatusBadRequest, err.Error())
-			return
-		case errors.Is(err, dispatch.ErrUnnamedStep), errors.Is(err, dispatch.ErrDuplicateStep),
-			errors.Is(err, dispatch.ErrUnknownDependency), errors.Is(err, dispatch.ErrDependencyCycle),
-			errors.Is(err, dispatch.ErrStepInput), errors.Is(err, dispatch.ErrTooManySteps),
-			errors.Is(err, dispatch.ErrNoPlaybook), errors.Is(err, dispatch.ErrNoCommand),
-			errors.Is(err, dispatch.ErrUnknownTool), errors.Is(err, dispatch.ErrToolCredential):
-			respondError(w, log, http.StatusBadRequest, err.Error())
-			return
-		case errors.Is(err, credential.ErrNoSecret), errors.Is(err, credential.ErrUnreadable):
-			respondError(w, log, http.StatusConflict, err.Error())
-			return
-		case errors.Is(err, dispatch.ErrPolicyDenied) ||
-			errors.Is(err, dispatch.ErrQueueUnlicensed):
-			respondError(w, log, http.StatusForbidden, err.Error())
-			return
-		case err != nil:
-			log.Error("server: submit pipeline: " + err.Error())
-			respondError(w, log, http.StatusInternalServerError, "could not submit pipeline")
+		failure := personSubmit{http.StatusBadRequest, "submit pipeline", "could not submit pipeline"}
+		if failure.respond(w, log, err) {
 			return
 		}
 		w.Header().Set("Location", "/v1/runs/"+created.ID)
@@ -694,23 +652,10 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 			respondNoHosts(w, log, rn.InventoryID, err)
 			return
 		}
-		if errors.Is(err, dispatch.ErrPolicyDenied) ||
-			errors.Is(err, dispatch.ErrQueueUnlicensed) {
-			respondError(w, log, http.StatusForbidden, err.Error())
-			return
-		}
-		if errors.Is(err, credential.ErrNoSecret) || errors.Is(err, credential.ErrUnreadable) {
-			respondError(w, log, http.StatusConflict, err.Error())
-			return
-		}
-		if errors.Is(err, dispatch.ErrInventorySnapshot) || errors.Is(err, inventory.ErrInvalidInventory) ||
-			errors.Is(err, inventory.ErrTooManyHosts) {
-			respondError(w, log, http.StatusConflict, err.Error())
-			return
-		}
-		if err != nil {
-			log.Error("server: rerun: " + err.Error())
-			respondError(w, log, http.StatusInternalServerError, "could not rerun")
+		// The rerun's request carries nothing but the run's id, so an error in the spec it replays is
+		// a conflict with what that spec now names, not a bad request.
+		failure := personSubmit{http.StatusConflict, "rerun", "could not rerun"}
+		if failure.respond(w, log, err) {
 			return
 		}
 		w.Header().Set("Location", "/v1/runs/"+created.ID)

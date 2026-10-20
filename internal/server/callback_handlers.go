@@ -20,7 +20,6 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/credential"
-	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/run"
@@ -575,16 +574,22 @@ func (c *callbacks) launch(w http.ResponseWriter, r *http.Request, t *template.T
 		}
 		respondError(w, c.log, http.StatusConflict, "a callback run for "+host+" is already pending")
 		return
-	case errors.Is(err, dispatch.ErrPolicyDenied), errors.Is(err, dispatch.ErrQueueUnlicensed):
-		respondError(w, c.log, http.StatusForbidden, err.Error())
-		return
-	case errors.Is(err, credential.ErrNoSecret), errors.Is(err, credential.ErrUnreadable):
-		c.log.Warn("server: provisioning callback: " + err.Error())
-		respondError(w, c.log, http.StatusConflict, err.Error())
-		return
 	case err != nil:
-		c.log.Error("server: provisioning callback: " + err.Error())
-		respondError(w, c.log, http.StatusBadGateway, "could not launch the template")
+		switch class, _ := classifySubmit(err); class {
+		case submitPolicy:
+			respondError(w, c.log, http.StatusForbidden, err.Error())
+		case submitSecret:
+			c.log.Warn("server: provisioning callback: " + err.Error())
+			respondError(w, c.log, http.StatusConflict, err.Error())
+		// The host holds the key and nothing more, so a configuration error is named to it and the
+		// server log keeps the detail, which can quote the inventory.
+		case submitInput:
+			c.log.Warn("server: provisioning callback: " + err.Error())
+			respondError(w, c.log, http.StatusConflict, templateRefusal(err))
+		default:
+			c.log.Error("server: provisioning callback: " + err.Error())
+			respondError(w, c.log, http.StatusBadGateway, "could not launch the template")
+		}
 		return
 	}
 	w.Header().Set("Location", "/v1/runs/"+created.ID)
@@ -757,8 +762,9 @@ func callbackInventoryHosts(ctx context.Context, inventories inventory.Store, id
 	}
 	hosts, err := inventory.Hosts(inv.Content)
 	if err != nil {
+		log.Warn("server: provisioning callback: read inventory: " + err.Error())
 		return nil, nil, http.StatusConflict, "this template's inventory could not be read as a " +
-			"host list: " + err.Error()
+			"host list: " + senderReason(err)
 	}
 	return inv, hosts, 0, ""
 }

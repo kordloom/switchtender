@@ -9,7 +9,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -293,17 +292,13 @@ func reconcileDriftHandler(store run.Store, submitter Submitter, authz *authoriz
 			}
 		}
 		proposal, err := submitter.Submit(r.Context(), check.Playbook, check.Inventory, opts...)
-		switch {
-		// A refusal is the operator's answer, not the server's failure. Both of these were logged
-		// and returned as a 500 saying the proposal could not be created, so the one person who
-		// needed to know which rule stopped them had to be handed a server log to find out.
-		case errors.Is(err, dispatch.ErrPolicyDenied) ||
-			errors.Is(err, dispatch.ErrQueueUnlicensed):
-			respondError(w, log, http.StatusForbidden, err.Error())
-			return
-		case err != nil:
-			log.Error("server: reconcile submit: " + err.Error())
-			respondError(w, log, http.StatusInternalServerError, "could not create the proposal")
+		// A refusal is the operator's answer, not the server's failure. Policy refusals and
+		// configuration errors were logged and returned as a 500 saying the proposal could not be
+		// created, so the one person who needed to know what stopped them had to be handed a server
+		// log to find out.
+		failure := personSubmit{http.StatusBadRequest, "reconcile submit",
+			"could not create the proposal"}
+		if failure.respond(w, log, err) {
 			return
 		}
 		respondRun(w, r, log, http.StatusAccepted, proposal)

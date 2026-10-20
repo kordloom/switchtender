@@ -244,6 +244,12 @@ of those data sources is refused by its address like any other, and a download t
 configuration unread, so the plan is refused and the comment says why. A plan that goes ahead
 records the download, its exit status, and the digest of the modules it read in the plan run's
 <code>dry_run_scans</code>, and the plan executes exactly those modules.</p>
+<p>A template that cannot launch for something its owner must fix, such as an inventory that is not a
+valid inventory or a project that no longer exists, is not planned either. The forge is answered
+<code>409</code>, and the pull request gets a comment naming the error and an <code>error</code> status. The comment names
+the error and quotes nothing, since anybody who can read the pull request reads it, and the server
+log keeps the detail. An inventory that could not be resolved, which can be a store that did not
+answer, is answered <code>502</code> as a failure on SwitchTender's side.</p>
 <p>A <code>.terraform</code> directory committed to the repository is never read. A pull request could commit one
 whose manifest points a registry module at a harmless copy beside it while the plan's own <code>init</code>
 installs the real module, so the review copies the configuration without it and reads only what its
@@ -549,6 +555,10 @@ author from approving their own change, whoever asked for the apply first.</p>
 <tr>
 <td>The template cannot be planned for a pull request, such as a workflow template</td>
 <td>One reply saying why.</td>
+</tr>
+<tr>
+<td>The apply cannot run for something its owner must fix, such as an inventory that is not a valid inventory or a credential with no secret</td>
+<td>One reply naming the error and quoting nothing. Nothing is applied.</td>
 </tr>
 <tr>
 <td>Something failed on SwitchTender's side, such as a call to the forge</td>

@@ -888,17 +888,26 @@ func (c *commentCall) propose(ctx context.Context, requester *user.User, plan *r
 		sctx = run.WithAuditReceipt(ctx, c.receipt)
 	}
 	proposal, err := c.d.submitter.Submit(sctx, plan.Playbook, plan.Inventory, opts...)
-	switch {
-	case errors.Is(err, dispatch.ErrPolicyDenied), errors.Is(err, dispatch.ErrQueueUnlicensed):
-		a := refused("policy", "A rule refuses this apply, so nothing was applied. Its run page "+
+	if err == nil {
+		return proposal, nil
+	}
+	var a commentAnswer
+	switch class, _ := classifySubmit(err); class {
+	case submitPolicy:
+		a = refused("policy", "A rule refuses this apply, so nothing was applied. Its run page "+
 			"in SwitchTender names the rule.")
 		a.err = err
-		return nil, &a
-	case err != nil:
-		a := failed("propose", http.StatusBadGateway, err)
-		return nil, &a
+	// Commenting again cannot fix a configuration error or a credential, so neither is told to
+	// retry. The reply names the error and no more: anybody who can read the pull request reads
+	// it, and the detail can quote the inventory or name the credential.
+	case submitInput, submitSecret:
+		c.d.log.Warn("server: comment apply: " + err.Error())
+		a = refused("configuration", "This apply cannot run: "+senderReason(err)+". Nothing was "+
+			"applied. Fix it in SwitchTender, then comment again.")
+	default:
+		a = failed("propose", http.StatusBadGateway, err)
 	}
-	return proposal, nil
+	return nil, &a
 }
 
 // proposedFrom reports whether existing is the apply this path proposes from plan for this pull
