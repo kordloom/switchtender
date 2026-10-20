@@ -119,6 +119,9 @@ type Spec struct {
 	EventsPath string
 	// Limit restricts execution to a host pattern, passed as ansible-playbook --limit.
 	Limit string
+	// LimitFile holds the limit one pattern per line when it is too long for one argument, and is
+	// passed as --limit @file in place of Limit.
+	LimitFile string
 	// Tags, when set, runs only plays and tasks carrying one of these tags, passed as a single
 	// comma-separated ansible-playbook --tags argument.
 	Tags []string
@@ -546,6 +549,11 @@ func (a *ansibleRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Resu
 		return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
 	}
 	defer varsCleanup()
+	limitCleanup, err := materializeLimit(&spec)
+	if err != nil {
+		return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
+	}
+	defer limitCleanup()
 	pargs, err := playbookArgs(spec)
 	if err != nil {
 		return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
@@ -608,6 +616,39 @@ func materializeExtraVars(spec *Spec) (func(), error) {
 	}
 	spec.ExtraVarsFiles = append(spec.ExtraVarsFiles, f.Name())
 	spec.ExtraVars = nil
+	return cleanup, nil
+}
+
+// maxLimitArg is the longest limit passed as one argument. Linux refuses any single argument longer
+// than 128 KiB, which a shard of about 5,400 hosts reached, so a longer limit goes in a file. Half
+// the ceiling leaves room for whatever else shares the argument.
+const maxLimitArg = 64 << 10
+
+// materializeLimit moves a limit too long for one argument into a file in the run's private
+// directory, one pattern per line, which ansible-playbook reads from --limit @file. A shorter limit
+// stays an argument, so every run that worked before runs exactly as it did. The spec is updated in
+// place so the caller's mount list picks the file up.
+func materializeLimit(spec *Spec) (func(), error) {
+	noCleanup := func() {}
+	if len(spec.Limit) <= maxLimitArg {
+		return noCleanup, nil
+	}
+	f, err := os.CreateTemp(spec.RunDir, "switchtender-limit-*.txt")
+	if err != nil {
+		return noCleanup, fmt.Errorf("create limit file: %w", err)
+	}
+	cleanup := func() { _ = os.Remove(f.Name()) }
+	body := strings.ReplaceAll(spec.Limit, ",", "\n") + "\n"
+	if _, err := f.WriteString(body); err != nil {
+		_ = f.Close()
+		cleanup()
+		return noCleanup, fmt.Errorf("write limit file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		cleanup()
+		return noCleanup, fmt.Errorf("close limit file: %w", err)
+	}
+	spec.LimitFile, spec.Limit = f.Name(), ""
 	return cleanup, nil
 }
 
@@ -770,7 +811,10 @@ func playbookArgs(spec Spec) ([]string, error) {
 	if spec.Inventory != "" {
 		args = append(args, "-i", spec.Inventory)
 	}
-	if spec.Limit != "" {
+	switch {
+	case spec.LimitFile != "":
+		args = append(args, "--limit", "@"+spec.LimitFile)
+	case spec.Limit != "":
 		args = append(args, "--limit", spec.Limit)
 	}
 	if len(spec.Tags) > 0 {

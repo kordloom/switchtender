@@ -1014,7 +1014,7 @@ func (s *store) RequestCancel(ctx context.Context, id string) error {
 // CancelPending atomically cancels a run still waiting unclaimed in pending or pending_approval.
 func (s *store) CancelPending(ctx context.Context, id string) (bool, error) {
 	res, err := s.db.ExecContext(ctx, `
-UPDATE runs SET status='canceled', ended_at=$1
+UPDATE runs SET status='canceled', ended_at=$1, inventory_sealed='', plan_sealed=''
 WHERE id=$2 AND claimed_by='' AND status IN ('pending', 'pending_approval', 'parked')`,
 		sqlutil.FormatTime(time.Now()), id)
 	if err != nil {

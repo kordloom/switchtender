@@ -93,9 +93,15 @@ func toolContainerPlan(spec Spec) (containerPlan, func(), error) {
 		if err != nil {
 			return containerPlan{}, noCleanup, err
 		}
+		limitCleanup, err := materializeLimit(&spec)
+		if err != nil {
+			varsCleanup()
+			return containerPlan{}, noCleanup, err
+		}
 		pargs, err := playbookArgs(spec)
 		if err != nil {
 			varsCleanup()
+			limitCleanup()
 			return containerPlan{}, noCleanup, err
 		}
 		mounts := []planMount{
@@ -110,6 +116,9 @@ func toolContainerPlan(spec Spec) (containerPlan, func(), error) {
 		for _, f := range spec.ExtraVarsFiles {
 			mounts = append(mounts, planMount{path: f})
 		}
+		if spec.LimitFile != "" {
+			mounts = append(mounts, planMount{path: spec.LimitFile})
+		}
 		// The fact cache is read and written by the play, so it is the one Ansible input mounted
 		// writable. Without the mount the plugin points at a path the container does not have.
 		if spec.FactCacheDir != "" {
@@ -119,7 +128,7 @@ func toolContainerPlan(spec Spec) (containerPlan, func(), error) {
 			argv:    append([]string{"ansible-playbook"}, pargs...),
 			workdir: spec.Dir,
 			mounts:  mounts,
-		}, varsCleanup, nil
+		}, func() { varsCleanup(); limitCleanup() }, nil
 	case run.ToolBash:
 		// Same shape as the other three script tools, so the script is a mounted file rather than
 		// part of the container's recorded command line.

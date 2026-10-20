@@ -176,6 +176,12 @@ fails and the split fails, any cancel and it cancels. Retrying a split re-runs o
 failed, under a new parent that records what it retried, so a hundred-host run that failed on three
 hosts costs three hosts to fix, not a hundred.
 
+A shard reaches ansible-playbook as a limit naming its hosts. A limit longer than 64 KiB, about
+2,600 hosts at 24-byte names, is written to a file in the run's private directory and passed as
+`--limit @file`, since Linux refuses any one argument over 128 KiB and a larger shard could not
+start. Shards beyond the slots that can run at once only add start cost, so a split rarely wants
+more shards than it has workers.
+
 ## Pipelines coordinate failure
 
 A pipeline runs steps in order, or as a dependency graph when steps declare what they depend on.

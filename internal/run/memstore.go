@@ -709,6 +709,7 @@ func (m *memStore) CancelPending(_ context.Context, id string) (bool, error) {
 	now := time.Now()
 	r.Status = StatusCanceled
 	r.EndedAt = &now
+	r.InventorySealed, r.PlanSealed = "", ""
 	delete(m.parked, id)
 	return true, nil
 }
