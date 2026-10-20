@@ -236,7 +236,8 @@ type Store interface {
 	// CancelPending atomically cancels a run that is waiting unclaimed in pending or
 	// pending_approval and reports whether it changed the run. It reports false for a missing,
 	// claimed, executing, or terminal run; those are canceled cooperatively through RequestCancel
-	// by whichever process holds them.
+	// by whichever process holds them. The run's sealed inventory and plan are cleared in the same
+	// write, since a canceled run never executes and its digests already bind what it held.
 	CancelPending(ctx context.Context, id string) (bool, error)
 	// TransitionStatusAndClaim atomically moves the run from the from status to the to status and
 	// stamps startedAt as the run's start when it is non-zero and no start is recorded yet; zero

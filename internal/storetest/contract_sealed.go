@@ -142,7 +142,7 @@ func testSealedMaterial(t *testing.T, store run.Store) {
 }
 
 // testSealedMaterialWipes pins the other ends of a run and the sweep: settling a held run wipes its
-// sealed material, WipeSealed wipes one run, and SweepSealed wipes every ended run still carrying
+// sealed material, so does canceling a waiting one, WipeSealed wipes one run, and SweepSealed wipes every ended run still carrying
 // some while leaving a run that is still waiting untouched.
 func testSealedMaterialWipes(t *testing.T, store run.Store) {
 	ctx := context.Background()
@@ -156,7 +156,12 @@ func testSealedMaterialWipes(t *testing.T, store run.Store) {
 	canceled := sealedRun("run_sealed_canceled")
 	canceled.Status = run.StatusCanceled
 	canceled.ClaimedBy = ""
-	for _, r := range []*run.Run{held, waiting, direct, canceled} {
+	// A shard of a rejected split is canceled while still waiting, and kept its sealed copy of the
+	// whole inventory until the sweep ran.
+	shard := sealedRun("run_sealed_shard")
+	shard.Status = run.StatusPendingApproval
+	shard.ClaimedBy = ""
+	for _, r := range []*run.Run{held, waiting, direct, canceled, shard} {
 		if err := store.Save(ctx, r); err != nil {
 			t.Fatalf("Save(%s) error = %v", r.ID, err)
 		}
@@ -169,6 +174,9 @@ func testSealedMaterialWipes(t *testing.T, store run.Store) {
 	}
 	if err := store.WipeSealed(ctx, direct.ID); err != nil {
 		t.Fatalf("WipeSealed() error = %v", err)
+	}
+	if ok, err := store.CancelPending(ctx, shard.ID); err != nil || !ok {
+		t.Fatalf("CancelPending() = %v, %v, want canceled", ok, err)
 	}
 	n, err := store.SweepSealed(ctx)
 	if err != nil {
@@ -191,6 +199,8 @@ func testSealedMaterialWipes(t *testing.T, store run.Store) {
 		ID: canceled.ID, WantSealed: false,
 	}, { // Test 3: A run still waiting keeps what it will execute.
 		ID: waiting.ID, WantSealed: true,
+	}, { // Test 4: A waiting run canceled is wiped by the cancel, not left for the sweep.
+		ID: shard.ID, WantSealed: false,
 	}}
 	for _, test := range tests {
 		got, err := store.Get(ctx, test.ID)
