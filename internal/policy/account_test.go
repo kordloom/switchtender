@@ -172,31 +172,31 @@ func TestValidateTheExemptionAccount(t *testing.T) {
 }
 
 // TestAccountScopingIsTeamExceptOnAnExemption holds the account criterion to the tier the actor
-// criterion has: a hold or a deny scoped to an account is the full engine, and an exemption naming
-// one stays Community.
+// criterion has: a hold or a deny scoped to an account is Team, and an exemption naming one stays
+// Community.
 func TestAccountScopingIsTeamExceptOnAnExemption(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		// Policy is the rule classified.
 		Policy Policy
-		// WantFull is whether it is the full engine.
-		WantFull bool
+		// WantTeam is whether it uses a Team rule.
+		WantTeam bool
 	}{{ // Test 0: A hold scoped to an account.
-		Policy: Policy{Account: "team-a"}, WantFull: true,
+		Policy: Policy{Account: "team-a"}, WantTeam: true,
 	}, { // Test 1: A deny scoped to an account.
-		Policy: Policy{Account: "team-a", Effect: EffectDeny}, WantFull: true,
+		Policy: Policy{Account: "team-a", Effect: EffectDeny}, WantTeam: true,
 	}, { // Test 2: An exemption naming an account.
-		Policy: Policy{Account: "team-a", Effect: EffectExempt}, WantFull: false,
+		Policy: Policy{Account: "team-a", Effect: EffectExempt}, WantTeam: false,
 	}, { // Test 3: An exemption naming an agent and its account.
-		Policy: Policy{Actor: "ci-agent", Account: "team-a", Effect: EffectExempt}, WantFull: false,
+		Policy: Policy{Actor: "ci-agent", Account: "team-a", Effect: EffectExempt}, WantTeam: false,
 	}, { // Test 4: A plain hold, the control.
-		Policy: Policy{Tool: "bash"}, WantFull: false,
+		Policy: Policy{Tool: "bash"}, WantTeam: false,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			if got := test.Policy.Advanced(); got != test.WantFull {
-				t.Errorf("Advanced() = %v, want %v", got, test.WantFull)
+			if got := test.Policy.TeamRules(); got != test.WantTeam {
+				t.Errorf("TeamRules() = %v, want %v", got, test.WantTeam)
 			}
 		})
 	}

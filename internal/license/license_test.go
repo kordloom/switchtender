@@ -221,6 +221,10 @@ func TestTierCoverage(t *testing.T) {
 		{Tier: TierEnterprise, Feature: FeatureReconcile, WantAllowed: true}, // Test 8.
 		{Tier: "", Feature: FeaturePolicyFull, WantAllowed: true},            // Test 9: pre-Pro licenses are Team.
 		{Tier: "platinum", Feature: FeatureSSO, WantAllowed: false},          // Test 10: unknown tiers cover nothing.
+		{Tier: TierPro, Feature: FeaturePolicyRules, WantAllowed: true},      // Test 11: deny rules and the floors are Pro.
+		{Tier: TierTeam, Feature: FeaturePolicyRules, WantAllowed: true},     // Test 12: Team includes them.
+		{Tier: "", Feature: FeaturePolicyRules, WantAllowed: true},           // Test 13: so do pre-Pro licenses.
+		{Tier: "platinum", Feature: FeaturePolicyRules, WantAllowed: false},  // Test 14.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -319,5 +323,43 @@ func TestLapsedProNamesTheTier(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "Team") ||
 		!strings.Contains(err.Error(), "Pro") {
 		t.Errorf("Pro-at-Team refusal = %v, want both tiers named", err)
+	}
+}
+
+// TestARetiredBandStillVerifies pins what dropping the 250 band from the price list does to the
+// licenses already minted at it: nothing. Hosts is informational and nothing counts it, so a
+// license naming a band the mint no longer signs verifies, keeps its band in status output, and
+// keeps every feature its tier covers. A license at the new 2,500 band round-trips the same way.
+func TestARetiredBandStillVerifies(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 21, 0, 0, 0, 0, time.UTC)
+	tests := []struct {
+		Hosts string
+	}{{ // Test 0: The retired 250 band.
+		Hosts: "250",
+	}, { // Test 1: The 2,500 band the ladder added.
+		Hosts: "2500",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			kid := fmt.Sprintf("band%d", testNum)
+			c := claims(kid)
+			c.Hosts = test.Hosts
+			raw, err := Sign(c, testKey(t, kid))
+			if err != nil {
+				t.Fatalf("Sign() error = %v", err)
+			}
+			l, err := Verify(raw, "test")
+			if err != nil {
+				t.Fatalf("a license minted at the %s band no longer verifies: %v", test.Hosts, err)
+			}
+			if l.Claims.Hosts != test.Hosts {
+				t.Errorf("Hosts = %q, want %q", l.Claims.Hosts, test.Hosts)
+			}
+			if err := allowAt(l, FeaturePolicyFull, now); err != nil {
+				t.Errorf("a Team license at the %s band lost Team coverage: %v", test.Hosts, err)
+			}
+		})
 	}
 }

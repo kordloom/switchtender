@@ -193,9 +193,9 @@ func cliIssuer() string {
 }
 
 // seedAgentExemption stores the exemption the agent's smoke test runs under, when the license holds
-// it. It is checked the way the API checks a rule an admin writes: the full engine when the rule
-// uses it, and the number of rules the tier holds. An install whose license refuses it keeps the
-// smoke test waiting like the agent's other runs, which is what that install would do, and says why.
+// it. It is checked the way the API checks a rule an admin writes: the Team and Pro rules it uses,
+// and the number of rules the tier holds. An install whose license refuses it keeps the smoke test
+// waiting like the agent's other runs, which is what that install would do, and says why.
 func seedAgentExemption(ctx context.Context, d Deps, log *zap.Logger) bool {
 	p := policy.NewPolicy(agentExemptionName)
 	p.Effect, p.Actor, p.Account = policy.EffectExempt, agentLabel, agentAccount
@@ -210,11 +210,9 @@ func seedAgentExemption(ctx context.Context, d Deps, log *zap.Logger) bool {
 		log.Warn("demo: seed the agent's exemption: " + err.Error())
 		return false
 	}
-	if p.Advanced() {
-		if err := license.Allow(license.FeaturePolicyFull); err != nil {
-			log.Warn("demo: the agent's exemption is not seeded: " + err.Error())
-			return false
-		}
+	if err := policy.AllowRules(p); err != nil {
+		log.Warn("demo: the agent's exemption is not seeded: " + err.Error())
+		return false
 	}
 	if err := license.AllowPolicies(len(existing) + 1); err != nil {
 		log.Warn("demo: the agent's exemption is not seeded, so its smoke test waits like its "+

@@ -5,12 +5,14 @@ package policy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/idgen"
+	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -229,44 +231,89 @@ func (p *Policy) matchesActor(r *run.Run) bool {
 	}
 }
 
-// Advanced reports whether a policy uses the full engine: a deny effect, a risk floor, actor
-// scoping, or distinct-approver separation of duties. One plain require-approval policy is the
-// Community gate; everything past it is what a Team license covers.
+// ProRules reports whether a policy uses a rule a Pro license adds to the one plain hold: a deny
+// effect, a risk floor, or a reversibility floor. Each of them strengthens what one rule does to
+// the runs it matches without saying who the rule is about, which is the line between Pro and Team.
 //
-// This is meant to be the one definition every enforcement point shares. It said so before it was,
-// which is how the drift lived: the create and update handlers each carried their own copy of the
-// condition and this carried a third, and none of the three tested for actor scoping while the
-// licensing terms, the API reference, the FAQ, and the comment on license.FeaturePolicyFull all sold
-// it as Team. A rule scoped to agents as a class was free through the API and free through
-// --policy-file, which is the path an install that takes policy seriously actually uses.
+// Reversibility is here for the same reason MinRisk is, and it drifted once: the grade was added to
+// the engine and not to the license question, so a rule holding on irreversibility was free through
+// --policy-file while the identical rule through the API was refused.
+func (p *Policy) ProRules() bool {
+	// An exemption asks for none of these, and Validate refuses the floors on one. Answering false
+	// here means a rule no tier accepts meets Validate's refusal rather than an offer to buy Pro,
+	// which would refuse it too.
+	if p.Exempts() {
+		return false
+	}
+	return p.Effect == EffectDeny || p.MinRisk != "" || p.Reversibility != ""
+}
+
+// TeamRules reports whether a policy uses what only a Team license covers: a Rego policy,
+// distinct-approver separation of duties, or scoping to an actor, an actor kind, or an account.
 //
-// Actor scoping belongs here because it is the criterion that turns a blanket hold into an
-// authorization boundary around a machine principal, which is the thing being sold. Account scoping
-// belongs beside it for the same reason: it is the same boundary, drawn around the account a
-// credential acts for rather than the credential's label.
-// Reversibility belongs here for the same reason MinRisk does, and it drifted the same way: the
-// grade was added, the engine evaluated it, and this was not updated, so a rule holding on
-// irreversibility was free through --policy-file while the identical rule through the API was
-// refused as Team. The feature this product sells hardest was the one leaking.
-//
-// A Rego policy is the full engine by construction: it can deny, scope to actors, and demand a
-// second approver, and nothing about it can be read before it runs to say that it does not.
-func (p *Policy) Advanced() bool {
-	// An exemption is how a Community install lets an agent's routine work past the built-in hold,
-	// so writing one is never the full engine on its own account. Naming the agent it covers only
+// Actor scoping belongs here because it turns a blanket hold into an authorization boundary around
+// a machine principal. Account scoping is the same boundary drawn around the account a credential
+// acts for rather than the credential's label. A Rego policy is here by construction: it can deny,
+// scope to actors, and demand a second approver, and nothing about it can be read before it runs to
+// say that it does not.
+func (p *Policy) TeamRules() bool {
+	// An exemption is how a Community install lets an agent's routine work past the built-in hold, so
+	// writing one is never paid on its own account. Naming the agent or the account it covers only
 	// narrows it, and charging for the narrowing would push an install toward a broader exemption.
-	// Validate refuses every paid criterion on an exemption, so nothing else can ride in on one.
 	if p.Exempts() {
 		return false
 	}
 	return p.Rego != nil ||
-		p.Effect == EffectDeny ||
-		p.MinRisk != "" ||
-		p.Reversibility != "" ||
 		p.RequireDistinctApprover ||
 		p.ActorKind != "" ||
 		p.Actor != "" ||
 		p.Account != ""
+}
+
+// Advanced reports whether a policy uses any paid criterion, Pro or Team. One plain
+// require-approval policy, or one exemption, is the Community gate.
+//
+// ProRules and TeamRules are the one definition every enforcement point shares. Three copies of
+// this question once lived in the create handler, the update handler, and here, and they drifted
+// twice: actor scoping and then reversibility were sold as paid and answered free. AllowRules is
+// the gate built on the pair, and every site that introduces a policy asks it.
+func (p *Policy) Advanced() bool {
+	return p.ProRules() || p.TeamRules()
+}
+
+// AllowRules reports whether the current license covers the paid rules a policy set uses. Team is
+// asked first, then Pro, so a set that needs both is refused naming Team, the tier that covers all
+// of it.
+//
+// A refusal that is not a lapse is returned at once. A lapse is returned wrapping license.ErrLapsed
+// only after both questions, so it never hides a feature the license never covered. Each caller
+// decides what a lapse means where it stands: the policy file keeps serving, and the API refuses to
+// author.
+func AllowRules(set ...*Policy) error {
+	var team, pro bool
+	for _, p := range set {
+		team = team || p.TeamRules()
+		pro = pro || p.ProRules()
+	}
+	var needs []license.Feature
+	if team {
+		needs = append(needs, license.FeaturePolicyFull)
+	}
+	if pro {
+		needs = append(needs, license.FeaturePolicyRules)
+	}
+	var lapse error
+	for _, f := range needs {
+		err := license.Allow(f)
+		switch {
+		case err == nil:
+		case !errors.Is(err, license.ErrLapsed):
+			return err
+		case lapse == nil:
+			lapse = err
+		}
+	}
+	return lapse
 }
 
 // riskRank orders risk levels so MinRisk can compare them. An unknown level ranks above high, so a

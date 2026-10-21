@@ -261,6 +261,13 @@ func TestTheAgentsExemptionFollowsTheLicense(t *testing.T) {
 		License: teamLicense, WantExemption: true, WantSmoke: run.StatusSucceeded,
 	}, { // Test 1: Community refuses it, the control.
 		License: nil, WantExemption: false, WantSmoke: run.StatusPendingApproval,
+	}, { // Test 2: Pro holds it. An exemption naming its agent and account is no Team rule, and
+		// five rules hold the demo's two and this one.
+		License: &license.License{Claims: license.Claims{
+			V: 1, ID: "lic_demo_pro", Org: "test", Tier: license.TierPro,
+			Issued: "2026-01-01T00:00:00Z", Expires: "2099-01-01T00:00:00Z",
+		}},
+		WantExemption: true, WantSmoke: run.StatusSucceeded,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

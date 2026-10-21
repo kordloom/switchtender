@@ -415,20 +415,14 @@ func (s *FileStore) List(_ context.Context) ([]*Policy, error) {
 // load a file whose only change was to tighten a rule, on an install that is already paying no
 // attention to the term. Status names the lapse.
 func (s *FileStore) allowed(set []*Policy) error {
-	for _, p := range set {
-		if p.Advanced() {
-			if err := license.Allow(license.FeaturePolicyFull); err != nil {
-				if errors.Is(err, license.ErrLapsed) {
-					break
-				}
-				if rego := firstRego(set); rego != nil {
-					return fmt.Errorf("the policy file needs a license it does not have: Rego "+
-						"policy %q is part of the full policy engine: %w", rego.Name, err)
-				}
-				return fmt.Errorf("the policy file needs a license it does not have: %w", err)
-			}
-			break
+	// AllowRules asks Team before Pro and returns a lapse only once both are settled, so a lapse
+	// here is a term that ran out on rules this tier had, on either feature.
+	if rerr := AllowRules(set...); rerr != nil && !errors.Is(rerr, license.ErrLapsed) {
+		if rego := firstRego(set); rego != nil {
+			return fmt.Errorf("the policy file needs a license it does not have: Rego "+
+				"policy %q is part of the full policy engine: %w", rego.Name, rerr)
 		}
+		return fmt.Errorf("the policy file needs a license it does not have: %w", rerr)
 	}
 	if err := license.AllowPolicies(len(set)); err != nil && !errors.Is(err, license.ErrLapsed) {
 		return fmt.Errorf("the policy file needs a license it does not have: %w", err)

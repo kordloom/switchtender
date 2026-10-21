@@ -44,6 +44,13 @@ func TestALapseIsOnlyReportedForWhatTheLicenseCovered(t *testing.T) {
 	}, { // Test 3: Live Team. Allowed.
 		Name: "live team", Tier: TierTeam, Expires: future,
 		Feature: FeaturePolicyFull, WantErr: false, WantLapsed: false,
+	}, { // Test 4: Expired Pro, asked for the deny rules and floors it did have. A lapse, which is
+		// what keeps a lapsed Pro install's deny rules enforcing from its policy file.
+		Name: "expired pro losing its rules", Tier: TierPro, Expires: past,
+		Feature: FeaturePolicyRules, WantErr: true, WantLapsed: true,
+	}, { // Test 5: Live Pro. Allowed.
+		Name: "live pro rules", Tier: TierPro, Expires: future,
+		Feature: FeaturePolicyRules, WantErr: false, WantLapsed: false,
 	}}
 
 	for testNum, test := range tests {

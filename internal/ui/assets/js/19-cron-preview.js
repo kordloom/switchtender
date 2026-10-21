@@ -455,32 +455,35 @@ function openPolicyEdit(p) {
 	document.getElementById("policy-modal").hidden = false;
 }
 
-// ADVANCED_POLICY_FIELDS are the six inputs whose use makes a rule Team, matching exactly what
-// policy.Advanced() tests: a deny effect, a risk floor, distinct-approver separation of duties,
-// either form of actor scoping, and account scoping. An exemption is the one rule that may use the
-// account and the actor on Community, which the account's tip says. Marking them is not
-// decoration. A Community reader filled the dialog, pressed Save, and met a 403 explaining the
-// tier after composing the whole rule, which is the same shape as the evidence-pack refusal and
-// just as avoidable.
+// ADVANCED_POLICY_FIELDS are the six inputs whose use makes a rule paid, each with the tier the
+// server's two predicates give it. policy.ProRules() makes the deny effect and the risk floor Pro.
+// policy.TeamRules() makes either form of actor scoping, account scoping, and distinct-approver
+// separation of duties Team. The reversibility floor is Pro too, and the dialog has no input for
+// it. An exemption is the one rule that may use the account and the actor on Community, which the
+// account's tip says. Marking them is not decoration. A Community reader filled the dialog,
+// pressed Save, and met a 403 explaining the tier after composing the whole rule, which is the
+// same shape as the evidence-pack refusal and just as avoidable.
 const ADVANCED_POLICY_FIELDS = [
-	["policy-effect", "A rule that denies outright, rather than holding for a person, is Team. " +
-		"An exemption from the default agent hold is Community."],
-	["policy-actor-kind", "Scoping a rule to who is asking, such as agents as a class, is Team."],
-	["policy-actor", "Scoping a rule to one named actor is Team."],
-	["policy-account", "Scoping a hold or deny rule to one account is Team. An exemption names " +
-		"an account on Community."],
-	["policy-min-risk", "A risk floor, so a rule applies only above a grade, is Team."],
-	["policy-distinct-approver", "Requiring a different person to approve than asked is Team."],
+	["policy-effect", "Pro", "A rule that denies outright, rather than holding for a person, is " +
+		"Pro. An exemption from the default agent hold is Community."],
+	["policy-actor-kind", "Team", "Scoping a rule to who is asking, such as agents as a class, " +
+		"is Team."],
+	["policy-actor", "Team", "Scoping a rule to one named actor is Team."],
+	["policy-account", "Team", "Scoping a hold or deny rule to one account is Team. An exemption " +
+		"names an account on Community."],
+	["policy-min-risk", "Pro", "A risk floor, so a rule applies only above a grade, is Pro."],
+	["policy-distinct-approver", "Team", "Requiring a different person to approve than asked is " +
+		"Team."],
 ];
 
-// markPolicyTiers tags each advanced field's label, so the gate is read from the control rather
-// than met as a refusal after the rule is composed.
+// markPolicyTiers tags each advanced field's label with its tier, so the gate is read from the
+// control rather than met as a refusal after the rule is composed.
 function markPolicyTiers() {
-	for (const [id, why] of ADVANCED_POLICY_FIELDS) {
+	for (const [id, tier, why] of ADVANCED_POLICY_FIELDS) {
 		const el = document.getElementById(id);
 		if (!el) continue;
 		const label = el.closest(".field-label") || el.parentElement;
-		markTier(label, "Team", why);
+		markTier(label, tier, why);
 	}
 }
 

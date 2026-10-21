@@ -7,13 +7,16 @@ import { reply } from "./net.mjs";
 import { loadPage } from "./pages.mjs";
 import { ALL_PARTS } from "./loader.mjs";
 
-// TestPolicyDialogMarksItsTeamFields pins the five inputs whose use makes a rule Team.
+// TestPolicyDialogMarksItsPaidFields pins the six inputs whose use makes a rule paid, and the tier
+// each one names.
 //
 // markTier was added for the evidence pack and the drift reconcile and then not applied here, so
-// the policy dialog offered five Team-only controls with nothing marking them. A Community reader
-// chose Deny, scoped the rule to an agent, set a risk floor, pressed Save, and learned the tier
-// from a 403 after composing the whole rule: the same shape of refusal markTier exists to prevent.
-test("the policy dialog marks every field that makes a rule Team", async () => {
+// the policy dialog offered paid controls with nothing marking them. A Community reader chose Deny,
+// scoped the rule to an agent, set a risk floor, pressed Save, and learned the tier from a 403
+// after composing the whole rule: the same shape of refusal markTier exists to prevent. A marker
+// naming the wrong tier is the same refusal one purchase later, so each one names the tier the
+// server's gate asks for.
+test("the policy dialog marks every field that makes a rule paid, with its tier", async () => {
 	const { app, document, clock } = loadPage("policies", {
 		parts: ALL_PARTS,
 		routes: {
@@ -24,16 +27,26 @@ test("the policy dialog marks every field that makes a rule Team", async () => {
 	app.wirePolicyForm();
 	await clock.flush();
 
-	// Exactly the set policy.Advanced() tests: deny, actor kind, named actor, account, risk floor,
-	// and distinct approver.
-	for (const id of ["policy-effect", "policy-actor-kind", "policy-actor", "policy-account",
-		"policy-min-risk", "policy-distinct-approver"]) {
+	// Exactly the sets policy.ProRules() and policy.TeamRules() test. Deny and the risk floor are
+	// Pro. Actor kind, named actor, account, and distinct approver are Team.
+	const tiers = {
+		"policy-effect": "Pro",
+		"policy-min-risk": "Pro",
+		"policy-actor-kind": "Team",
+		"policy-actor": "Team",
+		"policy-account": "Team",
+		"policy-distinct-approver": "Team",
+	};
+	for (const [id, tier] of Object.entries(tiers)) {
 		const el = document.getElementById(id);
 		assert.ok(el, id + " is missing from the dialog");
 		const label = el.closest(".field-label") || el.parentElement;
-		assert.ok(label.querySelector(".tier-tag"),
-			id + " is Team-gated but carries no tier marker, so a Community reader meets the gate " +
-			"as a refusal after composing the rule");
+		const tag = label.querySelector(".tier-tag");
+		assert.ok(tag,
+			id + " is " + tier + "-gated but carries no tier marker, so a Community reader meets " +
+			"the gate as a refusal after composing the rule");
+		assert.equal(tag.textContent, tier,
+			id + " names the wrong tier, so a reader buys one tier and meets the next refusal");
 	}
 
 	// A field that is free must not be marked, or the marker stops meaning anything.
