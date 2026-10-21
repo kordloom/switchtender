@@ -285,8 +285,10 @@ outliving the company is a documented path rather than a hope. The [continuity](
 
 ## What is the license?
 
-Business Source License 1.1: free to self-host and modify, with a restriction on offering it as a
-competing hosted service, and it converts to Apache 2.0 two years after each release. The Community
+Business Source License 1.1: free to self-host, modify, and run in production for your own
+organization. The one restriction is offering it to third parties as a hosted or managed service
+that provides its primary functionality, and each release converts to Apache 2.0 two years after it
+ships. The Community
 tier is free and complete on its own, with the built-in hold on agent runs and one plain rule of
 your own. Pro adds directory sign-in and five approval policies instead of one. Team adds the full
 policy engine, the period change register, distributed workers, initializing a new PostgreSQL
