@@ -62,6 +62,10 @@ type authorizer struct {
 	// orgOwners resolves a grantable object's owning organization so its members gain access to it.
 	// Nil disables org-ownership access, leaving only grants and the role in force.
 	orgOwners OrgResolver
+	// templateOwners reads every template's owning organization at once, keyed by template id, for
+	// a listing that decides many template-scoped rows. Nil leaves those listings deciding on grants
+	// alone, so it is wired wherever orgOwners is.
+	templateOwners func(ctx context.Context) (map[string]string, error)
 	// strict makes an object with no grants deny non-admins instead of deferring to the role.
 	strict bool
 }
@@ -748,6 +752,51 @@ func (a *authorizer) authorizeSchedule(ctx context.Context, want grant.Access,
 		return a.authorize(ctx, sc.TemplateID, want)
 	}
 	return a.authorizeOwningOrg(ctx, sc.OrgID)
+}
+
+// templateScopedFilter returns the predicate a schedule or trigger listing keeps rows with: the
+// answer the by-id fetch gives each row, decided for the whole list from one reading of the grant
+// table.
+//
+// Both listings asked authorize per row, which read the row's grants, the caller's teams and orgs,
+// and the template's owner each time, so a restricted operator's schedule list cost seconds. They
+// also only filtered when restrictedReader called the caller restricted, and that answer counts run
+// objects, while these rows are decided by their template. A template grant held by someone else
+// therefore hid nothing from the list on an install without strict grants, and the list named the
+// schedule, its cron and its inventory while fetching it answered 403.
+//
+// The returned function takes the row's template id and the organization stamped on the row. A row
+// with a template is decided by it, the way authorize decides it. A row without one is decided by
+// its organization, the way authorizeOwningOrg decides an inline schedule. Template owners are read
+// once for the request, and only for a caller in an organization, since nobody else gains access
+// through one. A template the read does not hold reads as unowned, which is what the org resolver
+// answers for a template it cannot find.
+func (a *authorizer) templateScopedFilter(ctx context.Context) (func(templateID, orgID string) bool, error) {
+	vis, err := a.visibilityFor(ctx, grant.AccessUse, filterInEveryMode, everyObject)
+	if err != nil {
+		return nil, err
+	}
+	if vis.all {
+		return func(string, string) bool { return true }, nil
+	}
+	var owners map[string]string
+	if actor, ok := actorFrom(ctx); ok && a.orgs != nil && a.templateOwners != nil && actor.UserID != "" {
+		memberships, err := a.orgs.OrgsForUser(ctx, actor.UserID)
+		if err != nil {
+			return nil, err
+		}
+		if len(memberships) > 0 {
+			if owners, err = a.templateOwners(ctx); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return func(templateID, orgID string) bool {
+		if templateID == "" {
+			return vis.allows("", orgID)
+		}
+		return vis.allows(templateID, owners[templateID])
+	}, nil
 }
 
 // authorizeOwningOrg reports whether the request actor may act on an object owned by orgID when it

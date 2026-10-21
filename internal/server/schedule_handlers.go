@@ -296,8 +296,8 @@ func updateScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 //
 // Reading was unauthorized while writing and deleting were not, so any operator could enumerate the
 // whole estate's unattended automation: which template fires on what cron, against which inventory.
-// A schedule is visible on the same test that governs writing one, its template, so listing and
-// editing cannot disagree about who it belongs to.
+// A schedule is listed exactly when fetching it by id would answer, on the same test that governs
+// writing one, so listing, fetching and editing cannot disagree about who it belongs to.
 func listSchedulesHandler(store schedule.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
@@ -310,21 +310,19 @@ func listSchedulesHandler(store schedule.Store, authz *authorizer, log *zap.Logg
 			respondError(w, log, http.StatusInternalServerError, "could not list schedules")
 			return
 		}
-		restricted, err := restrictedReader(r.Context(), authz)
+		keep, err := authz.templateScopedFilter(r.Context())
 		if err != nil {
 			log.Error("server: read filter: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not list schedules")
 			return
 		}
-		if restricted {
-			kept := make([]*schedule.Schedule, 0, len(list))
-			for _, sc := range list {
-				if authz.authorizeSchedule(r.Context(), grant.AccessUse, sc) == nil {
-					kept = append(kept, sc)
-				}
+		kept := make([]*schedule.Schedule, 0, len(list))
+		for _, sc := range list {
+			if keep(sc.TemplateID, sc.OrgID) {
+				kept = append(kept, sc)
 			}
-			list = kept
 		}
+		list = kept
 		page, total, hasMore, next := pageList(r, list,
 			func(sc *schedule.Schedule) string { return sc.ID })
 		respondJSON(w, log, http.StatusOK,

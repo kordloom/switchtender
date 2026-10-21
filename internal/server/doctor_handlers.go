@@ -240,14 +240,27 @@ func doctorHandler(templates template.Store, schedules schedule.Store, creds cre
 		}
 		report.Findings = append(report.Findings, runFilesFindings(runFiles)...)
 
-		credExists := func(id string) bool {
+		// Templates share projects, inventories and credentials, so each referenced id is read once,
+		// not once per template that names it.
+		credExists := onceByID(func(id string) bool {
 			if creds == nil || id == "" {
 				return true
 			}
 			_, err := creds.Get(ctx, id)
 			return !errors.Is(err, credential.ErrNotFound)
-		}
+		})
+		invMissing := onceByID(func(id string) bool {
+			_, err := invs.Get(ctx, id)
+			return errors.Is(err, inventory.ErrNotFound)
+		})
+		projMissing := onceByID(func(id string) bool {
+			_, err := projs.Get(ctx, id)
+			return errors.Is(err, project.ErrNotFound)
+		})
 
+		// byID holds the template list read below, so a schedule's template is looked up there rather
+		// than read again per schedule.
+		byID := map[string]*template.Template{}
 		if templates != nil {
 			list, err := templates.List(ctx)
 			if err != nil {
@@ -257,21 +270,18 @@ func doctorHandler(templates template.Store, schedules schedule.Store, creds cre
 			}
 			report.CheckedTemplates = len(list)
 			for _, t := range list {
+				byID[t.ID] = t
 				add := func(severity, problem string) {
 					report.Findings = append(report.Findings, doctorFinding{
 						Severity: severity, ObjectType: "template", ObjectID: t.ID,
 						ObjectName: namedOr(t.Name, t.ID), Problem: problem, FixPath: "/ui/templates",
 					})
 				}
-				if t.InventoryID != "" && invs != nil {
-					if _, err := invs.Get(ctx, t.InventoryID); errors.Is(err, inventory.ErrNotFound) {
-						add("broken", "References stored inventory "+t.InventoryID+", which does not exist.")
-					}
+				if t.InventoryID != "" && invs != nil && invMissing(t.InventoryID) {
+					add("broken", "References stored inventory "+t.InventoryID+", which does not exist.")
 				}
-				if t.ProjectID != "" && projs != nil {
-					if _, err := projs.Get(ctx, t.ProjectID); errors.Is(err, project.ErrNotFound) {
-						add("broken", "References project "+t.ProjectID+", which does not exist.")
-					}
+				if t.ProjectID != "" && projs != nil && projMissing(t.ProjectID) {
+					add("broken", "References project "+t.ProjectID+", which does not exist.")
 				}
 				for _, cid := range t.CredentialIDs {
 					if !credExists(cid) {
@@ -317,7 +327,13 @@ func doctorHandler(templates template.Store, schedules schedule.Store, creds cre
 					add("broken", "Cron expression "+s.Cron+" does not parse, so it never fires.")
 				}
 				if s.TemplateID != "" && templates != nil {
-					t, err := templates.Get(ctx, s.TemplateID)
+					// A template created after the list was read is not in byID, so a miss reads the
+					// store before calling the reference broken.
+					var err error
+					t := byID[s.TemplateID]
+					if t == nil {
+						t, err = templates.Get(ctx, s.TemplateID)
+					}
 					if errors.Is(err, template.ErrNotFound) {
 						add("broken", "Fires template "+s.TemplateID+", which does not exist.")
 					}
@@ -419,4 +435,18 @@ func namedOr(name, id string) string {
 		return name
 	}
 	return id
+}
+
+// onceByID memoizes a per-id store check for the length of one doctor run, so an id many objects
+// reference is read once.
+func onceByID(check func(id string) bool) func(id string) bool {
+	seen := map[string]bool{}
+	return func(id string) bool {
+		if v, ok := seen[id]; ok {
+			return v
+		}
+		v := check(id)
+		seen[id] = v
+		return v
+	}
 }

@@ -327,24 +327,24 @@ func listTriggersHandler(triggers trigger.Store, authz *authorizer, log *zap.Log
 			respondError(w, log, http.StatusInternalServerError, "could not list triggers")
 			return
 		}
-		// A trigger is visible on the same test that governs writing and deleting one, its template.
-		// Reading was unauthorized, so any operator could enumerate every webhook launch point on
-		// the install and the template each one fires.
-		restricted, err := restrictedReader(r.Context(), authz)
+		// A trigger is visible on the same test that governs fetching, writing and deleting one, its
+		// template. Reading was unauthorized, so any operator could enumerate every webhook launch
+		// point on the install and the template each one fires.
+		keep, err := authz.templateScopedFilter(r.Context())
 		if err != nil {
 			log.Error("server: read filter: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not list triggers")
 			return
 		}
-		if restricted {
-			kept := make([]*trigger.Trigger, 0, len(list))
-			for _, tg := range list {
-				if authz.authorizeAll(r.Context(), grant.AccessUse, tg.TemplateID) == nil {
-					kept = append(kept, tg)
-				}
+		kept := make([]*trigger.Trigger, 0, len(list))
+		for _, tg := range list {
+			// A trigger carries no organization of its own, and one with no template is kept, which is
+			// what authorizing it by id answers for an empty object.
+			if tg.TemplateID == "" || keep(tg.TemplateID, "") {
+				kept = append(kept, tg)
 			}
-			list = kept
 		}
+		list = kept
 		page, total, hasMore, next := pageList(r, list,
 			func(tg *trigger.Trigger) string { return tg.ID })
 		respondJSON(w, log, http.StatusOK, listTriggersResponse{Triggers: page, Count: len(page),
