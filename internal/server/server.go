@@ -554,7 +554,7 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 	}
 	srv.web = ui.New(srv.log, srv.docs, srv.readOnly, srv.matrixCap, srv.oidc != nil, srv.saml != nil,
 		srv.ai != nil, oidcBrand, ui.WithAccountCheck(srv.anyAccount), ui.WithTokenCheck(srv.anyToken),
-		ui.WithSignInCheck(srv.signInRequired), ui.WithDemo(srv.demo),
+		ui.WithSignInCheck(srv.signInRequired), ui.WithDemo(srv.demo), ui.WithRelease(srv.productVersion),
 		ui.WithFactCacheAdminOnly(srv.factCacheAdminOnly), ui.WithFeaturesOff(srv.featuresOff()...))
 	return srv
 }

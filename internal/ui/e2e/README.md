@@ -19,8 +19,9 @@ breakage the simulated DOM cannot see.
 - **workflow** (`workflow.spec.mjs`) drives the workflow editor twice, as the `workflow-demo` and
   `workflow-serve` projects: it adds steps from the toolbar, the canvas corner, and a step's own +,
   edits, links by dragging, deletes, clears to the empty canvas, starts from a pattern, and exports
-  JSON. Against the demo it also checks Run workflow and Save as template send nothing, and against
-  `serve` it runs the graph it built.
+  JSON. It starts over, drops a draft saved under another release, and checks a restored draft says
+  so, at desktop width and 390 wide. Against the demo it also checks Run workflow and Save as
+  template send nothing, and against `serve` it runs the graph it built.
 - **workflow-integration** (`workflow-integration.spec.mjs`) runs against `serve` only and proves
   what the editor draws is what the server does. It draws a release workflow from an empty canvas
   and runs it through an approval, then denies one and checks the deny path ran and the deploy did

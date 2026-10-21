@@ -7,7 +7,7 @@
 	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
 	<link rel="stylesheet" href="/ui/assets/app.css">
 </head>
-<body data-page="workflows"{{if .ReadOnly}} data-readonly="true"{{end}}{{if .Demo}} data-demo="true"{{end}}{{if .SignIn}} data-signin="required"{{end}}{{if .AIOff}} data-ai-off="true"{{end}}>
+<body data-page="workflows"{{if .ReadOnly}} data-readonly="true"{{end}}{{if .Demo}} data-demo="true"{{end}}{{if .SignIn}} data-signin="required"{{end}}{{if .AIOff}} data-ai-off="true"{{end}} data-draft-stamp="{{.DraftStamp}}">
 	<header class="topbar">
 		<div class="brand"><a href="/ui/"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="SwitchTender"></picture>SwitchTender</a></div>
 	</header>
@@ -21,6 +21,7 @@
 		</div>
 
 		<div id="wf-sample-note" class="risk-callout risk-medium" hidden></div>
+		<div id="wf-restored-note" class="risk-callout risk-medium" hidden></div>
 
 		<div class="wf-toolbar">
 			<input id="wf-name" class="input wf-name-input" placeholder="Workflow name" aria-label="Workflow name">
@@ -33,6 +34,7 @@
 				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
 				Add step
 			</button>
+			<button id="wf-start-over" class="button" type="button" data-tip="Click to discard your unsent changes and put back the starting example">Start over</button>
 			<span class="wf-toolbar-gap"></span>
 			<label class="check-label wf-approval" data-tip="Hold this workflow for an approver before any step runs">
 				<input type="checkbox" id="wf-require-approval"> Require approval

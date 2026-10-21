@@ -430,3 +430,89 @@ test("a writable server runs the graph the editor built", async ({ page }) => {
   await expect(page.locator("#run-header")).toBeVisible();
   assertNoErrors();
 });
+
+// The draft the editor keeps in this browser is stamped with the server's release, and on the demo
+// with when it started, so a draft from another release or an earlier demo seed is dropped rather
+// than replayed. Before the stamp, a step deleted once on the demo stayed deleted for that browser
+// through every nightly reseed.
+test("a draft saved under another release is dropped and the example opens", async ({ page }) => {
+  const assertNoErrors = attachErrorGuards(page);
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem("seeded")) return;
+    sessionStorage.setItem("seeded", "1");
+    localStorage.setItem("st_wf_draft", JSON.stringify({
+      stamp: "0.0.1-older", seq: 1, name: "stale",
+      nodes: [{ id: "n0", name: "stale-step", tool: "bash", command: "echo old", x: 40, y: 40 }],
+      edges: [],
+    }));
+  });
+  await openEditor(page);
+  await expect(step(page, "stale-step")).toHaveCount(0);
+  await expect(page.locator("#wf-restored-note")).toBeHidden();
+  const kept = await page.evaluate(() => JSON.parse(localStorage.getItem("st_wf_draft") || "null"));
+  const stamp = await page.locator("body").getAttribute("data-draft-stamp");
+  expect(kept === null || kept.stamp === stamp, "a stale draft was kept").toBe(true);
+  assertNoErrors();
+});
+
+test("a restored draft says so, and Discard puts back the example as one undo", async ({ page }) => {
+  const assertNoErrors = attachErrorGuards(page);
+  await openEditor(page);
+  await expect(page.locator("#wf-restored-note")).toBeHidden();
+  await step(page, "migrate-db").locator(".wf-node-del").click();
+  await expect(page.locator(".wf-node")).toHaveCount(3);
+
+  await page.reload();
+  await expect(page.locator(".wf-node")).toHaveCount(3);
+  const note = page.locator("#wf-restored-note");
+  await expect(note).toBeVisible();
+  await expect(note).toContainText("Restored your unsent changes");
+
+  await note.getByRole("button", { name: "Discard" }).click();
+  await expect(page.locator(".wf-node")).toHaveCount(4);
+  await expect(note).toBeHidden();
+  await page.locator("#wf-canvas").click({ position: { x: 5, y: 5 } });
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(page.locator(".wf-node")).toHaveCount(3);
+  assertNoErrors();
+});
+
+test("Start over names what it discards, and canceling keeps the work", async ({ page }) => {
+  const assertNoErrors = attachErrorGuards(page);
+  await openEditor(page);
+  await step(page, "migrate-db").locator(".wf-node-del").click();
+  await expect(page.locator(".wf-node")).toHaveCount(3);
+
+  let asked = "";
+  page.once("dialog", (d) => { asked = d.message(); d.dismiss(); });
+  await page.locator("#wf-start-over").click();
+  await expect.poll(() => asked).toContain("3 steps, 2 links");
+  await expect(page.locator(".wf-node")).toHaveCount(3);
+
+  page.once("dialog", (d) => d.accept());
+  await page.locator("#wf-start-over").click();
+  await expect(page.locator(".wf-node")).toHaveCount(4);
+  await page.reload();
+  await expect(page.locator(".wf-node")).toHaveCount(4);
+  await expect(page.locator("#wf-restored-note")).toBeHidden();
+  assertNoErrors();
+});
+
+test("on a phone-wide window Start over and the restored note fit without scrolling sideways", async ({ page }) => {
+  const assertNoErrors = attachErrorGuards(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openEditor(page);
+  await step(page, "migrate-db").locator(".wf-node-del").click();
+  await page.reload();
+  const note = page.locator("#wf-restored-note");
+  await expect(note).toBeVisible();
+  await expect(page.locator("#wf-start-over")).toBeVisible();
+  for (const el of [note, page.locator("#wf-start-over")]) {
+    const box = await el.boundingBox();
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(390);
+  }
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+  assertNoErrors();
+});
