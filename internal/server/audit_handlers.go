@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -222,6 +223,7 @@ func auditVerifyHandler(store audit.Store, producer audit.Identity, log *zap.Log
 				resp.Level, resp.LevelName = 3, "anchored"
 			}
 		}
+		releaseWalk(r.Context())
 		respondJSON(w, log, http.StatusOK, resp, wantsPretty(r))
 	}
 }
@@ -235,19 +237,12 @@ const maxBundleEntries = audit.MaxAssembledClaims
 // who pastes it succeeds rather than meeting the limit from the other direction.
 const suggestedBundleWindow = 10_000
 
-// bundleWindow decides how many of the chain's newest entries a bundle may assemble, from the chain's
-// size rather than a materialized slice, and reports the message to answer with when the request
-// cannot be served as asked. An empty limit means the whole chain, up to the ceiling.
-func bundleWindow(count int, limit string) (int, string) {
+// bundleLimit parses a bundle's limit parameter without reading the chain, so a limit that could
+// never be served is refused before a walk is paid for. It returns zero for an empty limit, meaning
+// the whole chain, and the message to answer with when the limit is not a count within the ceiling.
+func bundleLimit(limit string) (int, string) {
 	if limit == "" {
-		if count > maxBundleEntries {
-			// The suggestion names a window comfortably under the ceiling rather than at it, so
-			// following the advice cannot land on the same refusal from the other side.
-			return 0, fmt.Sprintf("this chain holds %d entries, more than the %d one bundle "+
-				"assembles at once. Ask for a window with limit=<count>, such as limit=%d, which "+
-				"bundles that many of the newest entries", count, maxBundleEntries, suggestedBundleWindow)
-		}
-		return count, ""
+		return 0, ""
 	}
 	n, err := strconv.Atoi(limit)
 	if err != nil || n < 1 {
@@ -257,11 +252,77 @@ func bundleWindow(count int, limit string) (int, string) {
 		return 0, fmt.Sprintf("limit must be at most %d, the number of entries one bundle "+
 			"assembles at once", maxBundleEntries)
 	}
+	return n, ""
+}
+
+// bundleWindow decides how many of the chain's newest entries a bundle may assemble, from the chain's
+// size rather than a materialized slice, and reports the message to answer with when the request
+// cannot be served as asked. An empty limit means the whole chain, up to the ceiling.
+func bundleWindow(count int, limit string) (int, string) {
+	n, msg := bundleLimit(limit)
+	if msg != "" {
+		return 0, msg
+	}
+	if n == 0 {
+		if count > maxBundleEntries {
+			// The suggestion names a window comfortably under the ceiling rather than at it, so
+			// following the advice cannot land on the same refusal from the other side.
+			return 0, fmt.Sprintf("this chain holds %d entries, more than the %d one bundle "+
+				"assembles at once. Ask for a window with limit=<count>, such as limit=%d, which "+
+				"bundles that many of the newest entries, or with from_seq and to_seq for an older "+
+				"slice", count, maxBundleEntries, suggestedBundleWindow)
+		}
+		return count, ""
+	}
 	if n >= count {
 		return count, ""
 	}
 	return n, ""
 }
+
+// bundleSeqs is a bundle request's window by sequence: the first and last entry to carry, inclusive.
+// Both are zero when the request names no such window.
+type bundleSeqs struct {
+	// From is the sequence of the first entry the bundle carries.
+	From int64
+	// To is the sequence of the last entry the bundle carries.
+	To int64
+}
+
+// parseBundleSeqs reads from_seq and to_seq without reading the chain, so a window that could never
+// be served is refused before a walk is paid for. It returns the message to answer with when the pair
+// does not name a slice within the ceiling. A time can repeat across entries, so a window names its
+// slice by sequence, which cannot.
+func parseBundleSeqs(q url.Values) (bundleSeqs, string) {
+	from, to := q.Get("from_seq"), q.Get("to_seq")
+	if from == "" && to == "" {
+		return bundleSeqs{}, ""
+	}
+	if from == "" || to == "" {
+		return bundleSeqs{}, "from_seq and to_seq go together: name the first and the last entry " +
+			"to bundle, such as from_seq=1&to_seq=10000"
+	}
+	if q.Get("limit") != "" {
+		return bundleSeqs{}, "ask for limit or for from_seq and to_seq, not both"
+	}
+	f, ferr := strconv.ParseInt(from, 10, 64)
+	t, terr := strconv.ParseInt(to, 10, 64)
+	if ferr != nil || terr != nil || f < 1 || t < 1 {
+		return bundleSeqs{}, "from_seq and to_seq must be entry sequence numbers from 1, such as " +
+			"from_seq=1&to_seq=10000"
+	}
+	if f > t {
+		return bundleSeqs{}, fmt.Sprintf("from_seq %d is past to_seq %d", f, t)
+	}
+	if t-f+1 > maxBundleEntries {
+		return bundleSeqs{}, fmt.Sprintf("from_seq %d to to_seq %d is %d entries, more than the %d "+
+			"one bundle assembles at once", f, t, t-f+1, maxBundleEntries)
+	}
+	return bundleSeqs{From: f, To: t}, ""
+}
+
+// errWindowFull stops the window pass once it holds the last entry the walk verified.
+var errWindowFull = errors.New("server: the bundle window is full")
 
 // The reasons a bundle download refuses. Each names a state of the stored chain, never a fault in
 // this server, so a caller branches on the code without reading the message.
@@ -434,6 +495,15 @@ func auditBundleHandler(store audit.Store, producer *audit.Identity, problem, ve
 		// against every anchor in full, before any window is applied, the same way the command does
 		// it, and only the second pass assembles the window the response actually carries. Loading
 		// the whole history to then slice its tail was the cap defeating its own purpose.
+		if _, msg := bundleLimit(r.URL.Query().Get("limit")); msg != "" {
+			respondError(w, log, http.StatusBadRequest, msg)
+			return
+		}
+		seqs, msg := parseBundleSeqs(r.URL.Query())
+		if msg != "" {
+			respondError(w, log, http.StatusBadRequest, msg)
+			return
+		}
 		recorded, aerr := anchorsFor(r.Context(), store)
 		if aerr != nil {
 			log.Error("server: read anchors: " + aerr.Error())
@@ -480,16 +550,37 @@ func auditBundleHandler(store audit.Store, producer *audit.Identity, problem, ve
 			}, wantsPretty(r))
 			return
 		}
-		window, msg := bundleWindow(count, r.URL.Query().Get("limit"))
-		if msg != "" {
-			respondError(w, log, http.StatusBadRequest, msg)
-			return
+		after, last := int64(0), highest
+		if seqs.From != 0 {
+			// A window past the head is refused rather than cut short, because a bundle that
+			// silently carries less than was named is a different slice from the one asked for.
+			if seqs.To > highest {
+				respondError(w, log, http.StatusBadRequest, fmt.Sprintf("to_seq %d is past the "+
+					"newest entry in the chain, sequence %d", seqs.To, highest))
+				return
+			}
+			after, last = seqs.From-1, seqs.To
+		} else {
+			window, msg := bundleWindow(count, r.URL.Query().Get("limit"))
+			if msg != "" {
+				respondError(w, log, http.StatusBadRequest, msg)
+				return
+			}
+			after = highest - int64(window)
 		}
-		entries := make([]*audit.Entry, 0, window)
-		err = store.ChainScan(r.Context(), highest-int64(window), func(e *audit.Entry) error {
+		// The pass stops at the last entry the walk verified. Entries appended since the walk are
+		// left out, so nothing in the bundle was signed without being checked first.
+		entries := make([]*audit.Entry, 0, last-after)
+		err = store.ChainScan(r.Context(), after, func(e *audit.Entry) error {
+			if e != nil && e.Seq > last {
+				return errWindowFull
+			}
 			entries = append(entries, e)
 			return nil
 		})
+		if errors.Is(err, errWindowFull) {
+			err = nil
+		}
 		if err != nil {
 			log.Error("server: chain audit entries: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not read the audit trail")
@@ -520,6 +611,9 @@ func auditBundleHandler(store audit.Store, producer *audit.Identity, problem, ve
 			respondError(w, log, http.StatusInternalServerError, "could not sign the bundle")
 			return
 		}
+		// Both scans are behind it, so the slot is freed before the write. A client reading the
+		// bundle slowly then holds only its own connection, not every other chain walk.
+		releaseWalk(r.Context())
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Content-Disposition", `attachment; filename="switchtender-audit.loomseal.json"`)
 		_, _ = w.Write(signed)

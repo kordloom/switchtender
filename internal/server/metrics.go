@@ -194,8 +194,8 @@ func writeRunDurations(b *strings.Builder, h histogramCounts) {
 	fmt.Fprintf(b, "switchtender_run_duration_seconds_count %d\n", h.total)
 }
 
-// writeChainHealth emits the audit chain integrity gauges. Verification is incremental and
-// cached, so a scrape stays cheap however long the trail grows. The last-anchor age is omitted
+// writeChainHealth emits the audit chain integrity gauges. Each walk verifies the whole chain and
+// its reading is cached between walks, so a scrape stays cheap however long the trail grows. The last-anchor age is omitted
 // until an anchor exists, since zero would read as a fresh anchor on an install that anchors
 // nothing.
 func writeChainHealth(b *strings.Builder, g chainGauges, now time.Time) {

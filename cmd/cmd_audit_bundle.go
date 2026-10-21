@@ -21,6 +21,10 @@ var (
 	bundleOut string
 	// bundleLimit caps how many of the newest entries the bundle carries.
 	bundleLimit int
+	// bundleFromSeq is the sequence of the first entry a windowed bundle carries.
+	bundleFromSeq int64
+	// bundleToSeq is the sequence of the last entry a windowed bundle carries, inclusive.
+	bundleToSeq int64
 	// bundleKeyDir overrides where the producer identity is read from or created.
 	bundleKeyDir string
 )
@@ -51,7 +55,11 @@ func init() {
 	auditBundleCmd.Flags().StringVar(&bundleOut, "out", "",
 		"Write the bundle here instead of to standard output.")
 	auditBundleCmd.Flags().IntVar(&bundleLimit, "limit", 0,
-		"Carry only the newest N entries. The default carries the whole chain.")
+		"Carry only the newest N entries. The default carries the whole chain, up to 25,000 entries.")
+	auditBundleCmd.Flags().Int64Var(&bundleFromSeq, "from-seq", 0,
+		"Carry the entries from this sequence through --to-seq, at most 25,000 of them.")
+	auditBundleCmd.Flags().Int64Var(&bundleToSeq, "to-seq", 0,
+		"Carry the entries from --from-seq through this sequence, inclusive.")
 	auditBundleCmd.Flags().StringVar(&bundleKeyDir, "key-dir", "",
 		"Directory holding the producer signing key. Defaults to the database's directory.")
 	auditCmd.AddCommand(auditBundleCmd)
@@ -59,22 +67,14 @@ func init() {
 
 // runAuditBundle reads the chain, assembles it into a bundle, signs it, and writes it out.
 func runAuditBundle(cmd *cobra.Command, _ []string) error {
+	if err := checkBundleWindow(bundleLimit, bundleFromSeq, bundleToSeq); err != nil {
+		return err
+	}
 	store, err := openExisting(bundleDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer func() { _ = store.Close() }()
-
-	// Chain returns the whole chain oldest first, which is the order a bundle's claims must be in.
-	// List is deliberately not used: it returns newest first and clamps a limit below one up to one,
-	// so it would have produced a single claim in the wrong order.
-	entries, err := store.Audits().Chain(cmd.Context())
-	if err != nil {
-		return fmt.Errorf("read audit chain: %w", err)
-	}
-	if len(entries) == 0 {
-		return errors.New("the audit chain is empty, there is nothing to bundle")
-	}
 
 	// The identity is loaded before the chain is checked rather than after, because a tree anchor's
 	// leaves bind to the install and the anchor check cannot run without it.
@@ -107,11 +107,29 @@ func runAuditBundle(cmd *cobra.Command, _ []string) error {
 	// install, reporting that entries the anchor covers were missing when they were merely outside
 	// the window, and the workaround an operator would find is to delete the anchors, which is the
 	// one action that makes real truncation invisible.
-	if err := refuseUnpublishableChain(entries, recorded, id, "a bundle"); err != nil {
+	//
+	// The walk streams, as the endpoint's does, and only the window is held in memory. Reading the
+	// whole chain to then cut a window from it held about 1.7 GB for a 100,000-entry chain.
+	walk, problems, err := streamChainWalk(cmd.Context(), store.Audits(), recorded, id)
+	if err != nil {
 		return err
 	}
-	if bundleLimit > 0 && len(entries) > bundleLimit {
-		entries = entries[len(entries)-bundleLimit:]
+	if walk.Count == 0 {
+		return errors.New("the audit chain is empty, there is nothing to bundle")
+	}
+	if !walk.OK {
+		return chainBreakRefusal("a bundle", walk)
+	}
+	if len(problems) > 0 {
+		return anchorRefusal("a bundle", problems)
+	}
+	after, last, err := bundleSlice(walk.Count, walk.Highest, bundleLimit, bundleFromSeq, bundleToSeq)
+	if err != nil {
+		return err
+	}
+	entries, err := scanWindow(cmd.Context(), store.Audits(), after, last)
+	if err != nil {
+		return err
 	}
 
 	doc, err := audit.BuildBundle(entries, id, resolveVersion(), time.Now())
@@ -138,9 +156,9 @@ func runAuditBundle(cmd *cobra.Command, _ []string) error {
 		// the part of the record the producer key could still rewrite. A bundle assembled long
 		// after its last anchor carries a large one, and so does a chain cut back to an old anchor,
 		// which is the shape that otherwise reads cleaner than the honest bundle it replaced. The
-		// window does not change the answer: it keeps the newest entries, so the head is the same
-		// entry either way.
-		warnAnchorLag(entries, recorded)
+		// gap is measured to the chain's head rather than to the window's last entry, because the
+		// head is what the producer key could still rewrite whichever slice is handed over.
+		warnAnchorLag(walk.Highest, recorded)
 	}
 	signed, err := audit.SignBundleDoc(doc, id.Private())
 	if err != nil {
@@ -196,6 +214,8 @@ type chainWalk struct {
 	BrokeSeq int64
 	// Count is how many entries the walk covered.
 	Count int
+	// Highest is the sequence of the newest entry the walk covered.
+	Highest int64
 }
 
 // walkChain holds a chain read from the store against its own links and reports where it first
@@ -299,11 +319,11 @@ func unbundlableRefusal(err error) error {
 // what a compromised or dishonest producer could still rewrite. The size of that gap is the honest
 // measure of what an anchored chain is worth, and it is worth saying out loud at the moment the
 // bundle is handed over rather than leaving a relying party to work it out.
-func warnAnchorLag(entries []*audit.Entry, anchors []*audit.Anchor) {
+func warnAnchorLag(head int64, anchors []*audit.Anchor) {
 	// With no anchors there is no newest one to name. Saying that the newest anchor covers entry
 	// zero described an anchor that does not exist, which is the ordinary state of an install that
 	// has never run switchtender audit anchor.
-	if len(entries) == 0 || len(anchors) == 0 {
+	if head == 0 || len(anchors) == 0 {
 		return
 	}
 	var through int64
@@ -313,13 +333,12 @@ func warnAnchorLag(entries []*audit.Entry, anchors []*audit.Anchor) {
 			through, anchoredAt = a.Seq, a.At
 		}
 	}
-	head := entries[len(entries)-1]
-	if through >= head.Seq {
+	if through >= head {
 		return
 	}
-	behind := head.Seq - through
+	behind := head - through
 	msg := fmt.Sprintf("The newest anchor covers entry %d and this chain ends at entry %d, so %d "+
-		"entries are attested by nothing outside this install.", through, head.Seq, behind)
+		"entries are attested by nothing outside this install.", through, head, behind)
 	if !anchoredAt.IsZero() {
 		msg += fmt.Sprintf(" The last anchor was taken %s ago.",
 			time.Since(anchoredAt).Round(time.Minute))
@@ -337,4 +356,134 @@ func keyDir() (string, error) {
 		return bundleKeyDir, nil
 	}
 	return identityDir(bundleDB)
+}
+
+// maxBundleEntries is how many entries one bundle carries at most, the ceiling GET /v1/audit/bundle
+// holds to. A bundle is one signed document over every claim in it, so it is assembled in memory,
+// and the ceiling is what keeps that bounded on the smallest documented install.
+const maxBundleEntries = audit.MaxAssembledClaims
+
+// errWindowFull stops the window pass once it holds the last entry asked for.
+var errWindowFull = errors.New("bundle window is full")
+
+// checkBundleWindow refuses a window the flags could never serve, before the store is opened. A
+// window names its slice by sequence because a time can repeat across entries and a sequence cannot.
+func checkBundleWindow(limit int, from, to int64) error {
+	if limit < 0 {
+		return errors.New("--limit must be a count of the newest entries to bundle, such as --limit 1000")
+	}
+	if limit > maxBundleEntries {
+		return fmt.Errorf("--limit must be at most %d, the number of entries one bundle assembles "+
+			"at once", maxBundleEntries)
+	}
+	if from == 0 && to == 0 {
+		return nil
+	}
+	if limit > 0 {
+		return errors.New("pass --limit or --from-seq and --to-seq, not both")
+	}
+	if from < 1 || to < 1 {
+		return errors.New("--from-seq and --to-seq go together and name entry sequences from 1, such " +
+			"as --from-seq 1 --to-seq 10000")
+	}
+	if from > to {
+		return fmt.Errorf("--from-seq %d is past --to-seq %d", from, to)
+	}
+	if to-from+1 > maxBundleEntries {
+		return fmt.Errorf("--from-seq %d to --to-seq %d is %d entries, more than the %d one bundle "+
+			"assembles at once", from, to, to-from+1, maxBundleEntries)
+	}
+	return nil
+}
+
+// bundleSlice decides which entries a bundle carries from the walked chain's size and head, as the
+// sequence after which the window starts and the sequence it ends at. An unwindowed export past the
+// ceiling is refused with the flags that would serve it, rather than assembled.
+func bundleSlice(count int, highest int64, limit int, from, to int64) (int64, int64, error) {
+	if from != 0 {
+		// A window past the head is refused rather than cut short, because a bundle that silently
+		// carries less than was named is a different slice from the one asked for.
+		if to > highest {
+			return 0, 0, fmt.Errorf("--to-seq %d is past the newest entry in the chain, sequence %d",
+				to, highest)
+		}
+		return from - 1, to, nil
+	}
+	if limit == 0 {
+		if count > maxBundleEntries {
+			return 0, 0, fmt.Errorf("this chain holds %d entries, more than the %d one bundle "+
+				"assembles at once. Pass --limit <count>, such as --limit 10000, for the newest "+
+				"entries, or --from-seq and --to-seq for an older slice", count, maxBundleEntries)
+		}
+		limit = count
+	}
+	if limit > count {
+		limit = count
+	}
+	return highest - int64(limit), highest, nil
+}
+
+// streamChainWalk holds the stored chain against its own links and against every anchor recorded
+// over it in one streaming pass, and returns where the links first fail and the problem with each
+// anchor the chain does not reach. Nothing is held but the scanners' state, so the walk costs the
+// same memory at any chain length.
+func streamChainWalk(ctx context.Context, audits audit.Store, recorded []*audit.Anchor,
+	producer audit.Identity) (chainWalk, []string, error) {
+	links := audit.NewChainScanner(true)
+	var anchors *audit.AnchorScanner
+	if len(recorded) > 0 {
+		anchors = audit.NewAnchorScanner(recorded, producer)
+	}
+	var walk chainWalk
+	err := audits.ChainScan(ctx, 0, func(e *audit.Entry) error {
+		links.Feed(e)
+		if anchors != nil {
+			anchors.Feed(e)
+		}
+		if e == nil {
+			return nil
+		}
+		walk.Highest = e.Seq
+		// The scanner marks a break at the position it was fed and never moves it, so the entry
+		// whose position equals the count fed so far is the one that broke the chain.
+		if _, at, walked := links.Result(); at != 0 && at == walked {
+			walk.BrokeSeq = e.Seq
+		}
+		return nil
+	})
+	if err != nil {
+		return chainWalk{}, nil, fmt.Errorf("read audit chain: %w", err)
+	}
+	walk.OK, walk.BrokeAt, walk.Count = links.Result()
+	if anchors == nil {
+		return walk, nil, nil
+	}
+	reachedAll, results := anchors.Results()
+	if reachedAll {
+		return walk, nil, nil
+	}
+	problems := make([]string, 0, len(results))
+	for _, res := range results {
+		if !res.Reached {
+			problems = append(problems, res.Anchor.ID+": "+res.Problem)
+		}
+	}
+	return walk, problems, nil
+}
+
+// scanWindow reads the entries after the sequence after through last, oldest first. It stops at
+// last, so an entry appended since the walk is never carried into a bundle unchecked.
+func scanWindow(ctx context.Context, audits audit.Store, after, last int64) ([]*audit.Entry, error) {
+	entries := make([]*audit.Entry, 0, last-after)
+	err := audits.ChainScan(ctx, after, func(e *audit.Entry) error {
+		if e != nil && e.Seq > last {
+			return errWindowFull
+		}
+		entries = append(entries, e)
+		return nil
+	})
+	if err != nil && !errors.Is(err, errWindowFull) {
+		return nil, fmt.Errorf("read audit chain: %w", err)
+	}
+	return entries, nil
 }

@@ -1220,7 +1220,12 @@ chain.</li>
 </ul>
 <p>Flags on the subcommands:</p>
 <ul>
-<li><code>audit bundle --limit &lt;n&gt;</code> carries only the newest N entries. The default carries the whole chain.</li>
+<li><code>audit bundle --limit &lt;n&gt;</code> carries only the newest N entries. The default carries the whole chain,
+and a chain past 25,000 entries, the most one bundle carries, is refused with the flags that would
+serve it.</li>
+<li><code>audit bundle --from-seq &lt;seq&gt; --to-seq &lt;seq&gt;</code> carries the entries from one sequence through
+another, both included, at most 25,000 of them. It is how an older slice of a long chain is
+bundled. Either way the whole chain is verified first, and only the slice is held in memory.</li>
 <li><code>audit anchor --type &lt;kind&gt;</code> picks the anchor: <code>rfc3161</code> for a signed timestamp, or <code>git</code> or
 <code>https</code> for one checked by fetching it. <code>--ref</code> is the authority URL for <code>rfc3161</code>, otherwise the
 URL a verifier fetches. <code>--tree</code> anchors the Merkle root over the whole chain, which is the

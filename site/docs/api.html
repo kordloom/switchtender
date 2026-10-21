@@ -985,6 +985,23 @@ count stays a <code>400</code>.</p>
 <p>The coordinates are the same ones <code>GET /v1/audit/verify</code> reports, so the two answers agree. A
 windowed request is refused for a break anywhere in the chain, not only inside the window: a bundle
 signed over a window sitting past a break would attest to entries this install cannot stand behind.</p>
+<h3 id="how-often-the-whole-chain-is-walked">How often the whole chain is walked</h3>
+<p><code>GET /v1/audit/verify</code>, <code>GET /v1/audit/bundle</code>, <code>GET /v1/audit/register</code>, and a run's evidence
+and receipt each walk every entry in the chain, and so do the chain gauges on <code>/metrics</code>. A server
+runs one walk at a time and the others wait their turn, so however many arrive together they hold
+one database read connection between them and every other read stays answered. A bundle <code>limit</code>
+that is not a count from 1 to the ceiling is refused with a <code>400</code> before anything is walked.</p>
+<p>A bundle carries at most 25,000 entries. <code>limit=&lt;n&gt;</code> carries the newest N, and <code>from_seq</code> and
+<code>to_seq</code> together carry an older slice, both ends included, such as
+<code>/v1/audit/bundle?from_seq=1&amp;to_seq=10000</code>. A window by sequence names an exact slice, so one that
+runs past the chain's newest entry is a <code>400</code> rather than a shorter bundle. The whole chain is still
+verified first, and the slice's first entry carries the link to the one before it, so an offline
+verifier sees that the slice belongs to the chain.</p>
+<p>The chain gauges walk again at most every 15 seconds, or every ten times the last walk's duration
+when that is longer, so a long chain never keeps a read connection busy more than a tenth of the
+time. That interval is also how long an entry rewritten in place can go unreported. A scrape that
+arrives while another walk runs serves the last reading with <code>switchtender_audit_health_stale</code> at
+<code>1</code> instead of waiting, and the next scrape walks.</p>
 <h2 id="opening-a-live-stream">Opening a live stream</h2>
 <p><code>EventSource</code> cannot set a header, so <code>GET /v1/runs/{id}/stream</code> takes a short-lived ticket in the
 query string instead of a bearer token. Mint one over the ordinary authenticated route and open the
