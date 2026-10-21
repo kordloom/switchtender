@@ -148,6 +148,12 @@ type config struct {
 	// parkHook runs between a workflow's walk stopping at an approval step and its park. Nil takes
 	// the hook SetParkHook installed, which is nil outside tests.
 	parkHook func(workflowID string)
+	// minFree is the free bytes below which new runs are refused. Zero refuses none.
+	minFree uint64
+	// freePaths are the directories whose filesystems minFree is checked against.
+	freePaths []string
+	// freeBytes reads a filesystem's free bytes. Nil uses runfiles.FreeBytes; tests set their own.
+	freeBytes func(path string) (uint64, error)
 }
 
 // WithParkHook runs fn between a workflow's walk stopping at an approval step and the park that
@@ -215,6 +221,13 @@ func WithOwner(owner string) Option {
 // WithClaimInterval sets how often the claim loop polls the store when idle.
 func WithClaimInterval(d time.Duration) Option {
 	return func(c *config) { c.claimInterval = d }
+}
+
+// WithFreeSpaceFloor refuses new runs with ErrLowSpace while any of paths is on a filesystem with
+// fewer than minBytes free, and reports it on readiness. Runs already admitted are not stopped. Zero
+// turns the floor off.
+func WithFreeSpaceFloor(minBytes uint64, paths ...string) Option {
+	return func(c *config) { c.minFree, c.freePaths = minBytes, paths }
 }
 
 // WithQueues sets the queues this process serves. A worker given named queues runs only work
@@ -337,6 +350,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		runTimeout:          cfg.runTimeout,
 		now:                 cfg.now,
 		parkHook:            cfg.parkHook,
+		floor:               newSpaceFloor(cfg.minFree, cfg.freePaths, cfg.freeBytes),
 		maxShards:           cfg.maxShards,
 		queues:              cfg.queues,
 		credentials:         cfg.credentials,

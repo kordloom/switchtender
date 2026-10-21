@@ -533,6 +533,11 @@ that variable is unset.</p>
 <td>Concurrent runs this process executes at once. At least 1: the server executes its own runs, so there is no value that makes it execute none.</td>
 </tr>
 <tr>
+<td><code>--min-free-mib</code></td>
+<td><code>256</code></td>
+<td>Free space, in MiB, on a SQLite database's disk below which new runs are refused with 503 and <code>/readyz</code> reports degraded. Runs already admitted finish. The default is room for four runs at the 64 MiB log cap, so raise it with <code>--workers</code>. 0 turns it off. A PostgreSQL server has no floor.</td>
+</tr>
+<tr>
 <td><code>--max-shards</code></td>
 <td><code>512</code></td>
 <td>Most groups a split fans out into. A split is always bounded by the host count.</td>

@@ -135,9 +135,16 @@ func (h *writeHealth) snapshot(now time.Time) Health {
 	return out
 }
 
-// Health reports whether this process can record what its runs do, for the readiness probe.
+// Health reports whether this process can record what its runs do, for the readiness probe. A disk
+// under the free space floor degrades it for as long as it stays under.
 func (d *Dispatcher) Health() Health {
-	return d.health.snapshot(d.now())
+	h := d.health.snapshot(d.now())
+	short, _ := d.floor.shortfalls()
+	for _, s := range short {
+		h.Reasons = append(h.Reasons, s+": new runs are refused")
+	}
+	h.Degraded = len(h.Reasons) > 0
+	return h
 }
 
 // landOwed retries owed run ends on the janitor's interval until the dispatcher closes. It runs on

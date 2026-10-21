@@ -1314,6 +1314,11 @@ func TestRetryRun(t *testing.T) {
 				dispatch.ErrIncompleteSplit)},
 			WantStatus: http.StatusConflict, WantBodyContains: "submit the split again",
 		},
+		{ // Test 8: A retry refused under the free space floor answers 503, as a submit does.
+			Name: "low space", Retrier: &fakeRetrier{err: fmt.Errorf(
+				"%w: only 12 MiB free at /data, under the 256 MiB floor", dispatch.ErrLowSpace)},
+			WantStatus: http.StatusServiceUnavailable, WantBodyContains: "under the 256 MiB floor",
+		},
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

@@ -249,6 +249,8 @@ type Dispatcher struct {
 	now func() time.Time
 	// health records failed writes on the run path and the run ends the store refused, for readiness.
 	health writeHealth
+	// floor refuses new runs while the disk their records are written to is nearly full.
+	floor spaceFloor
 	// parkHook runs between a workflow's walk stopping at an approval step and its park, nil
 	// outside tests.
 	parkHook func(workflowID string)

@@ -34,6 +34,9 @@ const (
 	// outage, so a sender is told where to look and not that the error is its own, since one that
 	// gives up on a refusal would stop retrying an outage.
 	submitContent
+	// submitCapacity is a new run refused because the disk its record is written to is nearly full.
+	// Nothing in the request is wrong, and the same request succeeds once space is freed.
+	submitCapacity
 )
 
 // submitClasses lists each class's errors in the order they are matched, so the most specific known
@@ -57,6 +60,7 @@ var submitClasses = []struct {
 	{class: submitSecret, errs: []error{credential.ErrNoSecret, credential.ErrUnreadable}},
 	{class: submitPolicy, errs: []error{dispatch.ErrPolicyDenied, dispatch.ErrQueueUnlicensed}},
 	{class: submitContent, errs: []error{inventory.ErrContentRead}},
+	{class: submitCapacity, errs: []error{dispatch.ErrLowSpace}},
 	{class: submitInput, errs: []error{inventory.ErrComposition, inventory.ErrResolve}},
 }
 
@@ -113,6 +117,9 @@ func (p personSubmit) respond(w http.ResponseWriter, log *zap.Logger, err error)
 		respondError(w, log, http.StatusConflict, err.Error())
 	case submitPolicy:
 		respondError(w, log, http.StatusForbidden, err.Error())
+	case submitCapacity:
+		log.Warn("server: " + p.op + ": " + err.Error())
+		respondError(w, log, http.StatusServiceUnavailable, err.Error())
 	default:
 		log.Error("server: " + p.op + ": " + err.Error())
 		respondError(w, log, http.StatusInternalServerError, p.fault)

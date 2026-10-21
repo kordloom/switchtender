@@ -159,3 +159,7 @@ var errFederatedCredential = fmt.Errorf("%w: a federated credential has no store
 // ErrBadGitRef is returned when a run names a git ref to fetch its commit from that cannot be
 // honored: one with no project, no pinned commit, or a malformed reference name.
 var ErrBadGitRef = errors.New("invalid git ref for this run")
+
+// ErrLowSpace is returned when a new run is refused because the disk its record is written to has
+// less free space than the floor. Runs already admitted are not stopped.
+var ErrLowSpace = errors.New("too little free space to record new runs")

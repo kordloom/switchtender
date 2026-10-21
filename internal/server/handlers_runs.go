@@ -432,6 +432,10 @@ func retryRunHandler(store run.Store, retrier Retrier, authz *authorizer, log *z
 			errors.Is(err, dispatch.ErrQueueUnlicensed):
 			respondError(w, log, http.StatusForbidden, err.Error())
 			return
+		case errors.Is(err, dispatch.ErrLowSpace):
+			log.Warn("server: retry run: " + err.Error())
+			respondError(w, log, http.StatusServiceUnavailable, err.Error())
+			return
 		case err != nil:
 			log.Error("server: retry run: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not retry run")

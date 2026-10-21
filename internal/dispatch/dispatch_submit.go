@@ -13,11 +13,15 @@ import (
 	"github.com/kordloom/switchtender/internal/run"
 )
 
-// validateRun checks a run's credential and project references before it is accepted. The run's own
-// credentials are held to the tool-compatibility gate; credentials inherited from the target
-// inventory are checked for existence and decryptability but not tool fit, since materializeCredentials
-// resolves the inherited set too and an undecryptable one there would otherwise fail only at execution.
+// validateRun checks that there is room to record a new run, then its credential and project
+// references, before it is accepted. The run's own credentials are held to the tool-compatibility
+// gate; credentials inherited from the target inventory are checked for existence and
+// decryptability but not tool fit, since materializeCredentials resolves the inherited set too and
+// an undecryptable one there would otherwise fail only at execution.
 func (d *Dispatcher) validateRun(ctx context.Context, r *run.Run) error {
+	if err := d.admit(); err != nil {
+		return err
+	}
 	if err := d.validateCredentials(ctx, r.Tool, r.CredentialIDs, true); err != nil {
 		return err
 	}
@@ -534,6 +538,11 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string, opt
 	}
 	if existing != nil {
 		return existing, nil
+	}
+	// A retry stores a new split and a run per shard, each writing logs, so it faces the floor the
+	// other submit paths face. A retry already made is returned above, since it stores nothing.
+	if err := d.admit(); err != nil {
+		return nil, err
 	}
 	parent, err := d.store.Get(ctx, parentID)
 	if err != nil {

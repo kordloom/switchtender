@@ -134,6 +134,7 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--ai-url` | provider default | Base URL for the AI provider, for a self-hosted Ollama, an OpenAI-compatible server, or a proxy. |
 | `--schedule-interval` | `15s` | How often the scheduler checks for due schedules. |
 | `--workers` | `4` | Concurrent runs this process executes at once. At least 1: the server executes its own runs, so there is no value that makes it execute none. |
+| `--min-free-mib` | `256` | Free space, in MiB, on a SQLite database's disk below which new runs are refused with 503 and `/readyz` reports degraded. Runs already admitted finish. The default is room for four runs at the 64 MiB log cap, so raise it with `--workers`. 0 turns it off. A PostgreSQL server has no floor. |
 | `--max-shards` | `512` | Most groups a split fans out into. A split is always bounded by the host count. |
 | `--run-timeout` | `0` | Default cap on how long a run may execute before it is canceled and failed, for example `1h`. A run may set a shorter timeout. Zero leaves runs uncapped. |
 | `--module-fetch-timeout` | `2m` | How long one module download may run, from `1s` to `1h`. The approval gate downloads the registry and remote modules a Terraform or OpenTofu plan calls before it reads the plan, while the submission waits, and a run downloads them again when the gate's copy is not kept where it executes. Past the bound the download stops and the plan stays unclassified, so it is held or refused. |

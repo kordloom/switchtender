@@ -63,6 +63,8 @@ func TestClassifySubmitNamesEveryKnownError(t *testing.T) {
 		WantClass: submitPolicy, Errs: []error{dispatch.ErrPolicyDenied, dispatch.ErrQueueUnlicensed},
 	}, { // Test 3: An inventory whose content could not be read from where it lives.
 		WantClass: submitContent, Errs: []error{inventory.ErrContentRead},
+	}, { // Test 4: A disk too full to record a new run.
+		WantClass: submitCapacity, Errs: []error{dispatch.ErrLowSpace},
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -132,6 +134,8 @@ func TestAPersonIsToldTheWholeReason(t *testing.T) {
 	})
 	const pipeline = `{"name":"p","steps":[{"name":"a","tool":"bash","command":"true"}]}`
 	noSecret := fmt.Errorf("%w: %q", credential.ErrNoSecret, "deploy-key")
+	lowSpace := fmt.Errorf("%w: only 12 MiB free at /data, under the 256 MiB floor",
+		dispatch.ErrLowSpace)
 	sealFault := fmt.Errorf("%w: seal the snapshot of inventory web: %w",
 		dispatch.ErrInventorySnapshot, errors.New("cipher: message authentication failed"))
 	tests := []struct {
@@ -190,6 +194,12 @@ func TestAPersonIsToldTheWholeReason(t *testing.T) {
 	}, { // Test 14: And on a rerun, which was a 409, though a rerun pins no snapshot to conflict with.
 		Err: sealFault, WantStatus: http.StatusInternalServerError, WantText: "could not rerun",
 		WantHidden: "cipher", Path: "/v1/runs/run_done/rerun",
+	}, { // Test 15: A disk under the free space floor is a 503 naming the space, not a 500.
+		Err: lowSpace, WantStatus: http.StatusServiceUnavailable,
+		WantText: "only 12 MiB free at /data", Path: "/v1/runs", Body: `{"playbook":"hello.yml"}`,
+	}, { // Test 16: And on a rerun, whose input errors are a 409.
+		Err: lowSpace, WantStatus: http.StatusServiceUnavailable,
+		WantText: "under the 256 MiB floor", Path: "/v1/runs/run_done/rerun",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -264,6 +274,9 @@ func TestAWebhookIsToldTheErrorByName(t *testing.T) {
 		Err: fmt.Errorf("%w: input %s: %w", inventory.ErrResolve, leakMarker,
 			errors.New("yaml: line 3: did not find expected key")), WantStatus: http.StatusConflict,
 		WantText: "this template cannot launch: composed inventory could not be resolved",
+	}, { // Test 7: A disk under the free space floor, whose path a sender is not told.
+		Err: fmt.Errorf("%w: only 12 MiB free at %s, under the 256 MiB floor", dispatch.ErrLowSpace,
+			leakMarker), WantStatus: http.StatusBadGateway, WantText: "could not launch the template",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

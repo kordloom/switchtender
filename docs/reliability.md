@@ -157,6 +157,14 @@ seconds and renews their leases meanwhile, so the run reads as running until its
 replica that restarts first loses them, and those runs end interrupted. SQLite has no server to
 share, so it stays a single-node deployment by design, and PostgreSQL is the HA backend.
 
+A SQLite server refuses new runs while its database's disk has less free space than
+`--min-free-mib`, 256 MiB by default, so a nearly full disk stops new work before it can cut a
+run's output short. A refused run is answered 503 naming the path, the space free and the floor,
+and `/readyz` reports degraded with the same reason until space is freed. Runs already admitted,
+a split's shards and a pipeline's later steps included, are not stopped. The floor watches only the
+database's disk: a full run files directory already fails a run when its directory cannot be
+created.
+
 ## Splits balance real work
 
 A split shards one inventory across parallel slices of the same playbook, each limited to its hosts,
