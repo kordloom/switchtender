@@ -135,9 +135,9 @@ guessed from traffic:
   what the default hold does not: refuse what an agent may never ask for, so no person can release
   it either, and require that someone other than the person the agent acts for approve a change
   nobody can take back. An exemption lifts only the default hold, so a rule like these still
-  applies to a run it covers. Scoping rules by actor or account, grading them by risk or
-  reversibility, requiring a distinct approver, and refusing outright are the full policy engine,
-  which Team covers:
+  applies to a run it covers. Refusing outright and grading rules by risk or reversibility are
+  Pro. Scoping rules by actor or account and requiring a distinct approver are the full policy
+  engine, which Team covers, so the rules below need Team:
 
       policies:
         - name: agents-never-drop-databases
@@ -430,12 +430,13 @@ and complete for leaving AWX: all seven engines, the importers, RBAC with organi
 the agent gate, which holds an agent token's runs for a person with no rule written, one plain rule
 of your own, either a require-approval policy or one exemption, approvals bound to the exact content
 released, and the whole evidence engine with signed receipts and offline verification. Pro adds
-directory sign-in (OIDC, SAML, LDAP, JWT) and five approval policies at $500 a year for up to 500
-hosts. Team, from $9,900 a year by fleet band, adds the full policy engine, creating a new
-PostgreSQL schema (opening one that exists, and running active-active HA on it, is never gated),
-distributed workers, the change register, and one-click drift reconcile. Enterprise, from $75,000 a
-year, adds the services that come from outside your install: custody of your evidence, evidence
-work on your audit calendar, and the hosted witness, which Team can also buy as an add-on. Every
+directory sign-in (OIDC, SAML, LDAP, JWT), deny rules, risk and reversibility floors, and five
+approval policies at $500 a year for up to 500 hosts. Team, from $7,500 a year by fleet band, adds
+the full policy engine, creating a new PostgreSQL schema (opening one that exists, and running
+active-active HA on it, is never gated), distributed workers, the change register, and one-click
+drift reconcile. Enterprise, from $50,000 a year, adds the services that come from outside your
+install: custody of your evidence, evidence work on your audit calendar, and the hosted witness,
+which Team can also buy as an add-on. Every
 paid feature unlocks in the same binary with a signed license file: no license
 server, no phone-home, flat per org. The one reserved right is offering SwitchTender to third
 parties as a hosted or managed service that provides its primary functionality. Each version

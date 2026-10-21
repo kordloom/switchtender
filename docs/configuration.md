@@ -12,7 +12,7 @@ variable.
 
 ## Licensed features
 
-Almost everything on this page runs on Community, which needs no license. Six features are licensed,
+Almost everything on this page runs on Community, which needs no license. Seven features are licensed,
 and separately an install is capped on how many approval policies it holds at once. A flag or request
 that turns on a licensed feature is refused outright rather than quietly ignored, so an install never
 believes it has a control it does not have.
@@ -20,7 +20,8 @@ believes it has a control it does not have.
 | Capability | Tier | Turned on by |
 |------------|------|--------------|
 | Directory sign-in (OIDC, SAML, LDAP, JWT) | Pro | Any `--oidc-*`, `--saml-*`, `--ldap-*`, or `--jwt-*` flag. `serve` refuses to start with one set and no license. |
-| The full policy engine: deny rules, risk and reversibility floors, actor scoping, distinct-approver separation of duties, and Rego policies | Team | Creating a policy that uses one. A single require-approval policy or one exemption stays Community. |
+| Deny rules and risk and reversibility floors | Pro | Creating a policy that uses one. A single require-approval policy or one exemption stays Community. |
+| The full policy engine: actor and account scoping, distinct-approver separation of duties, and Rego policies | Team | Creating a policy that uses one. |
 | More approval policies at once | Pro holds five, Team is uncapped | Creating policies. Community holds one. |
 | The period change register | Team | `audit report`, and `GET /v1/audit/register`. |
 | Distributed workers | Team | Every `switchtender worker`, whether it shares the database or reaches the server over the mesh relay with `--server`. |
@@ -134,7 +135,7 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--ai-url` | provider default | Base URL for the AI provider, for a self-hosted Ollama, an OpenAI-compatible server, or a proxy. |
 | `--schedule-interval` | `15s` | How often the scheduler checks for due schedules. |
 | `--workers` | `4` | Concurrent runs this process executes at once. At least 1: the server executes its own runs, so there is no value that makes it execute none. |
-| `--min-free-mib` | `256` | Free space, in MiB, on a SQLite database's disk below which new runs are refused with 503 and `/readyz` reports degraded. Runs already admitted finish. The default is room for four runs at the 64 MiB log cap, so raise it with `--workers`. 0 turns it off. A PostgreSQL server has no floor. |
+| `--min-free-mib` | `256` | Free space, in MiB, on a SQLite database's disk below which new runs are refused with 503 and `/readyz` reports degraded. Runs already admitted finish. The default is room for four runs at the 64 MiB log cap, which matches the default `--workers` of 4, so raise it by 64 MiB for each concurrent run you add. 0 turns it off. A PostgreSQL server has no floor. |
 | `--max-shards` | `512` | Most groups a split fans out into. A split is always bounded by the host count. |
 | `--run-timeout` | `0` | Default cap on how long a run may execute before it is canceled and failed, for example `1h`. A run may set a shorter timeout. Zero leaves runs uncapped. |
 | `--module-fetch-timeout` | `2m` | How long one module download may run, from `1s` to `1h`. The approval gate downloads the registry and remote modules a Terraform or OpenTofu plan calls before it reads the plan, while the submission waits, and a run downloads them again when the gate's copy is not kept where it executes. Past the bound the download stops and the plan stays unclassified, so it is held or refused. |

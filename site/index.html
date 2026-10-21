@@ -117,7 +117,7 @@
 				</div>
 				<p class="hero-note">Already on AWX? <a href="/assess">Drop your export here</a> and see what moves, what does not, and how many of your templates run today with nobody required to approve them. It is read in your browser and never uploaded. The same report comes from <code>switchtender assess awx export.json</code>, and <code>switchtender import awx</code> then brings projects, inventories, templates, surveys, and schedules over in one command.</p>
 				<p class="hero-note">Worth knowing if that is where you are: AWX has not shipped a release in over two years, it carries an unpatched <a href="/awx-alternative">CVSS 9.6</a> whose fix ships only in the paid product, and the supported way off it is priced per managed node.</p>
-				<p class="hero-note hero-offer">Would rather not do it yourself? The <a href="/pricing#sprint">Migration Program</a> is $25,000 fixed price, four milestones, about six weeks, first year of Team at the 250-host band included. It covers the part that actually goes wrong: cutting over without a window where neither system is authoritative.</p>
+				<p class="hero-note hero-offer">Would rather not do it yourself? The <a href="/pricing#sprint">Migration Program</a> is $25,000 fixed price, four milestones, about six weeks, first year of Team at the 500-host band included. It covers the part that actually goes wrong: cutting over without a window where neither system is authoritative.</p>
 				<p class="hero-note">Source-available. BSL 1.1. Go SDK with drop-in plugins. One binary and one database.</p>
 			</div>
 			<div class="hero-shot reveal">
@@ -280,7 +280,7 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 				</article>
 				<details class="card reveal">
 					<summary>Whether you get a second chance</summary>
-					<p>Risk says how bad a change is. It never says whether you can take it back, and the two come apart constantly: restarting a fleet is high risk and undoes itself, while deleting a backup set reads quietly and is permanent. Every run is graded reversible, costly, or irreversible, on every tier. A rule that holds a run on that grade is part of the full policy engine, which is Team. An Ansible run is graded from what it actually runs, every role and include read from the project at the commit that executes, not guessed from a file name.</p>
+					<p>Risk says how bad a change is. It never says whether you can take it back, and the two come apart constantly: restarting a fleet is high risk and undoes itself, while deleting a backup set reads quietly and is permanent. Every run is graded reversible, costly, or irreversible, on every tier. A rule that holds a run on that grade is a reversibility floor, which is Pro. An Ansible run is graded from what it actually runs, every role and include read from the project at the commit that executes, not guessed from a file name.</p>
 				</details>
 				<details class="card reveal">
 					<summary>Your estate as it was</summary>
@@ -324,7 +324,7 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 				<article class="card reveal">
 					<div class="ic ic-gate"></div>
 					<h3>Enforced approvals</h3>
-					<p>Hold risky runs for sign-off, gated by policy on tool, command, or target, and an agent token's runs are held with no policy written. Operators request, admins release. No skipping the gate. An approval binds what will run: a static, smart, or constructed inventory as snapshotted at submission, the container image by the digest its registry serves, or by its tag, said plainly, when the registry does not answer, and for a Terraform or OpenTofu apply the saved plan the apply carries out, however it came to be held. Community holds one plain rule, a require-approval policy or one exemption. The full engine, with deny rules, risk floors, actor scoping, and distinct-approver separation of duties, is Team.</p>
+					<p>Hold risky runs for sign-off, gated by policy on tool, command, or target, and an agent token's runs are held with no policy written. Operators request, admins release. No skipping the gate. An approval binds what will run: a static, smart, or constructed inventory as snapshotted at submission, the container image by the digest its registry serves, or by its tag, said plainly, when the registry does not answer, and for a Terraform or OpenTofu apply the saved plan the apply carries out, however it came to be held. Community holds one plain rule, a require-approval policy or one exemption. Deny rules and risk and reversibility floors are Pro. The full engine, with actor scoping and distinct-approver separation of duties, is Team.</p>
 				</article>
 				<details class="card reveal">
 					<summary>Roles, teams, and orgs</summary>
@@ -406,7 +406,7 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 			<div class="section-head reveal">
 				<span class="eyebrow">AI agent change governance</span>
 				<h2>Agents are principals here, not API keys.</h2>
-				<p>An agent's token is minted as an agent's, naming the human it acts for, and capped below admin so it can never approve its own work or touch identity, access, or secrets. Agents can propose changes. Only authorized humans can approve them. An agent's run waits for a person's approval with no policy written, unless <a href="/docs/policy#agent-runs-are-held-by-default">a rule with <code>effect: exempt</code></a> covers it, and the receipt then proves who approved exactly the change that ran, or which rule exempted it. Its dry runs wait too, and its Terraform or OpenTofu apply waits twice, once before it plans and again carrying the saved plan. On Team, rules can also refuse outright and require an approver other than the human the agent acts for. Every agent run lands in the chain as the agent's, on behalf of its human. <strong>We govern what agents are allowed to do.</strong></p>
+				<p>An agent's token is minted as an agent's, naming the human it acts for, and capped below admin so it can never approve its own work or touch identity, access, or secrets. Agents can propose changes. Only authorized humans can approve them. An agent's run waits for a person's approval with no policy written, unless <a href="/docs/policy#agent-runs-are-held-by-default">a rule with <code>effect: exempt</code></a> covers it, and the receipt then proves who approved exactly the change that ran, or which rule exempted it. Its dry runs wait too, and its Terraform or OpenTofu apply waits twice, once before it plans and again carrying the saved plan. On Pro, rules can also refuse outright, and on Team they can require an approver other than the human the agent acts for. Every agent run lands in the chain as the agent's, on behalf of its human. <strong>We govern what agents are allowed to do.</strong></p>
 			</div>
 			<div class="hero-cta center reveal">
 				<a class="btn big" href="/agents">Run an agent with proof</a>

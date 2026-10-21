@@ -27,7 +27,7 @@ from an admin:
 
     switchtender serve --policy-file policies.yml
 
-Deny rules, risk floors, distinct approvers, and any second policy are Team features, and the
+Deny rules, risk floors, distinct approvers, and any second policy are paid features, and the
 license gate refused them on this install. What follows is therefore the floor of the free tier,
 not the ceiling of the paid one.
 

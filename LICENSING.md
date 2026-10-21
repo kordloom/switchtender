@@ -38,18 +38,18 @@ The commercial model is open core, and paid features ship in the same binary, un
 small signed file verified offline against a key compiled into the binary.
 
 Pro, at $500 a year flat per organization to 500 hosts, adds directory sign-in (OIDC, SAML,
-LDAP, and JWT, with just-in-time provisioning, and group-to-role mapping on all but OIDC) and
-five approval policies instead of one.
+LDAP, and JWT, with just-in-time provisioning, and group-to-role mapping on all but OIDC), five
+approval policies instead of one, and deny rules and risk and reversibility floors.
 
-Team, from $9,900 a year by fleet band, adds the full policy engine (unlimited policies, outright
-denials, risk floors, agent-scoped rules, distinct-approver separation of duties, and Rego
-policies), the period change register, distributed workers, initializing a new PostgreSQL database
-for active-active high availability, and one-click drift reconcile. No license server, no
+Team, from $7,500 a year by fleet band, adds the full policy engine (unlimited policies, Rego
+policies, distinct-approver separation of duties, and rules scoped to an actor or agent), the
+period change register, distributed workers, initializing a new PostgreSQL database for
+active-active high availability, and one-click drift reconcile. No license server, no
 activation, no phone-home, no seat counting, and fleet bands are self-reported and never audited. A
 lapsed license takes nothing: opening an existing PostgreSQL database is never gated, in any state,
 and every Community feature keeps working. Restoring a backup carries your approval policies back
 whatever tier the install runs, because an install that came back without the gates it had is a
-worse outcome than one holding a rule it is no longer licensed to create. Enterprise, from $75,000 a
+worse outcome than one holding a rule it is no longer licensed to create. Enterprise, from $50,000 a
 year, adds the services that come from outside your install: custody of your evidence, evidence
 work on your audit calendar, and the hosted witness, which Team can also buy as an add-on.
 

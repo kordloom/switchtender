@@ -19,6 +19,7 @@ func TestTheGateMapIsWhatThePricingPageSells(t *testing.T) {
 	want := map[Feature]string{
 		FeatureSSO:          TierPro,
 		FeaturePolicyFull:   TierTeam,
+		FeaturePolicyRules:  TierPro,
 		FeatureRegister:     TierTeam,
 		FeatureWorkers:      TierTeam,
 		FeaturePostgresInit: TierTeam,
@@ -52,6 +53,8 @@ func TestTheGateMapIsWhatThePricingPageSells(t *testing.T) {
 		Tier: "Team", WantPhrase: "<b>Distributed workers</b>",
 	}, { // Test 6: FeatureReconcile.
 		Tier: "Team", WantPhrase: "<b>One-click drift reconcile</b>",
+	}, { // Test 7: FeaturePolicyRules, which Pro sells and the gate names in the same words.
+		Tier: "Pro", WantPhrase: "<b>Deny rules and risk and reversibility floors</b>",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

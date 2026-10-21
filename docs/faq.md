@@ -254,8 +254,9 @@ is enforced in the core, and the approval is bound to the exact plan that was re
 cannot be approved as one thing and executed as another.
 
 A Community install holds one plain rule, either a require-approval policy or one exemption, and
-Pro holds five. Team removes the cap and adds the rest of the policy engine: outright denials, risk
-floors, actor-scoped rules, distinct-approver separation of duties, and Rego policies.
+Pro holds five and adds outright denials and risk and reversibility floors. Team removes the cap and
+adds the rest of the policy engine: actor-scoped rules, distinct-approver separation of duties, and
+Rego policies.
 
 ## How fine-grained is access control?
 
@@ -290,9 +291,9 @@ organization. The one restriction is offering it to third parties as a hosted or
 that provides its primary functionality, and each release converts to Apache 2.0 two years after it
 ships. The Community
 tier is free and complete on its own, with the built-in hold on agent runs and one plain rule of
-your own. Pro adds directory sign-in and five approval policies instead of one. Team adds the full
-policy engine, the period change register, distributed workers, initializing a new PostgreSQL
-database, and one-click drift reconcile. Both unlock with a signed license file the binary verifies
+your own. Pro adds directory sign-in, five approval policies instead of one, and deny rules and
+risk and reversibility floors. Team adds the full policy engine, the period change register,
+distributed workers, initializing a new PostgreSQL database, and one-click drift reconcile. Both unlock with a signed license file the binary verifies
 offline, flat per organization by fleet band, and a lapsed license takes nothing: paid features stop
 while your data, evidence, and every Community feature keep working. There is no license server and
 nothing ever phones home.
