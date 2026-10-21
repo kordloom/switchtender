@@ -383,6 +383,9 @@ func (d *Dispatcher) readInputs(ctx context.Context, inputs []*composeInput) (st
 		why        string
 	)
 	for _, in := range inputs {
+		if err := ctx.Err(); err != nil {
+			return "", fmt.Errorf("stopped before reading input %s: %w", in.inv.Name, err)
+		}
 		l, err := inventory.ResolveNative(in.content)
 		if reason, ok := inventory.NeedsAnsibleReason(err); ok {
 			in.engine = inventory.EngineAnsible
@@ -456,17 +459,39 @@ func (d *Dispatcher) composeSmart(ctx context.Context, inv *inventory.Inventory,
 	if err != nil {
 		return nil, nil, "", err
 	}
+	hosts, vars, drawn, err := filterHosts(ctx, filter, inputs, facts)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("compose %s: %w", inv.Name, err)
+	}
+	return inventory.NewHostListing(hosts, vars), drawn, version, nil
+}
+
+// filterCheckEvery is how many hosts filterHosts tests between looks at its context.
+const filterCheckEvery = 1024
+
+// filterHosts returns the hosts of the read inputs the filter selects, sorted, with their
+// variables, and the inputs that contributed at least one. A host name in more than one input is
+// taken from the first. It stops with the context's error when the context ends, so the compose
+// timeout and a dropped request end the work rather than leave it running for nobody.
+func filterHosts(ctx context.Context, filter *inventory.HostFilter, inputs []*composeInput,
+	facts map[string]map[string]string) ([]string, map[string]map[string]any, []string, error) {
 	seen := map[string]bool{}
 	vars := map[string]map[string]any{}
 	var hosts, drawn []string
 	for _, in := range inputs {
+		groups := in.listing.HostGroups()
 		contributed := false
-		for _, h := range in.listing.Hosts() {
+		for n, h := range in.listing.Hosts() {
+			if n%filterCheckEvery == 0 {
+				if err := ctx.Err(); err != nil {
+					return nil, nil, nil, err
+				}
+			}
 			if seen[h] {
 				continue
 			}
 			c := &inventory.Candidate{
-				Name: h, Groups: in.listing.Groups(h), Vars: in.listing.Vars(h), Facts: facts[h],
+				Name: h, Groups: groups[h], Vars: in.listing.Vars(h), Facts: facts[h],
 				InventoryID: in.inv.ID, InventoryName: in.inv.Name,
 			}
 			if !filter.Match(c) {
@@ -482,7 +507,7 @@ func (d *Dispatcher) composeSmart(ctx context.Context, inv *inventory.Inventory,
 		}
 	}
 	slices.Sort(hosts)
-	return inventory.NewHostListing(hosts, vars), drawn, version, nil
+	return hosts, vars, drawn, nil
 }
 
 // composeConstructed runs the constructed plugin over every input at once, the way AWX runs a
