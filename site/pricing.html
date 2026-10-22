@@ -35,7 +35,7 @@
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-	<link rel="stylesheet" href="/styles.css?v=38">
+	<link rel="stylesheet" href="/styles.css?v=39">
 	<style>
 		/* Tier pricing layout. Reuses the card system, adding a price header, a feature checklist,
 		   and a featured-tier ring so the middle tier reads as the recommended one. */
@@ -69,6 +69,8 @@
 		/* "From" sits with the cadence, not the figure, so the number stays the thing you read. */
 		.tier-price .from { color: var(--muted); font-size: 14px; align-self: center; }
 		.tier-sub { color: var(--muted); font-size: 13px; }
+		/* The lede sits directly under a card's headline and carries its precise claim. */
+		.tier-lede { color: var(--text); font-size: 13.5px; line-height: 1.55; margin-top: 8px; }
 		.tier-payoff {
 			margin: 14px 0 2px; padding: 12px 14px; border-radius: 10px;
 			background: rgba(52, 211, 153, 0.06); border: 1px solid rgba(52, 211, 153, 0.16);
@@ -115,10 +117,26 @@
 		.sprint h3 { font-family: "Space Grotesk", sans-serif; font-size: 17px; margin-bottom: 6px; }
 		.sprint p { color: var(--muted); font-size: 14.5px; }
 		.sprint .btn { white-space: nowrap; }
-		.assurance { display: flex; flex-wrap: wrap; justify-content: center; gap: 16px; margin-top: 40px; }
+		.assurance {
+			display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px;
+			max-width: 1112px; margin: 40px auto 0;
+		}
 		.assurance div {
-			flex: 1 1 300px; max-width: 360px; padding: 20px 22px; border-radius: var(--radius);
+			padding: 20px 22px; border-radius: var(--radius);
 			background: var(--surface); border: 1px solid var(--border);
+		}
+		/* A card left alone on the last row sits under the middle column instead of off the grid. */
+		.assurance div:last-child:nth-child(3n+1) { grid-column: 2; }
+		@media (max-width: 900px) {
+			.assurance { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+			.assurance div:last-child:nth-child(3n+1) { grid-column: auto; }
+			.assurance div:last-child:nth-child(odd) {
+				grid-column: 1 / -1; justify-self: center; width: calc(50% - 8px);
+			}
+		}
+		@media (max-width: 600px) {
+			.assurance { grid-template-columns: 1fr; }
+			.assurance div:last-child:nth-child(odd) { grid-column: auto; width: auto; justify-self: stretch; }
 		}
 		.assurance h3 { font-family: "Space Grotesk", sans-serif; font-size: 15px; margin-bottom: 6px; }
 		.assurance p { font-size: 14px; color: var(--muted); }
@@ -242,7 +260,7 @@
 				<article class="card tier">
 					<div class="tier-head">
 						<div class="tier-name">Pro</div>
-						<p class="tier-for">When one rule stops being enough.</p>
+						<p class="tier-for">Pro stops a risky or irreversible change before it runs, at a price that fits one engineer's budget.</p>
 						<div class="tier-price"><b>$500</b><span class="cadence">per year, flat per org</span></div>
 						<p class="tier-sub">To 500 hosts, single-node. The same binary, unlocked by a signed license file the product verifies offline.</p>
 						<a class="btn" href="mailto:licensing@switchtender.com?subject=SwitchTender%20Pro%20trial&amp;body=Org%20name%3A%0A">Start a 30-day trial</a>
@@ -264,25 +282,27 @@
 				<article class="card tier tier-featured">
 					<div class="tier-head">
 						<div class="tier-name">Team</div>
-						<p class="tier-for">Community runs it. Team governs it.</p>
+						<p class="tier-for">The audit is a command, not a quarter.</p>
+						<p class="tier-lede">One command, <code>switchtender audit report</code>, renders the period's change register from the runs that actually happened: who asked for each change, the decision the chain recorded over it, its risk grade, and how it ended. That is the change-management evidence a SOC 2 CC8.1 or ISO/IEC 27001 A.8.32 review samples from.</p>
 						<div class="tier-price"><b>$7,500</b><span class="cadence">per year, flat per org</span></div>
 						<p class="tier-sub">By fleet band: <b>$7,500</b> to 500 hosts &middot; <b>$15,000</b> to 1,000 &middot; <b>$30,000</b> to 2,500 &middot; <b>$45,000</b> unlimited. Self-reported at renewal: no telemetry, no seat counting, no usage audit.</p>
 						<a class="btn" href="mailto:licensing@switchtender.com?subject=SwitchTender%20Team%20trial&body=Org%20name%3A%0AFleet%20band%20(500%2F1000%2F2500%2Funlimited)%3A%0AComing%20from%20(AWX%2FAAP%2FSemaphore%2FRundeck%2Fother)%3A%0A">Start a 30-day trial</a>
 						<a class="ghost" href="mailto:licensing@switchtender.com?subject=Buy%20SwitchTender%20Team">Buy Team</a>
 					</div>
 					<div class="tier-body">
-						<div class="tier-payoff">The quarter-end evidence scramble, ended. <b>The period change register</b> assembles evidence relevant to SOC 2 CC8.1 and ISO 27001 A.8.32 from the runs that actually happened.</div>
 						<p class="tier-inherit">Everything in Pro, plus:</p>
 						<ul class="tier-list">
-							<li><b>The period change register</b>: evidence relevant to SOC 2 CC8.1 and ISO 27001 A.8.32, assembled from your real run history</li>
-							<li><b>The full policy engine</b>: unlimited policies, Rego (Open Policy Agent) policies, separation of duties, and rules scoped to an actor or agent</li>
-							<li><b>Creating a new PostgreSQL schema</b>, the shared database active-active <b>HA</b> runs on. Opening one that already exists is never gated</li>
-							<li><b>Distributed workers</b> and queues, for fleets one machine cannot reach</li>
+							<li><b>The period change register</b>, built from your real run history: up to five thousand changes a period, and it says on its face when the period held more. Point <code>--evidence-dir</code> at an archive and registers write themselves on a cadence, so the evidence exists before anyone asks</li>
+							<li><b>Separation of duties</b>, which is what makes the register hold up: a rule can require an approver who is not the requester, and a refused self-approval leaves no decision behind. The check compares accounts, not credential names, so asking with a token and approving in a browser is still the same person. The requirement is copied onto each run the rule holds, so a later edit to the rule cannot weaken a pending decision</li>
+							<li><b>Per-agent rules</b>: scope a rule to every AI agent, to one named agent, or to the account an agent acts for. The record answers which AI agents touched prod, and who approved them: the chain marks an agent's change as an agent's, and every decision names who made it</li>
+							<li><b>Creating a new PostgreSQL schema</b>, the shared database active-active <b>HA</b> runs on: two or more controllers behind any load balancer, with no leader to elect. Opening a schema that already exists is never gated</li>
+							<li><b>Distributed workers</b> and queues, for fleets one machine cannot reach, including a DMZ or a customer network the controller cannot dial into. A worker's runs enter through the same gate as every other run, so the whole estate can run through one gate</li>
+							<li><b>The full policy engine</b>: unlimited policies, separation of duties and per-agent rules as above, and Rego (Open Policy Agent) policies when a rule needs code</li>
 							<li><b>One-click drift reconcile</b>, from detection to a held, approvable fix</li>
-							<li><b>Support with a clock on it</b>: a Severity 1 report, production runs blocked with no workaround, gets an engineer's first response within one business day. Severities and clocks are <a href="/terms#support" style="color: var(--accent);">defined in the terms</a>, not implied</li>
+							<li><b>Support with a clock on it</b>: Severity 1 and Severity 2 reports get an engineer's first response within one business day, and Severity 1 is worked first. Severities and clocks are <a href="/terms#support" style="color: var(--accent);">defined in the terms</a>, not implied</li>
 						</ul>
 						<p class="fineprint" style="margin-top:12px;">A signed license file, verified offline by the binary you already run. Thirty-day trial from an email, no card. Purchase by invoice, net 30, and the signed license usually lands within hours. <b>A lapsed license takes nothing</b>: paid features stop, apart from the few the FAQ names, and your data, evidence, and every Community feature keep working.</p>
-						<p class="fineprint"><b>Hosted witness add-on</b>, $3,000 a year, flat per org: a KordLoom-operated witness, outside your install, records and signs the chain heads and counters it observes. It receives no run content, host names, credentials, or personal data. Scoped on the order form.</p>
+						<p class="fineprint"><b>Hosted witness add-on</b>, $3,000 a year, flat per org: a KordLoom-operated witness, outside your install. On a cadence you set, your install sends it the chain's newest head with a proof that the chain only grew, and the witness countersigns only a chain that did. It receives no run content, host names, credentials, or personal data. Scoped on the order form.</p>
 						<p class="fineprint"><b>The live demo runs a Team license</b>, so it shows features beyond Community. This page lists the tier of each one.</p>
 					</div>
 				</article>
@@ -291,21 +311,22 @@
 					<div class="tier-head">
 						<div class="tier-name">Enterprise</div>
 						<p class="tier-for">The audit trail has an alibi.</p>
+						<p class="tier-lede">An outside witness countersigns your chain as it grows, so nothing it has seen can be rewritten without the verify failing.</p>
 						<div class="tier-price"><b>$50,000</b><span class="cadence">and up, per year</span></div>
-						<p class="tier-sub">Negotiated. Includes Team for the whole organization. Every service below is available, and the ones you choose are scoped and dated on the order form before either of us signs.</p>
+						<p class="tier-sub">Negotiated, and includes Team for the whole organization. Every service below is available, and the ones you choose are scoped and dated on the order form before either of us signs.</p>
 						<a class="ghost" href="mailto:licensing@switchtender.com?subject=SwitchTender%20Enterprise">Talk to us</a>
 					</div>
 					<div class="tier-body">
-						<div class="tier-payoff">An outside witness countersigns your chain as it grows, so nothing it has seen can be rewritten without the verify failing.</div>
-						<p class="tier-inherit">Everything in Team, plus the work that needs someone outside your install to hold your evidence:</p>
+						<p class="tier-inherit">Everything in Team, plus:</p>
 						<ul class="tier-list">
-							<li><b>Hosted witness, included</b>: the same KordLoom-operated witness Team buys as an add-on, outside your install, recording and signing the chain heads and counters it observes. It receives no run content, host names, credentials, or personal data</li>
+							<li><b>Hosted witness, included</b>: the same KordLoom-operated witness Team buys as an add-on, outside your install. On a cadence you set, your install sends it the chain's newest head with a proof that the chain only grew, and the witness countersigns only a chain that did. Every bundle your install exports carries those countersignatures, and any LoomSeal verifier checks them offline. It receives no run content, host names, credentials, or personal data</li>
 							<li><b>Evidence custody</b> for the term of the agreement, re-timestamped as timestamp authorities change, with the full archive handed back at the end. A paid retention period after the term can be added on the order form</li>
-							<li><b>Evidence operations</b>: the evidence packs and periods named on the order form, delivered on its dates</li>
+							<li><b>Evidence operations</b>: the evidence packs and periods named on the order form, delivered on its dates, so each pack lands on your audit calendar. Each pack is the change register the product already writes on a cadence, so none depends on someone remembering to run it</li>
 							<li>Air-gapped deployment assistance and hardened builds</li>
 							<li>A written support SLA on the order form, with its coverage and clocks stated there</li>
 							<li>A named engineer and a security questionnaire pack</li>
 						</ul>
+						<p class="fineprint" style="margin-top:12px;">What the witness proves: the record was not changed after the witness saw it. It does not prove an entry was true when it was written, and history from before enrollment rests on your anchors. The <a href="/docs/threat-model" style="color: var(--accent);">threat model</a> says where that line sits.</p>
 					</div>
 				</article>
 
