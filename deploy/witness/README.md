@@ -272,7 +272,7 @@ because queued beats are proven and countersigned on reconnect.
 On a machine that holds the license issuer key, mint a one-day test license with the add-on:
 
 ```sh
-switchtender license mint --tier team --addon hosted-witness --days 1 --hosts 250 \
+switchtender license mint --tier team --addon hosted-witness --days 1 --hosts 500 \
   --org "Witness test" --key ISSUER_KEY_FILE --out witness-test-license.json
 ```
 
