@@ -1346,6 +1346,49 @@ func TestRetryRun(t *testing.T) {
 	}
 }
 
+// TestRelaunchFailedRun pins how the relaunch endpoint answers what the dispatcher says, the free
+// space floor among it: a relaunch refused because the disk is short answers 503 with the floor's
+// reason, as a retry and a submit do, rather than a 500 that hides why.
+func TestRelaunchFailedRun(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Retrier          Retrier
+		WantStatus       int
+		WantBodyContains string
+	}{{ // Test 0: A finished run relaunches its failed hosts and returns the new run.
+		Retrier:    &fakeRetrier{run: &run.Run{ID: "run_relaunch", Status: run.StatusPending}},
+		WantStatus: http.StatusAccepted, WantBodyContains: "run_relaunch",
+	}, { // Test 1: A relaunch refused under the free space floor answers 503 with the reason.
+		Retrier: &fakeRetrier{err: fmt.Errorf(
+			"%w: only 12 MiB free at /data, under the 256 MiB floor", dispatch.ErrLowSpace)},
+		WantStatus: http.StatusServiceUnavailable, WantBodyContains: "under the 256 MiB floor",
+	}, { // Test 2: Any other dispatcher failure maps to 500.
+		Retrier:    &fakeRetrier{err: errors.New("boom")},
+		WantStatus: http.StatusInternalServerError, WantBodyContains: "could not relaunch run",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			store := run.NewMemStore()
+			if err := store.Save(context.Background(), &run.Run{
+				ID: "run_1", Tool: "ansible", Status: run.StatusFailed,
+			}); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+			handler := New(store, &fakeSubmitter{}, zap.NewNop(), WithRetrier(test.Retrier)).Handler()
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec,
+				httptest.NewRequest(http.MethodPost, "/v1/runs/run_1/relaunch-failed", nil))
+			if diff := cmp.Diff(test.WantStatus, rec.Code); diff != "" {
+				t.Errorf("status mismatch (-want +got):\n%s", diff)
+			}
+			if !strings.Contains(rec.Body.String(), test.WantBodyContains) {
+				t.Errorf("body %q does not contain %q", rec.Body.String(), test.WantBodyContains)
+			}
+		})
+	}
+}
+
 // TestTheRelayMountAdmitsThroughTheServer pins the wiring between the server and the relay it mounts
 // for the free space floor. The relay refuses a worker's proposed apply only if the server hands it
 // the admission, and a server that took the option and dropped it would let a worker write a run

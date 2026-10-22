@@ -498,6 +498,10 @@ func relaunchFailedHandler(store run.Store, retrier Retrier, authz *authorizer, 
 			errors.Is(err, dispatch.ErrQueueUnlicensed):
 			respondError(w, log, http.StatusForbidden, err.Error())
 			return
+		case errors.Is(err, dispatch.ErrLowSpace):
+			log.Warn("server: relaunch failed hosts: " + err.Error())
+			respondError(w, log, http.StatusServiceUnavailable, err.Error())
+			return
 		case err != nil:
 			log.Error("server: relaunch failed hosts: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not relaunch run")
