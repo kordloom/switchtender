@@ -349,7 +349,7 @@ details.card[open] summary { color: var(--accent); }
 .footer { border-top: 1px solid var(--border); padding: 40px 24px; }
 .footer-inner { display: flex; align-items: center; gap: 28px; flex-wrap: wrap; }
 .foot-logo { height: 18px; opacity: 0.85; }
-.footer nav { display: flex; gap: 12px 22px; flex: 1; flex-wrap: wrap; min-width: 0; }
+.footer nav { display: flex; gap: 12px 22px; flex: 1; flex-wrap: wrap; justify-content: center; min-width: 0; }
 .footer nav a { color: var(--muted); font-size: 14px; transition: color 0.15s; white-space: nowrap; }
 .footer nav a:hover { color: var(--text); }
 .foot-note { color: #63707d; font-size: 13px; }
