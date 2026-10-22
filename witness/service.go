@@ -878,8 +878,8 @@ func (s *Service) fail(w http.ResponseWriter, code int, msg string) {
 	_, _ = fmt.Fprintf(w, "{%q:%q}\n", "error", msg)
 }
 
-// Attestation is a countersigned statement of what an independent witness holds for one server.
-// A relying party verifies it against the witness key they have pinned, offline, with
+// Attestation is a countersigned statement of what a witness outside the watched install holds for
+// one server. A relying party verifies it against the witness key they have pinned, offline, with
 // "switchtender witness verify-attestation". It is the artifact the hosted witness exists to
 // produce: the watched operator cannot mint one, cannot alter one, and cannot answer one that
 // disagrees with the chain they serve.
