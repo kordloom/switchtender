@@ -95,7 +95,7 @@ func TestHAApprovalStepSurvivesARestartAndResumesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Binding() error = %v", err)
 	}
-	if err := store.StampApprovedSpec(ctx, node.ID, digest, binding); err != nil {
+	if err := store.StampApprovedSpec(ctx, node.ID, digest, binding, ""); err != nil {
 		t.Fatalf("StampApprovedSpec() error = %v", err)
 	}
 	if ok, err := store.SettleHeld(ctx, node.ID, run.Finalization{Status: run.StatusSucceeded,

@@ -64,7 +64,8 @@ var commands = sync.OnceValue(func() commandTree {
 func TestTheCommandSurfaceIsWhatItSaysItIs(t *testing.T) {
 	t.Parallel()
 	want := []string{
-		"ansible", "assess", "audit", "backup", "demo", "desktop", "examples", "import", "init",
+		"adopt", "ansible", "assess", "audit", "backup", "demo", "desktop", "examples", "import",
+		"init",
 		"license", "mcp",
 		"receipt", "restore", "serve", "token", "user", "verify", "version", "witness", "worker",
 	}
@@ -285,7 +286,8 @@ func TestNoFlagDefaultCarriesASecret(t *testing.T) {
 func TestEveryStoreCommandTakesTheSameDatabaseFlag(t *testing.T) {
 	t.Parallel()
 	paths := []string{
-		"switchtender ansible", "switchtender audit anchor", "switchtender audit bundle",
+		"switchtender adopt", "switchtender ansible", "switchtender audit anchor",
+		"switchtender audit bundle",
 		"switchtender audit receipt", "switchtender audit report", "switchtender audit run", "switchtender backup",
 		"switchtender examples", "switchtender import awx", "switchtender import cron",
 		"switchtender import jenkins", "switchtender import rundeck", "switchtender import semaphore",

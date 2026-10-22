@@ -25,3 +25,23 @@ func TestSubmitPipelineLeavesTheCallersStepsAlone(t *testing.T) {
 		t.Errorf("the caller's step command became %q, want it unchanged", got)
 	}
 }
+
+// TestACleanedSubmissionStillVerifies pins that a keyed install seals a workflow and its step over
+// the text the store will hold, not the text it was handed. Saving replaces a NUL byte, so a seal
+// made over the bytes as submitted refused the workflow's own honest step as rewritten.
+func TestACleanedSubmissionStillVerifies(t *testing.T) {
+	t.Parallel()
+	ci := newChildInstall(t)
+	steps := []run.PipelineStep{{Name: "deploy", Tool: run.ToolBash, Command: "echo a\x00b"}}
+	parent, err := ci.d.SubmitPipeline(context.Background(), "release", "", steps)
+	if err != nil {
+		t.Fatalf("SubmitPipeline() error = %v", err)
+	}
+	got, step := ci.finished(t, parent.ID)
+	if got.Status != run.StatusSucceeded || step == nil || step.Status != run.StatusSucceeded {
+		t.Fatalf("workflow = %s (%s), want it and its step succeeded", got.Status, got.Error)
+	}
+	if n := ci.runner.count("echo a�b"); n != 1 {
+		t.Errorf("the cleaned command ran %d times, want once", n)
+	}
+}

@@ -149,6 +149,17 @@ func runVerify(cmd *cobra.Command, args []string) error {
 	if rep.SpecPresent || rep.DecisionsPresent > 0 {
 		fmt.Fprintf(out, "spec         %s (%s)\n", mark(rep.SpecConsistent), specVerdict(rep))
 	}
+	// A release says which step a decision released and with what spec, so each verified one is
+	// named with the decisions it derives from. Whether it was held to the steps the outcome says
+	// ran is stated rather than implied, since a receipt can carry releases and withhold its outcome.
+	if rep.ReleaseEntries > 0 {
+		fmt.Fprintf(out, "releases     %s (%s)\n", mark(rep.ReleasesOK && rep.ReleasesConsistent),
+			releaseSummary(rep))
+		for _, r := range rep.Releases {
+			fmt.Fprintf(out, "  step %s attempt %d spec %s released by %s\n", printable(r.Step),
+				r.Attempt, r.SpecDigest, releasedBy(r.Roots))
+		}
+	}
 	// Every member the chain link does not commit, in one of three states. What was checked is
 	// counted by member and a redacted one is named. The unchecked ones follow the verdict, which
 	// counts them, so a verdict never stands for more than was checked.
@@ -378,10 +389,61 @@ func failedChecks(rep *audit.BundleReport) string {
 			failed = append(failed, "the spec digests this "+noun+" discloses do not agree")
 		}
 	}
+	// Only a disclosed release can fail either check, so a report naming none says nothing here.
+	if rep.ReleasesPresent > 0 && (!rep.ReleasesOK || !rep.ReleasesConsistent) {
+		failed = append(failed, "a disclosed release does not hold ("+
+			printable(strings.Join(rep.ReleaseProblems, "; "))+")")
+	}
 	if len(failed) == 0 {
 		return "a check did not pass"
 	}
 	return strings.Join(failed, "; ")
+}
+
+// releaseSummary says how many step releases the document carries and discloses, and what each
+// disclosed one was held to: the entry's digest, and the step the outcome names when a verified
+// outcome naming its steps is disclosed.
+func releaseSummary(rep *audit.BundleReport) string {
+	count := fmt.Sprintf("%d", rep.ReleasesPresent)
+	if rep.ReleaseEntries != rep.ReleasesPresent {
+		count = fmt.Sprintf("%d %s, %d disclosed", rep.ReleaseEntries,
+			util.Plural(rep.ReleaseEntries, "release entry", "release entries"), rep.ReleasesPresent)
+	}
+	switch {
+	case rep.ReleasesPresent == 0:
+		return count
+	case !rep.ReleasesOK || !rep.ReleasesConsistent:
+		return count + ", not every one holds, as the verdict below says"
+	case rep.ReleasesCompared:
+		return count + ", each matches what the chain committed and the step the outcome names"
+	case !rep.OutcomePresent:
+		return count + ", each matches what the chain committed, not held to an outcome since " +
+			"none is disclosed"
+	case rep.OutcomeDigestOK:
+		return count + ", each matches what the chain committed, not held to the outcome, which " +
+			"is disclosed as its summary and names no steps"
+	default:
+		return count + ", each matches what the chain committed, not held to an outcome that " +
+			"does not match its digest"
+	}
+}
+
+// releasedBy names the decisions a release derives from, each by its verdict and who made it, as
+// the receipt shows them. A decision the receipt does not show as verified is named by its id.
+func releasedBy(roots []audit.DisclosedReleaseRoot) string {
+	if len(roots) == 0 {
+		return "no decision"
+	}
+	parts := make([]string, 0, len(roots))
+	for _, root := range roots {
+		if root.Verdict == "" {
+			parts = append(parts, "decision "+printable(root.ID)+", not shown as verified")
+			continue
+		}
+		by := valueOr(printable(root.Actor), "no actor recorded")
+		parts = append(parts, root.Verdict+" ("+by+")")
+	}
+	return strings.Join(parts, " and ")
 }
 
 // reasonLine says what a receipt shows of a reason: the verified text, quoted so nothing in it can

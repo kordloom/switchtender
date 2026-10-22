@@ -11,6 +11,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/binding"
 	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -216,8 +217,13 @@ func (d *Dispatcher) proposeApply(
 //
 // created reports whether this call stored the proposal, false when a retry found the one an
 // earlier call made, so a caller announcing the proposal announces it once.
+//
+// key is the control node's binding key, nil when it holds none. The proposal is sealed under it as
+// a submission is, after the rules have set its approval fields, so the executor that later claims
+// the apply can hold its spec and those fields to what the control node built.
 func ProposeApplyFor(ctx context.Context, store run.Store, policies []*policy.Policy, plan *run.Run,
-	destroys int, read bool, sealedPlan string) (proposal *run.Run, created bool, err error) {
+	destroys int, read bool, sealedPlan string, key *binding.Key) (proposal *run.Run, created bool,
+	err error) {
 	if plan == nil {
 		return nil, false, fmt.Errorf("propose apply: no plan run")
 	}
@@ -234,6 +240,10 @@ func ProposeApplyFor(ctx context.Context, store run.Store, policies []*policy.Po
 		run.WithPlanFile(sealedPlan)))
 	if err := gateProposal(policies, proposal); err != nil {
 		return nil, false, err
+	}
+	submitted := func() (binding.Record, error) { return binding.SubmitRecord(proposal) }
+	if err := sealWith(key, proposal, submitted); err != nil {
+		return nil, false, fmt.Errorf("propose apply: %w", err)
 	}
 
 	err = store.Save(ctx, proposal)

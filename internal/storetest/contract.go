@@ -163,6 +163,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	callbackContract(t, newStore)
 	secretLeaseContract(t, newStore)
 	timeOrderContract(t, newStore)
+	sealContract(t, newStore)
 }
 
 // sampleRun returns a fully populated terminal run with deterministic times.

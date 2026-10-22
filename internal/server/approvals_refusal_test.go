@@ -14,6 +14,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/binding"
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
@@ -635,6 +636,106 @@ func TestApproverInterfaceErrorsAreDistinguished(t *testing.T) {
 			if rec.Code != http.StatusConflict {
 				t.Errorf("%s: a wrapped sentinel mapped to %d, want 409 (%q)",
 					test.Name, rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+// stubStepApprover is a stubApprover that also decides workflow approval steps, returning the same
+// canned error, so the step route can be driven without a dispatcher.
+type stubStepApprover struct {
+	// stubApprover supplies the run decisions and the canned result and error.
+	*stubApprover
+}
+
+// DecideStep counts the decision and returns the configured run or error.
+func (s stubStepApprover) DecideStep(context.Context, string, dispatch.StepDecision) (*run.Run, error) {
+	s.called++
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.result, nil
+}
+
+// TestBindingRefusalSaysWhy pins that a decision refused by the binding check is a 409 carrying the
+// refusal's own words on every route that decides, not a 500 that tells the operator to retry. A
+// drift starts "refused" and an unverifiable read starts "could not verify".
+//
+//nolint:funlen // Test function.
+func TestBindingRefusalSaysWhy(t *testing.T) {
+	t.Parallel()
+	drift := fmt.Errorf("%w: run run_held: its status moved from pending_approval to running",
+		binding.ErrDrift)
+	unverified := fmt.Errorf("%w: run run_held: read its record", binding.ErrUnverified)
+	tests := []struct {
+		Name        string
+		Decision    string
+		Step        bool
+		ApproverErr error
+		WantStatus  int
+		WantError   string
+	}{{ // Test 0: Approving a run whose row drifted is a conflict in the refusal's words.
+		Name: "approve run drift", Decision: "approve", ApproverErr: drift,
+		WantStatus: http.StatusConflict, WantError: drift.Error(),
+	}, { // Test 1: Rejecting a run whose row drifted is the same.
+		Name: "reject run drift", Decision: "reject", ApproverErr: drift,
+		WantStatus: http.StatusConflict, WantError: drift.Error(),
+	}, { // Test 2: Approving an approval step whose row drifted is the same.
+		Name: "approve step drift", Decision: "approve", Step: true, ApproverErr: drift,
+		WantStatus: http.StatusConflict, WantError: drift.Error(),
+	}, { // Test 3: Rejecting an approval step whose row drifted is the same.
+		Name: "reject step drift", Decision: "reject", Step: true, ApproverErr: drift,
+		WantStatus: http.StatusConflict, WantError: drift.Error(),
+	}, { // Test 4: Approving a run the check could not verify is a conflict that says so.
+		Name: "approve run unverified", Decision: "approve", ApproverErr: unverified,
+		WantStatus: http.StatusConflict, WantError: unverified.Error(),
+	}, { // Test 5: Rejecting a run the check could not verify is the same.
+		Name: "reject run unverified", Decision: "reject", ApproverErr: unverified,
+		WantStatus: http.StatusConflict, WantError: unverified.Error(),
+	}, { // Test 6: Approving an approval step the check could not verify is the same.
+		Name: "approve step unverified", Decision: "approve", Step: true, ApproverErr: unverified,
+		WantStatus: http.StatusConflict, WantError: unverified.Error(),
+	}, { // Test 7: Rejecting an approval step the check could not verify is the same.
+		Name: "reject step unverified", Decision: "reject", Step: true, ApproverErr: unverified,
+		WantStatus: http.StatusConflict, WantError: unverified.Error(),
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			held := heldRun(t, false)
+			if test.Step {
+				held.ID, held.Kind, held.StepName = "run_step", run.KindApproval, "gate"
+			}
+			store := &stubRuns{present: held}
+			stub := &stubApprover{result: held, err: test.ApproverErr}
+			var approver Approver = stub
+			if test.Step {
+				approver = stubStepApprover{stubApprover: stub}
+			}
+			var handler http.HandlerFunc
+			if test.Decision == "approve" {
+				handler = approveRunHandler(approver, store, nil, zap.NewNop())
+			} else {
+				handler = rejectRunHandler(approver, store, nil, zap.NewNop())
+			}
+			req := httptest.NewRequest(http.MethodPost,
+				"/v1/runs/"+held.ID+"/"+test.Decision, strings.NewReader(""))
+			req.SetPathValue("id", held.ID)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != test.WantStatus {
+				t.Fatalf("%s: status = %d, want %d (%q)",
+					test.Name, rec.Code, test.WantStatus, rec.Body.String())
+			}
+			var got errorResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatalf("%s: decode %q: %v", test.Name, rec.Body.String(), err)
+			}
+			if diff := cmp.Diff(test.WantError, got.Error); diff != "" {
+				t.Errorf("%s: error text mismatch (-want +got):\n%s", test.Name, diff)
+			}
+			if stub.called != 1 {
+				t.Errorf("%s: dispatcher asked %d times, want 1", test.Name, stub.called)
 			}
 		})
 	}

@@ -30,6 +30,11 @@ var ErrDuplicateID = errors.New("the chain already holds an entry with this id")
 // as a gap with its bounds and duration rather than failing.
 var ErrClockBehind = errors.New("clock behind the last span beat")
 
+// ErrEntryNotFound is returned by Entry when the chain holds no entry with the requested id. A
+// caller that named the id because a record said the entry exists reads it as that entry having
+// been removed.
+var ErrEntryNotFound = errors.New("audit entry not found")
+
 // ErrOutcomeRecorded is returned by Append for a run's outcome entry when the chain already holds
 // an outcome for that run, and nothing is written. A run has exactly one outcome entry, so a
 // committer that retries an append whose result it never learned, or two committers that both found

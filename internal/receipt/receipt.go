@@ -1,6 +1,7 @@
 // Package receipt builds a signed, offline-verifiable receipt for one run: the chain segment from
 // the request that created it through the entry that recorded what it did, with the run's outcome,
-// its approval decisions, and its redacted spec disclosed beside the digests the chain committed.
+// its approval decisions, its step releases, and its redacted spec disclosed beside the digests the
+// chain committed.
 //
 // It exists as a package rather than as command code because the receipt is the product's headline
 // evidence artifact and every way of asking for one has to produce the same bytes. The command was
@@ -198,6 +199,11 @@ func Build(ctx context.Context, runs run.Store, audits audit.Store, id audit.Ide
 			}
 		}
 		discloseDecisions(ctx, runs, opts.Decisions, doc, entries, r)
+		if rerr := discloseReleases(ctx, runs, doc, entries, r); rerr != nil {
+			res.Notes = append(res.Notes, "the workflow's steps could not be read, so the receipt "+
+				"proves its step releases are on the chain but does not show what each released: "+
+				rerr.Error())
+		}
 	}
 
 	if anchorScan != nil {
@@ -379,8 +385,66 @@ func discloseDecisions(ctx context.Context, runs run.Store, records decision.Sto
 	}
 }
 
-// disclosedRecord returns a decision or correction body as a receipt discloses it: its canonical
-// redacted form, the exact bytes the entry's digest was taken over, parsed for the claim.
+// discloseReleases attaches each step release's body and nonce to its claim, the way a decision is
+// disclosed, so a verifier can hold the step a decision released to the step the workflow's outcome
+// says ran. Each body is rebuilt from the stored step, from the decisions the stored workflow says
+// released it, and from the content digest each of those decisions committed as the segment holds
+// it, so a step rewritten after its release, or a decision entry rewritten on the chain, rebuilds
+// to a body the committed digest refuses. A decision the segment does not hold is named with an
+// empty digest. Either body is disclosed anyway: a receipt never quietly drops a release that no
+// longer rebuilds, because that is what tampering with the step looks like. The workflow's steps
+// are read once, and only when the segment holds a release of this workflow. It returns the error
+// that read ended on, and discloses no release then.
+func discloseReleases(ctx context.Context, runs run.Store, doc *audit.Bundle,
+	entries []*audit.Entry, r *run.Run) error {
+	var steps []*run.Run
+	var digests map[string]string
+	read := false
+	for _, e := range entries {
+		if e.Method != audit.MethodRelease {
+			continue
+		}
+		parentID, childID, ok := audit.ParseReleasePath(e.Path)
+		if !ok || parentID != r.ID {
+			continue
+		}
+		if !read {
+			var err error
+			if steps, err = runs.Steps(ctx, r.ID); err != nil {
+				return err
+			}
+			digests = make(map[string]string, len(entries))
+			for _, held := range entries {
+				digests[held.ID] = held.ContentDigest
+			}
+			read = true
+		}
+		at := slices.IndexFunc(steps, func(c *run.Run) bool { return c != nil && c.ID == childID })
+		if at < 0 {
+			continue
+		}
+		child := steps[at]
+		roots := outcome.RootsOf(outcome.ReleaseRoots(r, child, steps), func(id string) string {
+			return digests[id]
+		})
+		body, err := outcome.ReleaseBody(child, roots)
+		if err != nil {
+			continue
+		}
+		bodyObj, ok := disclosedRecord(body)
+		if !ok {
+			continue
+		}
+		if claim := claimForEntry(doc, audit.MethodRelease, e.Path, e.Seq); claim != nil {
+			claim.Payload["release_body"] = bodyObj
+			claim.Payload["release_nonce"] = e.Nonce
+		}
+	}
+	return nil
+}
+
+// disclosedRecord returns a decision, correction, or release body as a receipt discloses it: its
+// canonical redacted form, the exact bytes the entry's digest was taken over, parsed for the claim.
 // Disclosing the body as it was assembled instead put text the digest never covered beside it
 // whenever a step name, an account name, or a token label carried something the redaction rewrites,
 // such as a password assignment: an open verifier, which hashes what it is shown, refused the

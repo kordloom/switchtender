@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/binding"
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/event"
@@ -254,6 +255,10 @@ type Dispatcher struct {
 	// parkHook runs between a workflow's walk stopping at an approval step and its park, nil
 	// outside tests.
 	parkHook func(workflowID string)
+	// binder holds the rows this process executes or releases to the seals it made over them and to
+	// the chain entries those seals name, and its key mints those seals. Nil when the dispatcher has
+	// no binding key or keeps no chain, which mints and checks no seal.
+	binder *binding.Verifier
 }
 
 // errRunTimeout is the cancellation cause when a run is stopped for exceeding runTimeout, so the

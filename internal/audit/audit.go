@@ -130,6 +130,10 @@ type Store interface {
 	SpanBeats(ctx context.Context, limit int) ([]*Entry, error)
 	// List returns up to limit entries, newest first.
 	List(ctx context.Context, limit int) ([]*Entry, error)
+	// Entry returns the entry with this id, read by primary key, or ErrEntryNotFound when the chain
+	// holds none. It is how an executor starts a check from a chain entry it was told to expect,
+	// rather than from whatever rows it finds.
+	Entry(ctx context.Context, id string) (*Entry, error)
 	// Chain returns every entry in chain order, oldest first, for verification.
 	Chain(ctx context.Context) ([]*Entry, error)
 	// ChainScan streams every entry with a sequence above afterSeq in chain order, oldest first,

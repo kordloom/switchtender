@@ -131,6 +131,80 @@ and checkpoints the box does not hold, so the compromise is bounded in time to t
 and a witness dates that boundary. The chain proves the record was not altered after writing. It
 has never claimed to prove the writer was honest at the time of writing, and this page will not
 claim it either.</p>
+<h3 id="whoever-can-write-the-database">Whoever can write the database</h3>
+<p>This principal can write every table, the audit chain's tables included, and can recompute every
+hash the chain carries, since the chain's links are plain SHA-256 over public fields. It does not
+control the server process and does not hold the install's producer identity seed. A principal that
+also controls the process or holds the seed is the administrator of the section above, and nothing
+here changes that boundary.</p>
+<p>What holds depends on the server loading the producer identity, which the precondition below
+states. The server derives an approval binding key from the producer identity with HKDF-SHA256 and
+holds it only in memory. The database never holds it. Every run the server creates or releases
+carries a seal, an HMAC under that key over the run's spec binding, its governance fields, its
+parent's binding, and the audit chain entries it derives from, each named by id and content digest.
+The governance fields are who asked, whether an agent or a person asked, who it acted for, the
+queue, the labels, the reversibility grade, the timeout, and the creation time, among others. A
+writer can read every row and still cannot mint a seal for a row it edited.</p>
+<p>Before a run executes, the executor recomputes the seal from the row and from the chain entries it
+fetches by id, and refuses the run on any difference. This covers held runs, approval nodes, shards
+of a split run, workflow steps, and steps released by an approval. Approving or rejecting a run, or
+deciding an approval step, also checks the seal first, so a rewritten row is refused before
+anyone's decision attaches to it. Once an install's adoption is recorded, a keyed executor checks
+every row, so a row whose seal a writer removed is refused as carrying none. A claim on a decision
+in flight carries its own seal, so a decision claim the process did not write is never recorded as
+a decision. Because the governance fields are sealed, a writer cannot mark a run as already
+approved to skip a rule that makes it plan first, and cannot turn an agent's run into a person's to
+skip the approval agent runs need.</p>
+<p>An approval step's timeout and the time it started waiting are sealed. A forged timeout, whether
+backdated or added, is refused: the workflow fails with the reason and neither the approved nor the
+denied path runs. A step whose approval request could not be recorded fails the workflow instead of
+running the deny path. The deny path runs only after a recorded verdict. A finished step's status
+and outputs carry a result seal minted when the process writes them, so a workflow resumed later
+feeds forward only what the process wrote.</p>
+<p>Each attempt appends a START entry under an id fixed by the run and the attempt, after the executor
+takes the run and before any tool runs. A finished run that a writer resets to pending is refused
+and runs nothing, and an honest retry gets a new attempt and runs. If the START entry cannot be
+recorded, the run does not run. A relay control node does the same for the runs it hands to relay
+workers, and checks each run's seal before it hands it out. Launching a step that an approval
+released appends one RELEASE entry under a fixed id, naming the decision entries that released it
+by content digest. A receipt holds the released step's spec to the decision that released it, and
+this product's verifier and every LoomSeal verifier from 1.10.0 on fail a receipt whose release or
+decision was edited. A receipt that withholds its outcome reports its releases as verified but not
+compared. When the check cannot be made, because a chain entry cannot be read, the run fails closed
+and its error says the check could not be made. It never says the run was refused or changed.</p>
+<p>All of this holds only on a server that loads the install's producer identity, and every server of
+one install must load the same one. A server with no identity holds no key. It compares the digests
+stored on each run and warns at startup that approval binding is row-checked only, which a writer
+who also writes matching digests passes. A worker that shares the database directly holds no key,
+so the runs it claims are held only to the digests stored on them. A server whose key names another
+install refuses to start.</p>
+<p>Work a release without the key left behind carries no seal. <code>switchtender adopt</code> seals it once per
+install, run by a person. It verifies the chain from its first entry, refuses if any row already
+carries a seal or the chain holds an entry only a keyed install writes, shows every row it would
+seal, with who asked and who decided, and asks before it writes. It records the adoption on the
+chain under an id the key fixes. A keyed server that starts with nothing to adopt records the
+adoption itself, trusting no row, so adopt cannot later be run over that install. A keyed start
+that finds sealed work and no adoption record is refused as a removed record.</p>
+<p>Several things do not hold. The chain's links use public hashes. A writer can delete the adoption
+record, re-link every later entry, and delete the anchors the database holds, and then adopt runs a
+second time and seals whatever the writer left. Only an anchor or a witness checked outside the
+database bounds that. Adopt prints the chain's length, its newest anchor and the install it is bound
+to before it asks, and a request to adopt an install that was adopted or served before is itself
+evidence that its chain was rewritten. The same re-link reopens a finished run: a writer who deletes
+its START entry and re-links the chain makes the attempt look unstarted. It also reaches receipts.
+The server signs the chain it reads, so a re-linked edit or a cut tail on a chain that no anchor or
+witness covers verifies. Anchors and the witness detect each of these, as for adoption. A workflow
+that ended interrupted or canceled before its walk finished can be resumed by a writer who resets
+its status, and it then launches the steps that never ran. No step runs twice, but nobody asked for
+the resume. Adopt's check that no row carries a seal is a tripwire for an honest restore of the
+wrong backup, not a defense: one statement clears every seal. A rule's policy is read from the
+database when a run nobody approved executes, so a writer who edits a policy changes which
+unapproved applies are made to plan first.</p>
+<p>Two more limits apply. Adopting an unbound chain from a machine whose identity differs from the
+servers' binds the chain to that machine's key, and the servers then refuse to start. That is an
+operator's error caught at the first keyed start, not a path for the writer. And a writer can always
+stop work by damaging rows. Every refusal fails closed, which the availability limit below already
+states.</p>
 <h3 id="whoever-holds-the-signing-key">Whoever holds the signing key</h3>
 <p>The key signs bundles, so its holder can sign a forged one. Three things bound the damage. The key
 is published at a well-known path and can be pinned out of band, so a verifier is not taking the
@@ -220,6 +294,10 @@ loudly, and it is the right trade for a system whose product is the record.</p>
 <li><strong>Chain append fails.</strong> The mutation is refused with 503. Nothing executes off the record.</li>
 <li><strong>Policy store unreadable.</strong> Submission refused. A gate that cannot be evaluated has not passed.</li>
 <li><strong>Spec changed after approval.</strong> The run fails at claim time, naming the digest mismatch.</li>
+<li><strong>A run changed in the database after approval.</strong> On a server with the producer identity it is
+refused before it runs, naming what does not match.</li>
+<li><strong>The chain cannot be read while a run is checked.</strong> The run fails closed, and its error says the
+check could not be made rather than that the run was changed.</li>
 <li><strong>Project fetch fails at the gate.</strong> The grade reads the commit the last sync left and says which
 commit that was. The execution that follows syncs the same remote and fails on the same fault.</li>
 <li><strong>Database restored from an older backup.</strong> The head moves backward. A witness raises a finding,

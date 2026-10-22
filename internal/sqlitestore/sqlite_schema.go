@@ -75,6 +75,8 @@ CREATE TABLE IF NOT EXISTS runs (
 	actor_type TEXT NOT NULL DEFAULT '',
 	approved_spec_digest TEXT NOT NULL DEFAULT '',
 	approved_spec_binding TEXT NOT NULL DEFAULT '',
+	spec_seal TEXT NOT NULL DEFAULT '',
+	result_seal TEXT NOT NULL DEFAULT '',
 	distinct_approver INTEGER NOT NULL DEFAULT 0,
 	pinned_commit TEXT NOT NULL DEFAULT '',
 	policy_set TEXT NOT NULL DEFAULT '',
@@ -1098,7 +1100,7 @@ func migrateRuns(db *sql.DB) error {
 		"dry_run_scans", "hold_note", "sealed_digests", "policy_notes", "inventory_check",
 		"initiator", "require_reason", "inventory_snapshot", "inventory_sealed", "resolved_hosts",
 		"plan_sha256", "plan_sealed", "image_digest", "decision_id", "decision_claim",
-		"drift_plan_sealed", "account"} {
+		"drift_plan_sealed", "account", "spec_seal", "result_seal"} {
 		if _, err := db.Exec(
 			"ALTER TABLE runs ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''"); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {

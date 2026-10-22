@@ -147,17 +147,17 @@ believes it has a control it does not have.</p>
 </tr>
 <tr>
 <td><code>SWITCHTENDER_DB</code></td>
-<td>serve, worker</td>
+<td>serve, worker, adopt</td>
 <td>The database when <code>--db</code> is not given: a SQLite file path or a <code>postgres://</code> DSN. A DSN carries its password, and on the command line it shows in the process list and, on Kubernetes, in the pod spec, so a shared deployment names it here instead.</td>
 </tr>
 <tr>
 <td><code>SWITCHTENDER_AUDIT_KEY</code></td>
-<td>serve</td>
+<td>serve, adopt</td>
 <td>Hex-encoded ed25519 seed for the install's signing identity, which signs the LoomSeal bundles it emits and binds every audit entry to this install. Unset beside a local database, the install mints and stores its own key there. Unset against a shared database it mints nothing, since every process must sign as the same install, and the chain is recorded unattributed and unbound until a seed is supplied to all of them. A malformed value stops startup.</td>
 </tr>
 <tr>
 <td><code>SWITCHTENDER_IDENTITY_DIR</code></td>
-<td>serve, audit, receipt</td>
+<td>serve, adopt, audit, receipt</td>
 <td>Directory holding the install's producer signing identity. A SQLite install keeps it beside the database and needs no setting. A postgres install has no filesystem home, so it uses a per-user configuration directory; when the account has no home, as in a container, there is nowhere durable to put a key and startup refuses rather than choosing a path a restart would empty. Point this at a durable path the server owns.</td>
 </tr>
 <tr>
@@ -901,6 +901,23 @@ that variable is unset.</p>
 </table>
 <p>Retention windows accept a whole number of days with a <code>d</code> suffix, such as <code>30d</code>, or Go duration
 syntax such as <code>720h</code>.</p>
+<h3 id="approval-binding-needs-the-producer-identity">Approval binding needs the producer identity</h3>
+<p>A server that loads the install's producer identity derives an approval binding key from it, held
+in memory and never written anywhere. It seals every run it creates or releases under that key and
+checks the seal before the run executes, so a run whose spec, approval fields, or decision was
+changed in the database after it was approved is refused rather than run. Every server of one
+install must load the same identity, from the identity directory or from <code>SWITCHTENDER_AUDIT_KEY</code>,
+since a run sealed under one key is refused under another. A relay control node checks each run
+before it hands it to a relay worker. A worker that shares the database holds no key, so the runs it
+claims are held only to the digests stored on them.</p>
+<p>A server with no identity holds no key. It still compares the digests stored on each run, and its
+startup warning says that approval binding is row-checked only, which a change written into the
+database together with matching digests passes.</p>
+<p>A server that loads an identity refuses to start while work an earlier release left carries no seal
+and the audit chain holds no adoption record, and it names the runs. Run <a href="#adopt">adopt</a> once to
+seal that work, then start the server. A server that loads an identity and finds nothing to adopt
+records the adoption itself at its first start, trusting no row. A start that finds sealed work and
+no adoption record is refused, since the record was removed.</p>
 <h3 id="ai-providers">AI providers</h3>
 <p>The advisory AI features run against one provider, chosen with <code>--ai-provider</code>: <code>ollama</code> for a local
 model, or <code>anthropic</code> and <code>openai</code> for a cloud model with <code>SWITCHTENDER_AI_KEY</code>. The provider is off
@@ -1590,6 +1607,81 @@ backup was written with, and it never deletes objects absent from the file.</p>
 </tr>
 </tbody>
 </table>
+<h2 id="adopt">adopt</h2>
+<p>Seals, once per install, the work a release with no approval binding key left behind, so a server of
+this release accepts it. Run it after every server and worker of the earlier release has stopped and
+before this release's <code>serve</code> first starts. <a href="/docs/upgrading">Upgrading</a> gives the order.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--db</code></td>
+<td><code>switchtender.db</code></td>
+<td>SQLite file path, or a <code>postgres://</code> DSN, of the install to adopt.</td>
+</tr>
+<tr>
+<td><code>--dry-run</code></td>
+<td><code>false</code></td>
+<td>Print the rows adoption would seal and write nothing.</td>
+</tr>
+<tr>
+<td><code>--yes</code></td>
+<td><code>false</code></td>
+<td>Seal without asking, for a script. The rows are still printed.</td>
+</tr>
+<tr>
+<td><code>--fail-unsealed</code></td>
+<td><code>false</code></td>
+<td>Record the adoption trusting no row, and fail every unfinished run that carries no seal.</td>
+</tr>
+</tbody>
+</table>
+<p>Adoption reads every run that has not finished, the finished steps a waiting workflow reads forward,
+and the decisions left in flight, and gives each the seal its kind is held to, from the row as it
+reads and the decision entries it names. A row it cannot seal, such as one whose decision entry is
+not on the chain, is listed with the reason and left unsealed, and a server refuses that row when it
+reaches it. Before the rows, adopt prints the chain's entry count, its newest anchor (type,
+sequence, and reference) or that it has none, and the install the chain is bound to or that this
+adoption binds it. Then it prints every row it seals, with the run id, the kind of seal, who asked
+for the run, who decided it, the decision entry, its spec digest, and its release entry, and a count
+of decision claims whose decisions are not on the chain yet. Compare the anchor with its external
+target, which is the git ref, the published head, or the witness, before answering. Adopt asks
+before it writes. <code>--yes</code> skips the question. Without it, adopt refuses to run where standard input
+is not a terminal.</p>
+<p><code>--yes</code> is for one run by hand. Never put adopt in an entrypoint, a chart hook, an init container,
+or a recurring job. A second adopt on the same install is refused and exits non-zero, which a script
+should expect.</p>
+<p>It refuses, and writes nothing, in each of these cases. Each shows that keyed operation already
+began, so adopting again would seal whatever was written since as though the earlier release had
+left it.</p>
+<ul>
+<li>The audit chain does not verify from its first entry to its last, or no longer reaches an anchor
+recorded over it.</li>
+<li>Any run carries a seal, finished runs included.</li>
+<li>The chain holds a <code>RELEASE</code> entry or an adoption record.</li>
+</ul>
+<p>An install refused for one of the last two reasons that has no copy to restore runs adopt with
+<code>--fail-unsealed</code>. It records the adoption with nothing adopted, so no row is trusted, and fails
+every unfinished run that carries no seal with the reason <code>not adopted</code>. A run that carries a seal
+is left for the server to check when it reaches it, and one it did not make is refused. A run
+still held under a lease, or with a decision or a cancel in flight, is listed and left as it is.
+It still refuses a chain that does not verify and an install whose adoption is already recorded.</p>
+<p>Adopt appends one record to the audit chain, at <code>/runs/adopted</code> under an id the install's key fixes,
+before it writes any seal. A second adopt on the same install is refused and says when and by whom
+the first one ran. The rows it seals are the rows it showed, as they read when it showed them. A row
+changed while the list was on screen carries a seal over what was shown, which a server refuses, and
+a row created meanwhile is not sealed.</p>
+<p>Adopt needs the install's producer identity, the same one <code>serve</code> loads, from the identity directory
+or <code>SWITCHTENDER_AUDIT_KEY</code>. An install with no identity has no key and nothing to adopt, and adopt
+says so. Adopt binds an unbound chain to the key it runs with and names where that key came from, so
+against a PostgreSQL DSN run it with the seed the servers will sign with in
+<code>SWITCHTENDER_AUDIT_KEY</code>. A server whose key names another install refuses to start.</p>
 <h2 id="version">version</h2>
 <p>Prints the SwitchTender version.</p>
 <p><code>--verify</code> fetches this version's published binary hashes and verifies the running executable.</p>

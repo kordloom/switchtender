@@ -31,6 +31,17 @@ const MethodRun = "RUN"
 // deciding actor to a digest of the exact spec decided on, not just to a run id.
 const MethodDecision = "DECISION"
 
+// MethodRelease is the method recorded for the entry a workflow step's launch commits before the
+// step's record is saved, when a decision released it: the step, the decisions it derives from,
+// and digests of its spec and its inputs, under an id fixed by those decisions and the attempt, so
+// a second launch of the same attempt finds the first.
+const MethodRelease = "RELEASE"
+
+// MethodStart is the method recorded for the entry a run's start commits on a keyed install, after
+// the run moved to running and before any tool runs, under an id fixed by the run and its attempt,
+// so a run a writer reset to pending after it ran finds the first start and runs nothing.
+const MethodStart = "START"
+
 // MethodSchedule is the method recorded for the entry a schedule's fire commits before the run it
 // launches exists, so a scheduled run carries creation evidence like any other, for the entry a fire
 // the schedule refused commits in its place, and for the entry a fire commits when it is skipped

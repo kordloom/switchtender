@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -30,6 +31,7 @@ import (
 	"github.com/kordloom/switchtender/internal/attention"
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
+	"github.com/kordloom/switchtender/internal/binding"
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/dispatch"
@@ -48,6 +50,7 @@ import (
 	"github.com/kordloom/switchtender/internal/logutil"
 	"github.com/kordloom/switchtender/internal/notification"
 	"github.com/kordloom/switchtender/internal/org"
+	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/pgstore"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
@@ -1486,10 +1489,19 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	// act that an install records, commits to the install like every entry after it.
 	var producer *audit.Identity
 	producerProblem := ""
-	if id, err := loadProducerIdentity(cmd.Context(), bundle.Audits(), serveDB); err != nil {
+	//
+	// A key naming another install than the chain is the exception. No honest install meets it, and
+	// running on would leave the server unkeyed, checking no seal and passing no gate, while its
+	// operator believes the upgrade keyed it, so the start is refused.
+	if id, err := loadProducerIdentity(cmd.Context(), bundle.Audits(), serveDB); errors.Is(err,
+		errForeignIdentity) {
+		return fmt.Errorf("%w. A server with this key over this chain would run unkeyed, so the "+
+			"start is refused. Nothing was changed", err)
+	} else if err != nil {
 		producerProblem = err.Error()
 		log.Warn("producer identity unavailable, so bundles cannot be attributed and entries are not " +
-			"bound to this install, which lets a receipt be lifted onto another one: " + err.Error())
+			"bound to this install, which lets a receipt be lifted onto another one. Approval " +
+			"binding is row-checked only until an identity is present: " + err.Error())
 	} else {
 		producer = &id
 		log.Info("producer identity ready", zap.String("key_id", id.KeyID()),
@@ -1504,6 +1516,19 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			log.Warn("audit store cannot be bound to this install, so its entries will not commit " +
 				"to who produced them")
 		}
+	}
+	// The binding key is derived from the identity the chain is bound to, and the dispatcher is
+	// built below with it, so nothing claims work before the gate has answered. The gate refuses to
+	// start over work an earlier release left unsealed until adopt has recorded that work as the
+	// install's one trusted moment, since otherwise the claim loop would fail every such row on its
+	// first tick instead of pausing the install.
+	bindingKey, err := bindingKeyOf(producer)
+	if err != nil {
+		return err
+	}
+	if err := adoptionGate(cmd.Context(), store, bundle.Audits(), bindingKey, log,
+		serveDB); err != nil {
+		return err
 	}
 
 	n, cerr := bundle.Tokens().Count(cmd.Context())
@@ -1658,7 +1683,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		dispatch.WithSourceSync(),
 		dispatch.WithPolicies(policies),
 		dispatch.WithDecisions(bundle.Decisions()),
-		dispatch.WithPresence(bundle.Attention()))
+		dispatch.WithPresence(bundle.Attention()),
+		dispatch.WithBindingKey(bindingKey))
 	defer disp.Close()
 
 	// The Needs attention view, the doctor, and the alert monitor read the same source, so the three
@@ -1942,6 +1968,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		// A worker's plan hands its saved plan file to the control node, which seals it onto the
 		// apply it proposes, so the apply carries out exactly that plan.
 		server.WithPlanSealer(disp),
+		server.WithBinder(bindingKey),
 		server.WithSchedules(schedules), server.WithTokens(bundle.Tokens()),
 		server.WithCredentials(bundle.Credentials(), sealer),
 		server.WithCredentialTypes(bundle.CredentialTypes()),
@@ -2058,6 +2085,78 @@ func notifySecret(flagValue, env string) string {
 		return v
 	}
 	return flagValue
+}
+
+// bindingKeyOf derives the approval binding key from the producer identity's seed, nil when there
+// is no identity, which leaves approval binding row-checked only. The decoded seed is cleared once
+// the key is derived. An identity whose seed does not decode stops the start rather than running
+// unkeyed, since the identity loaded and an unkeyed start would quietly drop every seal check.
+func bindingKeyOf(producer *audit.Identity) (*binding.Key, error) {
+	if producer == nil {
+		return nil, nil
+	}
+	seed, err := hex.DecodeString(producer.Seed)
+	if err != nil {
+		return nil, fmt.Errorf("approval binding: the producer identity's seed is not hex: %w", err)
+	}
+	defer clear(seed)
+	key, err := binding.DeriveKey(seed)
+	if err != nil {
+		return nil, fmt.Errorf("approval binding: derive the key from the producer identity: %w", err)
+	}
+	return key, nil
+}
+
+// adoptionGate refuses a keyed start over work an earlier release left unsealed that adoption has
+// not recorded. A chain that holds the adoption record the key names lets the start go ahead, and
+// so does an install with nothing adoption would seal, since a row created unsealed after that is
+// refused on its own when it is reached. An unkeyed start is never gated. The gate only reads, so a
+// refused start has changed nothing.
+func adoptionGate(ctx context.Context, runs run.Store, audits audit.Store, key *binding.Key,
+	log *zap.Logger, db string) error {
+	if key == nil || audits == nil {
+		return nil
+	}
+	deps := dispatch.AdoptionDeps{Runs: runs, Audits: audits, Key: key, Log: log}
+	recorded, err := dispatch.Recorded(ctx, deps)
+	if err != nil {
+		return fmt.Errorf("approval binding: %w", err)
+	}
+	if recorded {
+		return nil
+	}
+	work, err := dispatch.AdoptionPlan(ctx, deps)
+	if err != nil {
+		return fmt.Errorf("approval binding: %w", err)
+	}
+	// Every keyed install records adoption at its first start, so sealed work beside no record means
+	// the record was removed, and adopting again would trust whatever the rows hold now.
+	if len(work.Sealed) > 0 {
+		return fmt.Errorf("approval binding: the chain holds no adoption record, yet %d non-terminal "+
+			"rows carry a seal (%s). Every keyed install records adoption at its first start, so the "+
+			"record was removed from the chain, and running adopt again would trust whatever the rows "+
+			"hold now. %s. %s. Nothing was changed", len(work.Sealed), shownIDs(work.Sealed),
+			restoreAdvice, failUnsealedAdvice)
+	}
+	// With nothing to adopt the start records an empty adoption, which trusts no row and closes the
+	// moment: a row a writer strips of its seal later is refused, never offered to adopt.
+	if len(work.Rows) == 0 {
+		deps.Actor = outcome.Decider{Name: serveAdoptionActor, Type: "system"}
+		if err := dispatch.RecordEmpty(ctx, deps); err != nil {
+			return fmt.Errorf("approval binding: %w", err)
+		}
+		return nil
+	}
+	ids := make([]string, 0, len(work.Rows))
+	for _, r := range work.Rows {
+		ids = append(ids, r.ID)
+	}
+	return fmt.Errorf("approval binding: the chain holds no adoption record and %d rows an earlier "+
+		"release left carry no seal (%s). If this is the first start after the upgrade, run "+
+		"switchtender adopt %s first. Adoption runs once per install, so if it already ran here, or a "+
+		"server of this release already started here, its record was removed from the chain and "+
+		"being asked to adopt is itself evidence of tampering. %s. %s. Nothing was changed", len(work.Rows), shownIDs(ids),
+		dbFlag(db), restoreAdvice, failUnsealedAdvice)
 }
 
 // loadProducerIdentity reads the install's producer signing identity, resolving where it lives

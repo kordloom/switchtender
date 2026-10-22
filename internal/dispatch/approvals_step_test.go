@@ -189,6 +189,51 @@ func TestApprovalStepPausesAndTakesAPath(t *testing.T) {
 	}
 }
 
+// TestAnUnrecordedRequestFailsTheWorkflow pins what an approval step does when the chain refuses
+// its request. Nobody could be asked, so nobody denied it: the workflow fails with that stated and
+// runs neither the approve path nor the deny path, whether or not its author wrote one. Taking the
+// deny path here acted on a denial with no record.
+func TestAnUnrecordedRequestFailsTheWorkflow(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// DenyPath gives the workflow a step that runs on a denial.
+		DenyPath bool
+	}{{ // Test 0: A workflow with a deny path runs neither path.
+		DenyPath: true,
+	}, { // Test 1: A workflow without a deny path fails the same way.
+		DenyPath: false,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			store := run.NewMemStore()
+			audits := &failingAppends{Store: audit.NewMemStore(), method: audit.MethodDecision}
+			runner := &commandRecorder{}
+			d := New(store, runner, nil, WithNoJanitor(), WithAudits(audits))
+			defer d.Close()
+			parent, err := d.SubmitPipeline(ctx, "release", "", gatedWorkflow(0, test.DenyPath))
+			if err != nil {
+				t.Fatalf("SubmitPipeline() error = %v", err)
+			}
+			got := waitTerminal(t, store, parent.ID)
+			if got.Status != run.StatusFailed ||
+				!strings.Contains(got.Error, `approval step "gate" could not record its request`) {
+				t.Errorf("workflow = %s (%s), want failed because the request was not recorded",
+					got.Status, got.Error)
+			}
+			if runner.count("build") != 1 || runner.count("deploy") != 0 || runner.count("notify") != 0 {
+				t.Errorf("build, deploy, notify ran %d, %d, %d times, want 1, 0, 0",
+					runner.count("build"), runner.count("deploy"), runner.count("notify"))
+			}
+			steps, err := run.ApprovalSteps(ctx, store, parent.ID)
+			if err != nil || len(steps) != 1 || steps[0].Status != run.StatusFailed {
+				t.Errorf("approval steps = %d, %v, want the one step settled failed", len(steps), err)
+			}
+		})
+	}
+}
+
 // TestApprovalStepSurvivesARestart pins durability. The process that parked the workflow stops, and
 // a different process records the approval and finishes the workflow from what the store holds,
 // without running the finished steps again.
@@ -247,7 +292,7 @@ func TestApprovalStepResumesExactlyOnce(t *testing.T) {
 	node := waitParked(t, store, parent.ID)
 	// The decision is recorded directly, as a replica that died before resuming would leave it, so
 	// every replica below races to resume the same parked workflow.
-	if err := store.StampApprovedSpec(ctx, node.ID, "", ""); err != nil {
+	if err := store.StampApprovedSpec(ctx, node.ID, "", "", ""); err != nil {
 		t.Fatalf("StampApprovedSpec() error = %v", err)
 	}
 	state, err := outcome.StepStateOf(ctx, store, parent, node)
@@ -258,7 +303,7 @@ func TestApprovalStepResumesExactlyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Binding() error = %v", err)
 	}
-	if err := store.StampApprovedSpec(ctx, node.ID, "", binding); err != nil {
+	if err := store.StampApprovedSpec(ctx, node.ID, "", binding, ""); err != nil {
 		t.Fatalf("StampApprovedSpec() error = %v", err)
 	}
 	if ok, err := store.SettleHeld(ctx, node.ID, run.Finalization{Status: run.StatusSucceeded,
@@ -442,7 +487,7 @@ func TestApprovalStepBindsTheStateItWasGivenFor(t *testing.T) {
 			}
 			digest, _ := state.Digest()
 			binding, _ := state.Binding()
-			if err := store.StampApprovedSpec(ctx, node.ID, digest, binding); err != nil {
+			if err := store.StampApprovedSpec(ctx, node.ID, digest, binding, ""); err != nil {
 				t.Fatalf("StampApprovedSpec() error = %v", err)
 			}
 			if ok, err := store.SettleHeld(ctx, node.ID, run.Finalization{
@@ -512,7 +557,7 @@ func TestApprovalStepRefusesAParentPinChangedAfterApproval(t *testing.T) {
 	}
 	digest, _ := state.Digest()
 	binding, _ := state.Binding()
-	if err := store.StampApprovedSpec(ctx, node.ID, digest, binding); err != nil {
+	if err := store.StampApprovedSpec(ctx, node.ID, digest, binding, ""); err != nil {
 		t.Fatalf("StampApprovedSpec() error = %v", err)
 	}
 	if ok, err := store.SettleHeld(ctx, node.ID, run.Finalization{

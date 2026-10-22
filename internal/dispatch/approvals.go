@@ -2,9 +2,14 @@ package dispatch
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
+	"github.com/kordloom/switchtender/internal/binding"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -20,6 +25,7 @@ func (d *Dispatcher) Approve(ctx context.Context, id string, by outcome.Decider)
 
 // approveRun is Approve with the approver's optional reason. The reason is masked, recorded with a
 // hiding commitment in the decision entry, and refused for confirmation when the masker changed it.
+// On a dispatcher with a binding key the run must still be as it was submitted.
 func (d *Dispatcher) approveRun(ctx context.Context, id string, dec RunDecision) (*run.Run, error) {
 	by := dec.By
 	// An agent's token is capped below the role the approve route needs, so it never reaches this
@@ -42,6 +48,12 @@ func (d *Dispatcher) approveRun(ctx context.Context, id string, dec RunDecision)
 		return nil, ErrChildNotApprovable
 	}
 	if err := d.refuseStartedWorkflow(ctx, r); err != nil {
+		return nil, err
+	}
+	// The separation-of-duties flag read next, and every field the seal minted below covers, are
+	// held to the seal the run was submitted with first. A writer who cleared the flag otherwise let
+	// the requester release their own run, under a seal this process made over the cleared flag.
+	if err := d.sealRefusal(ctx, nil, r); err != nil {
 		return nil, err
 	}
 	// A cancel already requested outranks the approval. Releasing the run anyway moved it to
@@ -109,11 +121,23 @@ func (d *Dispatcher) approveRun(ctx context.Context, id string, dec RunDecision)
 		if err != nil {
 			return nil, fmt.Errorf("record the approval decision: %w", err)
 		}
-		binding, err := outcome.SpecBinding(r)
+		specBinding, err := outcome.SpecBinding(r)
 		if err != nil {
 			return nil, fmt.Errorf("bind the approved spec: %w", err)
 		}
-		c.Entry, c.Digest, c.Binding = claimEntryOf(entry), specDigest, binding
+		c.Entry, c.Digest, c.Binding = claimEntryOf(entry), specDigest, specBinding
+		// The seal names the decision entry by id and content digest, so the executor holds the
+		// row to the entry and the entry to the row, under a key the database never holds.
+		if d.binder != nil {
+			// The row is sealed as it reads once the claim stamps what was decided on, so a
+			// row a writer marks approved without a decision does not carry it.
+			sealed, err := binding.RunRecord(binding.AsStamped(r, specDigest, specBinding),
+				binding.RootOf(entry))
+			if err != nil {
+				return nil, fmt.Errorf("seal the approved run: %w", err)
+			}
+			c.Seal = d.binder.Key.Seal(sealed)
+		}
 	}
 	// The decision claims the run first and is recorded and applied only once it has won, so a
 	// decision that loses, to a second approver, a rejection, a cancel, or anything on another
@@ -238,6 +262,11 @@ func (d *Dispatcher) rejectRun(ctx context.Context, id string, dec RunDecision) 
 	if err := d.refuseStartedWorkflow(ctx, r); err != nil {
 		return nil, err
 	}
+	// Held to its submit seal as an approval is, so a decision either way is recorded only on the
+	// run as it was submitted.
+	if err := d.sealRefusal(ctx, nil, r); err != nil {
+		return nil, err
+	}
 	// Same precondition as Approve, and the same reason. A reject arriving after the run had already
 	// been approved and succeeded was refused with 409 and still wrote DECISION .../rejected into the
 	// chain, so the permanent record said an approver rejected a run that ran and succeeded.
@@ -307,6 +336,39 @@ func (d *Dispatcher) rejectShards(ctx context.Context, parent *run.Run, reason s
 			d.log.Error("dispatch: cancel shard " + s.ID + " of a rejected split: " + err.Error())
 		}
 	}
+}
+
+// sealRefusal holds a row waiting for a decision to the seal this process made when it created the
+// row, before anything about a decision on it is recorded. parent is nil for a held run and is the
+// workflow for an approval step. The row's approval fields decide who may decide it, and an
+// approval seals the row as it reads, so a row a writer changed would otherwise be decided under
+// the changed fields and released under a seal that covers them.
+//
+// A dispatcher with no binding key checks nothing, as before. Neither does a row that is not
+// waiting for a decision or that a decision has already claimed, since the claim refuses either
+// having recorded nothing. Every other row is checked, so a row whose seal a writer cleared is
+// refused as carrying no seal rather than decided and sealed as the writer left it. A refusal is
+// stated in the verifier's words, and a read that failed is stated without the store's error,
+// which goes to the log.
+func (d *Dispatcher) sealRefusal(ctx context.Context, parent, r *run.Run) error {
+	if d.binder == nil || r.Status != run.StatusPendingApproval || r.InFlight() {
+		return nil
+	}
+	var err error
+	if parent == nil {
+		err = d.binder.Held(ctx, r)
+	} else {
+		err = d.binder.Pending(ctx, parent, r)
+	}
+	if err == nil {
+		return nil
+	}
+	d.log.Error("dispatch: "+err.Error(), zap.String("run_id", r.ID))
+	if !errors.Is(err, binding.ErrUnverified) {
+		return err
+	}
+	return fmt.Errorf("%w%s", binding.ErrUnverified,
+		strings.TrimPrefix(RefusalText(err), binding.ErrUnverified.Error()))
 }
 
 // refuseStartedWorkflow refuses a whole-run decision on a workflow that already started. Such a

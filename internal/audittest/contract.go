@@ -31,6 +31,7 @@ func Contract(t *testing.T, rawStore func() audit.Store) {
 		return s
 	}
 	t.Run("append and list", func(t *testing.T) { testAppendList(t, newStore()) })
+	t.Run("an entry is read back by its id", func(t *testing.T) { testEntryByID(t, newStore()) })
 	t.Run("chain verifies", func(t *testing.T) { testChain(t, newStore()) })
 	t.Run("anchors round trip and scope", func(t *testing.T) { testAnchors(t, newStore()) })
 	t.Run("anchor delete removes exactly the named anchor", func(t *testing.T) {
@@ -645,6 +646,68 @@ func testAppendList(t *testing.T, store audit.Store) {
 	}
 	if len(one) != 1 || one[0].Path != "/users" {
 		t.Errorf("List(1) = %+v, want just the newest", one)
+	}
+}
+
+// testEntryByID pins the primary-key read an executor starts every binding check from: each
+// appended entry comes back by its id exactly as the chain holds it, and an id the chain does not
+// hold is reported with audit.ErrEntryNotFound rather than as an empty entry.
+func testEntryByID(t *testing.T, store audit.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
+	ids := make([]string, 0, 3)
+	for i, path := range []string{"/runs", "/projects", "/users"} {
+		digest, nonce, err := audit.ContentDigestOf([]byte(`{"step":"` + path + `"}`))
+		if err != nil {
+			t.Fatalf("ContentDigestOf() error = %v", err)
+		}
+		e := &audit.Entry{
+			ID: audit.NewID(), At: base.Add(time.Duration(i) * time.Minute),
+			Actor: "root", ActorType: "user", Method: "POST", Path: path,
+			ContentDigest: digest, Nonce: nonce,
+		}
+		if err := store.Append(ctx, e); err != nil {
+			t.Fatalf("Append() error = %v", err)
+		}
+		ids = append(ids, e.ID)
+	}
+	chain, err := store.Chain(ctx)
+	if err != nil {
+		t.Fatalf("Chain() error = %v", err)
+	}
+	held := map[string]*audit.Entry{}
+	for _, e := range chain {
+		held[e.ID] = e
+	}
+
+	tests := []struct {
+		// ID is the id read.
+		ID string
+		// WantEntry is the entry the read must return, nil when none.
+		WantEntry *audit.Entry
+		// Want is the error the read must return.
+		Want error
+	}{{ // Test 0: The first entry appended.
+		ID: ids[0], WantEntry: held[ids[0]], Want: nil,
+	}, { // Test 1: An entry in the middle of the chain.
+		ID: ids[1], WantEntry: held[ids[1]], Want: nil,
+	}, { // Test 2: The chain head.
+		ID: ids[2], WantEntry: held[ids[2]], Want: nil,
+	}, { // Test 3: An id the chain never held.
+		ID: "aud_missing", WantEntry: nil, Want: audit.ErrEntryNotFound,
+	}, { // Test 4: The empty id.
+		ID: "", WantEntry: nil, Want: audit.ErrEntryNotFound,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			got, err := store.Entry(ctx, test.ID)
+			if !errors.Is(err, test.Want) {
+				t.Fatalf("Entry(%q) error = %v, want %v", test.ID, err, test.Want)
+			}
+			if diff := cmp.Diff(test.WantEntry, got); diff != "" {
+				t.Errorf("Entry(%q) mismatch (-want +got):\n%s", test.ID, diff)
+			}
+		})
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
+	"github.com/kordloom/switchtender/internal/binding"
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/outcome"
@@ -96,6 +97,10 @@ type relayServer struct {
 	// presence records the workers that reach the control node across the relay, nil when nothing
 	// records them.
 	presence *presenceNotes
+	// binder holds a leased run to the seal this process made over it before a worker is handed
+	// it, and its key seals what a worker reports and the applies this node proposes, nil when the
+	// control node holds no binding key.
+	binder *binding.Verifier
 }
 
 // Announcer tells the notification channels about a run: that it finished, or that it is held for a
@@ -124,6 +129,16 @@ type HandlerOption func(*relayServer)
 // leave held.
 func WithAnnouncer(a Announcer) HandlerOption {
 	return func(s *relayServer) { s.announcer = a }
+}
+
+// WithBinder makes the control node hold every run it leases to a worker to the seal this process
+// made over it, and seal the results workers report and the applies it proposes under v's key. A
+// worker holds no key, so the check it makes against the binding header is one a principal who
+// can write the database passes by rewriting the binding with the spec; this one it cannot pass.
+// Build v with dispatch.NewBindingVerifier over the store this handler serves, so the control node
+// checks a row the same way its dispatcher does. Nil checks and seals nothing.
+func WithBinder(v *binding.Verifier) HandlerOption {
+	return func(s *relayServer) { s.binder = v }
 }
 
 // NewHandler returns an http.Handler that serves the Transport methods over the run store, guarded
@@ -292,6 +307,10 @@ func (s *relayServer) claim(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	case err != nil:
 		s.internal(w, "claim", err)
+	case s.refused(r.Context(), owner, leased):
+		// The run never left this side of the boundary, so nothing is recorded as claimed and the
+		// worker is answered as though nothing were pending, which keeps it polling.
+		w.WriteHeader(http.StatusNoContent)
 	default:
 		// A worker took a run onto a machine the control node cannot reach. That is the moment the
 		// work left this side of the boundary, so it is the moment worth recording.
@@ -310,6 +329,95 @@ func (s *relayServer) claim(w http.ResponseWriter, r *http.Request) {
 		s.writeJSON(w, claimResponse{Run: leased,
 			Delivery: s.deliver(r.Context(), poolFrom(r.Context()), owner, leased)})
 	}
+}
+
+// bindingCheckTimeout bounds how long the control node spends holding a leased run to its seal and
+// settling one it refused, once the worker's request no longer holds the check open.
+const bindingCheckTimeout = 30 * time.Second
+
+// refused holds a run just leased to owner to the seal this process made over it and to the chain
+// entries the seal names, before the run is handed to a worker, and reports whether it was refused.
+// A refused run is ended failed with the reason and never handed over. Without a binder nothing is
+// checked.
+//
+// The check runs under a context the worker's connection does not end, so a worker hanging up
+// mid-check is never recorded as a failure to verify. Its reads are bounded.
+func (s *relayServer) refused(ctx context.Context, owner string, leased *run.Run) bool {
+	if s.binder == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), bindingCheckTimeout)
+	defer cancel()
+	err := s.binder.Executable(ctx, leased)
+	if err == nil {
+		return false
+	}
+	// The whole error is logged, the store's own text included. The run records the reason in the
+	// dispatcher's words, which never carry a store error that could read as tampering.
+	s.log.Error("relay: "+err.Error(), zap.String("run_id", leased.ID))
+	s.refuse(ctx, owner, leased, dispatch.RefusalText(err))
+	return true
+}
+
+// refuse ends a leased run failed with reason, under the claim owner holds, through the same fenced
+// writes a worker's own start and end go through: the claim moves the run to running, and the end
+// lands only while owner still holds it. A run whose claim was lost between the lease and these
+// writes, such as one canceled meanwhile, is left to the sweep. A top-level run's outcome is
+// committed and the run announced, as for a run a worker finished. A child is rolled into its
+// parent, which the coordinator commits and announces.
+func (s *relayServer) refuse(ctx context.Context, owner string, leased *run.Run, reason string) {
+	moved, err := s.store.StartClaimed(ctx, leased.ID, owner, leased.ClaimSecret, time.Time{})
+	switch {
+	case err != nil:
+		s.log.Error("relay: end a refused run, the sweep settles it: "+err.Error(),
+			zap.String("run_id", leased.ID))
+		return
+	case !moved:
+		s.log.Warn("relay: a refused run's claim was lost before it could be ended, so the sweep "+
+			"settles it", zap.String("run_id", leased.ID))
+		return
+	}
+	s.endStarted(ctx, owner, leased, reason)
+}
+
+// endStarted ends failed with reason a run this process just moved to running under the claim owner
+// holds, before anything ran, through the fenced end a worker's own end goes through. A run whose
+// claim was lost meanwhile is left to the sweep. A top-level run's outcome is committed and the run
+// announced, as for a run a worker finished. A child is rolled into its parent, which the
+// coordinator commits and announces.
+func (s *relayServer) endStarted(ctx context.Context, owner string, leased *run.Run, reason string) {
+	moved, err := s.store.FinalizeRunning(ctx, leased.ID, run.Finalization{
+		Status: run.StatusFailed, Error: reason, Warning: leased.Warning,
+		CommitSHA: leased.CommitSHA, Image: leased.Image,
+		PullCredentialID: leased.PullCredentialID, Outputs: leased.Outputs,
+		InventoryCheck: leased.InventoryCheck, ImageDigest: leased.ImageDigest,
+		ResolvedHosts: leased.ResolvedHosts, EndedAt: time.Now(), Owner: owner,
+	})
+	switch {
+	case err != nil:
+		s.log.Error("relay: end a refused run, the sweep settles it: "+err.Error(),
+			zap.String("run_id", leased.ID))
+		return
+	case !moved:
+		s.log.Warn("relay: a refused run's claim was lost before it could be ended, so the sweep "+
+			"settles it", zap.String("run_id", leased.ID))
+		return
+	}
+	if leased.ParentID != nil {
+		return
+	}
+	s.commitOwedOutcome(ctx, leased.ID)
+	if final, gerr := s.store.Get(ctx, leased.ID); gerr == nil {
+		s.announce(final)
+	}
+}
+
+// bindingKey returns the key the control node seals under, nil when it holds none.
+func (s *relayServer) bindingKey() *binding.Key {
+	if s.binder == nil {
+		return nil
+	}
+	return s.binder.Key
 }
 
 // heartbeat renews the owner's lease on a run, or 404 when the lease is gone.
@@ -426,6 +534,15 @@ func (s *relayServer) start(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		s.internal(w, "start", err)
 	default:
+		// On a keyed install the attempt's start is fixed on the chain before the worker hears it
+		// may run. A start the chain already holds, or one it could not record, is ended failed and
+		// the worker is told the run did not move, so it walks away without running anything.
+		if moved {
+			if reason := s.startRefusal(r.Context(), stored); reason != "" {
+				s.endUnstarted(r.Context(), normalizeOwner(body.Owner), stored, reason)
+				moved = false
+			}
+		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_ = json.NewEncoder(w).Encode(startResponse{Moved: moved})
 		// A run a worker begins is announced as started, once: only the request that moved it does,
@@ -544,12 +661,20 @@ func (s *relayServer) save(w http.ResponseWriter, r *http.Request) {
 		if stored.EndedAt != nil {
 			ended = *stored.EndedAt
 		}
+		// A worker holds no key, so the control node seals the result a step or shard reports, the
+		// way the in-process executor seals its own: over the outputs the store will hold, carried
+		// in the terminal write itself. A result left unsealed is refused by the walk that reads
+		// it, so the workflow fails rather than feeding forward values nobody sealed.
+		seal, serr := dispatch.SealResult(s.bindingKey(), stored, stored.Status)
+		if serr != nil {
+			s.log.Error("relay: seal a step's result: "+serr.Error(), zap.String("run_id", id))
+		}
 		fin := run.Finalization{
 			Status: stored.Status, ExitCode: stored.ExitCode, Error: stored.Error,
 			Warning: stored.Warning, CommitSHA: stored.CommitSHA,
 			Image: stored.Image, PullCredentialID: stored.PullCredentialID,
 			Outputs: stored.Outputs, InventoryCheck: stored.InventoryCheck, EndedAt: ended,
-			ImageDigest: stored.ImageDigest, ResolvedHosts: stored.ResolvedHosts,
+			ImageDigest: stored.ImageDigest, ResolvedHosts: stored.ResolvedHosts, ResultSeal: seal,
 		}
 		moved, err := s.store.FinalizeRunning(r.Context(), id, fin)
 		if err != nil {
@@ -561,7 +686,12 @@ func (s *relayServer) save(w http.ResponseWriter, r *http.Request) {
 			// report terminal before ever sending one, so the run is stepped to running first, by
 			// compare-and-swap like everything else here, and finalized again. A run a sweep settled
 			// fails both swaps and the report is refused, which is the point of the fence.
-			if ok, terr := s.startForReport(r, stored); terr == nil && ok {
+			ok, terr := s.startForReport(r, stored)
+			if errors.Is(terr, errStartUnrecorded) {
+				writeErr(w, http.StatusConflict, terr.Error())
+				return
+			}
+			if terr == nil && ok {
 				moved, err = s.store.FinalizeRunning(r.Context(), id, fin)
 				if err != nil {
 					s.internal(w, "save", err)
@@ -635,7 +765,10 @@ func (s *relayServer) save(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if fresh.Status == run.StatusPending {
-		if moved, terr := s.startForReport(r, fresh); terr != nil {
+		if moved, terr := s.startForReport(r, fresh); errors.Is(terr, errStartUnrecorded) {
+			writeErr(w, http.StatusConflict, terr.Error())
+			return
+		} else if terr != nil {
 			s.internal(w, "save", terr)
 			return
 		} else if !moved {
@@ -737,9 +870,54 @@ func leaseHeld(stored *run.Run, r *http.Request) bool {
 // the request presents. A status-only step let a report checked against one claim land on the
 // next, when the janitor requeued the run and another worker claimed it between the read and the
 // write.
+//
+// The start is fixed on the chain as a worker's own start is. A start the chain already holds, or one
+// it could not record, ends the run failed and answers errStartUnrecorded, so the report is not
+// applied: a report of a tool that already ran is lost rather than recorded over a second start.
 func (s *relayServer) startForReport(r *http.Request, stored *run.Run) (bool, error) {
-	return s.store.StartClaimed(r.Context(), stored.ID, stored.ClaimedBy, r.Header.Get(leaseHeader),
-		time.Time{})
+	moved, err := s.store.StartClaimed(r.Context(), stored.ID, stored.ClaimedBy,
+		r.Header.Get(leaseHeader), time.Time{})
+	if err != nil || !moved {
+		return moved, err
+	}
+	if reason := s.startRefusal(r.Context(), stored); reason != "" {
+		s.endUnstarted(r.Context(), stored.ClaimedBy, stored, reason)
+		return false, errStartUnrecorded
+	}
+	return true, nil
+}
+
+// endUnstarted ends a run whose start the chain refused or could not record, as endStarted does,
+// under a context the worker's connection does not end and bindingCheckTimeout bounds.
+func (s *relayServer) endUnstarted(ctx context.Context, owner string, stored *run.Run, reason string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), bindingCheckTimeout)
+	defer cancel()
+	s.endStarted(ctx, owner, stored, reason)
+}
+
+// errStartUnrecorded is what startForReport answers when the run's start could not be recorded on
+// the chain, so the report that needed the start is not applied.
+var errStartUnrecorded = errors.New("the run's start could not be recorded, so this report was not applied")
+
+// startAppendTimeout bounds the control node's append of a start entry. The worker's lease is not
+// renewed until it hears the start, so the append stays well inside the lease's lifetime.
+const startAppendTimeout = 10 * time.Second
+
+// startRefusal records the start of stored, a run this process just moved to running, on a control
+// node with a binding key and a chain, and returns why the run must not run, empty when it may. A
+// control node without either records nothing. The append is not ended by the worker's connection,
+// it is bounded by startAppendTimeout, and it is tried once.
+func (s *relayServer) startRefusal(ctx context.Context, stored *run.Run) string {
+	if s.binder == nil || s.audits == nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), startAppendTimeout)
+	defer cancel()
+	reason, err := dispatch.RecordStart(ctx, s.audits, stored, "system:relay", time.Now, 1)
+	if reason != "" {
+		s.log.Error("relay: record a run's start: "+err.Error(), zap.String("run_id", stored.ID))
+	}
+	return reason
 }
 
 // checkWorkerReport rejects a report a worker has no business making. leaseVerified is true when the
@@ -1342,7 +1520,7 @@ func (s *relayServer) proposeApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	proposal, created, err := dispatch.ProposeApplyFor(r.Context(), s.store, policies, plan,
-		body.Destroys, read, sealed)
+		body.Destroys, read, sealed, s.bindingKey())
 	if errors.Is(err, dispatch.ErrPolicyDenied) {
 		// A rule refused the apply. That is an answer, not a fault, and the worker records it on the
 		// plan run, so the reason travels rather than becoming "propose apply failed".

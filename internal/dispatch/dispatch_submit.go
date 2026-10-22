@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/binding"
 	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -146,6 +147,10 @@ func (d *Dispatcher) idempotentLookup(ctx context.Context, key string) (*run.Run
 // true so the caller returns it and skips any follow-on work such as spawning children. Without a
 // key it is an ordinary save.
 func (d *Dispatcher) idempotentSave(ctx context.Context, r *run.Run) (result *run.Run, dup bool, err error) {
+	submitted := func() (binding.Record, error) { return binding.SubmitRecord(r) }
+	if err := d.sealNew(r, submitted); err != nil {
+		return nil, false, err
+	}
 	saveErr := d.store.Save(ctx, r)
 	if errors.Is(saveErr, run.ErrDuplicateKey) {
 		winner, ferr := d.store.ByIdempotencyKey(ctx, r.IdempotencyKey)
@@ -158,6 +163,32 @@ func (d *Dispatcher) idempotentSave(ctx context.Context, r *run.Run) (result *ru
 		return nil, false, saveErr
 	}
 	return r, false, nil
+}
+
+// sealNew seals a row this process is about to create, as sealWith does under the dispatcher's
+// binding key. A dispatcher with no binding key seals nothing.
+func (d *Dispatcher) sealNew(r *run.Run, record func() (binding.Record, error)) error {
+	if d.binder == nil {
+		return nil
+	}
+	return sealWith(d.binder.Key, r, record)
+}
+
+// sealWith seals a row about to be created under key, so the executor can later hold the row to
+// what this process built. The row is cleaned first, the way every store's save cleans it, because
+// the seal has to cover what the store will hold; record then builds what the seal covers. A nil
+// key seals nothing.
+func sealWith(key *binding.Key, r *run.Run, record func() (binding.Record, error)) error {
+	if key == nil {
+		return nil
+	}
+	r.Sanitize()
+	rec, err := record()
+	if err != nil {
+		return fmt.Errorf("seal run %s: %w", r.ID, err)
+	}
+	r.SpecSeal = key.Seal(rec)
+	return nil
 }
 
 // Submit accepts a run for a tool against inventory and returns the created run in pending state.
@@ -394,7 +425,15 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		child.OrgID = parent.OrgID
 		// And it was asked for under the same account, which a policy's account criterion reads.
 		child.Account = parent.Account
-		if err := d.store.Save(ctx, child); err != nil {
+		// Sealed to the split as it stands now, so a shard or a split changed after this is refused.
+		// A shard that cannot be sealed is a shard that cannot be stored.
+		err := d.sealNew(child, func() (binding.Record, error) {
+			return binding.ShardRecord(parent, child)
+		})
+		if err == nil {
+			err = d.store.Save(ctx, child)
+		}
+		if err != nil {
 			return nil, d.abandonSplit(ctx, parent, children, count, err)
 		}
 		children = append(children, child)
@@ -692,7 +731,13 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string, opt
 		child.AuditReceipt = retry.AuditReceipt
 		child.OrgID = retry.OrgID
 		child.Account = retry.Account
-		if err := d.store.Save(ctx, child); err != nil {
+		err := d.sealNew(child, func() (binding.Record, error) {
+			return binding.ShardRecord(retry, child)
+		})
+		if err == nil {
+			err = d.store.Save(ctx, child)
+		}
+		if err != nil {
 			return nil, d.abandonSplit(ctx, retry, children, count, err)
 		}
 		children = append(children, child)

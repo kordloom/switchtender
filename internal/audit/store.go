@@ -212,6 +212,19 @@ func (m *memStore) List(_ context.Context, limit int) ([]*Entry, error) {
 	return out, nil
 }
 
+// Entry returns a copy of the entry with this id, or ErrEntryNotFound.
+func (m *memStore) Entry(_ context.Context, id string) (*Entry, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, e := range m.entries {
+		if e.ID == id {
+			cp := *e
+			return &cp, nil
+		}
+	}
+	return nil, fmt.Errorf("audit entry %s: %w", id, ErrEntryNotFound)
+}
+
 // Chain returns every entry in chain order, oldest first, for verification.
 func (m *memStore) Chain(_ context.Context) ([]*Entry, error) {
 	m.mu.RLock()

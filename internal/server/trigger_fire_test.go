@@ -63,6 +63,11 @@ func (a *recordingAudits) ChainScan(context.Context, int64, func(*audit.Entry) e
 	return nil
 }
 
+// Entry finds nothing.
+func (a *recordingAudits) Entry(context.Context, string) (*audit.Entry, error) {
+	return nil, audit.ErrEntryNotFound
+}
+
 // newHookServer builds a handler wiring triggers, one template, a submitter, a run store, and an
 // audit store, and seeds one unsigned trigger, returning its plaintext token and id.
 func newHookServer(t *testing.T, store run.Store, sub Submitter, audits audit.Store) (http.Handler, string, string) {

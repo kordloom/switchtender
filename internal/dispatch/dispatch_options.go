@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/binding"
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/factcache"
@@ -154,6 +155,35 @@ type config struct {
 	freePaths []string
 	// freeBytes reads a filesystem's free bytes. Nil uses runfiles.FreeBytes; tests set their own.
 	freeBytes func(path string) (uint64, error)
+	// bindingKey seals the rows this process releases and verifies them before they run, nil when
+	// the process holds no producer identity to derive one from.
+	bindingKey *binding.Key
+}
+
+// WithBindingKey gives the dispatcher the key it seals approved runs and approval steps under and
+// verifies them with before they execute or release anything. The key is held in memory and never
+// written anywhere, so a principal who can write the database cannot seal a row it edited. Nil, or a
+// dispatcher that keeps no chain, mints and checks no seal.
+func WithBindingKey(key *binding.Key) Option {
+	return func(c *config) { c.bindingKey = key }
+}
+
+// NewBindingVerifier returns the verifier a keyed process holds rows to before they execute: the
+// seals read from the rows, the chain entries read from audits by id, and a step's roots named by
+// StepReleaseRoots over runs. The dispatcher and the relay control node both build theirs here, so
+// the two check a row the same way. It returns nil when key or audits is nil, which mints and
+// checks no seal.
+func NewBindingVerifier(runs run.Store, audits audit.Store, key *binding.Key) *binding.Verifier {
+	if key == nil || audits == nil {
+		return nil
+	}
+	return &binding.Verifier{
+		Runs: runs, Audits: audits, Key: key,
+		SpecSeal:   func(r *run.Run) string { return r.SpecSeal },
+		ResultSeal: func(r *run.Run) string { return r.ResultSeal },
+		Entry:      chainEntryOf(audits),
+		StepRoots:  StepReleaseRoots(runs),
+	}
 }
 
 // WithParkHook runs fn between a workflow's walk stopping at an approval step and the park that
@@ -394,6 +424,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		presence:            cfg.presence,
 		planScans:           newPlanScanCache(),
 	}
+	d.binder = NewBindingVerifier(store, d.audits, cfg.bindingKey)
 	d.modules = newModuleStore(d.runFiles(), cmp.Or(cfg.moduleKeepFor, DefaultModuleKeepFor),
 		cmp.Or(cfg.moduleKeepMaxBytes, DefaultModuleKeepMaxBytes))
 	d.moduleFetchTimeout, d.moduleFetchMaxBytes = DefaultModuleFetchTimeout, DefaultModuleFetchMaxBytes

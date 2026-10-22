@@ -579,6 +579,9 @@ func (u *unreadableAudits) ChainScan(context.Context, int64, func(*audit.Entry) 
 	return u.err
 }
 
+// Entry reports the read failure.
+func (u *unreadableAudits) Entry(context.Context, string) (*audit.Entry, error) { return nil, u.err }
+
 // TestChainHealthReportsStaleRatherThanBroken pins the distinction an alarm depends on. A chain that
 // cannot be read is not a chain that has been tampered with, and reporting one as the other pages
 // the wrong person for the wrong reason. A relying alarm reads verified together with stale:

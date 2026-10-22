@@ -37,9 +37,9 @@ believes it has a control it does not have.
 |----------|---------|---------|
 | `SWITCHTENDER_ENCRYPTION_KEY` | serve, worker | Passphrase that seals stored credentials with AES-256-GCM. Credentials are disabled when unset. |
 | `SWITCHTENDER_ENCRYPTION_SALT` | serve, worker | Per-deployment salt for argon2id key derivation. Must be set alongside the key and stay stable across restarts, or stored credentials cannot be decrypted. Credentials are disabled when unset. |
-| `SWITCHTENDER_DB` | serve, worker | The database when `--db` is not given: a SQLite file path or a `postgres://` DSN. A DSN carries its password, and on the command line it shows in the process list and, on Kubernetes, in the pod spec, so a shared deployment names it here instead. |
-| `SWITCHTENDER_AUDIT_KEY` | serve | Hex-encoded ed25519 seed for the install's signing identity, which signs the LoomSeal bundles it emits and binds every audit entry to this install. Unset beside a local database, the install mints and stores its own key there. Unset against a shared database it mints nothing, since every process must sign as the same install, and the chain is recorded unattributed and unbound until a seed is supplied to all of them. A malformed value stops startup. |
-| `SWITCHTENDER_IDENTITY_DIR` | serve, audit, receipt | Directory holding the install's producer signing identity. A SQLite install keeps it beside the database and needs no setting. A postgres install has no filesystem home, so it uses a per-user configuration directory; when the account has no home, as in a container, there is nowhere durable to put a key and startup refuses rather than choosing a path a restart would empty. Point this at a durable path the server owns. |
+| `SWITCHTENDER_DB` | serve, worker, adopt | The database when `--db` is not given: a SQLite file path or a `postgres://` DSN. A DSN carries its password, and on the command line it shows in the process list and, on Kubernetes, in the pod spec, so a shared deployment names it here instead. |
+| `SWITCHTENDER_AUDIT_KEY` | serve, adopt | Hex-encoded ed25519 seed for the install's signing identity, which signs the LoomSeal bundles it emits and binds every audit entry to this install. Unset beside a local database, the install mints and stores its own key there. Unset against a shared database it mints nothing, since every process must sign as the same install, and the chain is recorded unattributed and unbound until a seed is supplied to all of them. A malformed value stops startup. |
+| `SWITCHTENDER_IDENTITY_DIR` | serve, adopt, audit, receipt | Directory holding the install's producer signing identity. A SQLite install keeps it beside the database and needs no setting. A postgres install has no filesystem home, so it uses a per-user configuration directory; when the account has no home, as in a container, there is nowhere durable to put a key and startup refuses rather than choosing a path a restart would empty. Point this at a durable path the server owns. |
 | `SWITCHTENDER_PASSWORD` | user new | Initial account password, read instead of prompting so it never lands on the command line. |
 | `SWITCHTENDER_SMTP_PASSWORD` | serve | Password for SMTP authentication when `--smtp-username` is set. |
 | `SWITCHTENDER_AI_KEY` | serve | API key for a cloud AI provider such as Anthropic or an OpenAI-compatible endpoint. A local Ollama needs none. |
@@ -210,6 +210,27 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 
 Retention windows accept a whole number of days with a `d` suffix, such as `30d`, or Go duration
 syntax such as `720h`.
+
+### Approval binding needs the producer identity
+
+A server that loads the install's producer identity derives an approval binding key from it, held
+in memory and never written anywhere. It seals every run it creates or releases under that key and
+checks the seal before the run executes, so a run whose spec, approval fields, or decision was
+changed in the database after it was approved is refused rather than run. Every server of one
+install must load the same identity, from the identity directory or from `SWITCHTENDER_AUDIT_KEY`,
+since a run sealed under one key is refused under another. A relay control node checks each run
+before it hands it to a relay worker. A worker that shares the database holds no key, so the runs it
+claims are held only to the digests stored on them.
+
+A server with no identity holds no key. It still compares the digests stored on each run, and its
+startup warning says that approval binding is row-checked only, which a change written into the
+database together with matching digests passes.
+
+A server that loads an identity refuses to start while work an earlier release left carries no seal
+and the audit chain holds no adoption record, and it names the runs. Run [adopt](#adopt) once to
+seal that work, then start the server. A server that loads an identity and finds nothing to adopt
+records the adoption itself at its first start, trusting no row. A start that finds sealed work and
+no adoption record is refused, since the record was removed.
 
 ### AI providers
 
@@ -625,6 +646,64 @@ backup was written with, and it never deletes objects absent from the file.
 |------|---------|---------|
 | `--db` | `switchtender.db` | SQLite file path, or a `postgres://` DSN, to restore into. |
 | `--in` | stdin | Backup file to read. |
+
+## adopt
+
+Seals, once per install, the work a release with no approval binding key left behind, so a server of
+this release accepts it. Run it after every server and worker of the earlier release has stopped and
+before this release's `serve` first starts. [Upgrading](upgrading.md) gives the order.
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--db` | `switchtender.db` | SQLite file path, or a `postgres://` DSN, of the install to adopt. |
+| `--dry-run` | `false` | Print the rows adoption would seal and write nothing. |
+| `--yes` | `false` | Seal without asking, for a script. The rows are still printed. |
+| `--fail-unsealed` | `false` | Record the adoption trusting no row, and fail every unfinished run that carries no seal. |
+
+Adoption reads every run that has not finished, the finished steps a waiting workflow reads forward,
+and the decisions left in flight, and gives each the seal its kind is held to, from the row as it
+reads and the decision entries it names. A row it cannot seal, such as one whose decision entry is
+not on the chain, is listed with the reason and left unsealed, and a server refuses that row when it
+reaches it. Before the rows, adopt prints the chain's entry count, its newest anchor (type,
+sequence, and reference) or that it has none, and the install the chain is bound to or that this
+adoption binds it. Then it prints every row it seals, with the run id, the kind of seal, who asked
+for the run, who decided it, the decision entry, its spec digest, and its release entry, and a count
+of decision claims whose decisions are not on the chain yet. Compare the anchor with its external
+target, which is the git ref, the published head, or the witness, before answering. Adopt asks
+before it writes. `--yes` skips the question. Without it, adopt refuses to run where standard input
+is not a terminal.
+
+`--yes` is for one run by hand. Never put adopt in an entrypoint, a chart hook, an init container,
+or a recurring job. A second adopt on the same install is refused and exits non-zero, which a script
+should expect.
+
+It refuses, and writes nothing, in each of these cases. Each shows that keyed operation already
+began, so adopting again would seal whatever was written since as though the earlier release had
+left it.
+
+- The audit chain does not verify from its first entry to its last, or no longer reaches an anchor
+  recorded over it.
+- Any run carries a seal, finished runs included.
+- The chain holds a `RELEASE` entry or an adoption record.
+
+An install refused for one of the last two reasons that has no copy to restore runs adopt with
+`--fail-unsealed`. It records the adoption with nothing adopted, so no row is trusted, and fails
+every unfinished run that carries no seal with the reason `not adopted`. A run that carries a seal
+is left for the server to check when it reaches it, and one it did not make is refused. A run
+still held under a lease, or with a decision or a cancel in flight, is listed and left as it is.
+It still refuses a chain that does not verify and an install whose adoption is already recorded.
+
+Adopt appends one record to the audit chain, at `/runs/adopted` under an id the install's key fixes,
+before it writes any seal. A second adopt on the same install is refused and says when and by whom
+the first one ran. The rows it seals are the rows it showed, as they read when it showed them. A row
+changed while the list was on screen carries a seal over what was shown, which a server refuses, and
+a row created meanwhile is not sealed.
+
+Adopt needs the install's producer identity, the same one `serve` loads, from the identity directory
+or `SWITCHTENDER_AUDIT_KEY`. An install with no identity has no key and nothing to adopt, and adopt
+says so. Adopt binds an unbound chain to the key it runs with and names where that key came from, so
+against a PostgreSQL DSN run it with the seed the servers will sign with in
+`SWITCHTENDER_AUDIT_KEY`. A server whose key names another install refuses to start.
 
 ## version
 

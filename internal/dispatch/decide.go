@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/binding"
 	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -54,6 +55,15 @@ type decisionClaim struct {
 	Digest string `json:"digest,omitempty"`
 	// Binding is the unredacted binding stamped beside Digest.
 	Binding string `json:"binding,omitempty"`
+	// Seal is the keyed seal stamped beside Digest and Binding over what was released and the chain
+	// entry that records the release, so the executor holds the row to both. It is empty on a
+	// dispatcher with no binding key and on a decision that releases nothing.
+	Seal string `json:"seal,omitempty"`
+	// ClaimSeal is the keyed seal over every other field of the claim and the run it is stored on,
+	// made by the process that claimed the run. The claim's chain entry names the decider, which no
+	// other keyed value covers, so a claim is recorded only under this seal. It is empty on a
+	// dispatcher with no binding key and on a claim stored before claims were sealed.
+	ClaimSeal string `json:"claim_seal,omitempty"`
 }
 
 // claimEntry is the chain entry a decision claim carries, with the nonce its content digest is
@@ -104,6 +114,10 @@ func (d *Dispatcher) decide(ctx context.Context, target string, rec *decision.Re
 		if err := d.decisions.Save(ctx, rec); err != nil {
 			return false, fmt.Errorf("keep the decision record: %w", err)
 		}
+	}
+	if err := d.sealClaim(target, c); err != nil {
+		d.withdrawRecord(rec)
+		return false, err
 	}
 	raw, err := json.Marshal(c)
 	if err != nil {
@@ -166,6 +180,12 @@ func (d *Dispatcher) withdrawRecord(rec *decision.Record) {
 // them settles the run and goes on to start what the decision released.
 func (d *Dispatcher) finishDecision(ctx context.Context, id string, c *decisionClaim) (bool,
 	error) {
+	// A claim is read back from the row it decides, which a writer can change. Its entry names the
+	// decider, so it is held to the seal this process made over it before anything about it is
+	// recorded, and a claim this process did not make is left on the row unrecorded.
+	if err := d.checkClaim(id, c); err != nil {
+		return false, err
+	}
 	if d.audits != nil && c.Entry != nil {
 		err := withRetries(func() error {
 			aerr := d.audits.Append(ctx, c.Entry.entry())
@@ -179,9 +199,9 @@ func (d *Dispatcher) finishDecision(ctx context.Context, id string, c *decisionC
 			return false, fmt.Errorf("%w: %w", errDecisionUnrecorded, err)
 		}
 	}
-	if c.Digest != "" || c.Binding != "" {
+	if c.Digest != "" || c.Binding != "" || c.Seal != "" {
 		if err := withRetries(func() error {
-			return d.store.StampApprovedSpec(ctx, id, c.Digest, c.Binding)
+			return d.store.StampApprovedSpec(ctx, id, c.Digest, c.Binding, c.Seal)
 		}); err != nil {
 			return false, fmt.Errorf("stamp the state the decision was made on: %w", err)
 		}
@@ -205,6 +225,61 @@ func (d *Dispatcher) finishDecision(ctx context.Context, id string, c *decisionC
 		return false, fmt.Errorf("settle the decision: %w", err)
 	}
 	return cur.Status == run.StatusRunning && cur.ClaimedBy == d.owner, nil
+}
+
+// sealClaim seals c, the claim this process is about to store on the run target, so whichever
+// process finishes it can tell it from a claim a writer stored. A dispatcher with no binding key
+// seals nothing.
+func (d *Dispatcher) sealClaim(target string, c *decisionClaim) error {
+	if d.binder == nil {
+		return nil
+	}
+	raw, err := claimBytes(c)
+	if err != nil {
+		return fmt.Errorf("seal the decision claim: %w", err)
+	}
+	c.ClaimSeal = d.binder.Key.SealClaim(target, raw)
+	return nil
+}
+
+// checkClaim refuses a claim on the run id that this process did not seal, or that changed after
+// it was sealed, on a dispatcher with a binding key. A claim with no seal is refused too, since a
+// writer can store one and nothing would tell it from a claim made before claims were sealed.
+func (d *Dispatcher) checkClaim(id string, c *decisionClaim) error {
+	if d.binder == nil {
+		return nil
+	}
+	if c.ClaimSeal == "" {
+		return fmt.Errorf("%w: decision %s claimed on run %s: it carries no claim seal, so this "+
+			"process did not claim it", binding.ErrDrift, c.ID, id)
+	}
+	raw, err := claimBytes(c)
+	if err != nil {
+		return fmt.Errorf("%w: decision %s claimed on run %s: encode the claim: %w",
+			binding.ErrUnverified, c.ID, id, err)
+	}
+	if !d.binder.Key.VerifyClaim(id, raw, c.ClaimSeal) {
+		return fmt.Errorf("%w: decision %s claimed on run %s: the claim or its decider changed "+
+			"after it was claimed, or it was claimed on another run", binding.ErrDrift, c.ID, id)
+	}
+	return nil
+}
+
+// claimBytes returns what a claim seal covers: c encoded without its own seal. The encoding is
+// taken after one decode, the one a claim read back from its row has been through, so a claim as
+// it was built and as it is read back encode the same.
+func claimBytes(c *decisionClaim) ([]byte, error) {
+	bare := *c
+	bare.ClaimSeal = ""
+	raw, err := json.Marshal(&bare)
+	if err != nil {
+		return nil, err
+	}
+	var stored decisionClaim
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		return nil, err
+	}
+	return json.Marshal(&stored)
 }
 
 // claimOf reads the decision a run's claim describes.

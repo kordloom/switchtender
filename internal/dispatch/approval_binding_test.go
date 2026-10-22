@@ -234,7 +234,7 @@ func TestExecutorRefusesAPinnedCommitChangedAfterApproval(t *testing.T) {
 			if err != nil {
 				t.Fatalf("SpecBinding() error = %v", err)
 			}
-			if err := store.StampApprovedSpec(ctx, r.ID, digest, binding); err != nil {
+			if err := store.StampApprovedSpec(ctx, r.ID, digest, binding, ""); err != nil {
 				t.Fatalf("StampApprovedSpec() error = %v", err)
 			}
 

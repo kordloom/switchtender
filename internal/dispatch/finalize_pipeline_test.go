@@ -200,8 +200,8 @@ func TestRunStepAttemptsStopsWithoutCreatingARun(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 
-	status, outputs := d.runStepAttempts(ctx, parent,
-		run.PipelineStep{Name: "one", Tool: run.ToolBash, Command: "echo hi", Retries: 3}, 0, nil)
+	status, outputs, _ := d.runStepAttempts(ctx, parent,
+		run.PipelineStep{Name: "one", Tool: run.ToolBash, Command: "echo hi", Retries: 3}, 0, nil, nil)
 
 	if status != run.StatusCanceled {
 		t.Errorf("status = %q, want canceled", status)
@@ -259,8 +259,8 @@ func TestAStepThatCannotBeStoredFailsRatherThanRunningUnrecorded(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 
-	status, outputs := d.runStepAttempts(ctx, parent,
-		run.PipelineStep{Name: "one", Tool: run.ToolBash, Command: "echo hi"}, 0, nil)
+	status, outputs, _ := d.runStepAttempts(ctx, parent,
+		run.PipelineStep{Name: "one", Tool: run.ToolBash, Command: "echo hi"}, 0, nil, nil)
 
 	if store.refused.Load() == 0 {
 		t.Fatal("the store was never asked to record the step")

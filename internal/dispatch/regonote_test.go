@@ -420,7 +420,7 @@ warn contains msg if {
 			plan := &run.Run{ID: "run_plan", Tool: run.ToolTerraform, Command: "infra/prod",
 				DryRun: true, Status: run.StatusSucceeded, CreatedAt: time.Now()}
 			relayed, _, err := ProposeApplyFor(ctx, run.NewMemStore(), list, plan, 5, true,
-				"sealed-plan-file")
+				"sealed-plan-file", nil)
 			if err != nil {
 				t.Fatalf("ProposeApplyFor() error = %v", err)
 			}

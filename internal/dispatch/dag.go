@@ -3,11 +3,17 @@ package dispatch
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
+	"slices"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/binding"
+	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -40,6 +46,9 @@ type stepResult struct {
 	status run.Status
 	// outputs holds the values the step published for its dependents.
 	outputs map[string]any
+	// reason says why the step was refused, before anything of it was stored or once it finished,
+	// empty when it was not.
+	reason string
 }
 
 // depClosures returns, per step, which steps it transitively depends on, over both the steps it
@@ -106,9 +115,19 @@ type dagWalk struct {
 	// handled marks an approval step that some step handles the denial of, so its denial is the
 	// workflow taking a path its author wrote rather than the workflow failing.
 	handled []bool
-	// refused marks an approval step whose approval no longer matched the state it was given for, so
-	// neither of its paths runs.
+	// refused marks an approval step whose approval no longer matched the state it was given for, or
+	// whose denial the chain does not record, so neither of its paths runs.
 	refused []bool
+	// roots holds, per decided approval step, the chain entry that records its verdict, for the
+	// steps it releases to name. It is empty where nothing was read: a step not yet decided, one
+	// withdrawn, or any step on a dispatcher with no binding key.
+	roots []binding.Root
+	// workflowRoots holds the chain entry recording the decision that won the workflow, which every
+	// step it releases names first, once workflowRead is set. It is empty for a workflow nobody
+	// decided on and on a dispatcher with no binding key.
+	workflowRoots []binding.Root
+	// workflowRead reports that workflowRoots was read.
+	workflowRead bool
 	// done receives each launched step's result.
 	done chan stepResult
 	// running counts launched steps that have not reported.
@@ -126,7 +145,7 @@ func (d *Dispatcher) newDAGWalk(parent *run.Run, steps []run.PipelineStep) *dagW
 		states: make([]stepState, len(steps)), results: make([]run.Status, len(steps)),
 		outputs: make([]map[string]any, len(steps)), nodes: map[int]string{},
 		handled: make([]bool, len(steps)), refused: make([]bool, len(steps)),
-		done: make(chan stepResult, len(steps)),
+		roots: make([]binding.Root, len(steps)), done: make(chan stepResult, len(steps)),
 	}
 	for i, s := range steps {
 		w.byName[s.Name] = i
@@ -153,8 +172,10 @@ func (w *dagWalk) restoreDry(children []*run.Run) {
 	w.load(context.Background(), children, true)
 }
 
-// load restores the walk from step records. With dry set it neither verifies an approval's binding
-// nor starts a wait on a step still executing.
+// load restores the walk from step records. A succeeded step is held to the result seal its terminal
+// write carried before its status or its outputs are settled, and one that fails the check is
+// refused, which fails the workflow. With dry set it verifies neither an approval's binding nor a
+// step's result, and starts no wait on a step still executing.
 func (w *dagWalk) load(ctx context.Context, children []*run.Run, dry bool) {
 	latest := map[int]*run.Run{}
 	for _, c := range children {
@@ -184,6 +205,12 @@ func (w *dagWalk) load(ctx context.Context, children []*run.Run, dry bool) {
 			w.nodes[i] = c.ID
 			w.settle(i, w.decided(ctx, i, c), nil)
 		case c.Status.Terminal():
+			if !dry {
+				if reason := w.d.resultRefusal(ctx, c); reason != "" {
+					w.refuse(i, reason)
+					continue
+				}
+			}
 			var out map[string]any
 			if c.Status == run.StatusSucceeded {
 				out = c.Outputs
@@ -199,31 +226,111 @@ func (w *dagWalk) load(ctx context.Context, children []*run.Run, dry bool) {
 			go func() {
 				status := w.d.waitChildren(ctx, []string{id})[0]
 				var out map[string]any
+				var reason string
 				if status == run.StatusSucceeded {
-					out = w.d.stepOutputs(c)
+					out, reason = w.d.stepOutputs(c)
 				}
-				w.done <- stepResult{idx: idx, status: status, outputs: out}
+				w.done <- stepResult{idx: idx, status: status, outputs: out, reason: reason}
 			}()
 		}
 	}
 }
 
-// decided returns the status an approval step's record settles the walk with. An approval is held
-// to the state it was given for: the record carries the binding stamped when the approver decided,
-// and a workflow whose finished steps no longer reduce to it is not the workflow that was approved,
-// so the step is refused and neither of its paths runs.
+// decided returns the status an approval step's record settles the walk with, holding the record to
+// what decided it. An approval is held to the state it was given for: a workflow whose finished
+// steps no longer reduce to it is not the workflow that was approved. A denial or a timeout is held
+// to the verdict the chain records for the step, because a row can read as denied without anybody
+// having denied it. A step that fails either check is refused, so neither of its paths runs and the
+// workflow fails with the reason. A withdrawn step is the workflow stopping and needs no verdict.
 func (w *dagWalk) decided(ctx context.Context, i int, node *run.Run) run.Status {
-	if node.Status != run.StatusSucceeded {
+	var err error
+	switch node.Status {
+	case run.StatusSucceeded:
+		err = w.approved(ctx, i, node)
+	case run.StatusRejected, run.StatusFailed:
+		err = w.denied(ctx, i, node)
+	default:
 		return node.Status
 	}
-	if err := w.d.checkStepBinding(ctx, w.parent, node); err != nil {
+	if err != nil {
 		w.d.log.Error("dispatch: "+err.Error(), zap.String("run_id", w.parent.ID),
 			zap.String("step", w.steps[i].Name))
 		w.refused[i] = true
-		w.res.reason = err.Error()
+		w.res.reason = RefusalText(err)
 		return run.StatusFailed
 	}
 	return node.Status
+}
+
+// approved holds an approved step to the state it was given for. On a dispatcher with a binding key
+// the step's DECISION entry is read first and kept on the walk once the seal over it holds.
+func (w *dagWalk) approved(ctx context.Context, i int, node *run.Run) error {
+	if w.d.binder == nil {
+		return w.d.checkStepBinding(ctx, w.parent, node)
+	}
+	root, err := w.d.verdictRoot(ctx, w.parent, node, outcome.StepApproved)
+	if err != nil {
+		return err
+	}
+	if err := w.d.checkStepBinding(ctx, w.parent, node); err != nil {
+		return err
+	}
+	w.roots[i] = root
+	return nil
+}
+
+// denied holds a denied or timed-out step to the verdict the chain records for it. A dispatcher
+// that keeps no chain records no verdict for any step, so its deny path runs on the row's word, as
+// it always did.
+func (w *dagWalk) denied(ctx context.Context, i int, node *run.Run) error {
+	if w.d.audits == nil {
+		return nil
+	}
+	root, err := w.d.verdictRoot(ctx, w.parent, node, outcome.StepRejected, outcome.StepTimedOut)
+	if err != nil {
+		return err
+	}
+	if w.d.binder != nil {
+		w.roots[i] = root
+	}
+	return nil
+}
+
+// verdictRoot reads the chain entry an approval step's decision names and returns the root naming
+// it. The entry must be a DECISION on this step of this workflow carrying one of verdicts. A step
+// that names no decision, or whose entry is gone or records something else, is refused with
+// binding.ErrDrift. A read that keeps failing is binding.ErrUnverified, which says nothing about
+// the step either way. The reads are not ended by the walk's cancellation, so a shutdown is never
+// recorded as a verdict that could not be read.
+func (d *Dispatcher) verdictRoot(ctx context.Context, parent, node *run.Run, verdicts ...string) (binding.Root, error) {
+	subject := fmt.Sprintf("approval step %q (run %s)", node.StepName, node.ID)
+	if node.DecisionID == "" {
+		return binding.Root{}, fmt.Errorf("%w: %s: it reads as %s and names no decision on the chain",
+			binding.ErrDrift, subject, node.Status)
+	}
+	read := context.WithoutCancel(ctx)
+	var e *audit.Entry
+	err := withRetries(func() error {
+		var rerr error
+		e, rerr = d.chainEntry(read, node.DecisionID)
+		return rerr
+	})
+	switch {
+	case err != nil:
+		return binding.Root{}, fmt.Errorf("%w: %s: read chain entry %s: %w", binding.ErrUnverified,
+			subject, node.DecisionID, err)
+	case e == nil:
+		return binding.Root{}, fmt.Errorf("%w: %s: chain entry %s it names is not on the chain",
+			binding.ErrDrift, subject, node.DecisionID)
+	}
+	for _, verdict := range verdicts {
+		if e.Method == audit.MethodDecision &&
+			e.Path == outcome.StepDecisionPath(parent.ID, node.ID, verdict) {
+			return binding.RootOf(e), nil
+		}
+	}
+	return binding.Root{}, fmt.Errorf("%w: %s: chain entry %s does not record a verdict of %s on it",
+		binding.ErrDrift, subject, node.DecisionID, strings.Join(verdicts, " or "))
 }
 
 // settle records a step's terminal status and folds it into how the walk ends.
@@ -294,8 +401,25 @@ func (w *dagWalk) depDenied(j int) bool {
 	return w.results[j] == run.StatusRejected || w.results[j] == run.StatusFailed
 }
 
+// behindRefusal reports whether a step the step at i waits behind, directly or through other steps,
+// was refused. A live walk never reaches a step behind a refusal, since nothing waiting on a refused
+// step is let through and what waits on that is skipped in turn. A restored walk can hold a refused
+// step whose dependent had already settled, such as an approval step decided before the refused
+// step's record was rewritten, and nothing behind that dependent may run either.
+func (w *dagWalk) behindRefusal(i int) bool {
+	for j, in := range w.closures[i] {
+		if in && w.refused[j] {
+			return true
+		}
+	}
+	return false
+}
+
 // readiness reports whether the waiting step at i can start, and whether it never can.
 func (w *dagWalk) readiness(i int) (ready, blocked bool) {
+	if w.behindRefusal(i) {
+		return false, true
+	}
 	ready = true
 	for _, dep := range w.steps[i].DependsOn {
 		j := w.byName[dep]
@@ -356,21 +480,76 @@ func (w *dagWalk) advance(ctx context.Context, dry bool) bool {
 	return false
 }
 
-// launch starts a step that runs a tool.
+// launch starts a step that runs a tool. The entries that released it are gathered here, on the
+// walk's goroutine, and handed to the launch by value. A step whose release cannot be named is
+// refused without starting.
 func (w *dagWalk) launch(ctx context.Context, i int) {
+	roots, err := w.releaseRoots(ctx, i)
+	if err != nil {
+		w.d.log.Error("dispatch: "+err.Error(), zap.String("run_id", w.parent.ID),
+			zap.String("step", w.steps[i].Name))
+		w.refuse(i, RefusalText(err))
+		return
+	}
 	w.states[i] = stepRunning
 	w.running++
 	idx := i
 	step := w.steps[i]
 	vars := w.inputsFor(i)
 	go func() {
-		status, published := w.d.runStepAttempts(ctx, w.parent, step, idx, vars)
-		w.done <- stepResult{idx: idx, status: status, outputs: published}
+		status, published, reason := w.d.runStepAttempts(ctx, w.parent, step, idx, vars, roots)
+		w.done <- stepResult{idx: idx, status: status, outputs: published, reason: reason}
 	}()
 }
 
+// releaseRoots returns the chain entries the step at i derives from, in the order its seal and its
+// release name them: the decision that won the workflow, when one did, then the decision on each
+// approval step it waits behind, directly or through other steps, in declaration order. This is the
+// order outcome.ReleaseRoots reads them back from the stored rows. A dispatcher with no binding key
+// names none.
+func (w *dagWalk) releaseRoots(ctx context.Context, i int) ([]binding.Root, error) {
+	if w.d.binder == nil {
+		return nil, nil
+	}
+	if !w.workflowRead {
+		roots, err := w.d.workflowRoots(ctx, w.parent)
+		if err != nil {
+			return nil, err
+		}
+		w.workflowRoots, w.workflowRead = roots, true
+	}
+	roots := slices.Clone(w.workflowRoots)
+	for j := range w.steps {
+		if w.closures[i][j] && w.steps[j].IsApproval() && w.roots[j].EntryID != "" {
+			roots = append(roots, w.roots[j])
+		}
+	}
+	return roots, nil
+}
+
+// refuse settles the step at i failed for reason, so nothing waiting on it runs over either kind of
+// edge whatever the step allows on failure, and fails the workflow with the reason.
+func (w *dagWalk) refuse(i int, reason string) {
+	w.refused[i] = true
+	w.res.reason = reason
+	w.settle(i, run.StatusFailed, nil)
+}
+
+// finish settles a launched step from its result. A step refused, before anything of it was stored
+// or once it finished, is settled the way refuse settles one.
+func (w *dagWalk) finish(r stepResult) {
+	if r.reason != "" {
+		w.refuse(r.idx, r.reason)
+		return
+	}
+	w.settle(r.idx, r.status, r.outputs)
+}
+
 // open asks for an approval step's decision. A request that cannot be recorded is not a request
-// anybody can answer, so the step fails and takes its deny path rather than waiting forever.
+// anybody can answer, so the step fails rather than waiting forever. On a dispatcher that keeps a
+// chain the step is also refused: nobody denied it, so its deny path does not run either, and the
+// workflow fails with the reason. A dispatcher that keeps no chain records no verdict for any step,
+// and its failed step takes the deny path as it always did.
 func (w *dagWalk) open(ctx context.Context, i int) {
 	node, err := w.d.openApprovalStep(ctx, w.parent, w.steps[i], i)
 	if err != nil {
@@ -378,6 +557,11 @@ func (w *dagWalk) open(ctx context.Context, i int) {
 			zap.String("step", w.steps[i].Name))
 		if node != nil {
 			w.nodes[i] = node.ID
+		}
+		if w.d.audits != nil {
+			w.refused[i] = true
+			w.res.reason = fmt.Sprintf("approval step %q could not record its request, so nobody "+
+				"could be asked and neither of its paths runs", w.steps[i].Name)
 		}
 		w.settle(i, run.StatusFailed, nil)
 		return
@@ -459,13 +643,13 @@ func (w *dagWalk) run(ctx context.Context) stepsResult {
 		if w.awaiting == 0 {
 			r := <-w.done
 			w.running--
-			w.settle(r.idx, r.status, r.outputs)
+			w.finish(r)
 			continue
 		}
 		select {
 		case r := <-w.done:
 			w.running--
-			w.settle(r.idx, r.status, r.outputs)
+			w.finish(r)
 		case <-time.After(approvalPollInterval):
 			w.poll(ctx)
 		case <-ctx.Done():

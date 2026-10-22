@@ -1,6 +1,7 @@
 package run
 
 import (
+	"cmp"
 	"context"
 	"maps"
 	"slices"
@@ -111,7 +112,8 @@ func (m *memStore) Save(_ context.Context, r *Run) error {
 		cl.CancelRequested = true
 	}
 	// The decision that claimed or won a run is written only by ClaimDecision and SettleDecision,
-	// the rule both database stores apply, so a whole-row save from a copy taken before the claim
+	// and its claim also by SealAdopted, which seals a claim left in flight across an upgrade. That
+	// is the rule both database stores apply, so a whole-row save from a copy taken before the claim
 	// can neither erase the claim nor credit a different decision.
 	cl.DecisionID, cl.DecisionClaim = "", ""
 	if prev, ok := m.runs[r.ID]; ok {
@@ -145,6 +147,11 @@ func (m *memStore) Save(_ context.Context, r *Run) error {
 		}
 		// A request's ask for approval is set when the run is created and never cleared.
 		cl.ApprovalRequested = cl.ApprovalRequested || prev.ApprovalRequested
+		// An empty seal keeps the stored one and a non-empty one replaces it, the rule both
+		// database stores apply, so a whole-row save from a copy that never carried a seal cannot
+		// unseal a row.
+		cl.SpecSeal = cmp.Or(cl.SpecSeal, prev.SpecSeal)
+		cl.ResultSeal = cmp.Or(cl.ResultSeal, prev.ResultSeal)
 	}
 	m.outcomes.noteSave(m.runs[r.ID], cl)
 	if prev, ok := m.runs[r.ID]; ok {
@@ -791,8 +798,9 @@ func (m *memStore) QueuedTimes(_ context.Context) (map[string]time.Time, error) 
 	return out, nil
 }
 
-// StampApprovedSpec records the spec digest an approver decided on, touching nothing else.
-func (m *memStore) StampApprovedSpec(_ context.Context, id, digest, binding string) error {
+// StampApprovedSpec records the spec digest an approver decided on and the seal over it, touching
+// nothing else.
+func (m *memStore) StampApprovedSpec(_ context.Context, id, digest, binding, seal string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.runs[id]
@@ -801,7 +809,36 @@ func (m *memStore) StampApprovedSpec(_ context.Context, id, digest, binding stri
 	}
 	r.ApprovedSpecDigest = digest
 	r.ApprovedSpecBinding = binding
+	r.SpecSeal = seal
 	return nil
+}
+
+// SealAdopted writes an adoption's seals and claim to the row id, in one locked write, only when
+// every column the adoption names still holds what adoption read.
+func (m *memStore) SealAdopted(_ context.Context, id string, a Adoption) (bool, error) {
+	if err := a.Check(); err != nil {
+		return false, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.runs[id]
+	if !ok {
+		return false, ErrNotFound
+	}
+	if (a.SpecSeal != "" && r.SpecSeal != "") || (a.ResultSeal != "" && r.ResultSeal != "") ||
+		(a.Claim != "" && r.DecisionClaim != a.PrevClaim) {
+		return false, nil
+	}
+	if a.SpecSeal != "" {
+		r.SpecSeal = a.SpecSeal
+	}
+	if a.ResultSeal != "" {
+		r.ResultSeal = a.ResultSeal
+	}
+	if a.Claim != "" {
+		r.DecisionClaim = a.Claim
+	}
+	return true, nil
 }
 
 // WipeSealed removes the run's sealed inventory snapshot and sealed plan file, keeping the digests
@@ -903,6 +940,7 @@ func (m *memStore) SettleHeld(_ context.Context, id string, fin Finalization) (b
 	ended := fin.EndedAt
 	r.Status = fin.Status
 	r.Error = fin.Error
+	r.ResultSeal = fin.ResultSeal
 	r.EndedAt = &ended
 	r.InventorySealed = ""
 	r.PlanSealed = ""
@@ -989,6 +1027,7 @@ func (m *memStore) FinalizeRunning(_ context.Context, id string, fin Finalizatio
 	r.Warning = fin.Warning
 	r.ImageDigest = fin.ImageDigest
 	r.ResolvedHosts = slices.Clone(fin.ResolvedHosts)
+	r.ResultSeal = fin.ResultSeal
 	r.EndedAt = &ended
 	// The run's sealed material is wiped by the write that ends it.
 	r.InventorySealed = ""

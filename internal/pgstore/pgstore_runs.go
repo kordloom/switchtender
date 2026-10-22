@@ -26,7 +26,7 @@ const runColumns = `id, playbook, inventory, status, exit_code, error, created_a
 	template_id, inventory_resolution, sealed_vars, use_fact_cache, fact_cache_timeout, git_ref,
 	dry_run_scans, hold_note, sealed_digests, policy_notes, inventory_check, initiator,
 	require_reason, inventory_snapshot, inventory_sealed, resolved_hosts, plan_sha256, plan_sealed,
-	image_digest, decision_id, decision_claim, approval_requested, account`
+	image_digest, decision_id, decision_claim, approval_requested, account, spec_seal, result_seal`
 
 // Save inserts or replaces the run identified by r.ID. The cancel flag merges with GREATEST so a
 // replace from a stale snapshot cannot erase a cancel another process just requested.
@@ -47,12 +47,12 @@ INSERT INTO runs
 	 template_id, inventory_resolution, sealed_vars, use_fact_cache, fact_cache_timeout, git_ref,
 	 dry_run_scans, hold_note, sealed_digests, policy_notes, inventory_check, initiator,
 	 require_reason, inventory_snapshot, inventory_sealed, resolved_hosts, plan_sha256, plan_sealed,
-	 image_digest, approval_requested, account)
+	 image_digest, approval_requested, account, spec_seal, result_seal)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
 	$21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38,
 	$39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57,
 	$58, $59, $60, $61, $62, $63, $64, $65, $66, $67, $68, $69, $70, $71, $72, $73, $74, $75,
-	$76, $77, $78, $79, $80, $81, $82, $83)
+	$76, $77, $78, $79, $80, $81, $82, $83, $84, $85)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory,
 	status=CASE WHEN runs.status IN ('parked', 'deciding') AND excluded.status='pending_approval'
@@ -97,7 +97,9 @@ ON CONFLICT(id) DO UPDATE SET
 	plan_sha256=CASE WHEN runs.plan_sha256 = '' THEN excluded.plan_sha256 ELSE runs.plan_sha256 END,
 	plan_sealed=runs.plan_sealed, image_digest=excluded.image_digest,
 	approval_requested=GREATEST(runs.approval_requested, excluded.approval_requested),
-	account=excluded.account`
+	account=excluded.account,
+	spec_seal=COALESCE(NULLIF(excluded.spec_seal, ''), runs.spec_seal),
+	result_seal=COALESCE(NULLIF(excluded.result_seal, ''), runs.result_seal)`
 	// The sealed answers are written once, by the insert that created the run, and kept by every
 	// later save. A run decoded from JSON, which is how a relay worker and every API reader holds
 	// one, does not carry them, so a whole-row save from such a copy would otherwise erase the
@@ -107,6 +109,9 @@ ON CONFLICT(id) DO UPDATE SET
 	// The sealed inventory snapshot and the sealed plan file go further: only the insert writes
 	// them, so a whole-row save can neither erase one nor bring one back after the run's end wiped
 	// it. The records binding them are written once, as the answer digests are.
+	//
+	// An empty spec or result seal keeps the stored one and a non-empty one replaces it, so a
+	// whole-row save from a copy decoded from JSON, which never carries a seal, cannot unseal a row.
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), sqlutil.NullInt(r.ExitCode), r.Error,
 		sqlutil.FormatTime(r.CreatedAt), sqlutil.NullTime(r.StartedAt), sqlutil.NullTime(r.EndedAt),
@@ -128,7 +133,7 @@ ON CONFLICT(id) DO UPDATE SET
 		run.InitiatorColumn(r.Initiator), r.RequireReason,
 		run.SnapshotColumn(r.InventorySnapshot), r.InventorySealed,
 		sqlutil.JSONStrings(r.ResolvedHosts), r.PlanSHA256, r.PlanSealed, r.ImageDigest,
-		sqlutil.BoolToInt(r.ApprovalRequested), r.Account,
+		sqlutil.BoolToInt(r.ApprovalRequested), r.Account, r.SpecSeal, r.ResultSeal,
 	)
 	if err != nil {
 		if isCallbackConflict(err) {
@@ -506,7 +511,7 @@ func scanRun(s scanner) (*run.Run, error) {
 		&scans, &r.HoldNote, &sealedDigests, &policyNotes, &inventoryCheck, &initiator,
 		&r.RequireReason, &snapshot, &r.InventorySealed, &resolvedHosts, &r.PlanSHA256,
 		&r.PlanSealed, &r.ImageDigest, &r.DecisionID, &r.DecisionClaim,
-		&approvalRequested, &r.Account); err != nil {
+		&approvalRequested, &r.Account, &r.SpecSeal, &r.ResultSeal); err != nil {
 		return nil, err
 	}
 	r.ApprovalRequested = approvalRequested != 0
@@ -1099,12 +1104,12 @@ WHERE id=$2 AND status=$3`, string(to), id, string(from), to == run.StatusPendin
 	return n > 0, nil
 }
 
-// StampApprovedSpec records the spec digest an approver decided on, in a narrow write that cannot
-// clobber a concurrent claim or cancel.
-func (s *store) StampApprovedSpec(ctx context.Context, id, digest, binding string) error {
+// StampApprovedSpec records the spec digest an approver decided on and the seal over it, in a
+// narrow write that cannot clobber a concurrent claim or cancel.
+func (s *store) StampApprovedSpec(ctx context.Context, id, digest, binding, seal string) error {
 	res, err := s.db.ExecContext(ctx,
-		"UPDATE runs SET approved_spec_digest=$1, approved_spec_binding=$2 WHERE id=$3",
-		digest, binding, id)
+		"UPDATE runs SET approved_spec_digest=$1, approved_spec_binding=$2, spec_seal=$3 WHERE id=$4",
+		digest, binding, seal, id)
 	if err != nil {
 		return fmt.Errorf("stamp approved spec: %w", err)
 	}
@@ -1116,6 +1121,52 @@ func (s *store) StampApprovedSpec(ctx context.Context, id, digest, binding strin
 		return run.ErrNotFound
 	}
 	return nil
+}
+
+// SealAdopted writes an adoption's seals and claim to the row id in one conditional update whose
+// fence is every column the adoption names, and reads whether the row exists only when nothing
+// changed, to tell a missing row from one that moved.
+func (s *store) SealAdopted(ctx context.Context, id string, a run.Adoption) (bool, error) {
+	if err := a.Check(); err != nil {
+		return false, err
+	}
+	args := []any{id}
+	arg := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	var set, fence []string
+	if a.SpecSeal != "" {
+		set, fence = append(set, "spec_seal="+arg(a.SpecSeal)), append(fence, "spec_seal=''")
+	}
+	if a.ResultSeal != "" {
+		set, fence = append(set, "result_seal="+arg(a.ResultSeal)), append(fence, "result_seal=''")
+	}
+	if a.Claim != "" {
+		set = append(set, "decision_claim="+arg(a.Claim))
+		fence = append(fence, "decision_claim="+arg(a.PrevClaim))
+	}
+	res, err := s.db.ExecContext(ctx, "UPDATE runs SET "+strings.Join(set, ", ")+
+		" WHERE id=$1 AND "+strings.Join(fence, " AND "), args...)
+	if err != nil {
+		return false, fmt.Errorf("seal adopted run: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("seal adopted run: %w", err)
+	}
+	if n > 0 {
+		return true, nil
+	}
+	var one int
+	err = s.db.QueryRowContext(ctx, "SELECT 1 FROM runs WHERE id=$1", id).Scan(&one)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return false, run.ErrNotFound
+	case err != nil:
+		return false, fmt.Errorf("seal adopted run: %w", err)
+	}
+	return false, nil
 }
 
 // ParkForApproval moves a running parent this owner holds to pending_approval and clears its lease
@@ -1145,10 +1196,11 @@ func (s *store) SettleHeld(ctx context.Context, id string, fin run.Finalization)
 	}
 	fin.SanitizeText()
 	res, err := s.db.ExecContext(ctx, `
-UPDATE runs SET status=$1, error=$2, ended_at=$3, inventory_sealed='', plan_sealed=''
+UPDATE runs SET status=$1, error=$2, ended_at=$3, result_seal=$6, inventory_sealed='',
+	plan_sealed=''
 WHERE id=$4 AND status=$5 AND claimed_by=''`,
 		string(fin.Status), fin.Error, sqlutil.FormatTime(fin.EndedAt), id,
-		string(run.StatusPendingApproval))
+		string(run.StatusPendingApproval), fin.ResultSeal)
 	if err != nil {
 		return false, fmt.Errorf("settle held run: %w", err)
 	}
@@ -1238,12 +1290,13 @@ func (s *store) FinalizeRunning(ctx context.Context, id string, fin run.Finaliza
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE runs SET status=$1, exit_code=$2, error=$3, image=$4, commit_sha=$5,
 pull_credential_id=$6, outputs=$7, warning=$8, ended_at=$9, claim_secret='', inventory_check=$13,
-image_digest=$14, resolved_hosts=$15, inventory_sealed='', plan_sealed=''
+image_digest=$14, resolved_hosts=$15, result_seal=$16, inventory_sealed='', plan_sealed=''
 WHERE id=$10 AND status=$11 AND ($12='' OR claimed_by=$12)`,
 		string(fin.Status), sqlutil.NullInt(fin.ExitCode), fin.Error, fin.Image,
 		fin.CommitSHA, fin.PullCredentialID, sqlutil.JSONMap(fin.Outputs), fin.Warning,
 		sqlutil.FormatTime(fin.EndedAt), id, string(run.StatusRunning), fin.Owner,
-		run.CheckColumn(fin.InventoryCheck), fin.ImageDigest, sqlutil.JSONStrings(fin.ResolvedHosts))
+		run.CheckColumn(fin.InventoryCheck), fin.ImageDigest, sqlutil.JSONStrings(fin.ResolvedHosts),
+		fin.ResultSeal)
 	if err != nil {
 		return false, fmt.Errorf("finalize running run: %w", err)
 	}

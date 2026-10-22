@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/kordloom/switchtender/internal/event"
@@ -97,6 +98,33 @@ func (r *Run) InFlight() bool {
 	return r.DecisionClaim != "" && r.Status == StatusPendingApproval
 }
 
+// Adoption is what adopting a row as it was read writes to it. Each seal is written only where the
+// row carries none, and the claim only where the stored claim is byte for byte PrevClaim, so a row
+// another process sealed, decided, or settled meanwhile is left as that process left it.
+type Adoption struct {
+	// SpecSeal is the spec seal to write, empty to leave the column alone.
+	SpecSeal string
+	// ResultSeal is the result seal to write, empty to leave the column alone.
+	ResultSeal string
+	// Claim is the decision claim to store, empty to leave the column alone.
+	Claim string
+	// PrevClaim is the claim the row carried when it was read, required with Claim.
+	PrevClaim string
+}
+
+// Check refuses an adoption no row can take: one that names nothing to write, and one that names
+// a claim without the claim it replaces, or the other way around. Both are a caller's mistake.
+func (a Adoption) Check() error {
+	switch {
+	case (a.Claim == "") != (a.PrevClaim == ""):
+		return fmt.Errorf("%w: an adopted claim is stored only over the claim it was read as",
+			ErrNoDecision)
+	case a.SpecSeal == "" && a.ResultSeal == "" && a.Claim == "":
+		return fmt.Errorf("%w: an adoption names nothing to write", ErrNoDecision)
+	}
+	return nil
+}
+
 // Finalization holds the facts that explain how a run ended.
 type Finalization struct {
 	// Status is the terminal status the run reached.
@@ -149,6 +177,10 @@ type Finalization struct {
 	// ResolvedHosts are the hosts a dynamic inventory source resolved to while the run executed. The
 	// outcome commits to them, so they land with the terminal status or not at all.
 	ResolvedHosts []string
+	// ResultSeal is the process's keyed seal over how the run ended, written with the terminal
+	// status so a finished row never carries a status its seal does not cover. Empty when the
+	// process holds no key.
+	ResultSeal string
 	// EndedAt is when the run reached its terminal state.
 	EndedAt time.Time
 }
@@ -280,10 +312,18 @@ type Store interface {
 	// whether it changed a row. It changes nothing and returns false when the run is missing or is
 	// not in the from status, so two callers racing to approve or reject the same run cannot both win.
 	TransitionStatus(ctx context.Context, id string, from, to Status) (bool, error)
-	// StampApprovedSpec records the spec digest an approver decided on, in a narrow write that
-	// touches nothing else, so it cannot clobber a concurrent claim or cancel the way a full Save
-	// from a stale snapshot would.
-	StampApprovedSpec(ctx context.Context, id, digest, binding string) error
+	// StampApprovedSpec records the spec digest an approver decided on, the unredacted binding the
+	// executor holds the run to, and the seal over that decision, in a narrow write that touches
+	// nothing else, so it cannot clobber a concurrent claim or cancel the way a full Save from a
+	// stale snapshot would.
+	StampApprovedSpec(ctx context.Context, id, digest, binding, seal string) error
+	// SealAdopted applies a in one fenced write and reports whether it changed the row. The fence is
+	// every column a names: a spec or result seal lands only on an empty column, and the claim only
+	// over PrevClaim. A row that fails any part of the fence is left whole and false is reported, and
+	// a missing row is ErrNotFound. An adoption that fails Check is refused before anything is
+	// written. It never writes the approved digest or binding, so an approval stamped beside it is
+	// kept whole.
+	SealAdopted(ctx context.Context, id string, a Adoption) (bool, error)
 	// WipeSealed removes the sealed inventory snapshot and the sealed plan file a run carries, leaving
 	// the digests that bound them. A run's sealed material is needed only while it waits and executes,
 	// so it is wiped when the run ends rather than kept at rest for the life of the record.
