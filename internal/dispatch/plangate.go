@@ -210,13 +210,13 @@ func (d *Dispatcher) proposeApply(
 // than letting a worker submit a run: the apply's command, target, credentials, image, and commit come
 // from the stored plan rather than from the worker's request.
 //
-// One apply per plan, always the same one. A worker whose 201 never arrived retries, which is
-// legitimate, so the second call has to return the proposal the first one made rather than mint a
-// second real apply. The key is derived from the plan and carries the server's reserved prefix, which
-// no caller may supply, so the store's unique index settles it whichever process asks.
+// One apply per plan, always the same one. A second call for the same plan returns the proposal the
+// first one made rather than minting a second real apply. The key is derived from the plan and
+// carries the server's reserved prefix, which no caller may supply, so the store's unique index
+// settles it whichever process asks.
 //
-// created reports whether this call stored the proposal, false when a retry found the one an
-// earlier call made, so a caller announcing the proposal announces it once.
+// created reports whether this call stored the proposal, false when an earlier call had already
+// made it, so a caller announcing the proposal announces it once.
 //
 // key is the control node's binding key, nil when it holds none. The proposal is sealed under it as
 // a submission is, after the rules have set its approval fields, so the executor that later claims

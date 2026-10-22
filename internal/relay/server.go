@@ -101,6 +101,10 @@ type relayServer struct {
 	// it, and its key seals what a worker reports and the applies this node proposes, nil when the
 	// control node holds no binding key.
 	binder *binding.Verifier
+	// admit refuses a proposed apply the control node has no room to record, nil when nothing is
+	// checked. It is the dispatcher's own free space floor, so a worker's proposal faces the same
+	// floor as a submission.
+	admit func() error
 }
 
 // Announcer tells the notification channels about a run: that it finished, or that it is held for a
@@ -139,6 +143,13 @@ func WithAnnouncer(a Announcer) HandlerOption {
 // checks a row the same way its dispatcher does. Nil checks and seals nothing.
 func WithBinder(v *binding.Verifier) HandlerOption {
 	return func(s *relayServer) { s.binder = v }
+}
+
+// WithAdmission checks admit before storing the apply a worker's plan proposes, and refuses the
+// proposal when it returns an error. A dispatcher's Admit is the intended value, so the proposal
+// faces the free space floor every submission faces.
+func WithAdmission(admit func() error) HandlerOption {
+	return func(s *relayServer) { s.admit = admit }
 }
 
 // NewHandler returns an http.Handler that serves the Transport methods over the run store, guarded
@@ -1514,6 +1525,19 @@ func (s *relayServer) proposeApply(w http.ResponseWriter, r *http.Request) {
 			"apply cannot complete on a relay worker")
 		return
 	}
+	// The apply is a new run the control node records, so it faces the floor a submission faces.
+	// Refused, nothing is sealed, stored, or recorded, and the worker fails its plan with the reason.
+	if s.admit != nil {
+		switch err := s.admit(); {
+		case errors.Is(err, dispatch.ErrLowSpace):
+			s.log.Warn("relay: propose apply: " + err.Error())
+			writeErr(w, http.StatusServiceUnavailable, err.Error())
+			return
+		case err != nil:
+			s.internal(w, "admit apply", err)
+			return
+		}
+	}
 	sealed, err := s.planSealer.SealPlanFile(body.PlanFile)
 	if err != nil {
 		s.internal(w, "seal plan file", err)
@@ -1533,8 +1557,8 @@ func (s *relayServer) proposeApply(w http.ResponseWriter, r *http.Request) {
 	}
 	s.record(r.Context(), poolFrom(r.Context()), plan.ClaimedBy,
 		"/relay/proposed/"+plan.ID+"/"+proposal.ID)
-	// A held apply waits for a person, so the person is told, once: a worker retrying a report whose
-	// answer it never received gets the same proposal back, and hears nothing announced again.
+	// A held apply waits for a person, so the person is told, once: a second report for the same plan
+	// gets the same proposal back, and nothing is announced again.
 	if created && proposal.Status == run.StatusPendingApproval {
 		s.announce(proposal)
 	}

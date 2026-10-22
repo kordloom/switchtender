@@ -60,6 +60,13 @@ func (d *Dispatcher) admit() error {
 	return nil
 }
 
+// Admit refuses a new run with ErrLowSpace while a watched path is under the floor, the check every
+// submit path here makes. It is exported for a caller that stores a run without this dispatcher,
+// such as the relay proposing a worker's apply, so that run faces the same floor.
+func (d *Dispatcher) Admit() error {
+	return d.admit()
+}
+
 // mib renders a byte count in whole mebibytes, rounded down.
 func mib(n uint64) string {
 	return fmt.Sprintf("%d MiB", n>>20)

@@ -1997,6 +1997,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		// A worker's plan hands its saved plan file to the control node, which seals it onto the
 		// apply it proposes, so the apply carries out exactly that plan.
 		server.WithPlanSealer(disp),
+		// That apply is a new run on the control node, so it faces the dispatcher's free space floor.
+		server.WithRelayAdmission(disp.Admit),
 		server.WithBinder(bindingKey),
 		server.WithSchedules(schedules), server.WithTokens(bundle.Tokens()),
 		server.WithCredentials(bundle.Credentials(), sealer),
