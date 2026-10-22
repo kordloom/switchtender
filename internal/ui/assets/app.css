@@ -1342,7 +1342,8 @@ table.runs td:has(> .origin-chip) { white-space: nowrap; }
 /* A hairline of colored light along the top edge of a metric that carries state. */
 .stat-card:has(.stat-value.failed)::before,
 .stat-card:has(.stat-value.ok)::before,
-.stat-card:has(.stat-value.running)::before {
+.stat-card:has(.stat-value.running)::before,
+.stat-card:has(.stat-value.changed)::before {
 	content: "";
 	position: absolute;
 	inset: 0 0 auto 0;
@@ -1351,6 +1352,7 @@ table.runs td:has(> .origin-chip) { white-space: nowrap; }
 .stat-card:has(.stat-value.failed)::before { background: linear-gradient(90deg, transparent, var(--failed), transparent); }
 .stat-card:has(.stat-value.ok)::before { background: linear-gradient(90deg, transparent, var(--ok), transparent); }
 .stat-card:has(.stat-value.running)::before { background: linear-gradient(90deg, transparent, var(--running), transparent); }
+.stat-card:has(.stat-value.changed)::before { background: linear-gradient(90deg, transparent, var(--changed), transparent); }
 
 /* Panels and the summary strip rise into place, staggered, so a loaded page
    assembles itself instead of appearing all at once. */

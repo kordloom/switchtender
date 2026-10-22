@@ -600,10 +600,21 @@ function renderSummary(summary) {
 	// number, so the counts are now over what they can see and the card has to say so rather than
 	// calling a subset a total.
 	const scoped = summary.scope === "visible";
-	el.appendChild(statCard(summary.total || 0, scoped ? "Runs you can see" : "Total runs", ""));
-	el.appendChild(statCard(summary.succeeded || 0, "Succeeded", "ok"));
-	el.appendChild(statCard(summary.failed || 0, "Failed", "failed"));
-	el.appendChild(statCard(summary.active || 0, "Active", "running"));
+	const total = summary.total || 0;
+	const succeeded = summary.succeeded || 0;
+	const failed = summary.failed || 0;
+	const pending = summary.awaiting_approval || 0;
+	const active = summary.active || 0;
+	// The cards beneath the total have to add up to it. Runs held for a decision had no card, so a
+	// page with four of them read 38 total over 30, 4, and 0. Canceled, interrupted, and rejected
+	// runs are what remains, and their card appears only when there are any.
+	const stopped = Math.max(0, total - succeeded - failed - pending - active);
+	el.appendChild(statCard(total, scoped ? "Runs you can see" : "Total runs", ""));
+	el.appendChild(statCard(succeeded, "Succeeded", "ok"));
+	el.appendChild(statCard(failed, "Failed", "failed"));
+	el.appendChild(statCard(pending, "Pending approval", "changed"));
+	el.appendChild(statCard(active, "Active", "running"));
+	if (stopped) el.appendChild(statCard(stopped, "Canceled or rejected", ""));
 	el.hidden = false;
 }
 
