@@ -62,24 +62,29 @@ func TestThePolicyAPIEnforcesTheLadder(t *testing.T) {
 		License: pro(24 * time.Hour), Method: http.MethodPost,
 		Body:     `{"name":"two people","require_distinct_approver":true}`,
 		WantCode: http.StatusForbidden,
-		WantText: "requires a Team license; this install's Pro license does not include it",
+		WantText: "A Team license is required for the full policy engine; this install's Pro " +
+			"license does not include it",
 	}, { // Test 6: Scoping to agents, edited in on Pro, names Team.
 		License: pro(24 * time.Hour), Method: http.MethodPut,
 		Body:     `{"name":"hold prod","actor_kind":"agent"}`,
 		WantCode: http.StatusForbidden,
-		WantText: "requires a Team license; this install's Pro license does not include it",
+		WantText: "A Team license is required for the full policy engine; this install's Pro " +
+			"license does not include it",
 	}, { // Test 7: A risk floor on Community names Pro.
 		Method: http.MethodPost, Body: `{"name":"hold risky","min_risk":"high"}`,
 		WantCode: http.StatusForbidden,
-		WantText: "requires a Pro license; this install runs Community",
+		WantText: "A Pro license is required for deny rules and risk and reversibility floors; " +
+			"this install runs Community",
 	}, { // Test 8: A reversibility floor on Community names Pro.
 		Method: http.MethodPost, Body: `{"name":"hold forever","reversibility":"irreversible"}`,
 		WantCode: http.StatusForbidden,
-		WantText: "requires a Pro license; this install runs Community",
+		WantText: "A Pro license is required for deny rules and risk and reversibility floors; " +
+			"this install runs Community",
 	}, { // Test 9: A plain rule edited into a deny rule on Community names Pro.
 		Method: http.MethodPut, Body: `{"name":"hold prod","effect":"deny"}`,
 		WantCode: http.StatusForbidden,
-		WantText: "requires a Pro license; this install runs Community",
+		WantText: "A Pro license is required for deny rules and risk and reversibility floors; " +
+			"this install runs Community",
 	}, { // Test 10: An exemption naming an account on Community.
 		Method: http.MethodPost, Body: `{"name":"ci","effect":"exempt","account":"team-a"}`,
 		WantCode: http.StatusCreated,

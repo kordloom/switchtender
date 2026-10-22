@@ -57,7 +57,7 @@
    "name": "Do I need Kubernetes?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "No. SwitchTender is one binary that is the API, the executor, the scheduler, and the UI. State is one database: a SQLite file to start, or PostgreSQL when you want more than one instance. No Redis, no operator, no separate task engine. One caveat on the second half of that sentence. SQLite is free forever, but creating a new PostgreSQL database is a Team feature: a Community or Pro install pointed at an empty PostgreSQL refuses to start and says Initializing a new PostgreSQL database requires a Team license. Opening a PostgreSQL database that already holds the schema is never gated, in any license state, so a lapsed license never locks a server out of its own data."
+    "text": "No. SwitchTender is one binary that is the API, the executor, the scheduler, and the UI. State is one database: a SQLite file to start, or PostgreSQL when you want more than one instance. No Redis, no operator, no separate task engine. One caveat on the second half of that sentence. SQLite is free forever, but creating a new PostgreSQL database is a Team feature: a Community or Pro install pointed at an empty PostgreSQL refuses to start and says A Team license is required for initializing a new PostgreSQL database. Opening a PostgreSQL database that already holds the schema is never gated, in any license state, so a lapsed license never locks a server out of its own data."
    }
   },
   {
@@ -255,9 +255,9 @@ database: a SQLite file to start, or PostgreSQL when you want more than one inst
 operator, no separate task engine.</p>
 <p>One caveat on the second half of that sentence. SQLite is free forever, but creating a new
 PostgreSQL database is a Team feature: a Community or Pro install pointed at an empty PostgreSQL
-refuses to start and says <code>Initializing a new PostgreSQL database requires a Team license</code>. Opening
-a PostgreSQL database that already holds the schema is never gated, in any license state, so a
-lapsed license never locks a server out of its own data.</p>
+refuses to start and says <code>A Team license is required for initializing a new PostgreSQL database</code>.
+Opening a PostgreSQL database that already holds the schema is never gated, in any license state,
+so a lapsed license never locks a server out of its own data.</p>
 <h2 id="what-is-a-dry-run">What is a dry run?</h2>
 <p>A run in the tool's no-change mode. Ansible runs in check mode, and Terraform and OpenTofu run plan
 instead of apply. Those are the only dry runs that preview a change. A Bash, Python, or PowerShell

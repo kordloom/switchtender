@@ -251,7 +251,7 @@ func TestServeRefusesSingleSignOnWithoutALicense(t *testing.T) {
 				t.Fatalf("%s: runServe() = nil error with single sign-on configured and no license",
 					test.Name)
 			}
-			if !strings.Contains(err.Error(), "Directory sign-in") {
+			if !strings.Contains(err.Error(), "required for directory sign-in") {
 				t.Errorf("%s: runServe() error = %v, want the sign-on gate rather than some later "+
 					"failure", test.Name, err)
 			}
@@ -279,7 +279,7 @@ func TestWorkerRefusesWithoutATeamLicense(t *testing.T) {
 		t.Fatal("runWorker() = nil error on Community; distributed workers are gated and the gate " +
 			"opened")
 	}
-	if !strings.Contains(err.Error(), "Running distributed workers requires a Team license") {
+	if !strings.Contains(err.Error(), "A Team license is required for running distributed workers") {
 		t.Errorf("runWorker() error = %v, want the workers gate", err)
 	}
 }
