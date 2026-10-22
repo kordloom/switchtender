@@ -221,6 +221,9 @@ func Build(ctx context.Context, runs run.Store, audits audit.Store, id audit.Ide
 		res.Anchors = doc.AttachAnchors(recorded)
 		res.UnanchoredSparse = opts.Sparse && res.Anchors == 0
 	}
+	if _, err := doc.AttachStoredAttestations(ctx, audits); err != nil {
+		return nil, err
+	}
 
 	signed, err := audit.SignBundleDoc(doc, id.Private())
 	if err != nil {

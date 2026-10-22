@@ -451,6 +451,9 @@ type Server struct {
 	producer *audit.Identity
 	// producerProblem is why producer is nil, empty when there is nothing to explain.
 	producerProblem string
+	// witness reports the standing of the push witness the install is enrolled with, nil when it
+	// is not enrolled.
+	witness WitnessStatuser
 	// runFiles is where this server stages run files, for the doctor, nil when it was not told.
 	runFiles *runFilesState
 	// productVersion stamps the trust document.
@@ -715,6 +718,7 @@ func (s *Server) Handler() http.Handler {
 		s.producerProblem, s.productVersion, s.log)))
 	mux.Handle("GET /v1/audit/register",
 		walks.hold(auditRegisterHandler(s.store, s.audits, producer, s.log)))
+	mux.Handle("GET /v1/audit/witness", witnessHandler(s.witness, s.log))
 	// Served unauthenticated: the beat feed exists so an outside watcher can see the chain is
 	// alive and whole, and that watcher has no account here.
 	mux.Handle("GET "+beatfeed.APIPath, auditBeatsHandler(s.audits, s.log))

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -32,7 +34,7 @@ type fakeFeed struct {
 func newFakeFeed(t *testing.T, beats []Beat) *fakeFeed {
 	t.Helper()
 	f := &fakeFeed{beats: beats}
-	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	f.srv = newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		if f.status != 0 {
@@ -152,7 +154,7 @@ func TestServiceWitnessesRecordsAndAttests(t *testing.T) {
 	s, key := startedService(t, feed, dir, id)
 	s.CheckAll(context.Background())
 
-	api := httptest.NewServer(s.Handler())
+	api := newTestServer(s.Handler())
 	defer api.Close()
 
 	// The server list names the witness key and the watched server's state.
@@ -336,14 +338,61 @@ func TestStateFileNamesNeverCollide(t *testing.T) {
 	}
 }
 
+// newTestServer starts a test server whose connections close with a reset rather than a FIN, so a
+// closed connection leaves no TIME_WAIT on either side: the server sends no FIN for its own closes,
+// and it answers a client's FIN with a reset, which ends the client's side without one too. Every
+// TIME_WAIT holds an ephemeral port for thirty seconds, test servers listen on ephemeral ports as
+// well, and this suite opens a few hundred connections per run, so at -race -count=300 the closed
+// connections alone filled the port range and connect failed with "can't assign requested address".
+func newTestServer(h http.Handler) *httptest.Server {
+	srv := httptest.NewUnstartedServer(h)
+	srv.Config.ConnState = func(c net.Conn, state http.ConnState) {
+		if tcp, ok := c.(*net.TCPConn); ok && state == http.StateNew {
+			_ = tcp.SetLinger(0)
+		}
+	}
+	srv.Start()
+	return srv
+}
+
+// testTransport carries the tests' own requests to their test servers. It keeps connections alive
+// and holds enough of them idle per server that a burst of parallel requests reuses a few
+// connections rather than opening one per request, and it is shared by no code but the tests, so
+// another test server shutting down never closes its idle connections. Every connection is then
+// closed by the test server when it shuts down, which leaves the TIME_WAIT on the server's port.
+// The default client opened and closed one connection per request and closed each from the client
+// side, as Go does on a body not read to the end and as every test server's shutdown does to the
+// default transport's idle connections, so each request held a client ephemeral port for the length
+// of a TIME_WAIT, and at -race -count=300 the suite ran out of them: connect failed with "can't
+// assign requested address".
+var testTransport = &http.Transport{MaxIdleConnsPerHost: 64}
+
+// testClient returns the client the tests make their own requests with, over testTransport.
+// Redirects are not followed, so a route answered only after a redirect shows as one.
+func testClient() *http.Client {
+	return &http.Client{
+		Transport: testTransport,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+// drain reads what is left of an answer and closes it, so its connection goes back to testTransport
+// to be used again rather than being closed from the client side.
+func drain(res *http.Response) {
+	_, _ = io.Copy(io.Discard, res.Body)
+	_ = res.Body.Close()
+}
+
 // getJSON fetches url and decodes it into v.
 func getJSON(t *testing.T, url string, v any) {
 	t.Helper()
-	res, err := http.Get(url)
+	res, err := testClient().Get(url)
 	if err != nil {
 		t.Fatalf("GET %s error = %v", url, err)
 	}
-	defer func() { _ = res.Body.Close() }()
+	defer drain(res)
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("GET %s = %d, want 200", url, res.StatusCode)
 	}
@@ -509,7 +558,7 @@ func TestWatcherRefusesAFeedThatFightsBack(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			body := test.Body()
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			srv := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = w.Write(body)
 			}))
 			defer srv.Close()
@@ -603,14 +652,14 @@ func TestAttestationRouteLeaksNothingToAnonymousCallers(t *testing.T) {
 	dir := t.TempDir()
 	id := testIdentity(t)
 	s, _ := startedService(t, feed, dir, id)
-	api := httptest.NewServer(s.Handler())
+	api := newTestServer(s.Handler())
 	defer api.Close()
 
-	res, err := http.Get(api.URL + "/witness/servers/no-such-key/attestation")
+	res, err := testClient().Get(api.URL + "/witness/servers/no-such-key/attestation")
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
-	defer func() { _ = res.Body.Close() }()
+	defer drain(res)
 	if res.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404 for an unknown server", res.StatusCode)
 	}
@@ -646,7 +695,7 @@ func TestReadTokenGatesEveryWitnessRoute(t *testing.T) {
 	t.Cleanup(s.Close)
 	s.CheckAll(context.Background())
 
-	api := httptest.NewServer(s.Handler())
+	api := newTestServer(s.Handler())
 	defer api.Close()
 
 	// Every /witness route is closed without a token and closed with the wrong one.
@@ -657,11 +706,11 @@ func TestReadTokenGatesEveryWitnessRoute(t *testing.T) {
 			if h != "" {
 				req.Header.Set("Authorization", h)
 			}
-			res, err := http.DefaultClient.Do(req)
+			res, err := testClient().Do(req)
 			if err != nil {
 				t.Fatalf("GET %s error = %v", path, err)
 			}
-			_ = res.Body.Close()
+			drain(res)
 			if res.StatusCode != http.StatusUnauthorized {
 				t.Errorf("GET %s auth=%q = %d, want 401", path, h, res.StatusCode)
 			}
@@ -675,22 +724,22 @@ func TestReadTokenGatesEveryWitnessRoute(t *testing.T) {
 	for _, path := range guarded {
 		req, _ := http.NewRequest(http.MethodGet, api.URL+path, nil)
 		req.Header.Set("Authorization", "Bearer "+token)
-		res, err := http.DefaultClient.Do(req)
+		res, err := testClient().Do(req)
 		if err != nil {
 			t.Fatalf("GET %s error = %v", path, err)
 		}
-		_ = res.Body.Close()
+		drain(res)
 		if res.StatusCode != http.StatusOK {
 			t.Errorf("GET %s with token = %d, want 200", path, res.StatusCode)
 		}
 	}
 
 	// A liveness probe never carries the token, so /healthz stays open.
-	res, err := http.Get(api.URL + "/healthz")
+	res, err := testClient().Get(api.URL + "/healthz")
 	if err != nil {
 		t.Fatalf("GET /healthz error = %v", err)
 	}
-	_ = res.Body.Close()
+	drain(res)
 	if res.StatusCode != http.StatusOK {
 		t.Errorf("GET /healthz = %d, want 200 without a token", res.StatusCode)
 	}

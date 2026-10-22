@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/witness"
 )
 
 // TestEveryBundleShapeAgreesWithTheReferenceVerifier runs every bundle this product emits through
@@ -28,10 +29,19 @@ func TestEveryBundleShapeAgreesWithTheReferenceVerifier(t *testing.T) {
 	id := treeIdentity(t)
 	chain := treeChain(t, 6)
 	at := time.Date(2026, 8, 11, 16, 0, 0, 0, time.UTC)
+	w := testWitnessIdentity(t)
+	all := map[int64]bool{1: true, 2: true, 3: true, 4: true, 5: true, 6: true}
 
 	shapes := []struct {
-		Name  string
+		// Name says which shape the row emits.
+		Name string
+		// Build emits the shape, signed.
 		Build func(t *testing.T) []byte
+		// WantAttestors is how many witness counter-signatures on claims the reference reports.
+		WantAttestors int
+		// WantHeadAttestors is how many witness counter-signatures at the head the reference
+		// reports.
+		WantHeadAttestors int
 	}{
 		{
 			Name: "the whole linear audit chain",
@@ -79,26 +89,187 @@ func TestEveryBundleShapeAgreesWithTheReferenceVerifier(t *testing.T) {
 				return signBundle(t, doc, id)
 			},
 		},
+		{
+			Name: "the whole linear chain with witness attestations on two claims",
+			Build: func(t *testing.T) []byte {
+				t.Helper()
+				doc, err := audit.BuildBundle(chain, id, "1.34.1", at)
+				if err != nil {
+					t.Fatalf("BuildBundle() error = %v", err)
+				}
+				if n := doc.AttachAttestations([]*audit.WitnessAttestation{
+					testClaimAttestation(t, w, 2, chain[1].Hash),
+					testClaimAttestation(t, w, 6, chain[5].Hash),
+				}); n != 2 {
+					t.Fatalf("AttachAttestations() = %d, want 2", n)
+				}
+				return signBundle(t, doc, id)
+			},
+			WantAttestors: 2,
+		},
+		{
+			Name: "a tree bundle complete through a witnessed head",
+			Build: func(t *testing.T) []byte {
+				t.Helper()
+				doc, err := audit.BuildTreeBundle(chain, all, id, "1.34.1",
+					audit.BundleSubject{Type: "fleet", ID: id.InstallID}, at)
+				if err != nil {
+					t.Fatalf("BuildTreeBundle(all) error = %v", err)
+				}
+				if n := doc.AttachAttestations([]*audit.WitnessAttestation{
+					testHeadAttestation(t, w, 6, testTreeRoot(t, chain, id)),
+				}); n != 1 {
+					t.Fatalf("AttachAttestations() = %d, want 1", n)
+				}
+				return signBundle(t, doc, id)
+			},
+			WantHeadAttestors: 1,
+		},
 	}
 	for _, shape := range shapes {
 		t.Run(shape.Name, func(t *testing.T) {
 			signed := shape.Build(t)
 
-			theirs := verifyWithLoomSeal(t, signed)
+			theirs := verifyAttestedWithLoomSeal(t, signed)
 			ours, err := audit.VerifyBundle(signed, id.KeyID())
 
 			if !theirs.OK {
 				t.Fatalf("the reference verifier refused a bundle this product emits: %v",
 					theirs.Problems)
 			}
-			if err != nil {
+			requireWitnessAttestors(t, "claim", theirs.Attestors, shape.WantAttestors, w.KeyID())
+			requireWitnessAttestors(t, "head", theirs.HeadAttestors, shape.WantHeadAttestors,
+				w.KeyID())
+			// A surface this product's verifier does not check may be refused, by name only, and
+			// the producer signature must still agree, since attestations sit outside what it
+			// covers on both sides.
+			attested := shape.WantAttestors+shape.WantHeadAttestors > 0
+			named := err != nil && strings.Contains(err.Error(), "this product does not verify")
+			if err != nil && !(attested && named) {
 				t.Fatalf("our verifier refused a bundle the reference verifier accepts: %v", err)
 			}
-			if !ours.SignatureOK || !ours.ChainOK {
-				t.Errorf("our verifier reports signature=%v chain=%v on a bundle the reference "+
-					"verifier accepts", ours.SignatureOK, ours.ChainOK)
+			if ours == nil || !ours.SignatureOK {
+				t.Fatalf("our verifier failed the signature on a bundle the reference verifier "+
+					"accepts (err=%v)", err)
+			}
+			if err == nil && !ours.ChainOK {
+				t.Errorf("our verifier reports a broken chain on a bundle the reference verifier " +
+					"accepts")
 			}
 		})
+	}
+}
+
+// TestTheReferenceVerifierRefusesAMisplacedWitnessAttestation is what makes the agreement above
+// mean something: an attestation the reference verifier accepted would prove nothing if it accepted
+// one anywhere. Each row puts a genuine witness signature where AttachAttestations never would, and
+// the reference refuses it, which is the reason each of its rules exists.
+func TestTheReferenceVerifierRefusesAMisplacedWitnessAttestation(t *testing.T) {
+	id := treeIdentity(t)
+	chain := treeChain(t, 6)
+	at := time.Date(2026, 8, 11, 16, 0, 0, 0, time.UTC)
+	w := testWitnessIdentity(t)
+	member := func(t *testing.T, cs witness.Countersignature, err error) json.RawMessage {
+		t.Helper()
+		if err != nil {
+			t.Fatalf("mint attestation: %v", err)
+		}
+		raw, err := json.Marshal(cs)
+		if err != nil {
+			t.Fatalf("encode attestation: %v", err)
+		}
+		return raw
+	}
+
+	misplaced := []struct {
+		// Name says where the attestation was put.
+		Name string
+		// Do puts it there.
+		Do func(t *testing.T, b *audit.Bundle)
+		// WantProblem is a fragment of the problem the reference names.
+		WantProblem string
+	}{
+		{
+			Name: "a claim attestation moved to the claim after the one it signs",
+			Do: func(t *testing.T, b *audit.Bundle) {
+				cs, err := witness.ClaimAttestation(chain[1].Hash, testAttestAt, w)
+				b.Claims[2].Attestations = []json.RawMessage{member(t, cs, err)}
+			},
+			WantProblem: "does not verify over the claim link",
+		},
+		{
+			Name: "a head attestation over the root put on a linear head",
+			Do: func(t *testing.T, b *audit.Bundle) {
+				cs, err := witness.HeadAttestation(testTreeRoot(t, chain, id), 6, testAttestAt, w)
+				b.Attestations = []json.RawMessage{member(t, cs, err)}
+			},
+			WantProblem: "does not verify over the chain head",
+		},
+	}
+	for _, tc := range misplaced {
+		t.Run(tc.Name, func(t *testing.T) {
+			doc, err := audit.BuildBundle(chain, id, "1.34.1", at)
+			if err != nil {
+				t.Fatalf("BuildBundle() error = %v", err)
+			}
+			tc.Do(t, doc)
+			signed := signBundle(t, doc, id)
+
+			theirs := verifyAttestedWithLoomSeal(t, signed)
+			if theirs.OK {
+				t.Fatalf("the reference verifier accepted a misplaced witness attestation: %s",
+					tc.Name)
+			}
+			if !strings.Contains(strings.Join(theirs.Problems, "; "), tc.WantProblem) {
+				t.Errorf("the reference refused for %v, want a problem naming %q", theirs.Problems,
+					tc.WantProblem)
+			}
+			if rep, err := audit.VerifyBundle(signed, ""); err == nil && rep.OK() {
+				t.Errorf("our verifier accepted what the reference verifier refused: %v",
+					theirs.Problems)
+			}
+		})
+	}
+}
+
+// attestedReport is the part of the format verifier's report that names the counter-signers it
+// checked.
+type attestedReport struct {
+	// OK reports whether every check passed.
+	OK bool `json:"ok"`
+	// Problems lists why it did not.
+	Problems []string `json:"problems"`
+	// Attestors lists each verified claim attestation as its role, key, and signing time.
+	Attestors []string `json:"attestors"`
+	// HeadAttestors lists each verified head attestation the same way.
+	HeadAttestors []string `json:"head_attestors"`
+}
+
+// verifyAttestedWithLoomSeal runs the format's own verifier over a bundle and returns its verdict
+// with the counter-signers it verified.
+func verifyAttestedWithLoomSeal(t *testing.T, signed []byte) attestedReport {
+	t.Helper()
+	out := runLoomSealVerify(t, signed)
+	var rep attestedReport
+	if err := json.Unmarshal(out, &rep); err != nil {
+		t.Fatalf("loomseal report is not JSON: %v\n%s", err, out)
+	}
+	return rep
+}
+
+// requireWitnessAttestors fails t unless the reference reported exactly want counter-signers of the
+// named kind, each under role witness and the witness key keyID.
+func requireWitnessAttestors(t *testing.T, kind string, got []string, want int, keyID string) {
+	t.Helper()
+	if len(got) != want {
+		t.Fatalf("the reference verified %d %s attestations, want %d: %v", len(got), kind, want,
+			got)
+	}
+	for _, entry := range got {
+		if !strings.HasPrefix(entry, "witness "+keyID) {
+			t.Errorf("the reference reports %s attestation %q, want role witness by %s", kind,
+				entry, keyID)
+		}
 	}
 }
 

@@ -605,6 +605,12 @@ func auditBundleHandler(store audit.Store, producer *audit.Identity, problem, ve
 			return
 		}
 		doc.AttachAnchors(recorded)
+		if _, err := doc.AttachStoredAttestations(r.Context(), store); err != nil {
+			log.Error("server: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError,
+				"could not read the witness attestations")
+			return
+		}
 		signed, err := audit.SignBundleDoc(doc, producer.Private())
 		if err != nil {
 			log.Error("server: sign bundle: " + err.Error())

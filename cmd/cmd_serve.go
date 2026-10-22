@@ -797,6 +797,8 @@ func init() {
 	serveCmd.Flags().StringVar(&serveAnchorTSAURL, "anchor-tsa-url", "",
 		"RFC 3161 timestamp authority that anchors each span beat, for example "+defaultTSA+". "+
 			"Empty emits beats without anchors.")
+	serveCmd.Flags().StringVar(&serveWitnessEnrollment, "witness-enrollment", "",
+		serveWitnessEnrollmentUsage)
 	serveCmd.Flags().StringVar(&retainRuns, "retain-runs", "",
 		"Delete terminal runs older than this, for example 90d. Empty keeps them forever.")
 	serveCmd.Flags().StringVar(&retainEvents, "retain-events", "",
@@ -1732,16 +1734,24 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("--span-cadence must be a whole number of seconds, at least 1s, got %s",
 			spanCadence)
 	}
+	witnessClient, err := serveWitnessClient(serveWitnessEnrollment, license.PathFor(serveDB),
+		spanCadence, producer, bundle.Audits(), log)
+	if err != nil {
+		return err
+	}
 	if spanCadence > 0 {
 		var beatOpts []spanbeat.Option
+		var tsa spanbeat.AnchorFunc
 		if serveAnchorTSAURL != "" {
 			anchors, ok := bundle.Audits().(audit.AnchorStore)
 			if !ok {
 				return fmt.Errorf("--anchor-tsa-url is set but this store keeps no anchors")
 			}
-			beatOpts = append(beatOpts, spanbeat.WithAnchorFunc(
-				beatAnchorFunc(serveAnchorTSAURL, producerInstallID(producer), anchors)))
+			tsa = beatAnchorFunc(serveAnchorTSAURL, producerInstallID(producer), anchors)
 			log.Info("span beats will be anchored", zap.String("tsa", serveAnchorTSAURL))
+		}
+		if hook := beatHooks(tsa, witnessClient); hook != nil {
+			beatOpts = append(beatOpts, spanbeat.WithAnchorFunc(hook))
 		}
 		beats := spanbeat.NewEmitter(auditBeatStore{store: bundle.Audits()}, spanCadence, log, beatOpts...)
 		beats.Start()
@@ -1982,6 +1992,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		server.WithAudit(bundle.Audits()),
 		server.WithProducerIdentity(producer, resolveVersion()),
 		server.WithProducerUnavailable(producerProblem),
+		witnessOption(witnessClient),
 		server.WithInventorySources(bundle.InventorySources(), disp),
 		server.WithInventoryPreviewer(disp),
 		server.WithTriggers(bundle.Triggers(), sealer),

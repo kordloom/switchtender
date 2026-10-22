@@ -61,6 +61,7 @@ believes it has a control it does not have.
 | `SWITCHTENDER_NOTIFY_GRAFANA_TOKEN` | serve | Bearer token for the Grafana annotations API, read when `--notify-grafana-token` is unset. |
 | `SWITCHTENDER_NOTIFY_TWILIO_TOKEN` | serve | Twilio Auth Token, read when `--notify-twilio-token` is unset. |
 | `SWITCHTENDER_WITNESS_TOKEN` | witness serve | Bearer token the witness API requires, read when `--api-token` is unset. |
+| `SWITCHTENDER_WITNESS_NOTIFY_SLACK` | witness serve | Slack incoming webhook URL that receives every finding as a message, read when `--notify-slack` is not given. The URL is its own credential, and a flag shows in the process list. |
 | `SWITCHTENDER_MCP_TOKEN` | mcp | API token the agent presents, read when `--token` is unset. |
 | `SWITCHTENDER_TOKEN` | mcp | Fallback for `SWITCHTENDER_MCP_TOKEN`. |
 | `SWITCHTENDER_LICENSE` | serve, worker, license, audit | Path to the license file, overriding `switchtender-license.json` beside the database. |
@@ -207,6 +208,7 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--fact-cache-admin-only` | `false` | Restrict reading cached facts to admins. By default an operator with read on the inventory and on the run that gathered the facts may read them, with secret-looking values masked. |
 | `--span-cadence` | `0` | Append a span beat to the audit chain this often, for example `60s`. Whole seconds only. Zero appends none. |
 | `--anchor-tsa-url` | none | RFC 3161 timestamp authority the chain anchors against. Empty anchors nothing. |
+| `--witness-enrollment` | none | Enrollment file to push each span beat to its witness under. Empty reads `witness-enrollment.json` beside the license file, and an install with neither pushes nothing. An enrolled install refuses to start without `--span-cadence` or without a producer identity, since it would run unwitnessed while its enrollment says otherwise. A witness outage never blocks the timestamp anchor, and the reverse. |
 
 Retention windows accept a whole number of days with a `d` suffix, such as `30d`, or Go duration
 syntax such as `720h`.
@@ -525,6 +527,8 @@ beats off, the witness reports `empty_feed`, and a `--once` run exits nonzero.
 - `witness serve` watches many servers from one process and answers auditors with countersigned
   attestations.
 - `witness verify-attestation` verifies an attestation offline against a pinned witness key.
+- `witness rotate-key` retires the witness signing key and makes a new one current.
+- `witness enroll` enrolls this install with a push witness that countersigns its chain.
 
 ## witness serve
 
@@ -539,6 +543,68 @@ Runs the witness. Its flags are checked against that subcommand rather than `wit
 | `--interval` | `1m0s` | How often every watched server is checked. At least 10s. |
 | `--key-dir` | the state directory | Directory holding the witness signing key. |
 | `--webhook` | none | URL that receives every finding as a JSON POST. |
+| `--accept-enrollments` | off | Accept enrollments from installs that push their own chain heads. `--watch` is then optional. |
+| `--enrollment-policy` | `licensed` | Who may enroll: `licensed` (a license that includes the hosted witness) or `open` (any signed enrollment). |
+| `--max-installs-per-license` | `10` | How many installs one license may enroll. |
+
+`--notify-slack` takes a Slack incoming webhook URL, is repeatable, and is unset by default. The
+witness posts every finding there as a message that names its kind, its class (refusal or note), the
+producer key id of the install it is about or the watched server, and its detail. When the flag is
+not given, the URL in `SWITCHTENDER_WITNESS_NOTIFY_SLACK` is used, which keeps the URL out of the
+process list. Messages are sent in order from a queue of their own, so an install's push is never
+answered late because Slack is slow. A post that fails is tried once more after two seconds, and a
+second failure is logged with the URL masked. The findings record stays the durable copy either way.
+
+## witness rotate-key
+
+Retires the witness signing key and makes a new one current. Stop the witness first and start it
+again after, since a running witness keeps signing with the key it loaded.
+
+    switchtender witness rotate-key --key-dir /var/lib/switchtender-witness-key \
+      --state-dir /var/lib/switchtender-witness
+
+The witness publishes every key it has signed with at `/.well-known/loomseal.json` and in every
+enrollment answer, each with its `valid_from` and, once retired, its `retired` time. After a rotation
+the list is signed by the new key and endorsed by every retired key the key directory still holds,
+so an enrolled install that holds an earlier key accepts the new list on that key's word. An
+attestation a key made before it retired verifies against the list for as long as anyone keeps it.
+The witness keeps reading its own memory signed by a retired key, for memory written before that key
+retired, and signs it with the new key at the next push it adopts. A retried push gets the bytes it
+was first answered with while the witness still holds the key that answered it.
+
+`--key-dir` is required and names the directory holding the key, the same one `witness serve` runs
+with. `--state-dir` names the witness state directory and defaults to `switchtender-witness`. The
+key directory must not be the state directory, lie inside it, or hold it, because the state
+directory is copied off the host. The retired key stays in the key directory, readable only by the
+account that runs the witness. Back up the whole key directory after a rotation, since its key
+history is part of what the witness publishes. Deleting a retired key's file stops that key
+endorsing anything again, which is the step after a compromise, and an install that held only that
+key then pins the new key by hand. The command prints the retired key and the new current key as
+JSON.
+
+## witness enroll
+
+Enrolls this install with a push witness. The server then sends every span beat to the witness with
+the tree root at that beat and a consistency proof from the root the witness last signed, and stores
+the countersignatures the witness answers with. It needs a license that includes the hosted witness:
+Enterprise, or Team with the add-on. Without one the command refuses and sends nothing.
+
+    switchtender witness enroll --db /var/lib/switchtender/switchtender.db \
+      --witness https://witness.switchtender.com
+
+The command prints the witness key id. Compare it with the id the witness publishes at
+`/.well-known/loomseal.json` before trusting what it countersigns, or pass `--witness-key` to refuse
+any other. The enrollment is written to `witness-enrollment.json` beside the license file, so a
+backup and a restore carry both or neither. It holds no secret. An install whose key was changed
+under its install id through `SWITCHTENDER_AUDIT_KEY` is refused, since the witness binds an install
+id to the key it was born to.
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--db` | `switchtender.db` | Database of the install to enroll. The license, key, and enrollment are found from it. |
+| `--witness` | none | Base URL of the witness. Required unless `--refresh-keys` is given. |
+| `--witness-key` | none | Witness key id, `sha256:...`, the witness must sign with. Anything else writes nothing. |
+| `--refresh-keys` | off | Fetch the enrolled witness's key list after it rotates, kept only when a held key signed it. |
 
 ## witness verify-attestation
 
@@ -659,6 +725,7 @@ before this release's `serve` first starts. [Upgrading](upgrading.md) gives the 
 | `--dry-run` | `false` | Print the rows adoption would seal and write nothing. |
 | `--yes` | `false` | Seal without asking, for a script. The rows are still printed. |
 | `--fail-unsealed` | `false` | Record the adoption trusting no row, and fail every unfinished run that carries no seal. |
+| `--witness-enrollment` | none | Enrollment file of the witness whose countersigned head the audit chain is held to. Empty reads `witness-enrollment.json` beside the license file, and an install with neither is held to no witness. A named file that is missing or out of form is an error, as for `serve`. |
 
 Adoption reads every run that has not finished, the finished steps a waiting workflow reads forward,
 and the decisions left in flight, and gives each the seal its kind is held to, from the row as it

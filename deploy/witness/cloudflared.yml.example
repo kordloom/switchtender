@@ -1,0 +1,26 @@
+# cloudflared configuration for the hosted witness: /etc/cloudflared/config.yml on the droplet.
+#
+# The tunnel is locally managed: this file holds the routing, and a credentials file beside it lets
+# cloudflared run the tunnel. TUNNEL_ID stands for the real tunnel id, which is not published. It is
+# on the tunnel: line of the config.yml already on the droplet, it names the credentials file in
+# /etc/cloudflared/ on the droplet and in ~/.cloudflared/ on the owner's Mac, and the Mac prints it
+# with: cloudflared tunnel list
+#
+# Only the push witness's public routes reach the service. The cross-server /witness routes, which
+# list every watched server and every finding, answer 404 at the edge and never reach the droplet,
+# on top of the read token the service requires for them.
+#
+# Check a change on the droplet before restarting cloudflared:
+#
+#   cloudflared tunnel --config /etc/cloudflared/config.yml ingress validate
+#   cloudflared tunnel --config /etc/cloudflared/config.yml ingress rule \
+#     https://witness.switchtender.com/witness/servers
+
+tunnel: TUNNEL_ID
+credentials-file: /etc/cloudflared/TUNNEL_ID.json
+
+ingress:
+  - hostname: witness.switchtender.com
+    path: '^/(v1/.*|\.well-known/loomseal\.json|healthz)$'
+    service: http://127.0.0.1:9440
+  - service: http_status:404

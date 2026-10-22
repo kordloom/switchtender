@@ -13,6 +13,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/idgen"
 )
 
 // Contract runs the audit.Store contract against a fresh store from newStore.
@@ -36,6 +37,18 @@ func Contract(t *testing.T, rawStore func() audit.Store) {
 	t.Run("anchors round trip and scope", func(t *testing.T) { testAnchors(t, newStore()) })
 	t.Run("anchor delete removes exactly the named anchor", func(t *testing.T) {
 		testAnchorDelete(t, newStore())
+	})
+	t.Run("witness attestations round trip and scope", func(t *testing.T) {
+		testAttestations(t, newStore())
+	})
+	t.Run("witness attestation delete removes exactly the named one", func(t *testing.T) {
+		testAttestationDelete(t, newStore())
+	})
+	t.Run("a held witness attestation is never overwritten", func(t *testing.T) {
+		testAttestationHeld(t, newStore())
+	})
+	t.Run("concurrent saves of one witness coordinate keep one record", func(t *testing.T) {
+		testAttestationConcurrent(t, newStore())
 	})
 	t.Run("concurrent appends do not fork", func(t *testing.T) { testConcurrentAppend(t, newStore()) })
 	t.Run("the chain says which install it belongs to", func(t *testing.T) {
@@ -860,6 +873,350 @@ func testAnchorDelete(t *testing.T, store audit.Store) {
 
 	if err := anchors.DeleteAnchor(ctx, doomed.ID); !errors.Is(err, audit.ErrAnchorNotFound) {
 		t.Errorf("DeleteAnchor() of a missing id error = %v, want audit.ErrAnchorNotFound", err)
+	}
+}
+
+// attestationStore returns the witness attestation half of store, failing the test when it has
+// none.
+func attestationStore(t *testing.T, store audit.Store) audit.AttestationStore {
+	t.Helper()
+	atts, ok := store.(audit.AttestationStore)
+	if !ok {
+		t.Fatalf("%T does not persist witness attestations, so a countersigned beat leaves no "+
+			"record a bundle can carry", store)
+	}
+	return atts
+}
+
+// witnessKeyID returns a fresh witness key id. Each case signs under a key of its own because a
+// contract store may be shared across cases and runs, and the store holds one record per seq, kind,
+// and key, so a fixed key would collide with what an earlier case left behind.
+func witnessKeyID() string { return idgen.New("sha256:", 32) }
+
+// newWitnessAttestation returns an attestation of kind at seq by the witness key keyID with every
+// member filled, so a store that drops or rewrites any one of them fails the round trip. The time
+// carries nanoseconds because the signature covers the exact string, so a store that parsed and
+// reformatted it would break every signature whose time it shortened.
+func newWitnessAttestation(kind string, seq int64, keyID string) *audit.WitnessAttestation {
+	a := &audit.WitnessAttestation{
+		ID: audit.NewAttestationID(), Seq: seq, Kind: kind, KeyID: keyID,
+		PublicKey: "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=", Role: "witness",
+		At: "2026-10-21T12:00:00.123456789Z", Sig: "c2lnbmVkIGJ5IHRoZSB3aXRuZXNz" + keyID[7:15],
+		Witness: keyID,
+	}
+	if kind == audit.AttestationHead {
+		a.Size, a.Root = seq, fmt.Sprintf("%064x", seq)
+	} else {
+		a.Link = fmt.Sprintf("%064x", seq+1)
+	}
+	return a
+}
+
+// ownAttestations lists every attestation at or below seq and keeps those signed by keyID, the
+// records this case saved, in the order the store returned them. It fails the test when the full
+// listing is not oldest first with ties broken on id.
+func ownAttestations(t *testing.T, atts audit.AttestationStore, seq int64, keyID string) []*audit.WitnessAttestation {
+	t.Helper()
+	all, err := atts.Attestations(context.Background(), seq)
+	if err != nil {
+		t.Fatalf("Attestations(%d) error = %v", seq, err)
+	}
+	if all == nil {
+		t.Errorf("Attestations(%d) = nil, want a non-nil slice", seq)
+	}
+	out := []*audit.WitnessAttestation{}
+	for i, a := range all {
+		if seq > 0 && a.Seq > seq {
+			t.Errorf("Attestations(%d) returned one at seq %d, which names a coordinate a bundle "+
+				"ending at %d does not hold", seq, a.Seq, seq)
+		}
+		if i > 0 {
+			prev := all[i-1]
+			if prev.Seq > a.Seq || (prev.Seq == a.Seq && prev.ID > a.ID) {
+				t.Errorf("Attestations(%d) out of order at index %d: %d %s after %d %s, want oldest "+
+					"first with ties on id", seq, i, a.Seq, a.ID, prev.Seq, prev.ID)
+			}
+		}
+		if a.KeyID == keyID {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// testAttestations verifies witness attestations persist every member verbatim, come back oldest
+// first, and scope to a sequence the way anchors do.
+//
+// A witness attestation is the outside party's signature over a link or a tree head, and it is only
+// worth keeping if a bundle can later carry it and a verifier can check it. So the members the
+// signature covers must come back exactly as stored, and a bundle asks for the attestations
+// covering the range it holds rather than all of them, since one naming a coordinate past its end
+// refers to something the bundle does not carry.
+func testAttestations(t *testing.T, store audit.Store) {
+	t.Helper()
+	ctx := context.Background()
+	atts := attestationStore(t, store)
+	key := witnessKeyID()
+	claim := newWitnessAttestation(audit.AttestationClaim, 5, key)
+	// A claim and a head attestation by one key at one seq are two records.
+	headAtFive := newWitnessAttestation(audit.AttestationHead, 5, key)
+	head := newWitnessAttestation(audit.AttestationHead, 20, key)
+	// Signed by a key other than the pinned one, as a witness key rotation leaves it, so a store
+	// that conflated the two key ids would fail the round trip.
+	head.Witness = witnessKeyID()
+	for _, a := range []*audit.WitnessAttestation{head, claim, headAtFive} {
+		if err := atts.SaveAttestation(ctx, a); err != nil {
+			t.Fatalf("SaveAttestation(%s) error = %v", a.ID, err)
+		}
+	}
+	atFive := []string{claim.ID, headAtFive.ID}
+	if atFive[0] > atFive[1] {
+		atFive[0], atFive[1] = atFive[1], atFive[0]
+	}
+
+	all := ownAttestations(t, atts, 0, key)
+	byID := make(map[string]*audit.WitnessAttestation, len(all))
+	for _, a := range all {
+		byID[a.ID] = a
+	}
+	for _, want := range []*audit.WitnessAttestation{claim, headAtFive, head} {
+		if diff := cmp.Diff(want, byID[want.ID]); diff != "" {
+			t.Errorf("attestation %s %s did not round trip (-want +got):\n%s", want.Kind, want.ID,
+				diff)
+		}
+	}
+
+	tests := []struct {
+		// Seq is the sequence the listing is scoped to.
+		Seq int64
+		// WantIDs is the ids of this case's attestations the listing must return, in order.
+		WantIDs []string
+	}{{ // Test 0: Zero returns every attestation, oldest first with ties on id.
+		Seq: 0, WantIDs: []string{atFive[0], atFive[1], head.ID},
+	}, { // Test 1: A range ending at ten holds both records at five and not the head at twenty.
+		Seq: 10, WantIDs: []string{atFive[0], atFive[1]},
+	}, { // Test 2: A range ending exactly at twenty holds the head at twenty.
+		Seq: 20, WantIDs: []string{atFive[0], atFive[1], head.ID},
+	}, { // Test 3: A range ending at four holds none of them.
+		Seq: 4, WantIDs: []string{},
+	}, { // Test 4: A negative sequence returns every attestation, as zero does.
+		Seq: -1, WantIDs: []string{atFive[0], atFive[1], head.ID},
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			got := []string{}
+			for _, a := range ownAttestations(t, atts, test.Seq, key) {
+				got = append(got, a.ID)
+			}
+			if diff := cmp.Diff(test.WantIDs, got); diff != "" {
+				t.Errorf("Attestations(%d) mismatch (-want +got):\n%s", test.Seq, diff)
+			}
+		})
+	}
+}
+
+// testAttestationDelete verifies a witness attestation can be withdrawn by id: the named one is
+// gone from the listing, the others survive, its coordinate is free to record again, and deleting
+// a missing id reports audit.ErrAttestationNotFound.
+func testAttestationDelete(t *testing.T, store audit.Store) {
+	t.Helper()
+	ctx := context.Background()
+	atts := attestationStore(t, store)
+	key := witnessKeyID()
+	doomed := newWitnessAttestation(audit.AttestationClaim, 7, key)
+	kept := newWitnessAttestation(audit.AttestationClaim, 3, key)
+	for _, a := range []*audit.WitnessAttestation{doomed, kept} {
+		if err := atts.SaveAttestation(ctx, a); err != nil {
+			t.Fatalf("SaveAttestation(%s) error = %v", a.ID, err)
+		}
+	}
+
+	if err := atts.DeleteAttestation(ctx, doomed.ID); err != nil {
+		t.Fatalf("DeleteAttestation(%s) error = %v", doomed.ID, err)
+	}
+	got := []string{}
+	for _, a := range ownAttestations(t, atts, 0, key) {
+		got = append(got, a.ID)
+	}
+	if diff := cmp.Diff([]string{kept.ID}, got); diff != "" {
+		t.Errorf("after deleting %s (-want +got):\n%s", doomed.ID, diff)
+	}
+
+	if err := atts.DeleteAttestation(ctx, doomed.ID); !errors.Is(err, audit.ErrAttestationNotFound) {
+		t.Errorf("DeleteAttestation() of a missing id error = %v, want "+
+			"audit.ErrAttestationNotFound", err)
+	}
+
+	// A withdrawn record frees its coordinate, so a correct one can take its place.
+	again := newWitnessAttestation(audit.AttestationClaim, 7, key)
+	again.Sig = "cmVwbGFjZW1lbnQ="
+	if err := atts.SaveAttestation(ctx, again); err != nil {
+		t.Fatalf("SaveAttestation() into a withdrawn coordinate error = %v", err)
+	}
+	if again.ID == doomed.ID {
+		t.Error("the new record took the withdrawn record's id")
+	}
+}
+
+// testAttestationHeld verifies the first attestation written at a seq, kind, and witness key wins
+// and never changes. The same answer saved again succeeds under the held id, which is what a
+// retried push produces, and a different answer at the same coordinate is refused with
+// audit.ErrAttestationConflict, which is what a restored witness re-minting at a seq it already
+// countersigned produces. Overwriting would let the later answer silently replace the one bundles
+// may already carry.
+func testAttestationHeld(t *testing.T, store audit.Store) {
+	t.Helper()
+	ctx := context.Background()
+	atts := attestationStore(t, store)
+	key := witnessKeyID()
+	held := newWitnessAttestation(audit.AttestationClaim, 9, key)
+	if err := atts.SaveAttestation(ctx, held); err != nil {
+		t.Fatalf("SaveAttestation() error = %v", err)
+	}
+	want := *held
+
+	// variant returns a copy of the held record under a fresh id with edit applied.
+	variant := func(edit func(*audit.WitnessAttestation)) *audit.WitnessAttestation {
+		cp := want
+		cp.ID = audit.NewAttestationID()
+		edit(&cp)
+		return &cp
+	}
+	same := want
+	tests := []struct {
+		// Record is the attestation saved.
+		Record *audit.WitnessAttestation
+		// WantID is the id the saved record carries after the save.
+		WantID string
+		// Want is the error the save must return.
+		Want error
+	}{{ // Test 0: The same answer under a fresh id succeeds and takes the held id.
+		Record: variant(func(*audit.WitnessAttestation) {}), WantID: want.ID, Want: nil,
+	}, { // Test 1: The held record itself saved again succeeds unchanged.
+		Record: &same, WantID: want.ID, Want: nil,
+	}, { // Test 2: A re-mint with a new time and signature is refused.
+		Record: variant(func(a *audit.WitnessAttestation) {
+			a.At, a.Sig = "2026-10-21T13:00:00Z", "cmUtbWludGVk"
+		}),
+		Want: audit.ErrAttestationConflict,
+	}, { // Test 3: Another link at the same seq is refused.
+		Record: variant(func(a *audit.WitnessAttestation) { a.Link = fmt.Sprintf("%064x", 99) }),
+		Want:   audit.ErrAttestationConflict,
+	}, { // Test 4: The same countersignature under another pinned witness is refused.
+		Record: variant(func(a *audit.WitnessAttestation) { a.Witness = witnessKeyID() }),
+		Want:   audit.ErrAttestationConflict,
+	}, { // Test 5: Another witness key at the same seq and kind is its own record.
+		Record: variant(func(a *audit.WitnessAttestation) { a.KeyID = witnessKeyID() }),
+		Want:   nil,
+	}, { // Test 6: A head attestation at the same seq by the same key is its own record.
+		Record: variant(func(a *audit.WitnessAttestation) {
+			a.Kind, a.Link, a.Size, a.Root = audit.AttestationHead, "", a.Seq, fmt.Sprintf("%064x", 9)
+		}),
+		Want: nil,
+	}, { // Test 7: The same key and kind at the next seq is its own record.
+		Record: variant(func(a *audit.WitnessAttestation) { a.Seq++ }),
+		Want:   nil,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			wantID := test.WantID
+			if wantID == "" {
+				wantID = test.Record.ID
+			}
+			err := atts.SaveAttestation(ctx, test.Record)
+			if !errors.Is(err, test.Want) {
+				t.Fatalf("SaveAttestation() error = %v, want %v", err, test.Want)
+			}
+			if test.Record.ID != wantID {
+				t.Errorf("saved record id = %s, want %s", test.Record.ID, wantID)
+			}
+		})
+	}
+
+	got := []*audit.WitnessAttestation{}
+	for _, a := range ownAttestations(t, atts, want.Seq, key) {
+		if a.Seq == want.Seq && a.Kind == want.Kind {
+			got = append(got, a)
+		}
+	}
+	if diff := cmp.Diff([]*audit.WitnessAttestation{&want}, got); diff != "" {
+		t.Errorf("the record held at seq %d changed (-want +got):\n%s", want.Seq, diff)
+	}
+}
+
+// testAttestationConcurrent verifies the first-write rule holds under concurrent saves of one
+// coordinate. Saves of the same answer all succeed and all name the one record kept. Saves of
+// different answers leave exactly one winner, every other save refused with
+// audit.ErrAttestationConflict, and the record kept is the winner's.
+func testAttestationConcurrent(t *testing.T, store audit.Store) {
+	t.Helper()
+	ctx := context.Background()
+	atts := attestationStore(t, store)
+	const writers = 8
+
+	sameKey := witnessKeyID()
+	base := newWitnessAttestation(audit.AttestationClaim, 11, sameKey)
+	retries := make([]*audit.WitnessAttestation, writers)
+	for i := range retries {
+		cp := *base
+		cp.ID = audit.NewAttestationID()
+		retries[i] = &cp
+	}
+	errs := make([]error, writers)
+	var wg sync.WaitGroup
+	for i := range retries {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errs[i] = atts.SaveAttestation(ctx, retries[i])
+		}(i)
+	}
+	wg.Wait()
+	kept := ownAttestations(t, atts, 0, sameKey)
+	if len(kept) != 1 {
+		t.Fatalf("%d concurrent saves of one answer kept %d records, want 1", writers, len(kept))
+	}
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("save %d of the same answer error = %v, want nil", i, err)
+		}
+		if retries[i].ID != kept[0].ID {
+			t.Errorf("save %d names %s, want the kept record %s", i, retries[i].ID, kept[0].ID)
+		}
+	}
+
+	rivalKey := witnessKeyID()
+	rivals := make([]*audit.WitnessAttestation, writers)
+	for i := range rivals {
+		rivals[i] = newWitnessAttestation(audit.AttestationClaim, 11, rivalKey)
+		rivals[i].Sig = fmt.Sprintf("cml2YWwg%04d", i)
+	}
+	for i := range rivals {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errs[i] = atts.SaveAttestation(ctx, rivals[i])
+		}(i)
+	}
+	wg.Wait()
+	var winner *audit.WitnessAttestation
+	for i, err := range errs {
+		switch {
+		case err == nil && winner != nil:
+			t.Errorf("rival saves %s and %s both succeeded, want exactly one", winner.ID,
+				rivals[i].ID)
+		case err == nil:
+			winner = rivals[i]
+		case !errors.Is(err, audit.ErrAttestationConflict):
+			t.Errorf("rival save %d error = %v, want audit.ErrAttestationConflict", i, err)
+		}
+	}
+	if winner == nil {
+		t.Fatal("no rival save succeeded, want exactly one")
+	}
+	if diff := cmp.Diff([]*audit.WitnessAttestation{winner},
+		ownAttestations(t, atts, 0, rivalKey)); diff != "" {
+		t.Errorf("the kept rival is not the winner's record (-want +got):\n%s", diff)
 	}
 }
 

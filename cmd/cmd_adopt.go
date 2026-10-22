@@ -21,8 +21,11 @@ import (
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/binding"
 	"github.com/kordloom/switchtender/internal/dispatch"
+	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/witnessclient"
+	"github.com/kordloom/switchtender/witness"
 )
 
 var (
@@ -34,7 +37,15 @@ var (
 	adoptYes bool
 	// adoptFailUnsealed records adoption trusting no row and fails the unsealed rows instead.
 	adoptFailUnsealed bool
+	// adoptWitnessEnrollment is the enrollment file of the witness adopt holds the chain to. Empty
+	// reads the one beside the license file, when there is one.
+	adoptWitnessEnrollment string
 )
+
+// adoptWitnessEnrollmentUsage is the help text of adopt's --witness-enrollment flag.
+const adoptWitnessEnrollmentUsage = "Enrollment file of the witness whose countersigned head the " +
+	"audit chain is held to. Empty reads " + witnessclient.EnrollmentFile + " beside the license " +
+	"file, when there is one."
 
 // serveAdoptionActor is who the chain names for the empty adoption a keyed serve records at its
 // first start.
@@ -98,20 +109,23 @@ func init() {
 		"Seal without asking, for a script. The rows are still printed.")
 	adoptCmd.Flags().BoolVar(&adoptFailUnsealed, "fail-unsealed", false,
 		"Record the adoption trusting no row, and fail every unfinished run that carries no seal.")
+	adoptCmd.Flags().StringVar(&adoptWitnessEnrollment, "witness-enrollment", "",
+		adoptWitnessEnrollmentUsage)
 	rootCmd.AddCommand(adoptCmd)
 }
 
 // runAdopt adopts the install the flags name, asking on the terminal standard input is.
 func runAdopt(cmd *cobra.Command, _ []string) error {
 	return adopt(cmd.Context(), adoptRequest{
-		DB:           dbFromEnv(cmd, adoptDB),
-		DryRun:       adoptDryRun,
-		Yes:          adoptYes,
-		FailUnsealed: adoptFailUnsealed,
-		Terminal:     term.IsTerminal(int(os.Stdin.Fd())),
-		In:           os.Stdin,
-		Out:          os.Stdout,
-		Prompt:       os.Stderr,
+		DB:                dbFromEnv(cmd, adoptDB),
+		DryRun:            adoptDryRun,
+		Yes:               adoptYes,
+		FailUnsealed:      adoptFailUnsealed,
+		WitnessEnrollment: adoptWitnessEnrollment,
+		Terminal:          term.IsTerminal(int(os.Stdin.Fd())),
+		In:                os.Stdin,
+		Out:               os.Stdout,
+		Prompt:            os.Stderr,
 	})
 }
 
@@ -126,6 +140,9 @@ type adoptRequest struct {
 	Yes bool
 	// FailUnsealed records the adoption trusting no row and fails the unsealed rows instead.
 	FailUnsealed bool
+	// WitnessEnrollment is the enrollment file of the witness the chain is held to. Empty reads the
+	// one beside the license file of DB, when there is one.
+	WitnessEnrollment string
 	// Terminal reports whether In is a terminal a person answers on.
 	Terminal bool
 	// In is where the answer to the confirmation is read.
@@ -139,10 +156,12 @@ type adoptRequest struct {
 }
 
 // adopt checks that the install has never run keyed, shows every row adoption would seal, asks,
-// and adopts. Each refusal comes before anything is written: a chain that does not verify, a run
-// that carries a seal, and a chain entry only a keyed install writes. What it shows and what it
-// seals are one read of the install, held by an adoptSnapshot, so a row changed or created while
-// the person reads the list is never sealed as changed.
+// and adopts. Each refusal comes before anything is written: an enrollment file that does not load
+// or is not this identity's, a witness that does not answer or answers with a statement the
+// enrollment does not accept, a chain that does not verify, a chain that does not reach the head
+// the witness countersigned, a chain entry only a keyed install writes, and a run that carries a
+// seal. What it shows and what it seals are one read of the install, held by an adoptSnapshot, so
+// a row changed or created while the person reads the list is never sealed as changed.
 func adopt(ctx context.Context, req adoptRequest) error {
 	open := req.Open
 	if open == nil {
@@ -163,11 +182,20 @@ func adopt(ctx context.Context, req adoptRequest) error {
 	if binder, ok := audits.(audit.InstallBinder); ok {
 		binder.BindInstall(id.InstallID)
 	}
-	chain, err := readAdoptChain(ctx, audits, id)
+	// The witness's head is fetched before the chain is walked, since the one walk holds the chain to
+	// it.
+	head, err := adoptWitnessHead(ctx, req, audits, id)
+	if err != nil {
+		return err
+	}
+	chain, err := readAdoptChain(ctx, audits, id, head)
 	if err != nil {
 		return err
 	}
 	if err := refuseBrokenChain(chain); err != nil {
+		return err
+	}
+	if err := refuseWitnessHead(chain); err != nil {
 		return err
 	}
 	if req.FailUnsealed {
@@ -295,12 +323,153 @@ type adoptChain struct {
 	Newest *audit.Anchor
 	// Bound is the install the chain's newest entry that names one names, empty for none.
 	Bound string
+	// Witness is what the witness the install is enrolled with holds for it, and whether the chain
+	// reaches it. It is never nil once adopt has looked for an enrollment.
+	Witness *witnessHead
+}
+
+// witnessHead is what the witness an install is enrolled with countersigned for it, as adopt
+// fetched it, and what the chain walk found against it.
+type witnessHead struct {
+	// File is the enrollment file adopt read, or the one it looked for when there is none.
+	File string
+	// URL is the witness's base URL, empty when the install is not enrolled.
+	URL string
+	// KeyID is the witness key that signed the statement.
+	KeyID string
+	// Seq is the chain position of the newest beat the witness countersigned.
+	Seq int64
+	// Head is the entry hash the witness countersigned at Seq.
+	Head string
+	// Size is the size of the tree the witness holds, which every later push must extend.
+	Size int64
+	// Root is the root of that tree.
+	Root string
+	// CheckpointAt is when the witness adopted that head.
+	CheckpointAt string
+	// Nothing reports that the witness holds nothing for this install yet.
+	Nothing bool
+	// Problems says, for each coordinate of the head the chain does not reach, why.
+	Problems []string
+	// anchors are the head's two coordinates as anchors, the tree root at Size under the
+	// enrollment's install id and the link at Seq, for the chain walk to hold the chain to. They
+	// are never saved.
+	anchors []*audit.Anchor
+}
+
+// adoptEnrollment loads the enrollment of the witness adopt holds the chain of db to, as serve
+// finds it: the file flagPath names, or witness-enrollment.json beside the license file when
+// flagPath is empty. A named file that is missing or out of form is an error, a missing file beside
+// the license is an install that never enrolled, and a broken one there is an error. It returns the
+// path it read or looked for.
+func adoptEnrollment(flagPath, db string) (*witnessclient.Enrollment, string, error) {
+	if flagPath != "" {
+		enr, err := witnessclient.Load(flagPath)
+		if err != nil {
+			return nil, flagPath, fmt.Errorf("--witness-enrollment: %w. Nothing was changed", err)
+		}
+		return enr, flagPath, nil
+	}
+	path := witnessclient.PathFor(license.PathFor(db))
+	enr, err := witnessclient.LoadIfPresent(path)
+	if err != nil {
+		return nil, path, fmt.Errorf("%w. Fix it before adopting. docs/upgrading.md covers an install "+
+			"that no longer uses a witness. Nothing was changed", err)
+	}
+	return enr, path, nil
+}
+
+// adoptWitnessHead fetches the head the witness this install is enrolled with countersigned, for
+// the chain walk to hold the chain to. An install that is not enrolled is checked against no
+// witness, as serve pushes to none. An enrolled one is refused, with nothing written, when its
+// enrollment is not adopt's identity's, when the witness does not answer or holds no record under
+// the enrollment, when the statement it answers with is not one the enrollment accepts, and when
+// it holds nothing for the install while the store holds its countersignatures. There is no way
+// past a witness that does not answer: adopting through an outage is the second adoption the
+// witness exists to bound.
+func adoptWitnessHead(ctx context.Context, req adoptRequest, audits audit.Store,
+	id audit.Identity) (*witnessHead, error) {
+	enr, path, err := adoptEnrollment(req.WitnessEnrollment, req.DB)
+	if err != nil {
+		return nil, err
+	}
+	w := &witnessHead{File: path}
+	if enr == nil {
+		return w, nil
+	}
+	w.URL = enr.Witness
+	// The witness keeps its memory under the producer key, so only that key's chain can be held to it.
+	if err := enr.Bind(id); err != nil {
+		return nil, fmt.Errorf("%s: %w. Run adopt with the identity every server of this install "+
+			"uses. Nothing was changed", path, err)
+	}
+	st, err := witnessclient.FetchStatement(ctx, nil, enr)
+	switch {
+	case errors.Is(err, witnessclient.ErrNothingWitnessed):
+		w.Nothing = true
+		return w, refuseLostWitnessMemory(ctx, audits, w.URL)
+	case errors.Is(err, witness.ErrNotEnrolled):
+		return nil, fmt.Errorf("the witness at %s holds no record of this install under the "+
+			"enrollment in %s: %w. Run switchtender witness enroll again, then adopt. "+
+			"docs/upgrading.md covers an install that no longer uses a witness. Nothing was changed",
+			w.URL, path, err)
+	case errors.Is(err, witnessclient.ErrWitnessKey), errors.Is(err, witnessclient.ErrEnrollment):
+		return nil, fmt.Errorf("the witness at %s answered with a statement this install's "+
+			"enrollment does not accept: %w. If the witness rotated its key, run switchtender "+
+			"witness enroll --refresh-keys, then adopt again. Nothing was changed", w.URL, err)
+	case err != nil:
+		// Any answer but the statement or a 404 is an outage here, a refusal to answer included.
+		if !errors.Is(err, witnessclient.ErrUnreachable) {
+			err = fmt.Errorf("%w: %w", witnessclient.ErrUnreachable, err)
+		}
+		return nil, fmt.Errorf("the witness at %s did not answer: %w. This install is enrolled with "+
+			"it, and adopt holds the chain to the head it countersigned before it trusts anything. "+
+			"Run adopt again once the witness answers. Nothing was changed", w.URL, err)
+	}
+	w.KeyID, w.Seq, w.Head, w.Size, w.Root = st.WitnessKeyID, st.LastSeq, st.LastHead, st.Size, st.Root
+	w.CheckpointAt = st.CheckpointAt
+	w.anchors = []*audit.Anchor{
+		{ID: "witness_tree", Shape: audit.AnchorShapeTree, Seq: st.Size, Link: st.Root,
+			InstallID: enr.InstallID, Ref: w.URL},
+		{ID: "witness_link", Shape: audit.AnchorShapeLinear, Seq: st.LastSeq, Link: st.LastHead,
+			Ref: w.URL},
+	}
+	return w, nil
+}
+
+// refuseLostWitnessMemory refuses a witness that says it has witnessed nothing for this install
+// while the store holds countersignatures from a witness, any witness: the install pushed somewhere
+// once, so an answer of nothing is wrong. It is a tripwire, not a defense. The countersignatures
+// are held in the database, so a writer who rewrites the chain can delete them too. What it catches
+// is a witness restored from a copy taken before this install's first push.
+func refuseLostWitnessMemory(ctx context.Context, audits audit.Store, url string) error {
+	store, ok := audits.(audit.AttestationStore)
+	if !ok {
+		return nil
+	}
+	held, err := store.Attestations(ctx, 0)
+	if err != nil {
+		return fmt.Errorf("read the witness countersignatures: %w", err)
+	}
+	if len(held) == 0 {
+		return nil
+	}
+	var newest int64
+	for _, a := range held {
+		newest = max(newest, a.Seq)
+	}
+	return fmt.Errorf("%w: the witness at %s says it has witnessed nothing for this install, and "+
+		"this install's store holds %d countersignatures from a witness, the newest over entry %d. "+
+		"Either the witness lost its memory or that answer is not the witness's. Ask the witness's "+
+		"operator, and run adopt again once it answers with its memory. Nothing was changed",
+		binding.ErrDrift, url, len(held), newest)
 }
 
 // readAdoptChain walks the whole chain once, through the scanners the server's chain verification
-// uses, holding it to its links from genesis and to every anchor recorded over it, and keeps what
-// adopt's checks and plan read.
-func readAdoptChain(ctx context.Context, audits audit.Store, id audit.Identity) (*adoptChain, error) {
+// uses, holding it to its links from genesis, to every anchor recorded over it, and to the head
+// witness w countersigned, and keeps what adopt's checks and plan read.
+func readAdoptChain(ctx context.Context, audits audit.Store, id audit.Identity,
+	w *witnessHead) (*adoptChain, error) {
 	var anchors []*audit.Anchor
 	if anchored, ok := audits.(audit.AnchorStore); ok {
 		var err error
@@ -310,7 +479,14 @@ func readAdoptChain(ctx context.Context, audits audit.Store, id audit.Identity) 
 	}
 	links := audit.NewChainScanner(true)
 	reach := audit.NewAnchorScanner(anchors, id)
-	out := &adoptChain{Decisions: map[string]*audit.Entry{}}
+	var witnessAnchors []*audit.Anchor
+	if w != nil {
+		witnessAnchors = w.anchors
+	}
+	// The witness's head has a scanner of its own, so a chain that misses it is refused in the
+	// witness's name rather than as one of the anchors the database holds.
+	seen := audit.NewAnchorScanner(witnessAnchors, id)
+	out := &adoptChain{Decisions: map[string]*audit.Entry{}, Witness: w}
 	for _, a := range anchors {
 		if out.Newest == nil || a.Seq > out.Newest.Seq {
 			out.Newest = a
@@ -325,6 +501,7 @@ func readAdoptChain(ctx context.Context, audits audit.Store, id audit.Identity) 
 	err := audits.ChainScan(ctx, 0, func(e *audit.Entry) error {
 		links.Feed(e)
 		reach.Feed(e)
+		seen.Feed(e)
 		if e == nil {
 			return nil
 		}
@@ -350,6 +527,15 @@ func readAdoptChain(ctx context.Context, audits audit.Store, id audit.Identity) 
 			}
 		}
 	}
+	if len(witnessAnchors) > 0 {
+		if ok, results := seen.Results(); !ok {
+			for _, r := range results {
+				if !r.Reached {
+					w.Problems = append(w.Problems, r.Problem)
+				}
+			}
+		}
+	}
 	return out, nil
 }
 
@@ -370,6 +556,23 @@ func refuseBrokenChain(c *adoptChain) error {
 			binding.ErrDrift, strings.Join(c.AnchorProblems, ", "), restoreAdvice)
 	}
 	return nil
+}
+
+// refuseWitnessHead refuses a chain that does not reach the head the witness countersigned: it is
+// shorter than the tree the witness holds, or the root of that tree or the link at the newest
+// countersigned beat differs. The witness's memory is outside the database, so a writer who deleted
+// the adoption record and re-linked the chain after it cannot make the chain reach it again. A
+// chain longer than the head, with entries appended since the last beat, reaches it.
+func refuseWitnessHead(c *adoptChain) error {
+	w := c.Witness
+	if w == nil || len(w.Problems) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: the audit chain does not reach the head the witness at %s countersigned "+
+		"at %s, entry %d with link %s and a tree of %d entries with root %s: %s. Entries the witness "+
+		"saw are gone or rewritten, so the chain cannot show that adoption never ran on this "+
+		"install. %s, rather than adopt over it. Nothing was changed", binding.ErrDrift, w.URL,
+		w.CheckpointAt, w.Seq, w.Head, w.Size, w.Root, strings.Join(w.Problems, ", "), restoreAdvice)
 }
 
 // refuseKeyedEntries refuses a chain holding an entry only an install with a binding key writes:
@@ -489,10 +692,10 @@ func shownIDs(ids []string) string {
 }
 
 // showChain prints what the person running adopt checks the chain against before answering: how
-// many entries it holds, its newest anchor, and the install it is bound to, or for a chain bound to
-// none the install this adoption binds it to and source, the key that names it. Adoption runs once
-// per install, so it also says that a request to run it on an install adopted before is itself
-// evidence that the chain was rewritten.
+// many entries it holds, its newest anchor, the witness head it reaches, and the install it is
+// bound to, or for a chain bound to none the install this adoption binds it to and source, the key
+// that names it. Adoption runs once per install, so it also says that a request to run it on an
+// install adopted before is itself evidence that the chain was rewritten.
 func showChain(out io.Writer, c *adoptChain, installID, source string) {
 	_, _ = fmt.Fprintf(out, "The audit chain holds %d entries. ", c.Count)
 	if c.Newest == nil {
@@ -501,6 +704,7 @@ func showChain(out io.Writer, c *adoptChain, installID, source string) {
 		_, _ = fmt.Fprintf(out, "Its newest anchor is a %s anchor at %d, %s. ", c.Newest.Type,
 			c.Newest.Seq, c.Newest.Ref)
 	}
+	showWitness(out, c.Witness)
 	if c.Bound == "" {
 		_, _ = fmt.Fprintf(out, "It is bound to no install yet, and this adoption binds it to "+
 			"install %s, %s.\n", installID, source)
@@ -512,6 +716,29 @@ func showChain(out io.Writer, c *adoptChain, installID, source string) {
 		"that its chain was rewritten: compare the count and the anchor with your own records, and "+
 		"restore rather than answer yes.")
 	_, _ = fmt.Fprintln(out)
+}
+
+// showWitness prints the one sentence on the witness w that bounds this adoption: the head it
+// countersigned, which the chain reaches, or that it has witnessed nothing yet, or that the install
+// is not enrolled with one and where the enrollment was looked for.
+func showWitness(out io.Writer, w *witnessHead) {
+	switch {
+	case w == nil:
+	case w.URL == "":
+		file := w.File
+		if abs, err := filepath.Abs(file); err == nil {
+			file = abs
+		}
+		_, _ = fmt.Fprintf(out, "This install is not enrolled with a witness (no %s), so no witness "+
+			"bounds this adoption. ", file)
+	case w.Nothing:
+		_, _ = fmt.Fprintf(out, "The witness at %s has witnessed nothing for this install yet, so it "+
+			"bounds this adoption nowhere. ", w.URL)
+	default:
+		_, _ = fmt.Fprintf(out, "The witness at %s countersigned entry %d (link %s, tree of %d "+
+			"entries, root %s) at %s, and the chain reaches it. ", w.URL, w.Seq, w.Head, w.Size,
+			w.Root, w.CheckpointAt)
+	}
 }
 
 // adoptKeySource names where adopt's key for db comes from: the seed in the environment, or the

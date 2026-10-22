@@ -266,6 +266,11 @@ believes it has a control it does not have.</p>
 <td>Bearer token the witness API requires, read when <code>--api-token</code> is unset.</td>
 </tr>
 <tr>
+<td><code>SWITCHTENDER_WITNESS_NOTIFY_SLACK</code></td>
+<td>witness serve</td>
+<td>Slack incoming webhook URL that receives every finding as a message, read when <code>--notify-slack</code> is not given. The URL is its own credential, and a flag shows in the process list.</td>
+</tr>
+<tr>
 <td><code>SWITCHTENDER_MCP_TOKEN</code></td>
 <td>mcp</td>
 <td>API token the agent presents, read when <code>--token</code> is unset.</td>
@@ -897,6 +902,11 @@ that variable is unset.</p>
 <td>none</td>
 <td>RFC 3161 timestamp authority the chain anchors against. Empty anchors nothing.</td>
 </tr>
+<tr>
+<td><code>--witness-enrollment</code></td>
+<td>none</td>
+<td>Enrollment file to push each span beat to its witness under. Empty reads <code>witness-enrollment.json</code> beside the license file, and an install with neither pushes nothing. An enrolled install refuses to start without <code>--span-cadence</code> or without a producer identity, since it would run unwitnessed while its enrollment says otherwise. A witness outage never blocks the timestamp anchor, and the reverse.</td>
+</tr>
 </tbody>
 </table>
 <p>Retention windows accept a whole number of days with a <code>d</code> suffix, such as <code>30d</code>, or Go duration
@@ -1358,6 +1368,8 @@ beats off, the witness reports <code>empty_feed</code>, and a <code>--once</code
 <li><code>witness serve</code> watches many servers from one process and answers auditors with countersigned
 attestations.</li>
 <li><code>witness verify-attestation</code> verifies an attestation offline against a pinned witness key.</li>
+<li><code>witness rotate-key</code> retires the witness signing key and makes a new one current.</li>
+<li><code>witness enroll</code> enrolls this install with a push witness that countersigns its chain.</li>
 </ul>
 <h2 id="witness-serve">witness serve</h2>
 <p>Runs the witness. Its flags are checked against that subcommand rather than <code>witness</code> itself.</p>
@@ -1404,6 +1416,96 @@ attestations.</li>
 <td><code>--webhook</code></td>
 <td>none</td>
 <td>URL that receives every finding as a JSON POST.</td>
+</tr>
+<tr>
+<td><code>--accept-enrollments</code></td>
+<td>off</td>
+<td>Accept enrollments from installs that push their own chain heads. <code>--watch</code> is then optional.</td>
+</tr>
+<tr>
+<td><code>--enrollment-policy</code></td>
+<td><code>licensed</code></td>
+<td>Who may enroll: <code>licensed</code> (a license that includes the hosted witness) or <code>open</code> (any signed enrollment).</td>
+</tr>
+<tr>
+<td><code>--max-installs-per-license</code></td>
+<td><code>10</code></td>
+<td>How many installs one license may enroll.</td>
+</tr>
+</tbody>
+</table>
+<p><code>--notify-slack</code> takes a Slack incoming webhook URL, is repeatable, and is unset by default. The
+witness posts every finding there as a message that names its kind, its class (refusal or note), the
+producer key id of the install it is about or the watched server, and its detail. When the flag is
+not given, the URL in <code>SWITCHTENDER_WITNESS_NOTIFY_SLACK</code> is used, which keeps the URL out of the
+process list. Messages are sent in order from a queue of their own, so an install's push is never
+answered late because Slack is slow. A post that fails is tried once more after two seconds, and a
+second failure is logged with the URL masked. The findings record stays the durable copy either way.</p>
+<h2 id="witness-rotate-key">witness rotate-key</h2>
+<p>Retires the witness signing key and makes a new one current. Stop the witness first and start it
+again after, since a running witness keeps signing with the key it loaded.</p>
+<pre><code>switchtender witness rotate-key --key-dir /var/lib/switchtender-witness-key \
+  --state-dir /var/lib/switchtender-witness
+</code></pre>
+<p>The witness publishes every key it has signed with at <code>/.well-known/loomseal.json</code> and in every
+enrollment answer, each with its <code>valid_from</code> and, once retired, its <code>retired</code> time. After a rotation
+the list is signed by the new key and endorsed by every retired key the key directory still holds,
+so an enrolled install that holds an earlier key accepts the new list on that key's word. An
+attestation a key made before it retired verifies against the list for as long as anyone keeps it.
+The witness keeps reading its own memory signed by a retired key, for memory written before that key
+retired, and signs it with the new key at the next push it adopts. A retried push gets the bytes it
+was first answered with while the witness still holds the key that answered it.</p>
+<p><code>--key-dir</code> is required and names the directory holding the key, the same one <code>witness serve</code> runs
+with. <code>--state-dir</code> names the witness state directory and defaults to <code>switchtender-witness</code>. The
+key directory must not be the state directory, lie inside it, or hold it, because the state
+directory is copied off the host. The retired key stays in the key directory, readable only by the
+account that runs the witness. Back up the whole key directory after a rotation, since its key
+history is part of what the witness publishes. Deleting a retired key's file stops that key
+endorsing anything again, which is the step after a compromise, and an install that held only that
+key then pins the new key by hand. The command prints the retired key and the new current key as
+JSON.</p>
+<h2 id="witness-enroll">witness enroll</h2>
+<p>Enrolls this install with a push witness. The server then sends every span beat to the witness with
+the tree root at that beat and a consistency proof from the root the witness last signed, and stores
+the countersignatures the witness answers with. It needs a license that includes the hosted witness:
+Enterprise, or Team with the add-on. Without one the command refuses and sends nothing.</p>
+<pre><code>switchtender witness enroll --db /var/lib/switchtender/switchtender.db \
+  --witness https://witness.switchtender.com
+</code></pre>
+<p>The command prints the witness key id. Compare it with the id the witness publishes at
+<code>/.well-known/loomseal.json</code> before trusting what it countersigns, or pass <code>--witness-key</code> to refuse
+any other. The enrollment is written to <code>witness-enrollment.json</code> beside the license file, so a
+backup and a restore carry both or neither. It holds no secret. An install whose key was changed
+under its install id through <code>SWITCHTENDER_AUDIT_KEY</code> is refused, since the witness binds an install
+id to the key it was born to.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--db</code></td>
+<td><code>switchtender.db</code></td>
+<td>Database of the install to enroll. The license, key, and enrollment are found from it.</td>
+</tr>
+<tr>
+<td><code>--witness</code></td>
+<td>none</td>
+<td>Base URL of the witness. Required unless <code>--refresh-keys</code> is given.</td>
+</tr>
+<tr>
+<td><code>--witness-key</code></td>
+<td>none</td>
+<td>Witness key id, <code>sha256:...</code>, the witness must sign with. Anything else writes nothing.</td>
+</tr>
+<tr>
+<td><code>--refresh-keys</code></td>
+<td>off</td>
+<td>Fetch the enrolled witness's key list after it rotates, kept only when a held key signed it.</td>
 </tr>
 </tbody>
 </table>
@@ -1639,6 +1741,11 @@ before this release's <code>serve</code> first starts. <a href="/docs/upgrading"
 <td><code>--fail-unsealed</code></td>
 <td><code>false</code></td>
 <td>Record the adoption trusting no row, and fail every unfinished run that carries no seal.</td>
+</tr>
+<tr>
+<td><code>--witness-enrollment</code></td>
+<td>none</td>
+<td>Enrollment file of the witness whose countersigned head the audit chain is held to. Empty reads <code>witness-enrollment.json</code> beside the license file, and an install with neither is held to no witness. A named file that is missing or out of form is an error, as for <code>serve</code>.</td>
 </tr>
 </tbody>
 </table>

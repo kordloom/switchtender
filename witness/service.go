@@ -1,8 +1,9 @@
 // The hosted witness: one process watching many servers from outside them, remembering what each
 // feed served in a signed checkpoint, persisting every finding, and answering auditors over HTTP
-// with countersigned attestations. Independence is the product: a witness the watched operator
-// runs proves little, so this is built to run where they have no hand, by another team, another
-// company, or a service.
+// with countersigned attestations. It can also take pushes from enrolled installs, which send their
+// own chain heads with a consistency proof so no install has to expose a port to be witnessed.
+// Independence is the product: a witness the watched operator runs proves little, so this is built
+// to run where they have no hand, by another team, another company, or a service.
 package witness
 
 import (
@@ -10,10 +11,13 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -71,6 +75,9 @@ type RecordedFinding struct {
 	Kind string `json:"kind"`
 	// Detail says what was expected and what was seen.
 	Detail string `json:"detail"`
+	// Class is ClassRefusal or ClassNote for a finding about an enrolled install, and empty for a
+	// watched server, whose record and recount read as they always have.
+	Class string `json:"class,omitempty"`
 }
 
 // ServerState is one watched server's status as the API reports it.
@@ -149,6 +156,32 @@ type Service struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+	// enrolling is whether the service takes new enrollments. Installs already enrolled keep
+	// pushing either way.
+	enrolling bool
+	// maxInstalls bounds how many installs one license id may enroll.
+	maxInstalls int
+	// policy decides whether an enrollment is entitled, required while enrolling.
+	policy EnrollmentPolicy
+	// keys is the witness's published key list, nil when it publishes none.
+	keys []WitnessKey
+	// endorsers are the retired keys the witness still holds. Each endorses the published key list
+	// and countersigns again what it adopted while it was current.
+	endorsers []heldKey
+	// retiredMemory are the keys the witness retired, whose signature its memory may carry until
+	// the next adopted push signs it with id.
+	retiredMemory []memoryKey
+	// currentFrom is when id began signing, zero for a witness that never rotated its key.
+	currentFrom time.Time
+	// installsMu guards installs and serializes enrollments. It is taken before any install's own
+	// lock, never after.
+	installsMu sync.RWMutex
+	// installs holds one record per enrolled install, keyed by the hex of its producer key id.
+	installs map[string]*install
+	// pushLimit bounds pushes per install, and enrollLimit enrollments per license.
+	pushLimit, enrollLimit *limiter
+	// startedAt is when Start ran, the earliest instant silence is measured from.
+	startedAt time.Time
 }
 
 // ServiceOption configures a Service.
@@ -170,10 +203,43 @@ func WithServiceReadToken(token string) ServiceOption {
 	return func(s *Service) { s.readToken = token }
 }
 
+// WithAcceptEnrollments opens POST /v1/enroll, letting at most maxInstalls installs enroll under
+// one license id. A service that enrolls needs WithEnrollmentPolicy and WithWitnessKeys too.
+func WithAcceptEnrollments(maxInstalls int) ServiceOption {
+	return func(s *Service) { s.enrolling, s.maxInstalls = true, maxInstalls }
+}
+
+// WithEnrollmentPolicy sets the rule that decides whether an enrollment is entitled.
+func WithEnrollmentPolicy(p EnrollmentPolicy) ServiceOption {
+	return func(s *Service) { s.policy = p }
+}
+
+// WithWitnessKeys sets the key list the witness publishes at /.well-known/loomseal.json and returns
+// in every enrollment answer: every key it has signed with, its current key among them.
+func WithWitnessKeys(keys []WitnessKey) ServiceOption {
+	return func(s *Service) { s.keys = slices.Clone(keys) }
+}
+
+// WithKeyring publishes the keyring's key list and has every retired key it still holds endorse
+// that list and countersign again what it adopted. The service also reads its own memory signed by
+// a key it retired, for memory observed before that key retired. The service's identity must be
+// the keyring's current key. It panics on a nil keyring, a programming error.
+func WithKeyring(k *Keyring) ServiceOption {
+	if k == nil {
+		panic("witness: WithKeyring needs a keyring")
+	}
+	return func(s *Service) {
+		s.keys, s.endorsers, s.retiredMemory = k.Keys(), slices.Clone(k.held), k.memoryKeys()
+		s.currentFrom = k.currentFrom()
+	}
+}
+
 // NewService returns a hosted witness over the given servers. It refuses a duplicate server,
 // however spelled, because two watchers over one state file take turns overwriting the memory
 // that catches a rewrite. It panics on an interval under ten seconds, a programming error: the
-// point of the pin is memory over time, not a busy loop.
+// point of the pin is memory over time, not a busy loop. A service that accepts enrollments may
+// watch no server at all, and it is refused without a policy, a key list naming its own key, or a
+// cap of at least one install per license.
 func NewService(id identity.Identity, dir string, interval time.Duration, servers []string,
 	log *zap.Logger, client *http.Client, opts ...ServiceOption) (*Service, error) {
 	if dir == "" {
@@ -182,9 +248,6 @@ func NewService(id identity.Identity, dir string, interval time.Duration, server
 	if interval < 10*time.Second {
 		panic("witness: interval must be at least ten seconds")
 	}
-	if len(servers) == 0 {
-		return nil, fmt.Errorf("nothing to watch; give at least one server")
-	}
 	if log == nil {
 		log = zap.NewNop()
 	}
@@ -192,10 +255,15 @@ func NewService(id identity.Identity, dir string, interval time.Duration, server
 	s := &Service{
 		id: id, dir: dir, interval: interval, log: log, clock: time.Now,
 		watchers: map[string]*Watcher{}, status: map[string]*serverStatus{},
-		ctx: ctx, cancel: cancel,
+		ctx: ctx, cancel: cancel, installs: map[string]*install{},
+		pushLimit: newLimiter(pushBurst, pushEvery), enrollLimit: newLimiter(enrollBurst, enrollEvery),
 	}
 	for _, opt := range opts {
 		opt(s)
+	}
+	if err := s.checkEnrollment(len(servers)); err != nil {
+		cancel()
+		return nil, err
 	}
 	for _, raw := range servers {
 		key := ServerKey(raw)
@@ -203,17 +271,46 @@ func NewService(id identity.Identity, dir string, interval time.Duration, server
 			cancel()
 			return nil, fmt.Errorf("%s is watched twice; one state file per server", NormalizeServer(raw))
 		}
-		s.watchers[key] = NewWatcher(raw, filepath.Join(dir, StateFileName(raw)), id, client)
+		w := NewWatcher(raw, filepath.Join(dir, StateFileName(raw)), id, client)
+		w.retired = s.retiredMemory
+		s.watchers[key] = w
 		s.status[key] = &serverStatus{}
 		s.order = append(s.order, key)
 	}
 	return s, nil
 }
 
+// checkEnrollment refuses a configuration that would watch nothing or enroll without what an
+// enrollment needs.
+func (s *Service) checkEnrollment(servers int) error {
+	if servers == 0 && !s.enrolling {
+		return fmt.Errorf("nothing to watch; give at least one server, or accept enrollments")
+	}
+	if !s.enrolling {
+		return nil
+	}
+	if s.policy == nil {
+		return fmt.Errorf("accepting enrollments needs an enrollment policy")
+	}
+	if s.maxInstalls < 1 {
+		return fmt.Errorf("accepting enrollments needs a cap of at least one install per license, "+
+			"got %d", s.maxInstalls)
+	}
+	listed := slices.ContainsFunc(s.keys, func(k WitnessKey) bool {
+		return k.KeyID == s.id.KeyID() && k.PublicKey == s.id.PublicKeyBase64() && k.Retired == ""
+	})
+	if !listed {
+		return fmt.Errorf("accepting enrollments needs a published key list naming this witness's "+
+			"key %s as its key in use", s.id.KeyID())
+	}
+	return nil
+}
+
 // Start validates the archive and launches the watch loop. The directory and the findings record
 // are checked here rather than at the first finding, because a finding is the one moment the
 // service exists for and the worst moment to learn the disk was never writable. Prior findings
 // are recounted from the record, so a restart does not reset the totals an attestation carries.
+// Every enrolled install's record is loaded too, and a restore marker is turned into notes.
 func (s *Service) Start() error {
 	if err := os.MkdirAll(s.dir, 0o750); err != nil {
 		return fmt.Errorf("witness state directory: %w", err)
@@ -221,6 +318,13 @@ func (s *Service) Start() error {
 	if err := s.recount(); err != nil {
 		return err
 	}
+	if err := s.loadInstalls(); err != nil {
+		return err
+	}
+	if err := s.noteRestore(); err != nil {
+		return err
+	}
+	s.startedAt = s.clock()
 	f, err := os.OpenFile(filepath.Join(s.dir, findingsFile), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("witness findings record: %w", err)
@@ -256,6 +360,7 @@ func (s *Service) Start() error {
 				return
 			case <-ticker.C:
 				s.CheckAll(s.ctx)
+				s.sweepInstalls()
 			}
 		}
 	})
@@ -423,7 +528,13 @@ func (s *Service) states() []ServerState {
 
 // tail returns the newest recorded findings, all servers or one, newest last.
 func (s *Service) tail(server string) ([]RecordedFinding, error) {
-	f, err := os.Open(filepath.Join(s.dir, findingsFile))
+	return tailFile(filepath.Join(s.dir, findingsFile), server)
+}
+
+// tailFile returns the newest findings recorded in the file at path, all servers or one, newest
+// last.
+func tailFile(path, server string) ([]RecordedFinding, error) {
+	f, err := os.Open(path)
 	if os.IsNotExist(err) {
 		return []RecordedFinding{}, nil
 	}
@@ -484,15 +595,24 @@ func (s *Service) Attest(key string) (*Attestation, error) {
 	return a, nil
 }
 
-// Handler serves the witness API. Every route is a read: the service has no mutating surface,
-// because what a witness says must come only from what it saw.
+// Handler serves the witness API. The watched-server routes are all reads, because what a witness
+// says must come only from what it saw. The push surface has two writes, and each takes only what a
+// signature proves: an enrollment signed by the key it enrolls, and a push signed by the enrolled
+// key with a proof the witness checks from hashes alone.
 //
 // When a read token is configured, every /witness route requires it as a bearer token, so a public
 // deployment does not hand an anonymous caller the list of watched servers or the cross-server
 // findings feed. The /healthz route stays open so a load balancer can probe it. The token is
-// compared in constant time.
+// compared in constant time. The per-install routes and the published key list are open by design:
+// a push is authenticated by its signature, and a read names one install by its producer key id,
+// which every bundle from that install already carries.
 func (s *Service) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/enroll", s.enrollHandler)
+	mux.HandleFunc("POST /v1/installs/{key}/beats", s.pushHandler)
+	mux.HandleFunc("GET /v1/installs/{key}/attestation", s.statementHandler)
+	mux.HandleFunc("GET /v1/installs/{key}/findings", s.installFindingsHandler)
+	mux.HandleFunc("GET /.well-known/loomseal.json", s.keysHandler)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_, _ = w.Write([]byte(`{"ok":true}`))
@@ -590,12 +710,169 @@ func (s *Service) serveFindings(w http.ResponseWriter, server string) {
 
 // respond writes v as JSON.
 func (s *Service) respond(w http.ResponseWriter, v any) {
+	s.answer(w, http.StatusOK, v)
+}
+
+// answer writes v as JSON with the given status.
+func (s *Service) answer(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(code)
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(v); err != nil {
 		s.log.Error("witness: write response: " + err.Error())
 	}
+}
+
+// enrollHandler admits an install, answering the signed enrollment or why there is none.
+func (s *Service) enrollHandler(w http.ResponseWriter, r *http.Request) {
+	var req EnrollRequest
+	if code, err := decodeBody(w, r, "enrollment", &req); err != nil {
+		s.fail(w, code, err.Error())
+		return
+	}
+	resp, err := s.Enroll(req)
+	if err != nil {
+		s.refuseRequest(w, err, enrollEvery)
+		return
+	}
+	s.respond(w, resp)
+}
+
+// pushHandler holds one push against an install's memory and answers with the countersignature, the
+// refusal, or the size to prove from.
+func (s *Service) pushHandler(w http.ResponseWriter, r *http.Request) {
+	var p Push
+	if code, err := decodeBody(w, r, "push", &p); err != nil {
+		s.fail(w, code, err.Error())
+		return
+	}
+	answer, err := s.Accept(r.PathValue("key"), p)
+	if answer != nil {
+		s.answer(w, statusOf(err), answer)
+		return
+	}
+	if err != nil {
+		s.refuseRequest(w, err, pushEvery)
+		return
+	}
+	s.fail(w, http.StatusInternalServerError, "the witness has no answer")
+}
+
+// statementHandler serves the signed statement for one install.
+func (s *Service) statementHandler(w http.ResponseWriter, r *http.Request) {
+	st, err := s.AttestInstall(r.PathValue("key"))
+	if err != nil {
+		s.refuseRequest(w, err, 0)
+		return
+	}
+	if st == nil {
+		s.fail(w, http.StatusNotFound, "nothing witnessed yet")
+		return
+	}
+	w.Header().Set("Cache-Control", "public, max-age=60")
+	s.respond(w, st)
+}
+
+// installFindingsHandler serves one install's recorded findings, both classes, with the totals the
+// statement carries.
+func (s *Service) installFindingsHandler(w http.ResponseWriter, r *http.Request) {
+	in, recs, refusals, notes, err := s.installFindings(r.PathValue("key"))
+	if err != nil {
+		s.refuseRequest(w, err, 0)
+		return
+	}
+	w.Header().Set("Cache-Control", "public, max-age=60")
+	s.respond(w, map[string]any{
+		"install_id": in.rec.InstallID, "key_id": in.rec.KeyID, "findings": recs,
+		"count": len(recs), "refusals_total": refusals, "notes_total": notes,
+	})
+}
+
+// keysHandler serves the witness's signed key list, the document a relying party pins from.
+func (s *Service) keysHandler(w http.ResponseWriter, _ *http.Request) {
+	if s.keys == nil {
+		s.fail(w, http.StatusNotFound, "this witness publishes no key list")
+		return
+	}
+	doc, err := s.keyDocument()
+	if err != nil {
+		s.fail(w, http.StatusInternalServerError, "the key list could not be signed")
+		s.log.Error("witness: sign key list: " + err.Error())
+		return
+	}
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	s.respond(w, doc)
+}
+
+// refuseRequest answers an error with its status. A server-side error is answered in fixed words,
+// because its detail names files in the state directory, and the detail goes to the log instead. A
+// rate refusal says when to come back.
+func (s *Service) refuseRequest(w http.ResponseWriter, err error, every time.Duration) {
+	code := statusOf(err)
+	switch {
+	case code >= http.StatusInternalServerError:
+		s.log.Error("witness: " + err.Error())
+		msg := "the witness could not answer"
+		if code == http.StatusServiceUnavailable {
+			msg = "the witness could not write its memory, so nothing was countersigned; retry"
+		}
+		s.fail(w, code, msg)
+		return
+	case code == http.StatusTooManyRequests && every > 0:
+		w.Header().Set("Retry-After", fmt.Sprintf("%d", int(every/time.Second)))
+	}
+	s.fail(w, code, clip(err.Error(), 512))
+}
+
+// statusOf maps how a push or an enrollment was answered to its HTTP status.
+func statusOf(err error) int {
+	switch {
+	case err == nil:
+		return http.StatusOK
+	case errors.Is(err, ErrNotEnrolled):
+		return http.StatusNotFound
+	case errors.Is(err, ErrSignature):
+		return http.StatusUnauthorized
+	case errors.Is(err, ErrMalformed), errors.Is(err, ErrNotBorn):
+		return http.StatusBadRequest
+	case errors.Is(err, ErrLapsed):
+		return http.StatusPaymentRequired
+	case errors.Is(err, ErrClosed), errors.Is(err, ErrEntitlement), errors.Is(err, ErrCap):
+		return http.StatusForbidden
+	case errors.Is(err, ErrLabel), errors.Is(err, ErrRefused), errors.Is(err, ErrProofBase),
+		errors.Is(err, ErrStale):
+		return http.StatusConflict
+	case errors.Is(err, ErrLimited):
+		return http.StatusTooManyRequests
+	case errors.Is(err, ErrWrite):
+		return http.StatusServiceUnavailable
+	}
+	return http.StatusInternalServerError
+}
+
+// decodeBody reads one JSON object of at most maxPushBody bytes into v, refusing unknown members
+// and anything after the object. noun names the object in the refusal. It returns the status to
+// answer with when the body is refused.
+func decodeBody(w http.ResponseWriter, r *http.Request, noun string, v any) (int, error) {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxPushBody))
+	dec.DisallowUnknownFields()
+	err := dec.Decode(v)
+	if err == nil {
+		if _, extra := dec.Token(); extra != io.EOF {
+			err = fmt.Errorf("the body carries more than one JSON object")
+		}
+	}
+	var tooBig *http.MaxBytesError
+	switch {
+	case errors.As(err, &tooBig):
+		return http.StatusRequestEntityTooLarge, fmt.Errorf("the body is larger than %d bytes",
+			maxPushBody)
+	case err != nil:
+		return http.StatusBadRequest, fmt.Errorf("%w: the body is not one %s: %w", ErrMalformed,
+			noun, err)
+	}
+	return http.StatusOK, nil
 }
 
 // fail writes a JSON error.

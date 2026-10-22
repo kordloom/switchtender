@@ -3,8 +3,11 @@ package cmd
 import (
 	"crypto/ed25519"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kordloom/switchtender/internal/license"
 )
@@ -25,6 +28,7 @@ func TestValidateMintRefusesWhatIsNotSold(t *testing.T) {
 		Tier    string
 		Hosts   string
 		Days    int
+		Addons  []string
 		WantErr string
 	}{{ // Test 0: The shape a real Pro trial takes.
 		Name: "valid pro trial", Org: "Acme", Tier: license.TierPro, Hosts: "500", Days: 30,
@@ -71,10 +75,35 @@ func TestValidateMintRefusesWhatIsNotSold(t *testing.T) {
 	}, { // Test 15: A plausible but unsold band, between the 2,500 band and unlimited.
 		Name: "unsold band", Org: "Acme", Tier: license.TierTeam, Hosts: "5000", Days: 30,
 		WantErr: "is not a published band",
+	}, { // Test 16: Team with the hosted witness add-on is what the Team card sells.
+		Name: "team addon", Org: "Acme", Tier: license.TierTeam, Hosts: "1000", Days: 365,
+		Addons: []string{license.AddonHostedWitness},
+	}, { // Test 17: Pro cannot carry the add-on, so a Pro license listing it is refused.
+		Name: "pro addon", Org: "Acme", Tier: license.TierPro, Hosts: "500", Days: 365,
+		Addons:  []string{license.AddonHostedWitness},
+		WantErr: "a pro license cannot carry an add-on",
+	}, { // Test 18: An add-on the product does not sell.
+		Name: "unsold addon", Org: "Acme", Tier: license.TierTeam, Hosts: "500", Days: 365,
+		Addons:  []string{"custody"},
+		WantErr: "is not one the product sells",
+	}, { // Test 19: A misspelled add-on would sign a grant no build honors.
+		Name: "misspelled addon", Org: "Acme", Tier: license.TierTeam, Hosts: "500", Days: 365,
+		Addons:  []string{"hosted_witness"},
+		WantErr: "is not one the product sells",
+	}, { // Test 20: The same add-on twice.
+		Name: "repeated addon", Org: "Acme", Tier: license.TierTeam, Hosts: "500", Days: 365,
+		Addons:  []string{license.AddonHostedWitness, license.AddonHostedWitness},
+		WantErr: "is listed twice",
+	}, { // Test 21: An unsold add-on on Pro is named as unsold before the tier is.
+		Name: "unsold addon on pro", Org: "Acme", Tier: license.TierPro, Hosts: "500", Days: 30,
+		Addons:  []string{""},
+		WantErr: "is not one the product sells",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
 			mintOrg, mintTier, mintHosts, mintDays = test.Org, test.Tier, test.Hosts, test.Days
+			mintAddons = test.Addons
+			t.Cleanup(func() { mintAddons = nil })
 			err := validateMint()
 			if test.WantErr == "" {
 				if err != nil {
@@ -137,5 +166,124 @@ func TestMintFlagsHaveNoDefaultsThatSell(t *testing.T) {
 		t.Fatal("license mint has no --days flag")
 	} else if f.DefValue != "0" {
 		t.Errorf("--days defaults to %q; a term must be stated rather than inherited", f.DefValue)
+	}
+}
+
+// TestMintPrintsAddons pins the add-ons in what the mint shows before it signs and in the line it
+// prints after. The add-on is $3,000 a year, so the confirmation is where a wrong one is caught.
+func TestMintPrintsAddons(t *testing.T) {
+	// Not parallel: the output reads package-level flag variables.
+	mintDays, mintOut = 365, "acme.json"
+	t.Cleanup(func() { mintDays, mintOut = 0, "license.json" })
+	base := license.Claims{
+		ID: "lic_print", Org: "Acme", Tier: license.TierTeam, Hosts: "1000",
+		Issued: "2026-09-01T00:00:00Z", Expires: "2027-09-01T00:00:00Z",
+	}
+	tests := []struct {
+		Name       string
+		Addons     []string
+		WantPrompt string
+		WantLine   string
+	}{{ // Test 22: The hosted witness add-on is named in both.
+		Name: "addon", Addons: []string{license.AddonHostedWitness},
+		WantPrompt: "  addons  hosted-witness\n",
+		WantLine: "minted lic_print team for Acme (1000 hosts, add-ons hosted-witness, 365 days, " +
+			"expires 2027-09-01) -> acme.json\n",
+	}, { // Test 23: No add-on reads as none, so the absence is a stated fact.
+		Name: "none", WantPrompt: "  addons  none\n",
+		WantLine: "minted lic_print team for Acme (1000 hosts, add-ons none, 365 days, " +
+			"expires 2027-09-01) -> acme.json\n",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			c := base
+			c.Addons = test.Addons
+			if got := mintPrompt(c); !strings.Contains(got, test.WantPrompt) {
+				t.Errorf("mintPrompt() = %q, want it to contain %q", got, test.WantPrompt)
+			}
+			if got := mintedLine(c); got != test.WantLine {
+				t.Errorf("mintedLine() = %q, want %q", got, test.WantLine)
+			}
+		})
+	}
+}
+
+// TestLicenseStatusPrintsAddons runs license status against signed licenses on disk and checks the
+// add-ons line appears exactly when the license carries add-ons.
+func TestLicenseStatusPrintsAddons(t *testing.T) {
+	// Not parallel: it sets the license path in the environment and captures standard output.
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("GenerateKey() error = %v", err)
+	}
+	const kid = "status-addons-test"
+	license.RegisterKey(kid, pub)
+	tests := []struct {
+		Name       string
+		Addons     []string
+		WantAddons bool
+	}{{ // Test 24: A Team license with the hosted witness add-on names it.
+		Name: "addon", Addons: []string{license.AddonHostedWitness}, WantAddons: true,
+	}, { // Test 25: A license with no add-ons prints no add-ons line.
+		Name: "none",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			raw, err := license.Sign(license.Claims{
+				V: 1, ID: "lic_status", Org: "Acme", Tier: license.TierTeam, Hosts: "250",
+				Issued: "2026-09-01T00:00:00Z", Expires: "2099-09-01T00:00:00Z", Kid: kid,
+				Addons: test.Addons,
+			}, priv)
+			if err != nil {
+				t.Fatalf("Sign() error = %v", err)
+			}
+			path := filepath.Join(t.TempDir(), "license.json")
+			if err := os.WriteFile(path, raw, 0o600); err != nil {
+				t.Fatalf("WriteFile() error = %v", err)
+			}
+			t.Setenv("SWITCHTENDER_LICENSE", path)
+			out, err := stdoutOf(t, func() error { return licenseStatusCmd.RunE(licenseStatusCmd, nil) })
+			if err != nil {
+				t.Fatalf("license status error = %v", err)
+			}
+			const line = "  addons   hosted-witness\n"
+			if got := strings.Contains(out, line); got != test.WantAddons {
+				t.Errorf("license status printed the add-ons line = %v, want %v:\n%s",
+					got, test.WantAddons, out)
+			}
+			if !strings.Contains(out, "team license for Acme (valid)") {
+				t.Errorf("license status did not name the license:\n%s", out)
+			}
+		})
+	}
+}
+
+// TestMintClaimsCarryTheAddons checks the add-ons the mint was given are the ones it signs, since
+// validating an add-on and then signing a license without it would sell a grant nobody receives.
+func TestMintClaimsCarryTheAddons(t *testing.T) {
+	// Not parallel: mintClaims reads package-level flag variables.
+	mintOrg, mintTier, mintHosts, mintDays = "Acme", license.TierTeam, "1000", 365
+	t.Cleanup(func() { mintOrg, mintTier, mintHosts, mintDays, mintAddons = "", "", "", 0, nil })
+	now := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	tests := []struct {
+		Addons     []string
+		WantAddons string
+	}{{ // Test 26: The hosted witness add-on is signed into the license.
+		Addons: []string{license.AddonHostedWitness}, WantAddons: "[hosted-witness]",
+	}, { // Test 27: No add-on signs none.
+		Addons: nil, WantAddons: "[]",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			mintAddons = test.Addons
+			c := mintClaims("lic_claims", now)
+			if got := fmt.Sprint(c.Addons); got != test.WantAddons {
+				t.Errorf("mintClaims().Addons = %s, want %s", got, test.WantAddons)
+			}
+			if c.Tier != license.TierTeam || c.Org != "Acme" || c.Hosts != "1000" ||
+				c.Kid != license.IssuerKid || c.Expires != "2027-09-01T00:00:00Z" {
+				t.Errorf("mintClaims() = %+v, want the flags it was given", c)
+			}
+		})
 	}
 }

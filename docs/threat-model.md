@@ -146,8 +146,10 @@ that finds sealed work and no adoption record is refused as a removed record.
 Several things do not hold. The chain's links use public hashes. A writer can delete the adoption
 record, re-link every later entry, and delete the anchors the database holds, and then adopt runs a
 second time and seals whatever the writer left. Only an anchor or a witness checked outside the
-database bounds that. Adopt prints the chain's length, its newest anchor and the install it is bound
-to before it asks, and a request to adopt an install that was adopted or served before is itself
+database bounds that. An install enrolled with a witness is bounded: adopt fetches the witness's
+signed head and refuses a chain that does not reach it, and refuses to adopt while the witness
+cannot answer. Adopt prints the chain's length, its newest anchor and the install it is bound to
+before it asks, and a request to adopt an install that was adopted or served before is itself
 evidence that its chain was rewritten. The same re-link reopens a finished run: a writer who deletes
 its START entry and re-links the chain makes the attempt look unstarted. It also reaches receipts.
 The server signs the chain it reads, so a re-linked edit or a cut tail on a chain that no anchor or

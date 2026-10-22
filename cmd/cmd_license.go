@@ -51,8 +51,11 @@ var licenseStatusCmd = &cobra.Command{
 			state = "lapsed; every Community feature keeps working and nothing was deleted"
 		}
 		fmt.Printf("%s license for %s (%s)\n", lic.Claims.Tier, lic.Claims.Org, state)
-		fmt.Printf("  id       %s\n  hosts    %s\n  expires  %s\n  file     %s\n",
-			lic.Claims.ID, lic.Claims.Hosts, lic.Claims.Expires, lic.Path)
+		fmt.Printf("  id       %s\n  hosts    %s\n", lic.Claims.ID, lic.Claims.Hosts)
+		if len(lic.Claims.Addons) > 0 {
+			fmt.Printf("  addons   %s\n", strings.Join(lic.Claims.Addons, ", "))
+		}
+		fmt.Printf("  expires  %s\n  file     %s\n", lic.Claims.Expires, lic.Path)
 		return nil
 	},
 }
@@ -89,6 +92,7 @@ var (
 	mintKey, mintOrg, mintTier, mintHosts, mintOut string
 	mintDays                                       int
 	mintYes                                        bool
+	mintAddons                                     []string
 )
 
 // mintBands are the fleet bands the pricing page publishes. Minting anything else would sign a
@@ -126,12 +130,7 @@ var licenseMintCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		c := license.Claims{
-			V: 1, ID: id,
-			Org: mintOrg, Tier: mintTier, Hosts: mintHosts, Kid: license.IssuerKid,
-			Issued:  now.Format(time.RFC3339),
-			Expires: now.AddDate(0, 0, mintDays).Format(time.RFC3339),
-		}
+		c := mintClaims(id, now)
 		raw, err := license.Sign(c, priv)
 		if err != nil {
 			return err
@@ -148,8 +147,7 @@ var licenseMintCmd = &cobra.Command{
 		if err := os.WriteFile(mintOut, raw, 0o600); err != nil {
 			return err
 		}
-		fmt.Printf("minted %s %s for %s (%s hosts, %d days, expires %s) -> %s\n",
-			c.ID, mintTier, mintOrg, mintHosts, mintDays, c.Expires[:10], mintOut)
+		fmt.Print(mintedLine(c))
 		return nil
 	},
 }
@@ -180,11 +178,67 @@ func validateMint() error {
 		return fmt.Errorf("hosts %q is not a band Pro is sold at: Pro is sold at the %s band, and "+
 			"a larger fleet is Team", mintHosts, proBand)
 	}
+	if err := validateAddons(); err != nil {
+		return err
+	}
 	if mintDays <= 0 {
 		return fmt.Errorf("--days must be positive, got %d, which would sign a license that "+
 			"expired before it was issued", mintDays)
 	}
 	return nil
+}
+
+// validateAddons refuses an add-on the product does not sell, a repeated one, and any add-on on a
+// tier below Team, which cannot carry one.
+func validateAddons() error {
+	seen := make(map[string]bool, len(mintAddons))
+	for _, a := range mintAddons {
+		if a != license.AddonHostedWitness {
+			return fmt.Errorf("add-on %q is not one the product sells: %s", a,
+				license.AddonHostedWitness)
+		}
+		if seen[a] {
+			return fmt.Errorf("add-on %q is listed twice", a)
+		}
+		seen[a] = true
+	}
+	if len(mintAddons) > 0 && mintTier != license.TierTeam && mintTier != license.TierEnterprise {
+		return fmt.Errorf("a %s license cannot carry an add-on: add-ons are sold from Team up",
+			mintTier)
+	}
+	return nil
+}
+
+// addonsLabel renders a license's add-ons for the mint output, "none" when it lists none.
+func addonsLabel(addons []string) string {
+	if len(addons) == 0 {
+		return "none"
+	}
+	return strings.Join(addons, ", ")
+}
+
+// mintClaims is the license body the mint flags describe, issued at now.
+func mintClaims(id string, now time.Time) license.Claims {
+	return license.Claims{
+		V: 1, ID: id,
+		Org: mintOrg, Tier: mintTier, Hosts: mintHosts, Kid: license.IssuerKid,
+		Issued:  now.Format(time.RFC3339),
+		Expires: now.AddDate(0, 0, mintDays).Format(time.RFC3339),
+		Addons:  mintAddons,
+	}
+}
+
+// mintedLine is the line the mint prints once the license is on disk.
+func mintedLine(c license.Claims) string {
+	return fmt.Sprintf("minted %s %s for %s (%s hosts, add-ons %s, %d days, expires %s) -> %s\n",
+		c.ID, c.Tier, c.Org, c.Hosts, addonsLabel(c.Addons), mintDays, c.Expires[:10], mintOut)
+}
+
+// mintPrompt is what the mint shows before it signs.
+func mintPrompt(c license.Claims) string {
+	return fmt.Sprintf("About to sign:\n  id      %s\n  org     %s\n  tier    %s\n  hosts   %s\n"+
+		"  addons  %s\n  issued  %s\n  expires %s\n  out     %s\n",
+		c.ID, c.Org, c.Tier, c.Hosts, addonsLabel(c.Addons), c.Issued[:10], c.Expires[:10], mintOut)
 }
 
 // mintID returns the license identifier. It carries the issuer key prefix, the timestamp, and
@@ -206,9 +260,7 @@ func confirmMint(c license.Claims) error {
 	if mintYes {
 		return nil
 	}
-	fmt.Printf("About to sign:\n  id      %s\n  org     %s\n  tier    %s\n  hosts   %s\n"+
-		"  issued  %s\n  expires %s\n  out     %s\n",
-		c.ID, c.Org, c.Tier, c.Hosts, c.Issued[:10], c.Expires[:10], mintOut)
+	fmt.Print(mintPrompt(c))
 	fmt.Print("Sign it? [y/N] ")
 	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil {
@@ -246,6 +298,8 @@ func init() {
 	licenseMintCmd.Flags().IntVar(&mintDays, "days", 0, "Term length in days.")
 	licenseMintCmd.Flags().BoolVar(&mintYes, "yes", false, "Skip the confirmation prompt.")
 	licenseMintCmd.Flags().StringVar(&mintOut, "out", "license.json", "Where to write the license.")
+	licenseMintCmd.Flags().StringArrayVar(&mintAddons, "addon", nil,
+		"Add-on bought on top of the tier, repeatable: "+license.AddonHostedWitness+". Team and up.")
 	for _, f := range []string{"key", "org", "tier", "hosts", "days"} {
 		if err := licenseMintCmd.MarkFlagRequired(f); err != nil {
 			panic("license mint: " + err.Error())

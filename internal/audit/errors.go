@@ -35,6 +35,16 @@ var ErrClockBehind = errors.New("clock behind the last span beat")
 // been removed.
 var ErrEntryNotFound = errors.New("audit entry not found")
 
+// ErrAttestationNotFound is returned by DeleteAttestation when no witness attestation carries the
+// requested id.
+var ErrAttestationNotFound = errors.New("witness attestation not found")
+
+// ErrAttestationConflict is returned by SaveAttestation when the store already holds a different
+// attestation by the same witness key at the same seq and kind, and nothing is written. A restored
+// witness re-minting at a seq it already countersigned produces it, and the push client keeps the
+// held record and logs the conflict.
+var ErrAttestationConflict = errors.New("a different witness attestation is held at this seq")
+
 // ErrOutcomeRecorded is returned by Append for a run's outcome entry when the chain already holds
 // an outcome for that run, and nothing is written. A run has exactly one outcome entry, so a
 // committer that retries an append whose result it never learned, or two committers that both found

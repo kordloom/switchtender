@@ -1,0 +1,29 @@
+# Copies the hosted witness's state directory to R2, once. switchtender-witness-snapshot.timer runs
+# it every hour. It runs as root so it can read the service's private state directory, and it reads
+# the R2 credentials from an rclone config only root can read.
+#
+#   install -d -m 0755 /usr/local/lib/switchtender-witness
+#   install -m 0755 snapshot-to-r2.sh /usr/local/lib/switchtender-witness/
+#   install -m 0644 switchtender-witness-snapshot.service switchtender-witness-snapshot.timer \
+#     /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now switchtender-witness-snapshot.timer
+
+[Unit]
+Description=Snapshot the SwitchTender hosted witness state to R2
+Documentation=https://switchtender.com/docs/witness
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=RCLONE_CACHE_DIR=/tmp/rclone
+ExecStart=/usr/local/lib/switchtender-witness/snapshot-to-r2.sh
+UMask=0077
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+NoNewPrivileges=true
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=30min

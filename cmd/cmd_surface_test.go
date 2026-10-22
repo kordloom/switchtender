@@ -104,7 +104,8 @@ func TestSubcommandGroupsKeepTheirMembers(t *testing.T) {
 		Name: "import", Parent: importCmd,
 		WantNames: []string{"awx", "chef", "cron", "jenkins", "puppet", "rundeck", "semaphore"},
 	}, { // Test 6: The witness tools.
-		Name: "witness", Parent: witnessCmd, WantNames: []string{"serve", "verify-attestation"},
+		Name: "witness", Parent: witnessCmd,
+		WantNames: []string{"enroll", "rotate-key", "serve", "verify-attestation"},
 	}, { // Test 7: The worker's one group, its delivery keys.
 		Name: "worker", Parent: workerCmd, WantNames: []string{"key"},
 	}, { // Test 8: The delivery key tools a relay worker pool registers and rotates with.
@@ -293,7 +294,7 @@ func TestEveryStoreCommandTakesTheSameDatabaseFlag(t *testing.T) {
 		"switchtender import jenkins", "switchtender import rundeck", "switchtender import semaphore",
 		"switchtender init", "switchtender license install", "switchtender license status",
 		"switchtender receipt", "switchtender restore", "switchtender serve", "switchtender token",
-		"switchtender user", "switchtender worker",
+		"switchtender user", "switchtender witness enroll", "switchtender worker",
 	}
 	byPath := commands().ByPath
 	for testNum, path := range paths {

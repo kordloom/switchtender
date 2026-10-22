@@ -572,6 +572,25 @@ CREATE TABLE IF NOT EXISTS audit_anchors (
 	install_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_audit_anchor_seq ON audit_anchors(seq);
+-- A witness attestation is one countersignature a hosted witness returned for a pushed beat. The
+-- store holds one per seq, kind, and witness key, and the first written wins. Every column but the
+-- id carries a default so the table stays healable column by column.
+CREATE TABLE IF NOT EXISTS audit_attestations (
+	id         TEXT PRIMARY KEY,
+	seq        INTEGER NOT NULL DEFAULT 0,
+	kind       TEXT NOT NULL DEFAULT '',
+	key_id     TEXT NOT NULL DEFAULT '',
+	link       TEXT NOT NULL DEFAULT '',
+	size       INTEGER NOT NULL DEFAULT 0,
+	root       TEXT NOT NULL DEFAULT '',
+	public_key TEXT NOT NULL DEFAULT '',
+	role       TEXT NOT NULL DEFAULT '',
+	at         TEXT NOT NULL DEFAULT '',
+	sig        TEXT NOT NULL DEFAULT '',
+	witness    TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_attestation_coord
+	ON audit_attestations(seq, kind, key_id);
 CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_entries(at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_seq ON audit_entries(seq);
 -- Span beats are a narrow slice of the chain selected by actor and method and ordered by seq.

@@ -39,13 +39,38 @@ func TreeHead(entries []*Entry, installID string) (int64, string, error) {
 func treeLeaves(entries []*Entry, installID string) ([][]byte, error) {
 	leaves := make([][]byte, 0, len(entries))
 	for _, e := range entries {
-		leaf, err := treeLeaf(claimContent(e), installID)
+		leaf, err := entryLeaf(e, installID)
 		if err != nil {
-			return nil, fmt.Errorf("%w: entry %d: %w", ErrExport, e.Seq, err)
+			return nil, err
 		}
 		leaves = append(leaves, leaf)
 	}
 	return leaves, nil
+}
+
+// LeafHash returns the RFC 6962 leaf hash of one chain entry in the tree profile under installID:
+// merkle.LeafHash over the leaf bytes treeLeaves gives the same entry. A reader that keeps a
+// chain's tree incrementally holds these 32 bytes per entry rather than the leaves, and folds them
+// into the same root TreeHead computes, so the two can never disagree about what the tree is.
+func LeafHash(e *Entry, installID string) ([]byte, error) {
+	if e == nil {
+		return nil, fmt.Errorf("%w: no entry to hash", ErrExport)
+	}
+	leaf, err := entryLeaf(e, installID)
+	if err != nil {
+		return nil, err
+	}
+	return merkle.LeafHash(leaf), nil
+}
+
+// entryLeaf builds one chain entry's leaf bytes for the tree profile, the one rule treeLeaves and
+// LeafHash share.
+func entryLeaf(e *Entry, installID string) ([]byte, error) {
+	leaf, err := treeLeaf(claimContent(e), installID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: entry %d: %w", ErrExport, e.Seq, err)
+	}
+	return leaf, nil
 }
 
 // BuildTreeBundle assembles a bundle that discloses only the named entries, proving each belongs to

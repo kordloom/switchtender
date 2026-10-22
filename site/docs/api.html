@@ -882,6 +882,11 @@ either licensed or absent.</li>
 </tr>
 <tr>
 <td>GET</td>
+<td><code>/v1/audit/witness</code></td>
+<td>The install's standing with its push witness, admin only: the witness and its key id, the last countersigned beat, seq, and time, the queue, the last error, and the last refusal with its findings. 404 when the install is not enrolled.</td>
+</tr>
+<tr>
+<td>GET</td>
 <td><code>/metrics</code></td>
 <td>Prometheus series: run, fleet, queue-depth, and worker gauges, plus a run-duration histogram.</td>
 </tr>

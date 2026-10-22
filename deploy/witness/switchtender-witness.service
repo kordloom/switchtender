@@ -1,0 +1,74 @@
+# SwitchTender hosted witness, as a systemd service.
+#
+# README.md beside this file is the runbook, and it installs this unit. In short, as root:
+#
+#   useradd --system --home-dir /var/lib/switchtender-witness --shell /usr/sbin/nologin \
+#     switchtender-witness
+#   install -d -m 0700 -o root -g root /etc/switchtender-witness
+#   install -m 0600 -o root -g root switchtender-witness.env.example \
+#     /etc/switchtender-witness/switchtender-witness.env
+#   install -m 0644 switchtender-witness.service /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now switchtender-witness
+#
+# The state directory holds every enrolled install's memory, and it is what the hourly snapshot
+# copies to R2. The key directory holds witness-key.json, the witness signing key, which the first
+# start creates with mode 0600. The key lives outside the state directory so that no snapshot ever
+# carries it. Its only other copy is the owner's encrypted offline copy.
+#
+# The API listens on loopback, and cloudflared forwards witness.switchtender.com to it, so loopback
+# is reachable from the internet. The env file therefore sets SWITCHTENDER_WITNESS_TOKEN even though
+# the binary would serve an open API on a loopback address.
+
+[Unit]
+Description=SwitchTender hosted witness
+Documentation=https://switchtender.com/docs/witness
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=switchtender-witness
+Group=switchtender-witness
+EnvironmentFile=/etc/switchtender-witness/switchtender-witness.env
+ExecStart=/usr/local/bin/switchtender witness serve \
+  --listen 127.0.0.1:9440 \
+  --accept-enrollments \
+  --enrollment-policy licensed \
+  --state-dir /var/lib/switchtender-witness \
+  --key-dir /var/lib/switchtender-witness-key
+WorkingDirectory=/var/lib/switchtender-witness
+StateDirectory=switchtender-witness switchtender-witness-key
+StateDirectoryMode=0700
+UMask=0077
+CapabilityBoundingSet=
+AmbientCapabilities=
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+ProcSubset=pid
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+LimitCORE=0
+KillMode=mixed
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

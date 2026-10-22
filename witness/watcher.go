@@ -27,6 +27,9 @@ type Watcher struct {
 	state string
 	// id signs the checkpoint and pins its signer.
 	id identity.Identity
+	// retired are the keys the witness retired, whose signature the checkpoint may still carry for
+	// memory observed before each retired, until the next save signs it with id.
+	retired []memoryKey
 	// client fetches the feed.
 	client *http.Client
 }
@@ -51,12 +54,12 @@ func NewWatcher(server, statePath string, id identity.Identity, client *http.Cli
 func (w *Watcher) Server() string { return w.server }
 
 // CheckOnce runs one watch cycle, returning the checkpoint it now holds and the findings it
-// raised. The checkpoint's signer is pinned to this witness's key, so a replaced state file is
+// raised. The checkpoint's signer is pinned to this witness's keys, so a replaced state file is
 // refused rather than believed. When Save fails, the findings and the compared checkpoint are
 // returned with the error: the poll observed them, and a caller that dropped them because the
 // disk was full would lose the observation at the exact moment durability was already degraded.
 func (w *Watcher) CheckOnce(ctx context.Context) (*Checkpoint, []Finding, error) {
-	prev, err := Load(w.state, w.id.PublicKeyHex())
+	prev, err := loadMemory(w.state, w.id, w.retired)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -76,7 +79,7 @@ func (w *Watcher) CheckOnce(ctx context.Context) (*Checkpoint, []Finding, error)
 
 // Checkpoint returns the watcher's current signed memory, nil before the first successful watch.
 func (w *Watcher) Checkpoint() (*Checkpoint, error) {
-	return Load(w.state, w.id.PublicKeyHex())
+	return loadMemory(w.state, w.id, w.retired)
 }
 
 // feedBodyCap bounds how much of a feed answer the witness will read. A full answer of FeedLimit

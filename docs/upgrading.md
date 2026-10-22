@@ -40,8 +40,11 @@ once, where it reads the same producer identity the servers load. Run it with th
 the servers will use, since a server whose key names another install refuses to start. It verifies
 the audit chain, prints every run it would seal, and asks before it writes. Pass `--yes` to skip the
 question, which is for a run by hand and never for an entrypoint, a hook, or a recurring job. Then
-start the servers. Adopt runs once per install. If the start is refused on an install where adopt
-already ran, its record was removed from the chain, and adopt refuses to run again. Restore the
+start the servers. Adopt runs once per install. On an install enrolled with a witness, adopt asks
+the witness for the head it countersigned and refuses a chain that does not reach it, or a witness
+that does not answer. To adopt an install that no longer uses its witness, remove
+`witness-enrollment.json` first. If the start is refused on an install where adopt already ran, its
+record was removed from the chain, and adopt refuses to run again. Restore the
 database, audit chain included, from a copy taken before the upgrade, such as a copy of the SQLite
 file or a PostgreSQL dump. A backup file from `switchtender backup` holds neither runs nor the
 chain. A run v1.102.0 creates or finishes after adoption carries no seal and is refused when it
@@ -271,6 +274,15 @@ What to do: nothing, unless a tool of yours reads the chain or the decisions API
 the decider types it already knew. Comments act only for people who link a forge account, which
 needs `--forge-oauth` and `--public-url`. [What the evidence
 holds](pull-request-review.md#what-the-evidence-holds) has the details.
+
+## A license carrying add-ons needs this release
+
+A license can now list add-ons, such as the hosted witness a Team license buys, and its signature
+covers that list. A license carrying add-ons verifies only on this release or later. An earlier
+release does not read the list, so the signature it checks does not match, and the install runs
+Community with a line saying the license did not verify. A license without add-ons is signed over
+the same bytes as before and verifies on every release. Upgrade before you install a license that
+carries add-ons.
 
 ## Smaller changes
 

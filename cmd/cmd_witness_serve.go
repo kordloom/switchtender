@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -17,7 +18,6 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/jsonutil"
 	"github.com/kordloom/switchtender/internal/logutil"
 	"github.com/kordloom/switchtender/internal/util"
@@ -39,11 +39,23 @@ var (
 	witnessServeWebhook string
 	// witnessServeToken gates the read API. Preferred from the environment.
 	witnessServeToken string
+	// witnessAcceptEnrollments opens enrollment, making this a push witness.
+	witnessAcceptEnrollments bool
+	// witnessEnrollmentPolicy names the rule that decides whether an enrollment is entitled.
+	witnessEnrollmentPolicy string
+	// witnessMaxInstalls bounds how many installs one license may enroll.
+	witnessMaxInstalls int
+	// witnessNotifySlack lists the Slack incoming webhooks every finding is posted to.
+	witnessNotifySlack []string
 )
 
 // witnessTokenEnv is the environment variable the read token is taken from when the flag is unset.
 // An environment variable is preferred to a flag because a flag value shows in the host process list.
 const witnessTokenEnv = "SWITCHTENDER_WITNESS_TOKEN"
+
+// witnessSlackEnv is the environment variable a Slack webhook URL is taken from when --notify-slack
+// is not given. The URL is its own credential, and a flag value shows in the host process list.
+const witnessSlackEnv = "SWITCHTENDER_WITNESS_NOTIFY_SLACK"
 
 // witnessServeCmd runs the hosted witness: many servers watched from one process, with an API.
 var witnessServeCmd = &cobra.Command{
@@ -61,6 +73,22 @@ every finding durably, and serves what it has witnessed over HTTP:
                                              findings it has ever recorded
   GET /witness/servers/{key}/findings        that server's recorded findings
   GET /witness/findings                      every recorded finding
+
+With --accept-enrollments it is also a push witness. An enrolled install sends each beat with its
+tree root and a consistency proof, signed by its producer key, so it never has to expose a port.
+The witness verifies the proof from hashes alone, writes its memory, and only then countersigns:
+
+  POST /v1/enroll                            enroll an install, idempotent
+  POST /v1/installs/{key}/beats              push one beat, answered with two LoomSeal attestations
+  GET  /v1/installs/{key}/attestation        the signed statement for one install
+  GET  /v1/installs/{key}/findings           that install's refusals and notes
+  GET  /.well-known/loomseal.json            the witness's signed key list
+
+{key} is the install's producer key id, as its bundles print it. These routes are open: a push is
+authenticated by its signature, and the read token gates only the /witness routes. Under
+--enrollment-policy licensed an install enrolls with a license that includes the hosted witness,
+an Enterprise license or the Team add-on. Under open any signed enrollment is accepted, for a push
+witness on a private network.
 
 Independence is the point. Run this where the watched servers' operators have no hand: another
 team, another company, or a service. Publish the witness key id, and a relying party verifies any
@@ -92,6 +120,9 @@ var witnessVerifyPubkey string
 
 // init registers the hosted witness commands and their flags.
 func init() {
+	witnessServeCmd.Flags().StringArrayVar(&witnessNotifySlack, "notify-slack", nil,
+		"Slack incoming webhook URL that receives every finding as a message, repeatable. Prefer "+
+			witnessSlackEnv+", since a flag is visible in the process list.")
 	witnessServeCmd.Flags().StringArrayVar(&witnessWatch, "watch", nil,
 		"Base URL of a SwitchTender server to watch. Repeatable, at least one.")
 	witnessServeCmd.Flags().StringVar(&witnessStateDir, "state-dir", "switchtender-witness",
@@ -104,6 +135,13 @@ func init() {
 		"Directory holding the witness signing key. Defaults to the state directory.")
 	witnessServeCmd.Flags().StringVar(&witnessServeWebhook, "webhook", "",
 		"URL that receives every finding as a JSON POST.")
+	witnessServeCmd.Flags().BoolVar(&witnessAcceptEnrollments, "accept-enrollments", false,
+		"Accept enrollments from installs that push their own chain heads. --watch is then optional.")
+	witnessServeCmd.Flags().StringVar(&witnessEnrollmentPolicy, "enrollment-policy", policyLicensed,
+		"Who may enroll: licensed (a license that includes the hosted witness) or open (any signed "+
+			"enrollment).")
+	witnessServeCmd.Flags().IntVar(&witnessMaxInstalls, "max-installs-per-license",
+		witness.DefaultMaxInstalls, "How many installs one license may enroll.")
 	witnessServeCmd.Flags().StringVar(&witnessServeToken, "api-token", "",
 		"Bearer token required on every /witness route. Prefer "+witnessTokenEnv+", since a flag is "+
 			"visible in the process list. Required when --listen is not loopback, so a public witness "+
@@ -133,8 +171,9 @@ func listenIsLoopback(addr string) bool {
 
 // runWitnessServe validates the watch list, starts the service, and serves its API until stopped.
 func runWitnessServe(cmd *cobra.Command, _ []string) error {
-	if len(witnessWatch) == 0 {
-		return fmt.Errorf("--watch is required at least once")
+	if len(witnessWatch) == 0 && !witnessAcceptEnrollments {
+		return fmt.Errorf("--watch is required at least once, unless --accept-enrollments makes " +
+			"this a push witness")
 	}
 	for _, raw := range witnessWatch {
 		base, err := url.Parse(raw)
@@ -144,6 +183,17 @@ func runWitnessServe(cmd *cobra.Command, _ []string) error {
 	}
 	if witnessServeInterval < 10*time.Second {
 		return fmt.Errorf("--interval must be at least 10s, got %s", witnessServeInterval)
+	}
+	policy, err := enrollmentPolicy(witnessEnrollmentPolicy, time.Now)
+	if err != nil {
+		return err
+	}
+	if witnessMaxInstalls < 1 {
+		return fmt.Errorf("--max-installs-per-license must be at least 1, got %d", witnessMaxInstalls)
+	}
+	slackURLs, err := witnessSlackURLs(witnessNotifySlack, os.Getenv)
+	if err != nil {
+		return err
 	}
 	readToken := witnessServeToken
 	if readToken == "" {
@@ -165,10 +215,11 @@ func runWitnessServe(cmd *cobra.Command, _ []string) error {
 	if err := os.MkdirAll(keyDir, 0o750); err != nil {
 		return fmt.Errorf("witness key directory: %w", err)
 	}
-	id, err := audit.LoadWitnessIdentity(keyDir)
+	ring, err := witness.LoadKeyring(keyDir, witnessStateDir)
 	if err != nil {
 		return fmt.Errorf("load witness identity: %w", err)
 	}
+	id := ring.Current()
 
 	// The signal context is established first so Ctrl+C and SIGTERM actually reach the shutdown
 	// branch; cobra runs commands with a background context that no signal ever cancels.
@@ -181,20 +232,16 @@ func runWitnessServe(cmd *cobra.Command, _ []string) error {
 	}
 	client := &http.Client{Timeout: 30 * time.Second}
 	var opts []witness.ServiceOption
-	if witnessServeWebhook != "" {
-		opts = append(opts, witness.WithServiceNotify(func(server string, f witness.Finding) {
-			// The service's findings record is the durable copy, so a lost POST does not lose the
-			// finding from the API. But the operator wired a webhook to be paged on tampering, so a
-			// delivery failure must be visible rather than swallowed: log it. postWitnessFinding does
-			// not log on its own, and the earlier comment that claimed it did was wrong.
-			if derr := postWitnessFinding(ctx, client, witnessServeWebhook, server, f); derr != nil {
-				log.Warn("witness: webhook delivery failed",
-					zap.String("server", server), zap.String("finding", f.Kind), zap.Error(derr))
-			}
-		}))
+	if notify := witnessNotifier(ctx, client, log, slackURLs); notify != nil {
+		opts = append(opts, witness.WithServiceNotify(notify))
 	}
 	if readToken != "" {
 		opts = append(opts, witness.WithServiceReadToken(readToken))
+	}
+	opts = append(opts, witness.WithKeyring(ring))
+	if witnessAcceptEnrollments {
+		opts = append(opts, witness.WithAcceptEnrollments(witnessMaxInstalls),
+			witness.WithEnrollmentPolicy(policy))
 	}
 	svc, err := witness.NewService(id, witnessStateDir, witnessServeInterval, witnessWatch,
 		log, client, opts...)
@@ -208,6 +255,19 @@ func runWitnessServe(cmd *cobra.Command, _ []string) error {
 
 	fmt.Fprintf(os.Stderr, "witness: watching %d %s, state %s, key %s\n", len(witnessWatch),
 		util.Plural(len(witnessWatch), "server", "servers"), witnessStateDir, id.KeyID())
+	if keys, held := len(ring.Keys()), len(ring.Held()); keys > 1 {
+		fmt.Fprintf(os.Stderr, "witness: the key list names %d keys, and %d retired %s held to "+
+			"endorse it\n", keys, held, util.Plural(held, "key is", "keys are"))
+	}
+	if witnessAcceptEnrollments {
+		fmt.Fprintf(os.Stderr, "witness: accepting enrollments under the %s policy, at most %d %s "+
+			"per license\n", witnessEnrollmentPolicy, witnessMaxInstalls,
+			util.Plural(witnessMaxInstalls, "install", "installs"))
+	}
+	if len(slackURLs) > 0 {
+		fmt.Fprintf(os.Stderr, "witness: findings go to %d Slack %s\n", len(slackURLs),
+			util.Plural(len(slackURLs), "webhook", "webhooks"))
+	}
 	access := "open"
 	if readToken != "" {
 		access = "token required"
@@ -231,6 +291,59 @@ func runWitnessServe(cmd *cobra.Command, _ []string) error {
 		defer cancel()
 		_ = httpSrv.Shutdown(shutdownCtx)
 		return nil
+	}
+}
+
+// witnessSlackURLs returns the Slack webhook URLs findings are posted to: every --notify-slack value,
+// or the URL in witnessSlackEnv when the flag is not given. A value that is not an http or https URL
+// is refused without being quoted, since it may be a credential.
+func witnessSlackURLs(flagged []string, getenv func(string) string) ([]string, error) {
+	urls := slices.Clone(flagged)
+	if len(urls) == 0 {
+		if v := strings.TrimSpace(getenv(witnessSlackEnv)); v != "" {
+			urls = []string{v}
+		}
+	}
+	for _, raw := range urls {
+		u, err := url.Parse(raw)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return nil, fmt.Errorf("--notify-slack or %s holds a value that is not an http or https "+
+				"URL", witnessSlackEnv)
+		}
+	}
+	return urls, nil
+}
+
+// witnessNotifier returns the function the service hands every finding to, or nil when no channel
+// is configured. The generic webhook is posted in line, as it always was. Slack is queued and
+// posted by a goroutine that runs until ctx ends, so a push answer never waits on Slack.
+func witnessNotifier(ctx context.Context, client *http.Client, log *zap.Logger,
+	slackURLs []string) func(string, witness.Finding) {
+	var notifiers []func(string, witness.Finding)
+	if witnessServeWebhook != "" {
+		notifiers = append(notifiers, func(server string, f witness.Finding) {
+			// The service's findings record is the durable copy, so a lost POST does not lose the
+			// finding from the API. But the operator wired a webhook to be paged on tampering, so a
+			// delivery failure must be visible rather than swallowed: log it. postWitnessFinding does
+			// not log on its own, and the earlier comment that claimed it did was wrong.
+			if derr := postWitnessFinding(ctx, client, witnessServeWebhook, server, f); derr != nil {
+				log.Warn("witness: webhook delivery failed",
+					zap.String("server", server), zap.String("finding", f.Kind), zap.Error(derr))
+			}
+		})
+	}
+	if len(slackURLs) > 0 {
+		slack := newWitnessSlack(slackURLs, client, witnessSlackRetryWait, log)
+		go slack.run(ctx)
+		notifiers = append(notifiers, slack.notify)
+	}
+	if len(notifiers) == 0 {
+		return nil
+	}
+	return func(server string, f witness.Finding) {
+		for _, fn := range notifiers {
+			fn(server, f)
+		}
 	}
 }
 
