@@ -306,15 +306,16 @@ func Allow(f Feature) error {
 }
 
 // allowAt is Allow against an explicit license and clock, which is what makes the rule testable.
+//
+// The license leads each sentence and the feature follows it, because "is required for" agrees with
+// every gate name. Leading with the name put a singular verb after plural ones, so a Pro gate read
+// "Deny rules and risk and reversibility floors requires a Pro license".
 func allowAt(l *License, f Feature, now time.Time) error {
-	name := featureNames[f]
-	if name == "" {
-		name = string(f)
-	}
+	name := gateName(f)
 	need := needFor(f)
 	if l == nil {
-		return fmt.Errorf("%s requires %s; this install runs Community. "+
-			"https://switchtender.com/pricing", name, need)
+		return fmt.Errorf("%s is required for %s; this install runs Community. "+
+			"https://switchtender.com/pricing", capitalize(need), name)
 	}
 	// Coverage is settled before the clock, and the order is the whole meaning of ErrLapsed.
 	//
@@ -325,14 +326,14 @@ func allowAt(l *License, f Feature, now time.Time) error {
 	// policy engine and was handed it. An expired license would then buy strictly more than the
 	// same license bought while it was live.
 	if !l.Covers(f) {
-		return fmt.Errorf("%s requires %s; this install's %s license does not "+
+		return fmt.Errorf("%s is required for %s; this install's %s license does not "+
 			"include it. https://switchtender.com/pricing",
-			name, need, tierLabel(normalizeTier(l.Claims.Tier)))
+			capitalize(need), name, tierLabel(normalizeTier(l.Claims.Tier)))
 	}
 	if l.Expired(now) {
-		return fmt.Errorf("%w: %s requires %s and this install's license for %s "+
+		return fmt.Errorf("%w: %s is required for %s and this install's license for %s "+
 			"lapsed on %s; everything Community keeps working. https://switchtender.com/pricing",
-			ErrLapsed, name, need, l.Claims.Org, l.Claims.Expires)
+			ErrLapsed, need, name, l.Claims.Org, l.Claims.Expires)
 	}
 	return nil
 }
@@ -387,7 +388,26 @@ func allowPoliciesAt(l *License, total int, now time.Time) error {
 		total, proPolicyCap)
 }
 
-// featureNames are the human names gates print.
+// gateName is the name a gate error prints for a feature, lowercased to sit after "required for".
+// No name starts with a proper noun, so lowercasing the first letter never misspells one. A feature
+// with no name prints its identifier.
+func gateName(f Feature) string {
+	name, ok := featureNames[f]
+	if !ok || name == "" {
+		return string(f)
+	}
+	return strings.ToLower(name[:1]) + name[1:]
+}
+
+// capitalize returns s with its first letter upper case, so a requirement can open a sentence.
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// featureNames are the human names gates print, written as they would open a sentence.
 var featureNames = map[Feature]string{
 	FeatureSSO:           "Directory sign-in (OIDC, SAML, LDAP, JWT)",
 	FeaturePolicyFull:    "The full policy engine",

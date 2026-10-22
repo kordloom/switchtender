@@ -534,7 +534,7 @@ test("the Audit page's Change register link opens the register page", async ({ p
   await expect(page).toHaveURL(/\/ui\/audit\/register$/);
   await expect(page.locator("body")).toHaveAttribute("data-page", "register");
   const status = page.locator("#status");
-  await expect(status).toContainText("requires a Team license");
+  await expect(status).toContainText("A Team license is required");
   await expect(status.getByRole("link", { name: "See what Team includes" }))
     .toHaveAttribute("href", "https://switchtender.com/pricing");
   await expect(page.locator("#register-table")).toBeHidden();

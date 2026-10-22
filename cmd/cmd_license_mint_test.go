@@ -3,8 +3,11 @@ package cmd
 import (
 	"crypto/ed25519"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -285,5 +288,49 @@ func TestMintClaimsCarryTheAddons(t *testing.T) {
 				t.Errorf("mintClaims() = %+v, want the flags it was given", c)
 			}
 		})
+	}
+}
+
+// TestDocumentedMintsNameAPublishedBand holds every mint command the operator documents to a band
+// the mint command signs. The witness runbook minted its test license at the 250 band after that
+// band was retired, so the step it documents was refused at the one moment it was followed.
+func TestDocumentedMintsNameAPublishedBand(t *testing.T) {
+	t.Parallel()
+	hosts := regexp.MustCompile(`--hosts[ =]"?([A-Za-z0-9]+)`)
+	var mints int
+	for _, dir := range []string{"../deploy", "../docs"} {
+		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || filepath.Ext(path) != ".md" {
+				return err
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			// A continued command is joined first, so a band on the line after the mint is read.
+			text := strings.ReplaceAll(string(raw), "\\\n", " ")
+			for line := range strings.Lines(text) {
+				if !strings.Contains(line, "license mint") {
+					continue
+				}
+				mints++
+				m := hosts.FindStringSubmatch(line)
+				if m == nil {
+					t.Errorf("%s: a mint names no band: %s", path, strings.TrimSpace(line))
+					continue
+				}
+				if !slices.Contains(mintBands, m[1]) {
+					t.Errorf("%s: a mint names band %q, which is not one of %v", path, m[1],
+						mintBands)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("walk %s: %v", dir, err)
+		}
+	}
+	if mints == 0 {
+		t.Fatal("no documented mint command was found, so this test checks nothing")
 	}
 }

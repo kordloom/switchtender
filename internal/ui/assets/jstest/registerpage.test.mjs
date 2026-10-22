@@ -16,8 +16,8 @@ const REGISTER_JSON = (req) => req.path === "/v1/audit/register" && req.params.g
 const REGISTER_DOC = (req) => req.path === "/v1/audit/register" && !req.params.has("format");
 
 // LICENSING is the server's refusal on a Community install, word for word.
-const LICENSING = "The period change register requires a Team license; this install runs Community. " +
-	"https://switchtender.com/pricing";
+const LICENSING = "A Team license is required for the period change register; this install runs " +
+	"Community. https://switchtender.com/pricing";
 
 // row builds one register row the way the server encodes it, with defaults for what a test does
 // not care about.
@@ -136,7 +136,7 @@ test("a licensing refusal with the pricing link becomes the Team offer", async (
 	const page = await openRegister(reply({ error: LICENSING }, { status: 403 }));
 	const doc = page.document;
 	const status = doc.getElementById("status");
-	assert.match(status.textContent, /requires a Team license/);
+	assert.match(status.textContent, /A Team license is required/);
 	const link = status.querySelector("a");
 	assert.ok(link, "the offer carries no link");
 	assert.equal(link.textContent, "See what Team includes");

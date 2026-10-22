@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -530,5 +531,46 @@ func TestCompleteContextCanceled(t *testing.T) {
 	defer cancel()
 	if _, err := newOllama(srv.URL, "m").Complete(ctx, "sys", "user"); err == nil {
 		t.Fatal("Complete() error = nil, want context cancellation")
+	}
+}
+
+// TestEachClientOwnsItsTransport pins that every provider's client carries a transport of its own.
+// On the shared default transport, anything in the process closing idle connections, as each
+// httptest.Server.Close does, could close the connection a reply with no body was pooled on before
+// the call received it, so TestOpenAIErrorPaths failed now and then with "http:
+// CloseIdleConnections called" in place of the 302 it asserts.
+func TestEachClientOwnsItsTransport(t *testing.T) {
+	t.Parallel()
+	ant, err := newAnthropic("sk-test", "", "")
+	if err != nil {
+		t.Fatalf("newAnthropic() error = %v", err)
+	}
+	oai, err := newOpenAI("sk-test", "m", "")
+	if err != nil {
+		t.Fatalf("newOpenAI() error = %v", err)
+	}
+	tests := []struct {
+		Name   string
+		Client *http.Client
+	}{{ // Test 0: Anthropic.
+		Name: "anthropic", Client: ant.client,
+	}, { // Test 1: OpenAI.
+		Name: "openai", Client: oai.client,
+	}, { // Test 2: Ollama.
+		Name: "ollama", Client: newOllama("", "").client,
+	}, { // Test 3: A second client of the same provider does not share the first one's transport.
+		Name: "second openai", Client: newClient(),
+	}}
+	seen := map[http.RoundTripper]string{}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			if test.Client.Transport == nil || test.Client.Transport == http.DefaultTransport {
+				t.Fatalf("%s: the client uses the shared default transport", test.Name)
+			}
+			if other, ok := seen[test.Client.Transport]; ok {
+				t.Errorf("%s: the client shares its transport with %s", test.Name, other)
+			}
+			seen[test.Client.Transport] = test.Name
+		})
 	}
 }

@@ -163,7 +163,8 @@ func TestHostedWitnessAddonCoverage(t *testing.T) {
 		WantErr     string
 	}{{ // Test 0: Community is refused, and told both ways to buy it.
 		Name: "community", License: nil, Feature: FeatureHostedWitness,
-		WantErr: "requires an Enterprise license or the Team add-on; this install runs Community",
+		WantErr: "An Enterprise license or the Team add-on is required for the hosted witness; this " +
+			"install runs Community",
 	}, { // Test 1: Team without the add-on is refused.
 		Name: "team", License: lic(TierTeam, live), Feature: FeatureHostedWitness,
 		WantErr: "this install's Team license does not include it",
@@ -190,7 +191,8 @@ func TestHostedWitnessAddonCoverage(t *testing.T) {
 		Feature: FeatureHostedWitness, WantErr: "does not include it",
 	}, { // Test 9: The add-on grants only its own feature.
 		Name: "add-on other feature", License: lic(TierPro, live, AddonHostedWitness),
-		Feature: FeaturePolicyFull, WantErr: "requires a Team license; this install's Pro license",
+		Feature: FeaturePolicyFull,
+		WantErr: "A Team license is required for the full policy engine; this install's Pro license",
 	}, { // Test 10: A lapsed Team license with the add-on names the lapse.
 		Name: "lapsed team add-on", License: lic(TierTeam, lapsed, AddonHostedWitness),
 		Feature: FeatureHostedWitness, WantLapsed: true, WantErr: "lapsed on",

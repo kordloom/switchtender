@@ -27,11 +27,18 @@ const errorBodyCap = 2048
 // is incomplete instead of treating a mid-sentence stop as the whole reply.
 const truncationNote = "\n[reply truncated at the token limit]"
 
-// newClient returns the HTTP client the providers share: a hard timeout, and no redirect
-// following, so a misconfigured or hostile endpoint cannot replay credentials elsewhere.
+// newClient returns the HTTP client a provider uses: a hard timeout, and no redirect following, so
+// a misconfigured or hostile endpoint cannot replay credentials elsewhere.
+//
+// Each client owns a clone of the default transport rather than sharing it. Anything in the process
+// that closes the shared transport's idle connections, as httptest.Server.Close does, can otherwise
+// close a connection a provider call is still being answered on: a reply with no body is pooled as
+// idle before the call receives it, and the call then fails with "http: CloseIdleConnections
+// called" in place of the reply.
 func newClient() *http.Client {
 	return &http.Client{
-		Timeout: aiTimeout,
+		Transport: http.DefaultTransport.(*http.Transport).Clone(),
+		Timeout:   aiTimeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},

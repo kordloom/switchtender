@@ -103,18 +103,19 @@ func TestAllowRulesAsksTeamBeforePro(t *testing.T) {
 	}{{ // Test 0: A plain hold on Community.
 		Set: []*Policy{{Tool: "bash"}},
 	}, { // Test 1: A risk floor on Community names Pro.
-		Set: []*Policy{{MinRisk: run.RiskHigh}}, WantText: "requires a Pro license",
+		Set: []*Policy{{MinRisk: run.RiskHigh}}, WantText: "A Pro license is required",
 	}, { // Test 2: A deny rule beside a distinct-approver rule on Community names Team.
 		Set:      []*Policy{{Effect: EffectDeny}, {RequireDistinctApprover: true}},
-		WantText: "requires a Team license",
+		WantText: "A Team license is required",
 	}, { // Test 3: Every Pro rule on a live Pro license.
 		License: ladderLicense(license.TierPro, 24*time.Hour),
 		Set: []*Policy{{Effect: EffectDeny}, {MinRisk: run.RiskHigh},
 			{Reversibility: run.Irreversible}},
 	}, { // Test 4: A distinct-approver rule on a live Pro license names Team and Pro.
-		License:  ladderLicense(license.TierPro, 24*time.Hour),
-		Set:      []*Policy{{RequireDistinctApprover: true}},
-		WantText: "Team license; this install's Pro license does not include it",
+		License: ladderLicense(license.TierPro, 24*time.Hour),
+		Set:     []*Policy{{RequireDistinctApprover: true}},
+		WantText: "Team license is required for the full policy engine; this install's Pro license " +
+			"does not include it",
 	}, { // Test 5: A deny rule on a lapsed Pro license is a lapse.
 		License: ladderLicense(license.TierPro, -time.Hour),
 		Set:     []*Policy{{Effect: EffectDeny}}, WantText: "lapsed", WantLapsed: true,
@@ -122,7 +123,7 @@ func TestAllowRulesAsksTeamBeforePro(t *testing.T) {
 		// account scoping.
 		License:  ladderLicense(license.TierPro, -time.Hour),
 		Set:      []*Policy{{Effect: EffectDeny}, {Account: "team-a"}},
-		WantText: "requires a Team license",
+		WantText: "A Team license is required",
 	}, { // Test 7: The same set on a lapsed Team license is a lapse.
 		License: ladderLicense(license.TierTeam, -time.Hour),
 		Set:     []*Policy{{Effect: EffectDeny}, {Account: "team-a"}}, WantText: "lapsed",

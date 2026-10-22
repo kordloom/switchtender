@@ -19,9 +19,9 @@ operator, no separate task engine.
 
 One caveat on the second half of that sentence. SQLite is free forever, but creating a new
 PostgreSQL database is a Team feature: a Community or Pro install pointed at an empty PostgreSQL
-refuses to start and says `Initializing a new PostgreSQL database requires a Team license`. Opening
-a PostgreSQL database that already holds the schema is never gated, in any license state, so a
-lapsed license never locks a server out of its own data.
+refuses to start and says `A Team license is required for initializing a new PostgreSQL database`.
+Opening a PostgreSQL database that already holds the schema is never gated, in any license state,
+so a lapsed license never locks a server out of its own data.
 
 ## What is a dry run?
 

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
+	"github.com/kordloom/switchtender/internal/binding"
 	"github.com/kordloom/switchtender/internal/dossier"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/scrub"
@@ -234,6 +236,57 @@ func TestRegisterJSONAndDocumentAgree(t *testing.T) {
 			}
 			if !strings.Contains(doc, html.EscapeString(notice)) {
 				t.Errorf("%s: the document does not carry the JSON form's notice %q", test.Name, notice)
+			}
+		})
+	}
+}
+
+// TestRegisterHoldsApprovalsToTheirSeals pins that both forms of the register state the seal check
+// on every approval they list. Dropping the check from the handler printed each approval as plain,
+// which reads to an auditor as checked and holding, and no test noticed. An install with no binding
+// key marks the approval unchecked, and one with a key finds that the row the approval released
+// carries no seal, which also proves the server's key reaches the check.
+func TestRegisterHoldsApprovalsToTheirSeals(t *testing.T) {
+	t.Parallel()
+	key, err := binding.DeriveKey(bytes.Repeat([]byte{7}, 32))
+	if err != nil {
+		t.Fatalf("DeriveKey() error = %v", err)
+	}
+	tests := []struct {
+		// Key is the install's binding key, nil for an install that holds none.
+		Key *binding.Key
+		// WantDecision is the approved row's decision text.
+		WantDecision string
+	}{{ // Test 0: No key marks the approval unchecked.
+		WantDecision: "Approved by bob, seal unchecked",
+	}, { // Test 1: A key finds the released row carries no seal.
+		Key: key, WantDecision: "Approved by bob, unsealed",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			runs, audits := seedRegisterKinds(t)
+			opts := []Option{WithAudit(audits)}
+			if test.Key != nil {
+				opts = append(opts, WithBinder(test.Key))
+			}
+			handler := New(runs, &fakeSubmitter{}, zap.NewNop(), opts...).Handler()
+			reg := decodeRegister(t, getRegister(handler, registerPeriod+"&format=json", ""))
+			var got string
+			for _, row := range reg.Rows {
+				if row.Run == "run_approved" {
+					got = row.Decision
+				}
+			}
+			if got != test.WantDecision {
+				t.Errorf("JSON decision = %q, want %q", got, test.WantDecision)
+			}
+			rec := getRegister(handler, registerPeriod, "")
+			if rec.Code != http.StatusOK {
+				t.Fatalf("register document = %d, want 200", rec.Code)
+			}
+			if !strings.Contains(rec.Body.String(), html.EscapeString(test.WantDecision)) {
+				t.Errorf("the register document does not read %q", test.WantDecision)
 			}
 		})
 	}

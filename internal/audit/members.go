@@ -43,8 +43,12 @@ func memberSet(names ...string) map[string]bool {
 // checkExactMembers parses the signed bytes as the canonical tree and refuses any object member
 // outside the exact set allowed at its position. It runs over the same bytes the signature and the
 // leaf recomputation read, so a value a verdict reads is one this has already approved by its exact
-// name. Disclosures and attestations are not descended into: this product refuses any bundle that
-// carries them, by name and with its own message, so there is nothing of theirs a verdict ever reads.
+// name. Disclosures and attestations are not descended into here. A claim's disclosures and the
+// bundle's head attestations are refused by name, each with its own message, so a verdict reads
+// nothing of theirs. A claim attestation is read member by member where it is verified:
+// attestationObject refuses any member outside the LoomSeal set, an attestation of any role but
+// witness is refused, and a witness attestation is verified against the link of the claim it rides
+// on before a verdict counts it.
 func checkExactMembers(signed []byte) error {
 	value, err := jcs.Parse(signed)
 	if err != nil {
@@ -84,8 +88,8 @@ func checkExactMembers(signed []byte) error {
 }
 
 // exactClaims checks every claim object and the sub-objects a verdict reads from it. The payload is
-// open and is not descended into; disclosures and attestations are refused elsewhere and are not
-// descended into here.
+// open and is not descended into. Neither are disclosures, which are refused elsewhere, nor
+// attestations, whose members are checked where a witness attestation is verified.
 func exactClaims(root map[string]any) error {
 	claims, ok := root["claims"].([]any)
 	if !ok {

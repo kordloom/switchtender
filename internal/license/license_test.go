@@ -363,3 +363,80 @@ func TestARetiredBandStillVerifies(t *testing.T) {
 		})
 	}
 }
+
+// TestGateSentenceAgreesForEveryGate walks every gated feature through each refusal a gate prints,
+// on Community, on a license that does not include it, and on a lapsed license that did, and fails
+// when any reads "<name> requires". Leading with the name put a singular verb after the plural
+// gate names, so the deny-rules gate read "Deny rules and risk and reversibility floors requires a
+// Pro license". The deny-rules sentences are pinned whole.
+func TestGateSentenceAgreesForEveryGate(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
+	live, lapsed := "2027-09-01T00:00:00Z", "2026-10-01T00:00:00Z"
+	lic := func(tier, expires string) *License {
+		return &License{Claims: Claims{Tier: tier, Org: "Acme", Expires: expires}}
+	}
+	const pricing = " https://switchtender.com/pricing"
+	// gateCase is one refusal of one gate.
+	type gateCase struct {
+		// State names the license state: community, below, or lapsed.
+		State string
+		// Feature is the gate asked about.
+		Feature Feature
+		// License is the license in force, nil for Community.
+		License *License
+		// WantText is the whole refusal, empty when only the agreement is checked.
+		WantText string
+	}
+	var tests []gateCase
+	for f := range featureTier {
+		// A Pro feature has no live license below it but one naming a tier this build never sold.
+		under := lic(TierPro, live)
+		if minTierFor(f) == TierPro {
+			under = lic("platinum", live)
+		}
+		tests = append(tests, gateCase{State: "community", Feature: f},
+			gateCase{State: "below", Feature: f, License: under},
+			gateCase{State: "lapsed", Feature: f, License: lic(minTierFor(f), lapsed)})
+	}
+	for i, test := range tests {
+		if test.Feature != FeaturePolicyRules {
+			continue
+		}
+		switch test.State {
+		case "community":
+			tests[i].WantText = "A Pro license is required for deny rules and risk and " +
+				"reversibility floors; this install runs Community." + pricing
+		case "below":
+			tests[i].WantText = "A Pro license is required for deny rules and risk and " +
+				"reversibility floors; this install's platinum license does not include it." + pricing
+		case "lapsed":
+			tests[i].WantText = "license term lapsed: a Pro license is required for deny rules and " +
+				"risk and reversibility floors and this install's license for Acme lapsed on " +
+				lapsed + "; everything Community keeps working." + pricing
+		}
+	}
+	for _, test := range tests {
+		t.Run(fmt.Sprintf("%s %s", test.Feature, test.State), func(t *testing.T) {
+			t.Parallel()
+			name, ok := featureNames[test.Feature]
+			if !ok {
+				t.Fatalf("gate %q has no name, so its refusal prints the identifier", test.Feature)
+			}
+			err := allowAt(test.License, test.Feature, now)
+			if err == nil {
+				t.Fatal("allowAt() = nil, want a refusal")
+			}
+			got := err.Error()
+			if strings.Contains(strings.ToLower(got), strings.ToLower(name)+" requires") {
+				t.Errorf("refusal reads %q, a verb that does not agree with every gate name", got)
+			}
+			if want := " is required for " + gateName(test.Feature); !strings.Contains(got, want) {
+				t.Errorf("refusal = %q, want it to contain %q", got, want)
+			}
+			if test.WantText != "" && got != test.WantText {
+				t.Errorf("refusal = %q, want %q", got, test.WantText)
+			}
+		})
+	}
+}
