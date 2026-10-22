@@ -38,9 +38,13 @@ type Feature string
 const (
 	// FeatureSSO is directory sign-in: OIDC, SAML, LDAP, and JWT.
 	FeatureSSO Feature = "sso"
-	// FeaturePolicyFull is the full policy engine: deny rules, risk floors, actor scoping, and
-	// distinct-approver separation of duties. One require-approval policy stays Community.
+	// FeaturePolicyFull is the full policy engine: Rego policies, distinct-approver separation of
+	// duties, and rules scoped to an actor, an actor kind, or an account. One require-approval
+	// policy stays Community, and an exemption is free on every tier.
 	FeaturePolicyFull Feature = "policy-full"
+	// FeaturePolicyRules is the set of rules Pro adds to a plain hold: deny rules, risk floors, and
+	// reversibility floors.
+	FeaturePolicyRules Feature = "policy-rules"
 	// FeatureRegister is the period change register, the SOC 2 / ISO evidence export. Per-run
 	// dossiers, receipts, anchoring, and verification stay Community: proofs are free, the
 	// compliance packaging is paid.
@@ -65,7 +69,8 @@ type Claims struct {
 	// Tier is pro, team, or enterprise. Licenses minted before Pro existed carry team, and an
 	// empty tier is read as team so no issued license is ever downgraded by a build upgrade.
 	Tier string `json:"tier"`
-	// Hosts is the self-reported band: "250", "500", "1000", or "unlimited". Informational; nothing counts.
+	// Hosts is the self-reported band: "500", "1000", "2500", or "unlimited". Informational; nothing
+	// counts, so a license minted at the retired "250" band still verifies.
 	Hosts string `json:"hosts,omitempty"`
 	// Issued and Expires bound the term, RFC 3339.
 	Issued  string `json:"issued"`
@@ -129,6 +134,7 @@ func normalizeTier(tier string) string {
 var featureTier = map[Feature]string{
 	FeatureSSO:          TierPro,
 	FeaturePolicyFull:   TierTeam,
+	FeaturePolicyRules:  TierPro,
 	FeatureRegister:     TierTeam,
 	FeatureWorkers:      TierTeam,
 	FeaturePostgresInit: TierTeam,
@@ -336,6 +342,7 @@ func allowPoliciesAt(l *License, total int, now time.Time) error {
 var featureNames = map[Feature]string{
 	FeatureSSO:          "Directory sign-in (OIDC, SAML, LDAP, JWT)",
 	FeaturePolicyFull:   "The full policy engine",
+	FeaturePolicyRules:  "Deny rules and risk and reversibility floors",
 	FeatureRegister:     "The period change register",
 	FeatureWorkers:      "Running distributed workers",
 	FeaturePostgresInit: "Initializing a new PostgreSQL database",

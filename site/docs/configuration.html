@@ -68,7 +68,7 @@
 <p>SwitchTender is one binary with subcommands. This page lists every command, flag, and environment
 variable.</p>
 <h2 id="licensed-features">Licensed features</h2>
-<p>Almost everything on this page runs on Community, which needs no license. Six features are licensed,
+<p>Almost everything on this page runs on Community, which needs no license. Seven features are licensed,
 and separately an install is capped on how many approval policies it holds at once. A flag or request
 that turns on a licensed feature is refused outright rather than quietly ignored, so an install never
 believes it has a control it does not have.</p>
@@ -87,9 +87,14 @@ believes it has a control it does not have.</p>
 <td>Any <code>--oidc-*</code>, <code>--saml-*</code>, <code>--ldap-*</code>, or <code>--jwt-*</code> flag. <code>serve</code> refuses to start with one set and no license.</td>
 </tr>
 <tr>
-<td>The full policy engine: deny rules, risk and reversibility floors, actor scoping, distinct-approver separation of duties, and Rego policies</td>
-<td>Team</td>
+<td>Deny rules and risk and reversibility floors</td>
+<td>Pro</td>
 <td>Creating a policy that uses one. A single require-approval policy or one exemption stays Community.</td>
+</tr>
+<tr>
+<td>The full policy engine: actor and account scoping, distinct-approver separation of duties, and Rego policies</td>
+<td>Team</td>
+<td>Creating a policy that uses one.</td>
 </tr>
 <tr>
 <td>More approval policies at once</td>
@@ -535,7 +540,7 @@ that variable is unset.</p>
 <tr>
 <td><code>--min-free-mib</code></td>
 <td><code>256</code></td>
-<td>Free space, in MiB, on a SQLite database's disk below which new runs are refused with 503 and <code>/readyz</code> reports degraded. Runs already admitted finish. The default is room for four runs at the 64 MiB log cap, so raise it with <code>--workers</code>. 0 turns it off. A PostgreSQL server has no floor.</td>
+<td>Free space, in MiB, on a SQLite database's disk below which new runs are refused with 503 and <code>/readyz</code> reports degraded. Runs already admitted finish. The default is room for four runs at the 64 MiB log cap, which matches the default <code>--workers</code> of 4, so raise it by 64 MiB for each concurrent run you add. 0 turns it off. A PostgreSQL server has no floor.</td>
 </tr>
 <tr>
 <td><code>--max-shards</code></td>

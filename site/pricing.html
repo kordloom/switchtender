@@ -252,10 +252,12 @@
 						<div class="tier-payoff">Community gives you the built-in hold on agent runs and one rule of your own, and one rule is one sentence about your whole estate. Pro is for when production needs a rule of its own, and people should sign in from the directory you already run. <b>A lapsed license takes nothing</b>: sign-in falls back to local accounts, and your data, evidence, and every Community feature keep working.</div>
 						<p class="tier-inherit">Everything in Community, plus:</p>
 						<ul class="tier-list">
-							<li><b>Five approval policies</b> instead of one, so production, Terraform, and a risky command can each have a rule of their own where one rule has to choose. Deny rules, risk and reversibility floors, separation of duties, and agent scoping are the full engine, in Team</li>
+							<li><b>Five approval policies</b> instead of one, so production, Terraform, and a risky command can each have a rule of their own where one rule has to choose</li>
+							<li><b>Deny rules and risk and reversibility floors</b>: refuse a change outright, or hold it when its risk or how hard it is to undo crosses a floor you set</li>
 							<li><b>Directory sign-in</b>: OIDC, SAML, LDAP, and JWT, so accounts come from the directory you already run</li>
 							<li><b>Email support</b>: an engineer's first response within two business days. Clocks are <a href="/terms#support" style="color: var(--accent);">defined in the terms</a></li>
 						</ul>
+						<p class="fineprint" style="margin-top:12px;">Pro stops where the organization starts: an approver who is not the requester, policy as code in Rego, rules scoped to one agent or actor, the change register, and HA or workers are Team.</p>
 					</div>
 				</article>
 
@@ -263,9 +265,9 @@
 					<div class="tier-head">
 						<div class="tier-name">Team</div>
 						<p class="tier-for">Community runs it. Team governs it.</p>
-						<div class="tier-price"><b>$9,900</b><span class="cadence">per year, flat per org</span></div>
-						<p class="tier-sub">By fleet band: <b>$9,900</b> to 250 hosts &middot; <b>$18,000</b> to 500 &middot; <b>$36,000</b> to 1,000 &middot; <b>$54,000</b> unlimited. Self-reported at renewal: no telemetry, no seat counting, no usage audit.</p>
-						<a class="btn" href="mailto:licensing@switchtender.com?subject=SwitchTender%20Team%20trial&body=Org%20name%3A%0AFleet%20band%20(250%2F500%2F1000%2Funlimited)%3A%0AComing%20from%20(AWX%2FAAP%2FSemaphore%2FRundeck%2Fother)%3A%0A">Start a 30-day trial</a>
+						<div class="tier-price"><b>$7,500</b><span class="cadence">per year, flat per org</span></div>
+						<p class="tier-sub">By fleet band: <b>$7,500</b> to 500 hosts &middot; <b>$15,000</b> to 1,000 &middot; <b>$30,000</b> to 2,500 &middot; <b>$45,000</b> unlimited. Self-reported at renewal: no telemetry, no seat counting, no usage audit.</p>
+						<a class="btn" href="mailto:licensing@switchtender.com?subject=SwitchTender%20Team%20trial&body=Org%20name%3A%0AFleet%20band%20(500%2F1000%2F2500%2Funlimited)%3A%0AComing%20from%20(AWX%2FAAP%2FSemaphore%2FRundeck%2Fother)%3A%0A">Start a 30-day trial</a>
 						<a class="ghost" href="mailto:licensing@switchtender.com?subject=Buy%20SwitchTender%20Team">Buy Team</a>
 					</div>
 					<div class="tier-body">
@@ -273,7 +275,7 @@
 						<p class="tier-inherit">Everything in Pro, plus:</p>
 						<ul class="tier-list">
 							<li><b>The period change register</b>: evidence relevant to SOC 2 CC8.1 and ISO 27001 A.8.32, assembled from your real run history</li>
-							<li><b>The full policy engine</b>: unlimited policies, outright denials, risk floors, separation of duties, agent-scoped rules, and Rego (Open Policy Agent) policies</li>
+							<li><b>The full policy engine</b>: unlimited policies, Rego (Open Policy Agent) policies, separation of duties, and rules scoped to an actor or agent</li>
 							<li><b>Creating a new PostgreSQL schema</b>, the shared database active-active <b>HA</b> runs on. Opening one that already exists is never gated</li>
 							<li><b>Distributed workers</b> and queues, for fleets one machine cannot reach</li>
 							<li><b>One-click drift reconcile</b>, from detection to a held, approvable fix</li>
@@ -289,7 +291,7 @@
 					<div class="tier-head">
 						<div class="tier-name">Enterprise</div>
 						<p class="tier-for">Team governs it. Enterprise has us keep and work the evidence.</p>
-						<div class="tier-price"><b>$75,000</b><span class="cadence">and up, per year</span></div>
+						<div class="tier-price"><b>$50,000</b><span class="cadence">and up, per year</span></div>
 						<p class="tier-sub">Negotiated. Includes Team for the whole organization. Every service below is available, and the ones you choose are scoped and dated on the order form before either of us signs.</p>
 						<a class="ghost" href="mailto:licensing@switchtender.com?subject=SwitchTender%20Enterprise">Talk to us</a>
 					</div>
@@ -342,12 +344,12 @@
 			<div class="sprint reveal" id="sprint">
 				<div class="sprint-head">
 					<h3>SwitchTender Migration Program</h3>
-					<div class="sprint-price">$25,000<span>fixed price, four milestones, first year of Team at the 250-host band included, larger bands pay the difference</span></div>
+					<div class="sprint-price">$25,000<span>fixed price, four milestones, first year of Team at the 500-host band included, larger bands pay the difference</span></div>
 				</div>
 				<p>We move you off AWX, Semaphore, or Rundeck and into
 				production on SwitchTender, with the change controls you already run and your evidence
 				workflows carried forward. Four milestones, normally about six weeks: discovery and
-				import, environment, governance, cutover and handoff. Your first year of Team at the 250-host band is included, and a larger band adds the difference for that year: $8,100 at 500 hosts, $26,100 at 1,000, and $44,100 unlimited. Everything wired during the program keeps working after it.</p>
+				import, environment, governance, cutover and handoff. Your first year of Team at the 500-host band is included, and a larger band adds the difference for that year: $7,500 at 1,000 hosts, $22,500 at 2,500, and $37,500 unlimited. Everything wired during the program keeps working after it.</p>
 				<div class="sprint-cta">
 					<a class="btn" href="mailto:hello@switchtender.com?subject=SwitchTender%20Migration%20Program">Start a migration</a>
 					<a class="ghost" href="/migration">Full program details</a>
@@ -407,8 +409,9 @@
 				<details>
 					<summary>Which tier do I need?</summary>
 					<p>Community, until one policy stops being enough. When production needs a rule of its
-					own, or people should sign in from the directory you already run, that is Pro. The week
-					you need deny rules or agent-scoped policy, PostgreSQL behind more than one controller,
+					own, a rule should refuse a change outright or hold it on its risk or how hard it is to
+					undo, or people should sign in from the directory you already run, that is Pro. The week
+					you need agent-scoped policy or an approver who is not the requester, PostgreSQL behind more than one controller,
 					workers reaching fleets a single machine cannot, or a change register an auditor will
 					actually read, that is Team. Enterprise is for when someone outside your own install has
 					to hold the evidence: custody of it for the term, evidence work on your audit calendar, and the hosted witness included. Most
@@ -490,6 +493,10 @@
 					Each release also converts to Apache 2.0 two years after it ships, and the terms
 					accelerate that: if KordLoom ceases business, every published release converts immediately. The
 					code itself outlives the company, on a clock you can enforce.</p>
+				</details>
+				<details>
+					<summary>Have these prices changed?</summary>
+					<p>Yes, the prices on this page last changed on October 21, 2026.</p>
 				</details>
 			</div>
 		</section>

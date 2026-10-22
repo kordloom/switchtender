@@ -119,7 +119,7 @@ func TestChangeRegisterIsTeamOverHTTP(t *testing.T) {
 }
 
 // TestProGatesHoldTheLine covers what a Pro install sees: five policies fit, the sixth refuses
-// toward Team, and the full engine stays refused even with a live Pro license installed.
+// toward Team, and a Team rule stays refused even with a live Pro license installed.
 func TestProGatesHoldTheLine(t *testing.T) {
 	store := policy.NewMemStore()
 	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), WithPolicies(store)).Handler()
@@ -150,15 +150,15 @@ func TestProGatesHoldTheLine(t *testing.T) {
 		t.Errorf("sixth-policy refusal does not teach the fix: %s", rec.Body.String())
 	}
 
-	// Test 2: a deny policy is the full engine, which Pro does not include.
+	// Test 2: separation of duties is Team, which Pro does not include.
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/policies",
-		strings.NewReader(`{"name":"deny prod","effect":"deny"}`)))
+		strings.NewReader(`{"name":"two people","require_distinct_approver":true}`)))
 	if rec.Code != http.StatusForbidden {
-		t.Fatalf("Pro deny policy = %d, want 403: %s", rec.Code, rec.Body.String())
+		t.Fatalf("Pro distinct-approver policy = %d, want 403: %s", rec.Code, rec.Body.String())
 	}
 	if !strings.Contains(rec.Body.String(), "Pro license does not include") {
-		t.Errorf("full-engine refusal does not name the Pro tier: %s", rec.Body.String())
+		t.Errorf("Team-rule refusal does not name the Pro tier: %s", rec.Body.String())
 	}
 }
 
@@ -180,9 +180,9 @@ func TestAFilePinnedPolicySetAnswersReadOnlyBeforeTheLicense(t *testing.T) {
 		Method, Path, Body string
 	}{{ // Test 0: A second plain policy, which Community would refuse as over its cap.
 		Method: http.MethodPost, Path: "/v1/policies", Body: `{"name":"hold stage"}`,
-	}, { // Test 1: A full-engine policy, which Community would refuse as Team.
+	}, { // Test 1: A deny policy, which Community would refuse as Pro.
 		Method: http.MethodPost, Path: "/v1/policies", Body: `{"name":"deny","effect":"deny"}`,
-	}, { // Test 2: An edit into the full engine.
+	}, { // Test 2: An edit into a deny rule.
 		Method: http.MethodPut, Path: "/v1/policies/pol_x", Body: `{"name":"deny","effect":"deny"}`,
 	}}
 	asCommunity(t, func() {

@@ -1590,13 +1590,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			zap.Int("rules", len(count)),
 			zap.String("in_force_digest", policy.InForce(count).Digest))
 		// The file is explicit configuration, so a license gap here is a misconfiguration worth
-		// one line at startup, the same treatment SSO gets.
-		needsFull := false
-		for _, fp := range count {
-			if fp.Advanced() {
-				needsFull = true
-			}
-		}
+		// one line at startup, the same treatment SSO gets. AllowRules asks Team before Pro, so a
+		// file needing both names the tier that covers all of it.
+		//
 		// A lapse is not a misconfiguration and must not stop the server from starting. Returning
 		// here meant a paid install with a policy file could not restart once its term ran out,
 		// and the same refusal on every read stopped its runs, so the install went dark rather
@@ -1604,13 +1600,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		// a running install is not bricked over a billing dispute. The rules stay in force either
 		// way, because dropping them would silently ungate the runs they were written to hold.
 		var lapse error
-		if needsFull {
-			if aerr := license.Allow(license.FeaturePolicyFull); aerr != nil {
-				if !errors.Is(aerr, license.ErrLapsed) {
-					return aerr
-				}
-				lapse = aerr
+		if aerr := policy.AllowRules(count...); aerr != nil {
+			if !errors.Is(aerr, license.ErrLapsed) {
+				return aerr
 			}
+			lapse = aerr
 		}
 		if aerr := license.AllowPolicies(len(count)); aerr != nil {
 			if !errors.Is(aerr, license.ErrLapsed) {

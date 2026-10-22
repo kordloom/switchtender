@@ -28,7 +28,7 @@ func TestFileStoreRefusesRulesTheLicenceDoesNotCover(t *testing.T) {
 
 	// A plain rule: holds a tool for approval, which every tier may do.
 	plain := "policies:\n  - name: hold bash\n    tool: bash\n"
-	// The same file after somebody adds a deny rule, which is Team.
+	// The same file after somebody adds a deny rule, which is Pro.
 	advanced := plain + "  - name: never destroy prod\n    tool: terraform\n    effect: deny\n"
 
 	write := func(body string) {

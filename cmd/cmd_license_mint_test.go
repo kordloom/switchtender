@@ -45,8 +45,9 @@ func TestValidateMintRefusesWhatIsNotSold(t *testing.T) {
 	}, { // Test 6: A band the pricing page does not publish.
 		Name: "bad band", Org: "Acme", Tier: license.TierTeam, Hosts: "banana", Days: 30,
 		WantErr: "is not a published band",
-	}, { // Test 7: A plausible but unsold band, between the 1000 band and unlimited.
-		Name: "unsold band", Org: "Acme", Tier: license.TierTeam, Hosts: "2500", Days: 30,
+	}, { // Test 7: The retired 250 band. A license minted at it still verifies, but no new one is
+		// signed.
+		Name: "retired band", Org: "Acme", Tier: license.TierTeam, Hosts: "250", Days: 30,
 		WantErr: "is not a published band",
 	}, { // Test 8: A negative term signs a license that expired before it was issued.
 		Name: "negative days", Org: "Acme", Tier: license.TierPro, Hosts: "500", Days: -30,
@@ -62,9 +63,14 @@ func TestValidateMintRefusesWhatIsNotSold(t *testing.T) {
 		WantErr: "is not a band Pro is sold at",
 	}, { // Test 12: Team at a band Pro refuses is still sold.
 		Name: "valid team 1000", Org: "Acme", Tier: license.TierTeam, Hosts: "1000", Days: 365,
-	}, { // Test 13: Pro is sold at one band, so a Pro license naming the 250 band is refused too.
-		Name: "pro below its band", Org: "Acme", Tier: license.TierPro, Hosts: "250", Days: 365,
+	}, { // Test 13: Pro is sold at one band, so a Pro license at the 2,500 band is refused too.
+		Name: "pro at the 2500 band", Org: "Acme", Tier: license.TierPro, Hosts: "2500", Days: 365,
 		WantErr: "is not a band Pro is sold at",
+	}, { // Test 14: Team at the 2,500 band the ladder added.
+		Name: "valid team 2500", Org: "Acme", Tier: license.TierTeam, Hosts: "2500", Days: 365,
+	}, { // Test 15: A plausible but unsold band, between the 2,500 band and unlimited.
+		Name: "unsold band", Org: "Acme", Tier: license.TierTeam, Hosts: "5000", Days: 30,
+		WantErr: "is not a published band",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {

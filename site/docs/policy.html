@@ -790,11 +790,11 @@ that cannot compile a bundle fails closed exactly as one that cannot reach the c
 Each bundle arrives with its <code>warn</code> and <code>timeout</code> settings, and a setting the worker cannot honor
 fails the same way, so the worker's copy of a policy decides exactly as the control node's does.</p>
 <h3 id="license">License</h3>
-<p>A Rego policy is part of the full policy engine, which Team covers, the same tier as deny rules,
-risk floors, actor scoping, and separation of duties. A Community or Pro install whose policy file
-lists a Rego policy refuses to load it and names the policy and the tier, the same refusal it gives
-a deny rule. A lapsed Team license keeps serving the policies it was serving. Each Rego policy counts
-as one policy toward a tier's policy count.</p>
+<p>A Rego policy is part of the full policy engine, which Team covers, the same tier as actor
+scoping and separation of duties. Deny rules and risk and reversibility floors are Pro. A Community
+or Pro install whose policy file lists a Rego policy refuses to load it and names the policy and
+the tier, the same refusal it gives a distinct-approver rule. A lapsed Team license keeps serving
+the policies it was serving. Each Rego policy counts as one policy toward a tier's policy count.</p>
 <p>Rego policies are read only from the policy file. The API does not create them, and a backup
 carrying one is refused at restore.</p>
 <h3 id="dry-runs-that-are-not-change-free">Dry runs that are not change free</h3>

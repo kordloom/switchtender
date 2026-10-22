@@ -56,27 +56,21 @@ type createPolicyRequest struct {
 	RequireReason string `json:"require_reason,omitempty"`
 }
 
-// usesFullPolicyEngine reports whether a policy reaches past the single plain require-approval rule
-// the Community tier holds. Deny rules, risk floors, actor scoping, and distinct-approver separation
-// of duties are the full engine, which a Team license covers.
+// requestRules returns the rule a create or update request describes, carrying every criterion the
+// license reads, so both handlers put the tier question to policy.AllowRules: deny rules and the risk
+// and reversibility floors are Pro, and separation of duties and actor, actor kind, and account
+// scoping are Team.
 //
-// The create and update handlers both ask this question. They asked it as two separately written
-// expressions and the two drifted from what the product says it sells: actor scoping is named as
-// part of the full engine by the licensing terms, the API reference, the FAQ, and the comment on
-// license.FeaturePolicyFull, and neither expression tested for it, so a rule scoped to a named actor
-// or to agents as a class was free on Community. Scoping a hold to a machine principal is the
-// difference between one blanket gate and an authorization boundary around agents, which is the
-// thing being sold, so it belongs here and both handlers now read the same answer.
-func usesFullPolicyEngine(req createPolicyRequest) bool {
-	// Delegates rather than repeating the condition. Three copies of this rule existed once and
-	// disagreed, which is how actor scoping shipped free; a fourth copy here would be the same
-	// mistake with the same consequence. Building the policy the request describes and asking it
-	// is the only form that cannot drift.
-	return (&policy.Policy{
+// The create and update handlers once asked it as two separately written expressions, and the two
+// drifted from what the product says it sells: neither tested for actor scoping, so a rule scoped to
+// a named actor or to agents as a class was free on Community. Building the rule the request
+// describes and asking the policy package is the only form that cannot drift.
+func requestRules(req createPolicyRequest) *policy.Policy {
+	return &policy.Policy{
 		Effect: req.Effect, MinRisk: req.MinRisk, Reversibility: req.Reversibility,
 		RequireDistinctApprover: req.RequireDistinctApprover,
 		ActorKind:               req.ActorKind, Actor: req.Actor, Account: req.Account,
-	}).Advanced()
+	}
 }
 
 // resolveMaxDestroy returns the request's max_destroy, defaulting a missing value to the disabled
@@ -119,20 +113,20 @@ func createPolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusBadRequest, "tool is not a supported execution tool")
 			return
 		}
-		// One plain require-approval policy is Community and five are Pro. The full engine and a sixth
-		// policy are Team. The check sits before the write so a refusal changes nothing.
-		advanced := usesFullPolicyEngine(req)
+		// One plain require-approval policy is Community. Five, with deny rules and the risk and
+		// reversibility floors, are Pro. Separation of duties, actor and account scoping, and a
+		// sixth policy are Team. The check sits before the write so a refusal changes nothing, and
+		// a lapse refuses here like any other gap, since what a lapse keeps is enforcement, not
+		// authoring.
 		existing, lerr := store.List(r.Context())
 		if lerr != nil {
 			log.Error("server: list policies: " + lerr.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not read the policies")
 			return
 		}
-		if advanced {
-			if aerr := license.Allow(license.FeaturePolicyFull); aerr != nil {
-				respondError(w, log, http.StatusForbidden, aerr.Error())
-				return
-			}
+		if aerr := policy.AllowRules(requestRules(req)); aerr != nil {
+			respondError(w, log, http.StatusForbidden, aerr.Error())
+			return
 		}
 		if aerr := license.AllowPolicies(len(existing) + 1); aerr != nil {
 			respondError(w, log, http.StatusForbidden, aerr.Error())
@@ -186,13 +180,11 @@ func updatePolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusBadRequest, "tool is not a supported execution tool")
 			return
 		}
-		// Editing the one Community policy into the full engine is the same purchase as creating
-		// an advanced one, so the same gate answers.
-		if usesFullPolicyEngine(req) {
-			if aerr := license.Allow(license.FeaturePolicyFull); aerr != nil {
-				respondError(w, log, http.StatusForbidden, aerr.Error())
-				return
-			}
+		// Editing the one Community policy into a Pro or Team rule is the same purchase as creating
+		// one, so the same gate answers.
+		if aerr := policy.AllowRules(requestRules(req)); aerr != nil {
+			respondError(w, log, http.StatusForbidden, aerr.Error())
+			return
 		}
 		id := r.PathValue("id")
 		existing, err := store.Get(r.Context(), id)

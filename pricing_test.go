@@ -69,7 +69,7 @@ func findOne(t *testing.T, pattern, text, what string) string {
 	return m[1]
 }
 
-// dollars parses a published amount such as "9,900".
+// dollars parses a published amount such as "7,500".
 func dollars(t *testing.T, s string) int {
 	t.Helper()
 	n, err := strconv.Atoi(strings.ReplaceAll(s, ",", ""))
@@ -117,7 +117,7 @@ func TestRetiredPricingClaimsStayGone(t *testing.T) {
 		Why:     "Continuity converts to Apache 2.0 only if KordLoom ceases business.",
 	}, { // Test 6: The Migration Program's band.
 		Pattern: `(?i)\bat your band\b`,
-		Why:     "The Migration Program includes Team at the 250-host band.",
+		Why:     "The Migration Program includes Team at the 500-host band.",
 	}, { // Test 7: An immediate migration start.
 		Pattern: `(?i)starts this week|date given here holds`,
 		Why:     "A migration date holds once its statement of work confirms it.",
@@ -138,7 +138,7 @@ func TestRetiredPricingClaimsStayGone(t *testing.T) {
 		Why:     "Verification does not depend on KordLoom, and no page promises a span of years.",
 	}, { // Test 13: The Migration Program's Team year without its band.
 		Pattern: `(?i)first year of Team included[^ a-z]`,
-		Why:     "The Migration Program includes Team at the 250-host band, so every mention names it.",
+		Why:     "The Migration Program includes Team at the 500-host band, so every mention names it.",
 	}, { // Test 14: A count of zero license checks.
 		Pattern: `(?i)telemetry or license checks`,
 		Why:     "The binary checks its license on every call. What it never has is a license server.",
@@ -273,31 +273,46 @@ func TestNoPageQuotesTheOldProPrice(t *testing.T) {
 func TestTheMigrationDifferencesFollowTheTeamBands(t *testing.T) {
 	t.Parallel()
 	page := readFlat(t, "site/pricing.html")
-	m := regexp.MustCompile(`\$([\d,]+)</b> to 250 hosts &middot; <b>\$([\d,]+)</b> to 500 &middot; ` +
-		`<b>\$([\d,]+)</b> to 1,000 &middot; <b>\$([\d,]+)</b> unlimited`).FindStringSubmatch(page)
+	m := regexp.MustCompile(`\$([\d,]+)</b> to 500 hosts &middot; <b>\$([\d,]+)</b> to 1,000 &middot; ` +
+		`<b>\$([\d,]+)</b> to 2,500 &middot; <b>\$([\d,]+)</b> unlimited`).FindStringSubmatch(page)
 	if m == nil {
 		t.Fatal("could not find the Team bands on the pricing page")
 	}
-	b250, b500, b1000, bUnl := dollars(t, m[1]), dollars(t, m[2]), dollars(t, m[3]), dollars(t, m[4])
+	b500, b1000, b2500, bUnl := dollars(t, m[1]), dollars(t, m[2]), dollars(t, m[3]), dollars(t, m[4])
 	team := findOne(t, `<div class="tier-price"><b>\$([\d,]+)</b>`, tierCard(t, page, "Team"), "the Team price")
-	if diff := cmp.Diff(b250, dollars(t, team)); diff != "" {
-		t.Errorf("the Team headline price is not its 250 band (-band +headline):\n%s", diff)
+	if diff := cmp.Diff(b500, dollars(t, team)); diff != "" {
+		t.Errorf("the Team headline price is not its 500 band (-band +headline):\n%s", diff)
 	}
 	mint := findOne(t, `var mintBands = \[\]string\{([^}]*)\}`, readFlat(t, "cmd/cmd_license.go"), "mintBands")
-	if diff := cmp.Diff(`"250", "500", "1000", "unlimited"`, mint); diff != "" {
+	if diff := cmp.Diff(`"500", "1000", "2500", "unlimited"`, mint); diff != "" {
 		t.Errorf("the mint's bands are not the published bands (-published +mint):\n%s", diff)
 	}
-	wantDiffs := fmt.Sprintf("$%s at 500 hosts, $%s at 1,000, and $%s unlimited",
-		thousands(b500-b250), thousands(b1000-b250), thousands(bUnl-b250))
+	// A page can name the included band more than once, in its meta description and its body, so
+	// every copy is held to the smallest band and one copy left at a retired band fails.
+	band := regexp.MustCompile(`Team at the ([\d,]+)-host band`)
+	for _, path := range []string{"site/index.html", "site/migration.html", "site/pricing.html"} {
+		named := band.FindAllStringSubmatch(readFlat(t, path), -1)
+		if len(named) == 0 {
+			t.Errorf("%s no longer names the Team band the Migration Program includes", path)
+		}
+		for _, n := range named {
+			if n[1] != "500" {
+				t.Errorf("%s includes Team at the %s-host band, and the smallest Team band is 500",
+					path, n[1])
+			}
+		}
+	}
+	wantDiffs := fmt.Sprintf("$%s at 1,000 hosts, $%s at 2,500, and $%s unlimited",
+		thousands(b1000-b500), thousands(b2500-b500), thousands(bUnl-b500))
 	tests := []struct {
 		File string
 		Want string
 	}{{ // Test 0: The pricing page names the band.
-		File: "site/pricing.html", Want: "first year of Team at the 250-host band included",
+		File: "site/pricing.html", Want: "first year of Team at the 500-host band included",
 	}, { // Test 1: The pricing page states the differences.
 		File: "site/pricing.html", Want: wantDiffs,
 	}, { // Test 2: The migration page names the band.
-		File: "site/migration.html", Want: "first year of Team at the 250-host band included",
+		File: "site/migration.html", Want: "first year of Team at the 500-host band included",
 	}, { // Test 3: The migration page states the differences.
 		File: "site/migration.html", Want: wantDiffs,
 	}}

@@ -56,24 +56,24 @@ func TestFirstPolicyRequiringADistinctApproverIsTeam(t *testing.T) {
 	}
 }
 
-// TestFirstPolicyWithARiskFloorIsTeam covers the create path for the risk floor, the other criterion
-// that turns a plain hold into the full engine. It is the same gate as the distinct-approver flag and
-// was equally uncovered on create.
-func TestFirstPolicyWithARiskFloorIsTeam(t *testing.T) {
+// TestFirstPolicyWithARiskFloorIsPro covers the create path for the risk floor, which turns a plain
+// hold into a Pro rule. It was equally uncovered on create, and the refusal names Pro, the tier that
+// sells it, rather than Team.
+func TestFirstPolicyWithARiskFloorIsPro(t *testing.T) {
 	store := policy.NewMemStore()
 	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), WithPolicies(store)).Handler()
 	const body = `{"name":"hold risky","min_risk":"high"}`
 
 	asCommunity(t, func() {
-		// Test 0: a risk floor is the full engine even as the first policy.
+		// Test 0: a risk floor is Pro even as the first policy.
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/policies",
 			strings.NewReader(body)))
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("create with min_risk = %d, want 403: %s", rec.Code, rec.Body.String())
 		}
-		if !strings.Contains(rec.Body.String(), "Team license") {
-			t.Errorf("refusal does not name the tier: %s", rec.Body.String())
+		if !strings.Contains(rec.Body.String(), "requires a Pro license") {
+			t.Errorf("refusal does not name Pro, the tier that sells it: %s", rec.Body.String())
 		}
 
 		// Test 1: nothing was stored, so the risk floor is not quietly in force.

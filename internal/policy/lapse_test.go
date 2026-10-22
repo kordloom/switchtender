@@ -32,8 +32,8 @@ func TestALapsedLicenseKeepsAPolicyFileInstallRunning(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "policies.yml")
 
-	// Deny rules and risk floors are Team. Several of them, so the count cap is crossed too and
-	// both gates are exercised by the same file.
+	// A deny rule is paid, and three rules are more than Community holds, so the feature gate and
+	// the count cap are both exercised by the same file.
 	advanced := "policies:\n" +
 		"  - name: hold bash\n    tool: bash\n" +
 		"  - name: never destroy prod\n    tool: terraform\n    effect: deny\n" +

@@ -195,14 +195,15 @@ for an agent's run is the account the agent is bound to, so the person the agent
 release its high-risk work alone. The requirement is copied onto each run the rule holds, so
 editing the rule later cannot weaken a pending decision. A rule that holds still applies to a run
 an exemption covers, since an exemption lifts only the default hold.</p>
-<p>Every criterion in that file is the full policy engine, which a Team license covers: actor
-scoping, risk floors, deny rules, and distinct-approver separation of duties. A server started
-with a policy file it is not licensed for refuses at startup and says so, rather than running with
-the rules quietly dropped. The gate itself is free on every tier: every run an agent submits
-waits for a person with no rule written, and that is the whole containment story on this page. A
-Community install also holds one plain rule, either a require-approval policy for everyone's runs
-or one exemption. What Team buys is scoping holds by actor, account, risk, and reversibility, and
-a rule that can refuse outright rather than wait.</p>
+<p>Deny rules and risk floors are Pro. Actor scoping and distinct-approver separation of duties
+are the full policy engine, which a Team license covers, so the file as a whole needs Team. A
+server started with a policy file it is not licensed for refuses at startup and says so, rather
+than running with the rules quietly dropped. The gate itself is free on every tier: every run an
+agent submits waits for a person with no rule written, and that is the whole containment story
+on this page. A Community install also holds one plain rule, either a require-approval policy
+for everyone's runs or one exemption. What Pro buys is holding on risk and reversibility, and a
+rule that can refuse outright rather than wait. What Team buys is scoping holds by actor and
+account, and a second person who must not be the requester.</p>
 </li>
 <li>
 <p>Pin the policies by starting the server with <code>serve --policy-file policies.yml</code>. The file is the

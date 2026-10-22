@@ -571,11 +571,11 @@ fails the same way, so the worker's copy of a policy decides exactly as the cont
 
 ### License
 
-A Rego policy is part of the full policy engine, which Team covers, the same tier as deny rules,
-risk floors, actor scoping, and separation of duties. A Community or Pro install whose policy file
-lists a Rego policy refuses to load it and names the policy and the tier, the same refusal it gives
-a deny rule. A lapsed Team license keeps serving the policies it was serving. Each Rego policy counts
-as one policy toward a tier's policy count.
+A Rego policy is part of the full policy engine, which Team covers, the same tier as actor
+scoping and separation of duties. Deny rules and risk and reversibility floors are Pro. A Community
+or Pro install whose policy file lists a Rego policy refuses to load it and names the policy and
+the tier, the same refusal it gives a distinct-approver rule. A lapsed Team license keeps serving
+the policies it was serving. Each Rego policy counts as one policy toward a tier's policy count.
 
 Rego policies are read only from the policy file. The API does not create them, and a backup
 carrying one is refused at restore.
