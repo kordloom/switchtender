@@ -516,10 +516,34 @@ function appendRunRows(tbody, runs) {
 		tr.appendChild(playbookCellEl(r));
 		tr.appendChild(labelCellEl(r.labels));
 
-		tr.appendChild(tdTime(r.started_at || r.created_at));
-		tr.appendChild(td(fmtDuration(r.started_at, r.ended_at)));
+		tr.appendChild(runStartedCell(r));
+		tr.appendChild(runDurationCell(r, new Date()));
 		tbody.appendChild(tr);
 	}
+}
+
+// runStartedCell shows when a run started. A run held for approval or still queued has not, and the
+// cell used to show its submission time under the Started heading, so a run that never executed read
+// as started hours ago. It now says so, and keeps the submission time for the hover and for sorting.
+function runStartedCell(r) {
+	if (r.started_at || !r.created_at) return tdTime(r.started_at);
+	const cell = td("Not started", "muted");
+	cell.dataset.time = r.created_at;
+	cell.dataset.tip = "Submitted " + exactTime(r.created_at);
+	return cell;
+}
+
+// runDurationCell says how long a finished run took, and for one that has not finished, how long it
+// has waited for a decision or run so far. A held run has no end, so the cell was left empty, which
+// read as data the page failed to load rather than a run still waiting.
+function runDurationCell(r, now) {
+	if (r.ended_at) return td(fmtDuration(r.started_at, r.ended_at));
+	const at = now.toISOString();
+	if (r.status === "pending_approval" && r.created_at) {
+		return td("Waiting " + fmtDuration(r.created_at, at), "muted");
+	}
+	if (r.status === "running" && r.started_at) return td("Running " + fmtDuration(r.started_at, at), "muted");
+	return td("");
 }
 
 // runsHasMore remembers whether the server holds more rows than the table shows, which is what
