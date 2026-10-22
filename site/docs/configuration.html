@@ -60,7 +60,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration" class="active">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/ansible-runtime">Managed Ansible runtime</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/upgrading">Upgrading</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration" class="active">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/ansible-runtime">Managed Ansible runtime</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/upgrading">Upgrading</a><a href="/docs/vendor-risk">Vendor risk review</a><a href="/docs/witness">Hosted witness</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -1316,6 +1316,13 @@ of band. Without it the receipt is checked against the key it names, which prove
 but not who signed it, and the verdict says so: <code>INTACT, BUT UNIDENTIFIED</code> rather than <code>VERIFIED</code>.
 A <code>--pubkey</code> given an empty value, which is what a failed key fetch leaves behind, is refused rather
 than treated as no pin.</p>
+<p>An install enrolled with a witness carries the witness's countersignatures in its bundles and
+receipts. Pass <code>--witness-pubkey</code> with the key the witness publishes, in either the sha256 key id or
+the raw hex form, so only that witness's countersignatures are counted, and <code>--witness</code> with the
+statement fetched from the witness at <code>GET /v1/installs/&lt;key id&gt;/attestation</code>, where <code>&lt;key id&gt;</code> is
+the producer key id, so the file is held to the newest head the witness countersigned. A file that
+ends before that head, or a statement that holds nothing yet, is reported as not checkable and never
+reads <code>VERIFIED</code>. An empty <code>--witness-pubkey</code> is refused.</p>
 <h2 id="witness">witness</h2>
 <p>Watches a server's span beat feed from outside it. A chain proves what it holds was not altered, but
 not that nothing was removed from the end, because the process running the chain also decides what
@@ -1374,7 +1381,9 @@ attestations.</li>
 <li><code>witness enroll</code> enrolls this install with a push witness that countersigns its chain.</li>
 </ul>
 <h2 id="witness-serve">witness serve</h2>
-<p>Runs the witness. Its flags are checked against that subcommand rather than <code>witness</code> itself.</p>
+<p>Runs the witness. Its flags are checked against that subcommand rather than <code>witness</code> itself. With
+<code>--accept-enrollments</code> it is also a push witness, the one <a href="/docs/witness">the hosted witness page</a>
+describes, and <code>--enrollment-policy open</code> runs it for installs on your own network.</p>
 <table>
 <thead>
 <tr>
@@ -1475,8 +1484,9 @@ Enterprise, or Team with the add-on. Without one the command refuses and sends n
   --witness https://witness.switchtender.com
 </code></pre>
 <p>The command prints the witness key id. Compare it with the id the witness publishes at
-<code>/.well-known/loomseal.json</code> before trusting what it countersigns, or pass <code>--witness-key</code> to refuse
-any other. The enrollment is written to <code>witness-enrollment.json</code> beside the license file, so a
+<code>/.well-known/loomseal.json</code> and with the one <a href="/docs/witness#the-witness-key">the hosted witness page</a>
+carries before trusting what it countersigns, or pass <code>--witness-key</code> to refuse any other. The
+enrollment is written to <code>witness-enrollment.json</code> beside the license file, so a
 backup and a restore carry both or neither. It holds no secret. An install whose key was changed
 under its install id through <code>SWITCHTENDER_AUDIT_KEY</code> is refused, since the witness binds an install
 id to the key it was born to. A new install started after its signing key was lost enrolls as a new

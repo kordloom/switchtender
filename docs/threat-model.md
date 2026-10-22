@@ -67,8 +67,12 @@ its actor, and the run itself records which rule held it.
 Editing an entry breaks its content digest. Replacing an entry breaks the hash link of everything
 after it. Truncating the chain moves the head backward, which is exactly what a witness on another
 machine is watching for: it keeps a signed checkpoint of the head it saw and raises a finding when
-history shrinks or a heartbeat goes missing. A bundle already exported is out of reach entirely; it
-is signed, self-contained, and in somebody else's hands.
+history shrinks or a heartbeat goes missing. An install enrolled with a push witness sends it every
+beat with a consistency proof, and the witness countersigns only a tree that extends the one it
+holds. A chain rewritten at or before any position it countersigned is never countersigned again,
+and no export from that chain reads `VERIFIED` when `switchtender verify --witness` holds it to the
+witness's signed statement. A bundle already exported is out of reach entirely. It is signed,
+self-contained, and in somebody else's hands.
 
 ### An administrator of the controller
 
@@ -206,9 +210,13 @@ states.
 
 The key signs bundles, so its holder can sign a forged one. Three things bound the damage. The key
 is published at a well-known path and can be pinned out of band, so a verifier is not taking the
-server's word for which key is real. The hosted witness countersigns what it observed, so a forged
-bundle also needs the witness to have seen a history that was never served. And every entry is
-bound to its install identity, so a bundle signed by one install cannot be replayed as another's.
+server's word for which key is real. The hosted witness countersigns each beat an enrolled install
+pushes, under its own key, which the producer key's holder does not hold: it is a 0600 file on the
+witness host, and KordLoom keeps its encrypted backups off that host. A forged history therefore
+also needs the witness to have countersigned it, and held to the witness's statement with `verify
+--witness`, an export whose links differ from what the witness countersigned fails. And every entry
+is bound to its install identity, so a bundle signed by one install cannot be replayed as
+another's.
 
 The operator who runs the install holds that key, so the operator is this adversary too, and the
 cheapest forgery open to them is not a new history but an edited receipt: change what a receipt
@@ -231,6 +239,19 @@ one. Anchors fix when history existed, so a rewrite made after an anchor shows. 
 countersigns heads as they are served fixes them in a record the operator does not control. Neither
 makes an entry true, and before the first anchor the operator's key is the only thing the record
 rests on.
+
+The push witness has limits of its own, and [the hosted witness page](witness.md#limits) lists
+them. It bounds history only from the first root it countersigned for an install, and it sees
+nothing between two beats. Before it holds a countersigned head for an install it bounds nothing:
+adopt's check against the witness's head binds only once there is one, and adopt's refusal when the
+install's store holds countersignatures the witness no longer remembers is a tripwire held in the
+database, which a writer who rewrites the chain can empty too. Root on the witness host, or a holder
+of a backup of its key, can sign false countersignatures. `switchtender verify` counts only the
+countersignatures on entries and refuses head attestations by name, and a sparse receipt is not
+checkable under `--witness`. A rotated identity cannot enroll until a succession link ships. An
+outage queues pushes in memory for one day of beats, drops the oldest past that with a counter
+rising, and resumes from the size the witness last acknowledged, and neither the queue nor the
+status's newest countersigned beat survives a restart.
 
 ### An AI agent holding a token
 
@@ -318,7 +339,17 @@ loudly, and it is the right trade for a system whose product is the record.
   When it comes back it checks the feed against its signed checkpoint, so a beat it had already
   witnessed that has since vanished or changed is still a finding. History written and removed
   entirely while it was away is outside what it saw. Anchors bound that loss independently of any
-  witness. `witness serve` reports a server it cannot reach rather than going quiet.
+  witness. `witness serve` reports a server it cannot reach rather than going quiet. An enrolled
+  install keeps beating and anchoring, queues its pushes for up to one day of beats, and proves
+  each from the size the witness last acknowledged when it answers again. Past a day the oldest is
+  dropped and counted, and the witness notes the gap as `missing_beat`. An export made during the
+  outage carries countersignatures through the last acknowledged beat and none after.
+- **Witness restored from a snapshot.** Its memory rewinds to the snapshot. It records one
+  `memory_restored` note per enrolled install naming the size it now holds, each install proves
+  again from that size, and the notes never fail a verify. Countersignatures issued after the
+  snapshot still verify by their signatures, but the witness no longer holds those entries, so a
+  rewrite of them made before the install's first push after the restore is not refused. That
+  interval is the window a relying party weighs, and the note names where it starts.
 - **Signing key lost.** A server that finds the chain bound to an install whose key it does not
   hold refuses to start, keyed or unkeyed, so no replica runs beside keyed ones checking no seal.
   Bundles, receipts, anchors and witness statements made before the loss verify against the

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -18,11 +19,21 @@ import (
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/util"
+	"github.com/kordloom/switchtender/witness"
 )
 
 // verifyPubkey is the key fingerprint a relying party pins, so a receipt signed by any other key is
 // refused. Empty trusts whatever key the receipt names, which checks integrity but not provenance.
 var verifyPubkey string
+
+// verifyWitnessPubkey is the witness key a relying party pins, as the sha256 key id or the raw hex
+// public key. Only countersignatures and a statement by that key count. Empty counts every witness
+// whose countersignature verifies, which checks the signatures but not whose they are.
+var verifyWitnessPubkey string
+
+// verifyWitness is the path of the witness's signed statement for the producer key, as served at
+// GET /v1/installs/{key}/attestation. Empty holds the document to no statement.
+var verifyWitness string
 
 // verifyCmd checks a run receipt offline.
 var verifyCmd = &cobra.Command{
@@ -38,7 +49,18 @@ server, so a relying party can check a receipt on a machine that has never seen 
 Pass --pubkey with the fingerprint the producer published to tie the result to a key you obtained out
 of band. Without it the receipt is checked against the key it names, which proves it was not altered
 but not who signed it, and the verdict reads INTACT, BUT UNIDENTIFIED instead of VERIFIED. An empty
---pubkey is refused, since that is what a failed key fetch leaves behind.`,
+--pubkey is refused, since that is what a failed key fetch leaves behind.
+
+A countersignature an outside witness made over an entry is verified and counted on the witness
+line. Pass --witness-pubkey with the key the witness publishes, either the sha256 key id or the raw
+hex public key, to count only that witness: a countersignature by any other key is named and not
+counted. Pass --witness with the statement the witness serves for the producer key, from GET
+/v1/installs/<key id>/attestation, to hold the document to it: the statement must verify, be
+signed by the pinned witness when one is pinned, name the producer key and install that signed the
+document, record no refused push, and the document must reproduce the newest entry the witness
+countersigned. A document that ends before that entry is not checkable against the statement and
+never reads VERIFIED, and neither does a statement of a witness that holds nothing for the install
+yet.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runVerify,
 }
@@ -47,12 +69,32 @@ but not who signed it, and the verdict reads INTACT, BUT UNIDENTIFIED instead of
 func init() {
 	verifyCmd.Flags().StringVar(&verifyPubkey, "pubkey", "",
 		"Key fingerprint (sha256:...) to pin, refusing a receipt signed by any other key.")
+	verifyCmd.Flags().StringVar(&verifyWitnessPubkey, "witness-pubkey", "",
+		"Witness key to pin, as the sha256 key id or the raw hex public key. Only its "+
+			"countersignatures and its statement count.")
+	verifyCmd.Flags().StringVar(&verifyWitness, "witness", "",
+		"Witness statement file, from GET /v1/installs/<key id>/attestation, to hold the receipt to.")
 	rootCmd.AddCommand(verifyCmd)
 }
 
 // runVerify checks one receipt file and reports the verdict.
 func runVerify(cmd *cobra.Command, args []string) error {
 	if err := refuseEmptyPin(cmd, "pubkey", verifyPubkey); err != nil {
+		return err
+	}
+	if err := refuseEmptyPin(cmd, "witness-pubkey", verifyWitnessPubkey); err != nil {
+		return err
+	}
+	var witnessPin string
+	if strings.TrimSpace(verifyWitnessPubkey) != "" {
+		pin, err := audit.WitnessPinKeyID(verifyWitnessPubkey)
+		if err != nil {
+			return err
+		}
+		witnessPin = pin
+	}
+	statement, err := readWitnessStatement(cmd)
+	if err != nil {
 		return err
 	}
 	signed, err := os.ReadFile(args[0])
@@ -62,6 +104,10 @@ func runVerify(cmd *cobra.Command, args []string) error {
 	rep, err := audit.VerifyBundle(signed, verifyPubkey)
 	if err != nil {
 		return err
+	}
+	var held *audit.StatementCheck
+	if statement != nil {
+		held = audit.CheckWitnessStatement(rep, signed, statement, witnessPin)
 	}
 
 	out := cmd.OutOrStdout()
@@ -116,6 +162,7 @@ func runVerify(cmd *cobra.Command, args []string) error {
 	} else {
 		fmt.Fprintln(out, "anchors      none (nothing outside this install fixes its position)")
 	}
+	printWitness(out, rep, held, witnessPin, noun)
 	// A caption states what the result means, so it has to follow the result. The parenthetical
 	// used to assert the passing case beside a FAILED, which read as a verifier contradicting
 	// itself on the one line a reader looks at hardest.
@@ -185,9 +232,24 @@ func runVerify(cmd *cobra.Command, args []string) error {
 			"nonces, which anyone who can guess it can confirm\n", l)
 	}
 
-	if !rep.OK() {
-		fmt.Fprintln(out, "\nNOT VERIFIED: "+failedChecks(rep))
-		return fmt.Errorf("%s did not verify: %s", noun, failedChecks(rep))
+	if !rep.OK() || (held != nil && held.State == audit.StatementFailed) {
+		failed := failedChecks(rep)
+		switch {
+		case rep.OK():
+			failed = "the witness statement does not hold: " + printable(held.Problem)
+		case held != nil && held.State == audit.StatementFailed:
+			failed += "; the witness statement does not hold: " + printable(held.Problem)
+		}
+		fmt.Fprintln(out, "\nNOT VERIFIED: "+failed)
+		return fmt.Errorf("%s did not verify: %s", noun, failed)
+	}
+	// A statement the document cannot be held to says nothing about it either way, so it never
+	// stands behind a VERIFIED, and the relying party who asked for the witness is told why.
+	if held != nil && !held.OK() {
+		fmt.Fprintf(out, "\nNOT VERIFIED: this %s is not checkable against the witness statement: "+
+			"%s\n", noun, printable(held.Problem))
+		return fmt.Errorf("%s is not checkable against the witness statement: %s", noun,
+			printable(held.Problem))
 	}
 	// Without a pin a forged receipt earned the same VERIFIED as a genuine one, because any key signs
 	// its own bundle. The unpinned result is its own verdict, the one the browser verifier gives.
@@ -203,6 +265,110 @@ func runVerify(cmd *cobra.Command, args []string) error {
 		uncheckedQualifier(rep), checkedScope(rep), noun)
 	printUnchecked(out, rep)
 	return nil
+}
+
+// readWitnessStatement reads the witness statement --witness names, nil when the flag is not given.
+// A statement that does not parse is an error rather than a statement that fails, since nothing in
+// it was read.
+func readWitnessStatement(cmd *cobra.Command) (*witness.Statement, error) {
+	if !cmd.Flags().Changed("witness") && verifyWitness == "" {
+		return nil, nil
+	}
+	if strings.TrimSpace(verifyWitness) == "" {
+		return nil, fmt.Errorf("--witness was given an empty value. Pass the statement file the " +
+			"witness serves, or leave --witness off to hold the document to no statement")
+	}
+	raw, err := os.ReadFile(verifyWitness)
+	if err != nil {
+		return nil, fmt.Errorf("read witness statement: %w", err)
+	}
+	var st witness.Statement
+	if err := json.Unmarshal(raw, &st); err != nil {
+		return nil, fmt.Errorf("parse witness statement: %w", err)
+	}
+	return &st, nil
+}
+
+// printWitness writes the witness line: OK with what the counted witness countersigned, FAILED with
+// why, NOT CHECKABLE when a statement was given that the document cannot be held to, or none. The
+// counted witness is the pinned one, else the statement's signer, else every witness whose
+// countersignature verifies. A countersignature by any other key is named beneath and not counted.
+func printWitness(out io.Writer, rep *audit.BundleReport, held *audit.StatementCheck, pin, noun string) {
+	key := pin
+	if key == "" && held != nil {
+		key = held.SignerKeyID
+	}
+	count, newest := rep.WitnessAttested, rep.WitnessNewestSeq
+	by := strings.Join(rep.WitnessKeyIDs, " and ")
+	if key != "" {
+		count, newest = rep.WitnessedBy(key)
+		by = key
+	}
+	ok := false
+	switch {
+	case held != nil && held.State == audit.StatementFailed:
+		fmt.Fprintf(out, "witness      FAILED (%s)\n", printable(held.Problem))
+	case len(rep.WitnessProblems) > 0:
+		fmt.Fprintf(out, "witness      FAILED (%d %s countersigned by a witness %s)\n",
+			len(rep.WitnessProblems), util.Plural(len(rep.WitnessProblems), "entry", "entries"),
+			util.Plural(len(rep.WitnessProblems), "does not verify", "do not verify"))
+	case held != nil && !held.OK():
+		fmt.Fprintf(out, "witness      NOT CHECKABLE (%s)\n", printable(held.Problem))
+	case held != nil:
+		ok = true
+		fmt.Fprintf(out, "witness      OK (%d %s countersigned by %s, newest seq %d, for "+
+			"producer %s%s)\n", count, util.Plural(count, "beat", "beats"), by,
+			max(newest, held.LastSeq), rep.KeyID, notesSuffix(held.NotesTotal))
+		fmt.Fprintf(out, "  this %s reproduces seq %d, the newest entry the witness countersigned. "+
+			"%s The witness refused no push.\n", noun, held.LastSeq, rootSentence(held, noun))
+	case count > 0:
+		ok = true
+		fmt.Fprintf(out, "witness      OK (%d %s countersigned by %s, newest seq %d, for producer %s)\n",
+			count, util.Plural(count, "beat", "beats"), by, newest, rep.KeyID)
+	case key != "":
+		fmt.Fprintf(out, "witness      none (the pinned witness %s countersigned nothing in this %s)\n",
+			key, noun)
+	default:
+		fmt.Fprintln(out, "witness      none (no outside witness countersigned this chain)")
+	}
+	for _, p := range rep.WitnessProblems {
+		fmt.Fprintf(out, "  %s\n", printable(p))
+	}
+	for _, other := range rep.WitnessKeyIDs {
+		if key == "" || other == key {
+			continue
+		}
+		n, _ := rep.WitnessedBy(other)
+		fmt.Fprintf(out, "  %d %s countersigned by %s, which is not the witness this %s is held "+
+			"to, so not counted\n", n, util.Plural(n, "beat", "beats"), other, noun)
+	}
+	if ok && pin == "" {
+		fmt.Fprintln(out, "  no witness key was pinned, so this says a witness signed, not which "+
+			"one. Pass --witness-pubkey with the key the witness publishes.")
+	}
+}
+
+// notesSuffix is what the witness line ends with when the witness noted something about its
+// coverage of the install: the count, which never fails the document.
+func notesSuffix(notes int64) string {
+	switch {
+	case notes == 1:
+		return ", 1 note"
+	case notes > 1:
+		return fmt.Sprintf(", %d notes", notes)
+	}
+	return ""
+}
+
+// rootSentence says whether a held statement's tree root was compared, and when it was not, what
+// the link alone shows.
+func rootSentence(held *audit.StatementCheck, noun string) string {
+	if held.RootCompared {
+		return fmt.Sprintf("The tree over its first %d entries matches the root the witness holds.",
+			held.Size)
+	}
+	return fmt.Sprintf("The link there commits to every entry before it, and the tree root was not "+
+		"compared, since this %s does not carry every entry from seq 1.", noun)
 }
 
 // uncheckedQualifier is what follows the verdict word when the document discloses members nothing
@@ -380,6 +546,10 @@ func failedChecks(rep *audit.BundleReport) string {
 		failed = append(failed, "a member's name differs only in case from one a check reads ("+
 			printable(strings.Join(rep.CaseVariants, ", "))+"), so a reader folding case would "+
 			"take one for the other")
+	}
+	if len(rep.WitnessProblems) > 0 {
+		failed = append(failed, "a witness countersignature does not verify over the entry it "+
+			"rides on ("+printable(strings.Join(rep.WitnessProblems, "; "))+")")
 	}
 	if len(rep.LegacyAfterKeyed) > 0 {
 		failed = append(failed, "a disclosed record sits on an unkeyed digest after the keyed form "+

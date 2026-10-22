@@ -505,6 +505,14 @@ but not who signed it, and the verdict says so: `INTACT, BUT UNIDENTIFIED` rathe
 A `--pubkey` given an empty value, which is what a failed key fetch leaves behind, is refused rather
 than treated as no pin.
 
+An install enrolled with a witness carries the witness's countersignatures in its bundles and
+receipts. Pass `--witness-pubkey` with the key the witness publishes, in either the sha256 key id or
+the raw hex form, so only that witness's countersignatures are counted, and `--witness` with the
+statement fetched from the witness at `GET /v1/installs/<key id>/attestation`, where `<key id>` is
+the producer key id, so the file is held to the newest head the witness countersigned. A file that
+ends before that head, or a statement that holds nothing yet, is reported as not checkable and never
+reads `VERIFIED`. An empty `--witness-pubkey` is refused.
+
 ## witness
 
 Watches a server's span beat feed from outside it. A chain proves what it holds was not altered, but
@@ -534,7 +542,9 @@ beats off, the witness reports `empty_feed`, and a `--once` run exits nonzero.
 
 ## witness serve
 
-Runs the witness. Its flags are checked against that subcommand rather than `witness` itself.
+Runs the witness. Its flags are checked against that subcommand rather than `witness` itself. With
+`--accept-enrollments` it is also a push witness, the one [the hosted witness page](witness.md)
+describes, and `--enrollment-policy open` runs it for installs on your own network.
 
 | Flag | Default | Purpose |
 |------|---------|---------|
@@ -595,8 +605,9 @@ Enterprise, or Team with the add-on. Without one the command refuses and sends n
       --witness https://witness.switchtender.com
 
 The command prints the witness key id. Compare it with the id the witness publishes at
-`/.well-known/loomseal.json` before trusting what it countersigns, or pass `--witness-key` to refuse
-any other. The enrollment is written to `witness-enrollment.json` beside the license file, so a
+`/.well-known/loomseal.json` and with the one [the hosted witness page](witness.md#the-witness-key)
+carries before trusting what it countersigns, or pass `--witness-key` to refuse any other. The
+enrollment is written to `witness-enrollment.json` beside the license file, so a
 backup and a restore carry both or neither. It holds no secret. An install whose key was changed
 under its install id through `SWITCHTENDER_AUDIT_KEY` is refused, since the witness binds an install
 id to the key it was born to. A new install started after its signing key was lost enrolls as a new

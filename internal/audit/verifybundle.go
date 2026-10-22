@@ -147,6 +147,20 @@ type BundleReport struct {
 	// DisclosedUnchecked is how many disclosed records are unchecked, a member and the one it travels
 	// with counted once. A document with any never verifies as plain VERIFIED.
 	DisclosedUnchecked int
+	// WitnessAttested counts the claims a witness countersigned, each pair of witness key and claim
+	// once, among the attestations of role witness that verify over the link of the claim they ride
+	// on.
+	WitnessAttested int
+	// WitnessKeyIDs are the key ids of the witnesses whose attestations verify, in sorted order.
+	WitnessKeyIDs []string
+	// WitnessNewestSeq is the highest seq a verified witness attestation covers, zero when none does.
+	WitnessNewestSeq int64
+	// WitnessProblems names, by the seq of the entry it rides on, each witness attestation that does
+	// not verify. The claim it names was altered or the attestation was forged, so any entry fails
+	// the document.
+	WitnessProblems []string
+	// witnessBy holds, per witness key id, what that key's verified attestations cover.
+	witnessBy map[string]*witnessTally
 	// memberStates holds what each check established about the members it covered.
 	memberStates map[int]map[string]memberSettled
 	// decisionClaims holds, by claim index, what the release check reads about each decision whose
@@ -257,13 +271,14 @@ type DisclosedDecision struct {
 // disclosed outcome, decision, or release that does not match its commitment fails the whole
 // receipt: it is a claim the chain does not back. A spec inconsistency fails it too, because then
 // the approval and the execution the receipt ties together are not about the same change, and so
-// does a release the outcome or the decisions do not bear out.
+// does a release the outcome or the decisions do not bear out. So does a witness attestation that
+// does not verify over the claim it rides on.
 func (r *BundleReport) OK() bool {
 	return r.SignatureOK && r.ChainOK && r.AnchorsOK &&
 		(!r.OutcomePresent || r.OutcomeDigestOK) && r.DecisionsOK && r.SpecConsistent &&
 		r.ApprovalPrecedesRun && !r.CorrectionsFailed && !r.SpansUnbound &&
 		len(r.CaseVariants) == 0 && len(r.LegacyAfterKeyed) == 0 &&
-		r.ReleasesOK && r.ReleasesConsistent
+		r.ReleasesOK && r.ReleasesConsistent && len(r.WitnessProblems) == 0
 }
 
 // VerifyBundle checks a signed bundle with no store and no network: it confirms the producer's
@@ -378,16 +393,20 @@ func verifyBundle(signed []byte, pinnedKeyID, acceptedInstall string) (*BundleRe
 	// "receipt --sparse", which prints "Verify it with: switchtender verify".
 	// Surfaces this product does not verify are refused by name, never silently skipped: a
 	// disclosure or attestation the mirror ignored would ride inside a green verdict unchecked,
-	// which is the exact rider problem the strip list exists to prevent. SwitchTender's own
-	// receipts carry neither, so nothing this product emits is affected.
+	// which is the exact rider problem the strip list exists to prevent. The one attestation this
+	// product verifies is a witness's countersignature of a claim, which verifyWitnessAttestations
+	// checks below. A head attestation and an attestation of any other role are refused.
 	if len(b.Attestations) > 0 {
 		return rep, fmt.Errorf("%w: bundle carries attestations: this product does not verify"+
 			" them; use the open loomseal verifier", ErrVerify)
 	}
 	for i := range b.Claims {
-		if len(b.Claims[i].Disclosures) > 0 || len(b.Claims[i].Attestations) > 0 {
-			return rep, fmt.Errorf("%w: claim %d carries disclosures or attestations: this"+
-				" product does not verify them; use the open loomseal verifier", ErrVerify, i)
+		if len(b.Claims[i].Disclosures) > 0 {
+			return rep, fmt.Errorf("%w: claim %d carries disclosures: this product does not"+
+				" verify them; use the open loomseal verifier", ErrVerify, i)
+		}
+		if err := refuseForeignAttestations(i, b.Claims[i].Attestations); err != nil {
+			return rep, err
 		}
 		// A payload with a redactable-field digest set follows LoomSwatch rules this product
 		// does not implement; passing it unexamined would grade a construction nobody checked.
@@ -455,6 +474,7 @@ func verifyBundle(signed []byte, pinnedKeyID, acceptedInstall string) (*BundleRe
 	verifyReleaseConsistency(b.Claims, rep)
 	verifySpanBinding(b.Claims, rep)
 	verifyTimeOrder(b.Claims, claimAt, rep)
+	verifyWitnessAttestations(b.Claims, rep)
 	classifyDisclosed(&b, rep)
 	return rep, nil
 }

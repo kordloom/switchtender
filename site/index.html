@@ -207,7 +207,7 @@
 				<article class="card reveal">
 					<div class="ic ic-doctor"></div>
 					<h3>A witness on another machine</h3>
-					<p><code>switchtender witness</code> watches the chain's public feed from a second machine, keeps a signed checkpoint of what it saw, and raises a finding when history shrinks or a beat goes missing. The hosted witness answers with countersigned attestations that verify offline against a key you pinned.</p>
+					<p><code>switchtender witness</code> watches the chain's public feed from a second machine, keeps a signed checkpoint of what it saw, and raises a finding when history shrinks or a beat goes missing. The <a href="/docs/witness">hosted witness</a> countersigns an enrolled install's chain as it grows, and <code>switchtender verify</code> holds an export to the witness's signed statement, so history it has seen cannot be rewritten without the check failing.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-bell"></div>

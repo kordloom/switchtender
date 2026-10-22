@@ -261,11 +261,21 @@ from a claim the operator makes into one a third party signs. When the witness c
 the attestation says so rather than going quiet, because a server going dark on its witness is
 itself a signal.
 
-A hosted witness reachable off its own host requires a read token on every
-API call, set with `--api-token` or `SWITCHTENDER_WITNESS_TOKEN`, so a public deployment does not
-hand any caller the list of watched servers or the cross-server findings feed. Offline attestation
-verification is unaffected: a relying party checks an attestation it already holds against the
-pinned key with no call to the witness at all, so the token gates delivery, not trust.
+With `--accept-enrollments` the same process is a push witness, so an install never has to expose
+a port. An install enrolled with `switchtender witness enroll` sends every span beat with the tree
+root at that beat and a consistency proof from the root the witness last signed, and the witness
+countersigns only a tree that extends the one it holds. The install carries those
+countersignatures in its bundles and receipts, and `switchtender verify --witness` holds an export
+to the witness's signed statement, so a chain rewritten at or before a countersigned position never
+reads `VERIFIED`. [The hosted witness](witness.md) is the one KordLoom runs, outside your install.
+
+A witness reachable off its own host requires a read token on every `/witness` route, set with
+`--api-token` or `SWITCHTENDER_WITNESS_TOKEN`, so a public deployment does not hand any caller the
+list of watched servers or the cross-server findings feed. The push routes stay open, since a push
+is authenticated by its producer signature and a read by producer key id reveals only counters,
+heads, and findings. Offline attestation verification is unaffected: a relying party checks an
+attestation it already holds against the pinned key with no call to the witness at all, so the
+token gates delivery, not trust.
 
 **The chain streams into the SIEM, and stays checkable there.** `--forward-url` and
 `--forward-syslog` deliver every audit entry to the operator's collector, each event carrying its
