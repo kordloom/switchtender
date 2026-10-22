@@ -1478,8 +1478,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	// The producer identity signs LoomSeal bundles and is published so a relying party can pin its
 	// fingerprint. It is created on first start in the install's identity directory, the same one the
 	// bundle command reads, so a bundle is signed with the key serve publishes. A failure to create
-	// it is not fatal: the server still runs and still records the audit chain, and refusing to start
-	// would take an install offline over evidence it may not be exporting yet.
+	// it on a chain no install has signed is not fatal: the server still runs and still records the
+	// audit chain, and refusing to start would take an install offline over evidence it may not be
+	// exporting yet.
 	//
 	// It does cost more than attribution. Without an identity there is no install to bind entries to,
 	// so the chain commits to no producer and its receipts can be lifted onto another install. The
@@ -1492,19 +1493,28 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	var producer *audit.Identity
 	producerProblem := ""
 	//
-	// A key naming another install than the chain is the exception. No honest install meets it, and
-	// running on would leave the server unkeyed, checking no seal and passing no gate, while its
-	// operator believes the upgrade keyed it, so the start is refused.
-	if id, err := loadProducerIdentity(cmd.Context(), bundle.Audits(), serveDB); errors.Is(err,
-		errForeignIdentity) {
+	// A chain some install has already signed is the exception, whether the key found names another
+	// install or no key is found at all. Running on would leave the server unkeyed beside keyed
+	// replicas, checking no seal and passing no gate, while its operator believes the install is
+	// keyed, so the start is refused. Only an unbound chain warns and runs: the first keyed start
+	// binds it, which closes that window.
+	id, err := loadProducerIdentity(cmd.Context(), bundle.Audits(), serveDB)
+	switch {
+	case errors.Is(err, errForeignIdentity):
 		return fmt.Errorf("%w. A server with this key over this chain would run unkeyed, so the "+
 			"start is refused. Nothing was changed", err)
-	} else if err != nil {
+	case errors.Is(err, errLostIdentity):
+		return fmt.Errorf("%w. A server without the key over this chain would run unkeyed, checking "+
+			"no seal and passing no gate, so the start is refused. Nothing was changed. If no copy "+
+			"of the key exists anywhere, the chain cannot be signed again: take a backup and "+
+			"restore it into a new database, which starts a new install, as the backup page "+
+			"describes under Signing key lost", err)
+	case err != nil:
 		producerProblem = err.Error()
 		log.Warn("producer identity unavailable, so bundles cannot be attributed and entries are not " +
 			"bound to this install, which lets a receipt be lifted onto another one. Approval " +
 			"binding is row-checked only until an identity is present: " + err.Error())
-	} else {
+	default:
 		producer = &id
 		log.Info("producer identity ready", zap.String("key_id", id.KeyID()),
 			zap.String("install_id", id.InstallID))
@@ -1526,6 +1536,13 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	// first tick instead of pausing the install.
 	bindingKey, err := bindingKeyOf(producer)
 	if err != nil {
+		return err
+	}
+	// The chain is held to the witness's head before the adoption gate, which can append an empty
+	// adoption record, so a chain re-linked under what the witness saw is refused with nothing
+	// written.
+	if err := witnessHeadGate(cmd.Context(), serveWitnessEnrollment, license.PathFor(serveDB),
+		producer, bundle.Audits(), log); err != nil {
 		return err
 	}
 	if err := adoptionGate(cmd.Context(), store, bundle.Audits(), bindingKey, log,
@@ -2172,13 +2189,38 @@ func adoptionGate(ctx context.Context, runs run.Store, audits audit.Store, key *
 
 // loadProducerIdentity reads the install's producer signing identity, resolving where it lives
 // first so a server with nowhere durable to keep it says so rather than signing with a key the next
-// restart throws away.
+// restart throws away. With nowhere to look over a chain an install has already signed, the key is
+// as missing as one absent from its directory, so that is reported as errLostIdentity too.
 func loadProducerIdentity(ctx context.Context, audits audit.Store, db string) (audit.Identity, error) {
 	dir, err := identityDir(db)
+	if errors.Is(err, errNoIdentityHome) {
+		bound, berr := chainInstall(ctx, audits)
+		if berr != nil {
+			return audit.Identity{}, errors.Join(err, berr)
+		}
+		if bound != "" {
+			return audit.Identity{}, fmt.Errorf("%w: the audit chain belongs to install %s, and its "+
+				"key is neither in %s nor anywhere this process can look, since there is %w here. "+
+				"Set %s to the seed this install signs with, or set %s to a durable directory "+
+				"holding its %s. A new key would sign as a different install, and no earlier entry "+
+				"would verify under it", errLostIdentity, bound, identity.KeyEnv, errNoIdentityHome,
+				identity.KeyEnv, identityDirEnv, audit.IdentityFile)
+		}
+	}
 	if err != nil {
 		return audit.Identity{}, err
 	}
 	return identityForChain(ctx, audits, db, dir)
+}
+
+// chainInstall returns the install the chain audits holds is bound to, or the empty string for a
+// chain no install has claimed or a store that cannot say.
+func chainInstall(ctx context.Context, audits audit.Store) (string, error) {
+	reader, ok := audits.(audit.InstallReader)
+	if !ok {
+		return "", nil
+	}
+	return reader.BoundInstall(ctx)
 }
 
 // identityForChain loads the producer identity in dir for the chain audits holds. It creates one only
@@ -2188,12 +2230,9 @@ func loadProducerIdentity(ctx context.Context, audits audit.Store, db string) (a
 // not, so none of them could verify, while the command printed a fingerprint to publish. A key that
 // names a different install than the chain is refused for the same reason.
 func identityForChain(ctx context.Context, audits audit.Store, db, dir string) (audit.Identity, error) {
-	bound := ""
-	if reader, ok := audits.(audit.InstallReader); ok {
-		var err error
-		if bound, err = reader.BoundInstall(ctx); err != nil {
-			return audit.Identity{}, err
-		}
+	bound, err := chainInstall(ctx, audits)
+	if err != nil {
+		return audit.Identity{}, err
 	}
 	if bound != "" && !audit.IdentityPresent(dir) {
 		where := dir
@@ -2201,9 +2240,10 @@ func identityForChain(ctx context.Context, audits audit.Store, db, dir string) (
 			where = abs
 		}
 		return audit.Identity{}, fmt.Errorf("%w: the audit chain belongs to install %s, and its key "+
-			"is not in %s. Restore %s there from a backup, or set %s to the seed this install signs "+
-			"with. A new key would sign as a different install, and no earlier entry would verify "+
-			"under it", errLostIdentity, bound, where, audit.IdentityFile, identity.KeyEnv)
+			"is neither in %s nor in %s. Restore %s there from a copy, or set %s to the seed this "+
+			"install signs with. A new key would sign as a different install, and no earlier entry "+
+			"would verify under it", errLostIdentity, bound, identity.KeyEnv, where,
+			audit.IdentityFile, identity.KeyEnv)
 	}
 	id, err := audit.LoadIdentityForStore(db, dir)
 	if err != nil {

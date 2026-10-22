@@ -358,7 +358,8 @@ func TestAdoptSealsWhatAnOldBinaryLeft(t *testing.T) {
 		},
 		WantResult: adoptResult{Seals: []string{binding.KindClaim}, Holds: true,
 			Status: run.StatusSucceeded, Ran: ran("site.yml")},
-	}, { // Test 3: The shards of a held split are sealed to it, and an approval then runs them.
+	}, { // Test 3: The shards of a held split are sealed to it, are refused until it is decided,
+		// and an approval then runs them.
 		Name: "shard",
 		Leave: func(t *testing.T, in *adoptInstall) adoptCase {
 			parent, err := in.old.SubmitSplit(ctx, "site.yml", "inv", 2,
@@ -374,7 +375,11 @@ func TestAdoptSealsWhatAnOldBinaryLeft(t *testing.T) {
 			return adoptCase{parent: parent, row: shards[0]}
 		},
 		Check: func(in *adoptInstall, c adoptCase) error {
-			return in.verifier().Executable(ctx, c.row)
+			if err := in.verifier().Executable(ctx, c.row); !errors.Is(err, binding.ErrDrift) {
+				return fmt.Errorf("Executable(shard of a held split) = %v, want %w", err,
+					binding.ErrDrift)
+			}
+			return in.verifier().Held(ctx, c.parent)
 		},
 		Drive: func(t *testing.T, in *adoptInstall, c adoptCase) *run.Run {
 			if _, err := in.keyed(t).Approve(ctx, c.parent.ID, bndDecider()); err != nil {
@@ -548,6 +553,65 @@ func TestAdoptSealsWhatAnOldBinaryLeft(t *testing.T) {
 			slices.Sort(got.Seals)
 			if diff := cmp.Diff(test.WantResult, got, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("adoption mismatch (-want +got):\n%s\nerror: %s", diff, ended.Error)
+			}
+		})
+	}
+}
+
+// TestAdoptSealsTheDeciderItShows pins that the name adoption shows as having decided a run is the
+// name its seal covers: the seal adoption writes verifies over the DECISION entry's root carrying
+// the DECIDED BY name, and not over the same root carrying another name.
+func TestAdoptSealsTheDeciderItShows(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	in := newAdoptInstall(t, run.NewMemStore())
+	held := in.held(t, run.WithQueue("work"))
+	if _, err := in.old.Approve(ctx, held.ID, bndDecider()); err != nil {
+		t.Fatalf("Approve() error = %v", err)
+	}
+	in.stopOld()
+	res, err := Adopt(ctx, in.deps())
+	if err != nil {
+		t.Fatalf("Adopt() error = %v", err)
+	}
+	if len(res.Work.Rows) != 1 || len(res.Sealed) != 1 {
+		t.Fatalf("Adopt() = %+v, %+v, want the one approved row sealed", res, res.Work)
+	}
+	shown := res.Work.Rows[0]
+	if shown.DecidedBy != bndDecider().Name {
+		t.Errorf("DecidedBy = %q, want %q", shown.DecidedBy, bndDecider().Name)
+	}
+	row := in.get(t, held.ID)
+	entry, err := in.chain.Entry(ctx, row.DecisionID)
+	if err != nil {
+		t.Fatalf("Entry(%s) error = %v", row.DecisionID, err)
+	}
+	if shown.DecisionEntry != entry.ID {
+		t.Errorf("DecisionEntry = %q, want %q", shown.DecisionEntry, entry.ID)
+	}
+	root := binding.RootOf(entry)
+	if root.Actor != shown.DecidedBy {
+		t.Errorf("root actor = %q, want the name shown, %q", root.Actor, shown.DecidedBy)
+	}
+	tests := []struct {
+		Actor      string
+		WantVerify bool
+	}{{ // Test 0: The name shown.
+		Actor: shown.DecidedBy, WantVerify: true,
+	}, { // Test 1: Another name.
+		Actor: "mallory", WantVerify: false,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			named := root
+			named.Actor = test.Actor
+			rec, err := binding.RunRecord(row, named)
+			if err != nil {
+				t.Fatalf("RunRecord() error = %v", err)
+			}
+			if got := in.key.Verify(rec, row.SpecSeal); got != test.WantVerify {
+				t.Errorf("Verify() with decider %q = %t, want %t", test.Actor, got, test.WantVerify)
 			}
 		})
 	}

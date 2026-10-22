@@ -182,6 +182,63 @@ func TestEnrollRefreshKeysKeepsOnlyAnEndorsedList(t *testing.T) {
 	}
 }
 
+// TestRequireSecureURL pins the transport rule for a witness URL: https anywhere, plain http only
+// to a loopback address, which never leaves the machine.
+func TestRequireSecureURL(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// In is the normalized witness URL.
+		In string
+		// Want is the error the rule returns, nil for a URL it accepts.
+		Want error
+	}{{ // Test 0: https to a public host.
+		In: "https://witness.example.com",
+	}, { // Test 1: https to a private address.
+		In: "https://10.0.0.5:9440",
+	}, { // Test 2: Plain http to 127.0.0.1.
+		In: "http://127.0.0.1:9440",
+	}, { // Test 3: Plain http to another address in 127.0.0.0/8.
+		In: "http://127.8.9.10:9440",
+	}, { // Test 4: Plain http to ::1.
+		In: "http://[::1]:9440",
+	}, { // Test 5: Plain http to localhost, in any case.
+		In: "http://LocalHost:9440",
+	}, { // Test 6: Plain http to a private network address.
+		In: "http://10.0.0.5:9440", Want: ErrEnrollment,
+	}, { // Test 7: Plain http to a public host.
+		In: "http://witness.example.com", Want: ErrEnrollment,
+	}, { // Test 8: Plain http to a name that only starts like localhost.
+		In: "http://localhost.example.com", Want: ErrEnrollment,
+	}, { // Test 9: Plain http to an address just outside 127.0.0.0/8.
+		In: "http://128.0.0.1", Want: ErrEnrollment,
+	}, { // Test 10: Plain http to the unspecified address.
+		In: "http://0.0.0.0:9440", Want: ErrEnrollment,
+	}, { // Test 11: Plain http to the IPv4-mapped loopback.
+		In: "http://[::ffff:127.0.0.1]:9440",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			err := RequireSecureURL(test.In)
+			if !errors.Is(err, test.Want) || (err == nil) != (test.Want == nil) {
+				t.Errorf("RequireSecureURL(%q) = %v, want %v", test.In, err, test.Want)
+			}
+		})
+	}
+}
+
+// TestEnrollRefusesPlainHTTPOffLoopback pins that Enroll sends nothing to a plain-http witness that
+// is not on a loopback address, since the request carries the license file.
+func TestEnrollRefusesPlainHTTPOffLoopback(t *testing.T) {
+	t.Parallel()
+	in := newTestInstall(t)
+	_, err := Enroll(context.Background(), testHTTPClient(), "http://10.0.0.5:9440", in.id, nil,
+		time.Now())
+	if !errors.Is(err, ErrEnrollment) || !strings.Contains(err.Error(), "plain http") {
+		t.Errorf("Enroll() over plain http off loopback = %v, want the transport refusal", err)
+	}
+}
+
 // TestEnrollNormalizesTheWitnessURL pins the witness URL rule.
 func TestEnrollNormalizesTheWitnessURL(t *testing.T) {
 	t.Parallel()

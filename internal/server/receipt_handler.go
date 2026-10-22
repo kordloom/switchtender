@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/binding"
 	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/receipt"
 	"github.com/kordloom/switchtender/internal/run"
@@ -41,8 +42,12 @@ import (
 // entries that is true. Refusing is the only answer available here that a relying party cannot be
 // shown without. The refusal names the break, so the operator loses nothing forensic: the entries,
 // the position, and GET /v1/audit/verify are all still there.
+//
+// binder holds the run and each approval step whose approval the receipt carries to its seal, so a
+// receipt never names an approver the DECISION entry was rewritten to; nil, an install with no
+// binding key, refuses every receipt that names an approver.
 func runReceiptHandler(store run.Store, audits audit.Store, producer *audit.Identity, version string,
-	decisions decision.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+	decisions decision.Store, binder *binding.Verifier, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: runReceiptHandler: Store required")
 	}
@@ -85,7 +90,8 @@ func runReceiptHandler(store run.Store, audits audit.Store, producer *audit.Iden
 		if refused {
 			return
 		}
-		opts := receipt.Options{Sparse: r.URL.Query().Get("sparse") != "", Decisions: decisions}
+		opts := receipt.Options{Sparse: r.URL.Query().Get("sparse") != "", Decisions: decisions,
+			Binder: binder}
 		// A non-admin receives the sparse shape whatever they asked for. The contiguous shape carries
 		// the chain segment recorded between this run's creation and its outcome, which on a shared
 		// install holds other organizations' entries: their actors, their methods, and their request

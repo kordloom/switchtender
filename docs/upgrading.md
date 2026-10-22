@@ -33,7 +33,9 @@ identity, and checks the seal before the run executes, so a run whose spec or de
 in the database after it was approved is refused rather than run. A run v1.102.0 left carries no
 seal. A server of this release that finds such work, held, queued, or in the middle of a workflow,
 and finds no adoption record on the audit chain refuses to start, names the runs, and changes
-nothing. A server with no producer identity holds no key and is not held back.
+nothing. A server with no producer identity on a chain no install has signed holds no key and is
+not held back. A server that finds the chain bound to an install whose key it does not hold refuses
+to start, as the [backup page](backup.md#signing-key-lost) explains.
 
 What to do: stop every server and worker of v1.102.0, then run `switchtender adopt --db <database>`
 once, where it reads the same producer identity the servers load. Run it with the seed or identity
@@ -42,16 +44,20 @@ the audit chain, prints every run it would seal, and asks before it writes. Pass
 question, which is for a run by hand and never for an entrypoint, a hook, or a recurring job. Then
 start the servers. Adopt runs once per install. On an install enrolled with a witness, adopt asks
 the witness for the head it countersigned and refuses a chain that does not reach it, or a witness
-that does not answer. To adopt an install that no longer uses its witness, remove
-`witness-enrollment.json` first. If the start is refused on an install where adopt already ran, its
-record was removed from the chain, and adopt refuses to run again. Restore the
-database, audit chain included, from a copy taken before the upgrade, such as a copy of the SQLite
-file or a PostgreSQL dump. A backup file from `switchtender backup` holds neither runs nor the
-chain. A run v1.102.0 creates or finishes after adoption carries no seal and is refused when it
-starts, so submit it again. A held run a v1.102.0 server approves after adoption is refused the same
-way, as changed after it was approved, because the old server's approval carries no seal. Nothing
-was tampered with. Submit it again, and stop every v1.102.0 server before adopting to avoid it.
-[adopt](configuration.md#adopt) has the details.
+that does not answer. After it writes, adopt appends a span beat and pushes it to the witness, so
+the witness's head covers the adoption record before adopt returns. If that push fails, the adoption
+stands and adopt exits non-zero, saying the record is not yet witnessed. The record stays outside
+the witness's memory until the server's first beat reaches the witness, so start the servers and
+check that the witness status shows a countersigned push. Do not run adopt again. To adopt an
+install that no longer uses its witness, remove `witness-enrollment.json` first. If the start is
+refused on an install where adopt already ran, its record was removed from the chain, and adopt
+refuses to run again. Restore the database, audit chain included, from a copy taken before the
+upgrade, such as a copy of the SQLite file or a PostgreSQL dump. A backup file from
+`switchtender backup` holds neither runs nor the chain. A run v1.102.0 creates or finishes after adoption carries
+no seal and is refused when it starts, so submit it again. A held run a v1.102.0 server approves
+after adoption is refused the same way, as changed after it was approved, because the old server's
+approval carries no seal. Nothing was tampered with. Submit it again, and stop every v1.102.0 server
+before adopting to avoid it. [adopt](configuration.md#adopt) has the details.
 
 ## Agent runs are held by default
 

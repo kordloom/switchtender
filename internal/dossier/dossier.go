@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"html/template"
 	"sort"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/binding"
 	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
@@ -73,6 +75,208 @@ type Input struct {
 	// a person made, the reason given with it, the random value that opens the reason's commitment,
 	// corrections, redactions, and for an agent's run the separation-of-duties evaluation.
 	Decisions []*decision.Record `json:"decisions,omitempty"`
+	// Seals are what holding the run, and each approval step whose approval the dossier shows, to
+	// the seal the process made over it found, attached by AttachSeals. A seal covers who the
+	// DECISION entry it names says decided, so a name on a row whose seal drifted is not trusted.
+	Seals []SealCheck `json:"seals,omitempty"`
+}
+
+// The states a SealCheck reports.
+const (
+	// SealHeld is a row whose seal matches it and the DECISION entry it names.
+	SealHeld = "held"
+	// SealDrifted is a row whose seal no longer matches it or the entry it names.
+	SealDrifted = "drifted"
+	// SealUnsealed is a row that carries no seal, or names no decision a seal covers.
+	SealUnsealed = "unsealed"
+	// SealUnchecked is a row nothing could be checked for: the install holds no binding key, or a
+	// read the check needed failed.
+	SealUnchecked = "unchecked"
+)
+
+// The kinds of row a SealCheck is about.
+const (
+	// SealKindRun is the run the dossier is about.
+	SealKindRun = "run"
+	// SealKindStep is one of its workflow approval steps.
+	SealKindStep = "approval_step"
+)
+
+// noKeyText says why a dossier or register checked no seal.
+const noKeyText = "this install holds no binding key, so no seal is checked and the name on a " +
+	"decision is held to none"
+
+// errNamesNoDecision is why a run credited an approval it does not name is held to no seal that
+// covers the approver.
+var errNamesNoDecision = errors.New("the run names no decision entry, so no seal covers who " +
+	"approved it")
+
+// SealCheck is what holding one row to its seal found.
+type SealCheck struct {
+	// RunID is the row checked.
+	RunID string `json:"run_id"`
+	// Kind is SealKindRun or SealKindStep.
+	Kind string `json:"kind"`
+	// EntryID is the DECISION entry whose decider the row's seal covers, empty when the row names
+	// no approval.
+	EntryID string `json:"entry_id,omitempty"`
+	// Status is one of the Seal states.
+	Status string `json:"status"`
+	// Text says what the check found when the seal did not hold.
+	Text string `json:"text,omitempty"`
+}
+
+// AttachSeals holds the collected run, and each approval step whose credited approval the dossier
+// shows, to the seal the process made over it, and records what each check found in in.Seals. It
+// runs before anything masks the collected run, since a seal is made over the row as stored. A nil
+// verifier, an install with no binding key, records every check as unchecked. Nothing here fails
+// the dossier: a read that fails is recorded as unchecked with the reason.
+func AttachSeals(ctx context.Context, in *Input, v *binding.Verifier, runs run.Store) {
+	if in == nil || in.Run == nil {
+		return
+	}
+	r := in.Run
+	byID := make(map[string]*audit.Entry, len(in.Entries))
+	for _, e := range in.Entries {
+		byID[e.ID] = e
+	}
+	approvalOf := func(id string) bool {
+		e, ok := byID[id]
+		return ok && e.Method == audit.MethodDecision && strings.HasSuffix(e.Path,
+			"/decision/"+outcome.StepApproved)
+	}
+	hold := func(runID, kind, entryID string, check func() error) {
+		if v == nil {
+			in.Seals = append(in.Seals, SealCheck{RunID: runID, Kind: kind, EntryID: entryID,
+				Status: SealUnchecked, Text: noKeyText})
+			return
+		}
+		in.Seals = append(in.Seals, sealCheckOf(runID, kind, entryID, check()))
+	}
+	switch {
+	case r.ParentID == nil && r.DecisionID == "":
+		// A run that names no decision is checked as submitted, and credits any approval at its
+		// path, which no seal then covers.
+		credited := ""
+		for _, e := range in.Entries {
+			if e.Method == audit.MethodDecision &&
+				e.Path == "/runs/"+r.ID+"/decision/"+outcome.StepApproved && outcome.Credits(r, e.ID) {
+				credited = e.ID
+			}
+		}
+		hold(r.ID, SealKindRun, credited, func() error {
+			if err := v.Sealed(ctx, r); err != nil || credited == "" {
+				return err
+			}
+			return fmt.Errorf("run %s: %w", r.ID, errNamesNoDecision)
+		})
+	case r.ParentID == nil && r.DecisionID != "" && !approvalOf(r.DecisionID) &&
+		byID[r.DecisionID] != nil:
+		// A rejection seals nothing, so the run is held to the seal it was submitted with and no
+		// decider is named under it.
+		submitted := *r
+		submitted.DecisionID = ""
+		hold(r.ID, SealKindRun, "", func() error { return v.Sealed(ctx, &submitted) })
+	case r.ParentID == nil:
+		hold(r.ID, SealKindRun, r.DecisionID, func() error { return v.Sealed(ctx, r) })
+	case r.Kind == run.KindApproval && r.DecisionID != "" && approvalOf(r.DecisionID):
+		hold(r.ID, SealKindStep, r.DecisionID, func() error {
+			return gateCheck(ctx, v, runs, *r.ParentID, r)
+		})
+	case r.Kind != run.KindApproval:
+		hold(r.ID, SealKindRun, "", func() error { return v.Executable(ctx, r) })
+	}
+	if r.ParentID != nil {
+		return
+	}
+	seen := map[string]bool{}
+	for _, e := range in.Entries {
+		runID, stepID, verdict, ok := outcome.ParseStepDecisionPath(e.Path)
+		if !ok || e.Method != audit.MethodDecision || runID != r.ID ||
+			verdict != outcome.StepApproved || seen[stepID] {
+			continue
+		}
+		node, err := runs.Get(ctx, stepID)
+		if err != nil {
+			in.Seals = append(in.Seals, SealCheck{RunID: stepID, Kind: SealKindStep, EntryID: e.ID,
+				Status: SealUnchecked, Text: "the approval step could not be read: " + err.Error()})
+			seen[stepID] = true
+			continue
+		}
+		if !outcome.Credits(node, e.ID) {
+			continue
+		}
+		seen[stepID] = true
+		hold(stepID, SealKindStep, e.ID, func() error { return gateCheck(ctx, v, runs, r.ID, node) })
+	}
+}
+
+// gateCheck holds a decided approval step of the workflow parentID to its seal, over the workflow
+// state rebuilt from runs.
+func gateCheck(ctx context.Context, v *binding.Verifier, runs run.Store, parentID string,
+	node *run.Run) error {
+	parent, err := runs.Get(ctx, parentID)
+	if err != nil {
+		return fmt.Errorf("%w: read workflow %s: %w", binding.ErrUnverified, parentID, err)
+	}
+	state, err := outcome.StepStateOf(ctx, runs, parent, node)
+	if err != nil {
+		return fmt.Errorf("%w: rebuild the state of step %s: %w", binding.ErrUnverified, node.ID, err)
+	}
+	return v.Gate(ctx, parent, node, state)
+}
+
+// sealCheckOf records what a check of runID returned.
+func sealCheckOf(runID, kind, entryID string, err error) SealCheck {
+	c := SealCheck{RunID: runID, Kind: kind, EntryID: entryID, Status: SealHeld}
+	switch {
+	case err == nil:
+		return c
+	case errors.Is(err, binding.ErrUnsealed), errors.Is(err, errNamesNoDecision):
+		c.Status = SealUnsealed
+	case errors.Is(err, binding.ErrDrift):
+		c.Status = SealDrifted
+	default:
+		c.Status = SealUnchecked
+	}
+	c.Text = err.Error()
+	return c
+}
+
+// sealNote says what a seal check means for the name on the entry it covers, empty when the seal
+// held.
+func sealNote(status string) string {
+	switch status {
+	case SealDrifted:
+		return "the row's seal no longer matches this entry; the name is not trusted"
+	case SealUnsealed:
+		return "the row carries no seal over this entry; the name is held to none"
+	case SealUnchecked:
+		return "unchecked: no seal was checked for this entry"
+	}
+	return ""
+}
+
+// sealNotes maps each DECISION entry a seal check covers to the note its name carries.
+func sealNotes(seals []SealCheck) map[string]string {
+	notes := map[string]string{}
+	for _, c := range seals {
+		if note := sealNote(c.Status); note != "" && c.EntryID != "" {
+			notes[c.EntryID] = note
+		}
+	}
+	return notes
+}
+
+// withNote returns a decider's name with the note its seal check carries, unchanged for none.
+func withNote(name, note string) string {
+	if note == "" {
+		return name
+	}
+	if name == "" {
+		name = "none recorded"
+	}
+	return name + " (" + note + ")"
 }
 
 // Collect gathers a run's evidence from the stores in one streaming pass over the chain. It
@@ -508,9 +712,10 @@ func Render(in *Input) ([]byte, error) {
 	if in.Launch == nil && !in.ReceiptMissing {
 		v.NoReceipt = true
 	}
+	notes := sealNotes(in.Seals)
 	for _, e := range in.Entries {
 		row := entryRow{
-			Seq: e.Seq, At: e.At.UTC().Format(time.RFC3339), Actor: e.Actor,
+			Seq: e.Seq, At: e.At.UTC().Format(time.RFC3339), Actor: withNote(e.Actor, notes[e.ID]),
 			OnBehalfOf: onBehalfOf(e),
 			Action:     e.Method + " " + e.Path,
 			Role:       entryRole(e),
@@ -522,8 +727,8 @@ func Render(in *Input) ([]byte, error) {
 		}
 	}
 	v.Tokens = tokenRows(in.Entries)
-	v.Reasons = reasonRows(in.Decisions)
-	v.Identity = agentIdentity(in.Run, in.Decisions)
+	v.Reasons = reasonRows(in.Decisions, in.Entries, notes)
+	v.Identity = agentIdentity(in.Run, in.Decisions, in.Entries, notes)
 	if res := in.Run.InventoryResolution; res != nil {
 		v.Resolution = &resolutionView{
 			Kind: res.Kind, Inputs: strings.Join(res.Inputs, ", "), Hosts: res.Hosts,
@@ -606,6 +811,22 @@ func Render(in *Input) ([]byte, error) {
 		v.Status = "verified"
 		v.StatusText = fmt.Sprintf("The chain verifies and %d %s history containing this run "+
 			"outside this install.", holding, util.Plural(holding, "anchor fixes", "anchors fix"))
+	}
+	// A drifted seal is a finding about who decided, which no anchor answers, so it outranks any
+	// verdict short of a chain that is itself broken.
+	var drifted []SealCheck
+	for _, c := range in.Seals {
+		if c.Status == SealDrifted {
+			drifted = append(drifted, c)
+		}
+	}
+	if n := len(drifted); n > 0 && v.Status != "broken" {
+		v.Status = "broken"
+		v.StatusText = fmt.Sprintf("Not verified. %d %s on this run no longer %s the seal the "+
+			"process made over %s, so the %s on %s not trusted: %s", n,
+			util.Plural(n, "row", "rows"), util.Plural(n, "matches", "match"),
+			util.Plural(n, "it", "them"), util.Plural(n, "name", "names"),
+			util.Plural(n, "it is", "them are"), drifted[0].Text)
 	}
 
 	var buf bytes.Buffer

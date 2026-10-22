@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"html/template"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/binding"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/scrub"
@@ -45,6 +47,15 @@ type Decision struct {
 	At time.Time
 	// Seq is the chain entry recording it.
 	Seq int64
+	// EntryID is the id of the chain entry recording it.
+	EntryID string
+	// StepID is the workflow approval step the decision was made on, empty for a whole run.
+	StepID string
+	// Seal is what holding the row the approval released to its seal found, one of the Seal
+	// states, set by AttachRegisterSeals and empty when nothing checked it.
+	Seal string
+	// SealText says what the check found when the seal did not hold.
+	SealText string
 }
 
 // RegisterInput is everything the change register renders, gathered by CollectRegister.
@@ -165,8 +176,12 @@ func CollectRegister(ctx context.Context, runs run.Store, audits audit.Store,
 			// The decision the run, or its approval step, stores as its winner is the one
 			// credited. A run decided before winners were stored credits the newest decision,
 			// as the chain tells it, in order.
-			in.Decisions[id] = Decision{Verdict: verdict, Actor: e.Actor, OnBehalfOf: onBehalfOf(e),
-				At: e.At, Seq: e.Seq}
+			d := Decision{Verdict: verdict, Actor: e.Actor, OnBehalfOf: onBehalfOf(e),
+				At: e.At, Seq: e.Seq, EntryID: e.ID}
+			if _, stepID, _, isStep := outcome.ParseStepDecisionPath(e.Path); isStep {
+				d.StepID = stepID
+			}
+			in.Decisions[id] = d
 		}
 		return nil
 	})
@@ -195,6 +210,65 @@ func CollectRegister(ctx context.Context, runs run.Store, audits audit.Store,
 		in.Pruned = len(pruned)
 	}
 	return in, nil
+}
+
+// AttachRegisterSeals holds the row each credited approval in the register released, the run or
+// its approval step, to the seal the process made over it, which covers who the approval's entry
+// says decided, and records what each check found on the decision. A rejection seals nothing and is
+// left unchecked. A nil verifier, an install with no binding key, marks every approval unchecked,
+// and so does a run the store no longer holds, which retention pruned: neither is a drift.
+func AttachRegisterSeals(ctx context.Context, in *RegisterInput, v *binding.Verifier,
+	runs run.Store) {
+	if in == nil {
+		return
+	}
+	listed := make(map[string]*run.Run, len(in.Runs))
+	for _, r := range in.Runs {
+		listed[r.ID] = r
+	}
+	for id, d := range in.Decisions {
+		if d.Verdict != "Approved" {
+			continue
+		}
+		d.Seal, d.SealText = registerSeal(ctx, v, runs, listed[id], id, d)
+		in.Decisions[id] = d
+	}
+}
+
+// registerSeal checks the row the approval d on run id released and returns the Seal state and,
+// when it did not hold, what the check found. r is the run as listed, nil to read it from runs.
+func registerSeal(ctx context.Context, v *binding.Verifier, runs run.Store, r *run.Run, id string,
+	d Decision) (string, string) {
+	if v == nil {
+		return SealUnchecked, noKeyText
+	}
+	if r == nil {
+		got, err := runs.Get(ctx, id)
+		switch {
+		case errors.Is(err, run.ErrNotFound):
+			return SealUnchecked, "the run is no longer in the store, which retention prunes"
+		case err != nil:
+			return SealUnchecked, "the run could not be read: " + err.Error()
+		}
+		r = got
+	}
+	var err error
+	switch {
+	case d.StepID != "":
+		var node *run.Run
+		if node, err = runs.Get(ctx, d.StepID); err != nil {
+			return SealUnchecked, "the approval step could not be read: " + err.Error()
+		}
+		err = gateCheck(ctx, v, runs, r.ID, node)
+	case r.DecisionID == "":
+		if err = v.Sealed(ctx, r); err == nil {
+			err = fmt.Errorf("run %s: %w", r.ID, errNamesNoDecision)
+		}
+	default:
+		err = v.Sealed(ctx, r)
+	}
+	c := sealCheckOf(r.ID, "", d.EntryID, err)
+	return c.Status, c.Text
 }
 
 // trimAt returns rows, which are oldest first, without the tail created at or after at.
@@ -322,6 +396,8 @@ type registerView struct {
 	CoveredTo string
 	// Failed tallies rows whose outcome is a failure.
 	Failed int
+	// Drifted tallies approvals whose row's seal no longer matches the entry naming the approver.
+	Drifted int
 	// Pruned counts changes the chain records in this period that the run store no longer holds,
 	// so the document says it is incomplete rather than reading as an account of a quiet period.
 	Pruned int
@@ -385,6 +461,17 @@ func RenderRegister(in *RegisterInput) ([]byte, error) {
 			if d.OnBehalfOf != "" {
 				row.Decision += " on behalf of " + d.OnBehalfOf
 			}
+			// The name is the approval entry's, which a writer can rewrite; the seal over the row
+			// it released is what says whether it still stands.
+			switch d.Seal {
+			case SealDrifted:
+				row.Decision += ", seal drifted"
+				v.Drifted++
+			case SealUnsealed:
+				row.Decision += ", unsealed"
+			case SealUnchecked:
+				row.Decision += ", seal unchecked"
+			}
 			row.DecisionSeq = d.Seq
 			switch d.Verdict {
 			case "Approved":
@@ -421,6 +508,12 @@ func RenderRegister(in *RegisterInput) ([]byte, error) {
 		v.Status = "verified"
 		v.StatusText = fmt.Sprintf("The chain verifies and carries %d %s fixing it outside this "+
 			"install.", in.Anchored, util.Plural(in.Anchored, "anchor", "anchors"))
+	}
+	if v.Drifted > 0 {
+		v.StatusText += fmt.Sprintf(" %d %s no longer %s the seal on the row %s released, so the "+
+			"%s on %s not trusted.", v.Drifted, util.Plural(v.Drifted, "approval", "approvals"),
+			util.Plural(v.Drifted, "matches", "match"), util.Plural(v.Drifted, "it", "they"),
+			util.Plural(v.Drifted, "name", "names"), util.Plural(v.Drifted, "it is", "them are"))
 	}
 	var buf bytes.Buffer
 	if err := registerTemplate.Execute(&buf, v); err != nil {

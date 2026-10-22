@@ -101,18 +101,52 @@ sits in the state directory beside the database and is what makes a bundle attri
 every entry and a tree anchor's Merkle leaves are bound to the install id derived from that key. A
 deployment restored without it will not mint a replacement: once a chain names an install, the server and
 every command refuse to sign or bind as another one, because a new key would sign as a different install
-and no earlier entry would verify under it. The server still starts and records the chain, unbound, and a
-request for a signed bundle answers <code>409</code> naming the key it needs. Commands that record a change still
-record it, unbound, and say why. Copy the file with the same care as the encryption key, and keep it out
-of the same place if you keep the backup somewhere a reader could reach both. The remedy for a missing
-key is to restore it.</p>
+and no earlier entry would verify under it. The server refuses to start, keyed or unkeyed, since a server
+without the key over that chain would check no seal and pass no gate beside servers that hold it.
+Commands that record a change still record it, unbound, and say why, so a backup can still be taken. Copy
+the file with the same care as the encryption key, and keep it out of the same place if you keep the
+backup somewhere a reader could reach both. The remedy for a missing key is to restore it. With no copy
+anywhere, see <a href="#signing-key-lost">Signing key lost</a>.</p>
 <p>Against PostgreSQL there is no directory beside the database, so the key has to be supplied rather than
 found: set <code>SWITCHTENDER_AUDIT_KEY</code> to one seed on every process, or place the same <code>producer-key.json</code> in
 each host's identity directory. A shared database with no identity supplied will not mint a per-host key,
 because two replicas signing as two installs is a fleet whose own anchors disagree with it. The server
 still starts and still records the chain. It warns, and runs with the chain unattributed and unbound, so
 its entries commit to no install and its receipts can be lifted onto another one. Supply the key before
-the receipts matter to anybody.</p>
+the receipts matter to anybody. Once any process has signed the chain, a process without the seed refuses
+to start. The first keyed start binds the chain, so from then on no replica without the key runs beside
+the ones that hold it.</p>
+<h2 id="signing-key-lost">Signing key lost</h2>
+<p>A server that finds the chain bound to an install whose key it does not hold refuses to start. If a copy
+of <code>producer-key.json</code> or the seed exists anywhere, put it back: the server starts keyed over the same
+chain. A new key would sign as a different install, and no earlier entry would verify under it, so there
+is no command that hands the chain to another key.</p>
+<p>With no copy anywhere, the chain cannot be signed again, and the install starts again as a new one:</p>
+<ol>
+<li>Stop every server.</li>
+<li>Take a backup of the install with <code>switchtender backup</code>. Commands still record unbound, so this works
+without the key.</li>
+<li>Restore it into a new, empty database with <code>switchtender restore --db &lt;new database&gt;</code>.</li>
+<li>Start the server there with a new key. A SQLite install mints one beside the new file. A shared
+database takes a new <code>SWITCHTENDER_AUDIT_KEY</code> on every process.</li>
+<li>Publish the new fingerprint, enroll the new key with the witness, and have each person link their
+forge account again.</li>
+<li>Keep the old database read-only as an archive.</li>
+</ol>
+<p>The new chain opens with the restore and its provenance entry, which carries the instant the backup was
+taken and its counts, then the empty adoption record of the first keyed start. That boundary is written
+by the install that owns it.</p>
+<p>What it costs:</p>
+<ul>
+<li>Runs waiting or in flight never execute, since nothing can check their seals, so they are resubmitted
+on the new install.</li>
+<li>Run and estate history stay in the old database.</li>
+<li>Bundles, receipts, anchors and witness statements made before the loss verify against the old pinned
+key as they always did. Nothing exports the old chain again, so history on it that no bundle exported
+before the loss is not evidence anyone can sign.</li>
+<li>The witness keeps the old install's record at its last countersigned head, and the new install enrolls
+as a new record under its new key. Anyone pinning the old fingerprint sees the change.</li>
+</ul>
 <h2 id="how-it-is-secured">How it is secured</h2>
 <p>The whole backup is sealed with the deployment's encryption key using AES-256-GCM before it is
 written, so the file is both confidential and tamper-evident:</p>

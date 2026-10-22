@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -32,6 +34,14 @@ func claimRewritten(t *testing.T, n *bndNode, id string) relayAttack {
 		Handed: status == http.StatusOK && strings.Contains(string(body), id)}
 }
 
+// rewriteApprover is a writer's edit of the audit table that names mallory, a person, as having
+// made every DECISION, leaving each entry's id, path, and content digest as they were.
+func rewriteApprover(e *audit.Entry) {
+	if e.Method == audit.MethodDecision {
+		e.Actor, e.ActorType = "mallory", "human"
+	}
+}
+
 // TestADatabaseWriterIsRefusedByAKeyedControlNode is unit 10's table for the relay control node:
 // each row is a move from the A1 to A22 list made by a principal who can write the runs table and
 // not the binding key, performed through the store against a keyed control node. Each is refused
@@ -43,6 +53,8 @@ func TestADatabaseWriterIsRefusedByAKeyedControlNode(t *testing.T) {
 	tests := []struct {
 		// Name labels the row.
 		Name string
+		// Config shapes the node the move is made on.
+		Config bndConfig
 		// Move makes the writer's move on n and drives the node until it lands.
 		Move func(t *testing.T, n *bndNode) relayAttack
 		// WantError is what the refusal must say.
@@ -145,11 +157,21 @@ func TestADatabaseWriterIsRefusedByAKeyedControlNode(t *testing.T) {
 			return relayAttack{Error: rerr.Error()}
 		},
 		WantError: "its status or its outputs changed after it finished",
+	}, { // Test 7: The approver rewritten on the chain. The node reads the DECISION entry by id and
+		// checks no link, so a re-link changes nothing it sees; only the seal over the entry's
+		// actor stands between the approver and the writer's name.
+		Name:   "approver rewritten on the chain",
+		Config: bndConfig{EntryEdit: rewriteApprover},
+		Move: func(t *testing.T, n *bndNode) relayAttack {
+			n.approved(t, "run_top", nil)
+			return claimRewritten(t, n, "run_top")
+		},
+		WantError: "changed after it was approved",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
 			t.Parallel()
-			n := newBndNode(t, bndConfig{})
+			n := newBndNode(t, test.Config)
 			got := test.Move(t, n)
 			if got.Handed {
 				t.Errorf("a worker was handed the writer's row")
@@ -158,5 +180,25 @@ func TestADatabaseWriterIsRefusedByAKeyedControlNode(t *testing.T) {
 				t.Errorf("the move ended with %q, want a refusal saying %q", got.Error, test.WantError)
 			}
 		})
+	}
+}
+
+// TestAnApproverLeftAloneIsHanded is the honest twin of the approver rewrite: the same approved run
+// on a node reading the chain through the same wrapper, with an edit that changes nothing, is
+// handed to the worker and records no error.
+func TestAnApproverLeftAloneIsHanded(t *testing.T) {
+	t.Parallel()
+	n := newBndNode(t, bndConfig{EntryEdit: func(*audit.Entry) {}})
+	r := n.approved(t, "run_top", nil)
+	if r.DecisionID == "" {
+		t.Fatal("the approved run names no decision")
+	}
+	e, err := n.Audits.Entry(context.Background(), r.DecisionID)
+	if err != nil || e.Path != "/runs/run_top/decision/"+outcome.StepApproved {
+		t.Fatalf("Entry(%s) = %+v, %v, want the run's approval", r.DecisionID, e, err)
+	}
+	got := claimRewritten(t, n, "run_top")
+	if !got.Handed || got.Error != "" {
+		t.Errorf("claim = %+v, want the run handed with no error", got)
 	}
 }

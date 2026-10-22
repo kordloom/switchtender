@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
@@ -77,9 +78,46 @@ type identityView struct {
 	ApprovedBy string
 }
 
+// deciderOf names who made a decision record from the chain entry that committed it, which the
+// link binds and a seal can cover, rather than from the record, which nothing binds. The record's
+// name is shown only as a disagreement: the entry's name and then the record's. The record is
+// compared in the form the chain stores a name in, so a name the chain escaped does not read as a
+// disagreement. A record with no entry among entries is named as the record names it. note is the
+// seal check's note for the entry, appended when there is one.
+func deciderOf(rec *decision.Record, entries map[string]*audit.Entry, note string) string {
+	e, ok := entries[rec.ID]
+	if !ok {
+		name := rec.Actor
+		if rec.OnBehalfOf != "" && rec.OnBehalfOf != rec.Actor {
+			name += " on behalf of " + rec.OnBehalfOf
+		}
+		return withNote(name, note)
+	}
+	name := e.Actor
+	if account := onBehalfOf(e); account != "" {
+		name += " on behalf of " + account
+	}
+	if stored := audit.AsStored(&audit.Entry{Actor: rec.Actor}).Actor; stored != e.Actor {
+		name += " (the decision record names " + rec.Actor + ")"
+	}
+	return withNote(name, note)
+}
+
+// entriesByID indexes a run's chain entries by id.
+func entriesByID(entries []*audit.Entry) map[string]*audit.Entry {
+	out := make(map[string]*audit.Entry, len(entries))
+	for _, e := range entries {
+		out[e.ID] = e
+	}
+	return out
+}
+
 // reasonRows renders a run's decision records as a thread: each decision followed by its
-// corrections, oldest first.
-func reasonRows(records []*decision.Record) []reasonRow {
+// corrections, oldest first. Each is named from the chain entry that committed it, with the note
+// its seal check carries.
+func reasonRows(records []*decision.Record, entries []*audit.Entry,
+	notes map[string]string) []reasonRow {
+	byID := entriesByID(entries)
 	var decisions []*decision.Record
 	corrections := map[string][]*decision.Record{}
 	for _, rec := range records {
@@ -91,21 +129,18 @@ func reasonRows(records []*decision.Record) []reasonRow {
 	}
 	var rows []reasonRow
 	for _, d := range decisions {
-		rows = append(rows, reasonRowOf(d))
+		rows = append(rows, reasonRowOf(d, deciderOf(d, byID, notes[d.ID])))
 		for _, c := range corrections[d.ID] {
-			rows = append(rows, reasonRowOf(c))
+			rows = append(rows, reasonRowOf(c, deciderOf(c, byID, notes[c.ID])))
 		}
 	}
 	return rows
 }
 
-// reasonRowOf renders one record.
-func reasonRowOf(rec *decision.Record) reasonRow {
-	row := reasonRow{Actor: rec.Actor, At: rec.At.UTC().Format(time.RFC3339), Event: rec.ID,
+// reasonRowOf renders one record, made by decider.
+func reasonRowOf(rec *decision.Record, decider string) reasonRow {
+	row := reasonRow{Actor: decider, At: rec.At.UTC().Format(time.RFC3339), Event: rec.ID,
 		Step: rec.StepRunID, Correction: rec.Kind == decision.KindCorrection}
-	if rec.OnBehalfOf != "" && rec.OnBehalfOf != rec.Actor {
-		row.Actor += " on behalf of " + rec.OnBehalfOf
-	}
 	switch {
 	case row.Correction:
 		row.Kind = "Correction"
@@ -161,8 +196,10 @@ func sodSentence(s *decision.SeparationOfDuties) string {
 }
 
 // agentIdentity renders an agent-initiated run's identity evidence, nil for any other run. The
-// approvers are read from the decision records, the run's own and its steps'.
-func agentIdentity(r *run.Run, records []*decision.Record) *identityView {
+// approvals are read from the decision records, the run's own and its steps', and each approver is
+// named from the chain entry that committed the approval, with the note its seal check carries.
+func agentIdentity(r *run.Run, records []*decision.Record, entries []*audit.Entry,
+	notes map[string]string) *identityView {
 	if r == nil || r.Initiator == nil {
 		return nil
 	}
@@ -177,10 +214,19 @@ func agentIdentity(r *run.Run, records []*decision.Record) *identityView {
 	} else if i.ProvisionedByType != "" {
 		view.ProvisionedBy += " (" + i.ProvisionedByType + ")"
 	}
+	byID := entriesByID(entries)
 	var approvers []string
 	for _, rec := range records {
 		if rec.Kind == decision.KindDecision && rec.Verdict == "approved" {
-			approvers = append(approvers, rec.Actor)
+			if e, ok := byID[rec.ID]; ok {
+				name := e.Actor
+				if stored := audit.AsStored(&audit.Entry{Actor: rec.Actor}).Actor; stored != e.Actor {
+					name += " (the decision record names " + rec.Actor + ")"
+				}
+				approvers = append(approvers, withNote(name, notes[rec.ID]))
+				continue
+			}
+			approvers = append(approvers, withNote(rec.Actor, notes[rec.ID]))
 		}
 	}
 	view.ApprovedBy = strings.Join(approvers, ", ")

@@ -716,8 +716,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/audit/verify", walks.hold(auditVerifyHandler(s.audits, producer, s.log)))
 	mux.Handle("GET /v1/audit/bundle", walks.hold(auditBundleHandler(s.audits, s.producer,
 		s.producerProblem, s.productVersion, s.log)))
-	mux.Handle("GET /v1/audit/register",
-		walks.hold(auditRegisterHandler(s.store, s.audits, producer, s.log)))
+	mux.Handle("GET /v1/audit/register", walks.hold(auditRegisterHandler(s.store, s.audits, producer,
+		dispatch.NewBindingVerifier(s.store, s.audits, s.bindingKey), s.log)))
 	mux.Handle("GET /v1/audit/witness", witnessHandler(s.witness, s.log))
 	// Served unauthenticated: the beat feed exists so an outside watcher can see the chain is
 	// alive and whole, and that watcher has no account here.
@@ -759,9 +759,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/runs/{id}/notifications",
 		runNotificationsHandler(s.store, s.notifications, authz, s.log))
 	mux.Handle("GET /v1/runs/{id}/evidence",
-		walks.hold(runEvidenceHandler(s.store, s.audits, producer, s.decisions, authz, s.log)))
-	mux.Handle("GET /v1/runs/{id}/receipt", walks.hold(runReceiptHandler(s.store, s.audits,
-		s.producer, s.productVersion, s.decisions, authz, s.log)))
+		walks.hold(runEvidenceHandler(s.store, s.audits, producer, s.decisions,
+			dispatch.NewBindingVerifier(s.store, s.audits, s.bindingKey), authz, s.log)))
+	mux.Handle("GET /v1/runs/{id}/receipt",
+		walks.hold(runReceiptHandler(s.store, s.audits, s.producer, s.productVersion, s.decisions,
+			dispatch.NewBindingVerifier(s.store, s.audits, s.bindingKey), authz, s.log)))
 	mux.Handle("POST /v1/runs/{id}/explain", explainRunHandler(s.store, s.ai, authz, s.log))
 	mux.Handle("POST /v1/ai/draft", draftStepHandler(s.ai, s.log))
 	mux.Handle("POST /v1/ai/ask", askFleetHandler(s.store, s.ai, authz, s.log))

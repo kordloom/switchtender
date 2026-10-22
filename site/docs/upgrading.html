@@ -96,7 +96,9 @@ identity, and checks the seal before the run executes, so a run whose spec or de
 in the database after it was approved is refused rather than run. A run v1.102.0 left carries no
 seal. A server of this release that finds such work, held, queued, or in the middle of a workflow,
 and finds no adoption record on the audit chain refuses to start, names the runs, and changes
-nothing. A server with no producer identity holds no key and is not held back.</p>
+nothing. A server with no producer identity on a chain no install has signed holds no key and is
+not held back. A server that finds the chain bound to an install whose key it does not hold refuses
+to start, as the <a href="/docs/backup#signing-key-lost">backup page</a> explains.</p>
 <p>What to do: stop every server and worker of v1.102.0, then run <code>switchtender adopt --db &lt;database&gt;</code>
 once, where it reads the same producer identity the servers load. Run it with the seed or identity
 the servers will use, since a server whose key names another install refuses to start. It verifies
@@ -104,16 +106,20 @@ the audit chain, prints every run it would seal, and asks before it writes. Pass
 question, which is for a run by hand and never for an entrypoint, a hook, or a recurring job. Then
 start the servers. Adopt runs once per install. On an install enrolled with a witness, adopt asks
 the witness for the head it countersigned and refuses a chain that does not reach it, or a witness
-that does not answer. To adopt an install that no longer uses its witness, remove
-<code>witness-enrollment.json</code> first. If the start is refused on an install where adopt already ran, its
-record was removed from the chain, and adopt refuses to run again. Restore the
-database, audit chain included, from a copy taken before the upgrade, such as a copy of the SQLite
-file or a PostgreSQL dump. A backup file from <code>switchtender backup</code> holds neither runs nor the
-chain. A run v1.102.0 creates or finishes after adoption carries no seal and is refused when it
-starts, so submit it again. A held run a v1.102.0 server approves after adoption is refused the same
-way, as changed after it was approved, because the old server's approval carries no seal. Nothing
-was tampered with. Submit it again, and stop every v1.102.0 server before adopting to avoid it.
-<a href="/docs/configuration#adopt">adopt</a> has the details.</p>
+that does not answer. After it writes, adopt appends a span beat and pushes it to the witness, so
+the witness's head covers the adoption record before adopt returns. If that push fails, the adoption
+stands and adopt exits non-zero, saying the record is not yet witnessed. The record stays outside
+the witness's memory until the server's first beat reaches the witness, so start the servers and
+check that the witness status shows a countersigned push. Do not run adopt again. To adopt an
+install that no longer uses its witness, remove <code>witness-enrollment.json</code> first. If the start is
+refused on an install where adopt already ran, its record was removed from the chain, and adopt
+refuses to run again. Restore the database, audit chain included, from a copy taken before the
+upgrade, such as a copy of the SQLite file or a PostgreSQL dump. A backup file from
+<code>switchtender backup</code> holds neither runs nor the chain. A run v1.102.0 creates or finishes after adoption carries
+no seal and is refused when it starts, so submit it again. A held run a v1.102.0 server approves
+after adoption is refused the same way, as changed after it was approved, because the old server's
+approval carries no seal. Nothing was tampered with. Submit it again, and stop every v1.102.0 server
+before adopting to avoid it. <a href="/docs/configuration#adopt">adopt</a> has the details.</p>
 <h2 id="agent-runs-are-held-by-default">Agent runs are held by default</h2>
 <p>A run an agent token asks for now waits for a person before it executes, with no policy written,
 under a built-in rule named <code>requested by an agent, held by default</code>. Its dry runs wait too, since a

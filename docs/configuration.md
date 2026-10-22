@@ -38,7 +38,7 @@ believes it has a control it does not have.
 | `SWITCHTENDER_ENCRYPTION_KEY` | serve, worker | Passphrase that seals stored credentials with AES-256-GCM. Credentials are disabled when unset. |
 | `SWITCHTENDER_ENCRYPTION_SALT` | serve, worker | Per-deployment salt for argon2id key derivation. Must be set alongside the key and stay stable across restarts, or stored credentials cannot be decrypted. Credentials are disabled when unset. |
 | `SWITCHTENDER_DB` | serve, worker, adopt | The database when `--db` is not given: a SQLite file path or a `postgres://` DSN. A DSN carries its password, and on the command line it shows in the process list and, on Kubernetes, in the pod spec, so a shared deployment names it here instead. |
-| `SWITCHTENDER_AUDIT_KEY` | serve, adopt | Hex-encoded ed25519 seed for the install's signing identity, which signs the LoomSeal bundles it emits and binds every audit entry to this install. Unset beside a local database, the install mints and stores its own key there. Unset against a shared database it mints nothing, since every process must sign as the same install, and the chain is recorded unattributed and unbound until a seed is supplied to all of them. A malformed value stops startup. |
+| `SWITCHTENDER_AUDIT_KEY` | serve, adopt | Hex-encoded ed25519 seed for the install's signing identity, which signs the LoomSeal bundles it emits and binds every audit entry to this install. Unset beside a local database, the install mints and stores its own key there. Unset against a shared database it mints nothing, since every process must sign as the same install, and the chain is recorded unattributed and unbound until a seed is supplied to all of them. Once any process has signed the chain, a process without the seed refuses to start. A malformed value stops startup. |
 | `SWITCHTENDER_IDENTITY_DIR` | serve, adopt, audit, receipt | Directory holding the install's producer signing identity. A SQLite install keeps it beside the database and needs no setting. A postgres install has no filesystem home, so it uses a per-user configuration directory; when the account has no home, as in a container, there is nowhere durable to put a key and startup refuses rather than choosing a path a restart would empty. Point this at a durable path the server owns. |
 | `SWITCHTENDER_PASSWORD` | user new | Initial account password, read instead of prompting so it never lands on the command line. |
 | `SWITCHTENDER_SMTP_PASSWORD` | serve | Password for SMTP authentication when `--smtp-username` is set. |
@@ -208,25 +208,27 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--fact-cache-admin-only` | `false` | Restrict reading cached facts to admins. By default an operator with read on the inventory and on the run that gathered the facts may read them, with secret-looking values masked. |
 | `--span-cadence` | `0` | Append a span beat to the audit chain this often, for example `60s`. Whole seconds only. Zero appends none. |
 | `--anchor-tsa-url` | none | RFC 3161 timestamp authority the chain anchors against. Empty anchors nothing. |
-| `--witness-enrollment` | none | Enrollment file to push each span beat to its witness under. Empty reads `witness-enrollment.json` beside the license file, and an install with neither pushes nothing. An enrolled install refuses to start without `--span-cadence` or without a producer identity, since it would run unwitnessed while its enrollment says otherwise. A witness outage never blocks the timestamp anchor, and the reverse. |
+| `--witness-enrollment` | none | Enrollment file to push each span beat to its witness under. Empty reads `witness-enrollment.json` beside the license file, and an install with neither pushes nothing. An enrolled install refuses to start without `--span-cadence` or without a producer identity, since it would run unwitnessed while its enrollment says otherwise. At start it holds the audit chain to the head the witness countersigned, and refuses to start on a chain that does not reach it or on a statement the enrollment does not accept. A witness that does not answer with its signed statement is a warning, and the server starts. A witness outage never blocks the timestamp anchor, and the reverse. |
 
 Retention windows accept a whole number of days with a `d` suffix, such as `30d`, or Go duration
 syntax such as `720h`.
 
 ### Approval binding needs the producer identity
 
-A server that loads the install's producer identity derives an approval binding key from it, held
-in memory and never written anywhere. It seals every run it creates or releases under that key and
-checks the seal before the run executes, so a run whose spec, approval fields, or decision was
-changed in the database after it was approved is refused rather than run. Every server of one
-install must load the same identity, from the identity directory or from `SWITCHTENDER_AUDIT_KEY`,
-since a run sealed under one key is refused under another. A relay control node checks each run
-before it hands it to a relay worker. A worker that shares the database holds no key, so the runs it
-claims are held only to the digests stored on them.
+A server that loads the install's producer identity derives an approval binding key from it, held in
+memory and never written anywhere. It seals every run it creates or releases under that key and
+checks the seal before the run executes, so a run whose spec, approval fields, decision, or who
+decided was changed in the database after it was approved is refused rather than run. Every server
+of one install must load the same identity, from the identity directory or from
+`SWITCHTENDER_AUDIT_KEY`, since a run sealed under one key is refused under another. A relay control
+node checks each run before it hands it to a relay worker. A worker that shares the database holds
+no key, so the runs it claims are held only to the digests stored on them.
 
-A server with no identity holds no key. It still compares the digests stored on each run, and its
-startup warning says that approval binding is row-checked only, which a change written into the
-database together with matching digests passes.
+A server with no identity on a chain no install has signed holds no key. It still compares the
+digests stored on each run, and its startup warning says that approval binding is row-checked only,
+which a change written into the database together with matching digests passes. A server that finds
+the chain bound to an install whose key it does not hold refuses to start, as the
+[backup page](backup.md#signing-key-lost) explains.
 
 A server that loads an identity refuses to start while work an earlier release left carries no seal
 and the audit chain holds no adoption record, and it names the runs. Run [adopt](#adopt) once to
@@ -597,12 +599,13 @@ The command prints the witness key id. Compare it with the id the witness publis
 any other. The enrollment is written to `witness-enrollment.json` beside the license file, so a
 backup and a restore carry both or neither. It holds no secret. An install whose key was changed
 under its install id through `SWITCHTENDER_AUDIT_KEY` is refused, since the witness binds an install
-id to the key it was born to.
+id to the key it was born to. A new install started after its signing key was lost enrolls as a new
+record under its new key, beside the old install's record, which keeps its last countersigned head.
 
 | Flag | Default | Purpose |
 |------|---------|---------|
 | `--db` | `switchtender.db` | Database of the install to enroll. The license, key, and enrollment are found from it. |
-| `--witness` | none | Base URL of the witness. Required unless `--refresh-keys` is given. |
+| `--witness` | none | Base URL of the witness. Required unless `--refresh-keys` is given. It must be https, or plain http to a loopback address (127.0.0.0/8, `::1`, or `localhost`). |
 | `--witness-key` | none | Witness key id, `sha256:...`, the witness must sign with. Anything else writes nothing. |
 | `--refresh-keys` | off | Fetch the enrolled witness's key list after it rotates, kept only when a held key signed it. |
 
@@ -725,7 +728,7 @@ before this release's `serve` first starts. [Upgrading](upgrading.md) gives the 
 | `--dry-run` | `false` | Print the rows adoption would seal and write nothing. |
 | `--yes` | `false` | Seal without asking, for a script. The rows are still printed. |
 | `--fail-unsealed` | `false` | Record the adoption trusting no row, and fail every unfinished run that carries no seal. |
-| `--witness-enrollment` | none | Enrollment file of the witness whose countersigned head the audit chain is held to. Empty reads `witness-enrollment.json` beside the license file, and an install with neither is held to no witness. A named file that is missing or out of form is an error, as for `serve`. |
+| `--witness-enrollment` | none | Enrollment file of the witness whose countersigned head the audit chain is held to. Empty reads `witness-enrollment.json` beside the license file, and an install with neither is held to no witness. A named file that is missing or out of form is an error, as for `serve`. An enrolled adoption pushes a span beat after its record and exits non-zero when that push fails, with the adoption kept. |
 
 Adoption reads every run that has not finished, the finished steps a waiting workflow reads forward,
 and the decisions left in flight, and gives each the seal its kind is held to, from the row as it

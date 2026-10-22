@@ -1,10 +1,12 @@
 package binding
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -12,7 +14,9 @@ import (
 // moved by the seal or named here, so a field added to run.Run fails the test until somebody
 // decides which it is.
 var uncovered = map[string]string{ //nolint:gochecknoglobals // Not modified, simplifies testing.
-	"Status":          "moves through the row's life; a finished row is held by the result seal",
+	"Status": "moves through the row's life, so a submit seal carries only whether the row " +
+		"was held (Record.Held), which the verifier sets from the check it makes rather than " +
+		"from the row; a finished row is held by the result seal",
 	"ExitCode":        "written when the run ends",
 	"Error":           "written when the run ends",
 	"Warning":         "written while the run is held or runs, and read only by people",
@@ -90,6 +94,103 @@ func TestEveryRunFieldIsCoveredOrNamed(t *testing.T) {
 			case moved && named:
 				t.Errorf("run field %s moves the seal but is named in uncovered (%s): remove it "+
 					"from the list", field.Name, reason)
+			}
+		})
+	}
+}
+
+// uncoveredEntry names each chain entry field a root leaves out on purpose, with the reason. A field
+// is either moved by RootOf or named here, so a field added to audit.Entry fails the test until
+// somebody decides which it is.
+var uncoveredEntry = map[string]string{ //nolint:gochecknoglobals // Not modified, simplifies testing.
+	"At": "bound by the link only: the sealers seal before append and Link truncates the time, so " +
+		"sealing it needs an encoding fixed on the stored form",
+	"Seq":       "chain position, assigned at append and bounded by anchors",
+	"PrevHash":  "chain position, assigned at append and bounded by anchors",
+	"Hash":      "the public link, assigned at append and bounded by anchors",
+	"Nonce":     "never exported; the content digest commits its hash",
+	"InstallID": "a chain from a foreign install is refused at start",
+}
+
+// testCoverageEntry returns a decision entry with every field set, which every other entry is
+// changed against.
+func testCoverageEntry() *audit.Entry {
+	return &audit.Entry{ID: "aud_cov", At: time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC),
+		Actor: "approver", ActorType: "session", OnBehalfOf: "ops-bot",
+		Method: audit.MethodDecision, Path: "/runs/run_cov/decision/approved", ContentDigest: "cd",
+		Nonce: "nonce", InstallID: "in_1", Seq: 3, PrevHash: "ph", Hash: "h"}
+}
+
+// TestEveryEntryFieldIsCoveredOrNamed changes each exported field of a chain entry and requires the
+// root naming it to move, unless the field is named in uncoveredEntry. A field a root misses is one
+// a database writer can rewrite on the chain under a valid seal.
+func TestEveryEntryFieldIsCoveredOrNamed(t *testing.T) {
+	t.Parallel()
+	want := RootOf(testCoverageEntry())
+	typ := reflect.TypeFor[audit.Entry]()
+	for i := range typ.NumField() {
+		field := typ.Field(i)
+		if !field.IsExported() {
+			continue
+		}
+		t.Run(field.Name, func(t *testing.T) {
+			t.Parallel()
+			changed := testCoverageEntry()
+			perturb(reflect.ValueOf(changed).Elem().Field(i))
+			moved := RootOf(changed) != want
+			reason, named := uncoveredEntry[field.Name]
+			switch {
+			case !moved && !named:
+				t.Errorf("entry field %s changes without moving the root and is not named in "+
+					"uncoveredEntry: cover it in the root or name why it is left out", field.Name)
+			case moved && named:
+				t.Errorf("entry field %s moves the root but is named in uncoveredEntry (%s): "+
+					"remove it from the list", field.Name, reason)
+			}
+		})
+	}
+}
+
+// TestTheSubmitSealCoversTheHold pins the one part of a row's status a submit seal covers: whether
+// the row was waiting for a decision. A row sealed held does not verify as queued, and the reverse,
+// while any other status reads as queued, so a writer's move between them changes nothing.
+func TestTheSubmitSealCoversTheHold(t *testing.T) {
+	t.Parallel()
+	k := testKey(t, 1)
+	tests := []struct {
+		// Sealed is the status the row is sealed with.
+		Sealed run.Status
+		// Checked is the status the record is rebuilt with.
+		Checked run.Status
+		// WantVerified reports whether the seal verifies.
+		WantVerified bool
+	}{{ // Test 0: A held row checked as held verifies.
+		Sealed: run.StatusPendingApproval, Checked: run.StatusPendingApproval, WantVerified: true,
+	}, { // Test 1: A held row checked as queued does not.
+		Sealed: run.StatusPendingApproval, Checked: run.StatusPending, WantVerified: false,
+	}, { // Test 2: A queued row checked as held does not.
+		Sealed: run.StatusPending, Checked: run.StatusPendingApproval, WantVerified: false,
+	}, { // Test 3: A queued row checked as queued verifies.
+		Sealed: run.StatusPending, Checked: run.StatusPending, WantVerified: true,
+	}, { // Test 4: A running row reads as queued.
+		Sealed: run.StatusRunning, Checked: run.StatusPending, WantVerified: true,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			sealed, checked := testCoverageRun(), testCoverageRun()
+			sealed.Status, checked.Status = test.Sealed, test.Checked
+			rec, err := SubmitRecord(sealed)
+			if err != nil {
+				t.Fatalf("SubmitRecord() error = %v", err)
+			}
+			again, err := SubmitRecord(checked)
+			if err != nil {
+				t.Fatalf("SubmitRecord() error = %v", err)
+			}
+			if got := k.Verify(again, k.Seal(rec)); got != test.WantVerified {
+				t.Errorf("sealed %s, checked %s: Verify() = %t, want %t", test.Sealed,
+					test.Checked, got, test.WantVerified)
 			}
 		})
 	}

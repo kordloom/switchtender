@@ -12,6 +12,7 @@ package receipt
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/binding"
 	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
@@ -43,6 +45,55 @@ type Options struct {
 	// record and discloses the reason's text and random value beside it, so the commitment the chain
 	// holds can be checked offline. Nil discloses decisions recorded without a record only.
 	Decisions decision.Store
+	// Binder holds the run and each approval step whose approval the receipt carries to the seal
+	// the process made over them, which covers who the DECISION entry says decided. A receipt
+	// naming an approver whose entry no longer matches its seal is refused. Nil, an install with
+	// no binding key, refuses every receipt that names an approver, since nothing then stands
+	// behind the name.
+	Binder *binding.Verifier
+}
+
+// errNamesNoDecision is why a run that credits an approval but names no DECISION entry cannot be
+// attested: its seal is then the one it was submitted with, which covers no approver at all.
+var errNamesNoDecision = errors.New("the run names no decision entry, so no seal covers who " +
+	"approved it")
+
+// ErrUnattested is wrapped by every refusal to issue a receipt naming an approver the install
+// cannot stand behind.
+var ErrUnattested = errors.New("who decided cannot be attested")
+
+// UnattestedError refuses a receipt that would name an approver the install cannot stand behind:
+// the seal on the row the approval released no longer matches the DECISION entry, the check could
+// not be made, or the install holds no binding key.
+type UnattestedError struct {
+	// RunID is the row the approval released: the run, or one of its approval steps.
+	RunID string
+	// EntryID is the DECISION entry that records the approval.
+	EntryID string
+	// Err is what the check returned, nil when no check could be made for want of a key.
+	Err error
+}
+
+// Error says which entry and row could not be attested, and why.
+func (e *UnattestedError) Error() string {
+	switch {
+	case e.Err == nil:
+		return fmt.Sprintf("this install holds no binding key, so decision entry %s on run %s is "+
+			"held to no seal and %s", e.EntryID, e.RunID, ErrUnattested)
+	case errors.Is(e.Err, binding.ErrDrift):
+		return fmt.Sprintf("decision entry %s no longer matches the seal on run %s, so %s: %v",
+			e.EntryID, e.RunID, ErrUnattested, e.Err)
+	}
+	return fmt.Sprintf("decision entry %s could not be checked against the seal on run %s, so %s: "+
+		"%v", e.EntryID, e.RunID, ErrUnattested, e.Err)
+}
+
+// Unwrap returns ErrUnattested and the check's error.
+func (e *UnattestedError) Unwrap() []error {
+	if e.Err == nil {
+		return []error{ErrUnattested}
+	}
+	return []error{ErrUnattested, e.Err}
 }
 
 // Result is a built receipt and what a caller needs to say about it.
@@ -162,6 +213,12 @@ func Build(ctx context.Context, runs run.Store, audits audit.Store, id audit.Ide
 	// one the published root was folded from, and the receipt would read as broken. The sparse shape
 	// therefore proves its own entries belong to the log, and names the outcome entry and the digest it
 	// committed, without reproducing the body.
+	// Every shape carries the DECISION entries in its segment, each with the actor the entry names,
+	// so the run and each approval step whose approval the receipt carries are held to their seals
+	// before anything is disclosed or signed.
+	if err := attestDeciders(ctx, runs, opts.Binder, entries, r); err != nil {
+		return nil, err
+	}
 	if !opts.Sparse {
 		switch body, berr := disclosedOutcome(ctx, runs, r, outcomeEntry.ContentDigest); {
 		case berr != nil:
@@ -386,6 +443,54 @@ func discloseDecisions(ctx context.Context, runs run.Store, records decision.Sto
 			discloseReason(claim, rec)
 		}
 	}
+}
+
+// attestDeciders holds the run and each approval step whose credited approval entries carries to
+// the seal binder recomputes, which covers the actor, actor type, and delegated account the entry
+// names. A rejection or a step's request is not sealed and is not checked here. It returns an
+// UnattestedError naming the first entry that cannot be attested.
+func attestDeciders(ctx context.Context, runs run.Store, binder *binding.Verifier,
+	entries []*audit.Entry, r *run.Run) error {
+	states := map[string]*outcome.StepState{}
+	for _, e := range entries {
+		if e.Method != audit.MethodDecision || !creditedDecision(ctx, runs, r, e) {
+			continue
+		}
+		if e.Path == "/runs/"+r.ID+"/decision/"+outcome.StepApproved {
+			switch {
+			case binder == nil:
+				return &UnattestedError{RunID: r.ID, EntryID: e.ID}
+			case r.DecisionID == "":
+				// A run that names no decision is credited any approval at its path, and is
+				// checked as submitted, so a writer who cleared the id would put a rewritten
+				// approver beyond the seal.
+				return &UnattestedError{RunID: r.ID, EntryID: e.ID, Err: errNamesNoDecision}
+			}
+			if err := binder.Sealed(ctx, r); err != nil {
+				return &UnattestedError{RunID: r.ID, EntryID: e.ID, Err: err}
+			}
+			continue
+		}
+		runID, stepID, verdict, ok := outcome.ParseStepDecisionPath(e.Path)
+		if !ok || runID != r.ID || verdict != outcome.StepApproved {
+			continue
+		}
+		if binder == nil {
+			return &UnattestedError{RunID: stepID, EntryID: e.ID}
+		}
+		node, err := runs.Get(ctx, stepID)
+		if err != nil {
+			return &UnattestedError{RunID: stepID, EntryID: e.ID, Err: err}
+		}
+		state, err := stepStateFor(ctx, runs, r, stepID, states)
+		if err != nil {
+			return &UnattestedError{RunID: stepID, EntryID: e.ID, Err: err}
+		}
+		if err := binder.Gate(ctx, r, node, state); err != nil {
+			return &UnattestedError{RunID: stepID, EntryID: e.ID, Err: err}
+		}
+	}
+	return nil
 }
 
 // discloseReleases attaches each step release's body and nonce to its claim, the way a decision is

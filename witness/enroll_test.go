@@ -561,3 +561,57 @@ func TestAStartRefusesARecordThatFailsItsChecks(t *testing.T) {
 		})
 	}
 }
+
+// TestAnInstallWithNothingWitnessedGetsASignedStatement pins that the statement route answers an
+// enrolled install that has pushed nothing with a signed statement of size 0, verifiable like any
+// statement and naming no last beat, seq, head, or root, so an install can tell it from an unsigned
+// answer that says the same. A key with no record keeps its 404, and the first countersigned push
+// moves the statement to the head it countersigned.
+func TestAnInstallWithNothingWitnessedGetsASignedStatement(t *testing.T) {
+	t.Parallel()
+	w := newPushWitness(t)
+	pr := newProducer(t, 4)
+	w.enroll(t, pr, "lic_empty")
+	st := w.statement(t, pr)
+	// head is the coordinate a statement names.
+	type head struct {
+		// LastBeat is the newest beat countersigned.
+		LastBeat int64
+		// LastSeq is that beat's chain position.
+		LastSeq int64
+		// Size is the size of the tree held.
+		Size int64
+		// LastHead is the entry hash at LastSeq.
+		LastHead string
+		// Root is the root of the tree held.
+		Root string
+		// Checkpoint is when the memory last adopted a coordinate.
+		Checkpoint string
+	}
+	got := head{LastBeat: st.LastBeat, LastSeq: st.LastSeq, Size: st.Size, LastHead: st.LastHead,
+		Root: st.Root, Checkpoint: st.CheckpointAt}
+	if diff := cmp.Diff(head{}, got); diff != "" {
+		t.Errorf("statement of nothing witnessed names a coordinate (-want +got):\n%s", diff)
+	}
+	if st.KeyID != pr.keyID() || st.InstallID != pr.id.InstallID || st.Sig == "" {
+		t.Errorf("statement = key %s install %s sig %q, want this install's, signed", st.KeyID,
+			st.InstallID, st.Sig)
+	}
+	altered := st
+	altered.Size = 1
+	if _, err := VerifyStatement(&altered); err == nil {
+		t.Error("VerifyStatement() accepted the size-0 statement with its size changed")
+	}
+	stranger := newProducer(t, 4)
+	if code, raw := w.get(t, "/v1/installs/"+stranger.keyID()+"/attestation"); code !=
+		http.StatusNotFound || !strings.Contains(string(raw), ErrNotEnrolled.Error()) {
+		t.Errorf("statement of a key with no record = %d %s, want 404 not enrolled", code, raw)
+	}
+	if code, _, raw := w.pushHTTP(t, pr, pr.push(t, 1, 2, 0)); code != http.StatusOK {
+		t.Fatalf("first push = %d %s, want 200", code, raw)
+	}
+	if after := w.statement(t, pr); after.Size != 2 || after.LastSeq != 2 || after.Root == "" {
+		t.Errorf("statement after the first push = size %d seq %d root %q, want the pushed head",
+			after.Size, after.LastSeq, after.Root)
+	}
+}

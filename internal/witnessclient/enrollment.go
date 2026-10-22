@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -99,6 +100,30 @@ func NormalizeURL(raw string) (string, error) {
 	return u.String(), nil
 }
 
+// RequireSecureURL refuses a witness base URL that sends the install's requests in the clear: plain
+// http is accepted only when its host is a loopback address, 127.0.0.0/8, ::1, or localhost, which
+// never leaves the machine. Over plain http a network position can answer for the witness, and the
+// enrollment carries the license file. base is a URL NormalizeURL accepted.
+func RequireSecureURL(base string) error {
+	u, err := url.Parse(base)
+	if err != nil {
+		return fmt.Errorf("%w: the witness URL does not parse: %w", ErrEnrollment, err)
+	}
+	if u.Scheme == "https" {
+		return nil
+	}
+	host := u.Hostname()
+	if strings.EqualFold(host, "localhost") {
+		return nil
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return nil
+	}
+	return fmt.Errorf("%w: the witness URL %s is plain http to a host that is not a loopback "+
+		"address, so anyone on the network path could answer for the witness and read what the "+
+		"install sends it. Use the witness's https URL", ErrEnrollment, base)
+}
+
 // Enroll asks the witness at base to enroll the install id signs for, carrying the license file
 // licenseFile for the witness's enrollment policy, and returns the enrollment the witness's signed
 // answer makes.
@@ -118,6 +143,9 @@ func Enroll(ctx context.Context, client *http.Client, base string, id identity.I
 	}
 	base, err := NormalizeURL(base)
 	if err != nil {
+		return nil, err
+	}
+	if err := RequireSecureURL(base); err != nil {
 		return nil, err
 	}
 	req := witness.EnrollRequest{InstallID: id.InstallID, License: json.RawMessage(licenseFile),

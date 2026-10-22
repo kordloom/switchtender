@@ -2,6 +2,7 @@ package dossier
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -217,5 +218,82 @@ func TestUnanchoredBannerNamesTheRemedy(t *testing.T) {
 	}
 	if strings.Contains(string(doc), "switchtender.com/pricing") {
 		t.Error("an evidence document links to pricing, which turns evidence into marketing")
+	}
+}
+
+// TestRegisterFlagsARewrittenDecider pins what the change register says about an approver a writer
+// of the database renamed on the chain and re-linked: the row names the writer's approver and says
+// the seal drifted, and the header counts it. The honest register names the approver plainly. A
+// decision on a run retention pruned is unchecked, never a drift, and an install with no key marks
+// every approval unchecked.
+func TestRegisterFlagsARewrittenDecider(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC)
+	tests := []struct {
+		// Rewrite renames the approver on the chain.
+		Rewrite bool
+		// Unkeyed attaches the seals with no verifier.
+		Unkeyed bool
+		// WantSeal is the approval's seal state.
+		WantSeal string
+		// WantRow is the decision cell's text.
+		WantRow string
+		// WantHeader reports whether the header counts a drifted approval.
+		WantHeader bool
+	}{{ // Test 0: An approval nobody touched holds.
+		WantSeal: SealHeld, WantRow: "Approved by alice <span",
+	}, { // Test 1: The approver renamed on the chain is flagged and counted.
+		Rewrite: true, WantSeal: SealDrifted, WantRow: "Approved by mallory, seal drifted",
+		WantHeader: true,
+	}, { // Test 2: An install with no key checks nothing.
+		Unkeyed: true, WantSeal: SealUnchecked, WantRow: "Approved by alice, seal unchecked",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			sealed := newSealedInstall(t, "run_sealed", at)
+			// A decision on a run retention has since pruned from the store.
+			if err := sealed.Audits.Append(ctx, &audit.Entry{ID: audit.NewID(), At: at,
+				Actor: "bob", Method: audit.MethodDecision,
+				Path: "/runs/run_pruned/decision/approved"}); err != nil {
+				t.Fatalf("Append() error = %v", err)
+			}
+			audits := sealed.Audits
+			if test.Rewrite {
+				audits = &actorRewritten{Store: audits, id: sealed.DecisionID, actor: "mallory"}
+			}
+			in, err := CollectRegister(ctx, sealed.Runs, audits, audit.Identity{},
+				at.Add(-time.Hour), at.Add(time.Hour), at.Add(time.Hour), 0)
+			if err != nil {
+				t.Fatalf("CollectRegister() error = %v", err)
+			}
+			v := sealed.verifier(audits)
+			if test.Unkeyed {
+				v = nil
+			}
+			AttachRegisterSeals(ctx, in, v, sealed.Runs)
+			if got := in.Decisions["run_sealed"].Seal; got != test.WantSeal {
+				t.Errorf("seal = %q (%s), want %q", got, in.Decisions["run_sealed"].SealText,
+					test.WantSeal)
+			}
+			pruned := in.Decisions["run_pruned"]
+			if pruned.Seal != SealUnchecked || (!test.Unkeyed &&
+				!strings.Contains(pruned.SealText, "no longer in the store")) {
+				t.Errorf("pruned decision = %+v, want unchecked because the run is gone", pruned)
+			}
+			doc, err := RenderRegister(in)
+			if err != nil {
+				t.Fatalf("RenderRegister() error = %v", err)
+			}
+			html := string(doc)
+			if !strings.Contains(html, test.WantRow) {
+				t.Errorf("the register does not read %q:\n%s", test.WantRow, html)
+			}
+			if got := strings.Contains(html, "1 approval no longer matches the seal"); got !=
+				test.WantHeader {
+				t.Errorf("header counts a drifted approval = %t, want %t", got, test.WantHeader)
+			}
+		})
 	}
 }

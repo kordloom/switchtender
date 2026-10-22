@@ -63,6 +63,25 @@ func (bndFailingEntries) Entry(context.Context, string) (*audit.Entry, error) {
 	return nil, errors.New(bndStoreError)
 }
 
+// bndEditedEntries is a chain as a principal who can write the audit table left it: a read by id
+// returns the entry as edit changed it. Every other call passes through.
+type bndEditedEntries struct {
+	// Store serves every other call.
+	audit.Store
+	// edit changes what a read by id sees.
+	edit func(e *audit.Entry)
+}
+
+// Entry reads an entry by id as the writer left it.
+func (c bndEditedEntries) Entry(ctx context.Context, id string) (*audit.Entry, error) {
+	e, err := c.Store.Entry(ctx, id)
+	if err != nil || e == nil {
+		return e, err
+	}
+	c.edit(e)
+	return e, nil
+}
+
 // bndCancelAfterClaim is a run store in which a person cancels each run right after it is leased,
 // the window between a claim and the control node's refusal of the run.
 type bndCancelAfterClaim struct {
@@ -93,6 +112,10 @@ type bndConfig struct {
 	FailEntries bool
 	// CancelAfterClaim records a cancel request on each run right after the node leases it.
 	CancelAfterClaim bool
+	// EntryEdit, when set, changes every entry a read by id returns, for the verifier and for the
+	// node alike, the way a writer who rewrote the audit table leaves it. A test writing or reading
+	// the chain directly through Audits sees the entries as appended.
+	EntryEdit func(e *audit.Entry)
 }
 
 // newBndNode stands up a control node shaped by cfg.
@@ -102,6 +125,9 @@ func newBndNode(t *testing.T, cfg bndConfig, opts ...HandlerOption) *bndNode {
 	chain := n.Audits
 	if cfg.FailEntries {
 		chain = bndFailingEntries{Store: n.Audits}
+	}
+	if cfg.EntryEdit != nil {
+		chain = bndEditedEntries{Store: chain, edit: cfg.EntryEdit}
 	}
 	served := n.Store
 	if cfg.CancelAfterClaim {
@@ -729,8 +755,8 @@ func TestFinishedRunCarriesAResultSeal(t *testing.T) {
 // TestARelayProposalIsSealed pins the plan gate's proposal on a relay worker. The control node
 // builds the apply a worker's plan proposes, so it seals the proposal as a submission is sealed,
 // after the rules set its approval fields, and the apply it queues is one the next claim hands
-// over. A proposal whose approval fields a writer clears is refused at claim, and a node with no
-// key seals nothing.
+// over. A held proposal is sealed as held, so it is refused at claim whether a writer clears its
+// approval fields or only moves its status to pending, and a node with no key seals nothing.
 func TestARelayProposalIsSealed(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -739,13 +765,17 @@ func TestARelayProposalIsSealed(t *testing.T) {
 		Unkeyed bool
 		// Destroys is what the plan reports it would destroy, over the limit holds the apply.
 		Destroys int
+		// FlipOnly makes the writer move a held proposal's status to pending and nothing else.
+		FlipOnly bool
 		// WantStatus is the proposal's status.
 		WantStatus run.Status
 	}{{ // Test 0: An apply within the limit is sealed and queued.
 		Name: "queued", Destroys: 0, WantStatus: run.StatusPending,
 	}, { // Test 1: An apply over the limit is sealed and held.
 		Name: "held", Destroys: 3, WantStatus: run.StatusPendingApproval,
-	}, { // Test 2: A node with no key proposes an unsealed apply.
+	}, { // Test 2: A held apply whose status alone a writer moves to pending is refused.
+		Name: "held flipped", Destroys: 3, FlipOnly: true, WantStatus: run.StatusPendingApproval,
+	}, { // Test 3: A node with no key proposes an unsealed apply.
 		Name: "unkeyed", Unkeyed: true, Destroys: 0, WantStatus: run.StatusPending,
 	}}
 	for testNum, test := range tests {
@@ -790,10 +820,10 @@ func TestARelayProposalIsSealed(t *testing.T) {
 				}
 				return
 			}
-			if err := n.Binder.Executable(ctx, stored); err != nil {
-				t.Fatalf("Executable(proposal) = %v, want nil", err)
-			}
 			if test.WantStatus == run.StatusPending {
+				if err := n.Binder.Executable(ctx, stored); err != nil {
+					t.Fatalf("Executable(proposal) = %v, want nil", err)
+				}
 				leased, err := c.Claim(ctx, bndWorker, []string{""})
 				if err != nil {
 					t.Fatalf("Claim(proposal) error = %v, want the apply handed over", err)
@@ -803,8 +833,17 @@ func TestARelayProposalIsSealed(t *testing.T) {
 				}
 				return
 			}
+			if err := n.Binder.Executable(ctx, stored); !errors.Is(err, binding.ErrDrift) {
+				t.Fatalf("Executable(held proposal) = %v, want %v", err, binding.ErrDrift)
+			}
+			if err := n.Binder.Held(ctx, stored); err != nil {
+				t.Fatalf("Held(proposal) = %v, want nil", err)
+			}
 			n.rewrite(t, proposal.ID, func(r *run.Run) {
-				r.Status, r.HeldByPolicy, r.RequireDistinctApprover = run.StatusPending, "", false
+				r.Status = run.StatusPending
+				if !test.FlipOnly {
+					r.HeldByPolicy, r.RequireDistinctApprover = "", false
+				}
 			})
 			if _, err := c.Claim(ctx, bndWorker, []string{""}); !errors.Is(err, run.ErrNonePending) {
 				t.Fatalf("Claim(released by the writer) error = %v, want %v", err,

@@ -10,6 +10,10 @@ import (
 	"github.com/kordloom/switchtender/internal/run"
 )
 
+// ErrUnsealed is wrapped beside ErrDrift by a refusal of a row that carries no seal, so a reader
+// can tell a row no keyed process sealed from one whose seal moved. Its text is the refusal's own.
+var ErrUnsealed = errors.New("it carries no seal, so this process did not build or release it")
+
 // readAttempts is how many times a store read is tried before the verifier reports that it could
 // not verify. Attempts follow each other at once: no check reads a clock or waits on one.
 const readAttempts = 3
@@ -60,7 +64,7 @@ func (v *Verifier) Executable(ctx context.Context, r *run.Run) error {
 		return drift(subject, "an approval step records a decision and never executes")
 	}
 	if r.ParentID == nil {
-		return v.top(ctx, r, subject)
+		return v.top(ctx, r, subject, false)
 	}
 	parent, err := v.parent(ctx, r, subject)
 	if err != nil {
@@ -96,7 +100,7 @@ func (v *Verifier) Gate(ctx context.Context, parent, node *run.Run, state *outco
 	if parent.ParentID != nil {
 		return drift(subject, "its workflow "+parent.ID+" is itself a child of another run")
 	}
-	if err := v.top(ctx, parent, subject+": workflow run "+parent.ID); err != nil {
+	if err := v.top(ctx, parent, subject+": workflow run "+parent.ID, false); err != nil {
 		return err
 	}
 	if node.DecisionID == "" {
@@ -134,7 +138,7 @@ func (v *Verifier) Held(ctx context.Context, r *run.Run) error {
 	case r.ParentID != nil:
 		return drift(subject, "a child is decided through its parent")
 	}
-	return v.top(ctx, r, subject)
+	return v.top(ctx, r, subject, true)
 }
 
 // Pending checks a workflow approval step waiting for a decision, before anything about a decision
@@ -151,7 +155,7 @@ func (v *Verifier) Pending(ctx context.Context, parent, node *run.Run) error {
 	case parent.ParentID != nil:
 		return drift(subject, "its workflow "+parent.ID+" is itself a child of another run")
 	}
-	if err := v.top(ctx, parent, subject+": workflow run "+parent.ID); err != nil {
+	if err := v.top(ctx, parent, subject+": workflow run "+parent.ID, false); err != nil {
 		return err
 	}
 	rec, err := StepRecord(parent, node, nil)
@@ -159,6 +163,23 @@ func (v *Verifier) Pending(ctx context.Context, parent, node *run.Run) error {
 		return unverified(subject, "build its record", err)
 	}
 	return v.check(subject, rec, v.specSeal(node))
+}
+
+// Sealed checks a top-level run against the seal it carries: against its DECISION entry when it
+// names one, as submitted when it does not. A reader that names who decided a run holds the run to
+// it first, so a decider rewritten on the chain is refused rather than shown. A run checked as
+// submitted verifies whether it was sealed held or queued: a reader acts on neither, and the hold
+// is checked where a run is executed or decided.
+func (v *Verifier) Sealed(ctx context.Context, r *run.Run) error {
+	subject := "run " + r.ID
+	if r.ParentID != nil {
+		return drift(subject, "a child is held through its parent")
+	}
+	err := v.top(ctx, r, subject, false)
+	if r.DecisionID == "" && errors.Is(err, ErrDrift) && v.top(ctx, r, subject, true) == nil {
+		return nil
+	}
+	return err
 }
 
 // Result checks a finished step whose status and outputs a walk is about to feed forward. Only a
@@ -177,10 +198,18 @@ func (v *Verifier) Result(_ context.Context, child *run.Run) error {
 }
 
 // top checks a top-level run: against its DECISION entry when it names one, as submitted when it
-// does not.
-func (v *Verifier) top(ctx context.Context, r *run.Run, subject string) error {
+// does not. A run checked as submitted is held to a seal made while it waited for a decision when
+// held is true, and to one made while it was queued when held is false, whatever status the row
+// carries now: a row sealed as held cannot execute without a decision, and a row sealed as queued
+// cannot be decided on.
+func (v *Verifier) top(ctx context.Context, r *run.Run, subject string, held bool) error {
 	if r.DecisionID == "" {
-		rec, err := SubmitRecord(r)
+		as := *r
+		as.Status = run.StatusPending
+		if held {
+			as.Status = run.StatusPendingApproval
+		}
+		rec, err := SubmitRecord(&as)
 		if err != nil {
 			return unverified(subject, "build its record", err)
 		}
@@ -216,7 +245,7 @@ func (v *Verifier) parent(ctx context.Context, r *run.Run, subject string) (*run
 	case parent.ParentID != nil:
 		return nil, drift(subject, "its parent "+id+" is itself a child of another run")
 	}
-	if err := v.top(ctx, parent, subject+": parent run "+id); err != nil {
+	if err := v.top(ctx, parent, subject+": parent run "+id, false); err != nil {
 		return nil, err
 	}
 	return parent, nil
@@ -274,7 +303,7 @@ func (v *Verifier) check(subject string, rec Record, stored string) error {
 		return nil
 	}
 	if stored == "" {
-		return drift(subject, "it carries no seal, so this process did not build or release it")
+		return fmt.Errorf("%w: %s: %w", ErrDrift, subject, ErrUnsealed)
 	}
 	if !v.Key.Verify(rec, stored) {
 		return drift(subject, moved(rec.Kind))

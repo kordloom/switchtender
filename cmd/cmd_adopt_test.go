@@ -11,10 +11,12 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -629,6 +631,8 @@ type adoptWitnessSetup struct {
 	url string
 	// head is the statement the witness answered after the last push, nil before one.
 	head *witness.Statement
+	// empty is the witness's signed statement of nothing, as it answered right after enrollment.
+	empty []byte
 }
 
 // newAdoptWitnessSetup returns the install and a witness, not enrolled yet.
@@ -654,6 +658,20 @@ func (s *adoptWitnessSetup) enroll(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 	s.url = enr.Witness
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+		enr.Witness+"/v1/installs/"+enr.KeyID+"/attestation", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET statement error = %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if s.empty, err = io.ReadAll(res.Body); err != nil || res.StatusCode != http.StatusOK {
+		t.Fatalf("GET statement after enrollment = %d %s, %v, want the signed statement of "+
+			"nothing", res.StatusCode, s.empty, err)
+	}
 }
 
 // push appends a span beat, pushes it to the witness so the store holds its countersignatures,
@@ -842,16 +860,19 @@ func TestAdoptHoldsTheChainToTheWitnessHead(t *testing.T) {
 		},
 		Want:     binding.ErrDrift,
 		WantText: []string{"a tree of {size} entries", "{url}", "are missing"},
-	}, { // Test 4: A witness that holds nothing yet bounds nothing, and says so.
+	}, { // Test 4: A witness that holds nothing yet bounds nothing, says so, and then holds the
+		// record once adopt pushes it.
 		Name:      "nothing witnessed",
 		Arrange:   func(t *testing.T, s *adoptWitnessSetup) { s.enroll(t) },
 		WantShown: []string{"The witness at {url} has witnessed nothing for this install yet"},
-	}, { // Test 5: Nothing witnessed while the store holds countersignatures trips the wire.
+	}, { // Test 5: Nothing witnessed while the store holds countersignatures trips the wire. The
+		// witness's signed statement of nothing, kept from before the first push, is what a witness
+		// restored from that time answers.
 		Name: "nothing witnessed over countersignatures",
 		Arrange: func(t *testing.T, s *adoptWitnessSetup) {
 			s.enroll(t)
 			s.push(t)
-			s.stub(t, http.StatusNotFound, []byte(`{"error":"nothing witnessed yet"}`))
+			s.stub(t, http.StatusOK, s.empty)
 		},
 		Want: binding.ErrDrift,
 		WantText: []string{"the witness at {url} says it has witnessed nothing",
@@ -920,6 +941,22 @@ func TestAdoptHoldsTheChainToTheWitnessHead(t *testing.T) {
 		Want:         binding.ErrDrift,
 		WantText: []string{"does not reach the head the witness at {url} countersigned",
 			"a tree of {size} entries with root {root}"},
+	}, { // Test 12: An enrollment naming a plain-http witness off the loopback is refused unasked.
+		Name: "plain http witness",
+		Arrange: func(t *testing.T, s *adoptWitnessSetup) {
+			s.enroll(t)
+			enr, err := witnessclient.Load(s.path)
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			enr.Witness = "http://10.0.0.5:9440"
+			if err := enr.Save(s.path); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+			s.url = enr.Witness
+		},
+		Want:     witnessclient.ErrEnrollment,
+		WantText: []string{"{url} is plain http", "https"},
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -948,9 +985,18 @@ func TestAdoptHoldsTheChainToTheWitnessHead(t *testing.T) {
 				if err != nil {
 					t.Fatalf("adopt() error = %v, want an adoption\noutput:\n%s", err, out.String())
 				}
-				if !got.Recorded || got.Entries != before.Entries+1 {
-					t.Errorf("adopt() left recorded %v with %d entries, want the record appended "+
-						"to %d", got.Recorded, got.Entries, before.Entries)
+				// An enrolled install appends a span beat after the record and pushes it.
+				appended := 1
+				if s.url != "" {
+					appended = 2
+					if !strings.Contains(out.String(), "which covers the adoption record") {
+						t.Errorf("output does not name the head that covers the record:\n%s",
+							out.String())
+					}
+				}
+				if !got.Recorded || got.Entries != before.Entries+appended {
+					t.Errorf("adopt() left recorded %v with %d entries, want %d appended to %d",
+						got.Recorded, got.Entries, appended, before.Entries)
 				}
 			} else {
 				if !errors.Is(err, test.Want) {
@@ -977,6 +1023,450 @@ func TestAdoptHoldsTheChainToTheWitnessHead(t *testing.T) {
 				if want = fill.Replace(want); !strings.Contains(out.String(), want) {
 					t.Errorf("output does not show %q:\n%s", want, out.String())
 				}
+			}
+		})
+	}
+}
+
+// recordSeq returns the chain position of the install's adoption record, zero when there is none.
+func (s *adoptWitnessSetup) recordSeq(t *testing.T) int64 {
+	t.Helper()
+	bundle, err := openBundle(s.fx.DB)
+	if err != nil {
+		t.Fatalf("openBundle() error = %v", err)
+	}
+	defer func() { _ = bundle.Close() }()
+	e, err := bundle.Audits().Entry(context.Background(), s.fx.Key.AdoptionID())
+	if errors.Is(err, audit.ErrEntryNotFound) {
+		return 0
+	}
+	if err != nil {
+		t.Fatalf("Entry() error = %v", err)
+	}
+	return e.Seq
+}
+
+// lastEntry returns the chain's newest entry.
+func (s *adoptWitnessSetup) lastEntry(t *testing.T) *audit.Entry {
+	t.Helper()
+	bundle, err := openBundle(s.fx.DB)
+	if err != nil {
+		t.Fatalf("openBundle() error = %v", err)
+	}
+	defer func() { _ = bundle.Close() }()
+	chain, err := bundle.Audits().Chain(context.Background())
+	if err != nil || len(chain) == 0 {
+		t.Fatalf("Chain() = %d entries, %v, want some", len(chain), err)
+	}
+	return chain[len(chain)-1]
+}
+
+// witnessed returns the statement the witness holds for the install now, read from the witness
+// itself, nil when it holds nothing.
+func (s *adoptWitnessSetup) witnessed(t *testing.T) *witness.Statement {
+	t.Helper()
+	enr, err := witnessclient.Load(s.path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	enr.Witness = s.w.url
+	st, err := witnessclient.FetchStatement(context.Background(), nil, enr)
+	if errors.Is(err, witnessclient.ErrNothingWitnessed) {
+		return nil
+	}
+	if err != nil {
+		t.Fatalf("FetchStatement() error = %v", err)
+	}
+	return st
+}
+
+// TestAdoptPushesTheRecordToTheWitness pins that adopt on an enrolled install closes the window the
+// adoption record sat in before: it appends a span beat right after the record and pushes it, so
+// the witness's head covers the record before adopt returns, and a writer who then removes the
+// record and re-links the chain is refused in the witness's name. --fail-unsealed does the same. A
+// push that fails keeps the adoption, says the record is not yet witnessed until serve's first
+// beat lands, and returns an error so a script sees a non-zero exit.
+//
+//nolint:funlen // Test function.
+func TestAdoptPushesTheRecordToTheWitness(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tests := []struct {
+		// Name labels the run.
+		Name string
+		// FailUnsealed runs adopt with --fail-unsealed.
+		FailUnsealed bool
+		// Down makes the witness answer every push 502 while its statement stays readable.
+		Down bool
+		// Want is the error adopt must return, nil when the push lands.
+		Want error
+	}{{ // Test 0: Adopt pushes the record, and a re-link after it is refused.
+		Name: "adopt",
+	}, { // Test 1: --fail-unsealed pushes its record the same way.
+		Name: "fail unsealed", FailUnsealed: true,
+	}, { // Test 2: A push that fails keeps the adoption and exits non-zero.
+		Name: "push fails", Down: true, Want: witnessclient.ErrUnreachable,
+	}, { // Test 3: --fail-unsealed whose push fails does the same.
+		Name: "fail unsealed, push fails", FailUnsealed: true, Down: true,
+		Want: witnessclient.ErrUnreachable,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			s := newAdoptWitnessSetup(t)
+			s.enroll(t)
+			s.push(t)
+			if test.Down {
+				s.w.mode.Store(serveWitnessDown)
+			}
+			before := s.fx.state(t)
+			var out strings.Builder
+			err := adopt(ctx, adoptRequest{DB: s.fx.DB, Yes: true, FailUnsealed: test.FailUnsealed,
+				Out: &out, Prompt: io.Discard, In: strings.NewReader("")})
+			seq := s.recordSeq(t)
+			if seq == 0 {
+				t.Fatalf("adopt() = %v left no adoption record\noutput:\n%s", err, out.String())
+			}
+			// Adopt appends the record and the beat. --fail-unsealed also records each run it fails.
+			if got := s.fx.state(t); !test.FailUnsealed && got.Entries != before.Entries+2 {
+				t.Errorf("adopt() left %d entries, want the record and a beat appended to %d",
+					got.Entries, before.Entries)
+			}
+			if last := s.lastEntry(t); last.Actor != audit.SpanActor || last.Seq <= seq {
+				t.Errorf("the newest entry is %s %s at %d, want a span beat after the record at %d",
+					last.Actor, last.Path, last.Seq, seq)
+			}
+			head := s.witnessed(t)
+			if test.Want != nil {
+				if !errors.Is(err, test.Want) {
+					t.Fatalf("adopt() error = %v, want %v\noutput:\n%s", err, test.Want, out.String())
+				}
+				for _, want := range []string{"the adoption is recorded", "not witnessed",
+					"serve's first beat lands", s.url} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("the failed push does not say %q:\n%v", want, err)
+					}
+				}
+				if strings.Contains(err.Error(), "Nothing was changed") {
+					t.Errorf("the failed push says nothing was changed, and the adoption was "+
+						"written:\n%v", err)
+				}
+				if head == nil || head.Size >= seq {
+					t.Errorf("the witness holds %+v after a failed push, want the head from before "+
+						"the record at %d", head, seq)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("adopt() error = %v\noutput:\n%s", err, out.String())
+			}
+			if head == nil || head.Size <= seq {
+				t.Fatalf("the witness holds %+v after adopt, want a tree past the record at %d",
+					head, seq)
+			}
+			shown := fmt.Sprintf("The witness at %s countersigned entry %d (link %s, tree of %d "+
+				"entries, root %s)", s.url, head.LastSeq, head.LastHead, head.Size, head.Root)
+			if !strings.Contains(out.String(), shown) || !strings.Contains(out.String(),
+				fmt.Sprintf("which covers the adoption record at entry %d", seq)) {
+				t.Errorf("output does not name the head that covers the record:\n%s", out.String())
+			}
+			// The writer's move inside the old window: keyed service goes on, the record is removed
+			// and the chain re-linked before the next push.
+			s.entries(t, 2)
+			s.relink(t)
+			again, sealedBefore := s.fx.state(t), sealedOf(t, s.fx)
+			out.Reset()
+			err = adopt(ctx, adoptRequest{DB: s.fx.DB, Yes: true, Out: &out, Prompt: io.Discard,
+				In: strings.NewReader("")})
+			if !errors.Is(err, binding.ErrDrift) || !strings.Contains(err.Error(),
+				"does not reach the head the witness at "+s.url) {
+				t.Fatalf("adopt() after the re-link = %v, want the witness head refusal\noutput:\n%s",
+					err, out.String())
+			}
+			if diff := cmp.Diff(again, s.fx.state(t), cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("the refused adopt changed the chain (-before +after):\n%s", diff)
+			}
+			if after := sealedOf(t, s.fx); !cmp.Equal(sealedBefore, after, cmpopts.EquateEmpty()) {
+				t.Errorf("the refused adopt sealed %v, want %v", after, sealedBefore)
+			}
+		})
+	}
+}
+
+// TestAnUnsignedNothingWitnessedIsRefused pins that an unsigned answer saying the witness holds
+// nothing is not taken as the witness's word. The writer of F2 removes the record and re-links the
+// chain, deletes the countersignatures the tripwire reads, and answers the statement request with
+// the 404 a witness once sent for nothing witnessed, from a network position. Adopt and
+// --fail-unsealed refuse, writing nothing, since a witness that holds nothing says so in a signed
+// statement of size 0.
+func TestAnUnsignedNothingWitnessedIsRefused(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	for _, failUnsealed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("fail unsealed %t", failUnsealed), func(t *testing.T) {
+			t.Parallel()
+			s := newAdoptWitnessSetup(t)
+			s.enroll(t)
+			s.push(t)
+			s.adoptOnce(t)
+			s.entries(t, 1)
+			s.relink(t)
+			editChain(t, s.fx.DB, "DELETE FROM audit_attestations")
+			s.stub(t, http.StatusNotFound, []byte(`{"error":"nothing witnessed yet"}`))
+			before, sealedBefore := s.fx.state(t), sealedOf(t, s.fx)
+			var out strings.Builder
+			err := adopt(ctx, adoptRequest{DB: s.fx.DB, Yes: true, FailUnsealed: failUnsealed,
+				Out: &out, Prompt: io.Discard, In: strings.NewReader("")})
+			if !errors.Is(err, witnessclient.ErrRejected) || !strings.Contains(err.Error(),
+				"Nothing was changed") {
+				t.Fatalf("adopt() = %v, want the unsigned answer refused\noutput:\n%s", err,
+					out.String())
+			}
+			if diff := cmp.Diff(before, s.fx.state(t), cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("the refused adopt changed the chain (-before +after):\n%s", diff)
+			}
+			if after := sealedOf(t, s.fx); !cmp.Equal(sealedBefore, after, cmpopts.EquateEmpty()) {
+				t.Errorf("the refused adopt sealed %v, want %v", after, sealedBefore)
+			}
+		})
+	}
+}
+
+// plantedControl is a database value that rewrites a line of a terminal reading it: it erases the
+// line, returns the cursor, and writes a forged sentence in its place.
+const plantedControl = "x\x1b[2K\rforged"
+
+// plantedC1 is a database value carrying a C1 control character, which some terminals read as an
+// escape introducer, then a byte that is not UTF-8 at all.
+const plantedC1 = "y\u009b2J\x9bgone"
+
+// controlFree reports the first character of text that would act on a terminal: any control
+// character but newline and tab, and the DEL and C1 range, or a byte that is not UTF-8. It returns
+// the empty string for text that is safe to print.
+func controlFree(text string) string {
+	for rest := text; rest != ""; {
+		r, size := utf8.DecodeRuneInString(rest)
+		switch {
+		case r == utf8.RuneError && size == 1:
+			return "invalid UTF-8"
+		case r < 0x20 && r != '\n' && r != '\t', r >= 0x7f && r <= 0x9f:
+			return fmt.Sprintf("U+%04X", r)
+		}
+		rest = rest[size:]
+	}
+	return ""
+}
+
+// plantControls writes rows into the fixture's database carrying control characters the way a
+// writer with database access can: a run whose id and requester carry them, a run to leave whose
+// id does, and an anchor over the real head whose reference does.
+func plantControls(t *testing.T, fx *adoptFixture) {
+	t.Helper()
+	ctx := context.Background()
+	bundle, err := openBundle(fx.DB)
+	if err != nil {
+		t.Fatalf("openBundle() error = %v", err)
+	}
+	defer func() { _ = bundle.Close() }()
+	for _, r := range []*run.Run{
+		{ID: "run_" + plantedControl, Tool: run.ToolBash, Command: "report",
+			Status: run.StatusPending, CreatedAt: time.Now(), Actor: plantedControl},
+		{ID: "run_" + plantedC1, Tool: run.ToolBash, Command: "report",
+			Status: run.StatusPending, CreatedAt: time.Now(), Actor: plantedC1},
+		{ID: "run_orphan_" + plantedControl, Tool: run.ToolBash, Command: "report",
+			Status: run.StatusPending, CreatedAt: time.Now(), ParentID: new("run_gone"),
+			StepIndex: new(0)},
+	} {
+		if err := bundle.Runs().Save(ctx, r); err != nil {
+			t.Fatalf("Save(%q) error = %v", r.ID, err)
+		}
+	}
+	chain, err := bundle.Audits().Chain(ctx)
+	if err != nil || len(chain) == 0 {
+		t.Fatalf("Chain() = %d entries, error %v", len(chain), err)
+	}
+	anchors, ok := bundle.Audits().(audit.AnchorStore)
+	if !ok {
+		t.Fatal("the SQLite chain keeps no anchors")
+	}
+	head := chain[len(chain)-1]
+	if err := anchors.SaveAnchor(ctx, &audit.Anchor{ID: "anc_planted", Type: audit.AnchorGit,
+		Shape: audit.AnchorShapeLinear, Seq: head.Seq, Link: head.Hash, At: head.At,
+		Ref: "refs/notes/anchor" + plantedControl}); err != nil {
+		t.Fatalf("SaveAnchor() error = %v", err)
+	}
+}
+
+// TestAdoptPrintsNoControlCharactersFromTheDatabase pins that a database value never reaches the
+// operator's terminal raw. A writer plants an escape and a carriage return in a run's requester, in
+// run ids, and in an anchor's reference, and adopt, adopt --fail-unsealed, and the start gate's
+// refusal name them: each must print them escaped, in the plan, the confirmation, and every
+// refusal, so no forged line or cursor movement reaches the person reading.
+//
+//nolint:funlen // Test function.
+func TestAdoptPrintsNoControlCharactersFromTheDatabase(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tests := []struct {
+		// Name labels the path.
+		Name string
+		// Plant leaves extra rows in the install beyond plantControls.
+		Plant func(t *testing.T, fx *adoptFixture)
+		// Request is how adopt is run, without its database.
+		Request adoptRequest
+		// WantErr reports whether adopt must refuse.
+		WantErr bool
+		// WantShown are the planted values whose escaped form the output or the error must hold.
+		WantShown []string
+	}{{ // Test 0: The confirmed plan prints the requester, the ids, and the anchor escaped.
+		Name:    "confirmed",
+		Request: adoptRequest{Yes: true},
+		WantShown: []string{plantedControl, plantedC1, "refs/notes/anchor" + plantedControl,
+			"run_orphan_" + plantedControl},
+	}, { // Test 1: A dry run prints the same plan escaped.
+		Name:      "dry run",
+		Request:   adoptRequest{DryRun: true},
+		WantShown: []string{plantedControl, plantedC1, "refs/notes/anchor" + plantedControl},
+	}, { // Test 2: A plan the person declines was printed escaped before it asked.
+		Name:      "declined",
+		Request:   adoptRequest{Terminal: true, In: strings.NewReader("n\n")},
+		WantErr:   true,
+		WantShown: []string{plantedControl, plantedC1, "refs/notes/anchor" + plantedControl},
+	}, { // Test 3: A run that already carries a seal refuses by naming its id escaped.
+		Name: "sealed row refusal",
+		Plant: func(t *testing.T, fx *adoptFixture) {
+			editChain(t, fx.DB, "UPDATE runs SET spec_seal = 'bk1:00' WHERE actor = char(120, 27)"+
+				" || '[2K' || char(13) || 'forged'")
+		},
+		Request:   adoptRequest{Yes: true},
+		WantErr:   true,
+		WantShown: []string{"run_" + plantedControl},
+	}, { // Test 4: --fail-unsealed prints the requester and the ids escaped.
+		Name:      "fail unsealed",
+		Request:   adoptRequest{Yes: true, FailUnsealed: true},
+		WantShown: []string{plantedControl, plantedC1, "refs/notes/anchor" + plantedControl},
+	}, { // Test 5: An adoption record by a planted actor refuses with the actor escaped.
+		Name: "earlier adoption",
+		Plant: func(t *testing.T, fx *adoptFixture) {
+			bundle, err := openBundle(fx.DB)
+			if err != nil {
+				t.Fatalf("openBundle() error = %v", err)
+			}
+			defer func() { _ = bundle.Close() }()
+			if err := bundle.Audits().Append(ctx, &audit.Entry{ID: fx.Key.AdoptionID(),
+				Actor: plantedControl, ActorType: actorTypeCLI, Method: audit.MethodCLI,
+				Path: audit.AdoptedPath}); err != nil {
+				t.Fatalf("Append() error = %v", err)
+			}
+		},
+		Request:   adoptRequest{Yes: true},
+		WantErr:   true,
+		WantShown: []string{plantedControl},
+	}, { // Test 6: A keyed entry with a planted id and path refuses with both escaped.
+		Name: "keyed entry",
+		Plant: func(t *testing.T, fx *adoptFixture) {
+			bundle, err := openBundle(fx.DB)
+			if err != nil {
+				t.Fatalf("openBundle() error = %v", err)
+			}
+			defer func() { _ = bundle.Close() }()
+			if err := bundle.Audits().Append(ctx, &audit.Entry{ID: "ent_" + plantedControl,
+				Actor: "x", ActorType: actorTypeCLI, Method: audit.MethodRelease,
+				Path: "/p/y\u009b2J"}); err != nil {
+				t.Fatalf("Append() error = %v", err)
+			}
+		},
+		Request:   adoptRequest{Yes: true},
+		WantErr:   true,
+		WantShown: []string{"ent_" + plantedControl, "/p/y\u009b2J"},
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			fx := newAdoptFixture(t)
+			plantControls(t, fx)
+			if test.Plant != nil {
+				test.Plant(t, fx)
+			}
+			req := test.Request
+			var out, prompt strings.Builder
+			req.DB, req.Out, req.Prompt = fx.DB, &out, &prompt
+			if req.In == nil {
+				req.In = strings.NewReader("")
+			}
+			err := adopt(ctx, req)
+			if test.WantErr != (err != nil) {
+				t.Fatalf("adopt() error = %v, want an error: %t\noutput:\n%q", err, test.WantErr,
+					out.String())
+			}
+			shown := out.String() + prompt.String()
+			if err != nil {
+				shown += "\n" + err.Error()
+			}
+			if bad := controlFree(shown); bad != "" {
+				t.Errorf("output carries %s from the database:\n%q", bad, shown)
+			}
+			for _, planted := range test.WantShown {
+				if !strings.Contains(shown, strconv.Quote(planted)) &&
+					!strings.Contains(shown, strconv.Quote(planted)[1:len(strconv.Quote(planted))-1]) {
+					t.Errorf("output does not show %q escaped:\n%s", planted, shown)
+				}
+			}
+		})
+	}
+	// Test 7: The start gate's refusal names the rows it would adopt escaped.
+	t.Run("test 7 gate", func(t *testing.T) {
+		t.Parallel()
+		in := newGateInstall()
+		for _, id := range []string{"run_" + plantedControl, "run_" + plantedC1} {
+			r := &run.Run{ID: id, Tool: run.ToolBash, Command: "deploy", Status: run.StatusPending,
+				CreatedAt: time.Now(), Actor: "requester"}
+			if err := in.Runs.Save(ctx, r); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+		}
+		err := adoptionGate(ctx, in.Runs, in.Audits, gateKey(t, 1), nil, "switchtender.db")
+		if err == nil {
+			t.Fatal("adoptionGate() = nil, want a refusal")
+		}
+		if bad := controlFree(err.Error()); bad != "" {
+			t.Errorf("refusal carries %s from the database:\n%q", bad, err.Error())
+		}
+		for _, planted := range []string{"run_" + plantedControl, "run_" + plantedC1} {
+			if !strings.Contains(err.Error(), strconv.Quote(planted)) {
+				t.Errorf("refusal does not show %q escaped:\n%s", planted, err)
+			}
+		}
+	})
+}
+
+// TestPrintableEscapesWhatActsOnATerminal pins the characters printable quotes: an escape, a
+// carriage return, a C1 control, DEL, and a byte that is not UTF-8.
+func TestPrintableEscapesWhatActsOnATerminal(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		In         string
+		WantResult string
+	}{{ // Test 0: Plain text prints as it is.
+		In: "refs/notes/anchor é", WantResult: "refs/notes/anchor é",
+	}, { // Test 1: An escape sequence is quoted.
+		In: "a\x1b[2Kb", WantResult: `"a\x1b[2Kb"`,
+	}, { // Test 2: A carriage return is quoted.
+		In: "a\rb", WantResult: `"a\rb"`,
+	}, { // Test 3: A C1 control is quoted.
+		In: "a\u009bb", WantResult: `"a\u009bb"`,
+	}, { // Test 4: DEL is quoted.
+		In: "a\x7fb", WantResult: `"a\x7fb"`,
+	}, { // Test 5: A lone C1 byte, not UTF-8, is quoted.
+		In: "a\x9bb", WantResult: `"a\x9bb"`,
+	}, { // Test 6: A real replacement character prints as it is.
+		In: "a\ufffdb", WantResult: "a\ufffdb",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			if got := printable(test.In); got != test.WantResult {
+				t.Errorf("printable(%q) = %q, want %q", test.In, got, test.WantResult)
 			}
 		})
 	}

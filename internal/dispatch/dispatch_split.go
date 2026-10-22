@@ -805,7 +805,7 @@ func (d *Dispatcher) releaseAttempt(ctx context.Context, parent, child *run.Run,
 		by := outcome.Decider{Name: requestDecider, Type: "system", OnBehalfOf: parent.Actor}
 		entry, err = outcome.ReleaseEntry(child, released, by, d.now)
 		if entry != nil {
-			seal = append(seal, binding.RootOf(entry))
+			seal = append(seal, binding.PreparedRootOf(entry))
 		}
 	}
 	if err == nil {

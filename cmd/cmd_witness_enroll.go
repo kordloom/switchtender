@@ -48,6 +48,9 @@ consistency proof from the root the witness last signed. The witness remembers t
 and countersigns second, so a chain rewritten at or before any position it countersigned is refused
 on the next push and fails verification against the witness's own statement.
 
+The witness URL must be https. Plain http is accepted only to a loopback address, 127.0.0.0/8,
+::1, or localhost, since over the network anyone on the path could answer for the witness.
+
 Enrollment needs a license that includes the hosted witness: Enterprise, or Team with the add-on.
 The request is signed by this install's producer key and carries the license file, and the witness's
 answer is signed by the witness key. The command prints that key's id. Compare it with the id the
@@ -105,6 +108,9 @@ func runWitnessEnroll(cmd *cobra.Command, _ []string) error {
 	base, err := witnessclient.NormalizeURL(witnessEnrollURL)
 	if err != nil {
 		return err
+	}
+	if err := witnessclient.RequireSecureURL(base); err != nil {
+		return fmt.Errorf("%w. Nothing was sent", err)
 	}
 	held, err := witnessclient.LoadIfPresent(path)
 	if err != nil {
@@ -165,10 +171,6 @@ func runWitnessEnroll(cmd *cobra.Command, _ []string) error {
 			"%s%s and in docs/witness.md before trusting what it countersigns, or pass "+
 			"--witness-key to pin it.\n", enr.Keys.KeyID, enr.Witness, witnessclient.KeysPath)
 	}
-	if strings.HasPrefix(enr.Witness, "http://") {
-		fmt.Fprintln(errOut, "The witness URL is plain http, so the license file this enrollment "+
-			"carried crossed the network unencrypted.")
-	}
 	fmt.Fprintf(errOut, "Wrote %s. A server started with --span-cadence pushes its beats to the "+
 		"witness from its next start.\n", path)
 	return nil
@@ -205,6 +207,9 @@ func refreshWitnessKeys(ctx context.Context, cmd *cobra.Command, path, pin strin
 	held, err := witnessclient.Load(path)
 	if err != nil {
 		return fmt.Errorf("%w. Enroll with switchtender witness enroll --witness <url> first", err)
+	}
+	if err := witnessclient.RequireSecureURL(held.Witness); err != nil {
+		return fmt.Errorf("%w. Enroll again with the witness's https URL. Nothing was sent", err)
 	}
 	if witnessEnrollURL != "" {
 		base, err := witnessclient.NormalizeURL(witnessEnrollURL)

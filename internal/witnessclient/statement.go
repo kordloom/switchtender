@@ -11,10 +11,6 @@ import (
 	"github.com/kordloom/switchtender/witness"
 )
 
-// nothingWitnessedAnswer is the reason a witness answers a statement request with before the first
-// push of the install it adopted.
-const nothingWitnessedAnswer = "nothing witnessed yet"
-
 // statementPath returns the path a witness serves the signed statement of producer key keyID at.
 func statementPath(keyID string) string { return "/v1/installs/" + keyID + "/attestation" }
 
@@ -22,8 +18,10 @@ func statementPath(keyID string) string { return "/v1/installs/" + keyID + "/att
 // enrolled: the newest beat it countersigned and the tree it holds, which every later push must
 // extend.
 //
-// A witness that holds nothing for the install yet is ErrNothingWitnessed. A witness that holds no
-// record under the enrollment's key is ErrRejected wrapping witness.ErrNotEnrolled, and any other
+// A witness that holds nothing for the install yet answers with a signed statement of size 0, which
+// is held to every check below and then returned as ErrNothingWitnessed. Any other answer that says
+// so, an unsigned 404 among them, is not the witness's word and is ErrRejected. A witness that holds
+// no record under the enrollment's key is ErrRejected wrapping witness.ErrNotEnrolled, and any other
 // answer that is not 200 is ErrRejected. A witness that does not answer, or answers 5xx, is
 // ErrUnreachable. A statement is returned only when its signature verifies, when its signer is a
 // key the enrollment lists as the witness's word at the time it was minted, and when it names the
@@ -37,9 +35,6 @@ func FetchStatement(ctx context.Context, client *http.Client, enr *Enrollment) (
 	}
 	switch reason := answerText(raw); {
 	case code == http.StatusOK:
-	case code == http.StatusNotFound && reason == nothingWitnessedAnswer:
-		return nil, fmt.Errorf("%w: the witness holds no countersigned head for install %s yet",
-			ErrNothingWitnessed, enr.InstallID)
 	case code == http.StatusNotFound && strings.HasPrefix(reason, witness.ErrNotEnrolled.Error()+":"):
 		return nil, fmt.Errorf("%w: %w: the witness answered the statement with %d: %s", ErrRejected,
 			witness.ErrNotEnrolled, code, reason)
@@ -53,6 +48,14 @@ func FetchStatement(ctx context.Context, client *http.Client, enr *Enrollment) (
 	}
 	if err := checkStatement(&st, enr); err != nil {
 		return nil, err
+	}
+	if st.Size == 0 {
+		if st.LastBeat != 0 || st.LastSeq != 0 || st.LastHead != "" || st.Root != "" {
+			return nil, fmt.Errorf("%w: the statement holds a tree of 0 entries and names beat %d at "+
+				"entry %d, which no witness signs", ErrWitnessKey, st.LastBeat, st.LastSeq)
+		}
+		return nil, fmt.Errorf("%w: the witness signed that it holds no countersigned head for "+
+			"install %s yet", ErrNothingWitnessed, enr.InstallID)
 	}
 	return &st, nil
 }

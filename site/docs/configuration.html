@@ -153,7 +153,7 @@ believes it has a control it does not have.</p>
 <tr>
 <td><code>SWITCHTENDER_AUDIT_KEY</code></td>
 <td>serve, adopt</td>
-<td>Hex-encoded ed25519 seed for the install's signing identity, which signs the LoomSeal bundles it emits and binds every audit entry to this install. Unset beside a local database, the install mints and stores its own key there. Unset against a shared database it mints nothing, since every process must sign as the same install, and the chain is recorded unattributed and unbound until a seed is supplied to all of them. A malformed value stops startup.</td>
+<td>Hex-encoded ed25519 seed for the install's signing identity, which signs the LoomSeal bundles it emits and binds every audit entry to this install. Unset beside a local database, the install mints and stores its own key there. Unset against a shared database it mints nothing, since every process must sign as the same install, and the chain is recorded unattributed and unbound until a seed is supplied to all of them. Once any process has signed the chain, a process without the seed refuses to start. A malformed value stops startup.</td>
 </tr>
 <tr>
 <td><code>SWITCHTENDER_IDENTITY_DIR</code></td>
@@ -905,24 +905,26 @@ that variable is unset.</p>
 <tr>
 <td><code>--witness-enrollment</code></td>
 <td>none</td>
-<td>Enrollment file to push each span beat to its witness under. Empty reads <code>witness-enrollment.json</code> beside the license file, and an install with neither pushes nothing. An enrolled install refuses to start without <code>--span-cadence</code> or without a producer identity, since it would run unwitnessed while its enrollment says otherwise. A witness outage never blocks the timestamp anchor, and the reverse.</td>
+<td>Enrollment file to push each span beat to its witness under. Empty reads <code>witness-enrollment.json</code> beside the license file, and an install with neither pushes nothing. An enrolled install refuses to start without <code>--span-cadence</code> or without a producer identity, since it would run unwitnessed while its enrollment says otherwise. At start it holds the audit chain to the head the witness countersigned, and refuses to start on a chain that does not reach it or on a statement the enrollment does not accept. A witness that does not answer with its signed statement is a warning, and the server starts. A witness outage never blocks the timestamp anchor, and the reverse.</td>
 </tr>
 </tbody>
 </table>
 <p>Retention windows accept a whole number of days with a <code>d</code> suffix, such as <code>30d</code>, or Go duration
 syntax such as <code>720h</code>.</p>
 <h3 id="approval-binding-needs-the-producer-identity">Approval binding needs the producer identity</h3>
-<p>A server that loads the install's producer identity derives an approval binding key from it, held
-in memory and never written anywhere. It seals every run it creates or releases under that key and
-checks the seal before the run executes, so a run whose spec, approval fields, or decision was
-changed in the database after it was approved is refused rather than run. Every server of one
-install must load the same identity, from the identity directory or from <code>SWITCHTENDER_AUDIT_KEY</code>,
-since a run sealed under one key is refused under another. A relay control node checks each run
-before it hands it to a relay worker. A worker that shares the database holds no key, so the runs it
-claims are held only to the digests stored on them.</p>
-<p>A server with no identity holds no key. It still compares the digests stored on each run, and its
-startup warning says that approval binding is row-checked only, which a change written into the
-database together with matching digests passes.</p>
+<p>A server that loads the install's producer identity derives an approval binding key from it, held in
+memory and never written anywhere. It seals every run it creates or releases under that key and
+checks the seal before the run executes, so a run whose spec, approval fields, decision, or who
+decided was changed in the database after it was approved is refused rather than run. Every server
+of one install must load the same identity, from the identity directory or from
+<code>SWITCHTENDER_AUDIT_KEY</code>, since a run sealed under one key is refused under another. A relay control
+node checks each run before it hands it to a relay worker. A worker that shares the database holds
+no key, so the runs it claims are held only to the digests stored on them.</p>
+<p>A server with no identity on a chain no install has signed holds no key. It still compares the
+digests stored on each run, and its startup warning says that approval binding is row-checked only,
+which a change written into the database together with matching digests passes. A server that finds
+the chain bound to an install whose key it does not hold refuses to start, as the
+<a href="/docs/backup#signing-key-lost">backup page</a> explains.</p>
 <p>A server that loads an identity refuses to start while work an earlier release left carries no seal
 and the audit chain holds no adoption record, and it names the runs. Run <a href="#adopt">adopt</a> once to
 seal that work, then start the server. A server that loads an identity and finds nothing to adopt
@@ -1477,7 +1479,8 @@ Enterprise, or Team with the add-on. Without one the command refuses and sends n
 any other. The enrollment is written to <code>witness-enrollment.json</code> beside the license file, so a
 backup and a restore carry both or neither. It holds no secret. An install whose key was changed
 under its install id through <code>SWITCHTENDER_AUDIT_KEY</code> is refused, since the witness binds an install
-id to the key it was born to.</p>
+id to the key it was born to. A new install started after its signing key was lost enrolls as a new
+record under its new key, beside the old install's record, which keeps its last countersigned head.</p>
 <table>
 <thead>
 <tr>
@@ -1495,7 +1498,7 @@ id to the key it was born to.</p>
 <tr>
 <td><code>--witness</code></td>
 <td>none</td>
-<td>Base URL of the witness. Required unless <code>--refresh-keys</code> is given.</td>
+<td>Base URL of the witness. Required unless <code>--refresh-keys</code> is given. It must be https, or plain http to a loopback address (127.0.0.0/8, <code>::1</code>, or <code>localhost</code>).</td>
 </tr>
 <tr>
 <td><code>--witness-key</code></td>
@@ -1745,7 +1748,7 @@ before this release's <code>serve</code> first starts. <a href="/docs/upgrading"
 <tr>
 <td><code>--witness-enrollment</code></td>
 <td>none</td>
-<td>Enrollment file of the witness whose countersigned head the audit chain is held to. Empty reads <code>witness-enrollment.json</code> beside the license file, and an install with neither is held to no witness. A named file that is missing or out of form is an error, as for <code>serve</code>.</td>
+<td>Enrollment file of the witness whose countersigned head the audit chain is held to. Empty reads <code>witness-enrollment.json</code> beside the license file, and an install with neither is held to no witness. A named file that is missing or out of form is an error, as for <code>serve</code>. An enrolled adoption pushes a span beat after its record and exits non-zero when that push fails, with the adoption kept.</td>
 </tr>
 </tbody>
 </table>

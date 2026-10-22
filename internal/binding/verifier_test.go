@@ -211,12 +211,13 @@ func (f *testFixture) edit(t *testing.T, id string, change func(r *run.Run)) {
 	f.put(r)
 }
 
-// addEntry appends an entry with a content digest derived from its id.
+// addEntry appends an entry with a content digest derived from its id, recorded by an approver.
 func (f *testFixture) addEntry(id, method, path string) {
 	f.Chain.mu.Lock()
 	defer f.Chain.mu.Unlock()
 	f.Chain.entries[id] = &audit.Entry{ID: id, Method: method, Path: path,
-		ContentDigest: "cd_" + id}
+		ContentDigest: "cd_" + id, Actor: "approver", ActorType: "session",
+		OnBehalfOf: "approver"}
 }
 
 // editEntry rewrites the entry id as a database writer would.
@@ -547,6 +548,16 @@ func TestExecutableRefusesDrift(t *testing.T) { //nolint:funlen // Test function
 		Attack: func(t *testing.T, f *testFixture) {
 			f.edit(t, "run_gate", func(r *run.Run) { r.Kind = ""; r.Playbook = "destroy.yml" })
 		},
+	}, { // Test 29: An approved run's decision actor rewritten, its digest left alone.
+		ID: "run_app", WantText: "changed after it was approved",
+		Attack: func(_ *testing.T, f *testFixture) {
+			f.editEntry("aud_app", func(e *audit.Entry) { e.Actor, e.ActorType = "mallory", "human" })
+		},
+	}, { // Test 30: A step's release entry actor rewritten.
+		ID: "run_deploy", WantText: "changed after it was built",
+		Attack: func(_ *testing.T, f *testFixture) {
+			f.editEntry("aud_rel", func(e *audit.Entry) { e.Actor = "mallory" })
+		},
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -628,6 +639,11 @@ func TestGateRefusesDrift(t *testing.T) {
 		ParentID: "run_wf", WantText: "aud_wf is not the decision this row names",
 		Attack: func(t *testing.T, f *testFixture) {
 			f.edit(t, "run_gate", func(r *run.Run) { r.DecisionID = "aud_wf" })
+		},
+	}, { // Test 8: The step decision's delegated account rewritten.
+		ParentID: "run_wf", WantText: "workflow state or the decision changed",
+		Attack: func(_ *testing.T, f *testFixture) {
+			f.editEntry("aud_gate", func(e *audit.Entry) { e.OnBehalfOf = "mallory" })
 		},
 	}}
 	for testNum, test := range tests {

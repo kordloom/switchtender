@@ -2,7 +2,9 @@ package receipt_test
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -13,6 +15,8 @@ import (
 	"github.com/kordloom/loomseal/jcs"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/binding"
+	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/receipt"
 	"github.com/kordloom/switchtender/internal/run"
@@ -54,8 +58,14 @@ func heldWith(t *testing.T, verdict string,
 		t.Fatalf("append creation: %v", err)
 	}
 
+	// An approval is settled the way the product settles one, out of pending_approval, so the run
+	// names the decision that won it and is sealed to it.
+	status := run.StatusRunning
+	if verdict == outcome.StepApproved {
+		status = run.StatusPendingApproval
+	}
 	r := &run.Run{
-		ID: "run_1", Status: run.StatusRunning, CreatedAt: time.Now(),
+		ID: "run_1", Status: status, CreatedAt: time.Now(),
 		Tool: run.ToolBash, Command: "deploy the thing", Actor: "casey", ActorType: "session",
 		HeldByPolicy: "deploys need a person", AuditReceipt: chainReceipt(creation),
 	}
@@ -76,6 +86,9 @@ func heldWith(t *testing.T, verdict string,
 		t.Fatalf("CommitDecision: %v", err)
 	}
 	r.ApprovedSpecDigest = specDigest
+	if verdict == outcome.StepApproved {
+		r = sealApproval(t, runs, audits, id, r)
+	}
 
 	// The run finishes and its outcome is committed, which is what makes it receiptable. It is
 	// committed the way every path that finishes a run commits it, so the store records the outcome
@@ -92,6 +105,102 @@ func heldWith(t *testing.T, verdict string,
 		t.Fatalf("CommitOwed outcome: %v", err)
 	}
 	return runs, audits, id, r
+}
+
+// keyOf derives the binding key an install signing with id seals its rows under, the way the
+// command and the server derive it.
+func keyOf(t *testing.T, id audit.Identity) *binding.Key {
+	t.Helper()
+	seed, err := hex.DecodeString(id.Seed)
+	if err != nil {
+		t.Fatalf("decode the identity seed: %v", err)
+	}
+	key, err := binding.DeriveKey(seed)
+	if err != nil {
+		t.Fatalf("DeriveKey: %v", err)
+	}
+	return key
+}
+
+// binderOf returns the verifier a keyed install holds a receipt's approvers to, over runs and
+// audits, under the key id derives.
+func binderOf(t *testing.T, runs run.Store, audits audit.Store, id audit.Identity) *binding.Verifier {
+	t.Helper()
+	return dispatch.NewBindingVerifier(runs, audits, keyOf(t, id))
+}
+
+// sealApproval settles the held run r with the approval the chain last recorded for it, stamps the
+// spec binding beside the digest it carries, and seals it as the dispatcher seals an approved run.
+// It returns the run as stored.
+func sealApproval(t *testing.T, runs run.Store, audits audit.Store, id audit.Identity,
+	r *run.Run) *run.Run {
+	t.Helper()
+	ctx := context.Background()
+	if r.ApprovedSpecBinding == "" {
+		b, err := outcome.SpecBinding(r)
+		if err != nil {
+			t.Fatalf("SpecBinding: %v", err)
+		}
+		r.ApprovedSpecBinding = b
+	}
+	if err := runs.Save(ctx, r); err != nil {
+		t.Fatalf("save held run: %v", err)
+	}
+	path := "/runs/" + r.ID + "/decision/" + outcome.StepApproved
+	decisionID := ""
+	err := audits.ChainScan(ctx, 0, func(e *audit.Entry) error {
+		if e.Method == audit.MethodDecision && e.Path == path {
+			decisionID = e.ID
+		}
+		return nil
+	})
+	if err != nil || decisionID == "" {
+		t.Fatalf("find the approval of %s: %q, %v", r.ID, decisionID, err)
+	}
+	decide(t, runs, r.ID, decisionID, run.DecisionSettle{Status: run.StatusRunning, Owner: "test"})
+	return sealRow(t, runs, audits, id, r.ID)
+}
+
+// sealRow seals the stored row runID to the DECISION entry it names, as the dispatcher seals an
+// approved top-level run or an approved workflow approval step, and returns it as stored.
+func sealRow(t *testing.T, runs run.Store, audits audit.Store, id audit.Identity,
+	runID string) *run.Run {
+	t.Helper()
+	ctx := context.Background()
+	r, err := runs.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("read %s: %v", runID, err)
+	}
+	entry, err := audits.Entry(ctx, r.DecisionID)
+	if err != nil {
+		t.Fatalf("read decision %s of %s: %v", r.DecisionID, runID, err)
+	}
+	var rec binding.Record
+	if r.ParentID == nil {
+		rec, err = binding.RunRecord(r, binding.RootOf(entry))
+	} else {
+		parent, perr := runs.Get(ctx, *r.ParentID)
+		if perr != nil {
+			t.Fatalf("read workflow of %s: %v", runID, perr)
+		}
+		state, serr := outcome.StepStateOf(ctx, runs, parent, r)
+		if serr != nil {
+			t.Fatalf("StepStateOf: %v", serr)
+		}
+		stateBinding, berr := state.Binding()
+		if berr != nil {
+			t.Fatalf("bind the step state: %v", berr)
+		}
+		rec, err = binding.GateRecord(parent, r, stateBinding, binding.RootOf(entry))
+	}
+	if err != nil {
+		t.Fatalf("record of %s: %v", runID, err)
+	}
+	r.SpecSeal = keyOf(t, id).Seal(rec)
+	if err := runs.Save(ctx, r); err != nil {
+		t.Fatalf("save sealed %s: %v", runID, err)
+	}
+	return r
 }
 
 // chainReceipt renders an entry's seq:link, the form a run stores.
@@ -120,7 +229,8 @@ func TestReceiptProvesWhoApprovedWhat(t *testing.T) {
 	runs, audits, id, r := held(t, "approved")
 	ctx := context.Background()
 
-	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID, receipt.Options{})
+	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID,
+		receipt.Options{Binder: binderOf(t, runs, audits, id)})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -158,11 +268,160 @@ func TestReceiptProvesWhoApprovedWhat(t *testing.T) {
 	}
 }
 
+// deciderRewritten is an audit store whose copy of one entry names another decider than the one
+// appended, read by id and streamed alike, with every entry from it on linked again over the
+// rewrite, the chain a database writer can leave behind. Its digest is left alone.
+type deciderRewritten struct {
+	audit.Store
+	// id is the entry whose decider is rewritten.
+	id string
+	// edit rewrites the entry's decider.
+	edit func(e *audit.Entry)
+}
+
+// Entry reads an entry by id with its decider rewritten when it is the entry id names.
+func (s *deciderRewritten) Entry(ctx context.Context, id string) (*audit.Entry, error) {
+	e, err := s.Store.Entry(ctx, id)
+	if err == nil && e != nil && e.ID == s.id {
+		s.edit(e)
+	}
+	return e, err
+}
+
+// ChainScan streams the rewritten chain above afterSeq, linked again from the rewrite on.
+func (s *deciderRewritten) ChainScan(ctx context.Context, afterSeq int64,
+	fn func(*audit.Entry) error) error {
+	prev, relinking := "", false
+	return s.Store.ChainScan(ctx, 0, func(e *audit.Entry) error {
+		rewritten := *e
+		if rewritten.ID == s.id {
+			s.edit(&rewritten)
+			relinking = true
+		}
+		if relinking {
+			rewritten.PrevHash = prev
+			rewritten.Hash = audit.EntryHash(&rewritten)
+		}
+		prev = rewritten.Hash
+		if rewritten.Seq <= afterSeq {
+			return nil
+		}
+		return fn(&rewritten)
+	})
+}
+
+// TestReceiptRefusesARewrittenDecider covers the approver a writer of the database renames on the
+// chain. The links are public, so the rewritten chain verifies on its own, and a receipt drawn from
+// it would sign the writer's name as the approver. The run's seal covers the decider its DECISION
+// entry names, so the builder refuses the whole receipt and names the entry, in either shape. With
+// no key nothing stands behind the name, and a run that names no decision is held to no seal that
+// covers one, so both are refused too. TestReceiptProvesWhoApprovedWhat is the honest twin.
+//
+//nolint:funlen // Test function.
+func TestReceiptRefusesARewrittenDecider(t *testing.T) {
+	ctx := context.Background()
+	mallory := func(e *audit.Entry) { e.Actor, e.ActorType = "mallory", "human" }
+	tests := []struct {
+		// Name labels the row.
+		Name string
+		// Workflow builds the released workflow rather than the held run.
+		Workflow bool
+		// Sparse asks for the sparse shape.
+		Sparse bool
+		// Unkeyed builds with no verifier.
+		Unkeyed bool
+		// Rewrite returns the stores as the writer left them, given the subject's decision.
+		Rewrite func(runs run.Store, audits audit.Store, decisionID string) (run.Store, audit.Store)
+		// WantDrift reports whether the refusal says the entry no longer matches its seal.
+		WantDrift bool
+		// WantText is what the refusal must say.
+		WantText string
+	}{{ // Test 0: The approver renamed on the chain.
+		Name: "approver rewritten",
+		Rewrite: func(runs run.Store, audits audit.Store, id string) (run.Store, audit.Store) {
+			return runs, &deciderRewritten{Store: audits, id: id, edit: mallory}
+		},
+		WantDrift: true, WantText: "no longer matches the seal on run run_1",
+	}, { // Test 1: The approver renamed, receipted in the sparse shape.
+		Name: "approver rewritten, sparse", Sparse: true,
+		Rewrite: func(runs run.Store, audits audit.Store, id string) (run.Store, audit.Store) {
+			return runs, &deciderRewritten{Store: audits, id: id, edit: mallory}
+		},
+		WantDrift: true, WantText: "no longer matches the seal on run run_1",
+	}, { // Test 2: The account the approver acted for rewritten.
+		Name: "delegated account rewritten",
+		Rewrite: func(runs run.Store, audits audit.Store, id string) (run.Store, audit.Store) {
+			return runs, &deciderRewritten{Store: audits, id: id,
+				edit: func(e *audit.Entry) { e.OnBehalfOf = "mallory" }}
+		},
+		WantDrift: true, WantText: "no longer matches the seal on run run_1",
+	}, { // Test 3: The approval step's approver renamed on the chain.
+		Name: "step approver rewritten", Workflow: true,
+		Rewrite: func(runs run.Store, audits audit.Store, _ string) (run.Store, audit.Store) {
+			gate, err := runs.Get(context.Background(), "run_wf_gate")
+			if err != nil {
+				panic(err)
+			}
+			return runs, &deciderRewritten{Store: audits, id: gate.DecisionID, edit: mallory}
+		},
+		WantDrift: true, WantText: "no longer matches the seal on run run_wf_gate",
+	}, { // Test 4: The decision the run names cleared, so it is checked as submitted.
+		Name: "decision id cleared",
+		Rewrite: func(runs run.Store, audits audit.Store, _ string) (run.Store, audit.Store) {
+			return &decisionSwapped{Store: runs, id: "run_1"}, audits
+		},
+		WantText: "names no decision entry",
+	}, { // Test 5: An install with no key, nothing rewritten.
+		Name: "no key", Unkeyed: true,
+		WantText: "holds no binding key",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			var runs run.Store
+			var audits audit.Store
+			var id audit.Identity
+			var subject *run.Run
+			if test.Workflow {
+				runs, audits, id, subject, _, _ = releasedWorkflow(t, nil)
+			} else {
+				runs, audits, id, subject = held(t, "approved")
+			}
+			if test.Rewrite != nil {
+				runs, audits = test.Rewrite(runs, audits, subject.DecisionID)
+			}
+			opts := receipt.Options{Sparse: test.Sparse, Binder: binderOf(t, runs, audits, id)}
+			if test.Unkeyed {
+				opts.Binder = nil
+			}
+			res, err := receipt.Build(ctx, runs, audits, id, "test", subject.ID, opts)
+			if err == nil {
+				t.Fatalf("a receipt naming an approver its seal does not cover was built: %d claims",
+					res.Claims)
+			}
+			var unattested *receipt.UnattestedError
+			if !errors.As(err, &unattested) || !errors.Is(err, receipt.ErrUnattested) {
+				t.Fatalf("error = %v, want an UnattestedError", err)
+			}
+			if got := errors.Is(err, binding.ErrDrift); got != test.WantDrift {
+				t.Errorf("error is a drift = %t, want %t: %v", got, test.WantDrift, err)
+			}
+			if unattested.EntryID == "" || !strings.Contains(err.Error(), unattested.EntryID) {
+				t.Errorf("error = %q, want it to name the decision entry", err)
+			}
+			if !strings.Contains(err.Error(), test.WantText) {
+				t.Errorf("error = %q, want it to say %q", err, test.WantText)
+			}
+		})
+	}
+}
+
 // TestReceiptSurfacesASpecChangedAfterApproval covers the tamper the decision disclosure exists to
 // catch. The chain commits a digest of the decision body, and that body names the spec digest as it
 // stood when the approver decided. Editing the run afterward, which is what an operator would do to
-// slip a different change past a recorded approval, makes the rebuilt body disagree with the committed
-// digest, and the receipt says so rather than verifying.
+// slip a different change past a recorded approval, moves the seal the approved run carries, which
+// covers its spec beside the approver its decision names. The builder holds the run to that seal
+// before it names the approver, so it refuses the receipt rather than signing one an offline check
+// would have to catch.
 func TestReceiptSurfacesASpecChangedAfterApproval(t *testing.T) {
 	runs, audits, id, r := held(t, "approved")
 	ctx := context.Background()
@@ -173,20 +432,17 @@ func TestReceiptSurfacesASpecChangedAfterApproval(t *testing.T) {
 		t.Fatalf("save edited run: %v", err)
 	}
 
-	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID, receipt.Options{})
-	if err != nil {
-		t.Fatalf("Build: %v", err)
+	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID,
+		receipt.Options{Binder: binderOf(t, runs, audits, id)})
+	if err == nil {
+		t.Fatalf("a receipt for a run whose spec changed after approval was built: %d claims, so "+
+			"an edited change can be presented as an approved one", res.Claims)
 	}
-	rep, err := audit.VerifyBundle(res.Signed, id.KeyID())
-	if err != nil {
-		t.Fatalf("VerifyBundle: %v", err)
+	if !errors.Is(err, receipt.ErrUnattested) || !errors.Is(err, binding.ErrDrift) {
+		t.Fatalf("error = %v, want a refusal of the approver as no longer matching the seal", err)
 	}
-	if rep.OK() {
-		t.Fatal("a receipt for a run whose spec changed after approval verified clean, so an edited " +
-			"change can be presented as an approved one")
-	}
-	if rep.DecisionsOK && rep.SpecConsistent {
-		t.Error("neither the decision disclosure nor the spec check noticed the edit")
+	if !strings.Contains(err.Error(), "changed after it was approved") {
+		t.Errorf("error = %q, want it to say the run changed after it was approved", err)
 	}
 }
 
@@ -203,7 +459,8 @@ func TestReceiptRefusesWhatItCannotAttest(t *testing.T) {
 	if err := runs.Save(ctx, &noReceipt); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	if _, err := receipt.Build(ctx, runs, audits, id, "test", noReceipt.ID, receipt.Options{}); err == nil {
+	if _, err := receipt.Build(ctx, runs, audits, id, "test", noReceipt.ID,
+		receipt.Options{Binder: binderOf(t, runs, audits, id)}); err == nil {
 		t.Error("a run with no creation receipt produced a receipt anyway")
 	} else if !strings.Contains(err.Error(), "creation receipt") {
 		t.Errorf("error = %v, want it to name the missing creation receipt", err)
@@ -218,14 +475,16 @@ func TestReceiptRefusesWhatItCannotAttest(t *testing.T) {
 	if err := runs.Save(ctx, &running); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	if _, err := receipt.Build(ctx, runs, audits, id, "test", running.ID, receipt.Options{}); err == nil {
+	if _, err := receipt.Build(ctx, runs, audits, id, "test", running.ID,
+		receipt.Options{Binder: binderOf(t, runs, audits, id)}); err == nil {
 		t.Error("a run with no committed outcome produced a receipt")
 	} else if !strings.Contains(err.Error(), "finished") {
 		t.Errorf("error = %v, want it to say a receipt covers a finished run", err)
 	}
 
 	// Test 2: A run that does not exist at all.
-	if _, err := receipt.Build(ctx, runs, audits, id, "test", "run_missing", receipt.Options{}); err == nil {
+	if _, err := receipt.Build(ctx, runs, audits, id, "test", "run_missing",
+		receipt.Options{Binder: binderOf(t, runs, audits, id)}); err == nil {
 		t.Error("a receipt was built for a run that does not exist")
 	}
 }
@@ -246,7 +505,8 @@ func TestSparseReceiptDisclosesOnlyItsOwnRun(t *testing.T) {
 		t.Fatalf("append other: %v", err)
 	}
 
-	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID, receipt.Options{Sparse: true})
+	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID,
+		receipt.Options{Sparse: true, Binder: binderOf(t, runs, audits, id)})
 	if err != nil {
 		t.Fatalf("Build sparse: %v", err)
 	}
@@ -289,7 +549,7 @@ func TestSparseReceiptProvesTheLogOnlyAppended(t *testing.T) {
 	}
 
 	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID,
-		receipt.Options{Sparse: true, From: from})
+		receipt.Options{Sparse: true, From: from, Binder: binderOf(t, runs, audits, id)})
 	if err != nil {
 		t.Fatalf("Build with a consistency proof: %v", err)
 	}
@@ -311,7 +571,8 @@ func TestRejectedRunReceiptSaysItWasRejected(t *testing.T) {
 	runs, audits, id, r := held(t, "rejected")
 	ctx := context.Background()
 
-	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID, receipt.Options{})
+	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID,
+		receipt.Options{Binder: binderOf(t, runs, audits, id)})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -338,7 +599,8 @@ func TestReceiptRefusesAChainItsAnchorsDisown(t *testing.T) {
 
 	// Verify the receipt builds while the anchors are satisfied, so the refusal below is the anchor's
 	// doing and not the fixture's.
-	if _, err := receipt.Build(ctx, runs, audits, id, "test", r.ID, receipt.Options{}); err != nil {
+	if _, err := receipt.Build(ctx, runs, audits, id, "test", r.ID,
+		receipt.Options{Binder: binderOf(t, runs, audits, id)}); err != nil {
 		t.Fatalf("Build before anchoring: %v", err)
 	}
 
@@ -361,7 +623,8 @@ func TestReceiptRefusesAChainItsAnchorsDisown(t *testing.T) {
 		t.Fatalf("SaveAnchor: %v", err)
 	}
 
-	_, err = receipt.Build(ctx, runs, audits, id, "test", r.ID, receipt.Options{})
+	_, err = receipt.Build(ctx, runs, audits, id, "test", r.ID,
+		receipt.Options{Binder: binderOf(t, runs, audits, id)})
 	if err == nil {
 		t.Fatal("a receipt was published from a chain that no longer satisfies an anchor recorded " +
 			"over it, so a truncated history was signed as an intact one")
@@ -482,7 +745,8 @@ func TestReceiptForAWorkflowFinishedBeforeSealsVerifies(t *testing.T) {
 		t.Fatalf("append outcome: %v", err)
 	}
 
-	res, err := receipt.Build(ctx, runs, audits, id, "test", wf.ID, receipt.Options{})
+	res, err := receipt.Build(ctx, runs, audits, id, "test", wf.ID,
+		receipt.Options{Binder: binderOf(t, runs, audits, id)})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -563,9 +827,13 @@ func releasedWorkflow(t *testing.T, tamper func(run.Store, string)) (run.Store, 
 	wf = decide(t, runs, wf.ID, wfDecision, run.DecisionSettle{Status: run.StatusRunning,
 		Owner: "test"})
 	wf.ApprovedSpecDigest = spec
+	if wf.ApprovedSpecBinding, err = outcome.SpecBinding(wf); err != nil {
+		t.Fatalf("SpecBinding: %v", err)
+	}
 	if err := runs.Save(ctx, wf); err != nil {
 		t.Fatalf("save approved workflow: %v", err)
 	}
+	wf = sealRow(t, runs, audits, id, wf.ID)
 
 	gateIndex, deployIndex := 0, 1
 	gate := &run.Run{
@@ -586,6 +854,7 @@ func releasedWorkflow(t *testing.T, tamper func(run.Store, string)) (run.Store, 
 	}
 	decide(t, runs, gate.ID, gateDecision, run.DecisionSettle{Status: run.StatusSucceeded,
 		EndedAt: time.Now()})
+	sealRow(t, runs, audits, id, gate.ID)
 
 	deploy := &run.Run{
 		ID: "run_wf_deploy", ParentID: &wf.ID, StepIndex: &deployIndex,
@@ -726,7 +995,8 @@ func TestReceiptDisclosesWhatADecisionReleased(t *testing.T) {
 				audits = test.WrapAudits(runs, audits)
 			}
 
-			res, err := receipt.Build(ctx, runs, audits, id, "test", wf.ID, receipt.Options{})
+			res, err := receipt.Build(ctx, runs, audits, id, "test", wf.ID,
+				receipt.Options{Binder: binderOf(t, runs, audits, id)})
 			if err != nil {
 				t.Fatalf("Build: %v", err)
 			}
@@ -896,7 +1166,8 @@ func TestSparseReceiptCarriesTheReleaseWithoutItsBody(t *testing.T) {
 	runs, audits, id, wf, release, _ := releasedWorkflow(t, nil)
 	ctx := context.Background()
 
-	res, err := receipt.Build(ctx, runs, audits, id, "test", wf.ID, receipt.Options{Sparse: true})
+	res, err := receipt.Build(ctx, runs, audits, id, "test", wf.ID,
+		receipt.Options{Sparse: true, Binder: binderOf(t, runs, audits, id)})
 	if err != nil {
 		t.Fatalf("Build sparse: %v", err)
 	}

@@ -3,9 +3,12 @@ package dispatch
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/outcome"
@@ -73,6 +76,67 @@ func planFirstMove(t *testing.T, agent bool, edit func(r, decided *run.Run) func
 	runner := &phaseRunner{}
 	executor := keyedAt(t, store, chain, runner, "work")
 	got := waitTerminal(t, store.Store, r.ID)
+	executor.Close()
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	return attackOutcome{Error: got.Error, Ran: runner.plans + runner.applies}
+}
+
+// heldFlipMove submits a run held for approval with opts on a keyed install that claims nothing,
+// then approves it, or has the writer move its status to pending and nothing else, and lets a
+// keyed executor claim it. Every plan and apply of the row is counted.
+func heldFlipMove(t *testing.T, approve bool, opts ...run.SubmitOption) attackOutcome {
+	t.Helper()
+	ctx := context.Background()
+	store, chain := run.NewMemStore(), audit.NewMemStore()
+	submitter := keyedAt(t, store, chain, &phaseRunner{}, "decisions")
+	r, err := submitter.Submit(ctx, "", "", append(slices.Clone(opts), run.WithQueue("work"))...)
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if r.Status != run.StatusPendingApproval {
+		t.Fatalf("Submit() stored the run %s, want %s", r.Status, run.StatusPendingApproval)
+	}
+	if approve {
+		if _, err := submitter.Approve(ctx, r.ID, bndDecider()); err != nil {
+			t.Fatalf("Approve() error = %v", err)
+		}
+	} else {
+		saveEdited(t, store, r.ID, func(row *run.Run) { row.Status = run.StatusPending })
+	}
+	submitter.Close()
+	runner := &phaseRunner{}
+	executor := keyedAt(t, store, chain, runner, "work")
+	got := waitTerminal(t, store, r.ID)
+	executor.Close()
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	return attackOutcome{Error: got.Error, Ran: runner.plans + runner.applies}
+}
+
+// proposalFlipMove has a keyed control node store the apply a terraform plan that asked for
+// approval proposes, which is held, has the writer move its status to pending and nothing else,
+// and lets a keyed executor claim it. Every plan and apply of the proposal is counted.
+func proposalFlipMove(t *testing.T) attackOutcome {
+	t.Helper()
+	ctx := context.Background()
+	store, chain := run.NewMemStore(), audit.NewMemStore()
+	plan := &run.Run{ID: run.NewID(), Status: run.StatusSucceeded, CreatedAt: time.Now(),
+		Tool: run.ToolTerraform, Command: "infra/prod", Queue: "work", DryRun: true,
+		ApprovalRequested: true}
+	proposal, _, err := ProposeApplyFor(ctx, store, nil, plan, 0, true, "sealed-plan-file",
+		bndKey(t))
+	if err != nil {
+		t.Fatalf("ProposeApplyFor() error = %v", err)
+	}
+	if proposal.Status != run.StatusPendingApproval || proposal.SpecSeal == "" {
+		t.Fatalf("ProposeApplyFor() stored the apply %s with seal %q, want it held and sealed",
+			proposal.Status, proposal.SpecSeal)
+	}
+	saveEdited(t, store, proposal.ID, func(row *run.Run) { row.Status = run.StatusPending })
+	runner := &phaseRunner{}
+	executor := keyedAt(t, store, chain, runner, "work")
+	got := waitTerminal(t, store, proposal.ID)
 	executor.Close()
 	runner.mu.Lock()
 	defer runner.mu.Unlock()
@@ -166,6 +230,22 @@ func parkedMove(t *testing.T, timeout int, edit func(t *testing.T, store run.Sto
 		Ran: runner.count(rewritten) + runner.count("notify") + runner.count("build") - 1}
 }
 
+// deciderMove approves a held run on a keyed dispatcher, has a writer apply edit to its DECISION
+// entry as every read by id sees it, and lets a keyed executor claim the run. It returns how the run
+// ended and how often it executed.
+func deciderMove(t *testing.T, edit func(e *audit.Entry)) attackOutcome {
+	t.Helper()
+	h := newBndHeld(t)
+	h.chain.set(func(e *audit.Entry) *audit.Entry {
+		if e.ID == h.run.DecisionID {
+			edit(e)
+		}
+		return e
+	}, 0)
+	got := h.execute(t)
+	return attackOutcome{Error: got.Error, Ran: h.runner.count("deploy")}
+}
+
 // saveEdited reads id, applies edit, and saves it back, the whole-row write a writer makes.
 func saveEdited(t *testing.T, store run.Store, id string, edit func(r *run.Run)) {
 	t.Helper()
@@ -185,8 +265,18 @@ func approveStep(d *Dispatcher, node *run.Run) error {
 	return err
 }
 
-// sweepSteps runs the approval timeout sweep once.
-func sweepSteps(d *Dispatcher, _ *run.Run) error {
+// sweepSteps runs the approval timeout sweep once, after the coordinator that parked node's
+// workflow has let it go. A sweep that finds the workflow still coordinated leaves it to the next
+// pass, and production sweeps on every janitor pass while this sweeps once.
+func sweepSteps(d *Dispatcher, node *run.Run) error {
+	deadline := time.Now().Add(waitBudget)
+	for d.coordinating(*node.ParentID) {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("workflow %s was still coordinated after %s, so the sweep never ran",
+				*node.ParentID, waitBudget)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
 	d.sweepApprovalSteps()
 	return nil
 }
@@ -207,6 +297,9 @@ func TestADatabaseWriterIsRefusedByAKeyedDispatcher(t *testing.T) {
 		Move func(t *testing.T) attackOutcome
 		// WantError is what the refusal must say.
 		WantError string
+		// WantErrorOr is a second refusal the row accepts in place of WantError, when the order
+		// of two writes decides which check refuses first.
+		WantErrorOr string
 	}{{ // Test 0: The approved spec digest stamped on an apply that asked for approval.
 		Name: "spec digest stamped",
 		Move: func(t *testing.T) attackOutcome {
@@ -329,7 +422,9 @@ func TestADatabaseWriterIsRefusedByAKeyedDispatcher(t *testing.T) {
 			step := waitTerminal(t, rows, stepID)
 			return attackOutcome{Error: step.Error, Ran: got.Ran}
 		},
-		WantError: "it derives from is not on the chain",
+		// The first is refused before the walk writes the RELEASE entry for index 2, the second after.
+		WantError:   "it derives from is not on the chain",
+		WantErrorOr: "it, its workflow, or the entries that released it changed after it was built",
 	}, { // Test 9: A shard added to an approved split.
 		Name: "shard added",
 		Move: func(t *testing.T) attackOutcome {
@@ -398,6 +493,52 @@ func TestADatabaseWriterIsRefusedByAKeyedDispatcher(t *testing.T) {
 			return attackOutcome{Error: got.Error, Ran: runner.count("deploy")}
 		},
 		WantError: "changed after it was submitted",
+	}, { // Test 13: The approver rewritten on the chain. The executor reads the DECISION entry by
+		// id and checks no link, so a re-link changes nothing it sees: the name it reads is the
+		// writer's, and only the seal over the entry's actor stands between the two.
+		Name: "approver rewritten on the chain",
+		Move: func(t *testing.T) attackOutcome {
+			return deciderMove(t, func(e *audit.Entry) { e.Actor = "mallory" })
+		},
+		WantError: "its decision changed after it was approved",
+	}, { // Test 14: The approver's kind rewritten on the chain, the name left alone, so only the
+		// seal over the entry's actor type stands between the approval and the writer's edit.
+		Name: "approver type rewritten on the chain",
+		Move: func(t *testing.T) attackOutcome {
+			return deciderMove(t, func(e *audit.Entry) { e.ActorType = "human" })
+		},
+		WantError: "its decision changed after it was approved",
+	}, { // Test 15: A run held for approval moved to pending with nothing decided.
+		Name: "held run flipped to pending",
+		Move: func(t *testing.T) attackOutcome {
+			return heldFlipMove(t, false, run.WithTool(run.ToolBash), run.WithCommand("deploy"),
+				run.WithRequireApproval(true))
+		},
+		WantError: "changed after it was submitted",
+	}, { // Test 16: An agent's terraform apply, held before it plans, moved to pending.
+		Name: "held plan-first request flipped to pending",
+		Move: func(t *testing.T) attackOutcome {
+			return heldFlipMove(t, false, run.WithTool(run.ToolTerraform),
+				run.WithCommand("infra/prod"), run.WithActor("agent-1"), run.WithActorType("agent"))
+		},
+		WantError: "changed after it was submitted",
+	}, { // Test 17: The held apply a plan proposed moved to pending with nothing decided.
+		Name: "held plan proposal flipped to pending",
+		Move: func(t *testing.T) attackOutcome {
+			return proposalFlipMove(t)
+		},
+		WantError: "changed after it was submitted",
+	}, { // Test 18: A workflow parked at its approval step turned into a queued plain run.
+		Name: "parked workflow flipped to a queued run",
+		Move: func(t *testing.T) attackOutcome {
+			return parkedMove(t, 0, func(t *testing.T, store run.Store, parent, _ *run.Run) {
+				saveEdited(t, store, parent.ID, func(r *run.Run) {
+					r.Status, r.Kind, r.Tool, r.Command = run.StatusPending, "", run.ToolBash,
+						rewritten
+				})
+			}, func(*Dispatcher, *run.Run) error { return nil })
+		},
+		WantError: "changed after it was submitted",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -406,8 +547,44 @@ func TestADatabaseWriterIsRefusedByAKeyedDispatcher(t *testing.T) {
 			if got.Ran != 0 {
 				t.Errorf("the move bought %d executions, want 0", got.Ran)
 			}
-			if !strings.Contains(got.Error, "refused") || !strings.Contains(got.Error, test.WantError) {
+			said := strings.Contains(got.Error, test.WantError) ||
+				test.WantErrorOr != "" && strings.Contains(got.Error, test.WantErrorOr)
+			if !strings.Contains(got.Error, "refused") || !said {
 				t.Errorf("the move ended with %q, want a refusal saying %q", got.Error, test.WantError)
+			}
+		})
+	}
+}
+
+// TestAHeldRunRunsOnceItIsApproved is the honest twin of the flip rows above: a run held for
+// approval that an approver releases is claimed and executes, and an agent's terraform apply
+// released to plan plans first, so the refusal is the flip and not the hold.
+func TestAHeldRunRunsOnceItIsApproved(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// Name labels the row.
+		Name string
+		// Opts are the run's submit options.
+		Opts []run.SubmitOption
+		// WantRan counts the plans and applies the approved run makes.
+		WantRan int
+	}{{ // Test 0: An approved run executes once.
+		Name: "approved run",
+		Opts: []run.SubmitOption{run.WithTool(run.ToolBash), run.WithCommand("deploy"),
+			run.WithRequireApproval(true)},
+		WantRan: 1,
+	}, { // Test 1: An agent's approved terraform apply plans first.
+		Name: "approved plan-first request",
+		Opts: []run.SubmitOption{run.WithTool(run.ToolTerraform), run.WithCommand("infra/prod"),
+			run.WithActor("agent-1"), run.WithActorType("agent")},
+		WantRan: 1,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			got := heldFlipMove(t, true, test.Opts...)
+			if diff := cmp.Diff(attackOutcome{Ran: test.WantRan}, got); diff != "" {
+				t.Errorf("approved run mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}

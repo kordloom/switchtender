@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/dossier"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -70,6 +71,14 @@ func runAuditRunDossier(cmd *cobra.Command, args []string) error {
 		store.Runs()); err != nil {
 		return fmt.Errorf("collect evidence: %w", err)
 	}
+	// The key the install seals rows under derives from the identity that signs, so the names on
+	// the run's decisions are held to the seals the serving process made.
+	key, err := bindingKeyOf(&id)
+	if err != nil {
+		return err
+	}
+	dossier.AttachSeals(cmd.Context(), in,
+		dispatch.NewBindingVerifier(store.Runs(), store.Audits(), key), store.Runs())
 	doc, err := dossier.Render(in)
 	if err != nil {
 		return fmt.Errorf("render dossier: %w", err)

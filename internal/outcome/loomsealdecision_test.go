@@ -53,7 +53,8 @@ func buildReasonedReceipt(t *testing.T, reason string) *reasonedReceipt {
 		},
 	)
 	rr.d = dispatch.New(rr.runs, runner, nil, dispatch.WithAudits(rr.audits),
-		dispatch.WithDecisions(rr.decisions), dispatch.WithNoJanitor())
+		dispatch.WithDecisions(rr.decisions), dispatch.WithNoJanitor(),
+		dispatch.WithBindingKey(receiptKey(t, id)))
 	t.Cleanup(rr.d.Close)
 	creation := &audit.Entry{ID: audit.NewID(), At: time.Now(), Actor: "deploy-bot",
 		ActorType: "agent", OnBehalfOf: "dev-lead", Method: "POST", Path: "/v1/runs"}
@@ -84,7 +85,7 @@ func buildReasonedReceipt(t *testing.T, reason string) *reasonedReceipt {
 func (rr *reasonedReceipt) rebuild(t *testing.T) {
 	t.Helper()
 	res, err := receipt.Build(context.Background(), rr.runs, rr.audits, rr.id, "v-test", rr.runID,
-		receipt.Options{Decisions: rr.decisions})
+		keyedReceipt(t, rr.runs, rr.audits, rr.id, receipt.Options{Decisions: rr.decisions}))
 	if err != nil {
 		t.Fatalf("receipt.Build() error = %v", err)
 	}

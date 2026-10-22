@@ -766,10 +766,6 @@ func (s *Service) statementHandler(w http.ResponseWriter, r *http.Request) {
 		s.refuseRequest(w, err, 0)
 		return
 	}
-	if st == nil {
-		s.fail(w, http.StatusNotFound, "nothing witnessed yet")
-		return
-	}
 	w.Header().Set("Cache-Control", "public, max-age=60")
 	s.respond(w, st)
 }

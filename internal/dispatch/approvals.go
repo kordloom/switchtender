@@ -132,7 +132,7 @@ func (d *Dispatcher) approveRun(ctx context.Context, id string, dec RunDecision)
 			// The row is sealed as it reads once the claim stamps what was decided on, so a
 			// row a writer marks approved without a decision does not carry it.
 			sealed, err := binding.RunRecord(binding.AsStamped(r, specDigest, specBinding),
-				binding.RootOf(entry))
+				binding.PreparedRootOf(entry))
 			if err != nil {
 				return nil, fmt.Errorf("seal the approved run: %w", err)
 			}

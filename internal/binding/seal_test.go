@@ -31,8 +31,12 @@ func testFullRecord() Record {
 		HeldByPolicy: "prod changes", RequireDistinctApprover: true,
 		PolicySet: &PolicySet{Digest: "pd", Count: 2, Rules: []string{"a", "b"}},
 		Roots: []Root{
-			{EntryID: "aud_1", ContentDigest: "cd1", Path: "/runs/run_p/decision/approved"},
-			{EntryID: "aud_2", ContentDigest: "cd2", Path: "/runs/run_p/steps/run_c/release"},
+			{EntryID: "aud_1", ContentDigest: "cd1", Path: "/runs/run_p/decision/approved",
+				Method: audit.MethodDecision, Actor: "approver", ActorType: "session",
+				OnBehalfOf: "approver"},
+			{EntryID: "aud_2", ContentDigest: "cd2", Path: "/runs/run_p/steps/run_c/release",
+				Method: audit.MethodRelease, Actor: "system:request", ActorType: "system",
+				OnBehalfOf: "dev"},
 		},
 		Status: string(run.StatusSucceeded), OutputsDigest: "sha256:cc",
 		Facts: testFullFacts(), ApprovedSpecDigest: "sha256:dd", ApprovedSpecBinding: "sha256:ee",
@@ -186,6 +190,16 @@ func TestVerifyRefusesEveryChangedField(t *testing.T) {
 		Field: "Facts.OrgID", Mutate: func(r *Record) { r.Facts.OrgID = "org_2" },
 	}, { // Test 54: GitRef.
 		Field: "Facts.GitRef", Mutate: func(r *Record) { r.Facts.GitRef = "refs/heads/main" },
+	}, { // Test 55: A root's method.
+		Field: "Roots.Method", Mutate: func(r *Record) { r.Roots[1].Method = audit.MethodDecision },
+	}, { // Test 56: A root's actor, the decider rewritten.
+		Field: "Roots.Actor", Mutate: func(r *Record) { r.Roots[0].Actor = "mallory" },
+	}, { // Test 57: A root's actor type.
+		Field: "Roots.ActorType", Mutate: func(r *Record) { r.Roots[0].ActorType = "human" },
+	}, { // Test 58: A root's delegated account.
+		Field: "Roots.OnBehalfOf", Mutate: func(r *Record) { r.Roots[1].OnBehalfOf = "mallory" },
+	}, { // Test 59: Held.
+		Field: "Held", Mutate: func(r *Record) { r.Held = !r.Held },
 	}}
 	covered := map[string]bool{}
 	for _, test := range tests {
@@ -630,13 +644,62 @@ func TestOutputsDigest(t *testing.T) {
 	}
 }
 
-// TestRootOf pins that a root names an entry by its id, content digest, and path.
+// TestRootOf pins that a root names an entry by its id, content digest, path, method, and who the
+// entry says acted, so a rewritten decider moves every seal naming the entry.
 func TestRootOf(t *testing.T) {
 	t.Parallel()
 	e := &audit.Entry{ID: "aud_1", ContentDigest: "cd", Path: "/p", Method: audit.MethodDecision,
-		Actor: "approver"}
-	want := Root{EntryID: "aud_1", ContentDigest: "cd", Path: "/p"}
+		Actor: "approver", ActorType: "session", OnBehalfOf: "ops-bot", Seq: 4, Hash: "h"}
+	want := Root{EntryID: "aud_1", ContentDigest: "cd", Path: "/p", Method: audit.MethodDecision,
+		Actor: "approver", ActorType: "session", OnBehalfOf: "ops-bot"}
 	if diff := cmp.Diff(want, RootOf(e)); diff != "" {
 		t.Errorf("root mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// TestPreparedRootOfMatchesTheStoredEntry seals a root over an entry before it is appended, the way
+// every sealer that seals first does, and requires the seal to verify against the root of the same
+// entry read back from the chain. The append escapes an invalid byte and a percent sign, and does
+// so again on every pass, so a seal over the entry as prepared would refuse the honest row.
+func TestPreparedRootOfMatchesTheStoredEntry(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	k := testKey(t, 1)
+	tests := []struct {
+		Entry *audit.Entry
+	}{{ // Test 0: An actor with a percent sign and an invalid byte, an account holding %25.
+		Entry: &audit.Entry{ID: "aud_pct", Actor: "a%b\xff", ActorType: "session",
+			OnBehalfOf: "ops%25bot", Method: audit.MethodDecision,
+			Path: "/runs/run_1/decision/approved", ContentDigest: "cd"},
+	}, { // Test 1: Plain text, which the append leaves as it is.
+		Entry: &audit.Entry{ID: "aud_plain", Actor: "approver", ActorType: "session",
+			Method: audit.MethodDecision, Path: "/runs/run_2/decision/approved",
+			ContentDigest: "cd"},
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			prepared := *test.Entry
+			rec := Record{Kind: KindRun, RunID: "run_x", Index: noIndex,
+				Roots: []Root{PreparedRootOf(&prepared)}}
+			stored := k.Seal(rec)
+			if diff := cmp.Diff(*test.Entry, prepared); diff != "" {
+				t.Fatalf("PreparedRootOf changed the entry it was given (-want +got):\n%s", diff)
+			}
+			chain := audit.NewMemStore()
+			appended := *test.Entry
+			if err := chain.Append(ctx, &appended); err != nil {
+				t.Fatalf("Append() error = %v", err)
+			}
+			held, err := chain.Entry(ctx, test.Entry.ID)
+			if err != nil {
+				t.Fatalf("Entry() error = %v", err)
+			}
+			rec.Roots = []Root{RootOf(held)}
+			if !k.Verify(rec, stored) {
+				t.Errorf("the seal over the prepared entry does not verify against the stored "+
+					"entry: prepared %+v, stored %+v", PreparedRootOf(test.Entry), RootOf(held))
+			}
+		})
 	}
 }

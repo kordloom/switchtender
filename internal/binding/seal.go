@@ -51,11 +51,27 @@ type Root struct {
 	ContentDigest string `json:"content_digest"`
 	// Path is the entry's path, which names the run or step it is about and the verdict.
 	Path string `json:"path"`
+	// Method is the entry's method, which says whether it records a decision or a release.
+	Method string `json:"method"`
+	// Actor is who the entry says decided or released, so a rewritten decider moves the seal.
+	Actor string `json:"actor"`
+	// ActorType is how that actor authenticated.
+	ActorType string `json:"actor_type"`
+	// OnBehalfOf is the account whose authority the actor used.
+	OnBehalfOf string `json:"on_behalf_of"`
 }
 
-// RootOf returns the root naming e.
+// RootOf returns the root naming e as the chain holds it. Use it for an entry read from the chain.
 func RootOf(e *audit.Entry) Root {
-	return Root{EntryID: e.ID, ContentDigest: e.ContentDigest, Path: e.Path}
+	return Root{EntryID: e.ID, ContentDigest: e.ContentDigest, Path: e.Path, Method: e.Method,
+		Actor: e.Actor, ActorType: e.ActorType, OnBehalfOf: e.OnBehalfOf}
+}
+
+// PreparedRootOf returns the root naming e as the chain will hold it once appended. A sealer that
+// seals before the append uses it, since the append escapes the entry's text and a seal over the
+// unescaped form would refuse the honest row read back.
+func PreparedRootOf(e *audit.Entry) Root {
+	return RootOf(audit.AsStored(e))
 }
 
 // PolicySet is the part of a run's recorded rule set a record covers: the digest, the count, and
@@ -94,6 +110,9 @@ type Record struct {
 	ParentBinding string `json:"parent_binding"`
 	// ApprovalRequested is the row's ApprovalRequested flag.
 	ApprovalRequested bool `json:"approval_requested"`
+	// Held reports that a submitted row was waiting for a decision when it was sealed, so a row
+	// whose status a writer moved to pending does not carry its seal at execution.
+	Held bool `json:"held"`
 	// HeldByPolicy is the rule the row records as having held it.
 	HeldByPolicy string `json:"held_by_policy"`
 	// RequireDistinctApprover is the row's separation-of-duties flag.
@@ -273,12 +292,14 @@ func (k *Key) sum(raw []byte) string {
 	return SealPrefix + hex.EncodeToString(m.Sum(nil))
 }
 
-// SubmitRecord returns the record a top-level run is sealed with when it is created.
+// SubmitRecord returns the record a top-level run is sealed with when it is created, marked held
+// when the run waits for a decision.
 func SubmitRecord(r *run.Run) (Record, error) {
 	rec, err := rowRecord(KindSubmit, r)
 	if err != nil {
 		return Record{}, err
 	}
+	rec.Held = r.Status == run.StatusPendingApproval
 	return withSpec(rec, r)
 }
 

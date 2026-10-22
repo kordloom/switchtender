@@ -21,6 +21,8 @@ import (
 
 	"github.com/kordloom/switchtender/identity"
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/binding"
+	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/witnessclient"
 	"github.com/kordloom/switchtender/spanbeat"
 	"github.com/kordloom/switchtender/witness"
@@ -521,6 +523,148 @@ func TestChainAnchorFuncsRunsEveryHook(t *testing.T) {
 			}
 			if len(test.WantErrs) == 0 && err != nil {
 				t.Errorf("hook() error = %v, want nil", err)
+			}
+		})
+	}
+}
+
+// TestServeRefusesAChainBehindTheWitnessHead pins the serve start gate on an enrolled install: the
+// chain is held to the head the witness countersigned with the two checks adopt makes, so a chain
+// re-linked without its adoption record after the witness saw it, or cut back under the witness's
+// tree, refuses the start naming the witness, the seq, and the root, with the restore remedy, and a
+// statement the enrollment does not accept refuses it too. A witness that does not answer with a
+// statement warns and the start goes on, as pushes queue and the witness judges them when it
+// answers. A witness that holds nothing yet, and an install that is not enrolled, start.
+//
+//nolint:funlen // Test function.
+func TestServeRefusesAChainBehindTheWitnessHead(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tests := []struct {
+		// Name labels the install's state.
+		Name string
+		// Arrange leaves the install in that state.
+		Arrange func(t *testing.T, s *adoptWitnessSetup)
+		// Want is the error the gate must return, nil for a start.
+		Want error
+		// WantText is what the refusal must say, with {url}, {seq}, and {root} the witness's.
+		WantText []string
+		// WantLog is a fragment a log line must carry.
+		WantLog string
+	}{{ // Test 0: An honest chain reaches the witness's head.
+		Name: "honest",
+		Arrange: func(t *testing.T, s *adoptWitnessSetup) {
+			s.enroll(t)
+			s.push(t)
+			s.entries(t, 2)
+		},
+		WantLog: "reaches the head the witness countersigned",
+	}, { // Test 1: Adopt pushed the record, then the writer removed it and re-linked the chain.
+		Name: "re-linked after adoption",
+		Arrange: func(t *testing.T, s *adoptWitnessSetup) {
+			s.enroll(t)
+			s.adoptOnce(t)
+			s.entries(t, 2)
+			s.relink(t)
+		},
+		Want: binding.ErrDrift,
+		WantText: []string{"does not reach the head the witness at {url} countersigned",
+			"entry {seq} with link", "with root {root}", "the start is refused", restoreAdvice,
+			"Nothing was changed"},
+	}, { // Test 2: A chain cut back under the witness's tree.
+		Name: "cut back",
+		Arrange: func(t *testing.T, s *adoptWitnessSetup) {
+			s.enroll(t)
+			s.push(t)
+			editChain(t, s.fx.DB, "DELETE FROM audit_entries WHERE seq > "+
+				"(SELECT MAX(seq) - 2 FROM audit_entries)")
+		},
+		Want:     binding.ErrDrift,
+		WantText: []string{"{url}", "{root}", "are missing"},
+	}, { // Test 3: A replayed statement with its signature altered refuses the start.
+		Name: "bad signature",
+		Arrange: func(t *testing.T, s *adoptWitnessSetup) {
+			s.enroll(t)
+			s.push(t)
+			s.replay(t, func(_ *testing.T, st *witness.Statement) {
+				st.Sig = "A" + st.Sig[1:]
+				if st.Sig == s.head.Sig {
+					st.Sig = "B" + st.Sig[1:]
+				}
+			})
+		},
+		Want:     witnessclient.ErrWitnessKey,
+		WantText: []string{"the witness at {url} answered with a statement", "--refresh-keys"},
+	}, { // Test 4: A witness that does not answer warns, and the start goes on.
+		Name: "unreachable",
+		Arrange: func(t *testing.T, s *adoptWitnessSetup) {
+			s.enroll(t)
+			s.push(t)
+			s.stub(t, http.StatusBadGateway, []byte(`{"error":"bad gateway"}`))
+		},
+		WantLog: "did not answer with its signed statement",
+	}, { // Test 5: An unsigned answer is no statement, so it is an outage at start.
+		Name: "unsigned nothing witnessed",
+		Arrange: func(t *testing.T, s *adoptWitnessSetup) {
+			s.enroll(t)
+			s.push(t)
+			s.stub(t, http.StatusNotFound, []byte(`{"error":"nothing witnessed yet"}`))
+		},
+		WantLog: "did not answer with its signed statement",
+	}, { // Test 6: A witness that holds nothing yet bounds nothing.
+		Name:    "nothing witnessed",
+		Arrange: func(t *testing.T, s *adoptWitnessSetup) { s.enroll(t) },
+		WantLog: "has witnessed nothing for this install yet",
+	}, { // Test 7: An install that is not enrolled is not held to a witness.
+		Name: "not enrolled",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			s := newAdoptWitnessSetup(t)
+			if test.Arrange != nil {
+				test.Arrange(t, s)
+			}
+			fill := strings.NewReplacer("{url}", s.url)
+			var st *witness.Statement
+			if s.url != "" {
+				st = s.witnessed(t)
+			}
+			if st != nil {
+				fill = strings.NewReplacer("{url}", s.url, "{seq}", fmt.Sprint(st.LastSeq),
+					"{root}", st.Root)
+			}
+			bundle, err := openBundle(s.fx.DB)
+			if err != nil {
+				t.Fatalf("openBundle() error = %v", err)
+			}
+			defer func() { _ = bundle.Close() }()
+			if binder, ok := bundle.Audits().(audit.InstallBinder); ok {
+				binder.BindInstall(s.id.InstallID)
+			}
+			before := s.fx.state(t)
+			core, logs := observer.New(zap.InfoLevel)
+			err = witnessHeadGate(ctx, "", license.PathFor(s.fx.DB), &s.id, bundle.Audits(),
+				zap.New(core))
+			if diff := cmp.Diff(before, s.fx.state(t)); diff != "" {
+				t.Errorf("the gate changed the chain (-before +after):\n%s", diff)
+			}
+			if test.Want == nil {
+				if err != nil {
+					t.Fatalf("witnessHeadGate() = %v, want the start to go on", err)
+				}
+			} else {
+				if !errors.Is(err, test.Want) {
+					t.Fatalf("witnessHeadGate() = %v, want %v", err, test.Want)
+				}
+				for _, want := range test.WantText {
+					if want = fill.Replace(want); !strings.Contains(err.Error(), want) {
+						t.Errorf("refusal does not say %q:\n%v", want, err)
+					}
+				}
+			}
+			if test.WantLog != "" && logs.FilterMessageSnippet(test.WantLog).Len() == 0 {
+				t.Errorf("no log line says %q: %v", test.WantLog, logs.All())
 			}
 		})
 	}

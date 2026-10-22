@@ -148,9 +148,6 @@ var ErrQueueUnlicensed = errors.New("named queues need a license this install do
 // would be recorded as an environment the run never entered.
 var ErrToolImage = errors.New("this tool cannot execute in an image")
 
-// errDecisionFound stops the audit chain scan once the approval decision has been read.
-var errDecisionFound = errors.New("decision found")
-
 // errFederatedCredential is openCredential's refusal of a federated credential, which has no stored
 // value to open. Run materialization recognizes it and mints the run's token instead.
 var errFederatedCredential = fmt.Errorf("%w: a federated credential has no stored secret",

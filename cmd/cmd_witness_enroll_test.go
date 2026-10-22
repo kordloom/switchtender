@@ -382,3 +382,50 @@ func TestWitnessEnrollRefusesARotatedIdentity(t *testing.T) {
 		t.Errorf("a refused enrollment left a file behind: %v", err)
 	}
 }
+
+// TestWitnessEnrollRefusesPlainHTTPOffLoopback pins the transport rule on the command: a witness
+// URL that is plain http to a host off the loopback is refused before any request, so the license
+// file never crosses the network in the clear, and the install directory is left as it was. A held
+// enrollment naming such a URL is refused by --refresh-keys the same way. Plain http to a loopback
+// address, as every test witness here is, enrolls.
+func TestWitnessEnrollRefusesPlainHTTPOffLoopback(t *testing.T) {
+	enrollTestEnv(t)
+	w := newEnrollWitness(t)
+	kid, priv := policyLicenseKey(t)
+	lic := signedLicense(t, kid, priv, "lic_enroll_http", license.TierEnterprise, nil,
+		time.Now().Add(365*24*time.Hour))
+	db := enrollInstall(t, lic)
+	dir := filepath.Dir(db)
+	before := dirDigest(t, dir)
+	for _, raw := range []string{"http://10.0.0.5:9440", "http://witness.example.com"} {
+		_, _, err := runEnroll(t, db, raw, "", false)
+		if !errors.Is(err, witnessclient.ErrEnrollment) || !strings.Contains(err.Error(),
+			"plain http") {
+			t.Errorf("runWitnessEnroll(%s) = %v, want the transport refusal", raw, err)
+		}
+	}
+	if diff := cmp.Diff(before, dirDigest(t, dir)); diff != "" {
+		t.Errorf("a refused enrollment changed the install directory (-before +after):\n%s", diff)
+	}
+	if _, _, err := runEnroll(t, db, w.url, "", false); err != nil {
+		t.Fatalf("runWitnessEnroll() over loopback http = %v, want an enrollment", err)
+	}
+	path := filepath.Join(dir, witnessclient.EnrollmentFile)
+	enr, err := witnessclient.Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	enr.Witness = "http://10.0.0.5:9440"
+	if err := enr.Save(path); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	sent := w.requests.Load()
+	if _, _, err := runEnroll(t, db, "", "", true); !errors.Is(err,
+		witnessclient.ErrEnrollment) || !strings.Contains(err.Error(), "plain http") {
+		t.Errorf("runWitnessEnroll(--refresh-keys) over plain http = %v, want the transport "+
+			"refusal", err)
+	}
+	if got := w.requests.Load(); got != sent {
+		t.Errorf("the refused refresh sent %d requests, want none", got-sent)
+	}
+}

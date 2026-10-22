@@ -145,7 +145,7 @@ func TestEveryBundleShapeAgreesWithTheReferenceVerifier(t *testing.T) {
 			// covers on both sides.
 			attested := shape.WantAttestors+shape.WantHeadAttestors > 0
 			named := err != nil && strings.Contains(err.Error(), "this product does not verify")
-			if err != nil && !(attested && named) {
+			if err != nil && (!attested || !named) {
 				t.Fatalf("our verifier refused a bundle the reference verifier accepts: %v", err)
 			}
 			if ours == nil || !ours.SignatureOK {

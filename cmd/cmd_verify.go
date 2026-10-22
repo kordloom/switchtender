@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -235,12 +236,15 @@ func printUnchecked(out io.Writer, rep *audit.BundleReport) {
 
 // printable returns s as it can be written to a terminal: unchanged when every character prints,
 // and quoted otherwise. A member name or a claim type is written by whoever produced the document,
-// and one carrying control characters must not act on the terminal reading it.
+// and one carrying control characters must not act on the terminal reading it. Escape, carriage
+// return, the C1 range, and bytes that are not UTF-8 are all quoted.
 func printable(s string) string {
-	for _, c := range s {
-		if !unicode.IsPrint(c) {
+	for rest := s; rest != ""; {
+		c, size := utf8.DecodeRuneInString(rest)
+		if !unicode.IsPrint(c) || (c == utf8.RuneError && size == 1) {
 			return strconv.Quote(s)
 		}
+		rest = rest[size:]
 	}
 	return s
 }

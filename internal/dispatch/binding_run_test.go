@@ -325,6 +325,18 @@ func TestExecutorRefusesARewrittenApprovedRow(t *testing.T) {
 		},
 		WantResult: bndResult{Status: run.StatusFailed, Refused: true},
 		WantText:   "it carries no seal",
+	}, { // Test 9: The DECISION entry's decider is rewritten, its digest left alone.
+		Name: "decider rewritten",
+		Rewrite: func(_ *testing.T, h *bndHeld) {
+			h.chain.set(func(e *audit.Entry) *audit.Entry {
+				if e.ID == h.run.DecisionID {
+					e.Actor, e.ActorType, e.OnBehalfOf = "mallory", "human", "mallory"
+				}
+				return e
+			}, 0)
+		},
+		WantResult: bndResult{Status: run.StatusFailed, Refused: true},
+		WantText:   "its decision changed after it was approved",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {

@@ -256,7 +256,7 @@ func (d *Dispatcher) DecideStep(ctx context.Context, id string, dec StepDecision
 		// held to the verdict the chain records instead.
 		if d.binder != nil && dec.Approve {
 			gate, err := binding.GateRecord(parent, binding.AsStamped(node, digest, stateBinding),
-				stateBinding, binding.RootOf(entry))
+				stateBinding, binding.PreparedRootOf(entry))
 			if err != nil {
 				return nil, fmt.Errorf("seal the approval step decision: %w", err)
 			}

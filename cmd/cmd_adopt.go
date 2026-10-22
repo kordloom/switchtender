@@ -25,6 +25,7 @@ import (
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/witnessclient"
+	"github.com/kordloom/switchtender/spanbeat"
 	"github.com/kordloom/switchtender/witness"
 )
 
@@ -89,6 +90,11 @@ var adoptCmd = &cobra.Command{
 		"trusting none of them. A run that carries a seal is left for the server to check when it " +
 		"reaches it. It still refuses a chain that does not verify and an install already " +
 		"adopted.\n\n" +
+		"On an install enrolled with a witness, it holds the chain to the head the witness " +
+		"countersigned before it trusts anything, and after it writes it appends a span beat and " +
+		"pushes it, so the witness's head covers the adoption record before it returns. When that " +
+		"push fails the adoption stands, and adopt says the record is not yet witnessed and exits " +
+		"non-zero.\n\n" +
 		"Before it asks, it prints the chain's entry count, its newest anchor, and the install it is " +
 		"bound to. Adoption runs once per install, so being asked to run it on an install already " +
 		"adopted or served by this release is itself evidence that the chain was rewritten.\n\n" +
@@ -199,7 +205,7 @@ func adopt(ctx context.Context, req adoptRequest) error {
 		return err
 	}
 	if req.FailUnsealed {
-		return failUnsealed(ctx, req, bundle.Runs(), audits, key, chain, id.InstallID)
+		return failUnsealed(ctx, req, bundle.Runs(), audits, key, chain, id)
 	}
 	if err := refuseKeyedEntries(chain, key); err != nil {
 		return err
@@ -212,7 +218,7 @@ func adopt(ctx context.Context, req adoptRequest) error {
 		Actor: outcome.Decider{Name: cliActor(), Type: actorTypeCLI}}
 	work, err := dispatch.AdoptionPlan(ctx, deps)
 	if err != nil {
-		return err
+		return escapeError(err)
 	}
 	if len(work.Sealed) > 0 {
 		return sealedRowsRefusal(work.Sealed)
@@ -231,10 +237,12 @@ func adopt(ctx context.Context, req adoptRequest) error {
 	if res != nil && res.Earlier {
 		return earlierAdoptionRefusal(res.Record)
 	}
-	if res != nil {
-		showAdopted(req.Out, res)
+	if res == nil {
+		return escapeError(err)
 	}
-	return err
+	showAdopted(req.Out, res)
+	return errors.Join(escapeError(err), pushAdoption(ctx, req.Out, audits, id, chain.Witness,
+		res.Record))
 }
 
 // failUnsealed records the adoption of an install trusting no row and fails every unfinished run
@@ -244,7 +252,7 @@ func adopt(ctx context.Context, req adoptRequest) error {
 // adoption is refused, as adopt refuses it. What it shows and what it fails are one read of the
 // install, as for adopt.
 func failUnsealed(ctx context.Context, req adoptRequest, runs run.Store, audits audit.Store,
-	key *binding.Key, chain *adoptChain, installID string) error {
+	key *binding.Key, chain *adoptChain, id audit.Identity) error {
 	if i := slices.IndexFunc(chain.Keyed, func(e *audit.Entry) bool {
 		return e.ID == key.AdoptionID()
 	}); i >= 0 {
@@ -255,9 +263,9 @@ func failUnsealed(ctx context.Context, req adoptRequest, runs run.Store, audits 
 		Actor: outcome.Decider{Name: cliActor(), Type: actorTypeCLI}}
 	work, err := dispatch.UnsealedPlan(ctx, deps)
 	if err != nil {
-		return err
+		return escapeError(err)
 	}
-	showChain(req.Out, chain, installID, adoptKeySource(req.DB))
+	showChain(req.Out, chain, id.InstallID, adoptKeySource(req.DB))
 	showUnsealed(req.Out, work)
 	if req.DryRun {
 		_, _ = fmt.Fprintln(req.Out, "Dry run: nothing was written.")
@@ -271,10 +279,12 @@ func failUnsealed(ctx context.Context, req adoptRequest, runs run.Store, audits 
 	if res != nil && res.Earlier {
 		return earlierAdoptionRefusal(res.Record)
 	}
-	if res != nil {
-		showUnadopted(req.Out, res)
+	if res == nil {
+		return escapeError(err)
 	}
-	return err
+	showUnadopted(req.Out, res)
+	return errors.Join(escapeError(err), pushAdoption(ctx, req.Out, audits, id, chain.Witness,
+		res.Record))
 }
 
 // adoptionKey loads the producer identity of the install db names and derives its binding key. An
@@ -355,6 +365,8 @@ type witnessHead struct {
 	// enrollment's install id and the link at Seq, for the chain walk to hold the chain to. They
 	// are never saved.
 	anchors []*audit.Anchor
+	// enr is the enrollment adopt read, nil when the install is not enrolled.
+	enr *witnessclient.Enrollment
 }
 
 // adoptEnrollment loads the enrollment of the witness adopt holds the chain of db to, as serve
@@ -393,11 +405,14 @@ func adoptWitnessHead(ctx context.Context, req adoptRequest, audits audit.Store,
 	if err != nil {
 		return nil, err
 	}
-	w := &witnessHead{File: path}
+	w := &witnessHead{File: path, enr: enr}
 	if enr == nil {
 		return w, nil
 	}
 	w.URL = enr.Witness
+	if err := witnessclient.RequireSecureURL(enr.Witness); err != nil {
+		return nil, fmt.Errorf("%s: %w. Nothing was changed", path, err)
+	}
 	// The witness keeps its memory under the producer key, so only that key's chain can be held to it.
 	if err := enr.Bind(id); err != nil {
 		return nil, fmt.Errorf("%s: %w. Run adopt with the identity every server of this install "+
@@ -418,23 +433,32 @@ func adoptWitnessHead(ctx context.Context, req adoptRequest, audits audit.Store,
 			"enrollment does not accept: %w. If the witness rotated its key, run switchtender "+
 			"witness enroll --refresh-keys, then adopt again. Nothing was changed", w.URL, err)
 	case err != nil:
-		// Any answer but the statement or a 404 is an outage here, a refusal to answer included.
+		// Any answer but the signed statement or the not-enrolled 404 is an outage here, a refusal
+		// to answer and an unsigned answer included.
 		if !errors.Is(err, witnessclient.ErrUnreachable) {
 			err = fmt.Errorf("%w: %w", witnessclient.ErrUnreachable, err)
 		}
-		return nil, fmt.Errorf("the witness at %s did not answer: %w. This install is enrolled with "+
-			"it, and adopt holds the chain to the head it countersigned before it trusts anything. "+
-			"Run adopt again once the witness answers. Nothing was changed", w.URL, err)
+		return nil, fmt.Errorf("the witness at %s did not answer with its signed statement: %w. This "+
+			"install is enrolled with it, and adopt holds the chain to the head it countersigned "+
+			"before it trusts anything. Run adopt again once the witness answers. Nothing was changed",
+			w.URL, err)
 	}
 	w.KeyID, w.Seq, w.Head, w.Size, w.Root = st.WitnessKeyID, st.LastSeq, st.LastHead, st.Size, st.Root
 	w.CheckpointAt = st.CheckpointAt
-	w.anchors = []*audit.Anchor{
-		{ID: "witness_tree", Shape: audit.AnchorShapeTree, Seq: st.Size, Link: st.Root,
-			InstallID: enr.InstallID, Ref: w.URL},
-		{ID: "witness_link", Shape: audit.AnchorShapeLinear, Seq: st.LastSeq, Link: st.LastHead,
-			Ref: w.URL},
-	}
+	w.anchors = witnessAnchors(st, w.URL)
 	return w, nil
+}
+
+// witnessAnchors returns the two coordinates of the head st names as anchors for a chain walk: the
+// tree root at Size under the statement's install id, and the link at LastSeq. A chain reaches the
+// head when both hold. They are never saved.
+func witnessAnchors(st *witness.Statement, url string) []*audit.Anchor {
+	return []*audit.Anchor{
+		{ID: "witness_tree", Shape: audit.AnchorShapeTree, Seq: st.Size, Link: st.Root,
+			InstallID: st.InstallID, Ref: url},
+		{ID: "witness_link", Shape: audit.AnchorShapeLinear, Seq: st.LastSeq, Link: st.LastHead,
+			Ref: url},
+	}
 }
 
 // refuseLostWitnessMemory refuses a witness that says it has witnessed nothing for this install
@@ -463,6 +487,90 @@ func refuseLostWitnessMemory(ctx context.Context, audits audit.Store, url string
 		"Either the witness lost its memory or that answer is not the witness's. Ask the witness's "+
 		"operator, and run adopt again once it answers with its memory. Nothing was changed",
 		binding.ErrDrift, url, len(held), newest)
+}
+
+// adoptBeatCadence is the cadence, in seconds, the span beat adopt appends after its record names.
+// Adopt is not the emitter and does not know serve's --span-cadence, so it names the one the docs
+// give as the example. A verifier reports the gap to serve's first beat with its bounds whatever it
+// names.
+const adoptBeatCadence = 60
+
+// adoptBeatTries bounds how many times adopt reads the clock again for its beat when the chain's
+// newest entry is dated after it, as a beat may not be written behind it.
+const adoptBeatTries = 100
+
+// pushAdoption puts the adoption record under the witness's memory on an enrolled install: it
+// appends a span beat right after record and pushes it through the client serve pushes with, then
+// fetches the witness's statement again and prints the head that now covers the record. Until a
+// push after the record lands, the record is in the chain's unwitnessed tail, where a writer who
+// removes it and re-links the chain is not refused by the witness's head.
+//
+// The adoption is written either way. A push that fails, or a statement that does not cover the
+// record afterward, is returned as an error that says the record is not yet witnessed and that the
+// window stays open until serve's first beat lands, so the exit code is not zero and a script
+// notices. An install that is not enrolled, or a run that wrote no record, pushes nothing.
+func pushAdoption(ctx context.Context, out io.Writer, audits audit.Store, id audit.Identity,
+	w *witnessHead, record *audit.Entry) error {
+	if w == nil || w.enr == nil || record == nil {
+		return nil
+	}
+	covered, err := pushAdoptionBeat(ctx, audits, id, w)
+	if err != nil {
+		return escapeError(fmt.Errorf("the adoption is recorded, as audit entry %s at chain position %d, and "+
+			"the witness at %s has not countersigned it: %w. Until a beat after the record reaches "+
+			"the witness, the record is not witnessed, so a writer who removes it and re-links the "+
+			"chain is not refused by the witness's head. That window stays open until serve's first "+
+			"beat lands. Start serve, which pushes a beat as it starts, and check that its witness "+
+			"status shows the push countersigned. Do not run adopt again", printable(record.ID),
+			record.Seq, w.URL, err))
+	}
+	_, _ = fmt.Fprintf(out, "The witness at %s countersigned entry %d (link %s, tree of %d entries, "+
+		"root %s) at %s, which covers the adoption record at entry %d.\n", w.URL, covered.LastSeq,
+		covered.LastHead, covered.Size, covered.Root, covered.CheckpointAt, record.Seq)
+	return nil
+}
+
+// pushAdoptionBeat appends a span beat at the chain's own clock and pushes it to the witness w
+// names, then returns the witness's statement once it holds a tree that reaches the beat.
+func pushAdoptionBeat(ctx context.Context, audits audit.Store, id audit.Identity,
+	w *witnessHead) (*witness.Statement, error) {
+	atts, ok := audits.(audit.AttestationStore)
+	if !ok {
+		return nil, fmt.Errorf("%w: this install's store keeps no witness countersignatures",
+			witnessclient.ErrRejected)
+	}
+	client, err := witnessclient.New(w.File, id, audits, atts, adoptBeatCadence*time.Second, nil)
+	if err != nil {
+		return nil, err
+	}
+	beats := auditBeatStore{store: audits}
+	var b spanbeat.AppendedBeat
+	for try := 0; ; try++ {
+		b, err = beats.AppendSpanBeatNow(ctx, adoptBeatCadence)
+		if !errors.Is(err, audit.ErrClockBehind) || try+1 >= adoptBeatTries {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("append the span beat: %w", err)
+	}
+	if err := client.Beat(ctx, b); err != nil {
+		return nil, err
+	}
+	st, err := witnessclient.FetchStatement(ctx, nil, w.enr)
+	if err != nil {
+		return nil, fmt.Errorf("the push was sent, and reading the witness's statement back: %w", err)
+	}
+	if st.Size < b.Seq {
+		return nil, fmt.Errorf("%w: the push of beat %d at entry %d was sent, and the witness's "+
+			"statement holds a tree of %d entries", witnessclient.ErrRejected, b.Beat, b.Seq, st.Size)
+	}
+	return st, nil
 }
 
 // readAdoptChain walks the whole chain once, through the scanners the server's chain verification
@@ -553,7 +661,7 @@ func refuseBrokenChain(c *adoptChain) error {
 		return fmt.Errorf("%w: the audit chain no longer satisfies an anchor recorded over it, so "+
 			"entries that provably existed are gone and it cannot show that adoption never ran on "+
 			"this install: %s. %s, rather than adopt over it. Nothing was changed",
-			binding.ErrDrift, strings.Join(c.AnchorProblems, ", "), restoreAdvice)
+			binding.ErrDrift, joinPrintable(c.AnchorProblems), restoreAdvice)
 	}
 	return nil
 }
@@ -572,7 +680,7 @@ func refuseWitnessHead(c *adoptChain) error {
 		"at %s, entry %d with link %s and a tree of %d entries with root %s: %s. Entries the witness "+
 		"saw are gone or rewritten, so the chain cannot show that adoption never ran on this "+
 		"install. %s, rather than adopt over it. Nothing was changed", binding.ErrDrift, w.URL,
-		w.CheckpointAt, w.Seq, w.Head, w.Size, w.Root, strings.Join(w.Problems, ", "), restoreAdvice)
+		w.CheckpointAt, w.Seq, w.Head, w.Size, w.Root, joinPrintable(w.Problems), restoreAdvice)
 }
 
 // refuseKeyedEntries refuses a chain holding an entry only an install with a binding key writes:
@@ -595,8 +703,8 @@ func refuseKeyedEntries(c *adoptChain, key *binding.Key) error {
 	}
 	return fmt.Errorf("%w: the audit chain holds %s, entry %s at %s, which only an install holding "+
 		"a binding key writes, so keyed operation already began on this install. %s, rather than "+
-		"adopt again. %s. Nothing was changed", binding.ErrDrift, what, e.ID, e.Path, restoreAdvice,
-		failUnsealedAdvice)
+		"adopt again. %s. Nothing was changed", binding.ErrDrift, what, printable(e.ID),
+		printable(e.Path), restoreAdvice, failUnsealedAdvice)
 }
 
 // earlierAdoptionRefusal refuses adopting an install whose chain already records its adoption,
@@ -608,8 +716,8 @@ func earlierAdoptionRefusal(e *audit.Entry) error {
 			"and adoption happens once. Nothing was changed", binding.ErrDrift)
 	}
 	return fmt.Errorf("%w: adoption was already recorded on this install, as audit entry %s at %s "+
-		"by %s, and it happens once. Nothing was changed", binding.ErrDrift, e.ID,
-		e.At.UTC().Format(time.RFC3339), e.Actor)
+		"by %s, and it happens once. Nothing was changed", binding.ErrDrift,
+		printable(e.ID), e.At.UTC().Format(time.RFC3339), printable(e.Actor))
 }
 
 // refuseSealedRows refuses an install any run of which carries a seal, finished runs included. A
@@ -682,9 +790,54 @@ func sealedRows(ctx context.Context, runs run.Store) ([]string, error) {
 	return sealed, nil
 }
 
+// escapedError is an error whose text carries no control character, wrapping the error it
+// describes so errors.Is and errors.As still see through it.
+type escapedError struct {
+	// err is the error the text describes.
+	err error
+	// text is err's text with each line escaped.
+	text string
+}
+
+// Error returns the escaped text.
+func (e *escapedError) Error() string { return e.text }
+
+// Unwrap returns the error the text describes.
+func (e *escapedError) Unwrap() error { return e.err }
+
+// escapeError returns err, or when its text would act on a terminal, an error wrapping it with that
+// text escaped line by line. Dispatch names rows by ids and reasons read from the database, and a
+// joined error carries one line per row.
+func escapeError(err error) error {
+	if err == nil {
+		return nil
+	}
+	lines := strings.Split(err.Error(), "\n")
+	changed := false
+	for i, line := range lines {
+		if safe := printable(line); safe != line {
+			lines[i], changed = safe, true
+		}
+	}
+	if !changed {
+		return err
+	}
+	return &escapedError{err: err, text: strings.Join(lines, "\n")}
+}
+
+// joinPrintable joins the database strings in items with commas, each as it can be written to a
+// terminal.
+func joinPrintable(items []string) string {
+	safe := make([]string, len(items))
+	for i, item := range items {
+		safe[i] = printable(item)
+	}
+	return strings.Join(safe, ", ")
+}
+
 // shownIDs joins up to adoptShown of ids and counts the rest.
 func shownIDs(ids []string) string {
-	shown := strings.Join(ids[:min(len(ids), adoptShown)], ", ")
+	shown := joinPrintable(ids[:min(len(ids), adoptShown)])
 	if more := len(ids) - adoptShown; more > 0 {
 		shown += fmt.Sprintf(", and %d more", more)
 	}
@@ -701,15 +854,15 @@ func showChain(out io.Writer, c *adoptChain, installID, source string) {
 	if c.Newest == nil {
 		_, _ = fmt.Fprint(out, "It has no anchors. ")
 	} else {
-		_, _ = fmt.Fprintf(out, "Its newest anchor is a %s anchor at %d, %s. ", c.Newest.Type,
-			c.Newest.Seq, c.Newest.Ref)
+		_, _ = fmt.Fprintf(out, "Its newest anchor is a %s anchor at %d, %s. ", printable(c.Newest.Type),
+			c.Newest.Seq, printable(c.Newest.Ref))
 	}
 	showWitness(out, c.Witness)
 	if c.Bound == "" {
 		_, _ = fmt.Fprintf(out, "It is bound to no install yet, and this adoption binds it to "+
 			"install %s, %s.\n", installID, source)
 	} else {
-		_, _ = fmt.Fprintf(out, "It is bound to install %s.\n", c.Bound)
+		_, _ = fmt.Fprintf(out, "It is bound to install %s.\n", printable(c.Bound))
 	}
 	_, _ = fmt.Fprintln(out, "Adoption runs once per install, at the upgrade. If this install was "+
 		"adopted or served by this release before, being asked to adopt it now is itself evidence "+
@@ -780,8 +933,10 @@ func showAdoption(out io.Writer, work *dispatch.AdoptionWork) {
 			"SPEC DIGEST\tRELEASE ENTRY")
 		unrecorded := 0
 		for _, r := range work.Rows {
-			_, _ = fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\t%s\n", r.ID, r.Seal, orNone(r.Actor),
-				orNone(r.DecidedBy), orNone(r.DecisionEntry), r.SpecDigest, orNone(r.Release))
+			_, _ = fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\t%s\n", printable(r.ID),
+				printable(r.Seal), orNone(printable(r.Actor)), orNone(printable(r.DecidedBy)),
+				orNone(printable(r.DecisionEntry)), printable(r.SpecDigest),
+				orNone(printable(r.Release)))
 			if r.Unrecorded {
 				unrecorded++
 			}
@@ -797,7 +952,7 @@ func showAdoption(out io.Writer, work *dispatch.AdoptionWork) {
 		_, _ = fmt.Fprintf(out, "\nIt leaves %d rows unsealed, which a server of this release "+
 			"refuses when it reaches them:\n\n", len(work.Left))
 		for _, l := range work.Left {
-			_, _ = fmt.Fprintf(out, "  %s  %s\n", l.ID, l.Reason)
+			_, _ = fmt.Fprintf(out, "  %s  %s\n", printable(l.ID), printable(l.Reason))
 		}
 	}
 	_, _ = fmt.Fprintln(out)
@@ -838,7 +993,8 @@ func confirmAdoption(req adoptRequest, question string) error {
 // process moved first, and the rows it could not write.
 func showAdopted(out io.Writer, res *dispatch.Adopted) {
 	if res.Record != nil {
-		_, _ = fmt.Fprintf(out, "Recorded the adoption as audit entry %s.\n", res.Record.ID)
+		_, _ = fmt.Fprintf(out, "Recorded the adoption as audit entry %s.\n",
+			printable(res.Record.ID))
 	}
 	_, _ = fmt.Fprintf(out, "Sealed %d rows.\n", len(res.Sealed))
 	if len(res.Moved) > 0 {
@@ -846,7 +1002,7 @@ func showAdopted(out io.Writer, res *dispatch.Adopted) {
 			"first, and were left as it left them: %s\n", len(res.Moved), shownIDs(res.Moved))
 	}
 	for _, l := range res.Left {
-		_, _ = fmt.Fprintf(out, "Not sealed: %s, %s\n", l.ID, l.Reason)
+		_, _ = fmt.Fprintf(out, "Not sealed: %s, %s\n", printable(l.ID), printable(l.Reason))
 	}
 }
 
@@ -862,14 +1018,15 @@ func showUnsealed(out io.Writer, work *dispatch.UnsealedWork) {
 		tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 		_, _ = fmt.Fprintln(tw, "  RUN\tSTATUS\tREQUESTED BY")
 		for _, r := range work.Fail {
-			_, _ = fmt.Fprintf(tw, "  %s\t%s\t%s\n", r.ID, r.Status, orNone(r.Actor))
+			_, _ = fmt.Fprintf(tw, "  %s\t%s\t%s\n", printable(r.ID), printable(string(r.Status)),
+				orNone(printable(r.Actor)))
 		}
 		_ = tw.Flush()
 	}
 	if len(work.Left) > 0 {
 		_, _ = fmt.Fprintf(out, "\nIt leaves %d unsealed runs as they are:\n\n", len(work.Left))
 		for _, l := range work.Left {
-			_, _ = fmt.Fprintf(out, "  %s  %s\n", l.ID, l.Reason)
+			_, _ = fmt.Fprintf(out, "  %s  %s\n", printable(l.ID), printable(l.Reason))
 		}
 	}
 	if len(work.Sealed) > 0 {
@@ -885,7 +1042,7 @@ func showUnsealed(out io.Writer, work *dispatch.UnsealedWork) {
 func showUnadopted(out io.Writer, res *dispatch.Unadopted) {
 	if res.Record != nil {
 		_, _ = fmt.Fprintf(out, "Recorded the adoption, trusting no row, as audit entry %s.\n",
-			res.Record.ID)
+			printable(res.Record.ID))
 	}
 	_, _ = fmt.Fprintf(out, "Failed %d runs.\n", len(res.Failed))
 	if len(res.Moved) > 0 {
@@ -893,7 +1050,7 @@ func showUnadopted(out io.Writer, res *dispatch.Unadopted) {
 			"left them: %s\n", len(res.Moved), shownIDs(res.Moved))
 	}
 	for _, l := range res.Left {
-		_, _ = fmt.Fprintf(out, "Not failed: %s, %s\n", l.ID, l.Reason)
+		_, _ = fmt.Fprintf(out, "Not failed: %s, %s\n", printable(l.ID), printable(l.Reason))
 	}
 }
 
@@ -1042,7 +1199,7 @@ func (c snapshotChain) Entry(ctx context.Context, id string) (*audit.Entry, erro
 	}
 	e, ok := c.s.decisions[id]
 	if !ok {
-		return nil, fmt.Errorf("audit entry %s: %w", id, audit.ErrEntryNotFound)
+		return nil, fmt.Errorf("audit entry %s: %w", printable(id), audit.ErrEntryNotFound)
 	}
 	kept := *e
 	return &kept, nil

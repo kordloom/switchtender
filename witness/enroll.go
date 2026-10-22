@@ -709,8 +709,9 @@ type Statement struct {
 }
 
 // AttestInstall mints a signed statement of what the witness holds for the install whose producer
-// key id is keyID. It returns nil before the first adopted push, since a statement of nothing is
-// noise wearing a signature, and ErrNotEnrolled for a key with no record.
+// key id is keyID, and ErrNotEnrolled for a key with no record. Before the first adopted push the
+// statement has size 0 and no last beat, seq, head, or root, signed like any other, so an install
+// tells a witness that holds nothing for it from an unsigned answer that says so.
 func (s *Service) AttestInstall(keyID string) (*Statement, error) {
 	in := s.lookup(keyID)
 	if in == nil {
@@ -724,16 +725,14 @@ func (s *Service) AttestInstall(keyID string) (*Statement, error) {
 		return nil, fmt.Errorf("%w: no install is enrolled under key %s", ErrNotEnrolled,
 			in.rec.KeyID)
 	}
-	c := in.checkpoint
-	if c == nil || c.Root == "" {
-		in.mu.Unlock()
-		return nil, nil
-	}
 	st := &Statement{InstallID: in.rec.InstallID, KeyID: in.rec.KeyID,
-		PublicKey: in.rec.PublicKey, MintedAt: stamp(now), CheckpointAt: stamp(c.ObservedAt),
-		LastBeat: c.LastBeat, LastSeq: c.LastSeq, LastHead: c.LastHead, Size: c.Size, Root: c.Root,
-		MemorySince: stamp(in.memorySince), Silent: now.Sub(in.lastSeen) > StaleAfter,
-		LastSeen: stamp(in.lastSeen), RefusalsTotal: in.refusals, NotesTotal: in.notes}
+		PublicKey: in.rec.PublicKey, MintedAt: stamp(now), MemorySince: stamp(in.memorySince),
+		Silent: now.Sub(in.lastSeen) > StaleAfter, LastSeen: stamp(in.lastSeen),
+		RefusalsTotal: in.refusals, NotesTotal: in.notes}
+	if c := in.checkpoint; c != nil && c.Root != "" {
+		st.CheckpointAt, st.LastBeat, st.LastSeq = stamp(c.ObservedAt), c.LastBeat, c.LastSeq
+		st.LastHead, st.Size, st.Root = c.LastHead, c.Size, c.Root
+	}
 	in.mu.Unlock()
 	if err := SignStatement(st, s.id); err != nil {
 		return nil, err

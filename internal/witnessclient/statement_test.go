@@ -22,9 +22,10 @@ import (
 // for the enrolled install, verified, signed by a key the enrollment lists, and about this
 // enrollment's producer key and label. A statement with its signature altered, one a key the
 // enrollment does not list signed, and one about another producer key or label are each refused as
-// the enrollment not accepting it. A witness that holds nothing yet, one that holds no record under
-// the enrollment's key, one that answers 502, and one that answers another status are each told
-// apart, since adopt answers each differently.
+// the enrollment not accepting it. A witness that holds nothing yet answers with a signed statement
+// of size 0, held to the same checks, and an unsigned 404 that says the same is rejected. A witness
+// that holds no record under the enrollment's key, one that answers 502, and one that answers
+// another status are each told apart, since adopt answers each differently.
 //
 //nolint:funlen // Test function.
 func TestFetchStatement(t *testing.T) {
@@ -52,6 +53,7 @@ func TestFetchStatement(t *testing.T) {
 	// A second install enrolled with the same witness and never pushed.
 	idle := newTestInstall(t)
 	idleEnr := idle.enroll(t, w)
+	empty := w.statement(t, idleEnr.KeyID)
 	// The enrollment of a producer key the witness never enrolled.
 	stranger, err := identity.LoadFile(t.TempDir())
 	if err != nil {
@@ -65,16 +67,7 @@ func TestFetchStatement(t *testing.T) {
 	}
 	resigned := func(t *testing.T, edit func(st *witness.Statement), by identity.Identity) []byte {
 		t.Helper()
-		st := *held
-		edit(&st)
-		if err := witness.SignStatement(&st, by); err != nil {
-			t.Fatalf("SignStatement() error = %v", err)
-		}
-		raw, err := json.Marshal(st)
-		if err != nil {
-			t.Fatalf("Marshal() error = %v", err)
-		}
-		return raw
+		return resignStatement(t, held, edit, by)
 	}
 	tests := []struct {
 		// Name labels the witness's answer.
@@ -148,6 +141,54 @@ func TestFetchStatement(t *testing.T) {
 			return http.StatusTooManyRequests, []byte(`{"error":"slow down"}`)
 		},
 		Want: []error{ErrRejected},
+	}, { // Test 9: An unsigned 404 saying nothing was witnessed is not the witness's word.
+		Name:       "unsigned nothing witnessed",
+		Enrollment: idleEnr,
+		Answer: func(*testing.T) (int, []byte) {
+			return http.StatusNotFound, []byte(`{"error":"nothing witnessed yet"}`)
+		},
+		Want: []error{ErrRejected},
+	}, { // Test 10: The signed statement of nothing with its signature altered.
+		Name:       "nothing witnessed, signature altered",
+		Enrollment: idleEnr,
+		Answer: func(t *testing.T) (int, []byte) {
+			st := *empty
+			st.Sig = "A" + st.Sig[1:]
+			if st.Sig == empty.Sig {
+				st.Sig = "B" + st.Sig[1:]
+			}
+			raw, err := json.Marshal(st)
+			if err != nil {
+				t.Fatalf("Marshal() error = %v", err)
+			}
+			return http.StatusOK, raw
+		},
+		Want: []error{ErrWitnessKey},
+	}, { // Test 11: A statement of nothing signed by a key the enrollment does not list.
+		Name:       "nothing witnessed, unlisted signer",
+		Enrollment: idleEnr,
+		Answer: func(t *testing.T) (int, []byte) {
+			return http.StatusOK, resignStatement(t, empty, func(*witness.Statement) {}, foreign)
+		},
+		Want: []error{ErrWitnessKey},
+	}, { // Test 12: The witness's key signed a statement of nothing about another label.
+		Name:       "nothing witnessed, label swapped",
+		Enrollment: idleEnr,
+		Answer: func(t *testing.T) (int, []byte) {
+			return http.StatusOK, resignStatement(t, empty, func(st *witness.Statement) {
+				st.InstallID = stranger.InstallID
+			}, w.id)
+		},
+		Want: []error{ErrEnrollment},
+	}, { // Test 13: A signed statement of size 0 that names a head is out of form.
+		Name:       "size 0 naming a head",
+		Enrollment: idleEnr,
+		Answer: func(t *testing.T) (int, []byte) {
+			return http.StatusOK, resignStatement(t, empty, func(st *witness.Statement) {
+				st.LastSeq, st.LastHead = held.LastSeq, held.LastHead
+			}, w.id)
+		},
+		Want: []error{ErrWitnessKey},
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -194,4 +235,20 @@ func TestFetchStatement(t *testing.T) {
 			}
 		})
 	}
+}
+
+// resignStatement returns base as edit leaves it, signed by by, as a witness answer's body.
+func resignStatement(t *testing.T, base *witness.Statement, edit func(st *witness.Statement),
+	by identity.Identity) []byte {
+	t.Helper()
+	st := *base
+	edit(&st)
+	if err := witness.SignStatement(&st, by); err != nil {
+		t.Fatalf("SignStatement() error = %v", err)
+	}
+	raw, err := json.Marshal(st)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	return raw
 }

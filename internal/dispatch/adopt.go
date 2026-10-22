@@ -617,8 +617,12 @@ func (p *adoptPlanner) top(ctx context.Context, r *run.Run) error {
 	case r.SpecSeal != "":
 		return nil
 	case r.DecisionID == "":
+		submitted, err := p.asSubmitted(ctx, r)
+		if err != nil {
+			return err
+		}
 		p.seal(r, binding.KindSubmit, func() (binding.Record, error) {
-			return binding.SubmitRecord(r)
+			return binding.SubmitRecord(submitted)
 		})
 		return nil
 	}
@@ -634,6 +638,25 @@ func (p *adoptPlanner) top(ctx context.Context, r *run.Run) error {
 	}
 	p.seal(r, binding.KindRun, func() (binding.Record, error) { return binding.RunRecord(r, root) })
 	return nil
+}
+
+// asSubmitted returns r as it read when it was submitted, as far as its seal marks it held. A
+// workflow waiting at one of its approval steps reads as held, but it was submitted queued and
+// parked once its walk reached the step, so it is sealed as queued, the way a workflow the live
+// submit path builds is. A workflow held at submission has no steps until a decision releases it,
+// and a released one names that decision, so a held workflow with steps is one parked at a step.
+// r is not changed.
+func (p *adoptPlanner) asSubmitted(ctx context.Context, r *run.Run) (*run.Run, error) {
+	if r.Kind != run.KindPipeline || r.Status != run.StatusPendingApproval {
+		return r, nil
+	}
+	steps, err := p.stepsOf(ctx, r)
+	if err != nil || len(steps) == 0 {
+		return r, err
+	}
+	parked := *r
+	parked.Status = run.StatusPending
+	return &parked, nil
 }
 
 // node plans an approval step waiting for a decision: its claim when one is in flight, and
@@ -708,7 +731,8 @@ func (p *adoptPlanner) step(ctx context.Context, parent, s *run.Run) error {
 		p.leave(s.ID, "its release could not be built: "+err.Error())
 		return nil
 	}
-	rec, err := binding.StepRecord(parent, s, append(slices.Clone(roots), binding.RootOf(entry)))
+	rec, err := binding.StepRecord(parent, s,
+		append(slices.Clone(roots), binding.PreparedRootOf(entry)))
 	if err != nil {
 		p.leave(s.ID, "its record could not be built: "+err.Error())
 		return nil
@@ -819,7 +843,7 @@ func (p *adoptPlanner) claim(ctx context.Context, parent, r *run.Run) error {
 	}
 	c.Seal = ""
 	if c.Verdict == outcome.StepApproved && c.Entry != nil {
-		root := binding.RootOf(c.Entry.entry())
+		root := binding.PreparedRootOf(c.Entry.entry())
 		var rec binding.Record
 		// The claim stamps its digest and binding when it settles, so the seal covers the row as
 		// it reads then.
