@@ -90,8 +90,8 @@ authenticated by its signature, and the read token gates only the /witness route
 an Enterprise license or the Team add-on. Under open any signed enrollment is accepted, for a push
 witness on a private network.
 
-Independence is the point. Run this where the watched servers' operators have no hand: another
-team, another company, or a service. Publish the witness key id, and a relying party verifies any
+Run this where the watched servers' operators have no hand: another team, another company, or a
+service. Publish the witness key id, and a relying party verifies any
 attestation offline with "switchtender witness verify-attestation" against the key they pinned.
 The watched operator cannot mint one, cannot alter one, and cannot answer one that disagrees with
 the chain they serve.`,

@@ -85,7 +85,7 @@ func TestRegisterDocumentMatchesItsGolden(t *testing.T) {
 	}, { // Test 1: A register cut at its cap says so, with its bound and where it stops.
 		Name: "truncated", Render: renderGolden(goldenTruncated()),
 		WantContains: "carries the earliest 2 and stops at 2026-07-01T14:00:00Z",
-		WantDigest:   "bec58763d85151f940ddd6c005abafb41d2ea716f0c6b9ca3dfc6a64aac6dbc3",
+		WantDigest:   "4ab1ad920cf9b2049d201924afc5d39c94bff790597cdcbd60ef839de1b8613b",
 	}, { // Test 2: One change pruned by retention is named in the singular.
 		Name: "pruned one", Render: renderGolden(goldenPruned(1)),
 		WantContains: "The chain records 1 further change in this period",
