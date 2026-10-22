@@ -1821,7 +1821,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 				log, evidence.WithNotify(func(path string, from, to time.Time) {
 					log.Info("evidence pack ready", zap.String("path", path),
 						zap.Time("from", from), zap.Time("to", to))
-				}))
+				}),
+				evidence.WithBinder(dispatch.NewBindingVerifier(bundle.Runs(), bundle.Audits(),
+					bindingKey)))
 			if err := packs.Start(); err != nil {
 				return err
 			}

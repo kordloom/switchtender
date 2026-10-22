@@ -16,6 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/binding"
 	"github.com/kordloom/switchtender/internal/dossier"
 	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/run"
@@ -43,6 +44,9 @@ type Emitter struct {
 	// anchor. It carries the key as well as the name, so an anchor taken under this install's
 	// earlier name recomputes instead of refusing.
 	producer audit.Identity
+	// binder holds the row each approval in a pack released to its seal, so a rewritten approver is
+	// flagged on its row and counted in the banner. Nil marks every approval unchecked.
+	binder *binding.Verifier
 	// dir is where packs are written, and is also where the emitter reads its own progress from.
 	dir string
 	// cadence is how long each pack covers and how often one is written.
@@ -78,6 +82,13 @@ type Option func(*Emitter)
 // rather than this package growing one.
 func WithNotify(fn func(path string, from, to time.Time)) Option {
 	return func(e *Emitter) { e.notify = fn }
+}
+
+// WithBinder holds each approval a pack lists to the seal over the row it released, the check the
+// register download and the audit report command make. Without it every approval in a pack reads
+// as unchecked.
+func WithBinder(v *binding.Verifier) Option {
+	return func(e *Emitter) { e.binder = v }
 }
 
 // WithClock replaces the clock, so a test can advance periods without waiting for them.
@@ -282,6 +293,10 @@ func (e *Emitter) Emit(ctx context.Context, from, to time.Time) error {
 		if err != nil {
 			return fmt.Errorf("collect register: %w", err)
 		}
+		// A pack is the same register the download serves, so each approval on it is held to its
+		// seal the same way. Skipping this printed every approval as plain, with no seal state,
+		// which reads to an auditor as checked and holding.
+		dossier.AttachRegisterSeals(ctx, in, e.binder, e.runs)
 		// The boundary has to fall inside the remaining period for the split to mean anything, and
 		// that is also what makes this loop finite. It fails to advance only when a register's
 		// worth of changes share the period's first instant, and then no bounded document covers

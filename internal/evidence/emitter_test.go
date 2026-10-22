@@ -1,7 +1,9 @@
 package evidence
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +12,8 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/binding"
+	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -328,5 +332,83 @@ func TestEmitterWritesItsFirstPackFromAnEmptyArchive(t *testing.T) {
 	}
 	if count() < 1 {
 		t.Error("packs landed in the archive but the notify callback never fired for any of them")
+	}
+}
+
+// seedApproval stores one run alice approved inside the period, its decision recorded on the chain
+// and claimed by the run, with no seal over the row it released.
+func seedApproval(t *testing.T) (run.Store, audit.Store, time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	runs := run.NewMemStore()
+	audits := audit.NewMemStore()
+	base := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	ended := base.Add(time.Minute)
+	if err := runs.Save(ctx, &run.Run{ID: "run_held", Playbook: "site.yml",
+		Status: run.StatusPendingApproval, CreatedAt: base, EndedAt: &ended, Actor: "deploy-bot",
+		ApprovalRequested: true, HeldByPolicy: "prod changes"}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	decision := audit.NewID()
+	if err := audits.Append(ctx, &audit.Entry{ID: decision, At: base, Actor: "alice",
+		ActorType: "session", Method: audit.MethodDecision, Path: "/runs/run_held/decision/approved",
+		ContentDigest: "sha256:" + strings.Repeat("ab", 32)}); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+	if ok, err := runs.ClaimDecision(ctx, "run_held", decision, "claim"); err != nil || !ok {
+		t.Fatalf("ClaimDecision() = %v, %v", ok, err)
+	}
+	settle := run.DecisionSettle{Status: run.StatusSucceeded, EndedAt: ended}
+	if ok, err := runs.SettleDecision(ctx, "run_held", decision, settle); err != nil || !ok {
+		t.Fatalf("SettleDecision() = %v, %v", ok, err)
+	}
+	return runs, audits, base
+}
+
+// TestPackHoldsApprovalsToTheirSeals pins that a pack states the seal check on every approval it
+// lists, as the register download does. The emitter once rendered the register without the check,
+// so an approval read as plain on a pack and its name was never held to the row it released. With
+// no binder an approval is unchecked, and with one an approval whose row carries no seal reads as
+// unsealed, which also proves the binder reaches the check.
+func TestPackHoldsApprovalsToTheirSeals(t *testing.T) {
+	t.Parallel()
+	key, err := binding.DeriveKey(bytes.Repeat([]byte{7}, 32))
+	if err != nil {
+		t.Fatalf("DeriveKey() error = %v", err)
+	}
+	tests := []struct {
+		// Keyed builds the emitter with a binder over the install's binding key.
+		Keyed bool
+		// WantRow is the decision cell's text.
+		WantRow string
+	}{{ // Test 0: No binder marks the approval unchecked.
+		WantRow: "Approved by alice, seal unchecked",
+	}, { // Test 1: A binder finds the row the approval released carries no seal.
+		Keyed: true, WantRow: "Approved by alice, unsealed",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			runs, audits, base := seedApproval(t)
+			var opts []Option
+			if test.Keyed {
+				opts = append(opts, WithBinder(dispatch.NewBindingVerifier(runs, audits, key)))
+			}
+			dir := t.TempDir()
+			e := NewEmitter(runs, audits, audit.Identity{}, dir, time.Hour, nil, opts...)
+			defer e.Close()
+			from, to := base.Add(-time.Hour), base.Add(time.Hour)
+			if err := e.Emit(context.Background(), from, to); err != nil {
+				t.Fatalf("Emit() error = %v", err)
+			}
+			body, err := os.ReadFile(filepath.Join(dir, packName(from, to)))
+			if err != nil {
+				t.Fatalf("ReadFile() error = %v", err)
+			}
+			if html := string(body); !strings.Contains(html, test.WantRow) {
+				t.Errorf("the pack does not read %q, so its approvals were not held to their "+
+					"seals:\n%s", test.WantRow, html)
+			}
+		})
 	}
 }
