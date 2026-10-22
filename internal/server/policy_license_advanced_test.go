@@ -72,7 +72,7 @@ func TestFirstPolicyWithARiskFloorIsPro(t *testing.T) {
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("create with min_risk = %d, want 403: %s", rec.Code, rec.Body.String())
 		}
-		if !strings.Contains(rec.Body.String(), "requires a Pro license") {
+		if !strings.Contains(rec.Body.String(), "A Pro license is required") {
 			t.Errorf("refusal does not name Pro, the tier that sells it: %s", rec.Body.String())
 		}
 

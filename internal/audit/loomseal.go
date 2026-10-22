@@ -35,10 +35,11 @@ type Bundle struct {
 	BundleID string `json:"bundle_id"`
 	// CreatedAt is when the bundle was assembled.
 	CreatedAt string `json:"created_at"`
-	// Attestations are head-level counter-signatures other tools may attach. This product never
-	// emits them and does not verify them; the field exists so their presence is seen and refused
-	// by name rather than silently ignored, which would let an unchecked rider travel inside a
-	// green verdict.
+	// Attestations are head-level counter-signatures over a tree root at a size. This product
+	// attaches a witness's head attestation to a tree bundle whose head the witness signed, for the
+	// open loomseal verifier to check, and does not verify one itself. Its own verify refuses a
+	// bundle carrying any by name rather than silently ignoring it, which would let an unchecked
+	// rider travel inside a green verdict.
 	Attestations []json.RawMessage `json:"attestations,omitempty"`
 	// Producer says who emitted the bundle and which key signed it.
 	Producer BundleProducer `json:"producer"`
@@ -134,10 +135,12 @@ type BundleClaim struct {
 	Payload map[string]any `json:"payload"`
 	// Chain is the claim's position and links.
 	Chain BundleCoordLink `json:"chain"`
-	// Disclosures and Attestations are holder- and third-party members other tools may attach.
-	// This product never emits either and does not verify them; the fields exist so their
-	// presence is refused by name rather than silently ignored.
-	Disclosures  []json.RawMessage `json:"disclosures,omitempty"`
+	// Disclosures are holder members other tools may attach. This product never emits them and
+	// does not verify them, so their presence is refused by name rather than silently ignored.
+	Disclosures []json.RawMessage `json:"disclosures,omitempty"`
+	// Attestations are counter-signatures of this claim's link. This product attaches each witness
+	// attestation recorded for the claim, and verifies every one of role witness against the link
+	// before a verdict counts it. An attestation of any other role is refused by name.
 	Attestations []json.RawMessage `json:"attestations,omitempty"`
 	// Inclusion is the audit path proving this claim belongs to the tree the head names. Tree
 	// profile only, and required on every claim there.

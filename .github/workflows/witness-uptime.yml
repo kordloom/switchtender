@@ -1,0 +1,47 @@
+name: witness-uptime
+
+# The hosted witness's order form promises 99.5 percent a month, and a fault must reach the owner
+# within about two and a half hours to keep it (deploy/witness/README.md step 10). This is the
+# second of two outside checks. GitHub runs scheduled jobs late under load, so it backs up the
+# primary monitor rather than replacing it.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: witness-uptime
+  cancel-in-progress: false
+
+jobs:
+  healthz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check the witness answers healthy
+        env:
+          URL: https://witness.switchtender.com/healthz
+          SLACK_WEBHOOK: ${{ secrets.WITNESS_UPTIME_SLACK_WEBHOOK }}
+        run: |
+          # Three tries 20 seconds apart, so one dropped request is not an outage.
+          for try in 1 2 3; do
+            body="$(curl -sS --max-time 10 "$URL" 2>&1)" && code=0 || code=$?
+            if [ "$code" = 0 ] && printf '%s' "$body" | grep -q '"ok":true'; then
+              echo "healthy on try $try: $body"
+              exit 0
+            fi
+            echo "try $try failed: curl exit $code, body: $body"
+            [ "$try" -lt 3 ] && sleep 20
+          done
+          if [ -n "$SLACK_WEBHOOK" ]; then
+            run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            text="Hosted witness is down: $URL failed three checks. $run_url"
+            jq -n --arg text "$text" '{text: $text}' |
+              curl -sS --max-time 10 -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK" ||
+              echo "the Slack post failed"
+          else
+            echo "WITNESS_UPTIME_SLACK_WEBHOOK is not set, so only this failed run reports the outage"
+          fi
+          exit 1

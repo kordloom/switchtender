@@ -24,7 +24,7 @@ test("a 404 carrying an explanation shows the explanation, not the path", async 
 });
 
 test("a 403 carrying a licensing explanation shows it rather than the role sentence", async () => {
-	const licensing = "The period change register requires a Team license; this install runs " +
+	const licensing = "A Team license is required for the period change register; this install runs " +
 		"Community. https://switchtender.com/pricing";
 	const { app } = withReply({ error: licensing }, 403);
 	await assert.rejects(() => app.getJSON("/audit/register"), (err) => {
