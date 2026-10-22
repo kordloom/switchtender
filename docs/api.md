@@ -305,7 +305,9 @@ verifier sees that the slice belongs to the chain.
 
 The chain gauges walk again at most every 15 seconds, or every ten times the last walk's duration
 when that is longer, so a long chain never keeps a read connection busy more than a tenth of the
-time. That interval is also how long an entry rewritten in place can go unreported. A scrape that
+time. The stretched interval is capped at 10 minutes, so one walk that stalls cannot hold the next
+one off longer than that. That interval is also how long an entry rewritten in place can go
+unreported. A scrape that
 arrives while another walk runs serves the last reading with `switchtender_audit_health_stale` at
 `1` instead of waiting, and the next scrape walks.
 

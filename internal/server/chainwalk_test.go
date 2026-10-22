@@ -160,6 +160,35 @@ func TestChainHealthStretchesItsIntervalOnALongWalk(t *testing.T) {
 	}
 }
 
+// TestChainHealthCapsTheStretchAfterAStalledWalk pins the ceiling on the duty cycle. One walk that
+// stalls 90 s would otherwise hold the next walk off for 15 minutes, and an entry rewritten in
+// place meanwhile would go unreported that long. The next walk waits 10 minutes, never more.
+func TestChainHealthCapsTheStretchAfterAStalledWalk(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	now := time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)
+	slow := &slowAudits{Store: seedChain(t, 3), now: &now, took: 90 * time.Second}
+	health := newChainHealth(slow, audit.Identity{})
+	health.clock = func() time.Time { return now }
+	start := now
+
+	health.snapshot(ctx)
+	if got := health.interval(); got != chainHealthMaxInterval {
+		t.Errorf("interval after a 90 s walk = %v, want the %v cap", got, chainHealthMaxInterval)
+	}
+	now = start.Add(chainHealthMaxInterval - time.Second)
+	health.snapshot(ctx)
+	if slow.scans != 1 {
+		t.Errorf("walks just inside the cap = %d, want 1", slow.scans)
+	}
+	now = start.Add(chainHealthMaxInterval)
+	health.snapshot(ctx)
+	if slow.scans != 2 {
+		t.Errorf("walks at the cap after a 90 s walk = %d, want 2: the next waits 10 min",
+			slow.scans)
+	}
+}
+
 // TestChainHealthServesStaleWhileAnotherWalkRuns pins that a scrape never queues behind a verify. A
 // refresh that finds the walk gate held serves its last reading marked stale, without touching the
 // store, and the next scrape after the gate frees walks again.
